@@ -23,6 +23,10 @@ Nession never relies on the user's default tmux server.
   [docs/architecture/session-tmux-sdk-ownership.md](../../docs/architecture/session-tmux-sdk-ownership.md).
   `main` receives it with the release promotion; until then the `cmd.rs`
   chokepoint above remains its authoritative executable rule.
+- Read-only Session process discovery (#2514):
+  [docs/architecture/agent-process-discovery.md](../../docs/architecture/agent-process-discovery.md).
+  Membership is observed, never asserted; the OS readers and command
+  sanitization live under `src/session/process_discovery/`.
 
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 

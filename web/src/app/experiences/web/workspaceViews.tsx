@@ -24,7 +24,15 @@ import type { WorkspaceContext, WorkspaceViewId } from '@/app/workspace/workspac
  */
 export const WEB_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<{ ctx: WorkspaceContext }>> = {
   agent: ({ ctx }) =>
-    ctx.agent && ctx.domain ? <AgentDetail agent={ctx.agent} state={ctx.domain} /> : null,
+    ctx.agent && ctx.domain ? (
+      <AgentDetail
+        agent={ctx.agent}
+        state={ctx.domain}
+        currentSessionId={
+          ctx.session?.agent_id === ctx.agent.agent_id ? ctx.session.session_id : null
+        }
+      />
+    ) : null,
   session: ({ ctx }) =>
     ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null,
   env: EnvWebLayout,

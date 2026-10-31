@@ -1058,3 +1058,251 @@ pub struct ClientAttachResponse {
 pub struct ClientDetachResponse {
     pub session_name: String,
 }
+
+// ============================================================================
+// Process discovery (#2514)
+// ============================================================================
+//
+// A Session's process membership is *observed*, never asserted. `complete`
+// means complete only for the dedicated resource domain the Agent could verify
+// at snapshot time — never for every process the Session ever launched. The
+// words in the reason codes are the contract; the UI displays them rather than
+// inventing a friendlier story.
+
+/// How one Pane's process membership was resolved for a snapshot.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessDiscoveryMethod {
+    /// A verified tmux/systemd per-Pane cgroup was read recursively.
+    Cgroup,
+    /// OS process enumeration plus PID/PPID recursion.
+    ProcessTree,
+    /// Neither could be used; the Pane reports why in its reason codes.
+    Unavailable,
+}
+
+/// How much of one Pane's membership the snapshot could observe.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessCoverage {
+    /// The observed dedicated resource domain was read without truncation.
+    Complete,
+    /// Some association evidence exists, but the result is not exhaustive.
+    Partial,
+    /// No process membership could be established for this Pane.
+    Unavailable,
+}
+
+/// The state of one sampled metric.
+///
+/// `zero` is not a state: zero is a sampled value. Unsupported, denied,
+/// unknown and stale are separate answers so a consumer cannot render "the
+/// kernel would not tell us" as "the process used nothing".
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessMetricState {
+    Sampled,
+    Unsupported,
+    Denied,
+    Unknown,
+    Stale,
+}
+
+/// One process metric: a value when it was sampled, otherwise why not.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProcessMetric {
+    /// The sampled value in the unit the field name states. `None` whenever
+    /// `state` is not `sampled`; a sampled metric may still be absent when the
+    /// kernel exposes no counter at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    pub state: ProcessMetricState,
+    /// A stable reason code, when the state is not `sampled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl ProcessMetric {
+    /// A metric that was observed.
+    #[must_use]
+    pub fn sampled(value: f64) -> Self {
+        Self {
+            value: Some(value),
+            state: ProcessMetricState::Sampled,
+            reason: None,
+        }
+    }
+
+    /// A metric that could not be observed, with a stable reason code.
+    #[must_use]
+    pub fn unavailable(state: ProcessMetricState, reason: impl Into<String>) -> Self {
+        Self {
+            value: None,
+            state,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+/// One discovered process inside one Pane's membership.
+///
+/// `pid` alone is not identity: PID reuse is why `start_time_ms` travels with
+/// it, and why a process whose start time cannot be read is reported with
+/// `None` rather than a guessed value.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiscoveredProcess {
+    pub pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_pid: Option<u32>,
+    /// Wall-clock process start time, epoch milliseconds. With `pid`, identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tty: Option<String>,
+    /// OS session id, lower-confidence association evidence only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<u32>,
+    /// OS process-group id, lower-confidence association evidence only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgid: Option<u32>,
+    /// Executable name or path, bounded by the Agent.
+    pub executable: String,
+    /// Sanitized executable + argv display, bounded by the Agent. Empty when
+    /// the command could not be read; `command_state` then says why.
+    pub command: String,
+    /// Whether the command display was read. A denied command is not an empty
+    /// one: the UI must be able to say "not readable" rather than "no command".
+    pub command_state: ProcessMetricState,
+    /// A stable reason code when `command_state` is not `sampled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_reason: Option<String>,
+    /// Whether at least one argument was replaced before the Agent→Server hop.
+    pub redacted: bool,
+    /// Whether the display was cut to the Agent's byte/argument budget.
+    pub truncated: bool,
+    /// Percentage of **one logical CPU**; values above 100 are valid.
+    pub cpu_percent: ProcessMetric,
+    /// Resident set size in MiB. Not virtual size.
+    pub rss_mib: ProcessMetric,
+    pub threads: ProcessMetric,
+    /// Wall-clock lifetime at snapshot time, milliseconds.
+    pub elapsed_ms: ProcessMetric,
+    /// Read throughput in KiB/s over the documented sampling window.
+    pub io_read_kib_per_s: ProcessMetric,
+    /// Write throughput in KiB/s over the documented sampling window.
+    pub io_write_kib_per_s: ProcessMetric,
+}
+
+/// One Pane's membership at snapshot time.
+///
+/// Linked tmux Windows are one Pane with several Session memberships, so the
+/// same Pane and its processes are never listed twice. `session_ids` and
+/// `session_names` are parallel and carry every Session that links this Window.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaneProcessSnapshot {
+    pub session_ids: Vec<String>,
+    pub session_names: Vec<String>,
+    pub window_id: String,
+    pub window_index: i32,
+    pub window_name: String,
+    pub pane_id: String,
+    pub pane_index: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_tty: Option<String>,
+    pub method: ProcessDiscoveryMethod,
+    pub coverage: ProcessCoverage,
+    /// Stable codes such as `no_dedicated_cgroup`, `cgroup_unreadable`,
+    /// `shared_cgroup`, `pane_process_missing`, `process_table_unavailable`
+    /// and `process_limit_reached`.
+    #[serde(default)]
+    pub reason_codes: Vec<String>,
+    pub processes: Vec<DiscoveredProcess>,
+}
+
+/// The bounds the Agent applied to one snapshot.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessDiscoveryLimits {
+    pub max_processes: u32,
+    pub max_depth: u32,
+    pub cpu_window_ms: u64,
+}
+
+/// One Session's process snapshot.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProcessSnapshot {
+    /// The Session this snapshot was scoped to. Panes may also belong to other
+    /// sessions through linked Windows; that is stated per Pane.
+    pub session_name: String,
+    /// Snapshot wall-clock time, epoch milliseconds.
+    pub snapshot_at_ms: i64,
+    /// `linux`, `macos`, or `other`.
+    pub platform: String,
+    /// Every method that contributed to this snapshot, deduplicated.
+    pub methods: Vec<ProcessDiscoveryMethod>,
+    pub panes: Vec<PaneProcessSnapshot>,
+    /// Whether any Pane result was cut by a bound.
+    pub truncated: bool,
+    pub limits: ProcessDiscoveryLimits,
+}
+
+/// `agent.session.processes` — the Server asks an Agent for a read-only
+/// snapshot of one Session's process membership.
+///
+/// The Agent scopes the answer to the named Session on its own private tmux
+/// server; it never enumerates host-wide processes for a user-facing request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionProcessesPayload {
+    /// Injected by the Server's command broker, like every `agent.*` command.
+    pub request_id: String,
+    pub session_name: String,
+}
+
+/// `server.session.processes` — a browser asks for one Session's snapshot.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionProcessesPayload {
+    /// `agent_id:session_name`, the registry key the Session list already uses.
+    pub session_id: String,
+}
+
+/// `server.session.processes`'s successful reply.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionProcessesResponse {
+    pub snapshot: ProcessSnapshot,
+}
+
+/// `server.session.processes`'s reply: the snapshot, or the refusal.
+///
+/// Untagged for the same reason `ServerSessionListReply` is: `snapshot` and
+/// `status` are disjoint, so there is nothing to discriminate on.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ServerSessionProcessesReply {
+    Snapshot(SessionProcessesResponse),
+    Refused(SessionRefusal),
+}

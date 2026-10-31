@@ -38,7 +38,13 @@ export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<Workspac
   agent: ({ ctx }) =>
     ctx.agent && ctx.domain ? (
       <AppToolScroll data-testid="agent-detail-app">
-        <AgentDetail agent={ctx.agent} state={ctx.domain} />
+        <AgentDetail
+          agent={ctx.agent}
+          state={ctx.domain}
+          currentSessionId={
+            ctx.session?.agent_id === ctx.agent.agent_id ? ctx.session.session_id : null
+          }
+        />
       </AppToolScroll>
     ) : null,
   session: ({ ctx }) =>

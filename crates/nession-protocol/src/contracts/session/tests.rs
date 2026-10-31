@@ -1,6 +1,120 @@
 use super::v1::*;
 
 #[test]
+fn a_process_snapshot_round_trips_with_its_honest_unknowns() {
+    // #2514: the wire must be able to say "not sampled" without a number, and
+    // must keep a sampled zero looking like an observation rather than an
+    // absence. Both are asserted in one round trip because that is the shape a
+    // consumer actually has to render.
+    let snapshot = ProcessSnapshot {
+        session_name: "work".to_string(),
+        snapshot_at_ms: 1_700_000_000_000,
+        platform: "linux".to_string(),
+        methods: vec![
+            ProcessDiscoveryMethod::Cgroup,
+            ProcessDiscoveryMethod::ProcessTree,
+        ],
+        panes: vec![PaneProcessSnapshot {
+            session_ids: vec!["$0".to_string(), "$1".to_string()],
+            session_names: vec!["work".to_string(), "linked".to_string()],
+            window_id: "@1".to_string(),
+            window_index: 1,
+            window_name: "editor".to_string(),
+            pane_id: "%3".to_string(),
+            pane_index: 0,
+            pane_pid: Some(4242),
+            pane_tty: Some("/dev/pts/3".to_string()),
+            method: ProcessDiscoveryMethod::Cgroup,
+            coverage: ProcessCoverage::Complete,
+            reason_codes: vec!["shared_window".to_string()],
+            processes: vec![DiscoveredProcess {
+                pid: 4242,
+                parent_pid: Some(1),
+                start_time_ms: Some(1_699_999_000_000),
+                tty: Some("/dev/pts/3".to_string()),
+                sid: Some(4242),
+                pgid: Some(4242),
+                executable: "bash".to_string(),
+                command: "bash -l --token [REDACTED]".to_string(),
+                command_state: ProcessMetricState::Sampled,
+                command_reason: None,
+                redacted: true,
+                truncated: false,
+                cpu_percent: ProcessMetric::sampled(0.0),
+                rss_mib: ProcessMetric::sampled(12.5),
+                threads: ProcessMetric::unavailable(
+                    ProcessMetricState::Denied,
+                    "proc_status_denied",
+                ),
+                elapsed_ms: ProcessMetric::sampled(60_000.0),
+                io_read_kib_per_s: ProcessMetric::unavailable(
+                    ProcessMetricState::Unsupported,
+                    "no_io_counters",
+                ),
+                io_write_kib_per_s: ProcessMetric::unavailable(
+                    ProcessMetricState::Unsupported,
+                    "no_io_counters",
+                ),
+            }],
+        }],
+        truncated: false,
+        limits: ProcessDiscoveryLimits {
+            max_processes: 512,
+            max_depth: 32,
+            cpu_window_ms: 150,
+        },
+    };
+
+    let encoded = serde_json::to_value(&snapshot).unwrap();
+    let decoded: ProcessSnapshot = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(decoded, snapshot);
+
+    // A sampled zero keeps its value; an unsupported metric carries no value.
+    assert_eq!(
+        encoded["panes"][0]["processes"][0]["cpu_percent"]["value"],
+        0.0
+    );
+    assert_eq!(
+        encoded["panes"][0]["processes"][0]["cpu_percent"]["state"],
+        "sampled"
+    );
+    assert!(encoded["panes"][0]["processes"][0]["threads"]
+        .get("value")
+        .is_none());
+    assert_eq!(
+        encoded["panes"][0]["processes"][0]["threads"]["state"],
+        "denied"
+    );
+}
+
+#[test]
+fn a_process_refusal_is_not_a_snapshot() {
+    // The untagged reply is only safe while the two shapes are disjoint. This
+    // pins the discriminant: a refusal decodes to Refused, and a snapshot
+    // decodes to Snapshot, with no field overlap required.
+    let refusal: ServerSessionProcessesReply = serde_json::from_value(serde_json::json!({
+        "status": "error",
+        "message": "Not authenticated"
+    }))
+    .unwrap();
+    assert!(matches!(refusal, ServerSessionProcessesReply::Refused(_)));
+
+    let reply: ServerSessionProcessesReply = serde_json::from_value(serde_json::json!({
+        "snapshot": {
+            "session_name": "s",
+            "snapshot_at_ms": 1,
+            "platform": "macos",
+            "methods": [],
+            "panes": [],
+            "truncated": false,
+            "limits": { "max_processes": 1, "max_depth": 1, "cpu_window_ms": 1 }
+        }
+    }))
+    .unwrap();
+    assert!(matches!(reply, ServerSessionProcessesReply::Snapshot(_)));
+}
+
+#[test]
 fn test_default_attach_mode() {
     assert_eq!(default_attach_mode(), "p2p");
 }

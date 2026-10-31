@@ -7,13 +7,16 @@ import type { Agent } from '@/types';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { AgentProcesses } from '@/product/agent/components/AgentProcesses';
 
 export interface AgentDetailProps {
   agent: Agent;
   state: DomainState;
+  /** The Session the Workspace was opened from, when it belongs to this Agent. */
+  currentSessionId?: string | null;
 }
 
-export function AgentDetail({ agent, state }: AgentDetailProps) {
+export function AgentDetail({ agent, state, currentSessionId }: AgentDetailProps) {
   const name = agentDisplayName(agent);
   const metadata = agent.metadata;
   const extensionSections = renderSlot('agent-detail', { agent });
@@ -66,6 +69,9 @@ export function AgentDetail({ agent, state }: AgentDetailProps) {
           </>
         )}
       </dl>
+
+      <Separator />
+      <AgentProcesses agent={agent} currentSessionId={currentSessionId} />
 
       {extensionSections.length > 0 ? (
         <>

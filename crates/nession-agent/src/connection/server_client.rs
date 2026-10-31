@@ -45,6 +45,7 @@ use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot};
 use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
     ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
+    ServerSessionProcessesPayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -4034,6 +4035,53 @@ core_routes!(agent, msg, responses;
                             "ansi_b64": ansi_b64,
                             "cols": cols,
                             "rows": rows,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.processes" => "agent.session.processes" => 1 => Query => {
+                    // #2514. The Server names one Session; the Agent scopes
+                    // the observation to that Session's Panes on its private
+                    // tmux server. There is no host-wide process endpoint.
+                    let payload: ServerSessionProcessesPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.processes payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    info!(
+                        "Server requested session process snapshot: session_name={}",
+                        payload.session_name
+                    );
+                    let (success, snapshot, error) =
+                        match crate::session::process_discovery::discover_session_processes(
+                            &agent.tmux.tmux_dep(),
+                            &payload.session_name,
+                        )
+                        .await
+                        {
+                            Ok(snapshot) => (true, Some(snapshot), None),
+                            Err(e) => {
+                                warn!(
+                                    "session process snapshot failed for {}: {e:#}",
+                                    payload.session_name
+                                );
+                                (false, None, Some(e.to_string()))
+                            }
+                        };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.processes",
+                            "success": success,
+                            "snapshot": snapshot,
                             "error": error,
                         }
                     });

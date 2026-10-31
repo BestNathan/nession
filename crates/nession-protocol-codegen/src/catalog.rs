@@ -1193,6 +1193,69 @@ wires: &["agent.session.capture-preview"],
         },
         Unit {
             owner: "core",
+            id: "server.session.processes",
+            version: 1,
+            wires: &["server.session.processes"],
+            // The first process snapshot contract (#2514). Unlike
+            // `server.session.capture-preview`, this reply *is* Nession's to
+            // describe: the Server validates the Agent's snapshot into
+            // `ProcessSnapshot` before it forwards it, so the browser-facing
+            // shape is owned here rather than relayed opaquely.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionProcessesPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionProcessesReply>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionProcessesResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessSnapshot>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::PaneProcessSnapshot>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::DiscoveredProcess>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessMetric>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessMetricState>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessDiscoveryMethod>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessCoverage>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::ProcessDiscoveryLimits>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionRefusal>(cfg),
+            ],
+            request: Some((
+                "SessionProcessesCall",
+                nession_protocol::contracts::session::v1::ClientSessionProcessesPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionProcessesPayload,
+                >,
+            )),
+            response: Some((
+                "SessionProcessesReply",
+                nession_protocol::contracts::session::v1::ServerSessionProcessesReply::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ServerSessionProcessesReply,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.processes",
+            version: 1,
+            wires: &["agent.session.processes"],
+            // Request-only, exactly like `agent.session.report`: the Agent's
+            // answer travels on `server.agent.command-response`, so declaring a
+            // reply here would describe a message nobody sends.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ServerSessionProcessesPayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "ServerSessionProcessesCall",
+                nession_protocol::contracts::session::v1::ServerSessionProcessesPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ServerSessionProcessesPayload,
+                >,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "server.session.relay.begin",
             version: 1,
             wires: &["server.session.relay.begin"],

@@ -38,6 +38,34 @@ function createdSessionSelection(
   select(created);
 }
 
+/**
+ * The two ways a Session can become current.
+ *
+ * `restore` is a navigation (deep link, confirmed attach) and returns to the
+ * Terminal. `sync` only keeps the shell's selection in step with a Sessions
+ * projection push — a foreground command, an attached-client count, another
+ * Session appearing — so it must leave the user's surface alone: restoring the
+ * same selection is not a route change.
+ */
+function useSessionSelectionCommands(
+  setSelectedId: (sessionId: string) => void,
+  setSurface: (surface: Surface) => void,
+  setTool: (tool: CapabilityId) => void,
+  openDetail: () => void,
+) {
+  const restore = useCallback((s: Session) => {
+    setSelectedId(s.session_id);
+    setSurface('terminal');
+    setTool('files');
+    openDetail();
+  }, [openDetail, setSelectedId, setSurface, setTool]);
+  const sync = useCallback((s: Session) => {
+    setSelectedId(s.session_id);
+    openDetail();
+  }, [openDetail, setSelectedId]);
+  return { restore, sync };
+}
+
 export function useShellState() {
   const data = useDashboard();
   const {
@@ -111,12 +139,8 @@ export function useShellState() {
     selectSessionInWorkspace,
   });
 
-  const onRestoreSession = useCallback((s: Session) => {
-    setSelectedId(s.session_id);
-    setSurface('terminal');
-    setTool('files');
-    openDetail();
-  }, [openDetail]);
+  const { restore: onRestoreSession, sync: syncSelectedSession } =
+    useSessionSelectionCommands(setSelectedId, setSurface, setTool, openDetail);
 
   /** Settings Save: persist the profile only — never attach or reconnect. */
   const saveAttachSettings = useCallback((session: Session, choice: AttachChoice) => {
@@ -138,6 +162,7 @@ export function useShellState() {
     loadingSessions: data.loadingSessions,
     confirmAttach,
     onRestoreSession,
+    onSyncSessionSelection: syncSelectedSession,
     requestAttach,
   });
 
