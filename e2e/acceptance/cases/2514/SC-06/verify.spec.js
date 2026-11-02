@@ -75,6 +75,19 @@ test('SC-06: Agent Workspace shows the current Session forest with grouped discl
   expect(mobile.documentScrollWidth).toBeLessThanOrEqual(mobile.viewportWidth + 1);
   expect(mobile.commandWidth).toBeLessThanOrEqual(mobile.viewportWidth);
 
+  // The grouped Agent details stays readable at the same narrow width.
+  const narrowDetails = page.getByTestId('agent-details');
+  await narrowDetails.locator('summary').click();
+  await expect(narrowDetails).toHaveJSProperty('open', true);
+  const narrowContent = page.getByTestId('agent-details-content');
+  for (const title of ['Identity & connection', 'Runtime environment', 'Capability & discovery']) {
+    await expect(narrowContent.getByText(title, { exact: true })).toBeVisible();
+  }
+  const narrowOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+  );
+  expect(narrowOverflow, 'Agent details groups do not force horizontal overflow').toBe(true);
+
   testInfo.annotations.push({
     type: 'evidence',
     description:
@@ -83,6 +96,6 @@ test('SC-06: Agent Workspace shows the current Session forest with grouped discl
       'by default and opened from the keyboard into Identity/connection, Runtime and Capability groups; ' +
       'Process details stayed closed by default, survived a resource-scope change and reset on another PID; ' +
       'returning to Terminal and back kept the Session, and at 390px the pushed detail had a Back to the ' +
-      'process list with no horizontal overflow',
+      'process list, the three Agent detail groups stayed readable, and neither forced horizontal overflow',
   });
 });

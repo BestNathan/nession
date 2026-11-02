@@ -71,10 +71,11 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
           lines.push(line.translateToString(true));
         }
       }
-      return lines.join('\n');
+      const lastLine = lines.reverse().find((line) => line.trim().length > 0) ?? '';
+      return lastLine;
     }),
     { timeout: 30_000, intervals: [500] },
-  ).toMatch(/[$#%]\s*$/m);
+  ).toMatch(/[$#%➜❯λ]/);
 
   // Same path as a user's typing: xterm's input API drives the PTY.
   await page.evaluate((command) => {
