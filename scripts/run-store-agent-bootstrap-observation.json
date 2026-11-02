@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "agent_store_main_bootstrap_observation",
+  "repository": "BestNathan/nession",
+  "ref": "agent-store",
+  "baseline_commit_sha": "e90f40a7c4fcebcf098364fe0027a6df4f414bb3",
+  "baseline_tree_sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  "baseline_kind": "2026-10-18_bootstrap_root_observed_2026-11-02",
+  "independently_anchored": false,
+  "history_attestation": "This is a repository-main recorded GitHub REST observation of the root commit/tree. It is not externally controlled, does not independently establish writer identity, and does not retroactively authenticate the bootstrap commit. A history audit may validate only its surviving descendant commits and allowed path deltas."
+}
