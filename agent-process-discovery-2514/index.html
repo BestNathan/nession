@@ -266,7 +266,7 @@ function renderInspector(items,p,d,session){
  var host=byId('inspector');host.replaceChildren();
  if(!p){add(host,'div','empty','请选择一个进程查看运行命令和资源。');return;}
  var details=profile(p,d),stats=scopeMetrics(items,p,d);
- var title=add(host,'div','inspector-title');add(title,'h4','',p.name);add(title,'span','status',details.cpu===null?'Snapshot expired':'Observed');
+ var title=add(host,'div','inspector-title');add(title,'h4','',p.name);add(title,'span','status'+(details.cpu===null?' offline':''),details.cpu===null?'Snapshot expired':'Observed');
  add(host,'div','inspector-sub','PID '+p.pid+' · '+session.name);
  var command=add(host,'section','section'),ch=add(command,'div','section-head');add(ch,'strong','', 'Executed command');add(ch,'small','', 'Sanitized · Read only');
  var cmd=add(command,'div','cmd');add(cmd,'code','',details.cmd);
@@ -313,7 +313,7 @@ function renderInspector(items,p,d,session){
 function render(){
  var d=getFixture(),s=getSession(d),items=uniqueProcesses(s),unavailable=d.coverage==='unavailable',none=!s;
  byId('host').textContent=d.host;byId('subhost').textContent=d.sub;
- var status=byId('status');status.textContent=unavailable?'Offline':d.coverage==='partial'?'Partial discovery':'Online';status.className='status'+(unavailable?' offline':d.coverage==='partial'?' partial':'');
+ var status=byId('status');status.textContent=unavailable?'Offline':'Online';status.className='status'+(unavailable?' offline':'');
  byId('snapshot').textContent=unavailable?'快照不可用':'模拟快照 · T+'+state.tick;byId('refresh').disabled=unavailable;
  renderAgentDetails(d);
  byId('session-name').textContent=none?'没有当前 Session':s.name;
