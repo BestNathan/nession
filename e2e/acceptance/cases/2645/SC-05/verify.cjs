@@ -17,9 +17,9 @@ run(({ evidence }) => {
   if (!runtimeFile) {
     throw new Error('the acceptance runtime file is not set');
   }
-  const runtime = JSON.parse(fs.readFileSync(runtimeFile, 'utf8'));
+  const runtimeInfo = JSON.parse(fs.readFileSync(runtimeFile, 'utf8'));
   const rendered = fs.readFileSync(
-    path.join(runtime.home, 'runtime-config', 'server.toml'),
+    path.join(runtimeInfo.home, 'runtime-config', 'server.toml'),
     'utf8',
   );
   const match = /^p2p_token_expiry_secs\s*=\s*(\d+)\s*$/m.exec(rendered);
