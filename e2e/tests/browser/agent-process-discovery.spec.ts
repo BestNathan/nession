@@ -11,11 +11,11 @@ import {
 /**
  * Agent Workspace process discovery (#2514).
  *
- * Real full-stack regression: a typed child process must appear in the Agent
- * Workspace's read-only snapshot, the inspector must put the sanitized command
- * before resources, the subtree scope must not change that command, and the
- * Terminal must keep working — discovery is an observation, not a runtime
- * mutation.
+ * Real full-stack regression: a typed child process must appear in the current
+ * Session's read-only forest, the inspector must put the sanitized command
+ * before resources, the two disclosures must be default-closed and grouped,
+ * the subtree scope must not change the command, and the Terminal must keep
+ * working — discovery is an observation, not a runtime mutation.
  *
  * CI-gated like session-lifecycle.spec.ts: these drive a real tmux-backed
  * agent, which the local e2e webServer stack only provides in CI.
@@ -48,22 +48,14 @@ test.describe('Agent process discovery', () => {
     await page.getByTestId('workspace-tool-agent').click();
     await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
 
-    // The Workspace keeps the Session it was opened from selected. State it
-    // explicitly: CI runs this spec in a shared process with other Sessions in
-    // the list, and the wrong selection is indistinguishable from a wrong tree.
-    const sessionButton = page
-      .getByTestId('agent-process-session-selector')
-      .getByRole('button', { name: sessionName });
-    await expect(sessionButton).toBeVisible({ timeout: 30_000 });
-    if ((await sessionButton.getAttribute('aria-pressed')) !== 'true') {
-      await sessionButton.click();
-    }
-    await expect(sessionButton).toHaveAttribute('aria-pressed', 'true');
-
-    // No permanent process chrome appeared in the capability row.
+    // Current-Session-only: the Session is identified, never offered as a
+    // selector, and there is no Pane/Window grouping in the product UI.
+    await expect(page.getByTestId('agent-process-session')).toContainText(sessionName);
+    await expect(page.getByTestId('agent-process-session-selector')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="process-pane-"]')).toHaveCount(0);
     await expect(page.getByTestId('workspace-tool-process')).toHaveCount(0);
 
-    const pane = page.locator('[data-testid^="process-pane-"]').first();
+    const tree = page.getByTestId('process-forest');
     // Surface a snapshot refusal instead of waiting out the pane timeout with
     // no diagnosis.
     await expect
@@ -73,7 +65,7 @@ test.describe('Agent process discovery', () => {
           if ((await errorState.count()) > 0) {
             throw new Error('process snapshot failed: ' + (await errorState.innerText()));
           }
-          return page.locator('[data-testid^="process-pane-"]').count();
+          return tree.count();
         },
         { timeout: 60_000, intervals: [500] },
       )
@@ -84,7 +76,7 @@ test.describe('Agent process discovery', () => {
     await expect
       .poll(
         async () => {
-          const text = await pane.innerText();
+          const text = await tree.innerText();
           if (text.includes('--token')) {
             return true;
           }
@@ -97,16 +89,28 @@ test.describe('Agent process discovery', () => {
       )
       .toBe(true);
 
-    // Pane coverage is stated, not implied. The method label lives in the
-    // snapshot header; the Pane section carries its coverage and reasons.
+    // Pane coverage is stated as Session coverage, not implied per Pane.
     await expect(page.getByTestId('agent-processes')).toContainText(
       /Process tree|Dedicated cgroup/,
     );
-    await expect(pane).toContainText(/Partial|Complete/);
+    await expect(page.getByTestId('agent-processes')).toContainText(/Partial|Complete/);
+
+    // Agent details is collapsed by default and keyboard-operable.
+    const agentDetails = page.getByTestId('agent-details');
+    await expect(agentDetails).toHaveJSProperty('open', false);
+    await agentDetails.locator('summary').focus();
+    await page.keyboard.press('Enter');
+    await expect(agentDetails).toHaveJSProperty('open', true);
+    const detailsContent = page.getByTestId('agent-details-content');
+    await expect(detailsContent.getByText('Identity & connection', { exact: true })).toBeVisible();
+    await expect(detailsContent.getByText('Runtime environment', { exact: true })).toBeVisible();
+    await expect(detailsContent.getByText('Capability & discovery', { exact: true })).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(agentDetails).toHaveJSProperty('open', false);
 
     // Select the credential-bearing process by its displayed command, not by
     // an accessible-name regex: the row also carries badges and a PID.
-    const rows = pane.getByRole('button');
+    const rows = tree.getByRole('button');
     const rowCount = await rows.count();
     let selectedCredentialRow = false;
     for (let index = 0; index < rowCount; index += 1) {
@@ -142,8 +146,20 @@ test.describe('Agent process discovery', () => {
       .toContain('--token [REDACTED]');
     expect(copied).not.toContain(secret);
 
-    // The resource scope changes only the metric set, never the command.
-    await pane.getByRole('button').first().click();
+    // Process details is default-closed, grouped, and survives a resource
+    // scope change for the same PID.
+    await expect(page.getByTestId('process-details')).toHaveJSProperty('open', false);
+    await page.getByTestId('process-details').getByText('Process details', { exact: true }).click();
+    await expect(page.getByTestId('process-details')).toHaveJSProperty('open', true);
+    await expect(page.getByTestId('process-details-content')).toContainText('Process identity');
+    await expect(page.getByTestId('process-details-content')).toContainText('Discovery evidence');
+    await page.getByRole('button', { name: 'With descendants' }).click();
+    await expect(page.getByTestId('process-details')).toHaveJSProperty('open', true);
+
+    // Selecting another PID resets the optional details; only the metrics
+    // scope was ever allowed to change the command.
+    await rows.first().click();
+    await expect(page.getByTestId('process-details')).toHaveJSProperty('open', false);
     const rootCommand = await page.getByTestId('process-command').innerText();
     await page.getByRole('button', { name: 'With descendants' }).click();
     await expect(page.getByTestId('process-command')).toHaveText(rootCommand);
@@ -158,9 +174,8 @@ test.describe('Agent process discovery', () => {
       .poll(async () => readTerminalBuffer(page), { timeout: 20_000 })
       .toContain('nession-2514-terminal-continuity');
 
-    // Mobile: the same command block and resources stay inside the viewport.
-    // A narrow viewport is the App experience, which starts on Terminal; enter
-    // its Workspace layer and re-select the Session/Pane before measuring.
+    // Mobile: the same current-Session view, with a pushed process detail and
+    // a Back to the process list instead of a Session/Pane picker.
     await page.setViewportSize({ width: 390, height: 844 });
     const processesVisible = await page
       .getByTestId('agent-processes')
@@ -178,13 +193,8 @@ test.describe('Agent process discovery', () => {
       }
       await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
     }
-    const narrowSession = page
-      .getByTestId('agent-process-session-selector')
-      .getByRole('button', { name: sessionName });
-    await expect(narrowSession).toBeVisible({ timeout: 15_000 });
-    if ((await narrowSession.getAttribute('aria-pressed')) !== 'true') {
-      await narrowSession.click();
-    }
+    await expect(page.getByTestId('agent-process-session')).toContainText(sessionName);
+    await expect(page.getByTestId('agent-process-session-selector')).toHaveCount(0);
     await expect
       .poll(
         async () => {
@@ -192,14 +202,14 @@ test.describe('Agent process discovery', () => {
           if ((await errorState.count()) > 0) {
             throw new Error('mobile process snapshot failed: ' + (await errorState.innerText()));
           }
-          return page.locator('[data-testid^="process-pane-"]').count();
+          return page.getByTestId('process-forest').count();
         },
         { timeout: 30_000, intervals: [500] },
       )
       .toBeGreaterThan(0);
-    const narrowPane = page.locator('[data-testid^="process-pane-"]').first();
+    const narrowTree = page.getByTestId('process-forest');
     if (!(await page.getByTestId('process-inspector').isVisible().catch(() => false))) {
-      await narrowPane.getByRole('button').first().click();
+      await narrowTree.getByRole('button').first().click();
     }
     await expect(inspector).toBeVisible();
     await inspector.scrollIntoViewIfNeeded();
@@ -215,5 +225,9 @@ test.describe('Agent process discovery', () => {
     expect(layout.commandWidth).toBeGreaterThan(0);
     expect(layout.commandWidth).toBeLessThanOrEqual(layout.viewport);
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport + 1);
+
+    await page.getByRole('button', { name: 'Back to processes' }).click();
+    await expect(page.getByTestId('process-forest')).toBeVisible();
+    await expect(page.getByTestId('process-inspector')).toHaveCount(0);
   });
 });

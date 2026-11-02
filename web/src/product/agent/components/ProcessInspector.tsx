@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Copy } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ChevronDown, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,27 +11,31 @@ import {
 } from '@/shared/typography/chromeRoles';
 import type {
   DiscoveredProcess,
-  PaneProcessSnapshot,
   ProcessMetric,
   ProcessSnapshot,
 } from '@/product/agent/types';
 import {
   aggregateMetric,
   collectDescendants,
+  coverageLabel,
   displayAggregate,
   displayCommand,
   displayMetric,
   formatElapsed,
+  formatSnapshotTime,
   isSet,
   methodLabel,
   reasonLabel,
   type DisplayMetric,
+  type SessionDiscovery,
 } from '@/product/agent/model/processSnapshot';
 
 export interface ProcessInspectorProps {
   process: DiscoveredProcess;
-  pane: PaneProcessSnapshot;
   snapshot: ProcessSnapshot;
+  discovery: SessionDiscovery;
+  /** The current Session's processes, deduplicated by identity. */
+  processes: DiscoveredProcess[];
 }
 
 type ResourceScope = 'process' | 'subtree';
@@ -39,18 +43,27 @@ type ResourceScope = 'process' | 'subtree';
 /**
  * Command-first process inspector (#2514).
  *
- * The selected command always belongs to the selected PID. The resource scope
- * changes only which processes the metrics are summed over: the PPID
- * descendant subtree walks parent edges and never absorbs a cgroup-only
- * reparented worker into the selected process's ancestry.
+ * The executed command and resources are always visible. Process identity and
+ * discovery evidence sit behind a default-closed disclosure: selecting a
+ * different PID remounts this component (the parent keys it by identity), so
+ * the disclosure resets, while a resource-scope toggle for the same PID keeps
+ * its state.
  */
-export function ProcessInspector({ process, pane, snapshot }: ProcessInspectorProps) {
+export function ProcessInspector({
+  process,
+  snapshot,
+  discovery,
+  processes,
+}: ProcessInspectorProps) {
   const [scope, setScope] = useState<ResourceScope>('process');
   const scopeProcesses =
-    scope === 'subtree' ? collectDescendants(process, pane.processes) : [process];
+    scope === 'subtree' ? collectDescendants(process, processes) : [process];
 
   return (
-    <div data-testid="process-inspector" className="flex min-w-0 flex-col gap-4">
+    <div
+      data-testid="process-inspector"
+      className="flex min-w-0 flex-col gap-4"
+    >
       <CommandSection process={process} />
       <ResourcesSection
         process={process}
@@ -59,7 +72,11 @@ export function ProcessInspector({ process, pane, snapshot }: ProcessInspectorPr
         scopeProcesses={scopeProcesses}
         snapshot={snapshot}
       />
-      <IdentitySection process={process} pane={pane} />
+      <ProcessDetails
+        process={process}
+        snapshot={snapshot}
+        discovery={discovery}
+      />
     </div>
   );
 }
@@ -113,12 +130,11 @@ function CommandSection({ process }: { process: DiscoveredProcess }) {
           </Badge>
         ) : null}
       </div>
-      <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-        PID {process.pid}
-        {isSet(process.start_time_ms)
-          ? ` · started ${new Date(process.start_time_ms).toLocaleString()}`
-          : ' · start time unavailable'}
-      </p>
+      {process.redacted ? (
+        <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+          Sensitive arguments were replaced with [REDACTED]; there is no raw-argv reveal.
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -221,44 +237,98 @@ function ResourcesSection({
   );
 }
 
-function IdentitySection({
+function ProcessDetails({
   process,
-  pane,
+  snapshot,
+  discovery,
 }: {
   process: DiscoveredProcess;
-  pane: PaneProcessSnapshot;
+  snapshot: ProcessSnapshot;
+  discovery: SessionDiscovery;
+}) {
+  const reasons =
+    discovery.reasonCodes.length > 0
+      ? discovery.reasonCodes.map(reasonLabel).join(' ')
+      : 'None reported';
+  return (
+    <details data-testid="process-details" className="group min-w-0">
+      <summary
+        className={cn(
+          'flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 rounded-[var(--nession-radius-control)] px-2 py-1.5 hover:bg-muted/60',
+          '[&::-webkit-details-marker]:hidden',
+        )}
+      >
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className={cn('text-foreground', chromeSansRole('secondary'))}>Process details</span>
+          <span className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>
+            Identity · discovery evidence
+          </span>
+        </span>
+        <ChevronDown
+          aria-hidden
+          className="size-[length:var(--nession-icon-sm)] shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div
+        data-testid="process-details-content"
+        className="mt-2 grid min-w-0 gap-3 sm:grid-cols-2"
+      >
+        <DetailGroup title="Process identity">
+          <DetailRow label="PID" value={String(process.pid)} mono />
+          <DetailRow
+            label="Parent PID"
+            value={isSet(process.parent_pid) ? String(process.parent_pid) : 'Unavailable'}
+            mono
+          />
+          <DetailRow label="Executable" value={process.executable || 'Unknown'} mono />
+          <DetailRow label="Current Session" value={snapshot.session_name} mono />
+        </DetailGroup>
+        <DetailGroup title="Discovery evidence">
+          <DetailRow
+            label="Method"
+            value={discovery.methods.map(methodLabel).join(' · ')}
+          />
+          <DetailRow label="Coverage" value={coverageLabel(discovery.coverage)} />
+          <DetailRow label="Snapshot" value={formatSnapshotTime(snapshot.snapshot_at_ms)} />
+          <DetailRow label="Reason code" value={reasons} />
+        </DetailGroup>
+      </div>
+    </details>
+  );
+}
+
+function DetailGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] bg-muted/50 p-3">
+      <h5 className={cn('text-muted-foreground', chromeLabelRole('metadata'))}>{title}</h5>
+      <dl className="flex min-w-0 flex-col gap-1.5">{children}</dl>
+    </section>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <h4 className={chromeSansRole('primary')}>Identity and membership evidence</h4>
-      <dl className={cn('grid grid-cols-2 gap-x-4 gap-y-1', chromeSansRole('body'))}>
-        <IdentityRow label="PID" value={String(process.pid)} />
-        <IdentityRow
-          label="Parent PID"
-          value={isSet(process.parent_pid) ? String(process.parent_pid) : 'Unavailable'}
-        />
-        <IdentityRow
-          label="Start time"
-          value={
-            isSet(process.start_time_ms)
-              ? new Date(process.start_time_ms).toLocaleString()
-              : 'Unavailable'
-          }
-        />
-        <IdentityRow label="TTY" value={process.tty ?? 'Unavailable'} />
-        <IdentityRow label="SID" value={isSet(process.sid) ? String(process.sid) : 'Unavailable'} />
-        <IdentityRow
-          label="PGID"
-          value={isSet(process.pgid) ? String(process.pgid) : 'Unavailable'}
-        />
-      </dl>
-      <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-        Pane method: {methodLabel(pane.method)} · coverage: {pane.coverage}
-        {pane.reason_codes.length > 0
-          ? ` · ${pane.reason_codes.map(reasonLabel).join(' ')}`
-          : ''}
-      </p>
-    </section>
+    <div className="flex min-w-0 items-baseline justify-between gap-3">
+      <dt className={cn('shrink-0 text-muted-foreground', chromeLabelRole('metadata'))}>{label}</dt>
+      <dd
+        className={cn(
+          'min-w-0 break-words text-right',
+          mono ? chromeMonoRole('metadata') : chromeSansRole('caption'),
+          value === 'Unavailable' || value === 'None reported' ? 'text-muted-foreground' : '',
+        )}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }
 
@@ -287,17 +357,6 @@ function MetricCell({
           {value.detail}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-function IdentityRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 gap-2">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 truncate" title={value}>
-        {value}
-      </dd>
     </div>
   );
 }

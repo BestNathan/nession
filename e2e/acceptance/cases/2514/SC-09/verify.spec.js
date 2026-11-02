@@ -18,7 +18,7 @@ test('SC-09: per-PID and PPID-descendant resource scope stay truthful', async ({
   const runtime = JSON.parse(fs.readFileSync(process.env.NESSION_ACCEPTANCE_RUNTIME_FILE, 'utf8'));
   const sha = process.env.NESSION_ACCEPTANCE_TARGET_SHA;
   const opened = await openAgentProcesses(page, expect, runtime, sha);
-  const selected = await inspectRoot(page, expect, opened.pane);
+  const selected = await inspectRoot(page, expect, opened.tree);
 
   // The selected command belongs to the selected PID and does not change when
   // only the metric scope changes.
