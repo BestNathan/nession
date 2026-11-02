@@ -15,6 +15,10 @@ on:
     # Keep push / manual triggers unchanged for exact-SHA evidence.
     paths:
       - '.github/workflows/**'
+      - '.claude/skills/**'
+      - '.agents/skills/**'
+      - '**/AGENTS.md'
+      - '**/CLAUDE.md'
       - 'crates/**'
       - 'web/**'
       - 'design/**'
@@ -50,6 +54,7 @@ jobs:
       rust: ${{ steps.changed.outputs.rust }}
       web: ${{ steps.changed.outputs.web }}
       workflow: ${{ steps.changed.outputs.workflow }}
+      instruction: ${{ steps.changed.outputs.instruction }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,6 +91,7 @@ jobs:
           rust=false
           web=false
           workflow=false
+          instruction=false
           for path in "${changed[@]}"; do
             case "$path" in
               crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|clippy.toml|justfile|gates/*|scripts/*|automation/*|.github/workflows/ci-quality.yml) rust=true ;;
@@ -96,9 +102,12 @@ jobs:
             case "$path" in
               .github/workflows/*) workflow=true ;;
             esac
+            case "$path" in
+              AGENTS.md|CLAUDE.md|*/AGENTS.md|*/CLAUDE.md|.claude/skills/*|.agents/skills/*|.github/workflows/ci-quality.yml) instruction=true ;;
+            esac
           done
           if [[ "$EVENT_NAME" == pull_request &&
-                "$rust" == false && "$web" == false && "$workflow" == false ]]; then
+                "$rust" == false && "$web" == false && "$workflow" == false && "$instruction" == false ]]; then
             echo '::error::PR matched Quality trigger but no applicable checks were found'
             exit 1
           fi
@@ -106,8 +115,24 @@ jobs:
             echo "rust=$rust"
             echo "web=$web"
             echo "workflow=$workflow"
+            echo "instruction=$instruction"
           } >> "$GITHUB_OUTPUT"
-          echo "Rust applicable: $rust; Web applicable: $web; Workflow contracts applicable: $workflow"
+          echo "Rust applicable: $rust; Web applicable: $web; Workflow contracts applicable: $workflow; Instruction contract applicable: $instruction"
+
+  instruction-check:
+    needs: scope
+    if: needs.scope.outputs.instruction == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify canonical repository instruction graph
+        run: ./gates/run instruction-contract
 
   workflow-check:
     needs: scope
