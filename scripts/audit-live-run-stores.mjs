@@ -74,6 +74,9 @@ export async function auditLiveRunStores({
       typeof fetchFn!=='function'||typeof gitRunner!=='function')deny('read-only API credential missing');
   if(!['externally_supplied','main_migration_observation','main_bootstrap_observation'].includes(anchorTrust))
     deny('invalid audit anchor trust boundary');
+  if(anchorTrust==='main_bootstrap_observation'&&
+      JSON.stringify(storeRefs)!==JSON.stringify(AGENT_STORE_AUDIT_REFS))
+    deny('bootstrap observation must audit only the agent-store root');
   const trust=typeof anchors==='string'?parseProtectedAnchors(anchors,storeRefs):parseProtectedAnchors(JSON.stringify(anchors),storeRefs);
   const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
     'X-GitHub-Api-Version':'2022-11-28'};
@@ -102,6 +105,11 @@ export async function auditLiveRunStores({
              gitRunner(worktree,'rev-parse',trust[store]+'^{tree}')!==expectedTree)
             deny('migration baseline tree identity does not match Git object for '+store);
         }
+        // A bootstrap "baseline" must actually be the orphan root; a newer
+        // mutable head must not be silently substituted as the first commit.
+        if(anchorTrust==='main_bootstrap_observation'&&
+           gitRunner(worktree,'rev-list','--parents','-n','1',trust[store])!==trust[store])
+          deny('agent-store bootstrap baseline is not the orphan root');
         const result=auditAnchoredRunStore(worktree,store,trust[store],observed);
         records.push({...result,api_ref_verified:true});
       }finally{
