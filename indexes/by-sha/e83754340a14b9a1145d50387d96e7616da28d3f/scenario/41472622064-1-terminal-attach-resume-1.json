@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41472622064,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2645-p2p-renewal",
+    "target_sha": "e83754340a14b9a1145d50387d96e7616da28d3f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41472622064",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "a4953b25931c1fed18fa589e7d37b681ce893d884a5ac7924dc6c7725276be80"
+  },
+  "record": "runs/2026-11-02/41472622064-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "7c85007149d3867f85f8e3e7a9e888ecc4f8234676fca75c8948b5f43ce0b6c2"
+}
