@@ -299,6 +299,19 @@ function selfTest(){
   const scopedAgentRule={id:552244,target:'branch',source_type:'Repository',
     source:REPO,enforcement:'active',
     conditions:{ref_name:{include:['refs/heads/agent-store'],exclude:[]}}};
+  const postRootAudit={anchoring:'repository_main_bootstrap_observation_only',records:[{
+    store:ACTIVE_AGENT_REF,observed:sha,mode:'anchored-history',
+    api_ref_verified:true,checked_commits:39,checked_changes:52,
+  }]};
+  const auditable=observeAgentStoreGovernance(liveBranch,[],postRootAudit);
+  assert.equal(auditable.post_bootstrap_history_audited,true);
+  assert.equal(auditable.historical_immutability_audited,true);
+  assert.equal(auditable.audited_commits,39);
+  assert.equal(auditable.server_side_app_only_writer_verified,false);
+  assert.equal(auditable.independent_external_anchor_verified,false);
+  assert.equal(observeAgentStoreGovernance(liveBranch,[],{...postRootAudit,
+    records:[{...postRootAudit.records[0],observed:'b'.repeat(40)}]})
+    .post_bootstrap_history_audited,false);
   const withRule=observeAgentStoreGovernance(liveBranch,[scopedAgentRule]);
   assert.deepEqual(withRule.active_ruleset_includes_ref_ids,[552244]);
   assert.equal(withRule.server_side_app_only_writer_verified,false);
