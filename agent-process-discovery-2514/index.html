@@ -34,6 +34,57 @@ a{color:inherit}.mast{display:flex;align-items:center;justify-content:space-betw
  .cmd{display:block}.cmd button{margin-top:10px}
  .capsule button{padding:8px 12px}
 }
+
+/* Agent detail disclosure: information survives behind a quiet, well-structured row. */
+.agent-meta{margin:0 28px;padding:0;border-bottom:1px solid #edf0f3}
+.agent-meta summary{display:flex;align-items:center;justify-content:space-between;gap:14px;list-style:none;cursor:pointer;border-radius:7px;padding:12px 2px 13px;color:#5e7185}
+.agent-meta summary::-webkit-details-marker{display:none}
+.agent-meta summary:hover .details-entry-title{color:#293d52}
+.details-entry{display:flex;align-items:center;gap:13px;min-width:0;flex-wrap:wrap}
+.details-entry-title{font-size:12px;font-weight:750;color:#566a7f;white-space:nowrap}
+.details-entry-description{font-size:11px;color:#95a2af}
+.details-disclosure{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-size:18px;color:#7e8da0;transition:transform .15s ease,background-color .15s}
+.agent-meta[open] .details-disclosure{transform:rotate(180deg)}
+.agent-meta summary:hover .details-disclosure{background:#f1f4f7}
+.agent-detail-body{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;padding:7px 0 19px}
+.agent-detail-group{min-width:0;background:#f9fafc;border:1px solid #eef1f4;border-radius:11px;padding:17px 16px 15px}
+.agent-detail-group-head{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+.agent-detail-symbol{background:#edf2f6;border-radius:7px;width:28px;height:28px;display:grid;place-items:center;font-size:13px;color:#557087;flex:none}
+.agent-detail-group-head h4{font-size:12px;color:#3b5066;margin:0;font-weight:760;letter-spacing:-.01em}
+.agent-detail-group-head small{display:block;color:#96a3b0;font-size:10px;font-weight:500;margin-top:2px}
+.agent-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:10px;row-gap:15px;margin:0}
+.agent-detail-field{min-width:0}
+.agent-detail-field.full{grid-column:1 / -1}
+.agent-detail-field dt{font-size:10px;color:#909eae;margin:0 0 5px}
+.agent-detail-field dd{font-size:11px;line-height:1.45;font-weight:690;color:#344b62;overflow-wrap:anywhere;margin:0}
+.agent-detail-field dd.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:600}
+.agent-detail-field dd.muted{color:#95a0ae;font-weight:550}
+.agent-detail-tip{font-size:10px;color:#8696a5;line-height:1.65;margin:15px 0 0;padding-top:11px;border-top:1px solid #e8edf2}
+.agent-detail-tip strong{font-weight:700;color:#556d86}
+/* Deep process identity has distinct grouped facts, not an undifferentiated metadata list. */
+.evidence{border-top:1px solid #eef1f4;padding-top:16px}
+.evidence summary{display:flex;justify-content:space-between;align-items:center;gap:10px;list-style:none;padding:5px 0 7px;font-size:11px;color:#657d94;cursor:pointer;font-weight:680}
+.evidence summary::-webkit-details-marker{display:none}
+.evidence summary::after{content:'⌄';font-size:17px;color:#8898a9;transition:transform .15s}
+.evidence[open] summary::after{transform:rotate(180deg)}
+.process-evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:11px}
+.process-evidence-group{padding:13px;border-radius:9px;background:#f8fafc;min-width:0}
+.process-evidence-group h5{margin:0 0 12px;color:#496078;font-size:11px}
+.process-evidence-group dl{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.process-evidence-group dt{font-size:10px;color:#95a3b1}
+.process-evidence-group dd{font-size:11px;line-height:1.5;color:#445e77;margin-top:4px;overflow-wrap:anywhere}
+@media(max-width:1050px){.agent-detail-body{grid-template-columns:repeat(2,minmax(0,1fr))}.agent-detail-group:last-child{grid-column:1 / -1}}
+@media(max-width:700px){
+ .agent-meta{margin:0 17px}
+ .agent-meta summary{padding:12px 0}
+ .details-entry{gap:4px;display:flex;flex-direction:column;align-items:flex-start}
+ .details-entry-description{font-size:10px}
+ .agent-detail-body{grid-template-columns:1fr;padding-top:3px;gap:8px}
+ .agent-detail-group:last-child{grid-column:auto}
+ .agent-detail-group{padding:15px}
+ .process-evidence-grid{grid-template-columns:1fr}
+}
+
 </style>
 </head>
 <body>
@@ -43,7 +94,10 @@ a{color:inherit}.mast{display:flex;align-items:center;justify-content:space-betw
   <section class="shell" aria-label="Agent capability workspace">
     <div class="shellbar"><div class="crumb">Workspace <span aria-hidden="true">›</span> <strong>Agent</strong></div><div><span class="crumb" id="snapshot">模拟快照 · T+0</span>　<button type="button" class="refresh" id="refresh">↻ 刷新</button></div></div>
     <div class="agent"><div class="agent-identity"><span class="agent-icon" aria-hidden="true">⌘</span><div><h2 id="host">dev-linux-01</h2><p id="subhost">Ubuntu · Connected</p></div></div><span id="status" class="status">Online</span></div>
-    <details class="agent-meta"><summary>节点环境与发现方式</summary><div class="meta-grid" id="node-facts"></div></details>
+    <details class="agent-meta" id="agent-details">
+      <summary><span class="details-entry"><span class="details-entry-title">Agent details</span><span class="details-entry-description">身份 · 连接 · 运行环境 · 发现能力</span></span><span class="details-disclosure" aria-hidden="true">⌄</span></summary>
+      <div class="agent-detail-body" id="agent-detail-content" aria-label="Agent details information"></div>
+    </details>
     <div class="stage">
       <div class="session-head"><div><div class="eyebrow">CURRENT SESSION</div><h3 id="session-name">nession-dev</h3></div><span class="session-activity" id="session-summary">8 processes · T+0</span></div>
       <p class="notice" id="notice" hidden></p>
@@ -92,7 +146,13 @@ var scenarios={
  mac:fixture('macbook-agent','macOS · arm64 · tmux','partial','PPID / TTY','macOS 不提供 Linux cgroup；仅能根据进程树、TTY 等有限证据关联。','platform_no_linux_cgroup',mac,'macOS','process API'),
  offline:fixture('edge-node-03','最后已知：Linux · 连接中断','unavailable','unavailable','Agent 离线，无法获取新快照。未知不能显示为零。','agent_offline',[], 'last-known Linux','unknown')
 };
-var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0};
+var mockAgentDetails={
+ linux:{agentId:'mock-agent-linux-01',endpoint:'192.0.2.24:9010',heartbeat:'12s ago',osVersion:'Ubuntu 26.04 / x86_64',nessionVersion:'0.0.0-mock',tmuxVersion:'3.5a (mock)',image:'Not reported'},
+ shared:{agentId:'mock-k8s-agent',endpoint:'198.51.100.16:9010',heartbeat:'29s ago',osVersion:'Ubuntu 26.04 / container',nessionVersion:'0.0.0-mock',tmuxVersion:'3.5a (mock)',image:'demo-agent:mock'},
+ mac:{agentId:'mock-mac-agent',endpoint:'192.0.2.55:9010',heartbeat:'8s ago',osVersion:'macOS / arm64',nessionVersion:'0.0.0-mock',tmuxVersion:'3.5a (mock)',image:'Not reported'},
+ offline:{agentId:'mock-edge-agent',endpoint:'Unknown (last seen)',heartbeat:'Unavailable · offline',osVersion:'Last known Linux',nessionVersion:'Unknown',tmuxVersion:'Unknown',image:'Unknown'}
+};
+var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0,processDetailsOpen:false};
 function byId(id){return document.getElementById(id);}
 function el(tag,cls,value){var n=document.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n;}
 function add(parent,tag,cls,value){var n=el(tag,cls,value);parent.appendChild(n);return n;}
@@ -150,12 +210,48 @@ function metric(root,label,value,unit,dec,trendSeed){
  add(cell,'strong',value===null?'unknown':'',format(value,unit,dec));
  if(trendSeed!==null)drawTrend(cell,value,trendSeed);
 }
+function renderAgentDetails(d){
+ var host=byId('agent-detail-content'),meta=mockAgentDetails[state.scenario]||mockAgentDetails.linux;
+ host.replaceChildren();
+ function group(glyph,title,subtitle,fields,note){
+  var card=add(host,'section','agent-detail-group'),heading=add(card,'div','agent-detail-group-head');
+  add(heading,'span','agent-detail-symbol',glyph);
+  var label=add(heading,'div');add(label,'h4','',title);add(label,'small','',subtitle);
+  var dl=add(card,'dl','agent-detail-grid');
+  fields.forEach(function(f){
+   var row=add(dl,'div','agent-detail-field'+(f.full?' full':''));
+   add(row,'dt','',f.label);
+   add(row,'dd',(f.mono?'mono ':'')+(f.muted?'muted':''),f.value);
+  });
+  if(note){var hint=add(card,'p','agent-detail-tip');add(hint,'strong','',note[0]);hint.appendChild(document.createTextNode(note[1]));}
+ }
+ group('⌘','Identity & connection','节点与可达性',[
+  {label:'Agent ID',value:meta.agentId,full:true,mono:true},
+  {label:'Hostname',value:d.host},
+  {label:'Endpoint',value:meta.endpoint,mono:true},
+  {label:'Connection',value:d.coverage==='unavailable'?'Offline · cannot refresh':'Connected'},
+  {label:'Last heartbeat',value:meta.heartbeat,muted:d.coverage==='unavailable'}
+ ]);
+ group('▤','Runtime environment','执行环境',[
+  {label:'Operating system',value:meta.osVersion,full:true},
+  {label:'Nession version',value:meta.nessionVersion,mono:true},
+  {label:'tmux version',value:meta.tmuxVersion,mono:true},
+  {label:'Image',value:meta.image,full:true,muted:meta.image==='Unknown'||meta.image==='Not reported'}
+ ]);
+ group('◈','Capability & discovery','支持能力 / 探测依据',[
+  {label:'Terminal',value:d.coverage==='unavailable'?'Unknown':'Available'},
+  {label:'Process discovery',value:d.coverage==='complete'?'Complete':d.coverage==='partial'?'Partial':'Unavailable'},
+  {label:'Method',value:d.method,full:true},
+  {label:'Environment',value:d.runtime},
+  {label:'Reason code',value:d.code,full:true,mono:true}
+ ],['Coverage · ',d.reason]);
+}
 function renderTree(items){
  var root=byId('tree');root.replaceChildren();
  function row(n,depth){
   var p=n.p,selected=p.pid===state.selectedPid;
   var b=button(root,'tree-line'+(selected?' selected':''),'',function(){
-   state.selectedPid=p.pid;state.resourceScope='self';state.mobileDetail=true;render();
+   state.selectedPid=p.pid;state.resourceScope='self';state.processDetailsOpen=false;state.mobileDetail=true;render();
   });
   b.setAttribute('aria-pressed',String(selected));b.dataset.pid=String(p.pid);
   var indent=add(b,'span','tree-indent');indent.style.width=(depth*15)+'px';
@@ -195,19 +291,31 @@ function renderInspector(items,p,d,session){
  add(sc,'span','',state.resourceScope==='subtree'?'PPID descendants · '+stats.count+' processes':'Selected PID only');
  add(sc,'span','','Sampling window · 5s');add(sc,'span','','Snapshot · T+'+state.tick);
  add(resources,'p','detail-note','CPU 可以超过 100%；缺失或过期指标显示不可用，不把 null 当零。子树只按 PPID 关系合计，不自动吸收重新收养进程。曲线仅为模拟示意。');
- var evidence=add(host,'details','evidence');add(evidence,'summary','','进程身份与归属依据');
- var dl=add(evidence,'dl');
- [['PID',String(p.pid)],['Parent PID',String(p.ppid)],['Method',p.reparented?'verified resource domain':d.method],['Coverage',d.coverage]].forEach(function(x){
-  var item=add(dl,'div');add(item,'dt','',x[0]);add(item,'dd','',x[1]);
- });
+ var evidence=add(host,'details','evidence');evidence.open=state.processDetailsOpen;
+ add(evidence,'summary','','Process details · 进程身份与发现依据');
+ var groups=add(evidence,'div','process-evidence-grid');
+ function evidenceGroup(title,fields){
+  var group=add(groups,'section','process-evidence-group');add(group,'h5','',title);
+  var dl=add(group,'dl');
+  fields.forEach(function(x){var cell=add(dl,'div');add(cell,'dt','',x[0]);add(cell,'dd','',x[1]);});
+ }
+ evidenceGroup('Process identity',[
+  ['PID',String(p.pid)],['Parent PID',String(p.ppid)],
+  ['Executable',p.name],['Current Session',session.name]
+ ]);
+ evidenceGroup('Discovery evidence',[
+  ['Method',p.reparented?'Verified resource-domain membership':d.method],
+  ['Coverage',d.coverage],['Snapshot','T+'+state.tick+' (mock)'],
+  ['Reason code',d.code]
+ ]);
+ evidence.addEventListener('toggle',function(){state.processDetailsOpen=evidence.open;});
 }
 function render(){
  var d=getFixture(),s=getSession(d),items=uniqueProcesses(s),unavailable=d.coverage==='unavailable',none=!s;
  byId('host').textContent=d.host;byId('subhost').textContent=d.sub;
  var status=byId('status');status.textContent=unavailable?'Offline':d.coverage==='partial'?'Partial discovery':'Online';status.className='status'+(unavailable?' offline':d.coverage==='partial'?' partial':'');
  byId('snapshot').textContent=unavailable?'快照不可用':'模拟快照 · T+'+state.tick;byId('refresh').disabled=unavailable;
- var facts=byId('node-facts');facts.replaceChildren();
- [['OS',d.os],['tmux','private socket'],['Discovery',d.method],['Runtime',d.runtime]].forEach(function(x){add(facts,'span','',x[0]+' · '+x[1]);});
+ renderAgentDetails(d);
  byId('session-name').textContent=none?'没有当前 Session':s.name;
  byId('session-summary').textContent=unavailable?'未获取快照':none?'仅显示当前工作上下文':items.length+' processes · T+'+state.tick;
  var notice=byId('notice');notice.hidden=d.coverage==='complete';notice.className='notice'+(unavailable?' offline':'');notice.textContent=unavailable?'Agent 离线：未观测不等于 0 个进程。':d.coverage==='partial'?d.reason:'';
@@ -233,7 +341,7 @@ function render(){
 }
 byId('scenario').addEventListener('change',function(e){
  state.scenario=e.target.value;state.currentSessionId=state.scenario==='no-session'?null:'dev';
- state.selectedPid=null;state.resourceScope='self';state.mobileDetail=false;state.tick=0;render();
+ state.selectedPid=null;state.resourceScope='self';state.mobileDetail=false;state.processDetailsOpen=false;state.tick=0;render();
 });
 byId('refresh').addEventListener('click',function(){
  if(getFixture().coverage==='unavailable'){toast('Agent 离线：无法获取快照');return;}
