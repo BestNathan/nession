@@ -9,6 +9,13 @@ import {fileURLToPath} from 'node:url';
 import {auditAnchoredRunStore} from './run-store-integrity.mjs';
 
 export const AUDITED_STORES=Object.freeze(['acceptance-results','task-results','metrics']);
+export const AGENT_STORE_AUDIT_REFS=Object.freeze(['agent-store']);
+function allowedAuditRefs(refs){
+  if(!Array.isArray(refs)||!([AUDITED_STORES,AGENT_STORE_AUDIT_REFS]
+    .some(list=>JSON.stringify(refs)===JSON.stringify(list))))
+    deny('unsupported exact store audit ref set');
+  return refs;
+}
 const SHA=/^[0-9a-f]{40}$/;
 const REPO='BestNathan/nession';
 function deny(reason){throw new Error('live run-store audit: '+reason);}
@@ -21,16 +28,17 @@ function git(cwd,...args){
     }).trim();
   }catch{deny('Git fetch/worktree operation failed');}
 }
-export function parseProtectedAnchors(raw) {
+export function parseProtectedAnchors(raw,stores=AUDITED_STORES) {
+  allowedAuditRefs(stores);
   if(typeof raw!=='string'||!raw.trim()||raw.length>2048)deny('independent anchor secret missing/oversized');
   let value;
   try{value=JSON.parse(raw);}catch{deny('invalid anchor JSON');}
   if(!value||typeof value!=='object'||Array.isArray(value)||
-    Object.keys(value).length!==AUDITED_STORES.length ||
-    AUDITED_STORES.some(k=>!Object.hasOwn(value,k)||!SHA.test(value[k]))) {
+    Object.keys(value).length!==stores.length ||
+    stores.some(k=>!Object.hasOwn(value,k)||!SHA.test(value[k]))) {
     deny('anchor manifest requires exact store commit SHAs');
   }
-  return Object.fromEntries(AUDITED_STORES.map(k=>[k,value[k]]));
+  return Object.fromEntries(stores.map(k=>[k,value[k]]));
 }
 function trustedCheckout(root,sha) {
   if(typeof root!=='string'||!path.isAbsolute(root)||!SHA.test(sha))deny('invalid main checkout');
@@ -58,20 +66,21 @@ function validateRef(value,store){
 }
 export async function auditLiveRunStores({
   checkout,sourceSha,anchors,token,fetchFn=fetch,gitRunner=git,
-  anchorTrust='externally_supplied',baselineTrees=null,
+  anchorTrust='externally_supplied',baselineTrees=null,storeRefs=AUDITED_STORES,
 }){
+  allowedAuditRefs(storeRefs);
   trustedCheckout(checkout,sourceSha);
   if(!token||typeof token!=='string'||token.length<8||
       typeof fetchFn!=='function'||typeof gitRunner!=='function')deny('read-only API credential missing');
-  if(!['externally_supplied','main_migration_observation'].includes(anchorTrust))
+  if(!['externally_supplied','main_migration_observation','main_bootstrap_observation'].includes(anchorTrust))
     deny('invalid audit anchor trust boundary');
-  const trust=typeof anchors==='string'?parseProtectedAnchors(anchors):parseProtectedAnchors(JSON.stringify(anchors));
+  const trust=typeof anchors==='string'?parseProtectedAnchors(anchors,storeRefs):parseProtectedAnchors(JSON.stringify(anchors),storeRefs);
   const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
     'X-GitHub-Api-Version':'2022-11-28'};
   const auditDir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-store-audit-'));
   const records=[];
   try{
-    for(const store of AUDITED_STORES){
+    for(const store of storeRefs){
       const response=await fetchFn('https://api.github.com/repos/'+REPO+
         '/git/ref/heads/'+store,{method:'GET',headers,redirect:'error'});
       if(!response.ok)deny('missing/inaccessible GitHub ref '+store+' ('+response.status+')');
@@ -87,7 +96,7 @@ export async function auditLiveRunStores({
         // A repository-main migration observation records both a commit and
         // its tree. The commit SHA alone proves only the claimed object name;
         // verify exact tree identity before trusting the ancestry classifier.
-        if(anchorTrust==='main_migration_observation'){
+        if(anchorTrust==='main_migration_observation'||anchorTrust==='main_bootstrap_observation'){
           const expectedTree=baselineTrees?.[store];
           if(typeof expectedTree!=='string'||!/^[a-f0-9]{40}$/.test(expectedTree)||
              gitRunner(worktree,'rev-parse',trust[store]+'^{tree}')!==expectedTree)
@@ -102,7 +111,8 @@ export async function auditLiveRunStores({
     return {schema_version:1,kind:'read_only_run_store_audit',repository:REPO,
       source_sha:sourceSha,passed:true,
       anchoring:anchorTrust==='externally_supplied'
-        ?'separately_supplied_secret':'repository_main_migration_observation_only',
+        ?'separately_supplied_secret':anchorTrust==='main_bootstrap_observation'
+          ?'repository_main_bootstrap_observation_only':'repository_main_migration_observation_only',
       historical_provenance_trust:anchorTrust==='externally_supplied'
         ?'caller_supplied_not_proven_WORM':'not_independent_or_retroactive',
       records};
