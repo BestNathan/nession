@@ -283,6 +283,36 @@ ok(() => {
 });
 
 // Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+// Inspect each real checkout step rather than assuming a fixed number of
+// checkouts: a new isolated CI job may add a correctly pinned checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  function assertExactSourceCheckouts(source, workflow, minimum) {
+    const checkouts=[...source.matchAll(/^([ \\t]*)- uses: actions\\/checkout@v\\d+\\s*$/gm)];
+    assert.ok(checkouts.length>=minimum,workflow+' must retain source checkouts');
+    for(const [index,checkout] of checkouts.entries()){
+      const following=source.slice(checkout.index+checkout[0].length);
+      const nextStep=following.search(new RegExp('^'+checkout[1]+'- (?:uses|name|run):','m'));
+      const step=nextStep===-1?following:following.slice(0,nextStep);
+      assert.ok(step.includes(expected),workflow+' checkout '+(index+1)+' must checkout exact PR head');
+      assert.match(step,/^\\s+persist-credentials: false\\s*$/m,
+        workflow+' checkout '+(index+1)+' cannot retain write credentials');
+    }
+  }
+  for(const [workflow,minimum] of [['ci-quality.yml',4],['e2e-tests.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assertExactSourceCheckouts(source,workflow,minimum);
+    // Negative fixtures prove the rule still rejects a vulnerable checkout,
+    // regardless of the total number of correctly pinned jobs.
+    assert.throws(()=>assertExactSourceCheckouts(source.replace(expected,'ref: refs/heads/main'),workflow,minimum),
+      /must checkout exact PR head/);
+    assert.throws(()=>assertExactSourceCheckouts(source.replace('persist-credentials: false','persist-credentials: true'),workflow,minimum),
+      /cannot retain write credentials/);
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e-tests.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
 ok(() => {
   const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
   for(const [workflow,count] of [['ci-quality.yml',4],['e2e-tests.yml',1],['e2e-scenario-smoke.yml',1]]){
