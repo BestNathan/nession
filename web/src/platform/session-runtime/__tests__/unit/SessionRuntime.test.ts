@@ -566,6 +566,137 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('renews a spent P2P credential before a lost socket is rebuilt (#2645)', async () => {
+    vi.useFakeTimers();
+    try {
+      const attachInfo: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token_expires_at: new Date(Date.now() + 61_000).toISOString(),
+      };
+      const fresh: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token: 'fresh-token',
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      const requestFreshAttach = vi.fn().mockResolvedValue(fresh);
+      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      // The first dial still presents the attach-issued credential.
+      expect(requestFreshAttach).not.toHaveBeenCalled();
+      expect(lastWs().url).toBe('ws://a/ws?token=tok');
+
+      // Cross the renewal margin while the socket stays healthy: expiry alone
+      // never rebuilds a working transport.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(requestFreshAttach).not.toHaveBeenCalled();
+      expect(rt.getAgentTerminalApi()).not.toBeNull();
+
+      const before = wsInstances.length;
+      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+      rt.resumeOnForeground();
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      expect(requestFreshAttach).toHaveBeenCalledWith('agent:s1');
+      expect(wsInstances.length).toBe(before + 1);
+      expect(lastWs().url).toContain('token=fresh-token');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses an unspent P2P credential and does not reissue it on reconnect (#2645)', async () => {
+    vi.useFakeTimers();
+    try {
+      const attachInfo: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      const requestFreshAttach = vi.fn();
+      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+      rt.resumeOnForeground();
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      expect(requestFreshAttach).not.toHaveBeenCalled();
+      expect(lastWs().url).toContain('token=tok');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fences a renewal that resolves after the attach was replaced (#2645)', async () => {
+    vi.useFakeTimers();
+    try {
+      const attachInfo: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token_expires_at: new Date(Date.now() + 61_000).toISOString(),
+      };
+      let settleRenewal!: (info: AttachInfo) => void;
+      const requestFreshAttach = vi.fn(
+        () => new Promise<AttachInfo>((resolve) => { settleRenewal = resolve; }),
+      );
+      const rt = new SessionRuntime(makeConfig({ attachInfo, requestFreshAttach }));
+      const events: string[] = [];
+      rt.subscribeRuntimeEvents((event) => {
+        if (event.type === 'p2p-credential') {
+          events.push(event.outcome);
+        }
+      });
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+      rt.resumeOnForeground();
+      await flushMicrotasks();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+
+      // A fresh attach replaces the authority while the old renewal is still
+      // in flight. It must win; the old reply must be discarded, not installed.
+      const replacement: AttachInfo = {
+        ...makeAttachInfo(),
+        connection_token: 'replacement-token',
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      };
+      rt.updateContext({ attachInfo: replacement });
+      settleRenewal({
+        ...makeAttachInfo(),
+        connection_token: 'stale-renewed-token',
+        connection_token_expires_at: new Date(Date.now() + 300_000).toISOString(),
+      });
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      expect(wsInstances.some((ws) => ws.url.includes('stale-renewed-token'))).toBe(false);
+      expect(lastWs().url).toContain('token=replacement-token');
+      expect(events).toContain('failed');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('builds no agent API when the plan carries no addresses (#1430)', () => {
     // An empty plan is a resolved answer now: there is no "not ready" state
     // left to wait in, so it means the advertisement named no candidate and

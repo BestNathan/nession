@@ -101,7 +101,7 @@ export class WebSocketService implements PluginSurface {
   readonly protocols = new ProtocolDirectory();
 
   constructor(
-    private readonly url: string,
+    private url: string,
     plugins: TransportPlugin[] = [],
     private readonly options: WebSocketServiceOptions = {},
   ) {
@@ -159,7 +159,51 @@ export class WebSocketService implements PluginSurface {
     }
 
     this.setState('connecting');
-    this.connectPromise = new Promise<void>((resolve, reject) => {
+    const attempt = this.reconnectAttempt;
+    const needsUrl = this.options.resolveUrl
+      && (this.options.needsUrl?.(attempt) ?? true);
+    if (needsUrl) {
+      this.connectPromise = this.connectWithResolvedUrl(attempt);
+      return this.connectPromise;
+    }
+    this.connectPromise = this.openSocketPromise();
+    return this.connectPromise;
+  }
+
+  /**
+   * Ask the caller for the URL this attempt should dial, then open it.
+   *
+   * The first connection may also need a renewal (a route switch or a slow
+   * first paint can outlive a credential lease), so the hook is not limited to
+   * reconnects. A rejected hook never dials and is counted as a failed attempt:
+   * it goes through the same loss path as a dropped socket, which is what keeps
+   * the reconnect budget, candidate rotation and the caller's failure state in
+   * one place.
+   */
+  private async connectWithResolvedUrl(attempt: number): Promise<void> {
+    try {
+      const next = await this.options.resolveUrl?.(attempt);
+      if (this.disposed || this.userClosed) {
+        throw new Error(this.disposed ? 'WebSocketService disposed' : 'WebSocketService is closed');
+      }
+      if (next) {
+        this.url = next;
+      }
+    } catch (error) {
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      if (!this.disposed && !this.userClosed) {
+        this.handleSocketLoss();
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    const opened = this.openSocketPromise();
+    this.connectPromise = opened;
+    return opened;
+  }
+
+  private openSocketPromise(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       this.rejectConnect = reject;
       try {
         this.openSocket(resolve, reject);
@@ -170,7 +214,6 @@ export class WebSocketService implements PluginSurface {
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
-    return this.connectPromise;
   }
 
   /**
