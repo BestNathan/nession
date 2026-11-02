@@ -2,434 +2,250 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Nession · Agent Capability / Process Discovery · #2514</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Nession · Agent Workspace · Current Session (#2514)</title>
 <style>
-:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;font-synthesis:none;color:#1c2735;background:#f5f7fa}
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh}
-button,select{font:inherit}
-button{cursor:pointer}
-button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #8dacdf;outline-offset:3px}
-button:disabled{cursor:not-allowed}
-a{color:inherit}
-.mast{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px clamp(18px,3vw,48px);border-bottom:1px solid #e5e9ef;background:#fff}
-.brand{display:flex;align-items:center;gap:10px;font-weight:750;letter-spacing:-.025em}
-.logo{width:27px;height:27px;border-radius:9px;background:#202f44;color:#fff;display:grid;place-items:center;font-size:15px}
-.mast .links{display:flex;align-items:center;gap:18px;color:#768294;font-size:12px}
-.mast a{text-decoration:none}
-.mast a:hover{text-decoration:underline}
-.eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#8995a4}
-.canvas{max-width:1500px;padding:clamp(18px,2.4vw,36px) clamp(16px,3vw,48px) 140px;margin:auto}
-.lead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:24px}
-.lead h1{margin:7px 0 8px;font-size:clamp(27px,3.1vw,41px);line-height:1.14;font-weight:720;letter-spacing:-.045em}
-.lead p{margin:0;font-size:13px;color:#768295;max-width:680px;line-height:1.6}
-.fixture{display:flex;align-items:center;gap:10px;border:1px solid #dce3ec;border-radius:12px;background:white;padding:10px 14px;box-shadow:0 5px 18px #101e3608}
-.fixture label{font-size:11px;color:#8993a3;white-space:nowrap}
-.fixture select{border:none;background:transparent;outline:none;font-size:12px;font-weight:650;color:#243549;max-width:235px;cursor:pointer}
-.shell{background:#fff;border:1px solid #e1e6ee;border-radius:21px;overflow:hidden;box-shadow:0 20px 60px #213c6210;min-height:620px;display:flex;flex-direction:column}
-.shellbar{height:59px;border-bottom:1px solid #ebeff4;display:flex;align-items:center;justify-content:space-between;padding:0 25px;gap:12px}
-.breadcrumb{font-size:12px;color:#929baa;display:flex;align-items:center;gap:9px;white-space:nowrap}
-.breadcrumb b{color:#2b3d51;font-weight:750}
-.header-actions{display:flex;align-items:center;gap:13px}
-.small{font-size:11px;color:#919dae}
-.online{display:inline-flex;align-items:center;gap:7px;color:#438873;font-size:12px;font-weight:700}
-.online:before{content:"";width:7px;height:7px;border-radius:50%;background:#50ad8b}
-.online.offline{color:#ac6363}
-.online.offline:before{background:#d67979}
-.refresh{border:1px solid #dfe6ee;padding:8px 12px;color:#4b5f77;background:#fff;border-radius:9px;font-size:12px}
-.refresh:hover{background:#f2f5f9}
-.context{padding:27px 30px 0;display:flex;align-items:start;justify-content:space-between;gap:14px}
-.node-title{display:flex;align-items:center;gap:11px}
-.node-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#eaf0f7;color:#486480;font-size:19px}
-.context h2{font-weight:720;font-size:22px;letter-spacing:-.035em;margin:0}
-.context p{margin:6px 0 0;color:#8190a1;font-size:12px}
-.state-pill{display:inline-flex;padding:6px 9px;border:1px solid #dce9e2;background:#f0f8f4;color:#45836f;font-size:11px;font-weight:750;border-radius:7px;white-space:nowrap}
-.state-pill.partial{background:#fff8e9;border-color:#f0e1c2;color:#9c712e}
-.state-pill.unavailable{background:#f8ecec;border-color:#efdcdc;color:#b46060}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:24px 30px 21px}
-.metric{border:1px solid #ebeff4;border-radius:13px;padding:17px 18px;background:#fbfcfe}
-.metric b{display:block;font-size:21px;line-height:1.15;font-weight:750;letter-spacing:-.045em;font-variant-numeric:tabular-nums}
-.metric span{font-size:11px;color:#8392a2;margin-top:8px;display:block}
-.view-nav{display:flex;align-items:center;gap:23px;padding:0 30px;border-bottom:1px solid #e9edf3}
-.view-tab{border:0;border-bottom:2px solid transparent;color:#8994a2;background:none;padding:14px 2px 13px;font-size:12px;font-weight:700}
-.view-tab.selected{color:#253b56;border-bottom-color:#334f70}
-.stage{padding:25px 30px 42px;flex:1;min-width:0}
-.stage-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 18px}
-.stage-head h3{margin:0;font-size:15px;font-weight:750;letter-spacing:-.025em}
-.stage-head p{margin:5px 0 0;color:#94a0ae;font-size:11px;line-height:1.5}
-.subtle-button{border:1px solid #e0e6ee;background:#fff;border-radius:9px;padding:9px 12px;color:#51667d;font-size:11px;font-weight:700}
-.subtle-button:hover{background:#f4f7fa}
-.overview{display:grid;grid-template-columns:1.16fr 1fr;gap:18px}
-.panel{border:1px solid #e7ecf2;border-radius:14px;background:#fff;overflow:hidden}
-.panel-head{padding:18px 20px;border-bottom:1px solid #edf0f4;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.panel-head strong{font-size:13px;font-weight:750}
-.panel-head small{color:#97a2b1;font-size:11px}
-.capability-row{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #f0f2f5}
-.capability-row:last-child{border-bottom:0}
-.cap-icon{width:32px;height:32px;flex:none;border-radius:10px;background:#f0f4f9;display:grid;place-items:center;color:#526983}
-.capability-row .copy{flex:1;min-width:0}
-.capability-row strong{font-size:12px}
-.capability-row p{margin:4px 0 0;font-size:11px;color:#8996a5;line-height:1.4}
-.cap-state{font-size:10px;font-weight:750;color:#557b6c;white-space:nowrap}
-.cap-state.warn{color:#a98546}
-.cap-state.bad{color:#a65c5c}
-.row-cta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:19px 20px;background:#fbfcfd}
-.row-cta p{font-size:11px;color:#8795a4;margin:5px 0 0}
-.primary{background:#2a425e;border:1px solid #2a425e;color:#fff;border-radius:9px;padding:10px 14px;font-size:12px;font-weight:700;white-space:nowrap}
-.primary:hover{background:#1d344f}
-.primary:disabled{background:#d2d9e0;border-color:#d2d9e0}
-.runtime{display:grid;grid-template-columns:1fr 1fr;gap:0}
-.kv{padding:16px 19px;border-bottom:1px solid #edf0f4}
-.kv:nth-child(odd){border-right:1px solid #edf0f4}
-.kv:last-child,.kv:nth-last-child(2){border-bottom:0}
-.kv dt{font-size:10px;color:#9aa5b3;margin-bottom:7px}
-.kv dd{margin:0;font-size:12px;font-weight:700;color:#36495f;overflow-wrap:anywhere}
-.process-layout{display:grid;grid-template-columns:minmax(200px, .75fr) minmax(0,1.6fr);gap:16px;align-items:start}
-.session-panel{border:1px solid #e7ecf2;border-radius:13px;padding:11px;background:#fbfcfe}
-.session-panel h4{font-size:10px;color:#95a0af;text-transform:uppercase;letter-spacing:.12em;margin:9px 10px 13px}
-.session-row{display:block;width:100%;text-align:left;border:1px solid transparent;border-radius:9px;background:none;padding:12px 13px;margin:3px 0}
-.session-row strong{display:block;font-size:12px;color:#32455a}
-.session-row span{display:block;color:#98a4b2;font-size:10px;margin-top:7px}
-.session-row.active{background:#fff;border-color:#dce5ef;box-shadow:0 3px 8px #2d47700b}
-.session-row:hover{background:#fff}
-.process-panel{border:1px solid #e5ebf2;border-radius:13px;overflow:hidden;min-width:0}
-.process-toolbar{display:flex;align-items:center;justify-content:space-between;padding:17px 18px;gap:11px;background:#fafbfd;border-bottom:1px solid #e8edf3}
-.process-toolbar strong{font-size:13px}
-.process-toolbar span{font-size:10px;color:#909eae}
-.process-area{padding:17px 16px 8px}
-.pane-heading{display:flex;align-items:center;gap:8px;margin:5px 0 13px;font-size:11px;color:#657c92;font-weight:750}
-.pane-heading small{font-size:10px;color:#a1abba;font-weight:500}
-.process-line{width:100%;display:flex;align-items:center;gap:10px;text-align:left;background:transparent;border:1px solid transparent;border-radius:7px;padding:10px 11px;margin:2px 0}
-.process-line:hover{background:#f4f7fb}
-.process-line.selected{border-color:#dbe6f1;background:#eef3f9}
-.process-indent{width:var(--indent);flex:none;max-width:65px;position:relative}
-.process-indent:after{content:"";position:absolute;right:6px;top:-8px;height:17px;border-left:1px solid #d3dce7;border-bottom:1px solid #d3dce7;width:9px}
-.process-line strong{font-size:12px;font-weight:700;color:#35495e}
-.pid{font-size:10px;color:#a0acb9;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
-.process-line .role{font-size:9px;color:#a17640;background:#fff7e9;border-radius:5px;padding:3px 5px;white-space:nowrap}
-.process-line .role.low{color:#9c6e30}
-.detail{margin:8px 16px 17px;border:1px solid #e7ecf3;border-radius:10px;padding:16px 17px;background:#fff}
-.detail-head{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px}
-.detail-head strong{font-size:12px}
-.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
-.detail-label{font-size:10px;color:#9ca7b4}
-.detail-value{font-size:11px;color:#536880;margin-top:5px;font-weight:700;overflow-wrap:anywhere}
-.reason{border-top:1px solid #edf1f6;padding:14px 17px;background:#fbfcfe;font-size:11px;color:#7e8d9d;line-height:1.65}
-.reason b{color:#546a83}
-.notice{margin:0 0 18px;padding:14px 16px;border:1px solid #e8e0d1;border-radius:11px;background:#fffcf5;color:#937341;font-size:11px;line-height:1.6}
-.notice.info{background:#f6f9fd;border-color:#e1e9f1;color:#607b97}
-.empty{padding:45px 20px;text-align:center;color:#9ba7b4;font-size:12px;line-height:1.7}
-.empty b{display:block;color:#63758a;font-size:14px;margin-bottom:10px}
-.diagnostics{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.diag-card{border:1px solid #e8edf3;border-radius:13px;padding:19px 20px}
-.diag-card h4{font-size:12px;margin:0 0 13px}
-.diag-card p{font-size:11px;color:#7e8b9b;line-height:1.75;margin:9px 0 0}
-.diag-card code{font-size:11px;color:#486480;overflow-wrap:anywhere}
-.diag-value{font-size:21px;font-weight:750;letter-spacing:-.04em}
-.diag-muted{font-size:11px;color:#94a1af}
-.bottom{display:flex;justify-content:center;padding:18px 18px 26px;pointer-events:none;position:sticky;bottom:0;margin-top:auto}
-.capsule{display:flex;gap:3px;border:1px solid #e2e8f0;border-radius:999px;background:#fff;box-shadow:0 8px 28px #1a2b3e18;padding:5px;pointer-events:auto}
-.capsule button{border:none;background:transparent;color:#8c9aa9;border-radius:100px;padding:9px 16px;font-size:11px;font-weight:750;white-space:nowrap}
-.capsule button.active{background:#eaf0f7;color:#335377}
-.footnote{max-width:1500px;margin:14px auto 0;color:#9aa4b1;text-align:center;font-size:11px;line-height:1.7}
-.toast{position:fixed;bottom:99px;left:50%;transform:translateX(-50%);background:#263e58;color:#fff;padding:11px 17px;border-radius:9px;font-size:12px;box-shadow:0 8px 35px #18334c30;z-index:5}
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#293543;background:#f6f8fa;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}button,select{font:inherit}button{cursor:pointer}button:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid #96b2ce;outline-offset:3px}
+a{color:inherit}.mast{display:flex;align-items:center;justify-content:space-between;gap:16px;background:white;border-bottom:1px solid #e6e9ed;padding:15px clamp(18px,3vw,44px)}.brand{font-weight:750;letter-spacing:-.02em;display:flex;align-items:center;gap:9px}.logo{display:grid;place-items:center;width:27px;height:27px;border-radius:9px;background:#2a3c50;color:#fff}.links{display:flex;gap:15px;color:#7b8795;font-size:12px}.links a{text-decoration:none}.links a:hover{text-decoration:underline}
+.canvas{max-width:1470px;margin:auto;padding:clamp(15px,2.5vw,35px) clamp(13px,3vw,44px) 96px}.intro{display:flex;align-items:end;justify-content:space-between;gap:18px;margin-bottom:21px}.eyebrow{color:#8593a2;font-size:10px;font-weight:760;letter-spacing:.13em;text-transform:uppercase}.intro h1{font-size:clamp(26px,3vw,39px);letter-spacing:-.045em;line-height:1.14;margin:7px 0}.intro p{color:#778596;font-size:12px;line-height:1.7;margin:6px 0 0;max-width:730px}.fixture{display:flex;align-items:center;gap:10px;background:white;border:1px solid #e0e5eb;border-radius:10px;padding:11px 13px;flex-shrink:0}.fixture label{font-size:10px;letter-spacing:.08em;color:#7e8d9b}.fixture select{border:0;background:transparent;color:#31465c;font-size:12px;font-weight:650;max-width:235px}
+.shell{background:#fff;border:1px solid #e0e6ec;border-radius:18px;min-height:635px;box-shadow:0 15px 50px #26394f0a;display:flex;flex-direction:column;overflow:hidden}.shellbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid #eff1f4;min-height:53px}.crumb{color:#8c98a5;font-size:11px}.crumb strong{color:#4a5d70}.refresh{border:1px solid #dfe6ec;border-radius:8px;background:#fff;color:#52677d;padding:8px 12px;font-size:11px}.refresh:hover{background:#f5f7fa}.refresh:disabled{opacity:.55;cursor:not-allowed}
+.agent{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:22px 28px 13px}.agent-identity{display:flex;align-items:center;gap:11px;min-width:0}.agent-icon{width:39px;height:39px;display:grid;place-items:center;border-radius:11px;background:#edf2f6;color:#4d6178;font-weight:700;font-size:18px;flex:none}.agent h2{font-size:19px;letter-spacing:-.035em;margin:0}.agent p{color:#8390a0;font-size:11px;margin:5px 0 0}.status{color:#657b70;font-size:11px;font-weight:700;white-space:nowrap}.status:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:#79a493}.status.partial{color:#956b33}.status.partial:before{background:#c8aa75}.status.offline{color:#ae6c6c}.status.offline:before{background:#cf8d8d}
+.agent-meta{margin:0 28px;padding:0 0 16px;border-bottom:1px solid #edf0f3;font-size:11px;color:#78889a}.agent-meta summary{cursor:pointer;display:inline-block}.meta-grid{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:13px}.meta-grid span{color:#566c82}
+.stage{padding:23px 28px 27px;flex:1}.session-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:15px}.session-head h3{margin:5px 0 0;font-size:16px;font-weight:750;letter-spacing:-.03em}.session-activity{color:#8895a4;font-size:11px;font-variant-numeric:tabular-nums;text-align:right}
+.notice{font-size:11px;line-height:1.6;padding:12px 14px;border-radius:8px;background:#f7f9fc;color:#657b95;margin:0 0 13px}.notice.offline{background:#fff8f5;color:#936e5e}.empty{text-align:center;padding:68px 18px;color:#8896a6;font-size:12px;line-height:1.8}.empty strong{display:block;font-size:15px;color:#52677c;margin-bottom:7px}
+.split{display:grid;grid-template-columns:minmax(240px,.82fr) minmax(0,1.55fr);border:1px solid #e7ecf1;border-radius:13px;overflow:hidden;min-height:410px}.tree-panel{padding:17px 13px 20px;background:#fbfcfd;border-right:1px solid #e8edf2;min-width:0}.panel-label{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 8px 13px;color:#40546a;font-size:12px;font-weight:730}.panel-label small{color:#94a1af;font-size:10px;font-weight:500}.tree-line{width:100%;display:flex;align-items:center;gap:8px;min-height:39px;border:1px solid transparent;border-radius:8px;text-align:left;background:transparent;padding:7px 9px;margin:2px 0;color:#34495c}.tree-line:hover{background:#f0f4f8}.tree-line.selected{background:#eaf0f6;border-color:#dce5ed}.tree-indent{flex:none}.tree-icon{font-size:12px;color:#8d9cb0}.tree-line strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pid{font-size:10px;color:#94a1af;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}.orphan{font-size:9px;color:#996e37;border-radius:4px;background:#fff3e5;padding:3px 5px;flex:none}
+.inspector{min-width:0;padding:18px 21px 23px}.inspector-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.inspector-title h4{font-size:17px;letter-spacing:-.035em;margin:0}.inspector-sub{font-size:11px;color:#8997a7;margin-top:5px}.section{margin-top:21px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px;flex-wrap:wrap}.section-head strong{font-size:12px}.section-head small{font-size:10px;color:#92a1af}.cmd{display:flex;align-items:start;gap:9px;background:#243343;border-radius:10px;padding:14px 15px}.cmd code{flex:1;color:#e7eef8;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}.cmd button{border:1px solid #5c6e83;background:#31465b;color:#fff;border-radius:7px;padding:7px 9px;font-size:10px;white-space:nowrap}.command-note{margin-top:8px;font-size:10px;color:#8494a6;line-height:1.6}
+.segment{display:flex;gap:3px;border-radius:8px;background:#eef2f6;padding:3px}.segment button{background:transparent;border:0;border-radius:6px;padding:7px 10px;color:#75889a;font-size:10px;font-weight:650}.segment button.active{background:white;color:#324c65;box-shadow:0 1px 3px #25354816}
+.resources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.resource{min-width:0;border-radius:9px;background:#f7f9fb;padding:14px}.resource small{display:block;font-size:10px;color:#8b98a6}.resource strong{display:block;font-size:clamp(16px,2vw,22px);font-weight:750;letter-spacing:-.035em;color:#314c63;margin-top:11px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.resource strong.unknown{font-size:12px;color:#a17b50}.resource svg{width:100%;height:26px;display:block;margin-top:7px;color:#8cb0d1}.detail-note{color:#8796a5;font-size:10px;line-height:1.7;margin:10px 0 0}.secondary{margin-top:12px;display:flex;gap:10px 18px;flex-wrap:wrap;color:#8190a0;font-size:10px}.secondary b{color:#455e77}
+.evidence{margin-top:19px}.evidence summary,.diagnostics summary{cursor:pointer;color:#72869b;font-size:11px;font-weight:670}.evidence dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin:12px 0 0}.evidence dt{color:#96a2af;font-size:10px}.evidence dd{margin:4px 0;font-size:11px;color:#55697f;overflow-wrap:anywhere}.diagnostics{margin-top:19px;border-top:1px solid #edf0f3;padding-top:14px}.diag-body{padding:14px 4px 0;color:#7b899a;font-size:11px;line-height:1.7}.diag-body code{color:#486682}.mobile-back{display:none}.bottom{display:flex;justify-content:center;padding:12px 16px 23px;margin-top:auto;pointer-events:none}.capsule{display:flex;gap:4px;align-items:center;background:white;border-radius:999px;padding:5px;box-shadow:0 5px 25px #2336471c;border:1px solid #e6eaee;pointer-events:auto}.capsule button{border:0;background:transparent;color:#8e9aa6;border-radius:100px;padding:9px 15px;font-size:11px;font-weight:700}.capsule button.active{background:#e9eff5;color:#385371}.footnote{font-size:10px;color:#94a0ad;text-align:center;margin-top:13px;line-height:1.6}.toast{position:fixed;left:50%;bottom:95px;transform:translateX(-50%);padding:10px 15px;border-radius:8px;background:#283e53;color:white;font-size:11px;z-index:2;box-shadow:0 8px 28px #1a293632}
 [hidden]{display:none!important}
-@media(max-width:850px){.overview{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.process-layout{grid-template-columns:1fr}.session-panel{display:flex;align-items:center;gap:7px;overflow-x:auto}.session-panel h4{white-space:nowrap;margin:0 4px}.session-row{flex:none;width:155px}.diagnostics{grid-template-columns:1fr}}
-@media(max-width:600px){.mast{padding:11px 16px}.mast .links{gap:10px}.mast .links .hide-mobile{display:none}.canvas{padding:19px 12px 115px}.lead{display:block;margin-bottom:17px}.lead h1{font-size:26px}.lead p{font-size:12px}.fixture{margin-top:16px;max-width:100%}.fixture select{flex:1;min-width:0}.shell{border-radius:15px}.shellbar{height:53px;padding:0 15px}.breadcrumb{font-size:11px}.header-actions .small{display:none}.refresh{padding:7px 9px}.context{padding:22px 17px 0}.context h2{font-size:18px}.node-icon{width:38px;height:38px}.metrics{padding:18px 17px;gap:7px}.metric{padding:14px 11px}.metric b{font-size:18px}.view-nav{padding:0 17px;gap:20px}.view-tab{font-size:11px}.stage{padding:19px 14px 30px}.panel-head{padding:16px}.capability-row{padding:15px}.row-cta{padding:16px}.bottom{padding-bottom:16px}.capsule button{padding:8px 12px}.detail-grid{grid-template-columns:repeat(2,1fr)}.shell{min-height:700px}}
-
-/* Process detail / runtime observability — command and resource evidence first */
-.process-layout{grid-template-columns:minmax(185px,.5fr) minmax(0,2fr)}
-.process-area{padding-bottom:13px}
-.detail{padding:0;margin:7px 15px 17px;border:1px solid #d9e3ee;border-radius:13px;background:#fff;overflow:hidden;box-shadow:0 10px 22px #1c375109}
-.detail-top{padding:19px 20px 13px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;border-bottom:1px solid #ecf0f4;background:#fbfcfe}
-.detail-title{font-size:15px;font-weight:780;color:#243b54;letter-spacing:-.03em}
-.detail-meta{font-size:11px;color:#8695a5;margin-top:5px}
-.proc-live{font-size:10px;padding:5px 9px;background:#eef7f2;color:#4f8c70;border-radius:7px;font-weight:700}
-.proc-live.uncertain{background:#fff5e4;color:#966d3f}
-.detail-section{padding:17px 20px;border-bottom:1px solid #edf0f4}
-.detail-section:last-child{border-bottom:0}
-.detail-section-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-.detail-section-head strong{font-size:12px;color:#30475f}
-.detail-help{font-size:10px;color:#98a4b2;line-height:1.5}
-.command-box{background:#182638;border-radius:11px;padding:16px 17px;display:flex;align-items:flex-start;gap:13px}
-.command-box pre{margin:0;flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#eaf1fb;font-size:12px;line-height:1.7;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;user-select:text}
-.command-box button{border:1px solid #506477;background:#2b3f57;color:#eef5ff;padding:7px 10px;border-radius:7px;white-space:nowrap;font-size:10px}
-.command-foot{margin-top:9px;font-size:10px;color:#8e9baa;line-height:1.6}
-.redact{color:#ad7545;font-weight:750}
-.segment-mini{display:flex;gap:3px;background:#edf2f7;border-radius:9px;padding:3px}
-.segment-mini button{background:transparent;color:#7b8da0;font-size:10px;font-weight:750;padding:7px 11px;border:0;border-radius:7px}
-.segment-mini button.active{background:white;color:#2b4869;box-shadow:0 1px 4px #18355013}
-.resource-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
-.resource-cell{border:1px solid #e9eef4;background:#fbfcfe;border-radius:11px;padding:14px 14px 12px;min-width:0}
-.resource-cell .caption{display:block;font-size:10px;color:#8f9fb0}
-.resource-number{font-size:clamp(19px,2.15vw,28px);line-height:1.2;letter-spacing:-.04em;color:#29445f;margin-top:12px;font-weight:750;white-space:nowrap;font-variant-numeric:tabular-nums}
-.resource-number small{font-size:11px;font-weight:600;color:#8b9bad;letter-spacing:normal}
-.mini-chart{height:34px;margin-top:6px;display:block;width:100%;color:#78a5ce}
-.resource-detail-note{font-size:10px;color:#8999a9;line-height:1.7;margin:12px 0 0}
-.resource-secondary{margin-top:10px;display:flex;gap:12px 22px;flex-wrap:wrap;font-size:11px;color:#7e8d9d}
-.resource-secondary b{color:#465e78;margin-left:5px;font-variant-numeric:tabular-nums}
-.meta-chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px 10px}
-.meta-chip .k{display:block;font-size:10px;color:#9aa7b5}
-.meta-chip .v{display:block;font-size:11px;color:#506881;font-weight:700;margin-top:5px;overflow-wrap:anywhere}
-.identity-toggle{border:0;background:none;color:#556e89;font-size:11px;font-weight:700;padding:0;text-align:left}
-.identity-toggle:hover{text-decoration:underline}
-.metric-unknown{font-size:11px!important;letter-spacing:0;color:#a17b4d!important}
-@media(max-width:850px){.process-layout{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.detail{margin:9px 10px 15px}.detail-section{padding:15px}.detail-top{padding:15px}.resource-cell{padding:12px 11px}.resource-number{font-size:22px}.meta-chips{grid-template-columns:repeat(2,minmax(0,1fr))}.command-box{display:block;padding:12px}.command-box button{margin-top:11px}.resource-grid{gap:7px}.segment-mini button{padding:7px 8px}}
+@media(max-width:900px){.split{grid-template-columns:minmax(195px,.75fr) minmax(0,1.3fr)}.resources{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){
+ .intro{display:block}.fixture{display:flex;margin-top:15px;width:max-content;max-width:100%}.fixture select{min-width:0;max-width:200px}
+ .stage{padding:18px 15px 22px}.agent{padding:17px 17px 11px}.agent-meta{margin:0 17px}.shellbar{padding:11px 16px}
+ .shell{min-height:650px;border-radius:14px}.split{display:block;min-height:340px}
+ .tree-panel{border-right:0;min-height:340px}.inspector{display:none;padding:15px 13px 21px}
+ .split.mobile-detail .tree-panel{display:none}.split.mobile-detail .inspector{display:block}
+ .mobile-back{display:inline-block;border:0;background:transparent;padding:9px 4px;margin-bottom:13px;color:#536f8c;font-size:12px;font-weight:700}
+ .resources{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .links .hide-mobile{display:none}
+ .cmd{display:block}.cmd button{margin-top:10px}
+ .capsule button{padding:8px 12px}
+}
 </style>
 </head>
 <body>
-<header class="mast">
- <div class="brand"><span class="logo" aria-hidden="true">N</span><span>Nession <span style="font-weight:450;color:#a0aaba">/ Prototype</span></span></div>
- <nav class="links" aria-label="Prototype navigation"><a href="https://bestnathan.github.io/nession/#/prototypes" target="_blank" rel="noopener noreferrer">← Prototype Center</a><a class="hide-mobile" href="https://github.com/BestNathan/nession/issues/2514" target="_blank" rel="noopener noreferrer">Requirement #2514</a></nav>
-</header>
+<header class="mast"><div class="brand"><span class="logo">N</span>Nession <span style="color:#9ba5ae;font-size:11px;font-weight:500">/ Prototypes</span></div><nav class="links" aria-label="Prototype navigation"><a href="https://bestnathan.github.io/nession/#/prototypes">← Prototype Center</a><a class="hide-mobile" href="https://github.com/BestNathan/nession/issues/2514">Requirement #2514</a><a class="hide-mobile" href="https://github.com/BestNathan/nession/tree/prototype/agent-process-discovery-2514">View source</a></nav></header>
 <main class="canvas">
- <div class="lead"><div><div class="eyebrow">Contextual Capabilities / Agent</div><h1>一个 Agent，完整的执行上下文。</h1><p>从 Agent 能力检测到 Session 进程树；选中进程后，优先查看运行命令、CPU 与内存，再按需展开归属与降级诊断。</p></div>
-  <div class="fixture"><label for="scenario">MOCK SCENARIO</label><select id="scenario" aria-label="选择模拟 Agent 环境"><option value="linux">Linux · 独立 tmux scope</option><option value="shared">Linux · 共享容器 cgroup</option><option value="mac">macOS · 进程树降级</option><option value="offline">Agent · 离线 / 无法检测</option></select></div>
- </div>
- <section class="shell" aria-label="Agent capability workspace">
-  <div class="shellbar"><div class="breadcrumb">Workspace <span>›</span> <b>Agent</b></div><div class="header-actions"><span class="small" id="snapshot">模拟快照 · T+0</span><button class="refresh" id="refresh" type="button">↻ 刷新</button></div></div>
-  <div class="context"><div class="node-title"><div class="node-icon" aria-hidden="true">⌘</div><div><h2 id="host">dev-linux-01</h2><p id="subhost">Linux 6.8 · x86_64 · tmux 3.5a</p></div></div><span class="state-pill" id="global-state">cgroup · 完整</span></div>
-  <div class="metrics">
-   <div class="metric"><b id="m-sessions">2</b><span>Sessions</span></div>
-   <div class="metric"><b id="m-panes">3</b><span>Panes</span></div>
-   <div class="metric"><b id="m-processes">8</b><span>发现的进程</span></div>
-   <div class="metric"><b id="m-method">scope</b><span>发现方式</span></div>
-  </div>
-  <div class="view-nav" role="tablist" aria-label="Agent capability sections">
-   <button type="button" class="view-tab selected" data-tab="overview" role="tab" aria-selected="true">概览</button>
-   <button type="button" class="view-tab" data-tab="processes" role="tab" aria-selected="false">Sessions & Processes</button>
-   <button type="button" class="view-tab" data-tab="diagnostics" role="tab" aria-selected="false">能力诊断</button>
-  </div>
-  <div class="stage" id="stage" role="tabpanel" aria-live="polite"></div>
-  <div class="bottom"><div class="capsule" role="navigation" aria-label="Workspace capabilities"><button type="button" data-other="Files">Files</button><button type="button" data-other="Session">Session</button><button type="button" class="active" data-go="overview" aria-current="page">● Agent</button><button type="button" data-other="Environment">Env</button></div></div>
- </section>
- <p class="footnote">Prototype-only · Public sanitized fixtures · No live OS, tmux, Agent, API or privileged process queries · No process control.</p>
+  <div class="intro"><div><div class="eyebrow">Agent capability / Workspace</div><h1>当前工作，清晰的运行上下文。</h1><p>只看当前 Session 的进程，不显示其他 Session 或底层 tmux Pane。桌面并排查看，移动端从进程列表进入详情。</p></div><div class="fixture"><label for="scenario">MOCK SCENARIO</label><select id="scenario" aria-label="选择模拟运行环境"><option value="linux">Linux · 独立资源域</option><option value="shared">Linux · 共享容器域</option><option value="mac">macOS · 进程树降级</option><option value="offline">Agent · 离线</option><option value="no-session">无当前 Session</option></select></div></div>
+  <section class="shell" aria-label="Agent capability workspace">
+    <div class="shellbar"><div class="crumb">Workspace <span aria-hidden="true">›</span> <strong>Agent</strong></div><div><span class="crumb" id="snapshot">模拟快照 · T+0</span>　<button type="button" class="refresh" id="refresh">↻ 刷新</button></div></div>
+    <div class="agent"><div class="agent-identity"><span class="agent-icon" aria-hidden="true">⌘</span><div><h2 id="host">dev-linux-01</h2><p id="subhost">Ubuntu · Connected</p></div></div><span id="status" class="status">Online</span></div>
+    <details class="agent-meta"><summary>节点环境与发现方式</summary><div class="meta-grid" id="node-facts"></div></details>
+    <div class="stage">
+      <div class="session-head"><div><div class="eyebrow">CURRENT SESSION</div><h3 id="session-name">nession-dev</h3></div><span class="session-activity" id="session-summary">8 processes · T+0</span></div>
+      <p class="notice" id="notice" hidden></p>
+      <div id="empty" class="empty" hidden></div>
+      <div id="split" class="split">
+        <section class="tree-panel" aria-label="Current Session process tree"><div class="panel-label"><span>Processes</span><small id="tree-count">0 discovered</small></div><div id="tree"></div></section>
+        <section class="inspector" aria-label="Selected process inspector"><button class="mobile-back" id="back" type="button">← 返回进程列表</button><div id="inspector"></div></section>
+      </div>
+      <details class="diagnostics" id="diagnostics"><summary>发现依据与诊断</summary><div id="diag-body" class="diag-body"></div></details>
+    </div>
+    <div class="bottom"><div class="capsule" aria-label="Workspace capabilities"><button type="button" data-other="Files">Files</button><button type="button" data-other="Session">Session</button><button type="button" class="active" id="agent-capability" aria-current="page">● Agent</button><button type="button" data-other="Environment">Env</button></div></div>
+  </section>
+  <p class="footnote">交互原型 · 合成脱敏数据 · 无真实 Agent、OS、网络请求或进程控制 · 不构成生产验收证据。</p>
 </main>
-<div class="toast" id="toast" hidden role="status"></div>
+<div id="toast" class="toast" role="status" hidden></div>
 <script>
 (function(){
 'use strict';
+var profiles={
+ bash:{cmd:'bash --login',cpu:.3,rss:16.8,threads:1,elapsed:'2h 14m',read:0,write:0},
+ zsh:{cmd:'zsh -l',cpu:.2,rss:12.4,threads:1,elapsed:'41m',read:0,write:0},
+ claude:{cmd:'claude --model sonnet --permission-mode default',cpu:31.8,rss:842.5,threads:27,elapsed:'1h 29m',read:126,write:41},
+ node:{cmd:'node /workspace/nession/tools/task-runner.mjs --jobs 4',cpu:12.6,rss:226.4,threads:11,elapsed:'46m',read:82,write:30},
+ git:{cmd:'git status --short',cpu:null,rss:null,threads:null,elapsed:'< 1s',read:null,write:null},
+ 'worker.py':{cmd:'python3 jobs/worker.py --queue build --api-key [REDACTED]',cpu:6.8,rss:298.2,threads:6,elapsed:'56m',read:38,write:12,redacted:true},
+ cargo:{cmd:'cargo test -p nession-agent --test integration',cpu:72.3,rss:493.7,threads:14,elapsed:'12m',read:890,write:360},
+ rustc:{cmd:'rustc --crate-name nession_agent --emit=link',cpu:128.6,rss:1426.5,threads:15,elapsed:'2m',read:1500,write:720}
+};
+var linux=[
+ {pid:2011,ppid:901,name:'bash'},{pid:2184,ppid:2011,name:'claude'},{pid:2232,ppid:2184,name:'node'},
+ {pid:2268,ppid:2184,name:'git'},{pid:3401,ppid:1,name:'worker.py',reparented:true},
+ {pid:2331,ppid:901,name:'zsh'},{pid:2360,ppid:2331,name:'cargo'},{pid:2366,ppid:2360,name:'rustc'}
+];
+var mac=[
+ {pid:511,ppid:401,name:'zsh'},{pid:587,ppid:511,name:'claude'},{pid:611,ppid:587,name:'node'},
+ {pid:699,ppid:401,name:'zsh'},{pid:722,ppid:699,name:'cargo'}
+];
+function fixture(host,sub,coverage,method,reason,code,processes,os,runtime){
+ return {host:host,sub:sub,coverage:coverage,method:method,reason:reason,code:code,os:os,runtime:runtime,
+  // The other Session exists only to test the UI's deliberate scope restriction.
+  sessions:[{id:'dev',name:'nession-dev',processes:processes},{id:'infra',name:'infra',processes:[{pid:9001,ppid:1,name:'infra-private'}]}]};
+}
 var scenarios={
- linux:{host:'dev-linux-01',sub:'Ubuntu 26.04 · x86_64 · tmux (systemd scope)',state:'cgroup · 完整',method:'cgroup',coverage:'complete',reason:'独立 tmux Pane scope 已验证，包含脱离父子关系但仍留在 scope 中的进程。',reasonCode:'dedicated_tmux_scope_verified',kind:'Linux / systemd',version:'cgroup v2',probe:'每 Pane 验证',sessions:[
-  {id:'dev',name:'nession-dev',panes:[{id:'%1',tty:'/dev/pts/3',pid:2011,scope:'tmux-spawn-a1b2.scope',processes:[{pid:2011,ppid:901,name:'bash',depth:0},{pid:2184,ppid:2011,name:'claude',depth:1},{pid:2232,ppid:2184,name:'node',depth:2},{pid:2268,ppid:2184,name:'git',depth:2},{pid:3401,ppid:1,name:'worker.py',depth:0,orphan:true}]} ,{id:'%2',tty:'/dev/pts/4',pid:2331,scope:'tmux-spawn-c3d4.scope',processes:[{pid:2331,ppid:901,name:'zsh',depth:0},{pid:2360,ppid:2331,name:'cargo',depth:1},{pid:2366,ppid:2360,name:'rustc',depth:2}]}]},
-  {id:'infra',name:'infra',panes:[{id:'%3',tty:'/dev/pts/5',pid:3011,scope:'tmux-spawn-e5f6.scope',processes:[{pid:3011,ppid:901,name:'bash',depth:0},{pid:3088,ppid:3011,name:'python',depth:1}]}]}]},
- shared:{host:'k8s-agent',sub:'Ubuntu 26.04 · container · tmux (no dedicated scope)',state:'进程树 · 部分',method:'PPID / SID',coverage:'partial',reason:'容器内所有 Pane 与 Agent 共享 cgroup；拒绝把该资源域的所有 PID 归属给当前 Session。',reasonCode:'scope_shared_with_agent',kind:'Linux / container',version:'cgroup v2 · shared',probe:'每 Pane 降级',sessions:[
- {id:'dev',name:'nession-dev',panes:[{id:'%1',tty:'/dev/pts/3',pid:2011,scope:null,processes:[{pid:2011,ppid:901,name:'bash',depth:0},{pid:2184,ppid:2011,name:'claude',depth:1},{pid:2232,ppid:2184,name:'node',depth:2},{pid:2268,ppid:2184,name:'git',depth:2}]},{id:'%2',tty:'/dev/pts/4',pid:2331,scope:null,processes:[{pid:2331,ppid:901,name:'zsh',depth:0},{pid:2360,ppid:2331,name:'cargo',depth:1}]}]},
- {id:'infra',name:'infra',panes:[{id:'%3',tty:'/dev/pts/5',pid:3011,scope:null,processes:[{pid:3011,ppid:901,name:'bash',depth:0},{pid:3088,ppid:3011,name:'python',depth:1}]}]}]},
- mac:{host:'macbook-agent',sub:'macOS 15.x · arm64 · tmux 3.5a',state:'进程树 · 部分',method:'PPID / TTY',coverage:'partial',reason:'macOS 不提供 Linux cgroup；通过进程 API 枚举 PPID 后代，TTY/SID 仅用于辅助关联。',reasonCode:'platform_no_linux_cgroup',kind:'macOS',version:'not applicable',probe:'Process API',sessions:[
- {id:'dev',name:'nession-dev',panes:[{id:'%1',tty:'/dev/ttys003',pid:511,scope:null,processes:[{pid:511,ppid:401,name:'zsh',depth:0},{pid:587,ppid:511,name:'claude',depth:1},{pid:611,ppid:587,name:'node',depth:2}]},{id:'%2',tty:'/dev/ttys004',pid:699,scope:null,processes:[{pid:699,ppid:401,name:'zsh',depth:0},{pid:722,ppid:699,name:'cargo',depth:1}]}]},
- {id:'infra',name:'infra',panes:[{id:'%3',tty:'/dev/ttys005',pid:761,scope:null,processes:[{pid:761,ppid:401,name:'zsh',depth:0},{pid:799,ppid:761,name:'python3',depth:1}]}]}]},
- offline:{host:'edge-node-03',sub:'最后已知：Linux · Agent 连接中断',state:'不可用',method:'—',coverage:'unavailable',reason:'Agent 离线，无法取得新的 tmux / 进程快照。不能把未观察到进程显示为 0。',reasonCode:'agent_offline',kind:'Unknown (last observed Linux)',version:'unknown',probe:'Unavailable',sessions:[]}
+ linux:fixture('dev-linux-01','Ubuntu 26.04 · x86_64 · tmux','complete','verified cgroup','独立资源域经校验；已重新收养的 worker 也可被发现。完整仅表示当前资源域快照。','dedicated_tmux_scope_verified',linux,'Linux / systemd','cgroup v2'),
+ shared:fixture('k8s-agent','Ubuntu 26.04 · container · tmux','partial','PPID / SID','共享容器 cgroup 不能作为某个 Session 的独占资源域；进程树回退可能遗漏被重新收养的进程。','scope_shared_with_agent',linux.filter(function(p){return !p.reparented;}),'Linux / container','shared cgroup'),
+ mac:fixture('macbook-agent','macOS · arm64 · tmux','partial','PPID / TTY','macOS 不提供 Linux cgroup；仅能根据进程树、TTY 等有限证据关联。','platform_no_linux_cgroup',mac,'macOS','process API'),
+ offline:fixture('edge-node-03','最后已知：Linux · 连接中断','unavailable','unavailable','Agent 离线，无法获取新快照。未知不能显示为零。','agent_offline',[], 'last-known Linux','unknown')
 };
-var state={key:'linux',tab:'overview',session:'dev',process:null,count:0,resourceScope:'self'};
-var stage=document.getElementById('stage');
-function el(tag,cls,txt){var n=document.createElement(tag);if(cls)n.className=cls;if(txt!==undefined)n.textContent=txt;return n;}
-function add(parent,tag,cls,txt){var n=el(tag,cls,txt);parent.appendChild(n);return n;}
-function btn(parent,txt,cls,fn){var x=add(parent,'button',cls,txt);x.type='button';x.addEventListener('click',fn);return x;}
-function node(x){return scenarios[state.key];}
-function allProcesses(d){return d.sessions.reduce(function(a,s){return a+s.panes.reduce(function(b,p){return b+p.processes.length;},0);},0);}
-function allPanes(d){return d.sessions.reduce(function(a,s){return a+s.panes.length;},0);}
-function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.hidden=false;window.clearTimeout(showToast.timer);showToast.timer=window.setTimeout(function(){t.hidden=true;},2400);}
-function tabs(){document.querySelectorAll('[data-tab]').forEach(function(b){var on=b.dataset.tab===state.tab;b.classList.toggle('selected',on);b.setAttribute('aria-selected',String(on));});}
-function setTab(t){state.tab=t;if(t==='processes')state.resourceScope='self';state.process=null;render();}
-function header(d){
- document.getElementById('host').textContent=d.host;
- document.getElementById('subhost').textContent=d.sub;
- var st=document.getElementById('global-state');st.textContent=d.state;st.className='state-pill '+(d.coverage==='partial'?'partial':d.coverage==='unavailable'?'unavailable':'');
- document.getElementById('m-sessions').textContent=d.coverage==='unavailable'?'—':String(d.sessions.length);
- document.getElementById('m-panes').textContent=d.coverage==='unavailable'?'—':String(allPanes(d));
- document.getElementById('m-processes').textContent=d.coverage==='unavailable'?'—':String(allProcesses(d));
- document.getElementById('m-method').textContent=d.method;
- document.getElementById('snapshot').textContent=d.coverage==='unavailable'?'快照不可用':'模拟快照 · T+'+state.count;
+var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0};
+function byId(id){return document.getElementById(id);}
+function el(tag,cls,value){var n=document.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n;}
+function add(parent,tag,cls,value){var n=el(tag,cls,value);parent.appendChild(n);return n;}
+function button(parent,cls,label,fn){var n=add(parent,'button',cls,label);n.type='button';n.addEventListener('click',fn);return n;}
+function getFixture(){return state.scenario==='no-session'?scenarios.linux:scenarios[state.scenario];}
+function getSession(d){return state.currentSessionId?d.sessions.find(function(s){return s.id===state.currentSessionId;})||null:null;}
+function uniqueProcesses(session){
+ if(!session)return [];
+ var seen=new Set();
+ return session.processes.filter(function(p){
+  // Fixture PIDs are unique; real process identity also includes start time.
+  var id=p.pid+':'+(p.started||0);
+  if(seen.has(id))return false;
+  seen.add(id);return true;
+ });
 }
-function describeCard(parent,name,desc,indicator,icon,klass){
- var row=add(parent,'div','capability-row'),badge=add(row,'div','cap-icon',icon),copy=add(row,'div','copy');
- add(copy,'strong','',name);add(copy,'p','',desc);
- add(row,'span','cap-state '+(klass||''),indicator);
+function forest(items){
+ var nodes=items.map(function(p){return {p:p,children:[]};}),lookup=new Map(nodes.map(function(n){return [n.p.pid,n];})),roots=[];
+ nodes.forEach(function(n){var parent=lookup.get(n.p.ppid);if(parent&&parent!==n)parent.children.push(n);else roots.push(n);});
+ return roots;
 }
-function infoSection(parent,entries){var dl=add(parent,'dl','runtime');entries.forEach(function(pair){var div=add(dl,'div','kv');add(div,'dt','',pair[0]);add(div,'dd','',pair[1]);});}
-function overview(d){
- var head=add(stage,'div','stage-head'),title=add(head,'div');add(title,'h3','', 'Agent 能力总览');add(title,'p','','能力是否可用，取决于此节点的实际环境；不根据操作系统名称猜测。');
- btn(head,'查看诊断 →','subtle-button',function(){setTab('diagnostics');});
- var grid=add(stage,'div','overview'),left=add(grid,'div','panel'),lhead=add(left,'div','panel-head');add(lhead,'strong','','运行能力');add(lhead,'small','','Context-aware');
- describeCard(left,'Terminal / tmux',d.coverage==='unavailable'?'Agent 断连 · 当前状态未知':'私有 Socket · Session / Window / Pane',d.coverage==='unavailable'?'未知':'可用','▣',d.coverage==='unavailable'?'warn':'');
- describeCard(left,'Process discovery',d.coverage==='unavailable'?'Agent 断连，等待重连':d.coverage==='complete'?'独立 cgroup 资源域 · 含重新收养进程':'OS 进程表 · 可能遗漏孤儿进程',d.coverage==='complete'?'完整':d.coverage==='partial'?'部分':'未知','⌁',d.coverage==='complete'?'':d.coverage==='partial'?'warn':'bad');
- describeCard(left,'Runtime context','操作系统 · tmux · Agent 版本','元数据','◈');
- var cta=add(left,'div','row-cta'),ct=add(cta,'div');add(ct,'strong','','Session 进程归属');add(ct,'p','',d.coverage==='unavailable'?'无法刷新；保留离线状态':'从当前 Session 的 Pane 开始，逐层查看工作进程');
- var g=btn(cta,'查看进程 →','primary',function(){setTab('processes');});g.disabled=d.coverage==='unavailable';
- var right=add(grid,'div','panel'),rhead=add(right,'div','panel-head');add(rhead,'strong','','节点信息');add(rhead,'small','','Agent context');
- infoSection(right,[['Hostname',d.host],['Operating system',d.kind],['tmux','private socket'],['Process strategy',d.method],['cgroup',d.version],['Latest probe',d.probe]]);
- var note=add(right,'div','reason');add(note,'b','','发现策略 · ');note.appendChild(document.createTextNode(d.reason));
+function descendants(items,p){
+ var seen=new Set([p.pid]),changed=true;
+ while(changed){changed=false;items.forEach(function(child){if(!seen.has(child.pid)&&seen.has(child.ppid)){seen.add(child.pid);changed=true;}});}
+ return items.filter(function(child){return seen.has(child.pid);});
 }
-function notice(root,d){
- if(d.coverage==='complete')return;
- var n=add(root,'div','notice '+(d.coverage==='unavailable'?'':'info'));n.textContent=d.coverage==='unavailable'?'当前 Agent 无法连接；没有新的进程快照。不要将空白理解为无进程。':'当前使用 '+d.method+'：已发现的后代进程可信，但后台 daemon / 被重新收养的进程可能无法完整归属。';
+function profile(p,d){
+ var b=profiles[p.name]||{cmd:p.name,cpu:null,rss:null,threads:null,elapsed:'—',read:null,write:null},wobble=((p.pid%7)-3)*state.tick*.13;
+ return {cmd:b.cmd,cpu:b.cpu===null?null:Math.max(0,b.cpu+wobble),rss:b.rss===null?null:b.rss+state.tick*(p.pid%3)*.15,
+ threads:b.threads,elapsed:b.elapsed,read:d.os==='macOS'?null:b.read,write:d.os==='macOS'?null:b.write,redacted:!!b.redacted};
 }
-
-// Synthetic public-safe process metadata. All command strings are already
-// sanitized at the mock data boundary: never offer an unredacted toggle.
-var processProfiles={
- 'bash':{cmd:'bash --login',cpu:.3,rss:16.8,threads:1,elapsed:'2h 14m',state:'Sleeping',read:0,write:0},
- 'zsh':{cmd:'zsh -l',cpu:.2,rss:12.4,threads:1,elapsed:'41m',state:'Sleeping',read:0,write:0},
- 'claude':{cmd:'claude --model sonnet --permission-mode default',cpu:31.8,rss:842.5,threads:27,elapsed:'1h 29m',state:'Running',read:126,write:41},
- 'node':{cmd:'node /workspace/nession/tools/task-runner.mjs --jobs 4',cpu:12.6,rss:226.4,threads:11,elapsed:'46m',state:'Running',read:82,write:30},
- 'git':{cmd:'git status --short',cpu:null,rss:null,threads:null,elapsed:'< 1s',state:'Exited / snapshot expired',read:null,write:null},
- 'worker.py':{cmd:'python3 jobs/worker.py --queue build --api-key [REDACTED]',cpu:6.8,rss:298.2,threads:6,elapsed:'56m',state:'Running',read:38,write:12,redacted:true},
- 'cargo':{cmd:'cargo test -p nession-agent --test integration',cpu:72.3,rss:493.7,threads:14,elapsed:'12m',state:'Running',read:890,write:360},
- 'rustc':{cmd:'rustc --crate-name nession_agent --emit=link',cpu:128.6,rss:1426.5,threads:15,elapsed:'2m',state:'Running',read:1500,write:720},
- 'python':{cmd:'python3 scripts/collector.py --interval 5s',cpu:8.4,rss:168.4,threads:7,elapsed:'9h',state:'Sleeping',read:32,write:22},
- 'python3':{cmd:'python3 scripts/collector.py --interval 5s',cpu:8.4,rss:168.4,threads:7,elapsed:'3h',state:'Sleeping',read:null,write:null}
-};
-function profile(proc,d){
- var base=processProfiles[proc.name]||{cmd:proc.name,cpu:null,rss:null,threads:null,elapsed:'—',state:'Unknown',read:null,write:null};
- // On macOS and restricted hosts I/O rates may not be available.
- var ioSupported=d.kind!=='macOS';
- var n=state.count, wobble=((proc.pid%7)-3)*n*.13;
- var cpu=base.cpu===null?null:Math.max(0,base.cpu+wobble);
- var rss=base.rss===null?null:Math.max(0,base.rss+n*(proc.pid%3)*.15);
- return {cmd:base.cmd,cpu:cpu,rss:rss,threads:base.threads,elapsed:base.elapsed,state:base.state,
-         read:ioSupported?base.read:null,write:ioSupported?base.write:null,redacted:base.redacted===true};
+function scopeMetrics(items,p,d){
+ var selected=state.resourceScope==='subtree'?descendants(items,p):[p],values=selected.map(function(x){return profile(x,d);});
+ function sum(key){return values.some(function(v){return v[key]===null;})?null:values.reduce(function(n,v){return n+v[key];},0);}
+ return {count:selected.length,cpu:sum('cpu'),rss:sum('rss'),threads:sum('threads'),read:sum('read'),write:sum('write')};
 }
-function descendants(p,proc){
- var ids=new Set([proc.pid]),changed=true;
- while(changed){changed=false;p.processes.forEach(function(child){
-   if(!ids.has(child.pid)&&ids.has(child.ppid)){ids.add(child.pid);changed=true;}
- });}
- return p.processes.filter(function(child){return ids.has(child.pid);});
+function format(n,unit,dec){return n===null?'不可用':Number(n).toFixed(dec)+(unit||'');}
+function toast(message){
+ var t=byId('toast');t.textContent=message;t.hidden=false;
+ clearTimeout(toast.timer);toast.timer=setTimeout(function(){t.hidden=true;},2500);
 }
-function sampleGroup(p,proc,d){
- var nodes=state.resourceScope==='subtree'?descendants(p,proc):[proc];
- var metrics=nodes.map(function(x){return profile(x,d);});
- function sum(key){return metrics.some(function(x){return x[key]===null;})?null:metrics.reduce(function(a,x){return a+x[key];},0);}
- return {count:nodes.length, cpu:sum('cpu'),rss:sum('rss'),threads:sum('threads'),
-         read:sum('read'),write:sum('write'),noMetrics:metrics.some(function(x){return x.cpu===null||x.rss===null;})};
-}
-function fmt(v,unit,decimals){
- return v===null?'不可用':Number(v).toFixed(decimals||0)+(unit||'');
-}
-function trend(parent,metric,seed){
- if(metric===null)return;
+function drawTrend(root,value,seed){
+ if(value===null)return;
  var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
- svg.setAttribute('viewBox','0 0 190 34');svg.setAttribute('preserveAspectRatio','none');
- svg.setAttribute('class','mini-chart');svg.setAttribute('role','img');svg.setAttribute('aria-label','模拟最近一分钟趋势');
- var values=Array.from({length:13},function(_,i){return Math.max(.01,metric*(.56+.23*Math.sin(i*.9+seed)+.19*i/12));});
- var max=Math.max.apply(null,values)*1.14,pts=values.map(function(v,i){return (i*190/12).toFixed(1)+','+(31-27*v/max).toFixed(1);}).join(' ');
- var path=document.createElementNS('http://www.w3.org/2000/svg','polyline');
- path.setAttribute('points',pts);path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','2');path.setAttribute('stroke-linejoin','round');
- path.setAttribute('stroke-linecap','round');svg.appendChild(path);parent.appendChild(svg);
+ svg.setAttribute('viewBox','0 0 190 26');svg.setAttribute('preserveAspectRatio','none');
+ svg.setAttribute('role','img');svg.setAttribute('aria-label','最近一分钟的示意趋势（非真实历史）');
+ var a=Array.from({length:13},function(_,i){return Math.max(.01,value*(.54+.24*Math.sin(i*.9+seed)+.2*i/12));});
+ var max=Math.max.apply(null,a)*1.1;
+ var poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+ poly.setAttribute('points',a.map(function(v,i){return (i*190/12).toFixed(1)+','+(24-21*v/max).toFixed(1);}).join(' '));
+ poly.setAttribute('fill','none');poly.setAttribute('stroke','currentColor');poly.setAttribute('stroke-width','2');poly.setAttribute('stroke-linecap','round');svg.appendChild(poly);root.appendChild(svg);
 }
-function resourceTile(parent,label,value,unit,precision,history,seed){
- var tile=add(parent,'div','resource-cell');add(tile,'span','caption',label);
- var num=add(tile,'div','resource-number'+(value===null?' metric-unknown':''));
- if(value===null)num.textContent='不可用';else{num.appendChild(document.createTextNode(fmt(value,'',precision)));if(unit)add(num,'small','', ' '+unit);}
- if(history)trend(tile,value,seed);
+function metric(root,label,value,unit,dec,trendSeed){
+ var cell=add(root,'div','resource');add(cell,'small','',label);
+ add(cell,'strong',value===null?'unknown':'',format(value,unit,dec));
+ if(trendSeed!==null)drawTrend(cell,value,trendSeed);
 }
-function detailView(root,p,proc,d){
- var active=profile(proc,d),agg=sampleGroup(p,proc,d);
- var card=add(root,'section','detail');
- card.setAttribute('aria-label',proc.name+' 进程详情');
- var top=add(card,'div','detail-top'),name=add(top,'div');
- add(name,'div','detail-title',proc.name+' · PID '+proc.pid);
- add(name,'div','detail-meta','Session · '+state.session+'　 /　 Pane '+p.id+'　 /　 '+p.tty);
- add(top,'span','proc-live'+(active.cpu===null?' uncertain':''),active.cpu===null?'数据过期':active.state);
- var command=add(card,'div','detail-section'),ch=add(command,'div','detail-section-head');
- add(ch,'strong','','运行命令');add(ch,'span','detail-help','已脱敏 · 只读快照');
- var box=add(command,'div','command-box'),pre=add(box,'pre','',active.cmd);
- pre.setAttribute('aria-label','脱敏后的进程命令行');
- var copy=btn(box,'复制命令','',async function(){
-   try{
-     if(!navigator.clipboard||!navigator.clipboard.writeText)throw new Error('Clipboard unavailable');
-     await navigator.clipboard.writeText(active.cmd);
-     showToast('已复制脱敏命令');
-   }catch(_){showToast('复制不可用，可手动选择脱敏命令');}
- });
- copy.setAttribute('aria-label','仅复制已脱敏的进程命令');
- add(command,'div','command-foot',active.redacted?
-   '包含敏感参数：已替换为 [REDACTED]，不提供显示原文入口。':
-   '展示 Agent 许可范围内的已过滤 argv；不读取环境变量，也不提供未脱敏原文。');
- var rs=add(card,'div','detail-section'),head=add(rs,'div','detail-section-head');
- add(head,'strong','','资源消耗');
- var seg=add(head,'div','segment-mini');seg.setAttribute('role','group');seg.setAttribute('aria-label','资源统计范围');
- btn(seg,'仅本进程',''+(state.resourceScope==='self'?'active':''),function(){state.resourceScope='self';render();}).setAttribute('aria-pressed',String(state.resourceScope==='self'));
- btn(seg,'含子进程',''+(state.resourceScope==='subtree'?'active':''),function(){state.resourceScope='subtree';render();}).setAttribute('aria-pressed',String(state.resourceScope==='subtree'));
- var grid=add(rs,'div','resource-grid');
- resourceTile(grid,'CPU · 5 秒窗口',agg.cpu,'%',1,true,proc.pid%7);
- resourceTile(grid,'常驻内存 · RSS',agg.rss,'MiB',1,true,proc.pid%5+1);
- resourceTile(grid,'线程数',agg.threads,'',0,false,0);
- resourceTile(grid,'所选进程运行时长',0,'',0,false,0);
- var last=grid.lastChild.querySelector('.resource-number');
- last.textContent=active.elapsed;
- var io=add(rs,'div','resource-secondary');
- [['磁盘读取',agg.read===null?'不可用':fmt(agg.read,' KiB/s',0)],['磁盘写入',agg.write===null?'不可用':fmt(agg.write,' KiB/s',0)],
- ['范围',state.resourceScope==='subtree'?'已发现后代 '+agg.count+' 个进程':'当前 PID'],['快照','T+'+state.count+' · 模拟采样']].forEach(function(x){var it=add(io,'span','',x[0]+' ');add(it,'b','',x[1]);});
- var explanation=state.resourceScope==='subtree'
-  ?'子树按 PPID 关系聚合，不把仅由 cgroup 归属但已重新收养的进程自动纳入此 PID 的后代。'
-  :'CPU 按单个逻辑 CPU 的 100% 计，可能高于 100%；RSS 为当前进程的常驻物理内存，不是虚拟内存。';
- if(agg.noMetrics)explanation+=' 部分进程指标不可用，聚合值显示“不可用”，不按 0 处理。';
- if(d.kind==='macOS')explanation+=' 此 macOS 模拟环境不提供 I/O 速率。';
- add(rs,'p','resource-detail-note',explanation+' 曲线为最近 60 秒模拟值；刷新不代表实时流式监控。');
- var other=add(card,'div','detail-section'),oh=add(other,'div','detail-section-head');
- add(oh,'strong','','进程与归属信息');add(oh,'span','detail-help','辅助诊断');
- var meta=add(other,'div','meta-chips');
- [['PID',String(proc.pid)],['PPID',String(proc.ppid)],['Pane ID',p.id],['TTY',p.tty],['发现依据',proc.orphan?'cgroup membership':d.method],['资源域',p.scope||'非独立 cgroup']].forEach(function(row){
-   var cell=add(meta,'div','meta-chip');add(cell,'span','k',row[0]);add(cell,'span','v',row[1]);
- });
-}
-function processes(d){
- var hd=add(stage,'div','stage-head'),heading=add(hd,'div');add(heading,'h3','','Session 进程');add(heading,'p','','聚合所有 Pane。进程归属不取决于是否通过 Web 创建。');
- btn(hd,'能力诊断 →','subtle-button',function(){setTab('diagnostics');});
- notice(stage,d);
- if(d.coverage==='unavailable'){var no=add(stage,'div','empty');add(no,'b','','当前无可用快照');add(no,'span','','Agent 离线。连接恢复后才能重新查询进程；不推断进程数量。');return;}
- var layout=add(stage,'div','process-layout'),aside=add(layout,'aside','session-panel');add(aside,'h4','','Sessions');
- d.sessions.forEach(function(s){var count=s.panes.reduce(function(a,p){return a+p.processes.length;},0),b=btn(aside,s.name,'session-row '+(s.id===state.session?'active':''),function(){state.session=s.id;state.process=null;state.resourceScope='self';render();});
- add(b,'span','',s.panes.length+' Pane · '+count+' Processes');if(s.id===state.session)b.setAttribute('aria-current','true');
- });
- var s=d.sessions.find(function(x){return x.id===state.session;})||d.sessions[0];
- if(!state.process){
-  var candidates=s.panes.flatMap(function(p){return p.processes.map(function(proc){return {pane:p,proc:proc};});});
-  var best=candidates.find(function(x){return x.proc.name==='claude';})||candidates.find(function(x){return x.proc.name==='cargo'||x.proc.name==='python'||x.proc.name==='python3';})||candidates[0];
-  if(best)state.process=best.pane.id+':'+best.proc.pid;
- }
- var pnl=add(layout,'div','process-panel'),bar=add(pnl,'div','process-toolbar'),group=add(bar,'div');
- add(group,'strong','',s.name);add(group,'span','',s.panes.length+' Pane(s) · Snapshot T+'+state.count);
- var content=add(pnl,'div','process-area');
- s.panes.forEach(function(p){
-  var ph=add(content,'div','pane-heading');add(ph,'span','','▧ '+p.id);add(ph,'small','',p.tty+' · Root '+p.pid);
-  p.processes.forEach(function(pr){
-   var id=p.id+':'+pr.pid,active=state.process===id,line=btn(content,'','process-line '+(active?'selected':''),function(){state.process=id;state.resourceScope='self';render();});
-   if(pr.depth>0){var ind=add(line,'span','process-indent');ind.style.setProperty('--indent',(10+pr.depth*17)+'px');}else{var dot=add(line,'span');dot.style.cssText='width:8px;height:8px;border-radius:50%;background:'+(pr.orphan?'#d2a65c':'#a3b3c7')+';flex:none';}
-   add(line,'strong','',pr.name);if(pr.orphan)add(line,'span','role','reparented');add(line,'span','pid','PID '+pr.pid);
+function renderTree(items){
+ var root=byId('tree');root.replaceChildren();
+ function row(n,depth){
+  var p=n.p,selected=p.pid===state.selectedPid;
+  var b=button(root,'tree-line'+(selected?' selected':''),'',function(){
+   state.selectedPid=p.pid;state.resourceScope='self';state.mobileDetail=true;render();
   });
- });
- var selected=null;
- s.panes.forEach(function(p){p.processes.forEach(function(pr){if(state.process===p.id+':'+pr.pid)selected={pane:p,proc:pr};});});
- if(selected)detailView(pnl,selected.pane,selected.proc,d);
- var reason=add(pnl,'div','reason');add(reason,'b','','发现依据 · ');reason.appendChild(document.createTextNode(d.method+' / '+d.reasonCode+'. '+d.reason));
+  b.setAttribute('aria-pressed',String(selected));b.dataset.pid=String(p.pid);
+  var indent=add(b,'span','tree-indent');indent.style.width=(depth*15)+'px';
+  add(b,'span','tree-icon',depth?'└':'●');add(b,'strong','',p.name);
+  if(p.reparented)add(b,'span','orphan','reparented');
+  add(b,'span','pid','PID '+p.pid);
+  n.children.forEach(function(child){row(child,depth+1);});
+ }
+ forest(items).forEach(function(n){row(n,0);});
 }
-function diagnostics(d){
- var hd=add(stage,'div','stage-head'),name=add(hd,'div');add(name,'h3','','能力检测与降级解释');add(name,'p','','系统是否有 cgroup ≠ tmux 是否创建了独立 Pane scope。');
- btn(hd,'查看进程 →','subtle-button',function(){setTab('processes');});
- var grid=add(stage,'div','diagnostics');
- var rows=[
- ['01 / 操作系统','Environment',d.kind,'不能假定 macOS 具有 /proc 或 Linux cgroup 接口。'],
- ['02 / tmux Pane','Root attribution',d.coverage==='unavailable'?'Unknown':'pane_pid + pane_tty','根 PID 只是查询起点；还需比对启动时间并处理 Pane 重建。'],
- ['03 / 资源域','Scope validation',d.version,state.key==='shared'?'共享容器域不能作为 Pane 身份。':'必须验证 scope 独立性、可读性和 Pane 根进程归属。'],
- ['04 / 最终结果','Discovery',d.coverage.toUpperCase(),'返回只读时间点快照与原因码；失败不影响 Terminal。']
- ];
- rows.forEach(function(row){var box=add(grid,'div','diag-card');add(box,'h4','',row[0]+' · '+row[1]);add(box,'div','diag-value','',row[2]);add(box,'p','',row[3]);});
- var footer=add(stage,'div','reason');add(footer,'b','','Reason code · ');add(footer,'code','',d.reasonCode);add(footer,'p','',d.reason+' 此原型不实现资源配额、杀死进程或 Agent 重新连接。');
+function renderInspector(items,p,d,session){
+ var host=byId('inspector');host.replaceChildren();
+ if(!p){add(host,'div','empty','请选择一个进程查看运行命令和资源。');return;}
+ var details=profile(p,d),stats=scopeMetrics(items,p,d);
+ var title=add(host,'div','inspector-title');add(title,'h4','',p.name);add(title,'span','status',details.cpu===null?'Snapshot expired':'Observed');
+ add(host,'div','inspector-sub','PID '+p.pid+' · '+session.name);
+ var command=add(host,'section','section'),ch=add(command,'div','section-head');add(ch,'strong','', 'Executed command');add(ch,'small','', 'Sanitized · Read only');
+ var cmd=add(command,'div','cmd');add(cmd,'code','',details.cmd);
+ button(cmd,'','复制命令',function(){
+  if(!navigator.clipboard||!navigator.clipboard.writeText){toast('浏览器不支持剪贴板写入；可手动复制已脱敏命令');return;}
+  navigator.clipboard.writeText(details.cmd).then(function(){toast('已复制脱敏命令');},function(){toast('浏览器拒绝复制；可手动复制已脱敏命令');});
+ });
+ add(command,'p','command-note',details.redacted?'敏感参数已替换为 [REDACTED]；没有原文入口。':'仅展示已脱敏命令；不读取环境变量。');
+ var resources=add(host,'section','section'),rh=add(resources,'div','section-head');add(rh,'strong','','Resources');
+ var toggle=add(rh,'div','segment');toggle.setAttribute('role','group');toggle.setAttribute('aria-label','资源统计范围');
+ [['self','仅本进程'],['subtree','含子进程']].forEach(function(x){
+  var b=button(toggle,state.resourceScope===x[0]?'active':'',x[1],function(){state.resourceScope=x[0];renderInspector(items,p,d,session);});
+  b.setAttribute('aria-pressed',String(state.resourceScope===x[0]));
+ });
+ var grid=add(resources,'div','resources');
+ metric(grid,'CPU · one logical core',stats.cpu,'%',1,p.pid%7);
+ metric(grid,'Resident memory · RSS',stats.rss,' MiB',1,p.pid%5);
+ metric(grid,'Threads',stats.threads,'',0,null);
+ var elapsed=add(grid,'div','resource');add(elapsed,'small','','Elapsed · selected PID');add(elapsed,'strong','',details.elapsed);
+ metric(grid,'Read I/O',stats.read,' KiB/s',0,null);metric(grid,'Write I/O',stats.write,' KiB/s',0,null);
+ var sc=add(resources,'div','secondary');
+ add(sc,'span','',state.resourceScope==='subtree'?'PPID descendants · '+stats.count+' processes':'Selected PID only');
+ add(sc,'span','','Sampling window · 5s');add(sc,'span','','Snapshot · T+'+state.tick);
+ add(resources,'p','detail-note','CPU 可以超过 100%；缺失或过期指标显示不可用，不把 null 当零。子树只按 PPID 关系合计，不自动吸收重新收养进程。曲线仅为模拟示意。');
+ var evidence=add(host,'details','evidence');add(evidence,'summary','','进程身份与归属依据');
+ var dl=add(evidence,'dl');
+ [['PID',String(p.pid)],['Parent PID',String(p.ppid)],['Method',p.reparented?'verified resource domain':d.method],['Coverage',d.coverage]].forEach(function(x){
+  var item=add(dl,'div');add(item,'dt','',x[0]);add(item,'dd','',x[1]);
+ });
 }
 function render(){
- var d=node();tabs();header(d);stage.replaceChildren();
- if(state.tab==='overview')overview(d);else if(state.tab==='processes')processes(d);else diagnostics(d);
+ var d=getFixture(),s=getSession(d),items=uniqueProcesses(s),unavailable=d.coverage==='unavailable',none=!s;
+ byId('host').textContent=d.host;byId('subhost').textContent=d.sub;
+ var status=byId('status');status.textContent=unavailable?'Offline':d.coverage==='partial'?'Partial discovery':'Online';status.className='status'+(unavailable?' offline':d.coverage==='partial'?' partial':'');
+ byId('snapshot').textContent=unavailable?'快照不可用':'模拟快照 · T+'+state.tick;byId('refresh').disabled=unavailable;
+ var facts=byId('node-facts');facts.replaceChildren();
+ [['OS',d.os],['tmux','private socket'],['Discovery',d.method],['Runtime',d.runtime]].forEach(function(x){add(facts,'span','',x[0]+' · '+x[1]);});
+ byId('session-name').textContent=none?'没有当前 Session':s.name;
+ byId('session-summary').textContent=unavailable?'未获取快照':none?'仅显示当前工作上下文':items.length+' processes · T+'+state.tick;
+ var notice=byId('notice');notice.hidden=d.coverage==='complete';notice.className='notice'+(unavailable?' offline':'');notice.textContent=unavailable?'Agent 离线：未观测不等于 0 个进程。':d.coverage==='partial'?d.reason:'';
+ var empty=byId('empty'),split=byId('split');empty.replaceChildren();
+ empty.hidden=!(none||unavailable);split.hidden=none||unavailable;
+ if(unavailable){add(empty,'strong','','当前无法读取进程');add(empty,'span','','Agent 离线，请在恢复连接后刷新；不会推断进程数为零。');}
+ else if(none){add(empty,'strong','','当前没有可检查的 Session');add(empty,'span','','从一个 Session 进入 Workspace 后才展示其进程；不会自动选择本节点上的其他 Session。');}
+ if(!none&&!unavailable){
+  if(!items.some(function(x){return x.pid===state.selectedPid;})){
+   var preferred=items.find(function(x){return x.name==='claude';})||items[0];
+   state.selectedPid=preferred?preferred.pid:null;state.mobileDetail=false;
+  }
+  byId('tree-count').textContent=items.length+' discovered';
+  renderTree(items);
+  renderInspector(items,items.find(function(x){return x.pid===state.selectedPid;}),d,s);
+  split.classList.toggle('mobile-detail',state.mobileDetail);
+ }
+ var diag=byId('diag-body');diag.replaceChildren();
+ add(diag,'div','', 'Scope · Current Session only. Internal tmux execution-unit IDs are deliberately absent from this UI.');
+ add(diag,'div','', 'Method · '+d.method+' | Coverage · '+d.coverage+' | Reason · '+d.code);
+ add(diag,'div','',d.reason);
+ add(diag,'div','','Discovery evidence is bounded and read-only; partial/offline and unavailable metrics are not zero. No process control.');
 }
-document.getElementById('scenario').addEventListener('change',function(e){state.key=e.target.value;state.session='dev';state.process=null;state.resourceScope='self';state.count=0;render();});
-document.getElementById('refresh').addEventListener('click',function(){if(node().coverage==='unavailable'){showToast('Agent 离线：无法获取新快照');return;}state.count++;render();showToast('已重放模拟进程快照 · T+'+state.count);});
-document.querySelectorAll('[data-tab]').forEach(function(b){b.addEventListener('click',function(){setTab(b.dataset.tab);});});
-document.querySelector('[data-go]').addEventListener('click',function(){setTab('overview');});
-document.querySelectorAll('[data-other]').forEach(function(b){b.addEventListener('click',function(){showToast(b.dataset.other+' 能力不在本次原型范围；当前焦点仍是 Agent');});});
+byId('scenario').addEventListener('change',function(e){
+ state.scenario=e.target.value;state.currentSessionId=state.scenario==='no-session'?null:'dev';
+ state.selectedPid=null;state.resourceScope='self';state.mobileDetail=false;state.tick=0;render();
+});
+byId('refresh').addEventListener('click',function(){
+ if(getFixture().coverage==='unavailable'){toast('Agent 离线：无法获取快照');return;}
+ state.tick++;render();toast('已刷新当前 Session 的模拟快照 · T+'+state.tick);
+});
+byId('back').addEventListener('click',function(){
+ state.mobileDetail=false;render();
+ var selected=document.querySelector('[data-pid="'+state.selectedPid+'"]');
+ if(selected){selected.focus({preventScroll:true});selected.scrollIntoView({block:'nearest'});}
+});
+byId('agent-capability').addEventListener('click',function(){state.mobileDetail=false;render();});
+document.querySelectorAll('[data-other]').forEach(function(b){b.addEventListener('click',function(){toast(b.dataset.other+' 不在此原型范围内；Agent 焦点未改变');});});
 render();
 })();
 </script>
