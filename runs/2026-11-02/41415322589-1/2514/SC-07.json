@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "34fd2307dd87653481cecb68f1256e12e4a07084644128b8781ad42e060ab02a",
+  "run_id": 41415322589,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-07",
+  "criterion_text": "Publish a standalone interactive sanitized mock for #2514 on the shared orphan `prototype` branch; source pinned by immutable SHA and listed in the native Pages prototype catalog after publication. Validate representative states and interactions; production behavior remains Pending independently.",
+  "stage": "staging",
+  "target_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "contract_sha256": "f0f56cb5f44ef4851992bd6f5e55338e2fe2bf74180f2054360e31df5796396d",
+  "case_revision": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "case_tree_sha": "07b81583e2f28b10a1adab36dd2a45ca39eaac09",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:48:23.905Z",
+  "finished_at": "2026-11-02T08:48:32.824Z",
+  "duration_ms": 8919,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=26"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 26
+      },
+      "duration_ms": 2433,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The revised #2514 prototype is published on the shared branch, listed by the native Pages catalog, and the public HTTPS site serves the same source revision with the revised disclosure design",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "prototype branch equals the pinned revised source 12fb8893..."
+        },
+        {
+          "type": "runtime",
+          "value": "public manifest source=prototype@12fb8893058ba7e5bd360a28b44ac9a154e40a95 lists agent-process-discovery-2514 with preview and pinned GitHub source"
+        },
+        {
+          "type": "runtime",
+          "value": "direct HTTPS HTML cites 12fb8893058ba7e5bd360a28b44ac9a154e40a95 and contains the scenario selector, Agent details, Process details, and no-current-Session state"
+        }
+      ],
+      "duration_ms": 635,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41415322589,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "record_path": "runs/2026-11-02/41415322589-1/2514/SC-07.json",
+    "source_result_sha256": "adf964b2c027e9567decfcd71cf15ac7ad7aeab873669964a37fe32385806571"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41415322589-1",
+    "sha256": "adf964b2c027e9567decfcd71cf15ac7ad7aeab873669964a37fe32385806571",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "durability": "time-limited; object archival not configured"
+  }
+}

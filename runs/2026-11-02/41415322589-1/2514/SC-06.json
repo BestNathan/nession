@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "79d0c37fc52504cc16b8b349caa9506706e04ed36011a4c4558e534f0bb89630",
+  "run_id": 41415322589,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-06",
+  "criterion_text": "Existing Agent Workspace label opens a compact Agent overview + **current-Session-only unified process tree** with no cross-Session selector or visible Pane/Window grouping. A **default-collapsed, accessible Agent details** section expands into readable identity/connection, runtime, and capability groups; the inspector preserves command/resources in plain view with **default-collapsed, grouped Process details**. Desktop master/detail and App list→process detail preserve focus/scroll and disclosure behavior; refresh/error/empty/fallback/stale states and unknown values stay honest without adding persistent chrome.",
+  "stage": "staging",
+  "target_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "contract_sha256": "f0f56cb5f44ef4851992bd6f5e55338e2fe2bf74180f2054360e31df5796396d",
+  "case_revision": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "case_tree_sha": "ac1b0c56499028bce54c4e2c44ada0903f64a2a7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:48:12.557Z",
+  "finished_at": "2026-11-02T08:48:23.882Z",
+  "duration_ms": 11325,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (2 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=74"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 74
+      },
+      "duration_ms": 7292,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The Agent Workspace shows the current Session forest with default-closed grouped disclosures and no Session/Pane navigation",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA bedaa172a59c716e04398a5d2ce98c4da1659e97: 15 Agent Workspace integration tests passed (current-Session-only forest, no Session/Pane UI, default-closed grouped Agent and Process details, scope-state persistence, offline/stale, App focus return, extension slot unchanged)"
+        }
+      ],
+      "duration_ms": 4018,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41415322589,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "record_path": "runs/2026-11-02/41415322589-1/2514/SC-06.json",
+    "source_result_sha256": "9137b8c71520e52d7b7efea61cad88b6322a315774bf3048cef9e03ba3e6c20b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41415322589-1",
+    "sha256": "9137b8c71520e52d7b7efea61cad88b6322a315774bf3048cef9e03ba3e6c20b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "durability": "time-limited; object archival not configured"
+  }
+}

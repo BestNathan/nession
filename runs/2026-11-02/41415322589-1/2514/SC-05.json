@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "3641971158491fbec170aff976ce9deedc31f3a7d67702f239d658c5ab63694b",
+  "run_id": 41415322589,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-05",
+  "criterion_text": "Typed, authorized, bounded Agent→Server→Web read-only process snapshot schema, including method, status, timestamp and safe diagnostic reasons; failures do not affect terminal continuity.",
+  "stage": "staging",
+  "target_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "contract_sha256": "f0f56cb5f44ef4851992bd6f5e55338e2fe2bf74180f2054360e31df5796396d",
+  "case_revision": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "case_tree_sha": "456182b83670eed8446ec74a50aeb56723f131b9",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:47:57.611Z",
+  "finished_at": "2026-11-02T08:48:12.556Z",
+  "duration_ms": 14945,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The process snapshot is a typed, authorized, bounded read-only contract at both boundaries, with refusals that never masquerade as partial data",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA bedaa172a59c716e04398a5d2ce98c4da1659e97 on Linux x86_64: the typed snapshot round-tripped, with sampled zero preserved and unavailable metrics carrying a state and reason instead of a value"
+        },
+        {
+          "type": "runtime",
+          "value": "the Server refused an unauthenticated browser, forwarded only the Session name to a verified online Agent, relayed a valid snapshot, and refused Agent failure or an unreadable payload"
+        },
+        {
+          "type": "runtime",
+          "value": "the Agent manifest advertises agent.session.processes and the protocol-integrity gate accepted every wire: ✓ protocol-integrity"
+        }
+      ],
+      "duration_ms": 14910,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41415322589,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "record_path": "runs/2026-11-02/41415322589-1/2514/SC-05.json",
+    "source_result_sha256": "bd04a10814611bb3f43eea125981f3f4d653119b417abaeb65bc86e106d9a666"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41415322589-1",
+    "sha256": "bd04a10814611bb3f43eea125981f3f4d653119b417abaeb65bc86e106d9a666",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "durability": "time-limited; object archival not configured"
+  }
+}

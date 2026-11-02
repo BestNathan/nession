@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "fa02e5d5ddcc955877267abaf8c658bb745b4704e1553224b2ffc27cce831c3e",
+  "run_id": 41415322589,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-03",
+  "criterion_text": "macOS and Linux fallback return correct descendant trees with SID/TTY evidence as lower-confidence associations; unsupported/permission-denied, offline and zero-process states remain distinct.",
+  "stage": "staging",
+  "target_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "contract_sha256": "f0f56cb5f44ef4851992bd6f5e55338e2fe2bf74180f2054360e31df5796396d",
+  "case_revision": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "case_tree_sha": "b23c4af521f85da090ae4c9af8570b5e8caed911",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:47:55.975Z",
+  "finished_at": "2026-11-02T08:47:56.711Z",
+  "duration_ms": 736,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Linux fallback and honest metric states are proven at the target SHA; the macOS libproc reader is present and executes on Darwin",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA bedaa172a59c716e04398a5d2ce98c4da1659e97 on Linux x86_64: the fallback tree carried SID/TTY association evidence and a real isolated Session reported its root and descendants"
+        },
+        {
+          "type": "runtime",
+          "value": "a process that exited mid-window was stale (not zero), an unreadable command was denied (not empty), a missing Pane root was unavailable, and an unknown Session was an error rather than an empty list"
+        },
+        {
+          "type": "source",
+          "value": "the Darwin reader (libproc + KERN_PROCARGS2) and its platform-gated child-process test are present at this SHA; they cannot execute on the Linux runner, and the PR records the Darwin execution"
+        }
+      ],
+      "duration_ms": 721,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41415322589,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "record_path": "runs/2026-11-02/41415322589-1/2514/SC-03.json",
+    "source_result_sha256": "b34efb51e4de477a9b84cfaaa4e78be66a8014db08dd35b5d0d279de238ca8f3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41415322589-1",
+    "sha256": "b34efb51e4de477a9b84cfaaa4e78be66a8014db08dd35b5d0d279de238ca8f3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "durability": "time-limited; object archival not configured"
+  }
+}

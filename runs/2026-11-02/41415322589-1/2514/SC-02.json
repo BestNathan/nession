@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d9ca1db34e3b6dd12be4fdd161beb20f80e973e671b9b9b14287126cc9d95461",
+  "run_id": 41415322589,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-02",
+  "criterion_text": "Linux with shared/unreadable/unavailable cgroup, unsupported tmux systemd integration, or non-systemd container falls back to process-tree discovery without claiming dedicated scope.",
+  "stage": "staging",
+  "target_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "contract_sha256": "f0f56cb5f44ef4851992bd6f5e55338e2fe2bf74180f2054360e31df5796396d",
+  "case_revision": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+  "case_tree_sha": "be1469f7538e75c3d19837c91fb39253df791ee0",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:47:55.233Z",
+  "finished_at": "2026-11-02T08:47:55.975Z",
+  "duration_ms": 741,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Shared, unreadable and unsupported cgroups fall back to process-tree discovery and never claim dedicated scope",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA bedaa172a59c716e04398a5d2ce98c4da1659e97 on Linux x86_64: an ordinary/shared cgroup and a cgroup v1 process were rejected with their own reason codes, not claimed as dedicated scope"
+        },
+        {
+          "type": "runtime",
+          "value": "the negative cgroup fixtures produced each fallback reason; a rejected scope never claimed dedicated coverage, and the fallback Pane reported method=process_tree with coverage=partial"
+        },
+        {
+          "type": "runtime",
+          "value": "a missing Pane root and a Pane outside the requested Session stayed distinct from an empty process tree"
+        }
+      ],
+      "duration_ms": 726,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41415322589,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bedaa172a59c716e04398a5d2ce98c4da1659e97",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "record_path": "runs/2026-11-02/41415322589-1/2514/SC-02.json",
+    "source_result_sha256": "d25cee5e82fc77e9d75d73513e5d87cea5843fbf020c31ac7122250d7abee778"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41415322589-1",
+    "sha256": "d25cee5e82fc77e9d75d73513e5d87cea5843fbf020c31ac7122250d7abee778",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41415322589",
+    "durability": "time-limited; object archival not configured"
+  }
+}
