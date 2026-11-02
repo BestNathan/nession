@@ -1134,6 +1134,23 @@ Spending a token on first use would break both, so single-use is a client rewrit
 rather than a policy choice. Expiry is the real revocation: deterministic, and
 needing no round trip.
 
+**Renewal happens at the next upgrade, not on the live socket (#2645).** Expiry
+does not close an established connection; it ends the credential's authority for
+a *new* one. The attach success reply therefore states
+`connection_token_expires_at` beside the opaque token, because the browser cannot
+parse the deadline out of the token itself. Before rebuilding a lost P2P
+transport the browser re-attaches through the authenticated
+`server.session.attach` operation and presents the reissued credential. A
+keepalive on the old socket cannot extend it, and the Agent's refusal remains
+authoritative. The Session runtime owns the renewal: it is single-flight, fenced
+to the current attach generation, refused if the reply names another
+Agent/Session, and rebuilt on the currently chosen address so Auto and pinned
+route intent are unchanged. A failed renewal surfaces as a transport failure —
+never as an anonymous fallback or a relaxed upgrade. The Server keeps the 300s
+default in production; the E2E/acceptance fixture uses a shorter lease so the
+expiry boundary is tested without waiting five minutes. Neither the token nor a
+credential-bearing URL is logged.
+
 The credential travels as a query parameter (`?token=`) because a browser cannot
 set a header on `new WebSocket()`. **That means it reaches every access log on
 the path**, which is a known cost of this design and not an oversight: it is why

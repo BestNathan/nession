@@ -206,6 +206,118 @@ describe('WebSocketService', () => {
     expect(service.reconnectAttempts).toBe(0);
   });
 
+  it('resolves the URL before each dial and uses the refreshed URL on reconnect (#2645)', async () => {
+    const resolveUrl = vi.fn()
+      .mockResolvedValueOnce('ws://server/ws?token=first')
+      .mockResolvedValueOnce('ws://server/ws?token=renewed');
+    const service = new WebSocketService('ws://server/ws', [], {
+      resolveUrl,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    await drainMicrotasks();
+    expect(resolveUrl).toHaveBeenNthCalledWith(1, 0);
+    expect(MockWebSocket.instances[0].url).toBe('ws://server/ws?token=first');
+    MockWebSocket.instances[0].open();
+    await connected;
+    expect(service.connectionState).toBe('connected');
+
+    MockWebSocket.instances[0].serverClose();
+    await flushTimers(50);
+    await drainMicrotasks();
+    expect(resolveUrl).toHaveBeenNthCalledWith(2, 1);
+    expect(MockWebSocket.instances[1].url).toBe('ws://server/ws?token=renewed');
+    MockWebSocket.instances[1].open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
+    expect(service.getUrl()).toBe('ws://server/ws?token=renewed');
+    service.dispose();
+  });
+
+  it('coalesces concurrent connect() calls onto one URL resolution (#2645)', async () => {
+    let settle!: (url: string) => void;
+    const resolveUrl = vi.fn(
+      () => new Promise<string>((resolve) => { settle = resolve; }),
+    );
+    const service = new WebSocketService('ws://server/ws', [], {
+      resolveUrl,
+      reconnectBaseDelay: 5,
+    });
+
+    const first = service.connect();
+    const second = service.connect();
+    await drainMicrotasks();
+    expect(resolveUrl).toHaveBeenCalledTimes(1);
+    settle('ws://server/ws?token=coalesced');
+    await drainMicrotasks();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toBe('ws://server/ws?token=coalesced');
+    MockWebSocket.instances[0].open();
+    await Promise.all([first, second]);
+    service.dispose();
+  });
+
+  it('settles an unresolved initial dial at disconnected so the caller can rotate (#2645)', async () => {
+    const resolveUrl = vi.fn().mockRejectedValue(new Error('credential renewal failed'));
+    const service = new WebSocketService('ws://server/ws', [], {
+      resolveUrl,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+
+    await expect(service.connect()).rejects.toThrow('credential renewal failed');
+    expect(MockWebSocket.instances).toHaveLength(0);
+    // An initial dial that cannot open is terminal until the caller asks
+    // again; the caller's address policy owns what happens next.
+    expect(service.connectionState).toBe('disconnected');
+    expect(service.reconnectAttempts).toBe(0);
+    expect(states).toEqual(['connecting', 'disconnected']);
+
+    await flushTimers(100);
+    expect(resolveUrl).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances).toHaveLength(0);
+    service.dispose();
+  });
+
+  it('retries a failed URL resolution within the reconnect budget (#2645)', async () => {
+    const resolveUrl = vi.fn()
+      .mockResolvedValueOnce('ws://server/ws?token=first')
+      .mockRejectedValueOnce(new Error('credential renewal failed'))
+      .mockResolvedValueOnce('ws://server/ws?token=retry');
+    const service = new WebSocketService('ws://server/ws', [], {
+      resolveUrl,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    await drainMicrotasks();
+    expect(MockWebSocket.instances[0].url).toBe('ws://server/ws?token=first');
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    MockWebSocket.instances[0].serverClose();
+    await flushTimers(5);
+    await drainMicrotasks();
+    expect(resolveUrl).toHaveBeenLastCalledWith(1);
+    expect(service.connectionState).toBe('reconnecting');
+    expect(service.reconnectAttempts).toBe(2);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    await flushTimers(10);
+    await drainMicrotasks();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockWebSocket.instances[1].url).toBe('ws://server/ws?token=retry');
+    MockWebSocket.instances[1].open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
+    service.dispose();
+  });
+
   it('re-runs the handshake per physical socket and recovers within the reconnect budget', async () => {
     let handshakeCount = 0;
     let resolveSecondHandshake!: () => void;

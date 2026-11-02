@@ -311,6 +311,7 @@ impl ConnectionHandler {
             }
 
             let connection_token = credential.token.clone();
+            let connection_token_expires_at = credential.expires_at.to_rfc3339();
 
             // P2P mode: return the full candidate list (with probe status) plus
             // the legacy single `agent_address` for backward compatibility. The
@@ -330,6 +331,7 @@ impl ConnectionHandler {
                         "agent_address": agent_address,
                         "addresses": addresses_json,
                         "connection_token": connection_token,
+                        "connection_token_expires_at": connection_token_expires_at,
                         "session_name": session_name,
                         "terminal_cols": self.config.terminal_cols,
                         "terminal_web_font_size": self.config.terminal_web_font_size

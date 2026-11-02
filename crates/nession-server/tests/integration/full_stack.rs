@@ -1432,6 +1432,15 @@ async fn test_client_session_attach_p2p_mode() {
         grant["payload"]["credential"].as_str(),
         "the client must be given the credential the agent was already granted"
     );
+    let expires_at = attach_resp["payload"]["connection_token_expires_at"]
+        .as_str()
+        .expect("the client is told when the credential stops being accepted");
+    let deadline = chrono::DateTime::parse_from_rfc3339(expires_at)
+        .expect("the stated credential deadline is RFC 3339");
+    assert!(
+        deadline > chrono::Utc::now(),
+        "the issued credential is not already expired"
+    );
 }
 
 // ---------------------------------------------------------------------------

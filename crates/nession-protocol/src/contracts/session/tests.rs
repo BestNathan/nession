@@ -148,6 +148,39 @@ fn test_server_terminal_resize_payload_serde() {
 }
 
 #[test]
+fn test_client_session_attach_reply_states_the_credential_deadline() {
+    // #2645: the browser cannot parse the opaque token, so a reconnect learns
+    // from this field whether it must ask for a new one.
+    let reply: ClientSessionAttachReply = serde_json::from_value(serde_json::json!({
+        "status": "success",
+        "mode": "p2p",
+        "session_id": "agent:session",
+        "connection_token": "opaque",
+        "connection_token_expires_at": "2026-11-02T12:00:00Z"
+    }))
+    .unwrap();
+    let ClientSessionAttachReply::Attached(payload) = reply else {
+        panic!("expected the attached arm");
+    };
+    assert_eq!(
+        payload.connection_token_expires_at.as_deref(),
+        Some("2026-11-02T12:00:00Z")
+    );
+
+    // Older Servers and relay replies omit it; decoding must stay compatible.
+    let legacy: ClientSessionAttachReply = serde_json::from_value(serde_json::json!({
+        "status": "success",
+        "mode": "relay",
+        "session_id": "agent:session"
+    }))
+    .unwrap();
+    let ClientSessionAttachReply::Attached(legacy) = legacy else {
+        panic!("expected the attached arm");
+    };
+    assert_eq!(legacy.connection_token_expires_at, None);
+}
+
+#[test]
 fn test_client_session_attach_payload_default_env_snapshots() {
     let json = serde_json::json!({
         "session_id": "agent:session",

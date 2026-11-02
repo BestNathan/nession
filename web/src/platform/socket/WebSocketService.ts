@@ -101,7 +101,7 @@ export class WebSocketService implements PluginSurface {
   readonly protocols = new ProtocolDirectory();
 
   constructor(
-    private readonly url: string,
+    private url: string,
     plugins: TransportPlugin[] = [],
     private readonly options: WebSocketServiceOptions = {},
   ) {
@@ -159,7 +159,68 @@ export class WebSocketService implements PluginSurface {
     }
 
     this.setState('connecting');
-    this.connectPromise = new Promise<void>((resolve, reject) => {
+    const attempt = this.reconnectAttempt;
+    const needsUrl = this.options.resolveUrl
+      && (this.options.needsUrl?.(attempt) ?? true);
+    if (needsUrl) {
+      this.connectPromise = this.connectWithResolvedUrl(attempt);
+      return this.connectPromise;
+    }
+    this.connectPromise = this.openSocketPromise();
+    return this.connectPromise;
+  }
+
+  /**
+   * Ask the caller for the URL this attempt should dial, then open it.
+   *
+   * The first connection may also need a renewal (a route switch or a slow
+   * first paint can outlive a credential lease), so the hook is not limited to
+   * reconnects.
+   *
+   * **A failed initial resolution is an initial-dial failure, not a loss.**
+   * The transport settles at `disconnected` exactly as it does when the first
+   * socket cannot open, so the caller's address policy can advance to its next
+   * candidate — or fall back to Relay — immediately. Scheduling the reconnect
+   * budget here instead (as a lost socket does) would keep the state at
+   * `reconnecting` for the whole budget, hiding a dead candidate from the
+   * policy that is supposed to rotate away from it (#1926 recovery after an
+   * Agent restart, with a short credential lease).
+   *
+   * On a reconnect the socket is already an established route's successor, so
+   * a rejected resolution goes through the ordinary loss path and its bounded
+   * retry budget.
+   */
+  private async connectWithResolvedUrl(attempt: number): Promise<void> {
+    try {
+      const next = await this.options.resolveUrl?.(attempt);
+      if (this.disposed || this.userClosed) {
+        throw new Error(this.disposed ? 'WebSocketService disposed' : 'WebSocketService is closed');
+      }
+      if (next) {
+        this.url = next;
+      }
+    } catch (error) {
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (!this.disposed && !this.userClosed) {
+        if (attempt === 0) {
+          this.router.failPending(failure);
+          this.rejectWaiters(failure);
+          this.setState('disconnected');
+        } else {
+          this.handleSocketLoss();
+        }
+      }
+      throw failure;
+    }
+    const opened = this.openSocketPromise();
+    this.connectPromise = opened;
+    return opened;
+  }
+
+  private openSocketPromise(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       this.rejectConnect = reject;
       try {
         this.openSocket(resolve, reject);
@@ -170,7 +231,6 @@ export class WebSocketService implements PluginSurface {
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
-    return this.connectPromise;
   }
 
   /**

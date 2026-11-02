@@ -97,6 +97,27 @@ export interface WebSocketServiceOptions {
    * `disconnected` so the address policy can pick the next candidate.
    */
   persistentReconnect?: boolean;
+  /**
+   * Resolve the URL to dial immediately before **every** connection attempt.
+   *
+   * The caller owns what "fresh" means; returning `null` keeps the URL the
+   * service already holds. The P2P Session runtime uses it to present a
+   * Server-issued credential that has not outlived its lease, without touching
+   * a healthy socket (#2645). `attempt` is the reconnect counter at dial time:
+   * 0 is the first connection, 1+ is a recovery attempt.
+   *
+   * A rejection is a failed attempt, not a handshake refusal: the service
+   * schedules the next bounded retry and surfaces the state change.
+   */
+  resolveUrl?: (attempt: number) => Promise<string | null>;
+  /**
+   * Synchronous gate for {@link resolveUrl}, evaluated before the attempt.
+   *
+   * A fresh credential that needs no work keeps the historical synchronous
+   * dial; only a spent lease may defer the attempt. Omitted means resolve
+   * before every attempt.
+   */
+  needsUrl?: (attempt: number) => boolean;
   onError?: (error: Error) => void;
   /** Called only when the live physical socket opens but its handshake rejects. */
   onHandshakeRejected?: (error: Error) => void;

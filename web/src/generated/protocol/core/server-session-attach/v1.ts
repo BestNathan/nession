@@ -104,6 +104,13 @@ addresses: Array<ProbedAddress>,
  * Spending the token on first use would break both, and single-use is
  * therefore a client rewrite rather than a policy choice.
  *
+ * **Renewal:** the browser cannot parse the opaque token, so the Server
+ * states the deadline beside it. Before a physical Agent socket is rebuilt
+ * after expiry, the Session runtime re-attaches through the authenticated
+ * `server.session.attach` operation and presents the fresh credential
+ * (#2645). A healthy socket is never replaced just because the credential
+ * expired; only a new upgrade needs one.
+ *
  * **Transport:** the `token` query parameter on the agent URL
  * ([`super::super::p2p::CREDENTIAL_PARAM`]). A query parameter because a
  * browser cannot set a header on `new WebSocket()`. **It therefore reaches
@@ -116,6 +123,16 @@ addresses: Array<ProbedAddress>,
  * browser.
  */
 connection_token?: string | null, 
+/**
+ * RFC 3339 deadline for [`Self::connection_token`], stated by its issuer.
+ *
+ * The browser cannot parse the opaque token, so this is the only way a
+ * client can know a reconnect needs a *new* credential instead of the one
+ * it already holds (#2645). Absent on older Servers and on the relay
+ * arm; a client that sees it must still treat the Agent's refusal as
+ * authoritative (fail closed).
+ */
+connection_token_expires_at?: string | null, 
 /**
  * The Server's release-selected fixed column count (#2487).
  *
