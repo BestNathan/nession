@@ -13,7 +13,9 @@ on:
       - scripts/run-store-policy.mjs
       - scripts/run-store-governance-live.mjs
       - scripts/run-store-migration-baseline.json
+      - scripts/run-store-agent-bootstrap-observation.json
       - scripts/audit-live-run-stores.mjs
+      - scripts/audit-live-run-stores-selftest.mjs
       - scripts/run-store-integrity-drill.mjs
       - scripts/run-store-cas-matrix.mjs
       - .github/workflows/*-ingest.yml
@@ -71,7 +73,9 @@ jobs:
       # Matrix executes real concurrent publisher processes against temporary local
       # bare Git, not live server-side Apps or branch authorization.
       # The drill uses only disposable local Git; it cannot prove live denial.
-      # This is a mandatory warning while the actual refs remain unprotected.
+      # This remains an alert until independent administrator and write-denial
+    # proof is available; the three legacy and fourth agent-store histories
+    # are separately checked against explicitly unanchored Git baselines.
       # It fetches only GitHub refs / full Git ancestry through read-only
       # permissions. No secret admin token or privileged writer is supplied.
       - name: Independently audit orphan Git ancestry and live App Rulesets
