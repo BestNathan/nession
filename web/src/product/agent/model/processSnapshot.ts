@@ -5,6 +5,7 @@ import type {
   ProcessDiscoveryMethod,
   ProcessMetric,
   ProcessMetricState,
+  ProcessSnapshot,
 } from '@/generated/protocol/core/server-session-processes/v1';
 
 /**
@@ -48,7 +49,39 @@ export function displayCommand(process: DiscoveredProcess): string {
   return `PID ${process.pid}`;
 }
 
-/** Build the PPID tree inside one Pane, roots first, children by PID. */
+/**
+ * The current Session's processes, deduplicated by identity.
+ *
+ * A linked Window reports the same Pane (and the same processes) once per
+ * membership; a process may also be observed by more than one Pane. Identity is
+ * PID + start time, so a reused PID stays a different process.
+ */
+export function sessionProcesses(panes: PaneProcessSnapshot[]): DiscoveredProcess[] {
+  const unique = new Map<string, DiscoveredProcess>();
+  for (const pane of panes) {
+    for (const process of pane.processes) {
+      const key = processKey(process);
+      if (!unique.has(key)) {
+        unique.set(key, process);
+      }
+    }
+  }
+  return [...unique.values()].sort((a, b) => a.pid - b.pid);
+}
+
+/**
+ * One flattened forest for the current Session.
+ *
+ * Pane and Window identity stay on the wire as discovery evidence; the product
+ * tree is built from the Session-wide process set. Only real PPID edges are
+ * rendered: a process whose parent is not observed is a separate root, never
+ * attached to an unrelated visible PID.
+ */
+export function buildProcessForest(panes: PaneProcessSnapshot[]): ProcessTreeNode[] {
+  return buildProcessTree(sessionProcesses(panes));
+}
+
+/** Build the PPID tree over a process set, roots first, children by PID. */
 export function buildProcessTree(processes: DiscoveredProcess[]): ProcessTreeNode[] {
   const byPid = new Map<number, DiscoveredProcess>();
   for (const process of processes) {
@@ -89,12 +122,40 @@ export function buildProcessTree(processes: DiscoveredProcess[]): ProcessTreeNod
   return roots.sort((a, b) => a.pid - b.pid).map((root) => build(root, 0));
 }
 
+export interface SessionDiscovery {
+  methods: ProcessDiscoveryMethod[];
+  coverage: ProcessCoverage;
+  reasonCodes: string[];
+}
+
 /**
- * The selected process plus its PPID descendants inside the same Pane.
+ * The Session-level truth a reader sees.
+ *
+ * Per-Pane methods and coverage are discovery evidence, not product nouns. The
+ * Session is complete only when every observed Pane is complete; one partial
+ * Pane makes the Session partial, and no readable Pane makes it unavailable.
+ */
+export function sessionDiscovery(snapshot: ProcessSnapshot): SessionDiscovery {
+  const panes = snapshot.panes;
+  const coverage: ProcessCoverage =
+    panes.length === 0 || panes.every((pane) => pane.coverage === 'unavailable')
+      ? 'unavailable'
+      : panes.every((pane) => pane.coverage === 'complete')
+        ? 'complete'
+        : 'partial';
+  return {
+    methods: snapshot.methods.length > 0 ? snapshot.methods : ['unavailable'],
+    coverage,
+    reasonCodes: [...new Set(panes.flatMap((pane) => pane.reason_codes))],
+  };
+}
+
+/**
+ * The selected process plus its PPID descendants in the current Session.
  *
  * This walks parent edges only. A cgroup-only reparented worker is not part of
  * the selected PID's ancestry and is deliberately not merged in, even though
- * it is present in the Pane.
+ * it is present in the Session.
  */
 export function collectDescendants(
   selected: DiscoveredProcess,
@@ -259,11 +320,6 @@ export function coverageLabel(coverage: ProcessCoverage): string {
 
 export function reasonLabel(reason: string): string {
   return REASON_LABELS[reason] ?? reason;
-}
-
-export function paneTitle(pane: PaneProcessSnapshot): string {
-  const window = `Window ${pane.window_index} · ${pane.window_name || 'unnamed'}`;
-  return `${window} · Pane ${pane.pane_index}`;
 }
 
 /** `HH:MM:SS` in the viewer's locale, with the date when it is not today. */

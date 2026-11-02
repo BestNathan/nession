@@ -1,9 +1,9 @@
 'use strict';
 // Shared exact-SHA browser proof for #2514's Agent Workspace SCs.
 //
-// The flow is one real run against the full-stack-local Server + Agent + tmux
-// runtime: create a Session, attach, type a command through xterm's own input
-// path, open Workspace -> Agent, and inspect the read-only process snapshot.
+// One real run against the full-stack-local Server + Agent + tmux runtime:
+// create a Session, attach, type a command through xterm's own input path,
+// open Workspace -> Agent, and inspect the read-only current-Session snapshot.
 // The command carries a credential-shaped flag so redaction is observed on the
 // wire path rather than asserted from a fixture.
 
@@ -71,10 +71,11 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
           lines.push(line.translateToString(true));
         }
       }
-      return lines.join('\n');
+      const lastLine = lines.reverse().find((line) => line.trim().length > 0) ?? '';
+      return lastLine;
     }),
     { timeout: 30_000, intervals: [500] },
-  ).toMatch(/[$#%]\s*$/m);
+  ).toMatch(/[$#%➜❯λ]/);
 
   // Same path as a user's typing: xterm's input API drives the PTY.
   await page.evaluate((command) => {
@@ -88,24 +89,15 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
   await page.getByTestId('workspace-tool-agent').click();
   await expect(page.getByTestId('agent-detail')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('agent-process-session-selector')).toBeVisible({
-    timeout: 30_000,
-  });
 
-  // The Agent view prefers the Workspace's current Session, but state the
-  // choice explicitly: the batch shares one runtime, so the list holds
-  // Sessions from earlier Cases too.
-  const sessionButton = page
-    .getByTestId('agent-process-session-selector')
-    .getByRole('button', { name: sessionName });
-  await expect(sessionButton).toBeVisible({ timeout: 30_000 });
-  if ((await sessionButton.getAttribute('aria-pressed')) !== 'true') {
-    await sessionButton.click();
-  }
-  await expect(sessionButton).toHaveAttribute('aria-pressed', 'true');
+  // The Agent is current-Session-only: no Session picker, no Pane grouping.
+  await expect(page.getByTestId('agent-process-session-selector')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="process-pane-"]')).toHaveCount(0);
+  const sessionIdentity = page.getByTestId('agent-process-session');
+  await expect(sessionIdentity).toBeVisible({ timeout: 30_000 });
+  await expect(sessionIdentity).toContainText(sessionName);
 
-  const pane = page.locator('[data-testid^="process-pane-"]').first();
-  await expect(pane).toBeVisible({ timeout: 30_000 });
+  const tree = page.getByTestId('process-forest');
   // The typed child may start after the first snapshot. Refresh the read-only
   // observation until it is present; a hidden refresh is not a hidden wait.
   const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
@@ -114,10 +106,10 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
     if ((await errorState.count()) > 0) {
       throw new Error('process snapshot failed: ' + (await errorState.innerText()));
     }
-    if ((await pane.count()) === 0) {
+    if ((await tree.count()) === 0) {
       return false;
     }
-    const text = await pane.innerText();
+    const text = await tree.innerText();
     if (text.includes('--token')) {
       return true;
     }
@@ -137,21 +129,21 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
     sessionName,
     typedCommand: TYPED_COMMAND,
     secret: SECRET,
-    pane,
+    tree,
     snapshotHeader,
   };
 }
 
-/** Select the Pane root and open the inspector. */
-async function inspectRoot(page, expect, pane) {
-  await pane.getByRole('button').first().click();
+/** Select the first forest row (the Session's root process) and inspect it. */
+async function inspectRoot(page, expect, tree) {
+  await tree.getByRole('button').first().click();
   await expect(page.getByTestId('process-inspector')).toBeVisible({ timeout: 15_000 });
   return captureInspector(page);
 }
 
 /** Select the row whose command carries the credential-bearing flag. */
-async function inspectCredentialBearingProcess(page, expect, pane) {
-  const rows = pane.getByRole('button');
+async function inspectCredentialBearingProcess(page, expect, tree) {
+  const rows = tree.getByRole('button');
   await expect.poll(async () => {
     const count = await rows.count();
     for (let index = 0; index < count; index += 1) {
@@ -174,7 +166,7 @@ async function inspectCredentialBearingProcess(page, expect, pane) {
     }
   }
   if (!clicked) {
-    throw new Error('no credential-bearing process row in the Pane');
+    throw new Error('no credential-bearing process row in the current Session');
   }
   await expect(page.getByTestId('process-inspector')).toBeVisible({ timeout: 15_000 });
   // Wait for the inspector to render this selection's command, not the
@@ -206,6 +198,63 @@ async function captureInspector(page) {
       agentText: text('[data-testid="agent-processes"]'),
     };
   });
+}
+
+/** Open Agent details by keyboard and assert the grouped facts are visible. */
+async function openAgentDetails(page, expect) {
+  const details = page.getByTestId('agent-details');
+  await expect(details).toHaveJSProperty('open', false);
+  await details.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(details).toHaveJSProperty('open', true);
+
+  const content = page.getByTestId('agent-details-content');
+  await expect(content).toBeVisible();
+  for (const title of ['Identity & connection', 'Runtime environment', 'Capability & discovery']) {
+    await expect(content.getByText(title, { exact: true })).toBeVisible();
+  }
+  await expect(content).toContainText('Agent ID');
+  await expect(content).toContainText('Operating system');
+  await expect(content).toContainText('Process discovery');
+
+  const text = await details.innerText();
+  expectNoSecret(text);
+  return { details, content, text };
+}
+
+/** Close the already-focused Agent details summary with the keyboard. */
+async function closeAgentDetails(page, expect, details) {
+  await details.locator('summary').focus();
+  await page.keyboard.press('Space');
+  await expect(details).toHaveJSProperty('open', false);
+}
+
+async function processDetailsOpen(page) {
+  return page.getByTestId('process-details').evaluate((element) => element.open);
+}
+
+/** The default-closed Process details toggle, by its visible summary. */
+async function setProcessDetails(page, expect, open) {
+  const details = page.getByTestId('process-details');
+  if ((await processDetailsOpen(page)) !== open) {
+    await details.getByText('Process details', { exact: true }).click();
+  }
+  await expect(details).toHaveJSProperty('open', open);
+  return details;
+}
+
+/** Select a different forest row without relying on its position. */
+async function selectRowContaining(tree, needle) {
+  const rows = tree.getByRole('button');
+  const count = await rows.count();
+  for (let index = 0; index < count; index += 1) {
+    const text = (await rows.nth(index).textContent()) ?? '';
+    if (text.includes(needle)) {
+      await rows.nth(index).click();
+      return true;
+    }
+  }
+  throw new Error('no process row containing ' + JSON.stringify(needle));
 }
 
 /** The selected-PID vs PPID-descendant resource scope (#2514 SC-09). */
@@ -248,35 +297,26 @@ async function mobileLayout(page, expect, options = {}) {
     page.getByTestId(testId).isVisible().catch(() => false);
 
   // A narrow viewport is the App experience, which starts on Terminal. Enter
-  // its Workspace layer and re-establish the same selected process before
-  // measuring the layout.
+  // its Workspace layer and re-establish the current Session's process view.
   if (!(await visible('agent-processes'))) {
     await page.getByTestId('app-header-workspace').click();
-    // Wait for the App Workspace capability row before asking for Agent.
     await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 20_000 });
     if (!(await visible('agent-processes'))) {
       await page.getByTestId('workspace-tool-agent').click();
     }
     await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 20_000 });
   }
-  if (options.sessionName) {
-    const button = page
-      .getByTestId('agent-process-session-selector')
-      .getByRole('button', { name: options.sessionName });
-    await expect(button).toBeVisible({ timeout: 15_000 });
-    if ((await button.getAttribute('aria-pressed')) !== 'true') {
-      await button.click();
-    }
-    await expect(button).toHaveAttribute('aria-pressed', 'true');
-  }
+  await expect(page.getByTestId('agent-process-session-selector')).toHaveCount(0);
+  await expect(page.getByTestId('agent-process-session')).toContainText(options.sessionName ?? '');
+  const tree = page.getByTestId('process-forest');
   await expect.poll(async () => {
     const errorState = page.getByTestId('agent-processes-error');
     if ((await errorState.count()) > 0) {
       throw new Error('process snapshot failed: ' + (await errorState.innerText()));
     }
-    return page.locator('[data-testid^="process-pane-"]').count();
+    return tree.count();
   }, { timeout: 30_000, intervals: [500] }).toBeGreaterThan(0);
-  const pane = page.locator('[data-testid^="process-pane-"]').first();
+
   if (!(await visible('process-inspector'))) {
     if (options.rowText) {
       const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
@@ -285,10 +325,10 @@ async function mobileLayout(page, expect, options = {}) {
         if ((await errorState.count()) > 0) {
           throw new Error('process snapshot failed: ' + (await errorState.innerText()));
         }
-        if ((await pane.count()) === 0) {
+        if ((await tree.count()) === 0) {
           return false;
         }
-        const text = await pane.innerText();
+        const text = await tree.innerText();
         if (text.includes(options.rowText)) {
           return true;
         }
@@ -298,11 +338,12 @@ async function mobileLayout(page, expect, options = {}) {
         return false;
       }, { timeout: 30_000, intervals: [1_000] }).toBe(true);
     }
-    await clickRowContaining(pane, options.rowText ?? '');
+    await selectRowContaining(tree, options.rowText ?? '');
   }
   await expect(page.getByTestId('process-inspector')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('process-inspector').scrollIntoViewIfNeeded();
-  return page.evaluate(() => {
+
+  const measurement = await page.evaluate(() => {
     const command = document.querySelector('[data-testid="process-command"]');
     const inspector = document.querySelector('[data-testid="process-inspector"]');
     const commandBox = command ? command.getBoundingClientRect() : null;
@@ -318,23 +359,16 @@ async function mobileLayout(page, expect, options = {}) {
         inspectorBox && inspectorBox.width > 0),
     };
   });
-}
 
-/**
- * Click the first process row whose command contains `needle`; an empty
- * needle means the Pane root row (the first row in tree order).
- */
-async function clickRowContaining(pane, needle) {
-  const rows = pane.getByRole('button');
-  const count = await rows.count();
-  for (let index = 0; index < count; index += 1) {
-    const text = (await rows.nth(index).textContent()) ?? '';
-    if (!needle || text.includes(needle)) {
-      await rows.nth(index).click();
-      return;
-    }
-  }
-  throw new Error('no process row containing ' + JSON.stringify(needle));
+  // The pushed detail has a Back to the process list; using it must bring the
+  // forest back rather than leaving the user on an empty detail.
+  const back = page.getByRole('button', { name: 'Back to processes' });
+  await expect(back).toBeVisible();
+  await back.click();
+  await expect(page.getByTestId('process-forest')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('process-inspector')).toHaveCount(0);
+
+  return measurement;
 }
 
 /** Return to Terminal and back without typing; the Session focus must survive. */
@@ -343,9 +377,8 @@ async function returnToTerminalAndBack(page, expect, sessionName) {
   await expect(page.locator('.xterm')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('surface-action-open-workspace').click();
   await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 15_000 });
-  await expect(
-    page.getByTestId('agent-process-session-selector').getByRole('button', { name: sessionName }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('agent-process-session')).toContainText(sessionName);
+  await expect(page.getByTestId('agent-process-session-selector')).toHaveCount(0);
 }
 
 /** Return to Terminal and prove the Session still echoes after discovery. */
@@ -377,16 +410,27 @@ async function terminalContinuity(page, expect) {
   ).toContain('nession-2514-terminal-continuity');
 }
 
+function expectNoSecret(text) {
+  if (text.includes(SECRET)) {
+    throw new Error('the raw secret reached the browser');
+  }
+}
+
 module.exports = {
   SECRET,
   TYPED_COMMAND,
   captureInspector,
+  closeAgentDetails,
   copySanitizedCommand,
   inspectCredentialBearingProcess,
   inspectRoot,
   mobileLayout,
+  openAgentDetails,
   openAgentProcesses,
+  processDetailsOpen,
   returnToTerminalAndBack,
+  selectRowContaining,
+  setProcessDetails,
   subtreeScope,
   terminalContinuity,
 };

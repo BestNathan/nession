@@ -16,11 +16,12 @@ Related owners:
 
 ## What the feature is
 
-A user can open the existing **Agent** capability, select one of that Agent's
-Sessions, and read a bounded, point-in-time snapshot of the processes that
-belong to the Session's Panes. It is an observation. There is no process
-control, no kill/signal action, no cgroup creation, no resource quota, no
-retained history and no raw-environment reveal.
+A user opens the existing **Agent** capability from a Session and reads a
+bounded, point-in-time snapshot of the processes that belong to that **current
+Session**. The view never lists or switches to the Agent's other Sessions, and
+with no current Session it says so instead of choosing one. It is an
+observation. There is no process control, no kill/signal action, no cgroup
+creation, no resource quota, no retained history and no raw-environment reveal.
 
 The answer is produced by the Agent because only the Agent can combine tmux
 Pane identity with node-local OS observation. The Server authorizes and relays;
@@ -84,6 +85,37 @@ This is the fallback on every platform and the only method on macOS:
 Coverage is always `partial`: a daemonized or adopted worker that left the tree
 is not discoverable. SID, PGID and TTY travel on each process as
 **lower-confidence association evidence** and never upgrade the coverage claim.
+
+## Agent Workspace presentation
+
+Owner decision 2026-11-02 (supersedes the earlier Session → Pane → Process
+selector):
+
+- **Current Session only.** The Agent capability is opened from a Session; that
+  Session is the scope. There is no Session list, selector, auto-fallback, or
+  cross-Session process tree. With no valid current Session the view shows an
+  explicit contextual empty state and reads nothing.
+- **One Session forest.** The UI merges every observed Pane's processes,
+  deduplicates by identity (PID + start time), and draws only real PPID edges.
+  A process whose parent is not observed is a separate root with the Session's
+  honest coverage/reason evidence; ancestry is never fabricated.
+- **Pane identity is evidence, not a product noun.** Session/Window/Pane ids,
+  `pane_pid` and per-Pane groups stay on the transport and in discovery
+  diagnostics; the product UI shows the current Session, the process forest,
+  and the selected process.
+- **Progressive disclosure.** The resting view is a compact Agent
+  identity/connectivity header, followed by a default-closed **Agent details**
+  disclosure with three groups — Identity & connection, Runtime environment,
+  Capability & discovery. The selected-process inspector keeps the sanitized
+  executed command and CPU/RSS/threads/elapsed/I-O immediately visible, with a
+  default-closed **Process details** disclosure grouped into Process identity
+  and Discovery evidence. Changing the resource scope for the same PID keeps
+  the disclosure state; selecting another PID resets it.
+- **Navigation and focus.** Desktop shows the forest and inspector side by
+  side. App/narrow shows the forest as the root and pushes the process detail
+  with a Back that returns focus to the same row; the current Session is
+  preserved. Coverage/partial discovery never changes the Agent's connection
+  indicator.
 
 ## Wire truth
 

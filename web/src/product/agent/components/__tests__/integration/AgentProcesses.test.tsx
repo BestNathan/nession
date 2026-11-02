@@ -1,13 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { Agent, Session } from '@/types';
+import type { Agent } from '@/types';
 import type { DiscoveredProcess, ProcessMetric, ProcessSnapshot } from '@/product/agent/types';
 import type { DomainState } from '@/product/session/model/domainState';
 
 const api = vi.hoisted(() => {
   const state: { listener: (() => void) | null } = { listener: null };
   return {
-    listSessions: vi.fn(),
     fetchProcessSnapshot: vi.fn(),
     connectionRevision: vi.fn(() => 1),
     onConnectionChange: vi.fn((listener: () => void) => {
@@ -37,18 +36,18 @@ const agent: Agent = {
   ip_address: '10.0.0.1',
   port: 19091,
   status: 'online',
-  session_count: 1,
+  session_count: 2,
   last_heartbeat: '2026-01-01T00:00:00Z',
-};
-
-const session: Session = {
-  session_id: 'a1:s1',
-  agent_id: 'a1',
-  session_name: 's1',
-  status: 'active',
-  window_count: 1,
-  attached_clients: 0,
-  last_activity: '2026-01-01T00:00:00Z',
+  metadata: {
+    tmux_version: '3.4',
+    os_version: 'linux',
+    nession_version: '0.35.0',
+    image_tag: 'ghcr.io/nession/agent:dev',
+  },
+  protocols: {
+    provider: 'a1',
+    protocols: { 'agent.attach': { versions: [1] } },
+  },
 };
 
 function metric(value: number | null, state: ProcessMetric['state'] = 'sampled'): ProcessMetric {
@@ -78,6 +77,14 @@ function process(pid: number, parent: number | null, overrides: Partial<Discover
   };
 }
 
+const shell = process(10, 1, { command: 'bash -l --token [REDACTED]', redacted: true });
+const child = process(11, 10, {
+  command: 'sleep 30',
+  cpu_percent: metric(20),
+  io_read_kib_per_s: metric(null, 'unsupported'),
+});
+const worker = process(12, 1, { command: 'worker.py' });
+
 const snapshot: ProcessSnapshot = {
   session_name: 's1',
   snapshot_at_ms: 1_700_000_100_000,
@@ -97,66 +104,116 @@ const snapshot: ProcessSnapshot = {
       method: 'process_tree',
       coverage: 'partial',
       reason_codes: ['no_dedicated_cgroup', 'sid_tty_association'],
-      processes: [
-        process(10, 1, {
-          command: 'bash -l --token [REDACTED]',
-          redacted: true,
-        }),
-        process(11, 10, {
-          command: 'sleep 30',
-          cpu_percent: metric(20),
-          io_read_kib_per_s: metric(null, 'unsupported'),
-        }),
-      ],
+      processes: [shell, child, worker],
+    },
+    {
+      session_ids: ['$1'],
+      session_names: ['s1', 'linked'],
+      window_id: '@1',
+      window_index: 1,
+      window_name: 'shared',
+      pane_id: '%1',
+      pane_index: 0,
+      pane_pid: 10,
+      pane_tty: '/dev/pts/1',
+      method: 'process_tree',
+      coverage: 'partial',
+      reason_codes: ['no_dedicated_cgroup', 'sid_tty_association'],
+      processes: [shell, child],
     },
   ],
   truncated: false,
   limits: { max_processes: 512, max_depth: 32, cpu_window_ms: 150 },
 };
 
+function stubMedia(matches: boolean) {
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+    matches,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+}
+
+function clickSummary(testId: string) {
+  const summary = within(screen.getByTestId(testId)).getByText(
+    testId === 'agent-details' ? 'Agent details' : 'Process details',
+  );
+  fireEvent.click(summary);
+  return screen.getByTestId(testId) as HTMLDetailsElement;
+}
+
 describe('Agent Processes workspace', () => {
   beforeEach(() => {
-    api.listSessions.mockReset().mockResolvedValue([session]);
     api.fetchProcessSnapshot.mockReset().mockResolvedValue(snapshot);
     api.connectionRevision.mockReset().mockReturnValue(1);
     api.onConnectionChange.mockClear();
     api.state.listener = null;
+    stubMedia(true);
   });
 
-  it('re-asks the Agent after the transport is replaced', async () => {
-    render(<AgentDetail agent={agent} state={state} />);
-    await screen.findByTestId('process-pane-%0');
-    expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(1);
-
-    api.connectionRevision.mockReturnValue(2);
-    act(() => {
-      api.state.listener?.();
-    });
-
-    await waitFor(() => expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(2));
-    expect(api.state.listener).not.toBeNull();
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('drills down from the Agent to Panes and a command-first inspector', async () => {
+  it('observes only the current Session and renders one deduplicated forest', async () => {
     render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
 
-    expect(await screen.findByTestId('process-pane-%0')).toBeInTheDocument();
-    const pane = screen.getByTestId('process-pane-%0');
-    expect(within(pane).getByText(/No verified per-pane cgroup/)).toBeInTheDocument();
-    expect(pane).toHaveTextContent('Partial');
+    expect(await screen.findByTestId('process-forest')).toBeInTheDocument();
+    expect(api.fetchProcessSnapshot).toHaveBeenCalledWith('a1:s1');
+    expect(screen.queryByTestId('agent-process-session-selector')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-testid^="process-pane-"]')).toBeNull();
+    expect(screen.getByTestId('agent-process-session')).toHaveTextContent('s1');
+    expect(screen.getAllByText('bash -l --token [REDACTED]')).toHaveLength(1);
+    expect(screen.getByText('worker.py')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByText('bash -l --token [REDACTED]'));
+  it('does not fetch or choose a Session when the Workspace has none', async () => {
+    api.fetchProcessSnapshot.mockClear();
+    render(<AgentDetail agent={agent} state={state} />);
 
-    const inspector = await screen.findByTestId('process-inspector');
-    expect(within(inspector).getByTestId('process-command')).toHaveTextContent(
-      'bash -l --token [REDACTED]',
+    expect(await screen.findByTestId('agent-processes-no-session')).toBeInTheDocument();
+    expect(api.fetchProcessSnapshot).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('process-forest')).not.toBeInTheDocument();
+  });
+
+  it('keeps Agent details closed by default and groups the facts when opened', async () => {
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
+
+    const details = screen.getByTestId('agent-details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    const opened = clickSummary('agent-details');
+    expect(opened.open).toBe(true);
+
+    const content = within(screen.getByTestId('agent-details-content'));
+    expect(content.getByText('Identity & connection')).toBeInTheDocument();
+    expect(content.getByText('Runtime environment')).toBeInTheDocument();
+    expect(content.getByText('Capability & discovery')).toBeInTheDocument();
+    expect(content.getByText('a1')).toBeInTheDocument();
+    expect(content.getByText('10.0.0.1:19091')).toBeInTheDocument();
+    expect(content.getByText('3.4')).toBeInTheDocument();
+    expect(content.getByText('Available (v1)')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(content.getAllByText('Process tree').length).toBeGreaterThan(0),
     );
-    expect(within(inspector).getByText('redacted')).toBeInTheDocument();
-    expect(within(screen.getByTestId('process-metric-cpu')).getByText('10.0%')).toBeInTheDocument();
+  });
+
+  it('keeps Process details closed, persists it across scope, and resets on another PID', async () => {
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
+    fireEvent.click(await screen.findByText('bash -l --token [REDACTED]'));
+
+    expect((screen.getByTestId('process-details') as HTMLDetailsElement).open).toBe(false);
+    fireEvent.click(within(screen.getByTestId('process-details')).getByText('Process details'));
+    expect((screen.getByTestId('process-details') as HTMLDetailsElement).open).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'With descendants' }));
+    expect((screen.getByTestId('process-details') as HTMLDetailsElement).open).toBe(true);
+
+    fireEvent.click(screen.getByText('sleep 30'));
+    expect((screen.getByTestId('process-details') as HTMLDetailsElement).open).toBe(false);
   });
 
   it('aggregates PPID descendants and refuses to total a missing metric', async () => {
-    render(<AgentDetail agent={agent} state={state} />);
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
     fireEvent.click(await screen.findByText('bash -l --token [REDACTED]'));
 
     fireEvent.click(screen.getByRole('button', { name: 'With descendants' }));
@@ -173,7 +230,7 @@ describe('Agent Processes workspace', () => {
       configurable: true,
     });
 
-    render(<AgentDetail agent={agent} state={state} />);
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
     fireEvent.click(await screen.findByText('bash -l --token [REDACTED]'));
     fireEvent.click(screen.getByRole('button', { name: /Copy command/i }));
 
@@ -182,9 +239,28 @@ describe('Agent Processes workspace', () => {
     );
   });
 
+  it('never labels another Session with the previous snapshot', async () => {
+    const { rerender } = render(
+      <AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />,
+    );
+    await screen.findByTestId('process-forest');
+
+    rerender(
+      <AgentDetail
+        agent={{ ...agent, status: 'offline' }}
+        state={state}
+        currentSessionId="a1:s2"
+      />,
+    );
+
+    await screen.findByTestId('agent-processes-offline');
+    expect(screen.getByTestId('agent-process-session')).toHaveTextContent('s2');
+    expect(screen.queryByTestId('process-forest')).not.toBeInTheDocument();
+  });
+
   it('does not pretend an offline Agent answered', async () => {
     api.fetchProcessSnapshot.mockClear();
-    render(<AgentDetail agent={{ ...agent, status: 'offline' }} state={state} />);
+    render(<AgentDetail agent={{ ...agent, status: 'offline' }} state={state} currentSessionId="a1:s1" />);
 
     expect(await screen.findByTestId('agent-processes-offline')).toBeInTheDocument();
     expect(api.fetchProcessSnapshot).not.toHaveBeenCalled();
@@ -196,14 +272,43 @@ describe('Agent Processes workspace', () => {
       .mockResolvedValueOnce(snapshot)
       .mockRejectedValueOnce(new Error('agent timed out'));
 
-    render(<AgentDetail agent={agent} state={state} />);
-    await screen.findByTestId('process-pane-%0');
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
+    await screen.findByTestId('process-forest');
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh process snapshot' }));
 
     const error = await screen.findByTestId('agent-processes-error');
     expect(error).toHaveTextContent('agent timed out');
     expect(error).toHaveTextContent('Showing the last snapshot');
-    expect(screen.getByTestId('process-pane-%0')).toBeInTheDocument();
+    expect(screen.getByTestId('process-forest')).toBeInTheDocument();
+  });
+
+  it('re-asks the Agent after the transport is replaced', async () => {
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
+    await screen.findByTestId('process-forest');
+    expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(1);
+
+    api.connectionRevision.mockReturnValue(2);
+    act(() => {
+      api.state.listener?.();
+    });
+
+    await waitFor(() => expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(2));
+    expect(api.state.listener).not.toBeNull();
+  });
+
+  it('moves focus into the App/narrow detail and back to the selected row', async () => {
+    stubMedia(false);
+    render(<AgentDetail agent={agent} state={state} currentSessionId="a1:s1" />);
+    const row = await screen.findByText('bash -l --token [REDACTED]');
+
+    const rowButton = row.closest('button');
+    fireEvent.click(row);
+    const inspector = screen.getByTestId('process-inspector');
+    await waitFor(() => expect(document.activeElement).toBe(inspector.parentElement));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to processes' }));
+    expect(screen.queryByTestId('process-inspector')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(rowButton));
   });
 });

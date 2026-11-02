@@ -14,12 +14,11 @@ vi.mock('@/extensions/registry', async (importOriginal) => {
   };
 });
 
-// AgentDetail now owns the Sessions & Processes section (#2514); these tests are
-// about the surrounding detail view, so the transport read is a quiet empty
-// list rather than an unconfigured-socket error.
+// AgentDetail composes the current-Session process view (#2514); these tests
+// are about the surrounding detail view, so the transport read stays quiet
+// rather than arriving as an unconfigured-socket error.
 vi.mock('@/product/session', () => ({
   sessionsApi: {
-    listSessions: vi.fn().mockResolvedValue([]),
     fetchProcessSnapshot: vi.fn(),
     connectionRevision: () => 1,
     onConnectionChange: () => () => {},

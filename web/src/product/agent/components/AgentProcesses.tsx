@@ -1,143 +1,253 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/shared/lib/utils';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { Agent } from '@/types';
-import type { ProcessSnapshot } from '@/product/agent/types';
+import type { DiscoveredProcess, ProcessCoverage } from '@/product/agent/types';
+import type { AgentProcessesState } from '@/product/agent/hooks/useAgentProcesses';
 import {
   coverageLabel,
   formatSnapshotTime,
   methodLabel,
   processKey,
   reasonLabel,
+  sessionDiscovery,
+  sessionProcesses,
 } from '@/product/agent/model/processSnapshot';
-import { useAgentProcesses, type AgentProcessesState } from '@/product/agent/hooks/useAgentProcesses';
-import { ProcessTree, type SelectedProcess } from './ProcessTree';
+import { ProcessTree } from './ProcessTree';
 import { ProcessInspector } from './ProcessInspector';
 
 export interface AgentProcessesProps {
   agent: Agent;
-  /** The Session the Workspace was opened from, when it belongs to `agent`. */
-  currentSessionId?: string | null;
+  view: AgentProcessesState;
 }
 
 /**
- * Contextual Sessions & Processes section of AgentDetail (#2514).
- *
- * This is deeper detail on one already-open Agent, not a permanent Process
- * tab: it sits inside the existing Agent Workspace capability, keeps the node
- * identity above it, and never becomes a navigation parent for Sessions.
+ * Selected-PID state, kept across snapshot refreshes by identity (PID + start
+ * time), plus the App/narrow focus handoff between the forest and the detail.
  */
-export function AgentProcesses({ agent, currentSessionId }: AgentProcessesProps) {
-  const view = useAgentProcesses(agent, currentSessionId);
-  const [selection, setSelection] = useState<SelectedProcess | null>(null);
-
-  // Keep a selected process across a refresh only while the new snapshot still
-  // contains the same PID + start time at the same Pane. A selection that
-  // vanished is dropped rather than re-pointed at a reused PID.
+function useProcessSelection(processes: DiscoveredProcess[], sessionId: string | null) {
+  const [selection, setSelection] = useState<DiscoveredProcess | null>(null);
   const selected = useMemo(() => {
-    if (!view.snapshot || !selection) {
+    if (!selection) {
       return null;
     }
-    const pane = view.snapshot.panes.find((candidate) => candidate.pane_id === selection.paneId);
-    const process = pane?.processes.find(
-      (candidate) => processKey(candidate) === processKey(selection.process),
-    );
-    return pane && process ? { paneId: pane.pane_id, process } : null;
-  }, [view.snapshot, selection]);
+    const key = processKey(selection);
+    return processes.find((process) => processKey(process) === key) ?? null;
+  }, [selection, processes]);
 
-  const selectedPane = selected
-    ? view.snapshot?.panes.find((pane) => pane.pane_id === selected.paneId) ?? null
-    : null;
+  const isWide = useMediaQuery('(min-width: 1024px)');
+  const treeRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLDivElement>(null);
+  const focusedKey = useRef<string | null>(null);
+  const returnFocusKey = useRef<string | null>(null);
+
+  // A Workspace Session switch is a new observation; never carry the previous
+  // Session's selected PID into it.
+  useEffect(() => {
+    setSelection(null);
+  }, [sessionId]);
+
+  // App/narrow detail behaves like a pushed view: focus moves into the detail
+  // and Back restores it to the row that opened it. Desktop never steals focus.
+  useEffect(() => {
+    const key = selected ? processKey(selected) : null;
+    if (key === focusedKey.current) {
+      return;
+    }
+    focusedKey.current = key;
+    if (isWide) {
+      return;
+    }
+    if (key) {
+      const inspector = inspectorRef.current;
+      inspector?.focus();
+      if (typeof inspector?.scrollIntoView === 'function') {
+        inspector.scrollIntoView({ block: 'start' });
+      }
+      return;
+    }
+    const keyToRestore = returnFocusKey.current;
+    returnFocusKey.current = null;
+    if (keyToRestore) {
+      treeRef.current
+        ?.querySelector<HTMLElement>(`[data-process-key="${keyToRestore}"]`)
+        ?.focus();
+      if (typeof treeRef.current?.scrollIntoView === 'function') {
+        treeRef.current.scrollIntoView({ block: 'start' });
+      }
+    }
+  }, [selected, isWide]);
+
+  const select = (process: DiscoveredProcess) => {
+    returnFocusKey.current = processKey(process);
+    setSelection(process);
+  };
+
+  const back = () => {
+    if (selected) {
+      returnFocusKey.current = processKey(selected);
+    }
+    setSelection(null);
+  };
+
+  return { selected, select, back, treeRef, inspectorRef };
+}
+
+/**
+ * The current Session's processes inside the existing Agent capability (#2514).
+ *
+ * This is one Session-scoped observation, not an Agent-wide process list: there
+ * is no Session selector and no Pane/Window grouping. On desktop the forest and
+ * the selected-process inspector sit side by side; on the App/narrow layout the
+ * forest is the root and selecting a process pushes its detail with a Back that
+ * returns focus to the same row.
+ */
+export function AgentProcesses({ agent, view }: AgentProcessesProps) {
+  const snapshot = view.snapshot;
+  const processes = useMemo(
+    () => (snapshot ? sessionProcesses(snapshot.panes) : []),
+    [snapshot],
+  );
+  const discovery = useMemo(
+    () => (snapshot ? sessionDiscovery(snapshot) : null),
+    [snapshot],
+  );
+  const { selected, select, back, treeRef, inspectorRef } = useProcessSelection(
+    processes,
+    view.sessionId,
+  );
 
   return (
     <section data-testid="agent-processes" className="flex min-w-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h3 className={chromeSansRole('primary')}>Sessions &amp; Processes</h3>
+        <h3 className={chromeSansRole('primary')}>Processes</h3>
         <RefreshButton
           onClick={() => view.refresh()}
+          disabled={agent.status !== 'online' || !view.sessionId}
           loading={view.snapshotLoading}
           ariaLabel="Refresh process snapshot"
           variant="ghost"
         />
       </div>
 
-      <SessionSelector
-        view={view}
-        onSelect={(sessionId) => {
-          setSelection(null);
-          view.selectSession(sessionId);
-        }}
-      />
-      <ProcessNotices agent={agent} view={view} />
-      <SnapshotArea
-        view={view}
-        selected={selected}
-        selectedPane={selectedPane}
-        onSelect={setSelection}
-      />
+      <SessionIdentity view={view} />
+      <ProcessNotices agent={agent} view={view} discovery={discovery} />
+
+      {!view.sessionId ? (
+        <p
+          data-testid="agent-processes-no-session"
+          className={cn('text-muted-foreground', chromeSansRole('body'))}
+        >
+          No current Session. Open this Agent from a Session to inspect that Session&apos;s
+          processes; the Agent&apos;s other Sessions are never chosen automatically.
+        </p>
+      ) : null}
+
+      {view.sessionId && view.snapshotLoading && !snapshot ? (
+        <Skeleton data-testid="agent-processes-snapshot-loading" className="h-24 w-full" />
+      ) : null}
+
+      {snapshot && discovery ? (
+        <>
+          <SnapshotHeader
+            snapshot={snapshot}
+            discovery={discovery}
+            processCount={processes.length}
+          />
+
+          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+            <div
+              ref={treeRef}
+              className={cn(
+                'flex min-w-0 flex-col gap-1',
+                selected ? 'hidden lg:flex' : 'flex',
+              )}
+            >
+              <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+                {processes.length} discovered
+              </p>
+              <ProcessTree
+                processes={processes}
+                selected={selected}
+                onSelect={select}
+              />
+            </div>
+
+            <div
+              ref={inspectorRef}
+              tabIndex={-1}
+              aria-label="Selected process inspector"
+              className={cn(
+                'min-w-0 rounded-[var(--nession-radius-surface)] focus:outline-none lg:p-0',
+                selected ? 'flex flex-col gap-3' : 'hidden lg:block',
+              )}
+            >
+              {selected ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => back()}
+                    className={cn(
+                      'flex min-h-9 w-fit items-center gap-1 rounded-[var(--nession-radius-control)] px-2 text-muted-foreground hover:bg-muted/60 lg:hidden',
+                      chromeSansRole('secondary'),
+                    )}
+                  >
+                    <ArrowLeft aria-hidden className="size-[length:var(--nession-icon-sm)]" />
+                    Back to processes
+                  </button>
+                  <ProcessInspector
+                    key={processKey(selected)}
+                    process={selected}
+                    snapshot={snapshot}
+                    discovery={discovery}
+                    processes={processes}
+                  />
+                </>
+              ) : (
+                <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+                  Select a process to inspect its sanitized command and resources.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <Diagnostics snapshot={snapshot} discovery={discovery} />
+        </>
+      ) : null}
     </section>
   );
 }
 
-function SessionSelector({
-  view,
-  onSelect,
-}: {
-  view: AgentProcessesState;
-  onSelect: (sessionId: string) => void;
-}) {
-  if (view.sessionsError) {
-    return (
-      <p
-        data-testid="agent-processes-sessions-error"
-        role="alert"
-        className={cn('text-destructive', chromeSansRole('body'))}
-      >
-        Sessions could not be listed: {view.sessionsError}
-      </p>
-    );
-  }
-  if (view.sessionsLoading && view.sessions.length === 0) {
-    return <Skeleton data-testid="agent-processes-loading" className="h-8 w-full" />;
-  }
-  if (view.sessions.length === 0) {
-    return (
-      <p className={cn('text-muted-foreground', chromeSansRole('body'))}>
-        This Agent reports no Sessions.
-      </p>
-    );
+function SessionIdentity({ view }: { view: AgentProcessesState }) {
+  if (!view.sessionId) {
+    return null;
   }
   return (
-    <div
-      role="group"
-      aria-label="Sessions on this Agent"
-      className="flex flex-wrap items-center gap-1"
-      data-testid="agent-process-session-selector"
-    >
-      {view.sessions.map((session) => {
-        const isSelected = session.session_id === view.selectedSessionId;
-        return (
-          <Button
-            key={session.session_id}
-            type="button"
-            size="sm"
-            variant={isSelected ? 'secondary' : 'ghost'}
-            aria-pressed={isSelected}
-            onClick={() => onSelect(session.session_id)}
-          >
-            {session.session_name}
-          </Button>
-        );
-      })}
+    <div data-testid="agent-process-session" className="flex min-w-0 flex-wrap items-baseline gap-2">
+      <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+        Current Session
+      </span>
+      <span className={cn('min-w-0 truncate', chromeMonoRole('code'))}>
+        {view.sessionName ?? view.sessionId}
+      </span>
     </div>
   );
 }
 
-function ProcessNotices({ agent, view }: { agent: Agent; view: AgentProcessesState }) {
+function ProcessNotices({
+  agent,
+  view,
+  discovery,
+}: {
+  agent: Agent;
+  view: AgentProcessesState;
+  discovery: ReturnType<typeof sessionDiscovery> | null;
+}) {
   const offlineLabel = agent.status === 'degraded' ? 'is degraded' : 'is offline';
   return (
     <>
@@ -147,7 +257,7 @@ function ProcessNotices({ agent, view }: { agent: Agent; view: AgentProcessesSta
           className={cn('text-muted-foreground', chromeSansRole('body'))}
         >
           Agent {offlineLabel} — a new process snapshot cannot be read. Last-known facts, if
-          any, remain below.
+          any, remain below; no process count is inferred.
         </p>
       ) : null}
       {view.snapshotError ? (
@@ -162,108 +272,86 @@ function ProcessNotices({ agent, view }: { agent: Agent; view: AgentProcessesSta
             : ''}
         </p>
       ) : null}
-      {view.snapshotLoading && !view.snapshot ? (
-        <Skeleton data-testid="agent-processes-snapshot-loading" className="h-24 w-full" />
+      {discovery && discovery.coverage === 'partial' ? (
+        <p
+          data-testid="agent-processes-coverage"
+          className={cn('text-muted-foreground', chromeSansRole('caption'))}
+        >
+          Partial discovery
+          {discovery.reasonCodes.length > 0
+            ? ` — ${discovery.reasonCodes.map(reasonLabel).join(' ')}`
+            : '.'}
+        </p>
       ) : null}
     </>
   );
 }
 
-function SnapshotArea({
-  view,
-  selected,
-  selectedPane,
-  onSelect,
-}: {
-  view: AgentProcessesState;
-  selected: SelectedProcess | null;
-  selectedPane: ProcessSnapshot['panes'][number] | null;
-  onSelect: (selection: SelectedProcess) => void;
-}) {
-  if (!view.snapshot) {
-    return view.selectedSessionId && !view.snapshotError && !view.snapshotLoading ? (
-      <p className={cn('text-muted-foreground', chromeSansRole('body'))}>
-        No process snapshot yet. Refresh to ask the Agent.
-      </p>
-    ) : null;
-  }
-  return (
-    <>
-      <SnapshotSection snapshot={view.snapshot} selected={selected} onSelect={onSelect} />
-      {selected && selectedPane ? (
-        <ProcessInspector
-          key={processKey(selected.process)}
-          process={selected.process}
-          pane={selectedPane}
-          snapshot={view.snapshot}
-        />
-      ) : (
-        <p
-          data-testid="agent-processes-hint"
-          className={cn('text-muted-foreground', chromeSansRole('caption'))}
-        >
-          Select a process to inspect its sanitized command and resources.
-        </p>
-      )}
-    </>
-  );
-}
-
-function SnapshotSection({
+function SnapshotHeader({
   snapshot,
-  selected,
-  onSelect,
+  discovery,
+  processCount,
 }: {
-  snapshot: ProcessSnapshot;
-  selected: SelectedProcess | null;
-  onSelect: (selection: SelectedProcess) => void;
+  snapshot: NonNullable<AgentProcessesState['snapshot']>;
+  discovery: ReturnType<typeof sessionDiscovery>;
+  processCount: number;
 }) {
-  const totalProcesses = snapshot.panes.reduce((count, pane) => count + pane.processes.length, 0);
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h4 className={cn('min-w-0 truncate', chromeSansRole('primary'))}>
           {snapshot.session_name}
         </h4>
-        {snapshot.methods.map((method) => (
+        {discovery.methods.map((method) => (
           <Badge key={method} variant="outline">
             {methodLabel(method)}
           </Badge>
         ))}
+        <Badge variant={coverageVariant(discovery.coverage)}>
+          {coverageLabel(discovery.coverage)}
+        </Badge>
         {snapshot.truncated ? <Badge variant="destructive">truncated</Badge> : null}
       </div>
       <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-        Snapshot {formatSnapshotTime(snapshot.snapshot_at_ms)} · {snapshot.platform} ·{' '}
-        {totalProcesses} process{totalProcesses === 1 ? '' : 'es'} across{' '}
-        {snapshot.panes.length} pane{snapshot.panes.length === 1 ? '' : 's'} ·{' '}
+        {processCount} process{processCount === 1 ? '' : 'es'} · Snapshot{' '}
+        {formatSnapshotTime(snapshot.snapshot_at_ms)} · {snapshot.platform} ·{' '}
         {snapshot.limits.cpu_window_ms} ms CPU window
       </p>
-
-      <ProcessTree panes={snapshot.panes} selected={selected} onSelect={onSelect} />
-      <Diagnostics snapshot={snapshot} />
     </div>
   );
 }
 
-function Diagnostics({ snapshot }: { snapshot: ProcessSnapshot }) {
+function Diagnostics({
+  snapshot,
+  discovery,
+}: {
+  snapshot: NonNullable<AgentProcessesState['snapshot']>;
+  discovery: ReturnType<typeof sessionDiscovery>;
+}) {
   return (
     <details data-testid="agent-process-diagnostics" className="min-w-0">
       <summary className={cn('cursor-pointer text-muted-foreground', chromeSansRole('caption'))}>
-        Diagnostics
+        Discovery diagnostics
       </summary>
       <dl className={cn('mt-2 grid gap-2', chromeSansRole('caption'))}>
-        {snapshot.panes.map((pane) => (
-          <div key={pane.pane_id} className="flex min-w-0 flex-col gap-0.5">
-            <dt className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>
-              {pane.pane_id} · {methodLabel(pane.method)} · {coverageLabel(pane.coverage)}
-            </dt>
-            <dd>
-              {pane.reason_codes.length > 0
-                ? pane.reason_codes.map(reasonLabel).join(' ')
-                : 'No fallback or bound reason was reported.'}
-            </dd>
-          </div>
-        ))}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>Scope</dt>
+          <dd>Current Session only · internal execution-unit identifiers are not shown.</dd>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>Method</dt>
+          <dd>
+            {discovery.methods.map(methodLabel).join(' · ')} · {coverageLabel(discovery.coverage)}
+          </dd>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>Reasons</dt>
+          <dd>
+            {discovery.reasonCodes.length > 0
+              ? discovery.reasonCodes.map(reasonLabel).join(' ')
+              : 'No fallback or bound reason was reported.'}
+          </dd>
+        </div>
         <div className="flex min-w-0 flex-col gap-0.5">
           <dt className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>Limits</dt>
           <dd>
@@ -274,4 +362,15 @@ function Diagnostics({ snapshot }: { snapshot: ProcessSnapshot }) {
       </dl>
     </details>
   );
+}
+
+function coverageVariant(coverage: ProcessCoverage): 'secondary' | 'outline' | 'destructive' {
+  switch (coverage) {
+    case 'complete':
+      return 'secondary';
+    case 'partial':
+      return 'outline';
+    default:
+      return 'destructive';
+  }
 }

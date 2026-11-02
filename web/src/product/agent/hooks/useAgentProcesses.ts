@@ -1,29 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Agent, Session } from '@/types';
+import type { Agent } from '@/types';
 import type { ProcessSnapshot } from '@/generated/protocol/core/server-session-processes/v1';
 import { sessionsApi } from '@/product/session';
 
 /**
- * Read-only process discovery for one Agent's Sessions (#2514).
+ * Read-only process discovery for the Workspace's current Session (#2514).
  *
- * Two independent reads, deliberately kept apart: the Session list comes from
- * the Server's registry, and each snapshot comes from the Agent on demand. A
- * failed refresh keeps the last snapshot and says it is stale rather than
+ * The Agent capability observes one Session — the one whose Workspace the user
+ * is already in. It never lists the Agent's other Sessions and never silently
+ * chooses one: with no current Session the view is explicitly empty.
+ *
+ * A failed refresh keeps the last snapshot and says it is stale rather than
  * blanking the view — "we could not ask" and "there is nothing" are different
  * answers.
  */
 export interface AgentProcessesState {
-  sessions: Session[];
-  sessionsLoading: boolean;
-  sessionsError: string | null;
-  selectedSessionId: string | null;
-  selectSession: (sessionId: string) => void;
+  /** The current Session id, when the Workspace has one for this Agent. */
+  sessionId: string | null;
+  /** The current Session's name, derived from the id before a snapshot arrives. */
+  sessionName: string | null;
   snapshot: ProcessSnapshot | null;
   snapshotLoading: boolean;
   snapshotError: string | null;
   /** The snapshot is from an earlier successful read; the latest attempt failed. */
   snapshotStale: boolean;
-  /** Ask the Agent again for the selected Session. */
+  /** Ask the Agent again for the current Session. */
   refresh: () => void;
 }
 
@@ -31,65 +32,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function useAgentSessions(
-  agentId: string,
-  currentSessionId: string | null | undefined,
-  connectionRevision: number,
-) {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const request = useRef(0);
-
-  useEffect(() => {
-    request.current += 1;
-    setSessions([]);
-    setSelectedSessionId(null);
-  }, [agentId]);
-
-  useEffect(() => {
-    const current = ++request.current;
-    setLoading(true);
-    setError(null);
-    sessionsApi
-      .listSessions(agentId)
-      .then((list) => {
-        if (current === request.current) {
-          setSessions(list);
-        }
-      })
-      .catch((failure: unknown) => {
-        if (current === request.current) {
-          setError(errorMessage(failure));
-        }
-      })
-      .finally(() => {
-        if (current === request.current) {
-          setLoading(false);
-        }
-      });
-  }, [agentId, connectionRevision]);
-
-  // Keep a valid selection as the list changes. Prefer the Session the
-  // Workspace was opened from, so returning to this view keeps focus.
-  useEffect(() => {
-    if (loading) {
-      return;
-    }
-    setSelectedSessionId((previous) => {
-      if (previous && sessions.some((session) => session.session_id === previous)) {
-        return previous;
-      }
-      const preferred =
-        currentSessionId && sessions.some((session) => session.session_id === currentSessionId)
-          ? currentSessionId
-          : null;
-      return preferred ?? sessions[0]?.session_id ?? null;
-    });
-  }, [sessions, loading, currentSessionId]);
-
-  return { sessions, loading, error, selectedSessionId, setSelectedSessionId };
+/** `agent_id:session_name` → `session_name`; a name may itself contain colons. */
+function sessionNameOf(sessionId: string | null): string | null {
+  if (!sessionId) {
+    return null;
+  }
+  const separator = sessionId.indexOf(':');
+  const name = separator >= 0 ? sessionId.slice(separator + 1) : sessionId;
+  return name.length > 0 ? name : null;
 }
 
 function useConnectionRevision(): number {
@@ -106,7 +56,7 @@ function useConnectionRevision(): number {
 
 function useSnapshot(
   agent: Agent,
-  selectedSessionId: string | null,
+  sessionId: string | null,
   connectionRevision: number,
 ) {
   const [snapshot, setSnapshot] = useState<ProcessSnapshot | null>(null);
@@ -119,13 +69,21 @@ function useSnapshot(
 
   useEffect(() => {
     const current = ++request.current;
-    if (!selectedSessionId) {
+    if (!sessionId) {
       snapshotRef.current = null;
       setSnapshot(null);
       setError(null);
       setStale(false);
       setLoading(false);
       return;
+    }
+    // A refresh of the same Session may keep the last snapshot while the new
+    // read is in flight; a different Session never inherits it. Keeping it
+    // would label another Session's processes as this one's.
+    if (snapshotRef.current?.session_name !== sessionNameOf(sessionId)) {
+      snapshotRef.current = null;
+      setSnapshot(null);
+      setStale(false);
     }
     if (agent.status !== 'online') {
       // Do not pretend the Agent answered. A previous snapshot may still be
@@ -139,7 +97,7 @@ function useSnapshot(
     setLoading(true);
     setError(null);
     sessionsApi
-      .fetchProcessSnapshot(selectedSessionId)
+      .fetchProcessSnapshot(sessionId)
       .then((next) => {
         if (current === request.current) {
           snapshotRef.current = next;
@@ -158,7 +116,7 @@ function useSnapshot(
           setLoading(false);
         }
       });
-  }, [selectedSessionId, refreshNonce, agent.status, connectionRevision]);
+  }, [sessionId, refreshNonce, agent.status, connectionRevision]);
 
   const refresh = useCallback(() => {
     setRefreshNonce((nonce) => nonce + 1);
@@ -172,15 +130,12 @@ export function useAgentProcesses(
   currentSessionId?: string | null,
 ): AgentProcessesState {
   const connectionRevision = useConnectionRevision();
-  const sessions = useAgentSessions(agent.agent_id, currentSessionId, connectionRevision);
-  const snapshot = useSnapshot(agent, sessions.selectedSessionId, connectionRevision);
+  const sessionId = currentSessionId ?? null;
+  const snapshot = useSnapshot(agent, sessionId, connectionRevision);
 
   return {
-    sessions: sessions.sessions,
-    sessionsLoading: sessions.loading,
-    sessionsError: sessions.error,
-    selectedSessionId: sessions.selectedSessionId,
-    selectSession: sessions.setSelectedSessionId,
+    sessionId,
+    sessionName: sessionNameOf(sessionId),
     snapshot: snapshot.snapshot,
     snapshotLoading: snapshot.loading,
     snapshotError: snapshot.error,
