@@ -74,8 +74,8 @@ jobs:
       # bare Git, not live server-side Apps or branch authorization.
       # The drill uses only disposable local Git; it cannot prove live denial.
       # This remains an alert until independent administrator and write-denial
-    # proof is available; the three legacy and fourth agent-store histories
-    # are separately checked against explicitly unanchored Git baselines.
+      # proof is available; the three legacy and fourth agent-store histories
+      # are separately checked against explicitly unanchored Git baselines.
       # It fetches only GitHub refs / full Git ancestry through read-only
       # permissions. No secret admin token or privileged writer is supplied.
       - name: Independently audit orphan Git ancestry and live App Rulesets
