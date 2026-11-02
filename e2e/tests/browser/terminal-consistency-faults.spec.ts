@@ -1083,7 +1083,10 @@ for (const mode of ['P2P', 'Auto'] as const) {
       const sockets = await agentSockets();
       return sockets.filter((socket) => socket.readyState === 1).length;
     }, { timeout: 30_000 }).toBeGreaterThan(0);
-    const openAgent = (await agentSockets()).find((socket) => socket.readyState === 1);
+    // The attach probe opens and closes its own short-lived Agent socket; the
+    // terminal transport is the most recently opened live one.
+    const openAgents = (await agentSockets()).filter((socket) => socket.readyState === 1);
+    const openAgent = openAgents[openAgents.length - 1];
     const originalToken = new URL(openAgent?.url ?? 'ws://invalid').searchParams.get('token');
     expect(originalToken, 'the direct route presents a credential').toBeTruthy();
 

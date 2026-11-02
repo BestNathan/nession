@@ -154,11 +154,16 @@ for (const mode of ['P2P', 'Auto']) {
       const sockets = await agentSockets();
       return sockets.filter((socket) => socket.readyState === 1).length;
     }, { timeout: 30_000 }).toBeGreaterThan(0);
-    const openAgent = (await agentSockets()).find((socket) => socket.readyState === 1);
+    // The attach probe opens and closes its own short-lived Agent socket; the
+    // terminal transport is the most recently opened live one.
+    const openAgents = (await agentSockets()).filter((socket) => socket.readyState === 1);
+    const openAgent = openAgents[openAgents.length - 1];
     const originalToken = new URL(openAgent.url).searchParams.get('token');
     expect(originalToken, 'the direct route presents a credential').toBeTruthy();
 
-    await xtermInput(page, `printf '${BEFORE}%s\\n' ''`);
+    // The marker is passed through `%s` so the echoed command line does not
+    // itself contain it: only the printed output counts.
+    await xtermInput(page, "printf 'TTL-2645-%s\\n' BEFORE");
     await expect.poll(async () => countInBuffer(page, BEFORE), { timeout: 20_000 }).toBe(1);
     const attachRequestsBefore = sentTypes
       .filter((type) => type === 'server.session.attach').length;
@@ -208,7 +213,7 @@ for (const mode of ['P2P', 'Auto']) {
       .not.toContain('server.session.relay.begin');
 
     // Exactly-once continuity across the renewal on the same renderer.
-    await xtermInput(page, `printf '${AFTER}%s\\n' ''`);
+    await xtermInput(page, "printf 'TTL-2645-%s\\n' AFTER");
     await expect.poll(async () => countInBuffer(page, AFTER), { timeout: 20_000 }).toBe(1);
     expect(await countInBuffer(page, BEFORE)).toBe(1);
 
