@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6201d70f1d67e58cd555f472ae9a3e7714810da08b7ce59113ccfa79c19ecabe",
+  "run_id": 41409744745,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-01",
+  "criterion_text": "Linux independent per-Pane cgroup discovery lists current descendants, including reparented workers, with deduplication across linked tmux Windows and bounded enumeration.",
+  "stage": "staging",
+  "target_sha": "83878962b414ba912d606a000deca6aef0fb5714",
+  "contract_sha256": "dd88eedd38df3114bf14ed2b175f5649bdbe7dc461e152ec4d4373436f4f48e7",
+  "case_revision": "83878962b414ba912d606a000deca6aef0fb5714",
+  "case_tree_sha": "0a84032165abf4b188d250e6cf99f00bf4f3a29d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:01:01.956Z",
+  "finished_at": "2026-11-02T08:01:39.400Z",
+  "duration_ms": 37444,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Linux dedicated per-Pane cgroup discovery is verified, including recursive membership, shared-scope rejection, linked-Window deduplication and bounded enumeration",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 83878962b414ba912d606a000deca6aef0fb5714 on Linux x86_64: a tmux-spawn scope was resolved under the cgroup root, nested cgroup.procs were read recursively, and the Pane root had to be present before membership was claimed"
+        },
+        {
+          "type": "runtime",
+          "value": "a cgroup containing the Agent was rejected as shared; linked Window rows kept both Session memberships while the Pane and its process list appeared once; process and depth bounds marked truncation"
+        },
+        {
+          "type": "runtime",
+          "value": "a real isolated tmux server reported its Pane root and descendants through the same snapshot projection, under the discovery method the runner actually exposes"
+        }
+      ],
+      "duration_ms": 37420,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41409744745,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "83878962b414ba912d606a000deca6aef0fb5714",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41409744745",
+    "record_path": "runs/2026-11-02/41409744745-1/2514/SC-01.json",
+    "source_result_sha256": "1b5ca877fbfc917502e6bc09e4957f42b80d366bdc7770f83ad6a6bb6f198fe6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41409744745-1",
+    "sha256": "1b5ca877fbfc917502e6bc09e4957f42b80d366bdc7770f83ad6a6bb6f198fe6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41409744745",
+    "durability": "time-limited; object archival not configured"
+  }
+}

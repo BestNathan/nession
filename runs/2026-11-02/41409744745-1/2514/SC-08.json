@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4bc3833000204dca18eb28cd11f005090be12551170008049791b8f3aa46c2ff",
+  "run_id": 41409744745,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-08",
+  "criterion_text": "Selecting any process presents its **sanitized executable + argument command line** first, followed by CPU, RSS, thread count, lifetime and optional I/O rates; unsupported/denied/expired metrics show explicit unavailable state, not 0, with mobile-readable layout and a safe copy affordance that never reveals or copies raw secret-bearing argv.",
+  "stage": "staging",
+  "target_sha": "83878962b414ba912d606a000deca6aef0fb5714",
+  "contract_sha256": "dd88eedd38df3114bf14ed2b175f5649bdbe7dc461e152ec4d4373436f4f48e7",
+  "case_revision": "83878962b414ba912d606a000deca6aef0fb5714",
+  "case_tree_sha": "d4f1866fb1cee6fd052df68533a1b8545d491786",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:02:07.250Z",
+  "finished_at": "2026-11-02T08:02:17.277Z",
+  "duration_ms": 10027,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (2 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=61"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 61
+      },
+      "duration_ms": 6495,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The command is sanitized and bounded at the Agent boundary, and the inspector renders it first with unavailable metrics distinct from zero",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 83878962b414ba912d606a000deca6aef0fb5714: secret flags, assignment values, URL userinfo and bearer material were replaced before the Agent→Server hop; display bounds were reported"
+        },
+        {
+          "type": "test",
+          "value": "exact SHA 83878962b414ba912d606a000deca6aef0fb5714: 21 inspector/model tests passed — command-first order, sanitized copy source, sampled zero versus unavailable, and an incomplete subtree metric staying unavailable"
+        }
+      ],
+      "duration_ms": 3518,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41409744745,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "83878962b414ba912d606a000deca6aef0fb5714",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41409744745",
+    "record_path": "runs/2026-11-02/41409744745-1/2514/SC-08.json",
+    "source_result_sha256": "3ea6edb40dbdf81ee54ad89195dd10cc1ce3c4ef96615b798b54ed174187cb90"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41409744745-1",
+    "sha256": "3ea6edb40dbdf81ee54ad89195dd10cc1ce3c4ef96615b798b54ed174187cb90",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41409744745",
+    "durability": "time-limited; object archival not configured"
+  }
+}
