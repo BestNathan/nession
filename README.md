@@ -23,7 +23,7 @@
 | Fixed-column Terminal / real CSS font-size simulator | [#2487](https://github.com/BestNathan/nession/issues/2487) | [Interactive HTML](terminal-fixed-cols-2487/index.html) · [Scenario & fidelity](terminal-fixed-cols-2487/README.md) |
 | Terminal Clipboard Protocols / transient permission & unsupported states | [#2598](https://github.com/BestNathan/nession/issues/2598) | [Interactive HTML](terminal-clipboard-2598/index.html) · [Scenario & fidelity](terminal-clipboard-2598/README.md) |
 
-| Agent process discovery / command & resource inspector | [#2514](https://github.com/BestNathan/nession/issues/2514) | [Interactive HTML](agent-process-discovery-2514/index.html) · [Scenario & fidelity](agent-process-discovery-2514/README.md) |
+| Agent Workspace / current-Session-only process tree and inspector | [#2514](https://github.com/BestNathan/nession/issues/2514) | [Interactive HTML](agent-process-discovery-2514/index.html) · [Scenario & fidelity](agent-process-discovery-2514/README.md) |
 
 | Git capability / GitHub repository context | [#1290](https://github.com/BestNathan/nession/issues/1290) | [Interactive HTML](git-github-1290/index.html) · [Scenario & fidelity](git-github-1290/README.md) |
 
