@@ -259,25 +259,62 @@ describe('WebSocketService', () => {
     service.dispose();
   });
 
-  it('counts a rejected URL resolution as a failed attempt and retries with the next URL (#2645)', async () => {
+  it('settles an unresolved initial dial at disconnected so the caller can rotate (#2645)', async () => {
+    const resolveUrl = vi.fn().mockRejectedValue(new Error('credential renewal failed'));
+    const service = new WebSocketService('ws://server/ws', [], {
+      resolveUrl,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+
+    await expect(service.connect()).rejects.toThrow('credential renewal failed');
+    expect(MockWebSocket.instances).toHaveLength(0);
+    // An initial dial that cannot open is terminal until the caller asks
+    // again; the caller's address policy owns what happens next.
+    expect(service.connectionState).toBe('disconnected');
+    expect(service.reconnectAttempts).toBe(0);
+    expect(states).toEqual(['connecting', 'disconnected']);
+
+    await flushTimers(100);
+    expect(resolveUrl).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances).toHaveLength(0);
+    service.dispose();
+  });
+
+  it('retries a failed URL resolution within the reconnect budget (#2645)', async () => {
     const resolveUrl = vi.fn()
+      .mockResolvedValueOnce('ws://server/ws?token=first')
       .mockRejectedValueOnce(new Error('credential renewal failed'))
-      .mockResolvedValueOnce('ws://server/ws?token=after-renewal');
+      .mockResolvedValueOnce('ws://server/ws?token=retry');
     const service = new WebSocketService('ws://server/ws', [], {
       resolveUrl,
       maxReconnectAttempts: 2,
       reconnectBaseDelay: 5,
     });
 
-    await expect(service.connect()).rejects.toThrow('credential renewal failed');
-    expect(MockWebSocket.instances).toHaveLength(0);
-    expect(service.connectionState).toBe('reconnecting');
-    expect(service.reconnectAttempts).toBe(1);
-
-    await flushTimers(50);
+    const connected = service.connect();
     await drainMicrotasks();
+    expect(MockWebSocket.instances[0].url).toBe('ws://server/ws?token=first');
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    MockWebSocket.instances[0].serverClose();
+    await flushTimers(5);
+    await drainMicrotasks();
+    expect(resolveUrl).toHaveBeenLastCalledWith(1);
+    expect(service.connectionState).toBe('reconnecting');
+    expect(service.reconnectAttempts).toBe(2);
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances[0].url).toBe('ws://server/ws?token=after-renewal');
+
+    await flushTimers(10);
+    await drainMicrotasks();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockWebSocket.instances[1].url).toBe('ws://server/ws?token=retry');
+    MockWebSocket.instances[1].open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
     service.dispose();
   });
 

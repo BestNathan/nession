@@ -175,10 +175,20 @@ export class WebSocketService implements PluginSurface {
    *
    * The first connection may also need a renewal (a route switch or a slow
    * first paint can outlive a credential lease), so the hook is not limited to
-   * reconnects. A rejected hook never dials and is counted as a failed attempt:
-   * it goes through the same loss path as a dropped socket, which is what keeps
-   * the reconnect budget, candidate rotation and the caller's failure state in
-   * one place.
+   * reconnects.
+   *
+   * **A failed initial resolution is an initial-dial failure, not a loss.**
+   * The transport settles at `disconnected` exactly as it does when the first
+   * socket cannot open, so the caller's address policy can advance to its next
+   * candidate — or fall back to Relay — immediately. Scheduling the reconnect
+   * budget here instead (as a lost socket does) would keep the state at
+   * `reconnecting` for the whole budget, hiding a dead candidate from the
+   * policy that is supposed to rotate away from it (#1926 recovery after an
+   * Agent restart, with a short credential lease).
+   *
+   * On a reconnect the socket is already an established route's successor, so
+   * a rejected resolution goes through the ordinary loss path and its bounded
+   * retry budget.
    */
   private async connectWithResolvedUrl(attempt: number): Promise<void> {
     try {
@@ -192,10 +202,17 @@ export class WebSocketService implements PluginSurface {
     } catch (error) {
       this.connectPromise = null;
       this.rejectConnect = null;
+      const failure = error instanceof Error ? error : new Error(String(error));
       if (!this.disposed && !this.userClosed) {
-        this.handleSocketLoss();
+        if (attempt === 0) {
+          this.router.failPending(failure);
+          this.rejectWaiters(failure);
+          this.setState('disconnected');
+        } else {
+          this.handleSocketLoss();
+        }
       }
-      throw error instanceof Error ? error : new Error(String(error));
+      throw failure;
     }
     const opened = this.openSocketPromise();
     this.connectPromise = opened;
