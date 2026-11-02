@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c740fe3a087e98c889ca04b7b3da1932425d5f8b618d9aad9d90e4a4883c6cf2",
+  "run_id": 41473925992,
+  "run_attempt": 1,
+  "issue": 2645,
+  "criterion": "SC-05",
+  "criterion_text": "An authenticated, source-aligned **real Server + Agent + browser** Case demonstrates TTL expiry **before** forced physical P2P loss, shows a freshly issued credential at successful reconnect, exactly-once terminal I/O/stream continuity, and no regression in Agent refusal. Use a shortened fixture TTL instead of sleeping five minutes; retain exact staging SHA and executable Case receipt.",
+  "stage": "staging",
+  "target_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "contract_sha256": "8d03f0815bed35d9c0b8bc03d34759f7c739576e8c0d080642c87967d97a26d3",
+  "case_revision": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "case_tree_sha": "1a29b8e7804a77f7f885b11aef7c0c73d6f0a2cd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T15:43:19.335Z",
+  "finished_at": "2026-11-02T15:43:57.310Z",
+  "duration_ms": 37975,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (8 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=2 passed=2 skipped=0 assertions=64"
+        }
+      ],
+      "execution": {
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 64
+      },
+      "duration_ms": 32054,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The staging runtime uses a short, deterministic P2P credential lease and ships the renewal owner the browser exercises",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: rendered Server config p2p_token_expiry_secs=8s; shipped runtime has the Server-backed renewal owner; Agent still verifies expires_at on every upgrade"
+        }
+      ],
+      "duration_ms": 40,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41473925992,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "record_path": "runs/2026-11-02/41473925992-1/2645/SC-05.json",
+    "source_result_sha256": "522c47d60af81039aa3133fe75d07ae6e6c0c2826431c8f5e2fdc2b4dea7f6e7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41473925992-1",
+    "sha256": "522c47d60af81039aa3133fe75d07ae6e6c0c2826431c8f5e2fdc2b4dea7f6e7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "durability": "time-limited; object archival not configured"
+  }
+}

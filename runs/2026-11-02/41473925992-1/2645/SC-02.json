@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8d1683758082cd10ab8d0d48b294cc1dd5060520f0ddc0fadc01d372dc1d0322",
+  "run_id": 41473925992,
+  "run_attempt": 1,
+  "issue": 2645,
+  "criterion": "SC-02",
+  "criterion_text": "Concurrent wake/retry signals coalesce credential acquisition; delayed or failed renewal, changed Session/Agent/route and explicit detach cannot install a stale authority, overwrite a successor socket, or create unbounded retry loops.",
+  "stage": "staging",
+  "target_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "contract_sha256": "8d03f0815bed35d9c0b8bc03d34759f7c739576e8c0d080642c87967d97a26d3",
+  "case_revision": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "case_tree_sha": "774ddc92aed858cbb362efa40fe8e3ae3788515c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T15:43:10.663Z",
+  "finished_at": "2026-11-02T15:43:13.909Z",
+  "duration_ms": 3246,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Concurrent attempts coalesce, and a stale, foreign or replaced-attach renewal cannot install an authority or overwrite its successor",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: 2 concurrency/fencing tests passed (one resolution for concurrent connects; a renewal resolving after a replacement attach is discarded)"
+        },
+        {
+          "type": "source",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: renewal is single-flight and fenced by credentialEpoch; a foreign session_id is refused and a fresh attach invalidates the in-flight authority"
+        }
+      ],
+      "duration_ms": 3228,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41473925992,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "record_path": "runs/2026-11-02/41473925992-1/2645/SC-02.json",
+    "source_result_sha256": "0914e5fa34a71ba8d4c9d1a23f17d18f622216639e7ef524688469577eaf29ef"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41473925992-1",
+    "sha256": "0914e5fa34a71ba8d4c9d1a23f17d18f622216639e7ef524688469577eaf29ef",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "durability": "time-limited; object archival not configured"
+  }
+}

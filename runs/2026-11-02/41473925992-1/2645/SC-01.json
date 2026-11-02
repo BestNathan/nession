@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "92124f790db72604e0878b00b5a246b4627fdfda507f3abf8cd7529596b7acd6",
+  "run_id": 41473925992,
+  "run_attempt": 1,
+  "issue": 2645,
+  "criterion": "SC-01",
+  "criterion_text": "Following a P2P credential expiry and physical WebSocket loss, the browser reobtains a valid **same-Agent/same-Session scoped** credential and automatically reattaches without explicit user action or full page refresh; an unexpired healthy socket is not unnecessarily replaced.",
+  "stage": "staging",
+  "target_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "contract_sha256": "8d03f0815bed35d9c0b8bc03d34759f7c739576e8c0d080642c87967d97a26d3",
+  "case_revision": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "case_tree_sha": "e8c2af27b1812ca632012d0ba93a815bf07cec29",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T15:43:08.323Z",
+  "finished_at": "2026-11-02T15:43:10.662Z",
+  "duration_ms": 2339,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A spent P2P credential is reissued before the lost socket is rebuilt, while an unspent credential and a healthy socket are untouched",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: 2 SessionRuntime renewal tests passed (expired lease renews before rebuild; unspent lease is reused)"
+        },
+        {
+          "type": "source",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: attach reply states connection_token_expires_at; the runtime renews through requestFreshAttach before a spent-lease dial and leaves a healthy transport untouched"
+        }
+      ],
+      "duration_ms": 2301,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41473925992,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "record_path": "runs/2026-11-02/41473925992-1/2645/SC-01.json",
+    "source_result_sha256": "93e0573deaf29382e59c30734b517de8a3b8789df26fa8b32a285f80243d7225"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41473925992-1",
+    "sha256": "93e0573deaf29382e59c30734b517de8a3b8789df26fa8b32a285f80243d7225",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "durability": "time-limited; object archival not configured"
+  }
+}

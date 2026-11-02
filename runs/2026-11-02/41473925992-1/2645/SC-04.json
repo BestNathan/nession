@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "bacec5bf41b0604eb8bcc0697c87231cdda9c848cea8318812e4d12221b622fc",
+  "run_id": 41473925992,
+  "run_attempt": 1,
+  "issue": 2645,
+  "criterion": "SC-04",
+  "criterion_text": "Both Auto and pinned P2P routes honor their existing transport policies after renewal. Successful recovery preserves the live xterm, terminal stream consistency and controller/observer ownership; a genuinely unavailable Server/Agent surfaces an honest recovery failure.",
+  "stage": "staging",
+  "target_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "contract_sha256": "8d03f0815bed35d9c0b8bc03d34759f7c739576e8c0d080642c87967d97a26d3",
+  "case_revision": "b2f321bcf412c4790c55425c793c67d03339679f",
+  "case_tree_sha": "4cdb4533a33673c0a49b5cc2b49aab24f107938d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T15:43:13.909Z",
+  "finished_at": "2026-11-02T15:43:19.324Z",
+  "duration_ms": 5415,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Renewal rebuilds the same chosen route under the existing Auto and pinned P2P policies; it never rewrites transport intent",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: 11 address-policy/route tests passed (Auto rotation, route-intent change, pinned-route exhaustion)"
+        },
+        {
+          "type": "source",
+          "value": "exact SHA b2f321bcf412c4790c55425c793c67d03339679f: renewal reuses addressPolicy.activeUrl and keeps the existing relay/candidate policy; it introduces no route decision of its own"
+        }
+      ],
+      "duration_ms": 5394,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41473925992,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b2f321bcf412c4790c55425c793c67d03339679f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "record_path": "runs/2026-11-02/41473925992-1/2645/SC-04.json",
+    "source_result_sha256": "fc78ab97398db1eae070e8cd782c3b15a220a6f2b711da0c527d9b727ef5bd5b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41473925992-1",
+    "sha256": "fc78ab97398db1eae070e8cd782c3b15a220a6f2b711da0c527d9b727ef5bd5b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41473925992",
+    "durability": "time-limited; object archival not configured"
+  }
+}
