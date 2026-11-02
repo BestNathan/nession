@@ -21,6 +21,10 @@ Do not infer product design from one existing component if canonical product/des
 
 For a **clickable exploration of unresolved interaction/product behavior**, use [nession-prototype](../nession-prototype/SKILL.md) for mock construction, the shared orphan `prototype` branch and Issue backlinks. [nession-writing-requirements](../nession-writing-requirements/SKILL.md) owns **whether/when** the Issue needs a prototype. A mock artifact is not the production UI, a design Gate run or a trusted browser/Acceptance receipt.
 
+### Linked prototype consistency on UI decisions
+
+When a layout or interaction decision changes, check the owning Issue for a linked prototype. If its visible behavior would contradict the new design, follow `nession-writing-requirements` + `nession-prototype` to revise the **same** prototype and its Issue/gallery links before reporting design completion. A formerly approved screenshot or prototype SHA does not remain valid after a superseding decision; if synchronization is blocked, visibly mark the artifact stale instead of citing it as current.
+
 ## 2. Find the owner before styling
 
 Classify the need:
