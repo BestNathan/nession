@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "26c34c6448aff3d0360c7c984045925c2284ef1137333d217f4e590ad6039c43",
+  "run_id": 41413226729,
+  "run_attempt": 1,
+  "issue": 2514,
+  "criterion": "SC-04",
+  "criterion_text": "Pane exit/respawn, new-window/split, linked Windows, PID reuse and disappearing processes do not cause stale or cross-Session misattribution; orphan tracking limitations are surfaced.",
+  "stage": "staging",
+  "target_sha": "de0bf5a02a215510b852732d94ec11da6810f4a7",
+  "contract_sha256": "dd88eedd38df3114bf14ed2b175f5649bdbe7dc461e152ec4d4373436f4f48e7",
+  "case_revision": "de0bf5a02a215510b852732d94ec11da6810f4a7",
+  "case_tree_sha": "53d6367796fe47365820bd87f3abb84ed9884e85",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-02T08:29:56.268Z",
+  "finished_at": "2026-11-02T08:29:57.056Z",
+  "duration_ms": 788,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Pane mutation, linked Windows, PID-reuse identity and disappearing processes stay truthful; unsupported orphan tracking is stated rather than invented",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA de0bf5a02a215510b852732d94ec11da6810f4a7 on Linux x86_64: a linked Window kept both Session memberships with one Pane pid, and every snapshot re-read the fresh Pane root rather than caching it"
+        },
+        {
+          "type": "runtime",
+          "value": "a missing Pane root was unavailable, a process that exited during sampling was stale (identity is PID + start time), and a Pane outside the requested Session never entered its snapshot"
+        },
+        {
+          "type": "runtime",
+          "value": "process and depth bounds marked truncation instead of silently dropping members; retained-scope orphan tracking is not claimed by this stateless phase"
+        }
+      ],
+      "duration_ms": 775,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41413226729,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "de0bf5a02a215510b852732d94ec11da6810f4a7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41413226729",
+    "record_path": "runs/2026-11-02/41413226729-1/2514/SC-04.json",
+    "source_result_sha256": "64543bc404a157ce6f01f99ae4aa06d8ee6b9cac68a4ba65bab70c330dd5fa7e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41413226729-1",
+    "sha256": "64543bc404a157ce6f01f99ae4aa06d8ee6b9cac68a4ba65bab70c330dd5fa7e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41413226729",
+    "durability": "time-limited; object archival not configured"
+  }
+}
