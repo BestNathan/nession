@@ -299,10 +299,13 @@ async function mobileLayout(page, expect, options = {}) {
   // A narrow viewport is the App experience, which starts on Terminal. Enter
   // its Workspace layer and re-establish the current Session's process view.
   if (!(await visible('agent-processes'))) {
-    await page.getByTestId('app-header-workspace').click();
+    // The App experience mounts asynchronously after the viewport change; do
+    // not click its header while it is still hidden.
+    await expect(page.getByTestId('app-header-workspace')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('app-header-workspace').click({ timeout: 15_000 });
     await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 20_000 });
     if (!(await visible('agent-processes'))) {
-      await page.getByTestId('workspace-tool-agent').click();
+      await page.getByTestId('workspace-tool-agent').click({ timeout: 15_000 });
     }
     await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 20_000 });
   }
