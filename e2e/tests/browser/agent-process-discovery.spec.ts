@@ -182,14 +182,21 @@ test.describe('Agent process discovery', () => {
       .isVisible()
       .catch(() => false);
     if (!processesVisible) {
-      await page.getByTestId('app-header-workspace').click();
+      // The experience switch after a viewport change is asynchronous. Wait
+      // for the App header to become visible before clicking it: an untimed
+      // click on the still-hidden header otherwise burns the whole test
+      // timeout and marks a passing retry flaky (observed on staging).
+      await expect(page.getByTestId('app-header-workspace')).toBeVisible({
+        timeout: 15_000,
+      });
+      await page.getByTestId('app-header-workspace').click({ timeout: 15_000 });
       await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 30_000 });
       const agentVisible = await page
         .getByTestId('agent-processes')
         .isVisible()
         .catch(() => false);
       if (!agentVisible) {
-        await page.getByTestId('workspace-tool-agent').click();
+        await page.getByTestId('workspace-tool-agent').click({ timeout: 15_000 });
       }
       await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
     }
