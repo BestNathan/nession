@@ -294,7 +294,8 @@ ok(() => {
       const following=source.slice(checkout.index+checkout[0].length);
       const nextStep=following.search(new RegExp('^'+checkout[1]+'- (?:uses|name|run):','m'));
       const step=nextStep===-1?following:following.slice(0,nextStep);
-      assert.ok(step.includes(expected),workflow+' checkout '+(index+1)+' must checkout exact PR head');
+      assert.ok(step.split(/\r?\n/).some(line=>line.trim()===expected),
+        workflow+' checkout '+(index+1)+' must checkout exact PR head');
       assert.match(step,/^\s+persist-credentials: false\s*$/m,
         workflow+' checkout '+(index+1)+' cannot retain write credentials');
     }
@@ -305,6 +306,9 @@ ok(() => {
     // Negative fixtures prove the rule still rejects a vulnerable checkout,
     // regardless of the number of correctly pinned jobs.
     assert.throws(()=>assertExactSourceCheckouts(source.replace(expected,'ref: refs/heads/main'),workflow,minimum),
+      /must checkout exact PR head/);
+    assert.throws(()=>assertExactSourceCheckouts(source.replace(expected,
+      'ref: refs/heads/main\n          # '+expected),workflow,minimum),
       /must checkout exact PR head/);
     assert.throws(()=>assertExactSourceCheckouts(source.replace('persist-credentials: false','persist-credentials: true'),workflow,minimum),
       /cannot retain write credentials/);
