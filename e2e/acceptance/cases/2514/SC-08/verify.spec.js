@@ -23,7 +23,7 @@ test('SC-08: command-first inspector, sanitized copy and mobile-readable metrics
   const runtime = JSON.parse(fs.readFileSync(process.env.NESSION_ACCEPTANCE_RUNTIME_FILE, 'utf8'));
   const sha = process.env.NESSION_ACCEPTANCE_TARGET_SHA;
   const opened = await openAgentProcesses(page, expect, runtime, sha);
-  const inspector = await inspectCredentialBearingProcess(page, expect, opened.pane);
+  const inspector = await inspectCredentialBearingProcess(page, expect, opened.tree);
 
   // The credential-bearing flag is replaced before transport, everywhere the
   // browser can see it.

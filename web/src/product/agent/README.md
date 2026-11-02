@@ -14,13 +14,14 @@ was deleted under #655. The shared `Agent` type remains in `@/types`.
 | `patterns/AgentDetail.tsx` | Workspace Agent details and extension contribution slot |
 | `patterns/AgentContext.tsx` | Session-header Agent context / status |
 | `hooks/useAgentData.ts` | Per-mount list, refresh, dedupe and bounded heartbeat history |
-| `hooks/useAgentProcesses.ts` | Per-Agent Session list plus on-demand read-only process snapshots (#2514) |
+| `hooks/useAgentProcesses.ts` | On-demand read-only snapshot for the Workspace's **current** Session (#2514); no Session listing or selection |
 | `hooks/useAgentProbe.ts` | Credentialed, attach-context address probes |
 | `state/probe.ts` | Agent-keyed cached browser probe results |
-| `components/AgentProcesses.tsx` | Contextual Sessions & Processes section inside AgentDetail (#2514) |
-| `components/ProcessTree.tsx` | Pane-grouped PPID process tree with linked-Window memberships |
-| `components/ProcessInspector.tsx` | Command-first process detail and per-PID/subtree resource scope |
-| `model/processSnapshot.ts` | Pure tree, descendant-subtree and metric helpers |
+| `components/AgentDetails.tsx` | Default-closed, grouped Agent identity/runtime/discovery facts (#2514) |
+| `components/AgentProcesses.tsx` | Current Session's process forest and selected-process inspector; offline/empty/stale states (#2514) |
+| `components/ProcessTree.tsx` | Session-wide PPID forest (no Pane or Window product nouns) |
+| `components/ProcessInspector.tsx` | Command-first process detail, per-PID/subtree resources, default-closed Process details |
+| `model/processSnapshot.ts` | Identity dedupe, Session forest, Session-level discovery and metric helpers |
 
 ## State and dependencies
 
@@ -41,12 +42,15 @@ was deleted under #655. The shared `Agent` type remains in `@/types`.
 
 Session process discovery **deepens the existing Agent capability**; it does
 not add a Process capability, a permanent tab, or a second navigation owner.
-`AgentDetail` keeps node identity/connectivity first, then renders the
-`AgentProcesses` section: Session list → Pane → process tree → command-first
-inspector → per-PID/subtree resources → diagnostics. The snapshot is read-only
-and on demand; the browser never probes the OS, and the sanitized command is the
-only command string that exists here. The truth contract (methods, coverage,
-metric states, redaction) is owned by
+`AgentDetail` keeps a compact node identity/connectivity header, places the
+Agent's own facts behind a default-closed `AgentDetails` disclosure, then renders
+`AgentProcesses` for the Workspace's **current Session only**: one identity-
+deduplicated process forest → command-first inspector → per-PID/subtree
+resources → default-closed Process details. There is no Session selector and no
+Pane/Window product noun; Pane identity stays internal discovery evidence.
+The snapshot is read-only and on demand; the browser never probes the OS, and
+the sanitized command is the only command string that exists here. The truth
+contract (methods, coverage, metric states, redaction) is owned by
 [docs/architecture/agent-process-discovery.md](../../../docs/architecture/agent-process-discovery.md).
 
 The live shell imports Agent patterns from `@/product/agent/...`.

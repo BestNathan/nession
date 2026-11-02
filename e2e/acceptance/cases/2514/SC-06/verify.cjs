@@ -16,7 +16,9 @@ run(({ evidence }) => {
     type: 'test',
     value:
       'exact SHA ' + sha + ': ' + total +
-      ' Agent Workspace integration tests passed (drill-down, session focus, offline, stale refresh, extension slot unchanged)',
+      ' Agent Workspace integration tests passed (current-Session-only forest, no Session/Pane UI, ' +
+      'default-closed grouped Agent and Process details, scope-state persistence, offline/stale, ' +
+      'App focus return, extension slot unchanged)',
   });
-  return 'The Agent Workspace composition still owns its detail view and the contextual Sessions & Processes section passes its component contracts';
+  return 'The Agent Workspace shows the current Session forest with default-closed grouped disclosures and no Session/Pane navigation';
 });
