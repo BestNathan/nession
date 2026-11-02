@@ -103,7 +103,7 @@ jobs:
               .github/workflows/*) workflow=true ;;
             esac
             case "$path" in
-              AGENTS.md|CLAUDE.md|*/AGENTS.md|*/CLAUDE.md|.claude/skills/*|.agents/skills/*|.github/workflows/ci-quality.yml) instruction=true ;;
+              AGENTS.md|CLAUDE.md|*/AGENTS.md|*/CLAUDE.md|.claude/skills/*|.agents/skills/*) instruction=true ;;
             esac
           done
           if [[ "$EVENT_NAME" == pull_request &&
