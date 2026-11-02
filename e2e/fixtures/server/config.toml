@@ -15,11 +15,14 @@ db_path = "/tmp/nession-e2e/nession.db"
 # CI runners can be slow, and we want to avoid false "agent disconnected" errors.
 heartbeat_timeout_secs = 120
 
-# #2645: this test stack uses a short P2P credential lease so the
-# expiry → physical-loss → renewal path is exercised without a five-minute
-# sleep. Production keeps the 300s default; the browser renews before any dial
-# whose lease is spent, and a healthy socket is never closed by expiry alone.
-p2p_token_expiry_secs = 8
+# #2645: the runtime harness renders the P2P lease per profile. The acceptance
+# profile uses a short lease so the expiry → physical-loss → renewal path is
+# exercised without a five-minute sleep; the E2E regression profile keeps the
+# production 300s lease so unrelated reconnect/restart scenarios are not
+# perturbed by a reissue on every dial. Production keeps the 300s default; the
+# browser renews before any dial whose lease is spent, and a healthy socket is
+# never closed by expiry alone.
+p2p_token_expiry_secs = _P2P_TOKEN_EXPIRY_SECS_
 
 # Logging — set to info for debugging CI issues.
 [logging]
