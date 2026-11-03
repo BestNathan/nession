@@ -1,5 +1,5 @@
 'use strict';
-// Shared browser machinery for the #2621 Terminal status-overlay Cases.
+// Shared browser machinery for Terminal notice geometry and on-demand detail Cases.
 //
 // Every Case drives a canonical fixture route that mounts the production
 // `TerminalSurface` + engine:
@@ -80,8 +80,8 @@ async function settle(page) {
 }
 
 /**
- * The grid and the boxes that must not move when a status notice appears.
- * `overlay` is reported separately because its presence is the variable.
+ * The grid and boxes that must not move when contextual status availability changes.
+ * `overlay` must always be null: automatic Terminal status chrome is forbidden.
  */
 async function readGeometry(page, viewportTestId) {
   return page.evaluate((testId) => {

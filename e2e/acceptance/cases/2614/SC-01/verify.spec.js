@@ -29,6 +29,7 @@ test('SC-01: HTTP OSC 52 copy completes through a real user gesture', async ({ p
     await page.locator('.xterm-helper-textarea').focus();
     await armCopyProbe(page);
     await emit(page, '\x1b]52;c;' + b64(text) + '\x1b\\');
+    await page.getByTestId('terminal-notices-trigger').click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');

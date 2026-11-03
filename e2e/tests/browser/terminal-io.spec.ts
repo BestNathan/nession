@@ -825,6 +825,7 @@ test.describe('Terminal clipboard protocols', () => {
       const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
       harness.emit('\x1b]52;c;' + btoa('http copy payload') + '\x1b\\');
     });
+    await page.getByTestId('terminal-notices-trigger').click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
     await notice.getByRole('button', { name: 'Copy' }).click();
@@ -971,18 +972,18 @@ test.describe('Terminal clipboard protocols', () => {
       });
       const delivered = !target.dispatchEvent(event);
       await new Promise((resolve) => { setTimeout(resolve, 300); });
-      const notice = document.querySelector('[data-testid="terminal-clipboard-notice"]');
       return {
         delivered,
         sent: harness.sent.slice(),
-        noticeText: notice?.textContent ?? null,
-        noticeKind: notice?.getAttribute('data-clipboard-notice') ?? null,
       };
     });
     expect(result.delivered).toBe(true);
     expect(result.sent).toEqual([]);
-    expect(result.noticeKind).toBe('unsupported-image-paste');
-    expect(result.noticeText).toContain('Image clipboard protocol not supported by this TUI');
+    await page.getByTestId('terminal-notices-trigger').click();
+    await expect(page.getByTestId('terminal-clipboard-notice'))
+      .toHaveAttribute('data-clipboard-notice', 'unsupported-image-paste');
+    await expect(page.getByTestId('terminal-clipboard-notice'))
+      .toContainText('Image clipboard protocol not supported by this TUI');
   });
 
   test('a blocked OSC 52 write completes through an explicit Copy click', async ({ page }) => {
@@ -999,6 +1000,7 @@ test.describe('Terminal clipboard protocols', () => {
       harness.emit('\x1b]52;c;' + btoa('gesture payload') + '\x1b\\');
       await new Promise((resolve) => { setTimeout(resolve, 300); });
     });
+    await page.getByTestId('terminal-notices-trigger').click();
     await expect(page.getByTestId('terminal-clipboard-notice'))
       .toHaveAttribute('data-clipboard-notice', 'copy-required');
 

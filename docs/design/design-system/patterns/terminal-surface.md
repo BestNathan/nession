@@ -20,7 +20,7 @@ Terminal remains the current hero surface, but that does not make every surround
 
 ```text
 ┌─ Terminal well ───────────────────────────────────────────────┐
-│ optional continuity banner / state                           │
+│ xterm grid — no automatic notice overlay                     │
 │ ┌─ TerminalViewport ────────────────────────────────────────┐ │
 │ │ xterm.js / current terminal workload                     │ │
 │ │                                                          │ │
@@ -36,7 +36,7 @@ Terminal remains the current hero surface, but that does not make every surround
 |------|------|
 | Terminal well | Stable host for viewport + contextual floating layers |
 | TerminalViewport | xterm mount point and scrollback owner |
-| continuity/banner state | Local attach/reconnect/mode messaging when necessary |
+| contextual notices | History uncertainty, lost input, clipboard action, and control transfer are reachable on demand from the Capsule rather than overlaid over terminal cells |
 | TerminalCapsule | Conversational/contextual interaction surface; see its own pattern spec |
 | App scroll helpers | Touch-specific accelerators when required |
 
@@ -66,6 +66,7 @@ Do **not** freeze “Capsule Enter always sends `\r` to PTY” as a universal pr
 - Tapping the viewport may focus the mobile terminal IME.
 - Tapping the capsule focuses the capsule interaction plane.
 - Touch scroll helpers should preserve appropriate IME/focus state.
+- Vertical drag in local normal-buffer history scrolls xterm history; a TUI with mouse tracking or alternate-screen mode instead receives xterm's wheel semantics. Horizontal selection and the top-level edge pager retain their gesture ownership.
 - Top-level Sessions/Workspace gestures must not fire from ordinary terminal scroll intent.
 
 Exact keyboard/IME mechanics remain implementation-specific and should be protected by tests/contracts where stable.
@@ -105,7 +106,7 @@ client attachment
 
 A reconnecting Agent must not be mislabeled as an exited Session. An active Session with a detached client must not be presented as destroyed.
 
-Local banners or [ConnectionStatus](connection-status.md) may communicate these states when they affect continuity. Healthy transport remains quiet.
+The Terminal grid does not carry automatic status banners or floating notice strips. Observed history gaps, input-delivery uncertainty, clipboard copy fallback, and read-only control transfer remain available through the Capsule's contextual status action, only while relevant; details open after explicit user interaction. [ConnectionStatus](connection-status.md) may communicate connectivity outside the terminal grid. Healthy transport remains quiet.
 
 ## Capability presence
 

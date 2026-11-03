@@ -29,6 +29,7 @@ test('SC-05: the deployed HTTP origin matrix holds at the exact SHA', async ({ p
 
     // Negative: an automatic remote write is refused truthfully.
     await emit(page, '\x1b]52;c;' + b64('deployed-negative') + '\x1b\\');
+    await page.getByTestId('terminal-notices-trigger').click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
 
@@ -42,6 +43,7 @@ test('SC-05: the deployed HTTP origin matrix holds at the exact SHA', async ({ p
     // Negative: a TUI without OSC 5522 opt-in receives no image bytes.
     await page.evaluate(() => { window.clipboardHarness.sent.length = 0; });
     await dispatchPaste(page, { images: [{ mime: 'image/png', bytes: fixtureImage(256) }] });
+    await page.getByTestId('terminal-notices-trigger').click();
     await expect(page.getByTestId('terminal-clipboard-notice'))
       .toHaveAttribute('data-clipboard-notice', 'unsupported-image-paste');
     expect(await sentFrames(page)).toEqual([]);

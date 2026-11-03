@@ -73,7 +73,12 @@ export class CapsuleOcclusionScroll {
   private occlusionListener: (() => void) | null = null;
   private touchStartListener: ((event: TouchEvent) => void) | null = null;
   private touchMoveListener: ((event: TouchEvent) => void) | null = null;
+  private touchStartX: number | null = null;
+  private touchStartY: number | null = null;
   private touchLastY: number | null = null;
+  private touchAxis: 'pending' | 'horizontal' | 'vertical' = 'pending';
+  private touchScrollRemainder = 0;
+  private touchEndListener: (() => void) | null = null;
   private wasFollowing = true;
   private currentMode: ScrollMode = 'following';
   private observedDock: HTMLElement | null = null;
@@ -127,11 +132,19 @@ export class CapsuleOcclusionScroll {
       this.terminal.attachCustomWheelHandler((event) => this.handleWheel(event));
 
       this.touchStartListener = (event) => {
-        this.touchLastY = event.touches[0]?.clientY ?? null;
+        const touch = event.touches.length === 1 ? event.touches[0] : null;
+        this.touchStartX = touch?.clientX ?? null;
+        this.touchStartY = touch?.clientY ?? null;
+        this.touchLastY = touch?.clientY ?? null;
+        this.touchAxis = 'pending';
+        this.touchScrollRemainder = 0;
       };
       this.touchMoveListener = (event) => this.handleTouchMove(event);
+      this.touchEndListener = () => this.resetTouch();
       element.addEventListener('touchstart', this.touchStartListener, { capture: true, passive: true });
       element.addEventListener('touchmove', this.touchMoveListener, { capture: true, passive: false });
+      element.addEventListener('touchend', this.touchEndListener, true);
+      element.addEventListener('touchcancel', this.touchEndListener, true);
     }
 
     updateFollowingFromScroll();
@@ -160,9 +173,14 @@ export class CapsuleOcclusionScroll {
     if (element && this.touchMoveListener) {
       element.removeEventListener('touchmove', this.touchMoveListener, true);
     }
+    if (element && this.touchEndListener) {
+      element.removeEventListener('touchend', this.touchEndListener, true);
+      element.removeEventListener('touchcancel', this.touchEndListener, true);
+    }
     this.touchStartListener = null;
     this.touchMoveListener = null;
-    this.touchLastY = null;
+    this.touchEndListener = null;
+    this.resetTouch();
     this.host.style.removeProperty('--nession-local-terminal-content-bottom-inset');
     delete this.host.dataset.terminalScrollMode;
   }
@@ -259,28 +277,72 @@ export class CapsuleOcclusionScroll {
     return Math.sign(deltaY) * Math.max(1, Math.round(Math.abs(deltaY) / pixelsPerLine));
   }
 
+  private resetTouch(): void {
+    this.touchStartX = null;
+    this.touchStartY = null;
+    this.touchLastY = null;
+    this.touchAxis = 'pending';
+    this.touchScrollRemainder = 0;
+  }
+
+  /**
+   * A one-finger vertical drag is a scroll, not a synthetic cursor movement.
+   * Local scrollback stays local; mouse-tracking/full-screen TUIs receive the
+   * same wheel path as a desktop scroll. In particular, returning early for
+   * alternate buffers left mobile users unable to scroll Claude Code/Vim.
+   */
   private handleTouchMove(event: TouchEvent): void {
-    if (!this.shouldScrollLocally()) {
+    const touch = event.touches.length === 1 ? event.touches[0] : null;
+    if (!touch || this.touchStartX === null || this.touchStartY === null || this.touchLastY === null) {
+      this.resetTouch();
       return;
     }
-    const currentY = event.touches[0]?.clientY;
-    if (currentY === undefined || this.touchLastY === null) {
-      this.touchLastY = currentY ?? null;
+    const dx = touch.clientX - this.touchStartX;
+    const dy = touch.clientY - this.touchStartY;
+    const deltaY = touch.clientY - this.touchLastY;
+    this.touchLastY = touch.clientY;
+
+    // Keep taps, horizontal selection and the shell's edge pager untouched.
+    if (this.touchAxis === 'pending') {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) { return; }
+      this.touchAxis = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+    }
+    if (this.touchAxis !== 'vertical' || deltaY === 0) { return; }
+
+    if (this.shouldScrollLocally()) {
+      // Accumulate sub-cell deltas. Rounding each touchmove up to one line
+      // turned a slow finger drag into a runaway scroll on high-Hz phones.
+      const cellHeight = this.getCellHeight() || 16;
+      this.touchScrollRemainder -= deltaY;
+      const lines = Math.trunc(this.touchScrollRemainder / cellHeight);
+      this.touchScrollRemainder -= lines * cellHeight;
+      event.preventDefault();
+      event.stopPropagation();
+      if (lines !== 0) {
+        if (lines < 0) { this.enterHistory(); }
+        this.terminal.scrollLines(lines);
+        this.syncModeFromViewport();
+      }
       return;
     }
-    const deltaY = currentY - this.touchLastY;
-    this.touchLastY = currentY;
-    const lines = this.wheelLines(-deltaY, 0);
-    if (lines === 0) {
+
+    // xterm's 5.5 touch path only scrolls its viewport. It cannot deliver the
+    // wheel reports that a mouse-aware TUI consumes (or xterm's alternate-
+    // buffer wheel-to-arrow fallback). Let xterm encode those modes itself.
+    const mode = this.terminal.readModes();
+    const buffer = this.terminal.readBuffer();
+    if (mode.mouseTrackingMode === 'none' && buffer.type !== 'alternate') {
       return;
-    }
-    if (lines < 0) {
-      this.enterHistory();
     }
     event.preventDefault();
     event.stopPropagation();
-    this.terminal.scrollLines(lines);
-    this.syncModeFromViewport();
+    const target = event.target instanceof Element ? event.target : this.terminal.element;
+    target?.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -deltaY,
+      deltaMode: 0,
+    }));
   }
 
   scheduleScrollToMarginBottom(): void {
