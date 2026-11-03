@@ -1,0 +1,98 @@
+name: CI / Run Store Signed Checkpoint
+
+# #1690 SC-08. This main-only public-repository workflow has NO Store writer
+# credentials. Its signed checkpoint is witnessed by Sigstore Public Good's
+# independent immutable transparency log. Initial observations are NOT
+# retroactive proof of historic records or independently authorized writers.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci-run-store-anchor.yml
+      - scripts/run-store-sigstore-checkpoint.mjs
+      - docs/architecture/run-store-integrity-audit-runbook.md
+  schedule:
+    - cron: '17 5 * * 0'
+  # Unlike workflow_dispatch this uses default-branch code only.
+  repository_dispatch:
+    types: [nession-run-store-anchor]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: ci-run-store-anchor-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  anchor:
+    name: Sign four-Store roots and rehearse read-only restore
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       github.event_name == 'schedule' ||
+       github.event_name == 'repository_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact trusted main without Git credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify canonical checkpoint contract and path-policy Gate
+        run: |
+          set -euo pipefail
+          node scripts/run-store-sigstore-checkpoint.mjs self-test
+          ./gates/run run-store-integrity
+      - name: Collect four API/Git-matched immutable Store root commitments
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/run-store-checkpoint"
+          node scripts/run-store-sigstore-checkpoint.mjs collect \
+            "${RUNNER_TEMP}/run-store-checkpoint/checkpoint.json"
+      - name: Independently sign and publicly witness checkpoint
+        id: witness
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/run-store-checkpoint/checkpoint.json
+          predicate-type: https://github.com/BestNathan/nession/attestation/run-store-checkpoint/v1
+          predicate-path: ${{ runner.temp }}/run-store-checkpoint/checkpoint.json
+      - name: Verify Sigstore witness and rehearse read-only restore from pinned Store roots
+        run: |
+          set -euo pipefail
+          node scripts/run-store-sigstore-checkpoint.mjs verify-restore \
+            "${RUNNER_TEMP}/run-store-checkpoint/checkpoint.json" \
+            "${RUNNER_TEMP}/run-store-checkpoint/verified-restore.json"
+      - name: Retain checkpoint and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-signed-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/run-store-checkpoint/
+          retention-days: 90
+          if-no-files-found: warn
+      - name: Report public independent witness
+        if: success()
+        env:
+          ATTESTATION_URL: ${{ steps.witness.outputs.attestation-url }}
+        run: |
+          {
+            echo '## Run Store signed checkpoint and restore'
+            echo
+            echo "- Main SHA: \`${GITHUB_SHA}\`"
+            echo "- Four Store refs and exact Git tree digests: verified"
+            echo "- Sigstore transparency-witnessed attestation: ${ATTESTATION_URL}"
+            echo "- Read-only restore: four pinned heads checked, no ref writes"
+            echo "- Limits: first checkpoint is a migration-era observation; no retroactive writer authorization or permanent GitHub Artifact retention"
+          } >> "${GITHUB_STEP_SUMMARY}"
