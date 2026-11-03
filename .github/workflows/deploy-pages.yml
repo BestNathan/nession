@@ -337,6 +337,33 @@ jobs:
             echo "::error::Published Pages did not serve the exact prototype gallery and preview HTML"
             exit 1
           }
+          # Independently compare anonymous HTTPS Knowledge bytes with the
+          # exact validated orphan checkout and build artifact.
+          [[ "$EXPECTED_KNOWLEDGE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$EXPECTED_KNOWLEDGE_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_KNOWLEDGE_ARTICLES" =~ ^[0-9]+$ ]] || exit 1
+          knowledge_json="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html" "$prototype_manifest" "$prototype_gallery" "$prototype_detail" "$knowledge_json"' EXIT
+          knowledge_ready=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/knowledge.json?revision=$EXPECTED_KNOWLEDGE_SHA" -o "$knowledge_json" \
+              && jq -e --arg sha "$EXPECTED_KNOWLEDGE_SHA" --argjson count "$EXPECTED_KNOWLEDGE_ARTICLES" '
+                .schema_version == 1 and .status == "available" and
+                .source.branch == "knowledge" and .source.sha == $sha and
+                (.articles | length) == $count
+              ' "$knowledge_json" >/dev/null \
+              && [[ "$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" == "$EXPECTED_KNOWLEDGE_JSON_SHA256" ]]; then
+              knowledge_ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$knowledge_ready" == true ]] || {
+            echo "::error::Published Knowledge snapshot does not match pinned source/digest"
+            exit 1
+          }
+          echo "Public Knowledge verified: source=$EXPECTED_KNOWLEDGE_SHA articles=$EXPECTED_KNOWLEDGE_ARTICLES digest=$EXPECTED_KNOWLEDGE_JSON_SHA256"
           # This is only source observation; never infer SC acceptance or PR
           # lineage from matching bytes. The existing trusted attester rechecks
           # the published SHA-256 against the exact GitHub Run/Attempt.
