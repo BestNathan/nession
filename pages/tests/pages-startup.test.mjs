@@ -82,6 +82,8 @@ test('Knowledge and Prototypes remain independent of an unavailable site snapsho
   assert.match(h.main.textContent,/Loading published prototypes/);
   assert.doesNotMatch(h.main.textContent,/Engineering snapshot unavailable/);
   h.run("location.hash='#/knowledge'; render()");
+  assert.match(h.main.textContent,/Loading public Knowledge snapshot/);
+  h.run("knowledgeSnapshotStatus='available'; render()");
   assert.match(h.main.textContent,/Knowledge independent/);
   assert.doesNotMatch(h.main.textContent,/Engineering snapshot unavailable/);
   assert.equal(h.errors.length,0);
@@ -119,7 +121,8 @@ test('Knowledge loads separately even if the public site source is unavailable',
     throw Error('other snapshots unavailable');
   });
   await h.run('init()');
-  // The Knowledge view uses its own loader, regardless of site.json availability.
+  // The main snapshot promise and independent Knowledge promise settle separately.
+  await h.run('loadKnowledgeCatalog()');
   assert.match(h.main.textContent,/Knowledge independent/);
   assert.equal(h.errors.length,0);
 });
