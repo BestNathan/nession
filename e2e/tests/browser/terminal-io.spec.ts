@@ -1050,6 +1050,13 @@ async function terminalGridCenter(
 }
 
 test.describe('Terminal touch direction pad (#2657)', () => {
+  test.beforeEach(async ({ page }) => {
+    // The describe is outside `Terminal I/O`, so it does not inherit that
+    // block's navigation. Mount the same shell before creating a Session.
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await waitForShell(page);
+  });
+
   test('a stationary long-press arms, sends one arrow, repeats and releases', async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
     const sessionName = `e2e-direction-${testInfo.retry}-${Date.now()}`;
