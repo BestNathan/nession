@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   CapsuleOcclusionScroll,
+  advanceTouchScrollGesture,
+  beginTouchScrollGesture,
   isFollowingMarginBottom,
   marginLinesFromOcclusion,
   targetViewportY,
@@ -206,5 +208,46 @@ describe('occlusionScroll helpers', () => {
     occlusion.enterHistory();
 
     expect(occlusion.snapshotFollowing()).toBe(false);
+  });
+});
+
+describe('touch scroll gesture (#2659)', () => {
+  it('does not claim a move inside the axis slop', () => {
+    const gesture = beginTouchScrollGesture(100, 100);
+    expect(advanceTouchScrollGesture(gesture, { clientX: 104, clientY: 105 }, 16))
+      .toEqual({ claimed: false, axis: 'undecided', lines: 0 });
+  });
+
+  it('locks a horizontal drag so the pager and selection keep it', () => {
+    const gesture = beginTouchScrollGesture(100, 100);
+    expect(advanceTouchScrollGesture(gesture, { clientX: 120, clientY: 102 }, 16).axis)
+      .toBe('horizontal');
+    // Even a later vertical move cannot steal the locked gesture.
+    expect(advanceTouchScrollGesture(gesture, { clientX: 120, clientY: 140 }, 16))
+      .toEqual({ claimed: false, axis: 'horizontal', lines: 0 });
+  });
+
+  it('accumulates sub-cell travel instead of one line per high-frequency move', () => {
+    const gesture = beginTouchScrollGesture(0, 0);
+    const steps = [8, 16, 24, 32].map((y) =>
+      advanceTouchScrollGesture(gesture, { clientX: 0, clientY: y }, 16));
+    // 8px = claimed but below one cell; 16px = exactly one line; 24 carries
+    // 8px; 32 yields the second line.
+    expect(steps.map((step) => step.lines)).toEqual([0, -1, 0, -1]);
+    expect(steps.every((step) => step.claimed)).toBe(true);
+  });
+
+  it('converts a downward drag to history lines and carries the remainder', () => {
+    const gesture = beginTouchScrollGesture(0, 200);
+    // Finger moves down 20px: one whole 16px line, 4px carried forward.
+    expect(advanceTouchScrollGesture(gesture, { clientX: 0, clientY: 220 }, 16).lines).toBe(-1);
+    // The carried 4px plus 12 more reaches the next line.
+    expect(advanceTouchScrollGesture(gesture, { clientX: 0, clientY: 232 }, 16).lines).toBe(-1);
+    expect(gesture.accumY).toBe(0);
+  });
+
+  it('treats an upward drag as forward scrolling', () => {
+    const gesture = beginTouchScrollGesture(0, 200);
+    expect(advanceTouchScrollGesture(gesture, { clientX: 0, clientY: 170 }, 16).lines).toBe(1);
   });
 });
