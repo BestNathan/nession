@@ -103,7 +103,18 @@ export function validateVerifiedCheckpoint(result,source){
     recovery_status:'ReadOnlyRestoreVerified',recovered_stores:4,
     original_checkpoint_class:restore.baseline_class,
     no_production_ref_writes:true,
-    writer_authorization_verified:false,
+    // SC-08 requires independently witnessed content and a read-only restore.
+    // Writer-ref permission denial is a different SC (#02/#03): explicitly
+    // state the scope limit without misrepresenting an unrelated negative
+    // flag as a failing SC-08 precondition.
+    independent_content_anchor_and_restore_verified:true,
+    writer_authorization_scope:'not_claimed_here_SC_02_and_SC_03',
+    verified_four_store_restore:restore.results.map(x=>({
+      ref:x.ref,baseline_sha:x.baseline_sha,observed_sha:x.observed_sha,
+      checked_commits:x.checked_commits,checked_changes:x.checked_changes,
+      recovery_status:x.status,
+    })),
+    runbook:'docs/architecture/run-store-integrity-audit-runbook.md',
     provenance:'GitHub REST exact-main Run/attempt/Job/Artifact plus independently CLI-verified public Sigstore witness and canonical four-Store Git restore',
   });
 }
@@ -200,7 +211,9 @@ export function selfTestAuthenticatedCheckpoint(){
         checked_commits:0,checked_changes:0,status:'ReadOnlyRestoreVerified'}))}};
   const verify=x=>validateVerifiedCheckpoint(x,auth());
   assert.equal(verify(report).verdict,'Verified');
-  assert.equal(verify(report).writer_authorization_verified,false);
+  assert.equal(verify(report).writer_authorization_scope,'not_claimed_here_SC_02_and_SC_03');
+  assert.equal(verify(report).verified_four_store_restore.length,4);
+  assert.equal(verify(report).independent_content_anchor_and_restore_verified,true);
   assert.throws(()=>verify({...report,witness:{...report.witness,external_log_witnessed:false}}));
   assert.throws(()=>verify({...report,restore:{...report.restore,coverage:3}}));
   assert.throws(()=>verify({...report,restore:{...report.restore,production_ref_mutated:true}}));
