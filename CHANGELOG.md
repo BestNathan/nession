@@ -169,3 +169,10 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Record the passed main Pages deployment and the merged dual-signal Pages regression test; publish a final authenticated Knowledge source-push witness for #2683
 - Source: https://github.com/BestNathan/nession/issues/2683
+
+## 2026-11-03T10:27:55Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Promote to verified after authenticated end-to-end Knowledge push, main Pages publish and exact anonymous HTTPS digest readback, plus trusted Acceptance SC-01 through SC-04 Pass
+- Source: https://github.com/BestNathan/nession/issues/2683

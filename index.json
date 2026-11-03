@@ -87,16 +87,16 @@
       },
       {
         "title": "Nession public Pages source publication and orphan-branch signals",
-        "description": "Current trusted Pages projection, existing Prototype event bridge and pending Knowledge push notification",
+        "description": "Verified trusted main Pages publishing of Prototype and Knowledge orphan branch push signals with exact-source public readback",
         "path": "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md",
-        "status": "candidate",
+        "status": "verified",
         "categories": [
           "delivery",
           "knowledge",
           "pages",
           "security"
         ],
-        "updated_at": "2026-11-03T10:10:39Z"
+        "updated_at": "2026-11-03T10:27:55Z"
       }
     ]
   },
