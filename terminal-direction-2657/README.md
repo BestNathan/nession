@@ -5,19 +5,19 @@
 - **Entry / critical path:** Terminal Session mock → stationary long press 380ms → radial arrows → drag horizontally/vertically → immediate arrow and 1/2/4/8 keys/s repeat → return to center / release to stop.
 - **Gesture thresholds:** 24px entry and 17px exit center dead zone, 48/76/108px distance bands, ±5px speed hysteresis and 1.28 axis-switch ratio. Changing speed never emits an extra immediate key. Visible dial is clamped to the terminal, and a small origin dot indicates displaced visual anchors.
 - **Negative paths:** quick scroll before activation, 28px left/right edge navigation reservation, touch cancellation, read-only observer, disconnected, document hidden.
-- **Device:** iOS/Android browser touch preferred; desktop mouse hold + drag supported for inspection.
+- **Device & primary input:** Android / iOS use native `touchstart` → long-press timer → `touchmove` → `touchend` / `touchcancel`. Movement is captured at document level only while tracking an active touch; active non-passive `touchmove` claims the direction gesture, while a pre-activation drag is surrendered to native scrolling. Browser long-press callout is suppressed on the prototype Terminal surface; double-tap zoom is not required here. Synthetic mouse-after-touch events are ignored. Desktop fine-pointer mouse hold is a **debug-only** fallback, never the mobile implementation path.
 - **Fidelity:** HTML/CSS/JS, entirely local fake TUI and keyboard-event log. No backend, actual PTY, xterm, data persistence or side effects. Visual caret is a mock TUI response, not direct xterm cursor control.
 - **Accessibility:** controls are buttons and keyboard reachable; production Terminal Keys remain discoverable as the fallback.
-- **Known uncertainties:** iOS/Android context-menu/text-selection and TUI mouse / real scroll gesture arbitration require real-device testing on production code.
+- **Known uncertainties:** Chromium mobile emulation can exercise native Touch Events, touch-vs-scroll arbitration, continuation and cancellation; it cannot prove WebKit/iOS Safari long-press behavior. iOS real-device validation and TUI mouse/copy behavior remain required for production.
 - **Reference:** https://termius.com/blog/new-touch-terminal-on-ios
 - **Source of truth:** semantic-key input authority belongs to TerminalInteractionController, shell edges remain App-owned as in docs/design/interaction/app.md.
 
 ## Manual checks
 
 1. Tap or scroll quickly within terminal: no emitted arrow.
-2. Hold stationary: guide appears, no arrow until exit from center.
+2. On an actual phone (not mouse emulation), hold stationary: guide appears, Input path says `touch`, and no arrow until exit from center.
 3. Drag each direction: event log and mock TUI caret update.
 4. Stay held: 4 bounded repeat rates (1/2/4/8 per second); change direction; return center, stop.
-5. Release, toggle observer/offline: no further emissions.
+5. Release or trigger `touchcancel`, toggle observer/offline: no further emissions. Diagnostic `Last touch event` distinguishes native cancellation from normal release. Quick swipe still scrolls the Terminal.
 
 Mock design exploration only, **not** trusted production Acceptance.
