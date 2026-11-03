@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_failure_admission_observation",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "event": "push",
+    "branch": "main",
+    "conclusion": "failure",
+    "run_id": 41587307737,
+    "run_attempt": 1,
+    "target_sha": "35400fcfbd07a2d2c5370daf31b69efa99d21509",
+    "completed_at": "2026-11-03T06:21:58Z",
+    "acceptance_record_path": "runs/35400fcfbd07a2d2c5370daf31b69efa99d21509/full-regression/41587307737-1.json"
+  },
+  "artifact": {
+    "id": 13209680623,
+    "digest": "sha256:825ce072fe98241b107444ce533f1613dffa60ed6144cb4c7698f13720026ff4"
+  },
+  "fingerprint": "e2e1:5494c12d320c997e744176a156e39a5b325e7b334661bbfc11885fae1cddcd9f",
+  "classification": "candidate_test_failure",
+  "observed_at": "2026-11-03T06:21:58Z",
+  "result_ids": [
+    "pages-overview"
+  ],
+  "acceptance_record_path": "runs/35400fcfbd07a2d2c5370daf31b69efa99d21509/full-regression/41587307737-1.json",
+  "failure_signatures": [
+    {
+      "test_id": "pages-overview",
+      "kind": "assertion_failed",
+      "actionable": true,
+      "signature": {
+        "assertion_code": "playwright_unexpected",
+        "stable_frame": "pages-overview.spec.ts:42:52",
+        "affected_invariant": "pages-overview",
+        "environment_specific": false
+      }
+    }
+  ]
+}
