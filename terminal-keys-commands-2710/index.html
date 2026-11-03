@@ -14,7 +14,7 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
 .topbar{height:58px;padding:17px 16px 10px;display:flex;align-items:center;gap:11px;background:#fff}
 .back{width:30px;height:30px;border:0;background:transparent;border-radius:50%;font-size:26px;line-height:1}
 .sess{min-width:0;flex:1}.sess strong{display:block;font-weight:620;font-size:14px;letter-spacing:-.02em}.sess small{display:block;color:#777b80;font-size:11px;margin-top:3px}
-.topdot{width:9px;height:9px;border-radius:50%;background:#76aa87}
+.topdot{width:9px;height:9px;border-radius:50%;background:#76aa87}.source{font-size:10px;color:#7b8287;text-decoration:none;white-space:nowrap}.source:hover{text-decoration:underline}
 .terminal{position:absolute;inset:58px 0 0;padding:17px 17px 110px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow:auto;overscroll-behavior:contain;word-break:break-word}
 .terminal .faint{color:#8f949a}.terminal .prompt{color:#587364}.terminal .strong{color:#292d31}
 .terminal .entry{white-space:pre-wrap;margin:0 0 7px}.terminal .entry.blank{height:10px}
@@ -83,7 +83,7 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
 <div class="page">
 <div class="demo-note"><span>NESSION / INTERACTIVE PROTOTYPE <b>#2710</b></span><span>Mock transport · no real commands</span></div>
 <div class="phone">
-  <header class="topbar"><button class="back" type="button" aria-label="Back is a mock" title="Navigation is not part of this prototype">‹</button><div class="sess"><strong>dev-session</strong><small>beijing · zsh</small></div><span class="topdot" aria-label="Connected (mock)"></span></header>
+  <header class="topbar"><button class="back" type="button" aria-label="Back is a mock" title="Navigation is not part of this prototype">‹</button><div class="sess"><strong>dev-session</strong><small>beijing · zsh</small></div><span class="topdot" aria-label="Connected (mock)"></span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">Source</a></header>
   <main class="terminal" id="terminal" aria-label="Simulated terminal">
     <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
@@ -99,7 +99,7 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
     </div>
   </div>
 </div>
-<div class="status"><span>Try <strong>Ctrl+C</strong>, then <strong>Ctrl → X</strong>, or select <strong>Commands</strong>.</span><a id="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
+<div class="status"><span>Try <strong>Ctrl+C</strong>, then <strong>Ctrl → X</strong>, or select <strong>Commands</strong>.</span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
 </div>
 <script>
 (function(){
@@ -201,7 +201,7 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
   fetch("../manifest.json").then(r=>r.ok?r.json():null).then(m=>{
     const sha=m&&(m.prototype_sha||m.source_sha||m.sha);
     if(typeof sha==="string"&&/^[0-9a-f]{40}$/.test(sha)){
-      document.getElementById("source").href="https://github.com/BestNathan/nession/tree/"+sha+"/terminal-keys-commands-2710";
+      document.querySelectorAll(".source").forEach(a=>{a.href="https://github.com/BestNathan/nession/tree/"+sha+"/terminal-keys-commands-2710";});
     }
   }).catch(()=>{});
   render();
