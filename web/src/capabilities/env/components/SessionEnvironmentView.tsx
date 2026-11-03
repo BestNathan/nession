@@ -75,6 +75,7 @@ function StatusPanel({
     <>
       <div
         data-testid="env-session-status"
+        data-status={status.status}
         data-tone={status.tone}
         className={cn(
           'mt-4 rounded-[var(--nession-radius-surface)] px-3 py-2',
