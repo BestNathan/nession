@@ -35,17 +35,20 @@ test('SC-02: draft, reorder, preview and one replace-whole Apply; Cancel is iner
   const preview = page.getByTestId('env-draft-preview');
   await expect(preview).toContainText('8 effective variables');
   await expect(preview).toContainText('2 overlapping keys: NODE_ENV, LOG_LEVEL');
-  await expect(preview).toContainText('Changed keys:');
-  await expect(preview).toContainText('DATABASE_URL');
+  await expect(preview).toContainText(
+    'Changed keys: NODE_ENV, LOG_LEVEL, DATABASE_URL, DB_PASSWORD',
+  );
   // Key names and counts only — never a value.
   await expect(preview).not.toContainText('staging-secret-9f2c7d');
   await expect(preview).not.toContainText('prod-password-77');
 
-  // Reorder changes the effective result: prod first means staging wins last.
+  // Reorder changes the effective result: with staging last, the overlapping
+  // keys fall back to staging's current values, so only prod's own keys stay
+  // changed.
   await page.getByTestId('env-draft-up-' + PROD_KEY).click();
   await expect(page.getByTestId('env-draft-profiles').locator('li').first())
     .toContainText('prod.env');
-  await expect(preview).toContainText('No effective value changes');
+  await expect(preview).toContainText('Changed keys: DATABASE_URL, DB_PASSWORD');
   await page.getByTestId('env-draft-down-' + PROD_KEY).click();
   await expect(page.getByTestId('env-draft-profiles').locator('li').first())
     .toContainText('staging.env');

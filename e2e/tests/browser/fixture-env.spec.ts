@@ -236,19 +236,20 @@ test.describe('Web 1440×900', () => {
     const preview = page.getByTestId('env-draft-preview');
     await expect(preview).toContainText('8 effective variables');
     await expect(preview).toContainText('2 overlapping keys: NODE_ENV, LOG_LEVEL');
-    await expect(preview).toContainText('Changed keys:');
-    await expect(preview).toContainText('DATABASE_URL');
-    await expect(preview).toContainText('LOG_LEVEL');
+    await expect(preview).toContainText(
+      'Changed keys: NODE_ENV, LOG_LEVEL, DATABASE_URL, DB_PASSWORD',
+    );
     await expect(preview).not.toContainText('staging-secret-9f2c7d');
     await expect(preview).not.toContainText('prod-password-77');
 
-    // Order is the meaning: moving prod ahead of staging makes staging win,
-    // so no effective value changes.
+    // Order is the meaning: moving prod ahead of staging makes the overlapping
+    // keys fall back to staging's current values, so only prod's own keys
+    // remain changed.
     await page.getByTestId(`env-draft-up-${PROD_KEY}`).click();
     await expect(
       page.getByTestId('env-draft-profiles').locator('li').first(),
     ).toContainText('prod.env');
-    await expect(preview).toContainText('No effective value changes');
+    await expect(preview).toContainText('Changed keys: DATABASE_URL, DB_PASSWORD');
 
     // Put it back and apply the ordered selection.
     await page.getByTestId(`env-draft-down-${PROD_KEY}`).click();
