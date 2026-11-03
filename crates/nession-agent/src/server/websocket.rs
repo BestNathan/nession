@@ -58,8 +58,10 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::handshake::server::{
     Request as UpgradeRequest, Response as UpgradeResponse,
 };
@@ -862,6 +864,58 @@ fn make_ok(request_id: &str, message: &str) -> Message<OkPayload> {
 // Server
 // ---------------------------------------------------------------------------
 
+/// How many P2P TCP connections may be in a TLS/WebSocket handshake at once
+/// (#2653).
+///
+/// This is the admission bound **before** authentication. An accepted socket
+/// that has not yet presented a credential occupies one slot; the listener
+/// closes excess sockets instead of spawning work for them. Once the upgrade
+/// callback has authorized the peer the slot is released, so the bound is about
+/// incomplete handshakes and never about how many Sessions a node can serve.
+///
+/// 64: a legitimate client completes TLS and the HTTP upgrade in milliseconds
+/// on a LAN, so 64 concurrent upgrades is far beyond what a burst of browser
+/// tabs produces. A silent peer can hold a slot for at most
+/// [`DEFAULT_P2P_HANDSHAKE_TIMEOUT`], which is what keeps the bound meaningful
+/// under a flood of connections that never speak.
+pub const DEFAULT_P2P_MAX_PENDING_HANDSHAKES: usize = 64;
+
+/// How long one P2P connection may take to complete TLS and the WebSocket
+/// upgrade (#2653).
+///
+/// Covers a peer that sends nothing at all, a partial TLS record, and a partial
+/// HTTP request: the deadline starts after `accept` and ends when the upgrade
+/// callback has authenticated a credential, which is exactly the window in
+/// which the peer is unauthenticated. Ten seconds is generous for a TLS
+/// handshake on a slow link and short enough that idle peers cannot occupy the
+/// admission budget indefinitely.
+pub const DEFAULT_P2P_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The Agent's pre-authentication admission policy for its P2P listener
+/// (#2653).
+///
+/// One value rather than two loose parameters: both are enforced by the same
+/// accept loop, and a caller that could set the bound without the deadline — or
+/// the other way round — could restate "unbounded pending handshakes" as a
+/// supported configuration. `runtime.rs` passes the default; tests pass a small
+/// bound and a short deadline to observe saturation and recovery.
+#[derive(Debug, Clone, Copy)]
+pub struct P2pHandshakePolicy {
+    /// Maximum number of connections concurrently in TLS/WebSocket handshake.
+    pub max_pending: usize,
+    /// Deadline covering both the TLS handshake and the WebSocket upgrade.
+    pub timeout: Duration,
+}
+
+impl Default for P2pHandshakePolicy {
+    fn default() -> Self {
+        Self {
+            max_pending: DEFAULT_P2P_MAX_PENDING_HANDSHAKES,
+            timeout: DEFAULT_P2P_HANDSHAKE_TIMEOUT,
+        }
+    }
+}
+
 /// WebSocket server that accepts P2P client connections and routes
 /// terminal I/O to/from per-client PTY sessions.
 /// What the runtime composition lends this server, as opposed to what it
@@ -904,6 +958,11 @@ pub struct AgentServerContext {
     /// on create/attach. An existing Session keeps its pane's width regardless
     /// of this value.
     pub terminal_cols: u16,
+    /// How many unauthenticated connections may be mid-handshake, and for how
+    /// long (#2653). Defaulted here rather than configured: the default is the
+    /// policy, and tests are the only callers that need a smaller bound and a
+    /// shorter deadline.
+    pub handshake_policy: P2pHandshakePolicy,
 }
 
 pub struct AgentServer {
@@ -943,6 +1002,11 @@ pub struct AgentServer {
     /// with nothing to show for it. `runtime.rs` constructs it once for that
     /// reason.
     credentials: Arc<P2pCredentials>,
+    /// How unauthenticated connections are admitted and how long one may take
+    /// to complete its handshake (#2653). Enforced by [`Self::start`]'s accept
+    /// loop and [`Self::complete_handshake`]; the same policy is never
+    /// re-derived per connection.
+    handshake_policy: P2pHandshakePolicy,
 }
 
 /// Translate a legacy attach-time `env_snapshots` list into the binding model.
@@ -1054,6 +1118,11 @@ fn choose_attach_size(
 #[derive(Clone)]
 pub struct ServerHandle {
     shutdown_tx: mpsc::Sender<()>,
+    /// The pre-authentication admission budget (#2653), readable so a test can
+    /// prove a slot was released rather than infer it from how fast a later
+    /// dial happens. Never taken by the handle itself; the accept loop and the
+    /// pending handshake tasks are the only owners.
+    handshake_slots: Arc<Semaphore>,
 }
 
 impl ServerHandle {
@@ -1063,6 +1132,17 @@ impl ServerHandle {
             .send(())
             .await
             .context("failed to send shutdown signal")
+    }
+
+    /// How many unauthenticated connections this listener can still admit
+    /// (#2653).
+    ///
+    /// The admission budget itself is internal, but its occupancy is the direct
+    /// observation that a refused, failed or timed-out handshake returned its
+    /// slot — and, outside tests, a health signal for a listener under a
+    /// connection flood.
+    pub fn available_handshake_slots(&self) -> usize {
+        self.handshake_slots.available_permits()
     }
 }
 
@@ -2762,6 +2842,7 @@ impl AgentServer {
             attach_mode,
             resize: context.resize,
             credentials: context.credentials,
+            handshake_policy: context.handshake_policy,
         })
     }
 
@@ -2783,8 +2864,15 @@ impl AgentServer {
             .shutdown_rx
             .take()
             .ok_or_else(|| anyhow::anyhow!("shutdown_rx taken twice"))?;
+        // The pre-authentication budget (#2653). One slot per connection that
+        // is still *becoming* a peer; a connection that completes its upgrade
+        // gives the slot back and never takes another, so this bounds pending
+        // work rather than Sessions.
+        let handshake_policy = self.handshake_policy;
+        let handshake_slots = Arc::new(Semaphore::new(handshake_policy.max_pending));
         let handle = ServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
+            handshake_slots: Arc::clone(&handshake_slots),
         };
 
         let tmux_manager = Arc::clone(&self.tmux_manager);
@@ -2803,6 +2891,12 @@ impl AgentServer {
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
+            // Only the *pre-authentication* phase is tracked here. A handshake
+            // task ends as soon as the upgrade has authorized the peer (then a
+            // separate task runs the Session's message loop), so aborting this
+            // set at shutdown drops exactly the connections that never became
+            // peers — and it already finished ones, whose slots are back.
+            let mut handshakes = JoinSet::new();
             info!("Agent WebSocket server listening on {}", listen_address);
 
             loop {
@@ -2814,6 +2908,23 @@ impl AgentServer {
                     accept_result = listener.accept() => {
                         match accept_result {
                             Ok((stream, addr)) => {
+                                // Admission happens here, before any work is
+                                // spawned. If the budget is exhausted the socket
+                                // is closed and no task, future or buffer is
+                                // allocated for it — the peer is indistinguishable
+                                // from a listener that is not there, which is the
+                                // only answer an unauthenticated caller needs.
+                                let Ok(slot) =
+                                    Arc::clone(&handshake_slots).try_acquire_owned()
+                                else {
+                                    info!(
+                                        %addr,
+                                        pending = handshake_policy.max_pending,
+                                        "refusing a P2P connection: every handshake slot is occupied"
+                                    );
+                                    drop(stream);
+                                    continue;
+                                };
                                 let tmux = Arc::clone(&tmux_manager);
                                 let svc = Arc::clone(&service);
                                 let shared_sessions = Arc::clone(&sessions);
@@ -2826,19 +2937,34 @@ impl AgentServer {
                                 let am = attach_mode.clone();
                                 let rtx = resize.clone();
                                 let creds = Arc::clone(&credentials);
-                                tokio::spawn(async move {
-                                    if let Err(e) =
-                                        Self::handle_connection(
-                                            stream, addr, tmux, svc, tls, wd, terminal_cols,
-                                            fops, lanes, &la, &aid, am, rtx, creds,
-                                            shared_sessions,
-                                        )
-                                        .await
+                                let deadline = handshake_policy.timeout;
+                                handshakes.spawn(async move {
+                                    match Self::complete_handshake(
+                                        stream, addr, tls, creds, deadline,
+                                    )
+                                    .await
                                     {
-                                        // Downgraded from warn: random non-WebSocket clients
-                                        // (health checks, scanners) hitting the P2P port are
-                                        // expected noise, not actionable alerts.
-                                        info!("connection error from {}: {:#}", addr, e);
+                                        Ok((ws, authority)) => {
+                                            // The peer is authenticated: this
+                                            // connection no longer occupies the
+                                            // pre-auth budget, however long its
+                                            // Session lives.
+                                            drop(slot);
+                                            tokio::spawn(Self::serve_connection(
+                                                ws, authority, addr, tmux, svc,
+                                                shared_sessions, fops, lanes, wd,
+                                                terminal_cols, la, aid, am, rtx,
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            // Downgraded from warn: random non-WebSocket clients
+                                            // (health checks, scanners) hitting the P2P port are
+                                            // expected noise, not actionable alerts.
+                                            info!("connection error from {}: {:#}", addr, e);
+                                            // `slot` drops here, so a timeout, a refused
+                                            // credential and a transport failure all return
+                                            // the budget without waiting for anything else.
+                                        }
                                     }
                                 });
                             }
@@ -2847,8 +2973,22 @@ impl AgentServer {
                             }
                         }
                     }
+                    // Reap finished handshake tasks so a long-lived listener
+                    // does not accumulate one completed entry per connection.
+                    Some(result) = handshakes.join_next(), if !handshakes.is_empty() => {
+                        if let Err(e) = result {
+                            error!("P2P handshake task failed: {}", e);
+                        }
+                    }
                     _ = shutdown_future => {
                         info!("Agent WebSocket server shutting down");
+                        // Abort in-flight handshakes and wait for them to be
+                        // dropped so their admission slots are back before
+                        // shutdown proceeds. These peers are unauthenticated,
+                        // so there is no connection of theirs to preserve; a
+                        // client that was mid-handshake simply reconnects.
+                        handshakes.abort_all();
+                        while handshakes.join_next().await.is_some() {}
                         // Close every attached backend: the tmux Sessions
                         // persist, but their terminal clients belong to this
                         // process and must not outlive it.
@@ -2862,91 +3002,100 @@ impl AgentServer {
         Ok((handle, local_addr))
     }
 
-    /// Handle a single incoming TCP connection. Performs optional TLS
-    /// handshake, upgrades to WebSocket, then enters the per-client
-    /// message loop.
-    #[allow(clippy::too_many_arguments)]
-    async fn handle_connection(
+    /// Complete the pre-authentication phase of one accepted P2P socket.
+    ///
+    /// Performs the optional TLS handshake and the WebSocket upgrade — the
+    /// latter including the #1013 credential check — under one deadline, and
+    /// returns only once a credential has been authorized. Everything after
+    /// this point is therefore unreachable for a peer that never completed an
+    /// upgrade, which is what bounds the work an unauthenticated connection can
+    /// cause (#2653).
+    async fn complete_handshake(
         stream: tokio::net::TcpStream,
         addr: SocketAddr,
-        tmux_manager: Arc<SessionManager>,
-        service: Arc<SessionService>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
-        default_working_dir: String,
-        terminal_cols: u16,
-        file_ops: Arc<FileOps>,
-        mutations: Arc<KeyedLane<ResourceKey>>,
-        listen_address: &str,
-        agent_id: &str,
-        attach_mode: AttachMode,
-        resize: ResizeReporter,
         credentials: Arc<P2pCredentials>,
-        sessions: Arc<SessionRegistry>,
-    ) -> Result<()> {
-        // Box the underlying stream so that TLS and plain connections
-        // share a single WebSocket stream type.
-        let io: TcpOrTls = if let Some(acceptor) = tls_acceptor {
-            let tls_stream = acceptor
-                .accept(stream)
-                .await
-                .context("TLS handshake failed")?;
-            info!("TLS connection established from {}", addr);
-            TcpOrTls::Tls(tls_stream)
-        } else {
-            TcpOrTls::Plain(stream)
-        };
-
-        // The half of #1013 that asks *is there a credential, and is it this
-        // agent's*, decided at the upgrade rather than after it.
-        //
-        // `accept_hdr_async` because its callback can **refuse**: returning
-        // `Err` rejects the upgrade, so a caller with no credential never has a
-        // WebSocket, never has a connection, and cannot leave one in a
-        // half-authenticated state — the property is structural rather than
-        // something every later handler has to keep honouring.
-        //
-        // The callback is **synchronous** (verified in the vendored
-        // tungstenite: `Callback::on_request` is an `FnOnce`, not an async fn),
-        // which is why the credential store is a `std::sync::RwLock` and why the
-        // authority has to come back out through a cell the closure wrote to.
-        // `OnceLock` rather than a `Mutex`: it is written once, on the path that
-        // returns `Ok`, and read once below.
+        deadline: Duration,
+    ) -> Result<(WebSocketStream<TcpOrTls>, ConnectionAuthority)> {
         let authority: Arc<OnceLock<ConnectionAuthority>> = Arc::new(OnceLock::new());
         let captured = Arc::clone(&authority);
         let store = Arc::clone(&credentials);
-        let ws = tokio_tungstenite::accept_hdr_async(
-            io,
-            move |request: &UpgradeRequest, response: UpgradeResponse| {
-                let presented = request
-                    .uri()
-                    .query()
-                    .and_then(nession_protocol::contracts::p2p::credential_from_query);
 
-                match presented.as_deref().map(|token| store.authorize(token)) {
-                    Some(Ok(found)) => {
-                        let _ = captured.set(found);
-                        Ok(response)
+        let upgrade = async move {
+            // Box the underlying stream so that TLS and plain connections
+            // share a single WebSocket stream type.
+            let io: TcpOrTls = if let Some(acceptor) = tls_acceptor {
+                let tls_stream = acceptor
+                    .accept(stream)
+                    .await
+                    .context("TLS handshake failed")?;
+                info!("TLS connection established from {}", addr);
+                TcpOrTls::Tls(tls_stream)
+            } else {
+                TcpOrTls::Plain(stream)
+            };
+
+            // The half of #1013 that asks *is there a credential, and is it this
+            // agent's*, decided at the upgrade rather than after it.
+            //
+            // `accept_hdr_async` because its callback can **refuse**: returning
+            // `Err` rejects the upgrade, so a caller with no credential never has a
+            // WebSocket, never has a connection, and cannot leave one in a
+            // half-authenticated state — the property is structural rather than
+            // something every later handler has to keep honouring.
+            //
+            // The callback is **synchronous** (verified in the vendored
+            // tungstenite: `Callback::on_request` is an `FnOnce`, not an async fn),
+            // which is why the credential store is a `std::sync::RwLock` and why the
+            // authority has to come back out through a cell the closure wrote to.
+            // `OnceLock` rather than a `Mutex`: it is written once, on the path that
+            // returns `Ok`, and read once below.
+            tokio_tungstenite::accept_hdr_async(
+                io,
+                move |request: &UpgradeRequest, response: UpgradeResponse| {
+                    let presented = request
+                        .uri()
+                        .query()
+                        .and_then(nession_protocol::contracts::p2p::credential_from_query);
+
+                    match presented.as_deref().map(|token| store.authorize(token)) {
+                        Some(Ok(found)) => {
+                            let _ = captured.set(found);
+                            Ok(response)
+                        }
+                        refusal => {
+                            // One line, one shape, whatever the reason. `refusal` is
+                            // `None` for "nothing presented" and `Some(Err(_))` for
+                            // unknown, expired and wrong-agent alike, and they are
+                            // deliberately indistinguishable to the peer: a message
+                            // that said "expired" would tell a caller which of its
+                            // guesses was closest. The reason is logged and not sent.
+                            warn!(
+                                %addr,
+                                reason = ?refusal,
+                                "refusing a peer-to-peer connection: no valid credential"
+                            );
+                            Err(unauthorized_upgrade())
+                        }
                     }
-                    refusal => {
-                        // One line, one shape, whatever the reason. `refusal` is
-                        // `None` for "nothing presented" and `Some(Err(_))` for
-                        // unknown, expired and wrong-agent alike, and they are
-                        // deliberately indistinguishable to the peer: a message
-                        // that said "expired" would tell a caller which of its
-                        // guesses was closest. The reason is logged and not sent.
-                        warn!(
-                            %addr,
-                            reason = ?refusal,
-                            "refusing a peer-to-peer connection: no valid credential"
-                        );
-                        Err(unauthorized_upgrade())
-                    }
-                }
-            },
-        )
-        .await
-        .context("WebSocket upgrade failed")?;
-        let (ws_sink, ws_stream) = ws.split();
+                },
+            )
+            .await
+            .context("WebSocket upgrade failed")
+        };
+
+        // One deadline for both phases, because they are one unauthenticated
+        // window: a peer that sends nothing, a partial TLS record, or half of a
+        // request line is exactly the peer this bound exists for. It starts
+        // after `accept` (the admission slot is acquired before this future
+        // runs) and ends when the upgrade callback has authorized a credential.
+        let ws = tokio::time::timeout(deadline, upgrade)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "P2P handshake did not complete within {deadline:?}; closing the connection"
+                )
+            })??;
 
         // The callback sets this on every path that returns `Ok`. A `None` here
         // would mean a connection that passed the upgrade with no record of what
@@ -2961,6 +3110,32 @@ impl AgentServer {
             "WebSocket connection from {} (credential {}, session {})",
             addr, authority.credential_id, authority.session_id
         );
+        Ok((ws, authority))
+    }
+
+    /// Run one authenticated P2P connection's message loop.
+    ///
+    /// Reached only after [`Self::complete_handshake`] has authorized a
+    /// credential. The connection holds no pre-authentication admission slot
+    /// here: that budget is for becoming a peer, not for being one.
+    #[allow(clippy::too_many_arguments)]
+    async fn serve_connection(
+        ws: WebSocketStream<TcpOrTls>,
+        authority: ConnectionAuthority,
+        addr: SocketAddr,
+        tmux_manager: Arc<SessionManager>,
+        service: Arc<SessionService>,
+        sessions: Arc<SessionRegistry>,
+        file_ops: Arc<FileOps>,
+        mutations: Arc<KeyedLane<ResourceKey>>,
+        default_working_dir: String,
+        terminal_cols: u16,
+        listen_address: String,
+        agent_id: String,
+        attach_mode: AttachMode,
+        resize: ResizeReporter,
+    ) -> Result<()> {
+        let (ws_sink, ws_stream) = ws.split();
 
         // The outbound path: a bounded queue with a policy per lane, and one
         // writer task that owns the socket (`#961-E`). Every lane's task — and
@@ -2987,8 +3162,8 @@ impl AgentServer {
             default_working_dir,
             terminal_cols,
             file_ops,
-            listen_address: listen_address.to_string(),
-            agent_id: agent_id.to_string(),
+            listen_address,
+            agent_id,
             attach_mode,
             resize,
             addr,
@@ -4017,6 +4192,7 @@ mod tests {
     use nession_protocol::contracts::p2p::agent_url_with_credential;
     use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -4085,6 +4261,22 @@ mod tests {
     }
 
     async fn start_test_server_on(_port: u16) -> (SocketAddr, ServerHandle, Arc<P2pCredentials>) {
+        start_test_server_with(None, P2pHandshakePolicy::default()).await
+    }
+
+    /// Start a test server with an explicit TLS identity and admission policy
+    /// (#2653).
+    ///
+    /// The policy is the whole point of the pre-authentication tests: a small
+    /// `max_pending` makes saturation observable with a handful of sockets, and
+    /// a short `timeout` proves the deadline without waiting ten seconds.
+    async fn start_test_server_with(
+        tls: Option<(
+            Vec<rustls::pki_types::CertificateDer<'static>>,
+            rustls::pki_types::PrivateKeyDer<'static>,
+        )>,
+        handshake_policy: P2pHandshakePolicy,
+    ) -> (SocketAddr, ServerHandle, Arc<P2pCredentials>) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (resize, _resize_updates) = ResizeReporter::new();
         // Granted **before** `start`, which consumes the server: the store is an
@@ -4106,7 +4298,7 @@ mod tests {
         let server = AgentServer::new(
             "127.0.0.1:0",
             "test-agent",
-            None,
+            tls,
             "/tmp".to_string(),
             tmp.path().to_string_lossy().as_ref(),
             AttachMode::Plain,
@@ -4116,6 +4308,7 @@ mod tests {
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+                handshake_policy,
             },
         )
         .expect("server creation should succeed");
@@ -4123,6 +4316,108 @@ mod tests {
         Box::leak(Box::new(tmp));
         let (handle, addr) = server.start().await.expect("start should succeed");
         (addr, handle, credentials)
+    }
+
+    /// A fresh test CA and server leaf for the TLS half of the admission tests
+    /// (#2653).
+    ///
+    /// Generated per test rather than committed as PEM material. The SAN is
+    /// `127.0.0.1` because that is the address the test dials. A CA plus a leaf
+    /// rather than one self-signed certificate: rustls rejects a CA certificate
+    /// presented as the endpoint (`CaUsedAsEndEntity`), and a leaf that is its
+    /// own anchor would have to be one.
+    fn test_tls_identity() -> (
+        Vec<rustls::pki_types::CertificateDer<'static>>,
+        rustls::pki_types::PrivateKeyDer<'static>,
+        rustls::pki_types::CertificateDer<'static>,
+    ) {
+        let ca_key = rcgen::KeyPair::generate().expect("generate the test CA key");
+        let mut ca_params =
+            rcgen::CertificateParams::new(Vec::<String>::new()).expect("empty CA SAN list");
+        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        ca_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "nession P2P handshake test CA");
+        let ca = ca_params
+            .self_signed(&ca_key)
+            .expect("self-sign the test CA");
+
+        let leaf_key = rcgen::KeyPair::generate().expect("generate the server leaf key");
+        let mut leaf_params =
+            rcgen::CertificateParams::new(vec!["127.0.0.1".to_string()]).expect("valid SAN");
+        leaf_params
+            .extended_key_usages
+            .push(rcgen::ExtendedKeyUsagePurpose::ServerAuth);
+        let leaf = leaf_params
+            .signed_by(&leaf_key, &ca, &ca_key)
+            .expect("sign the server leaf");
+        let leaf_der = leaf.der().clone();
+        let ca_der = ca.der().clone();
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(leaf_key.serialize_der().into());
+        (vec![leaf_der, ca_der.clone()], key, ca_der)
+    }
+
+    /// Dial a TLS test server presenting [`TEST_CREDENTIAL`], trusting the
+    /// test's own certificate instead of any system root.
+    async fn connect_tls_client(
+        addr: SocketAddr,
+        trusted: rustls::pki_types::CertificateDer<'static>,
+    ) -> (WsSink, WsStream) {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(trusted)
+            .expect("the generated certificate is a usable trust anchor");
+        let client = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let url = agent_url_with_credential(&format!("wss://{addr}"), TEST_CREDENTIAL);
+        let (ws, _response) = tokio_tungstenite::connect_async_tls_with_config(
+            url.as_str(),
+            None,
+            false,
+            Some(tokio_tungstenite::Connector::Rustls(Arc::new(client))),
+        )
+        .await
+        .expect("a TLS client with a valid credential connects");
+        ws.split()
+    }
+
+    /// Wait until the listener closed `peer`, or report that it is still
+    /// waiting on it.
+    ///
+    /// Closed is the *event* the admission tests wait for; a `false` result
+    /// means the read was still pending at `wait`, which is how a saturated
+    /// listener's one admitted peer is told apart from the peers it dropped.
+    /// Bytes before EOF (a TLS alert, for instance) are discarded: what is
+    /// being asserted is that the connection ended.
+    async fn await_peer_closed(peer: &mut tokio::net::TcpStream, wait: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + wait;
+        let mut buf = [0u8; 64];
+        loop {
+            match tokio::time::timeout_at(deadline, peer.read(&mut buf)).await {
+                Ok(Ok(0)) | Ok(Err(_)) => return true,
+                Ok(Ok(_)) => continue,
+                Err(_) => return false,
+            }
+        }
+    }
+
+    /// Wait until the listener has an admission slot free, then return it.
+    ///
+    /// Used instead of reading [`ServerHandle::available_handshake_slots`]
+    /// after an awaited event: the client observes its socket closing slightly
+    /// before the server task drops the permit, so a direct read would race.
+    /// Acquiring is the event-driven form — it resolves only after the task
+    /// holding the slot has released it.
+    async fn await_free_slot(handle: &ServerHandle) {
+        let slot = tokio::time::timeout(
+            Duration::from_secs(5),
+            Arc::clone(&handle.handshake_slots).acquire_owned(),
+        )
+        .await
+        .expect("the listener must release its handshake slot")
+        .expect("the admission semaphore is not closed");
+        drop(slot);
     }
 
     /// Dial `addr`, presenting `credential`.
@@ -4232,6 +4527,7 @@ mod tests {
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+                handshake_policy: Default::default(),
             },
         )
         .unwrap();
@@ -6385,5 +6681,209 @@ mod tests {
 
         handle_a.shutdown().await.ok();
         handle_b.shutdown().await.ok();
+    }
+
+    // ── Pre-authentication admission and handshake deadline (#2653) ────────
+    //
+    // The credential tests above prove *who* may connect. These prove that a
+    // peer which never gets that far — silent, or halfway through TLS or an
+    // HTTP request — occupies a bounded amount of the listener and gives it
+    // back. The bound is app-level, before any task is spawned for the peer;
+    // the deadline is one clock over both TLS and the WebSocket upgrade.
+
+    /// SC-01: silent peers are admitted only up to the bound.
+    ///
+    /// One slot, eight silent sockets, and a deadline long enough that the one
+    /// admitted peer cannot expire while the assertions run. Exactly one peer
+    /// must stay open and the other seven must be closed by the listener
+    /// without ever having a task spawned for them; shutdown must then abort
+    /// the survivor and return the slot.
+    #[tokio::test]
+    async fn incomplete_handshakes_are_capped_and_returned_on_shutdown() {
+        let policy = P2pHandshakePolicy {
+            max_pending: 1,
+            timeout: Duration::from_secs(60),
+        };
+        let (addr, handle, _credentials) = start_test_server_with(None, policy).await;
+
+        let mut peers = Vec::new();
+        for _ in 0..8 {
+            peers.push(
+                tokio::net::TcpStream::connect(addr)
+                    .await
+                    .expect("local TCP connect"),
+            );
+        }
+
+        let mut still_open = 0;
+        for peer in &mut peers {
+            if !await_peer_closed(peer, Duration::from_secs(1)).await {
+                still_open += 1;
+            }
+        }
+
+        assert_eq!(
+            still_open, 1,
+            "one admission slot means exactly one silent peer may stay open"
+        );
+        assert_eq!(
+            handle.available_handshake_slots(),
+            0,
+            "the admitted handshake is the one holding the slot"
+        );
+
+        handle.shutdown().await.expect("shutdown signal is queued");
+        await_free_slot(&handle).await;
+        assert_eq!(
+            handle.available_handshake_slots(),
+            1,
+            "shutdown aborts the pending handshake and returns its slot"
+        );
+    }
+
+    /// SC-02/SC-03 on the plain path: the WebSocket upgrade has one finite
+    /// deadline covering a partial request and a silent peer, and the capacity
+    /// it returns admits a real credential-bearing connection.
+    #[tokio::test]
+    async fn plain_incomplete_handshakes_time_out_and_capacity_recovers() {
+        let policy = P2pHandshakePolicy {
+            max_pending: 1,
+            timeout: Duration::from_millis(150),
+        };
+        let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+
+        // Past the TCP accept, short of a complete HTTP upgrade: the credential
+        // callback has not run, so this is exactly the pre-auth window.
+        let mut partial = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("local TCP connect");
+        partial
+            .write_all(b"GET / HTTP/1.1\r\nHost: test\r\n")
+            .await
+            .expect("write a partial request");
+        assert!(
+            await_peer_closed(&mut partial, Duration::from_secs(5)).await,
+            "a partial HTTP upgrade must be closed at the handshake deadline"
+        );
+
+        // And a peer that says nothing at all.
+        let mut silent = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("local TCP connect");
+        assert!(
+            await_peer_closed(&mut silent, Duration::from_secs(5)).await,
+            "a silent peer must be closed at the handshake deadline"
+        );
+
+        await_free_slot(&handle).await;
+        assert_eq!(
+            handle.available_handshake_slots(),
+            1,
+            "both expired handshakes returned their slot"
+        );
+
+        // The same listener still serves a credential-bearing connection.
+        let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        let ping: Message<serde_json::Value> = Message {
+            msg_type: msg_types::CONTROL_PING.to_string(),
+            id: "after-timeout".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let pong: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &ping).await;
+        assert_eq!(
+            pong.msg_type,
+            msg_types::CONTROL_PONG,
+            "a valid client is served after incomplete handshakes expire"
+        );
+
+        // Recovery does not weaken the #1013 boundary.
+        assert!(
+            connect_async(format!("ws://{addr}")).await.is_err(),
+            "a connection presenting no credential is still refused"
+        );
+
+        handle.shutdown().await.ok();
+    }
+
+    /// SC-02 on the TLS path: a partial ClientHello and a silent peer are both
+    /// covered by the same deadline, and the slot they release admits a real
+    /// TLS client.
+    #[tokio::test]
+    async fn tls_incomplete_handshakes_time_out_and_capacity_recovers() {
+        let (certs, key, trusted) = test_tls_identity();
+        let policy = P2pHandshakePolicy {
+            max_pending: 1,
+            timeout: Duration::from_millis(150),
+        };
+        let (addr, handle, _credentials) = start_test_server_with(Some((certs, key)), policy).await;
+
+        // Enough TLS to enter rustls (a handshake record announcing 64 bytes),
+        // not enough to finish one.
+        let mut partial = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("local TCP connect");
+        partial
+            .write_all(&[0x16, 0x03, 0x01, 0x00, 0x40])
+            .await
+            .expect("write a partial TLS record header");
+        assert!(
+            await_peer_closed(&mut partial, Duration::from_secs(5)).await,
+            "a partial TLS handshake must be closed at the deadline"
+        );
+
+        // And one that sends nothing: rustls is still waiting for a ClientHello.
+        let mut silent = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("local TCP connect");
+        assert!(
+            await_peer_closed(&mut silent, Duration::from_secs(5)).await,
+            "a silent TLS peer must be closed at the deadline"
+        );
+
+        await_free_slot(&handle).await;
+
+        // The slot is usable, and the TLS path still authenticates a credential.
+        let (mut sink, mut stream) = connect_tls_client(addr, trusted).await;
+        let ping: Message<serde_json::Value> = Message {
+            msg_type: msg_types::CONTROL_PING.to_string(),
+            id: "tls-after-timeout".to_string(),
+            timestamp: now_timestamp(),
+            payload: serde_json::json!({}),
+        };
+        let pong: Message<serde_json::Value> =
+            send_and_receive(&mut sink, &mut stream, &ping).await;
+        assert_eq!(pong.msg_type, msg_types::CONTROL_PONG);
+
+        handle.shutdown().await.ok();
+    }
+
+    /// SC-02's refusal path: a handshake that completes but presents an unknown
+    /// credential returns its slot immediately, not at the deadline.
+    ///
+    /// The 60-second deadline is the assertion: with one slot and a refused
+    /// upgrade, a slot that was held until timeout would leave the listener
+    /// saturated for the whole test.
+    #[tokio::test]
+    async fn a_refused_upgrade_releases_its_handshake_slot() {
+        let policy = P2pHandshakePolicy {
+            max_pending: 1,
+            timeout: Duration::from_secs(60),
+        };
+        let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+
+        let url = agent_url_with_credential(&format!("ws://{addr}"), "not-a-minted-credential");
+        assert!(
+            connect_async(&url).await.is_err(),
+            "an unknown credential must not upgrade"
+        );
+
+        await_free_slot(&handle).await;
+
+        // And the recovered budget admits the credential the agent minted.
+        let (_sink, _stream) = connect_client(&credentials, addr).await;
+
+        handle.shutdown().await.ok();
     }
 }

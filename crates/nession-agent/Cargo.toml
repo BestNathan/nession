@@ -60,6 +60,9 @@ nession-server = { path = "../nession-server" }
 base64.workspace = true
 rand.workspace = true
 tempfile = "3"
+# A self-signed identity for the TLS half of the P2P handshake-deadline tests
+# (#2653). Generated per test rather than committed as PEM material.
+rcgen = "0.13"
 
 [lints]
 workspace = true
