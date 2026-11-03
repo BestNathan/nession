@@ -16,6 +16,10 @@ const TITLE_BASE='8e5ab335212841898dac7a4be719ceed60750591';
 const SHA=/^[a-f0-9]{40}$/;
 const ACTIONS=new Set(['create','update','delete','rename','move','migrate']);
 const HEADER='# Knowledge Changelog\n\n';
+// #2683: one byte-pinned read-only push notification on the orphan branch;
+// it is never executed inside a trusted main runner or used as proof.
+export const KNOWLEDGE_SIGNAL_PATH='.github/workflows/knowledge-changed.yml';
+export const KNOWLEDGE_SIGNAL_SOURCE=["name: Knowledge / Change Signal","","# One immutable, read-only notification; trusted main validates all source data.","# No checkout, third-party action, secrets, or write permission here.","on:","  push:","    branches: [knowledge]","","permissions:","  contents: read","","jobs:","  signal:","    runs-on: ubuntu-24.04","    timeout-minutes: 3","    steps:","      - name: Record Knowledge revision","        shell: bash","        run: |","          echo \"Knowledge source revision: $GITHUB_SHA\"","          echo \"Only the trusted main workflow may validate and publish it.\""].join('\n')+'\n';
 const fail=(message)=>{throw Error('knowledge-ledger: '+message);};
 export function titleSlug(title) {
   if(typeof title!=='string'||!title.trim())fail('nonempty title required');
@@ -45,6 +49,17 @@ function paths(root,part) {
     }
   }
   visit(start,'');return out.sort();
+}
+export function validateKnowledgeSignal(root) {
+  const dir=path.join(root,'.github');
+  if(!fs.existsSync(dir))return false; // Historic orphan commits predate the signal.
+  if(!fs.lstatSync(dir).isDirectory())fail('Knowledge .github must be a directory');
+  const entries=paths(root,'.github');
+  if(entries.length!==1||entries[0]!==KNOWLEDGE_SIGNAL_PATH)
+    fail('Knowledge .github may contain only the pinned read-only change signal');
+  if(fs.readFileSync(path.join(root,KNOWLEDGE_SIGNAL_PATH),'utf8')!==KNOWLEDGE_SIGNAL_SOURCE)
+    fail('Knowledge change signal source differs from trusted byte-pinned contract');
+  return true;
 }
 function scalar(input) {
   const v=input.trim();
@@ -202,9 +217,10 @@ function latestEventForArticle(entry,events) {
 }
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
-    if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
+    if(!['.git','.github','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
       fail('legacy/unexpected active knowledge path: '+entry);
   }
+  validateKnowledgeSignal(root);
   const schemas=paths(root,'schema');
   if(schemas.length!==1||schemas[0]!=='schema/v2.json')fail('exactly one schema/v2.json must be active');
   const schema=JSON.parse(fs.readFileSync(path.join(root,'schema/v2.json'),'utf8'));
@@ -284,6 +300,13 @@ function verify(root,baseline=null) {
       if(change.file.startsWith('topics/'))continue;
       if(change.file==='CHANGELOG.md'&&change.status==='M')continue;
       if(change.file==='index.json'&&change.status==='M')continue;
+      // Exactly one initial ADD with pinned bytes; later mutations/deletions
+      // and any other workflow on the knowledge ref remain forbidden.
+      if(change.file===KNOWLEDGE_SIGNAL_PATH&&change.status==='A'){
+        if(git(root,'show',commit+':'+KNOWLEDGE_SIGNAL_PATH)+'\n'!==KNOWLEDGE_SIGNAL_SOURCE)
+          fail('Knowledge signal addition must match trusted exact source');
+        continue;
+      }
       if(i===0&&change.status==='M'&&['schema/v2.json','README.md'].includes(change.file))continue;
       fail('forbidden knowledge commit modification: '+change.status+' '+change.file);
     }
@@ -319,6 +342,15 @@ function fixture() {
       .replace('# '+secondTitle,'# '+secondTitle)+'\nSee [architecture](./'+slug+'.md#'+slugHeadingForFixture(title)+').\n');
     put(file,article+'\nSee [related fixture](./'+secondSlug+'.md).\n');
     assert.equal(validateArticleLinks(d,[file,secondFile]).orphans,0);
+    assert.equal(validateKnowledgeSignal(d),false);
+    put(KNOWLEDGE_SIGNAL_PATH,KNOWLEDGE_SIGNAL_SOURCE);
+    assert.equal(validateKnowledgeSignal(d),true);
+    put(KNOWLEDGE_SIGNAL_PATH,KNOWLEDGE_SIGNAL_SOURCE.replace('branches: [knowledge]','branches: [main]'));
+    assert.throws(()=>validateKnowledgeSignal(d),/source differs/);
+    put(KNOWLEDGE_SIGNAL_PATH,KNOWLEDGE_SIGNAL_SOURCE);
+    put('.github/workflows/extra.yml','name: Unapproved\n');
+    assert.throws(()=>validateKnowledgeSignal(d),/only the pinned/);
+    fs.unlinkSync(path.join(d,'.github/workflows/extra.yml'));
     assert.throws(()=>validateArticleLinks(d,[file]),/orphan article/);
     put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#'+slugHeadingForFixture(title),'./missing.md'));
     assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local link/);
@@ -342,7 +374,7 @@ function fixture() {
     assert.equal(latestEventForArticle(currentEntry,logEntries(log)).action,'create');
     assert.throws(()=>latestEventForArticle(currentEntry,[]),/missing changelog event/);
     assert.throws(()=>logEntries(log.replace(slug+'.md','short.md')),/full title/);
-    console.log('knowledge-ledger-contract: full title slug, Unicode, no synthetic IDs, topic/category index, global log fixtures passed');
+    console.log('knowledge-ledger-contract: title, index, log, local-link and pinned signal fixtures passed');
   }finally{fs.rmSync(d,{recursive:true,force:true});}
 }
 const [cmd,root,base]=process.argv.slice(2);
