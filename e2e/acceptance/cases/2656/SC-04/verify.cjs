@@ -53,8 +53,11 @@ run(({ evidence }) => {
     "from '@/shared/lib/clipboard'",
     'NotAllowedError',
     'SecurityError',
-    "ClipboardEffectError('EPERM')",
-    "ClipboardEffectError('EIO')",
+    // The adapter builds the codes through `isPermissionError(...) ? 'EPERM'
+    // : 'EIO'`, so assert the predicate and both literals, not one call shape.
+    'isPermissionError',
+    "'EPERM'",
+    "'EIO'",
     'writeClipboard',
   ]) {
     if (!adapter.includes(required)) {
