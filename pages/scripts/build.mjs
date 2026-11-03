@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
+import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
@@ -163,6 +164,9 @@ const storeMeta=Object.fromEntries(await Promise.all(
     [name,await optionalStoreMeta(allRefs[index])])
 ));
 const generatedAt=new Date().toISOString();
+const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
+  sha:process.env.KNOWLEDGE_SHA,generatedAt});
+if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
@@ -192,9 +196,10 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','app.js','favicon.svg','workflows.html','workflows.js','workflows.css']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,
@@ -206,5 +211,6 @@ console.log(JSON.stringify({
   published_e2e_ids:result.work.acceptance_e2e.records.length,
   lineage_status:result.work.lineage.status,
   agent_store_readiness:result.work.agent_store_readiness.status,
-  stores:result.evidence.stores.map(x=>[x.name,x.state])
+  stores:result.evidence.stores.map(x=>[x.name,x.state]),
+  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null}
 }));
