@@ -106,3 +106,17 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record the #2659 mobile touch-scroll ownership: the capsule host capture listener decides by xterm's tracked mode, scrolls local history with scrollLines, re-dispatches synthetic wheel events into xterm's mouse/alternate-screen path, accumulates sub-cell pixels, and never claims horizontal/multitouch/tap gestures
 - Source: https://github.com/BestNathan/nession/issues/2659
+
+## 2026-11-03T08:52:21.743Z | create | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the approved but not-yet-implemented native-backed Sandbox Policy and exact platform/security limitations from #2681
+- Source: https://github.com/BestNathan/nession/issues/2681
+
+## 2026-11-03T08:52:21.743Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Add a reciprocal link clarifying that Sandbox policy and execution isolation are outside xterm/terminal-engine ownership
+- Source: https://github.com/BestNathan/nession/issues/2681
