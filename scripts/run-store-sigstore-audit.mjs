@@ -87,6 +87,65 @@ export function unpackOriginalEnvelope(bundle){
   if(bytes.length>180000)fail('oversized signed checkpoint statement');
   return manifestFromOriginalStatement(JSON.parse(bytes.toString('utf8')));
 }
+// GitHub's public Attestations REST bundle_url is served as raw Snappy block
+// (.json.sn). Treat it as binary, never UTF-8 text. Verify signed DSSE using
+// the existing canonical Sigstore verifier AFTER bounded decoding; decoding
+// itself never confers authenticity.
+export function decodeSnappyBundle(raw){
+  if(!Buffer.isBuffer(raw)||raw.length<2||raw.length>1024*1024)
+    fail('invalid or oversized raw Snappy signed bundle');
+  let input=0,size=0,mult=1,finished=false;
+  for(let i=0;i<5;i++){
+    if(input>=raw.length)fail('truncated Snappy length');
+    const b=raw[input++];
+    size+=(b&0x7f)*mult;
+    if((b&0x80)===0){finished=true;break;}
+    mult*=128;
+  }
+  if(!finished||!Number.isSafeInteger(size)||size<2||size>2*1024*1024)
+    fail('invalid or unbounded Snappy uncompressed length');
+  const out=Buffer.alloc(size);
+  let cursor=0;
+  while(input<raw.length){
+    const tag=raw[input++],kind=tag&3;
+    let length=0,offset=0;
+    if(kind===0){
+      const code=tag>>>2;
+      if(code<60)length=code+1;
+      else{
+        const n=code-59;
+        if(input+n>raw.length)fail('truncated Snappy literal length');
+        let scalar=0;
+        for(let i=0;i<n;i++)scalar+=raw[input++]*2**(8*i);
+        length=scalar+1;
+      }
+      if(length<1||length>size-cursor||input+length>raw.length)
+        fail('truncated/oversized Snappy literal');
+      raw.copy(out,cursor,input,input+length);
+      input+=length;cursor+=length;
+      continue;
+    }
+    if(kind===1){
+      length=4+((tag>>>2)&7);
+      if(input>=raw.length)fail('truncated Snappy copy1 offset');
+      offset=((tag&0xe0)<<3)|raw[input++];
+    }else{
+      const n=kind===2?2:4;
+      length=1+(tag>>>2);
+      if(input+n>raw.length)fail('truncated Snappy copy offset');
+      offset=0;
+      for(let i=0;i<n;i++)offset+=raw[input++]*2**(8*i);
+    }
+    if(!Number.isSafeInteger(offset)||offset<1||offset>cursor||
+       length<1||length>size-cursor)
+      fail('invalid Snappy copy bounds');
+    for(let i=0;i<length;i++)out[cursor+i]=out[cursor+i-offset];
+    cursor+=length;
+  }
+  if(cursor!==size||input!==raw.length)
+    fail('Snappy signed bundle length mismatch');
+  return out;
+}
 async function getOriginalBundle(){
   const listing=JSON.parse(gh(['api','--method','GET',
     'repos/'+REPO+'/attestations/sha256:'+FIRST_GOOD.subject_sha256+
@@ -94,9 +153,13 @@ async function getOriginalBundle(){
   const url=pickOriginalBundle(listing);
   const response=await fetch(url,{signal:AbortSignal.timeout(60000)});
   if(!response.ok)fail('GitHub public signed bundle fetch failed: '+response.status);
-  const text=await response.text();
-  if(text.length>512*1024)fail('oversized remote signed bundle');
-  const bundle=JSON.parse(text);
+  const body=Buffer.from(await response.arrayBuffer());
+  if(body.length>1024*1024||body.length<2)fail('invalid signed bundle body');
+  // Public GitHub Attestation bundles use raw Snappy .json.sn. A future
+  // uncompressed JSON response remains accepted only if all subsequent
+  // independent signer, predicate, digest and Rekor checks succeed.
+  const bytes=body[0]===0x7b?body:decodeSnappyBundle(body);
+  const bundle=JSON.parse(bytes.toString('utf8'));
   return unpackOriginalEnvelope(bundle);
 }
 function verifyReadOnly(reportFile){
@@ -151,6 +214,20 @@ function verifyReadOnly(reportFile){
   });
 }
 function selfTest(){
+  // Positive Snappy block fixtures: literal-only and overlapping COPY_1.
+  assert.equal(decodeSnappyBundle(Buffer.from([5,16,104,101,108,108,111]))
+    .toString('utf8'),'hello');
+  assert.equal(decodeSnappyBundle(Buffer.from([8,4,97,98,9,2]))
+    .toString('utf8'),'abababab');
+  for(const bad of [
+    Buffer.from([5,16,104,101]),                // truncated literal
+    Buffer.from([8,4,97,98,9,0]),              // illegal zero offset
+    Buffer.from([8,4,97,98,9,3]),              // copy before output start
+    Buffer.from([8,4,97,98,9,2,0]),            // extra payload
+    Buffer.from([128]),                        // truncated varint
+    Buffer.from([255,255,255,255,127,0]),      // too-large decoded body
+    Buffer.from([8,4,97,98,9]),                // truncated copy
+  ])assert.throws(()=>decodeSnappyBundle(bad));
   assert.equal(REFS.length,4);
   const sample={schema_version:1,kind:'public_sigstore_run_store_checkpoint',
     repository:REPO,main_sha:FIRST_GOOD.main_sha,
