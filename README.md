@@ -25,6 +25,7 @@
 
 | Agent Workspace / current-Session process tree + collapsible, grouped Agent/Process details | [#2514](https://github.com/BestNathan/nession/issues/2514) | [Interactive HTML](agent-process-discovery-2514/index.html) · [Scenario & fidelity](agent-process-discovery-2514/README.md) |
 
+| Session Environment Workspace / ordered binding, prompt convergence | [#2654](https://github.com/BestNathan/nession/issues/2654) | [Interactive HTML](environment-session-2654/index.html) · [Scenario & fidelity](environment-session-2654/README.md) |
 | Git capability / GitHub repository context | [#1290](https://github.com/BestNathan/nession/issues/1290) | [Interactive HTML](git-github-1290/index.html) · [Scenario & fidelity](git-github-1290/README.md) |
 
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
