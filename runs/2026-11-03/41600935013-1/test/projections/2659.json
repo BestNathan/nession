@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2659,
+  "run_id": 41600935013,
+  "run_attempt": 1,
+  "target_sha": "4c88c2e49d470621133b6578424911b95635c53b",
+  "plan_digest": "460450433de8f4a0d239699848d89591e6d68445adf9ac4e8846940041b447d8",
+  "artifact_digest": "sha256:3417ac8d9f5ea0c731babf7893b98df4346a2cd8d9dc38c619c01dd35f84d8ce",
+  "ingest_run_id": 41601563012,
+  "ingest_attempt": 1,
+  "declaration_digest": "36e6805501a8290785d8965822c961d21aec347e05eb12da3bd849995ab834a1",
+  "before_body_sha256": "471580fb09ff46fde4a79f50a4c79304044d6a84bda5725237e7ba3fcb8ba429",
+  "body_sha256": "749261badd5a0c21bd0158bfbb623c8f3e4bf910365244a200c6b30e98a9bb37",
+  "readback_body": "## Description\nOn mobile, a vertical finger drag inside the Nession terminal may fail to scroll content, particularly in full-screen / mouse-aware TUIs (Vim, Claude Code and similar). Ordinary shell local scrollback and TUI scrolling have different semantics and must both work.\n\n## Reproduction\n1. Open the current mobile App Terminal, attach to a session, produce more output than one screen, and swipe vertically to inspect history.\n2. Enter a mouse-aware TUI or alternate-screen program and swipe to scroll its own view.\n3. Compare against desktop wheel scrolling and App's top-level edge navigation.\n\n**User-reported on 2026-11-03.** Browser reproduction on physical mobile remains pending.\n\n## Investigation Status\nStatic inspection of `web/src/platform/terminal-runtime/capsule/occlusionScroll.ts` confirms that the touchmove callback immediately returns when `shouldScrollLocally()` is false. It is false when the TUI enables mouse tracking or uses alternate buffer. Thus no local scroll action and no synthetic wheel/mouse path is sent from this handler in those cases. This is a concrete missing event path consistent with the report, but not yet proof of the only runtime cause.\n\n## Impact\nMobile cannot reliably review shell history or scroll an active TUI, undermining PC↔phone session continuity.\n\n## Fix Direction\nPreserve terminal mode ownership: local normal-buffer history scrolls xterm's local buffer; mouse-aware/alternate-screen TUI drags enter xterm's wheel path; horizontal selection/pager, taps, long-press arrow gesture (#2657), and multi-touch do not get claimed as scroll. Accumulate sub-cell drag deltas instead of treating every high-frequency move as one line.\n\n## Location\n`web/src/platform/terminal-runtime/capsule/occlusionScroll.ts`, `web/src/app/experiences/app/useSwipePager.ts`, xterm 5.5 input path.\n\n### Success Criteria\n- [ ] SC-01 Normal-buffer local history moves on a single-finger vertical swipe without changing the PTY or jumping many lines on tiny deltas.\n- [ ] SC-02 Mouse-reporting/alternate-screen TUIs receive scroll input via xterm's existing mode semantics.\n- [ ] SC-03 Horizontal selection, edge pager, quick tap, multitouch, and the separate planned long-press gesture (#2657) are not hijacked.\n- [ ] SC-04 Mobile touch regression test verifies ownership across all three terminal modes.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: merged\n    branch: staging\n    method: case\n  SC-02:\n    when: merged\n    branch: staging\n    method: case\n  SC-03:\n    when: merged\n    branch: staging\n    method: case\n  SC-04:\n    when: merged\n    branch: staging\n    method: case\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | integration touch test + browser proof |\n| SC-02 | Pending | real staging TUI touch smoke on exact SHA |\n| SC-03 | Pending | integration touch and App pager regressions |\n| SC-04 | Pending | new mobileTouchScroll integration test |\n\n## E2E Verification\n### New\n- none: touch path has a source-aligned web integration test; existing terminal-io can exercise remote PTY semantics\n### Regression\n- terminal-io\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-io | Regression | Pass | run 41600935013/1, SHA 4c88c2e49d470621133b6578424911b95635c53b, contract 36e6805501a8290785d8965822c961d21aec347e05eb12da3bd849995ab834a1, plan 460450433de8f4a0d239699848d89591e6d68445adf9ac4e8846940041b447d8, tests 24/24 (https://github.com/BestNathan/nession/actions/runs/41600935013) |\n\n## Product alignment\n- [x] Real terminal semantics first; no application-specific hardcoding.\n- [x] Compact mobile Terminal, no new visible controls.\n- [x] Preserve edge pager and long-press direction gesture ownership.\n\n---\n**Status:** Approved — runtime confirmation and acceptance pending.",
+  "patch_updated_at": "2026-11-03T08:12:45Z",
+  "readback_updated_at": "2026-11-03T08:12:45Z",
+  "rows": [
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "evidence": "run 41600935013/1, SHA 4c88c2e49d470621133b6578424911b95635c53b, contract 36e6805501a8290785d8965822c961d21aec347e05eb12da3bd849995ab834a1, plan 460450433de8f4a0d239699848d89591e6d68445adf9ac4e8846940041b447d8, tests 24/24 (https://github.com/BestNathan/nession/actions/runs/41600935013)"
+    }
+  ]
+}
