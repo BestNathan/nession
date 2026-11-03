@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {NAV_ITEMS} from '../navigation.js';
 import {readFile} from 'node:fs/promises';
 import {projectKnowledge,unavailableKnowledge,validatePublicKnowledge} from '../scripts/knowledge-project.mjs';
 import {knowledgeHref,knowledgeRoute,validKnowledgeSnapshot,filterKnowledge} from '../knowledge.js';
@@ -89,7 +90,8 @@ test('Pages native navigation, trusted deployment and safe text-only rendering a
   readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8'),
   readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8')
  ]);
- assert.match(html,/href="#\/knowledge" data-route="\/knowledge"/);
+ assert.match(html, /<script src="navigation\.js" type="module"><\/script>/);
+ assert.ok(NAV_ITEMS.some(item=>item.route==='/knowledge'));
  assert.match(app,/renderKnowledge\(root,knowledgeSnapshot,location\.hash\)/);
  assert.match(app,/validKnowledgeSnapshot/);
  assert.match(reader,/document\.createTextNode/);
