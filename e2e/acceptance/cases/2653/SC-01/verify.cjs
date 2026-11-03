@@ -27,24 +27,32 @@ run(({ evidence }) => {
     'incomplete_handshakes_are_capped_and_returned_on_shutdown',
   ]);
 
+  // Source checks read only the production half of the file; the test module
+  // shares these identifiers and would otherwise satisfy them.
   const source = fs.readFileSync(SOURCE, 'utf8');
-  const admittedAt = source.indexOf('try_acquire_owned()');
-  const spawnedAt = source.indexOf('handshakes.spawn(');
+  const production = source.slice(0, source.indexOf('#[cfg(test)]'));
+  if (production.length === source.length) {
+    throw new Error('could not separate production code from the test module');
+  }
+  const admittedAt = production.indexOf('try_acquire_owned()');
+  const spawnedAt = production.indexOf('handshakes.spawn(');
   if (admittedAt < 0) throw new Error('the accept loop must take an admission slot');
   if (spawnedAt < 0 || admittedAt > spawnedAt) {
     throw new Error('admission must be decided before any handshake task is spawned');
   }
-  if (!source.includes('Semaphore::new(handshake_policy.max_pending)')) {
-    throw new Error('the admission budget must be the configured handshake bound');
+  if (!production.includes('handshake_policy') || !production.includes('Semaphore::MAX_PERMITS')) {
+    throw new Error(
+      'the admission budget must come from the policy and be clamped to a valid semaphore bound',
+    );
   }
-  const releasedAt = source.indexOf('drop(slot);');
-  const servedAt = source.indexOf('tokio::spawn(Self::serve_connection(');
+  const releasedAt = production.indexOf('drop(slot);');
+  const servedAt = production.indexOf('tokio::spawn(Self::serve_connection(');
   if (releasedAt < 0 || servedAt < 0 || releasedAt > servedAt) {
     throw new Error(
       'the pre-authentication slot must be returned before the authenticated message loop starts',
     );
   }
-  if (!source.includes('handshakes.abort_all()')) {
+  if (!production.includes('handshakes.abort_all()')) {
     throw new Error('shutdown must abort in-flight handshakes so their slots return');
   }
 
@@ -53,7 +61,7 @@ run(({ evidence }) => {
     value:
       'exact SHA ' + sha + ': one-slot policy with eight silent TCP peers leaves exactly one ' +
       'open; the listener closes the rest without spawning a handshake task, and shutdown ' +
-      'aborts the pending handshake and returns the slot',
+      'aborts the pending handshake, returns its slot, and closes the admission budget',
   });
   return (
     'Incomplete unauthenticated P2P connections are capped by an Agent-owned admission ' +

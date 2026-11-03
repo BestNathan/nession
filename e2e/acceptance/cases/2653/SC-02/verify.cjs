@@ -30,30 +30,37 @@ run(({ evidence }) => {
     'incomplete_handshakes_are_capped_and_returned_on_shutdown',
   ]);
 
+  // Source checks read only the production half of the file; the test module
+  // shares these identifiers and would otherwise satisfy them.
   const source = fs.readFileSync(SOURCE, 'utf8');
-  if (!source.includes('tokio::time::timeout(deadline, upgrade)')) {
+  const production = source.slice(0, source.indexOf('#[cfg(test)]'));
+  if (production.length === source.length) {
+    throw new Error('could not separate production code from the test module');
+  }
+  if (!production.includes('tokio::time::timeout(deadline, upgrade)')) {
     throw new Error('one deadline must cover the TLS handshake and the WebSocket upgrade');
   }
   // `rustfmt` splits `acceptor.accept(stream)` across lines, so match the
   // method call itself rather than one formatting of it.
-  const tlsAt = source.indexOf('.accept(stream)');
-  const upgradeAt = source.indexOf('accept_hdr_async(');
-  const deadlineAt = source.indexOf('tokio::time::timeout(deadline, upgrade)');
+  const tlsAt = production.indexOf('.accept(stream)');
+  const upgradeAt = production.indexOf('accept_hdr_async(');
+  const deadlineAt = production.indexOf('tokio::time::timeout(deadline, upgrade)');
   if (tlsAt < 0 || upgradeAt < 0 || deadlineAt < 0 || tlsAt > deadlineAt || upgradeAt > deadlineAt) {
     throw new Error(
       'both the TLS handshake and the HTTP upgrade must run inside the handshake deadline',
     );
   }
-  if (!source.includes('drop(slot);')) {
+  if (!production.includes('drop(slot);')) {
     throw new Error('a completed handshake must return its pre-authentication slot');
   }
 
   evidence.push({
     type: 'runtime',
     value:
-      'exact SHA ' + sha + ': a 150 ms deadline closes a partial HTTP upgrade, a partial TLS ' +
+      'exact SHA ' + sha + ': a 500 ms deadline closes a partial HTTP upgrade, a partial TLS ' +
       'record and a silent TLS peer; a credential refusal returns its slot without waiting ' +
-      'for a 60 s deadline; shutdown aborts a pending handshake and returns its slot',
+      'for a 60 s deadline; a live authenticated plain/TLS connection leaves the slot free; ' +
+      'shutdown aborts a pending handshake and closes the budget',
   });
   return (
     'Plain and TLS handshakes enforce one finite deadline for idle/partial upgrades and ' +

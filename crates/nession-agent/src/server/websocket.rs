@@ -902,6 +902,10 @@ pub const DEFAULT_P2P_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, Copy)]
 pub struct P2pHandshakePolicy {
     /// Maximum number of connections concurrently in TLS/WebSocket handshake.
+    ///
+    /// Clamped by [`AgentServer::start`] to `1..=Semaphore::MAX_PERMITS`: a
+    /// bound of zero would be a listener that admits nobody, and a value above
+    /// Tokio's semaphore limit would panic rather than fail the start.
     pub max_pending: usize,
     /// Deadline covering both the TLS handshake and the WebSocket upgrade.
     pub timeout: Duration,
@@ -1140,9 +1144,15 @@ impl ServerHandle {
     /// The admission budget itself is internal, but its occupancy is the direct
     /// observation that a refused, failed or timed-out handshake returned its
     /// slot — and, outside tests, a health signal for a listener under a
-    /// connection flood.
+    /// connection flood. A shut-down listener reports **zero**, not the permits
+    /// its aborted handshakes released: full capacity on a dead listener is the
+    /// one reading this signal must never give.
     pub fn available_handshake_slots(&self) -> usize {
-        self.handshake_slots.available_permits()
+        if self.handshake_slots.is_closed() {
+            0
+        } else {
+            self.handshake_slots.available_permits()
+        }
     }
 }
 
@@ -2869,7 +2879,14 @@ impl AgentServer {
         // gives the slot back and never takes another, so this bounds pending
         // work rather than Sessions.
         let handshake_policy = self.handshake_policy;
-        let handshake_slots = Arc::new(Semaphore::new(handshake_policy.max_pending));
+        // A zero bound would be a listener that admits nobody and reports no
+        // error; raise it to one rather than obey it, as `QueryLane::new` does.
+        // The upper clamp keeps an absurd policy from panicking inside
+        // `Semaphore::new` instead of returning from `start`.
+        let max_pending = handshake_policy
+            .max_pending
+            .clamp(1, Semaphore::MAX_PERMITS);
+        let handshake_slots = Arc::new(Semaphore::new(max_pending));
         let handle = ServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
             handshake_slots: Arc::clone(&handshake_slots),
@@ -2917,9 +2934,16 @@ impl AgentServer {
                                 let Ok(slot) =
                                     Arc::clone(&handshake_slots).try_acquire_owned()
                                 else {
-                                    info!(
+                                    // Debug, not info: this line fires once per
+                                    // *offered* socket, so under the flood the
+                                    // bound exists for it would turn the log
+                                    // backend into the next bottleneck. The
+                                    // timeout/refusal paths below still log at
+                                    // info, which is where an actionable event
+                                    // lives.
+                                    debug!(
                                         %addr,
-                                        pending = handshake_policy.max_pending,
+                                        pending = max_pending,
                                         "refusing a P2P connection: every handshake slot is occupied"
                                     );
                                     drop(stream);
@@ -2988,7 +3012,24 @@ impl AgentServer {
                         // so there is no connection of theirs to preserve; a
                         // client that was mid-handshake simply reconnects.
                         handshakes.abort_all();
-                        while handshakes.join_next().await.is_some() {}
+                        // Bounded like every other lane shutdown: an abort
+                        // takes effect at the task's next poll, and a task
+                        // parked in synchronous work (the credential store's
+                        // lock, a blocked log write) must not hold shutdown
+                        // here indefinitely.
+                        let drained = tokio::time::timeout(SHUTDOWN_GRACE, async {
+                            while handshakes.join_next().await.is_some() {}
+                        })
+                        .await;
+                        if drained.is_err() {
+                            warn!(
+                                "P2P handshakes did not stop within {:?}; abandoning them",
+                                SHUTDOWN_GRACE
+                            );
+                        }
+                        // No handshake may be admitted past this point, and a
+                        // closed budget must not read as spare capacity.
+                        handshake_slots.close();
                         // Close every attached backend: the tmux Sessions
                         // persist, but their terminal clients belong to this
                         // process and must not outlive it.
@@ -6697,7 +6738,7 @@ mod tests {
     /// admitted peer cannot expire while the assertions run. Exactly one peer
     /// must stay open and the other seven must be closed by the listener
     /// without ever having a task spawned for them; shutdown must then abort
-    /// the survivor and return the slot.
+    /// the survivor, return its slot, and close the budget.
     #[tokio::test]
     async fn incomplete_handshakes_are_capped_and_returned_on_shutdown() {
         let policy = P2pHandshakePolicy {
@@ -6733,11 +6774,25 @@ mod tests {
         );
 
         handle.shutdown().await.expect("shutdown signal is queued");
-        await_free_slot(&handle).await;
+        // Wait for the listener to process the shutdown. Polling the closed
+        // flag is an event, not a sleep: the budget closes only after the
+        // aborted handshake has been drained.
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while !handle.handshake_slots.is_closed() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "shutdown must close the admission budget");
+        assert_eq!(
+            handle.handshake_slots.available_permits(),
+            1,
+            "the aborted handshake released its slot before the budget closed"
+        );
         assert_eq!(
             handle.available_handshake_slots(),
-            1,
-            "shutdown aborts the pending handshake and returns its slot"
+            0,
+            "a shut-down listener reports no spare capacity"
         );
     }
 
@@ -6748,7 +6803,9 @@ mod tests {
     async fn plain_incomplete_handshakes_time_out_and_capacity_recovers() {
         let policy = P2pHandshakePolicy {
             max_pending: 1,
-            timeout: Duration::from_millis(150),
+            // Generous enough that a loaded CI runner can still complete the
+            // *valid* recovery dial below inside the same deadline.
+            timeout: Duration::from_millis(500),
         };
         let (addr, handle, credentials) = start_test_server_with(None, policy).await;
 
@@ -6766,6 +6823,11 @@ mod tests {
             "a partial HTTP upgrade must be closed at the handshake deadline"
         );
 
+        // The previous slot must be back before the next dial: otherwise this
+        // socket could be refused for lack of capacity, and "closed" would not
+        // prove anything about the deadline.
+        await_free_slot(&handle).await;
+
         // And a peer that says nothing at all.
         let mut silent = tokio::net::TcpStream::connect(addr)
             .await
@@ -6776,14 +6838,12 @@ mod tests {
         );
 
         await_free_slot(&handle).await;
-        assert_eq!(
-            handle.available_handshake_slots(),
-            1,
-            "both expired handshakes returned their slot"
-        );
 
         // The same listener still serves a credential-bearing connection.
         let (mut sink, mut stream) = connect_client(&credentials, addr).await;
+        // An authenticated connection must not retain the pre-auth slot, however
+        // long it lives: the budget is free while this Session is still open.
+        await_free_slot(&handle).await;
         let ping: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
             id: "after-timeout".to_string(),
@@ -6815,7 +6875,9 @@ mod tests {
         let (certs, key, trusted) = test_tls_identity();
         let policy = P2pHandshakePolicy {
             max_pending: 1,
-            timeout: Duration::from_millis(150),
+            // Generous enough that a loaded CI runner can still complete the
+            // *valid* TLS dial below inside the same deadline.
+            timeout: Duration::from_millis(500),
         };
         let (addr, handle, _credentials) = start_test_server_with(Some((certs, key)), policy).await;
 
@@ -6833,6 +6895,10 @@ mod tests {
             "a partial TLS handshake must be closed at the deadline"
         );
 
+        // Same reason as the plain test: this dial must be admitted, not
+        // refused for capacity, or the deadline is not what closes it.
+        await_free_slot(&handle).await;
+
         // And one that sends nothing: rustls is still waiting for a ClientHello.
         let mut silent = tokio::net::TcpStream::connect(addr)
             .await
@@ -6846,6 +6912,8 @@ mod tests {
 
         // The slot is usable, and the TLS path still authenticates a credential.
         let (mut sink, mut stream) = connect_tls_client(addr, trusted).await;
+        // The authenticated TLS connection must not retain the pre-auth slot.
+        await_free_slot(&handle).await;
         let ping: Message<serde_json::Value> = Message {
             msg_type: msg_types::CONTROL_PING.to_string(),
             id: "tls-after-timeout".to_string(),
@@ -6885,5 +6953,26 @@ mod tests {
         let (_sink, _stream) = connect_client(&credentials, addr).await;
 
         handle.shutdown().await.ok();
+    }
+
+    /// A policy at both edges still starts and admits.
+    ///
+    /// Zero would be a listener that admits nobody; it is raised to one rather
+    /// than obeyed. An oversized bound is clamped to the semaphore's limit
+    /// rather than panicking inside `start`. Both are policy inputs this
+    /// listener owns, so neither may turn into a silent or abortive startup.
+    #[tokio::test]
+    async fn handshake_bound_edges_are_normalized() {
+        for max_pending in [0, usize::MAX] {
+            let policy = P2pHandshakePolicy {
+                max_pending,
+                timeout: Duration::from_secs(5),
+            };
+            let (addr, handle, credentials) = start_test_server_with(None, policy).await;
+
+            let (_sink, _stream) = connect_client(&credentials, addr).await;
+
+            handle.shutdown().await.ok();
+        }
     }
 }
