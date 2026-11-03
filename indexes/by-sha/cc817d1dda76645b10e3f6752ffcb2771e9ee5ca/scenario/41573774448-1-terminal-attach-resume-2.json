@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41573774448,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/terminal-notices-mobile-scroll-staging",
+    "target_sha": "cc817d1dda76645b10e3f6752ffcb2771e9ee5ca",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41573774448",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "b1adfaf9599270086ebe09b265d2295cf3910af30427d6d3204d93a2c9418f51"
+  },
+  "record": "runs/2026-11-03/41573774448-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4002bb3776dc9c993c5be27e73b424fd8faca0e1f8f6797b6e21a7d19b0879a5"
+}
