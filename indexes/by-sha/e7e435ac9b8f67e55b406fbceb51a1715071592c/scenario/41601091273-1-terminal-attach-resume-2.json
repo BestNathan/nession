@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41601091273,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/170-acceptance-regression-gaps",
+    "target_sha": "e7e435ac9b8f67e55b406fbceb51a1715071592c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41601091273",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "fb765f5c2af20c6091bbd03060c976708fb80c9fe96c18fd2bd1cc6cba3585bb"
+  },
+  "record": "runs/2026-11-03/41601091273-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "3ea5bc37e9970994695366416002887d59b6674a7dec02f1343684d161dea7f6"
+}
