@@ -166,6 +166,25 @@ export async function runMatrix(){
       note:'Actual concurrent OS processes and bare-Git CAS in an isolated runner; NOT live GitHub protected ref authorization'};
   }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
+// Canonical, source-bound evidence for the already-executed matrix Gate.
+// Only the dedicated trusted-main fixture Workflow sets this optional output.
+// A local developer selftest remains side-effect free in the absence of it.
+export function writeMatrixEvidence(report,output,env=process.env){
+  assertReport(report);
+  if(env.GITHUB_REPOSITORY!==REPO||env.GITHUB_REF!=='refs/heads/main'||
+     !SHA.test(env.GITHUB_SHA??'')||!/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID??'')||
+     !/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT??'')||
+     !output||!path.isAbsolute(output)||fs.existsSync(output)||
+     !env.RUNNER_TEMP||!path.isAbsolute(env.RUNNER_TEMP)||
+     path.dirname(output)!==path.join(env.RUNNER_TEMP,'store-fixture-evidence'))
+    throw Error('Run Store CAS evidence requires trusted exact-main fixture output');
+  const source={...report,
+    observed_main_sha:env.GITHUB_SHA,workflow_run_id:Number(env.GITHUB_RUN_ID),
+    workflow_run_attempt:Number(env.GITHUB_RUN_ATTEMPT),
+    evidence_scope:'isolated_disposable_bare_git_only_not_server_authorization'};
+  fs.writeFileSync(output,JSON.stringify(source,null,2)+'\n',{flag:'wx'});
+  return source;
+}
 function assertReport(report){
   assert.deepEqual(report.stores.map(x=>x.store),kinds.map(x=>x.store));
   assert.equal(report.coverage,3);
@@ -178,6 +197,26 @@ async function main(){
   const mode=process.argv[2];
   if(mode==='self-test'){
     const report=await runMatrix();assertReport(report);
+    if(process.env.RUN_STORE_CAS_EVIDENCE_OUTPUT)
+      writeMatrixEvidence(report,process.env.RUN_STORE_CAS_EVIDENCE_OUTPUT);
+    // The optional main-owned evidence handoff is independently fail-closed.
+    const evidenceHome=fs.mkdtempSync(path.join(os.tmpdir(),'nession-cas-evidence-test-'));
+    try{
+      const outputDir=path.join(evidenceHome,'store-fixture-evidence');
+      fs.mkdirSync(outputDir);
+      const output=path.join(outputDir,'cas-matrix.json');
+      const env={RUNNER_TEMP:evidenceHome,GITHUB_REPOSITORY:REPO,
+        GITHUB_REF:'refs/heads/main',GITHUB_SHA:'a'.repeat(40),
+        GITHUB_RUN_ID:'333',GITHUB_RUN_ATTEMPT:'2'};
+      const sealed=writeMatrixEvidence(report,output,env);
+      assert.equal(JSON.parse(fs.readFileSync(output,'utf8')).workflow_run_id,333);
+      assert.equal(sealed.observed_main_sha,env.GITHUB_SHA);
+      assert.throws(()=>writeMatrixEvidence(report,output,env),/trusted exact-main/);
+      assert.throws(()=>writeMatrixEvidence(report,path.join(outputDir,'invalid.json'),
+        {...env,GITHUB_REF:'refs/heads/feature'}),/trusted exact-main/);
+      assert.throws(()=>writeMatrixEvidence({...report,coverage:2},
+        path.join(outputDir,'wrong.json'),env));
+    }finally{fs.rmSync(evidenceHome,{recursive:true,force:true});}
     const wf=fs.readFileSync('.github/workflows/store-governance-audit.yml','utf8');
     assert.match(wf,/run-store-cas-matrix\.mjs collect/);
     assert.match(wf,/permissions:\s*\n  contents: read\s*\n  actions: read/);
