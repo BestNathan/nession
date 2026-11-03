@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "09910342e85a567665981387926c9bf4f0ae9e6c",
+  "run_id": 41586690252,
+  "run_attempt": 1,
+  "plan_digest": "32b4c386e0de48e5ff67b24d3d51350ba1ad4d57ab2376583b9d45b6027e1660",
+  "artifact_digest": "sha256:da417badb059b23b2b8ad1f2759d5faa91d77ee0dbeb52bb3af493e3f88cefb8",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-matrix",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
