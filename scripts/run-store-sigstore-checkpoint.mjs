@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {auditAnchoredRunStore} from './run-store-integrity.mjs';
@@ -113,11 +114,19 @@ export function verifySignedBundle(manifest,verified,bytes){
     const result=item?.verificationResult;
     const st=result?.statement;
     const subjects=st?.subject;
+    const bundle=item?.attestation?.bundle??item?.attestation;
+    const logEntries=bundle?.verificationMaterial?.tlogEntries;
+    // A TSA-only timestamp is insufficient: this public-repo path requires
+    // an actual Sigstore transparency log entry in the verified bundle.
     return st?.predicateType===PREDICATE&&
-      JSON.stringify(st.predicate)===JSON.stringify(manifest)&&
+      isDeepStrictEqual(st.predicate,manifest)&&
       Array.isArray(subjects)&&subjects.length===1&&
       subjects[0]?.digest?.sha256===digest&&
-      Array.isArray(result.verifiedTimestamps)&&result.verifiedTimestamps.length>0;
+      Array.isArray(result.verifiedTimestamps)&&result.verifiedTimestamps.length>0&&
+      Array.isArray(logEntries)&&logEntries.length>0&&
+      logEntries.some(entry=>Number.isSafeInteger(Number(entry?.logIndex))&&
+        Number(entry.logIndex)>=0&&
+        (entry.inclusionProof||entry.inclusionPromise));
   });
   if(!match)deny('no exact subject/predicate/independent witnessed timestamp');
   // Signature, trusted root and signer-workflow identity are checked by gh
@@ -210,12 +219,15 @@ function selfTest(){
   assert.throws(()=>validateManifest({...m,canonical_store_roots_sha256:'0'.repeat(64)}));
   assert.throws(()=>validateManifest({...m,main_sha:'foo'}));
   const bytes=Buffer.from(JSON.stringify(m));
-  const evidence=[{verificationResult:{statement:{
+  const evidence=[{attestation:{bundle:{verificationMaterial:{tlogEntries:[
+    {logIndex:10,inclusionProof:{rootHash:'abc'}}]}}},verificationResult:{statement:{
     predicateType:PREDICATE,predicate:m,
     subject:[{digest:{sha256:hash(bytes)}}],
   },verifiedTimestamps:[{timestamp:'2026-11-03T12:00:00Z'}]}}];
   assert.equal(verifySignedBundle(m,evidence,bytes).verified,true);
   assert.throws(()=>verifySignedBundle(m,evidence,Buffer.from('changed')));
+  assert.throws(()=>verifySignedBundle(m,[{...evidence[0],
+    attestation:{bundle:{verificationMaterial:{tlogEntries:[]}}}}],bytes));
   assert.throws(()=>verifySignedBundle(m,[{verificationResult:{
     ...evidence[0].verificationResult,verifiedTimestamps:[]}}],bytes));
   assert.throws(()=>verifySignedBundle(m,[{verificationResult:{
