@@ -2,6 +2,25 @@
 
 [Owning Requirement #2654](https://github.com/BestNathan/nession/issues/2654) · [Interactive HTML](index.html) · [Prototypes gallery](../index.html)
 
+## Layout revision after #2701 status-bar review (2026-11-03)
+
+[#2701](https://github.com/BestNathan/nession/issues/2701) correctly made desired/observed Session Binding state visible, but PR #2705 introduced a full-width read-only status banner above both Web columns and above the App list/detail/editor. That banner competes with the primary Environment content, duplicates navigator/Profile usage labels and wraps long adapter failures into large header chrome.
+
+This mock now explores the **#2654-owned Session-first composition** rather than preserving that banner:
+
+- **Web:** bounded Profile navigator on the left; flexible main content defaults to **Session Environment** (no empty detail). The Session observation lives alongside the Session title, not in a full-width strip. Profile details retain Variables/Raw and existing actions.
+- **App:** the root list shows a compact current-Session item and Profile list; tap Session/Profile to push exactly one detail depth. No second full-width status row above every depth.
+- **Normal state:** one quiet line with status, short consequence and a **Details** disclosure; no success-colored badge, no permanent revision telemetry.
+- **Pending:** explicit next-shell-prompt boundary; **unsupported_shell**, **error**, or **unavailable** immediately shows an understandable reason and do **not** claim the running shell is in sync. New panes/processes inheritance remains separately explained.
+- **Details:** reveal desired revision, applied revision and managed key count only on demand. A failed materialization may retain an older applied revision. Observed-unavailable never silently becomes `in_sync`.
+- **Profile semantics:** “Included in Session binding” is not proof of convergence. Each detail can return to the Session observation. Profile Save does not imply Reapply.
+
+**Try it:** use the external `Observed` selector to cycle In sync / Pending shell / Unsupported shell / Apply error / Unavailable, open Details, select a Profile, return to Session, use Manage binding → Apply and the simulated next prompt, and repeat at a narrow mobile viewport. The state selector is a **lab control only**, not a proposed production control. All observed states are synthetic; no real Session state, backend, browser clipboard, Shell ACK, or secrets are accessed.
+
+**Verification:** prototype source authored and revised; source-level checks possible, but real browser interaction, mobile screenshot and exact Pages SHA readback are **not yet independently verified**. #2701's completed production acceptance and #2654's pending product acceptance remain separate.
+
+---
+
 ## Question and decision
 
 How should Nession's already-delivered Environment capability (#1202) become **Session-first** without resurrecting a file-management lobby or inventing new global chrome? This prototype explores a default Session Environment overview, a reusable Profile navigator, and **one ordered binding replacement** interaction. #170 is the runtime source of truth; this mock does not change it.
