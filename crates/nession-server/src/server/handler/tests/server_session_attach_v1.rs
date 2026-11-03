@@ -331,3 +331,133 @@ async fn attach_relay_mode() {
         _ => panic!("expected Relay action"),
     }
 }
+
+/// Register `a1` with one advertised address and a relayable session.
+async fn register_relay_agent(h: &mut ConnectionHandler) {
+    h.handle_message(proto_msg(
+        "server.agent.register",
+        json!({
+            "agent_id": "a1",
+            "hostname": "host",
+            "ip_address": "10.0.0.5",
+            "port": 19091,
+            "auth_token": "",
+            "protocol_manifest": {"provider": "test-agent", "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}},
+            "addresses": [{"url": "ws://10.0.0.5:19091/ws", "network_type": "lan"}],
+            "connect_url": null,
+            "metadata": { "tmux_version": "3.3", "os_version": "linux", "nession_version": "0.1" },
+        }),
+    ))
+    .await
+    .unwrap();
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({
+            "agent_id": "a1",
+            "session_name": "dev",
+            "status": "active",
+            "window_count": 1,
+            "attached_clients": 0,
+        }),
+    ))
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn relay_begin_refuses_an_unregistered_manual_endpoint_before_grant() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_relay_agent(&mut h).await;
+
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let (client_sender, _client_rx) = WsMessageSender::new();
+    h.set_client_sender(client_sender);
+
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({
+                "session_id": "a1:dev",
+                // A live credential-looking query is part of the attack
+                // surface: the refusal must not echo or log it either.
+                "relay_url": "ws://attacker.example/ws?token=stolen"
+            }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["status"], "error");
+    let message = reply["payload"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("not an address registered"),
+        "the refusal states the binding rule: {message}"
+    );
+    assert!(
+        !message.contains("attacker") && !message.contains("stolen"),
+        "the refusal must not echo the candidate: {message}"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "a target that is not Agent-bound must not receive a credential grant"
+    );
+}
+
+#[tokio::test]
+async fn relay_begin_accepts_a_manual_endpoint_registered_to_the_agent() {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_relay_agent(&mut h).await;
+
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let (client_sender, _client_rx) = WsMessageSender::new();
+    h.set_client_sender(client_sender);
+    let broker = Arc::clone(&h.command_broker);
+
+    // A different spelling of the registered endpoint (case) still binds;
+    // the dial receives the Server's registered string.
+    let begin_fut = h.handle_message(proto_msg(
+        "server.session.relay.begin",
+        json!({
+            "session_id": "a1:dev",
+            "relay_url": "WS://10.0.0.5:19091/ws"
+        }),
+    ));
+    let grant_fut = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("the agent is told before the server dials it")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let grant: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(grant["msg_type"], "agent.p2p.grant");
+        assert_eq!(grant["payload"]["session_id"], "a1:dev");
+        let request_id = grant["payload"]["request_id"].as_str().unwrap().to_string();
+        broker
+            .resolve_command("a1", &request_id, json!({ "success": true }))
+            .await;
+    };
+
+    let (action, ()) = tokio::join!(begin_fut, grant_fut);
+    match action.unwrap() {
+        HandlerAction::Relay { agent_ws_urls, .. } => {
+            assert_eq!(
+                agent_ws_urls.len(),
+                1,
+                "a manual choice selects exactly the one registered endpoint"
+            );
+            assert!(
+                agent_ws_urls[0].starts_with("ws://10.0.0.5:19091/ws?token="),
+                "the dial uses the registered spelling, never the browser's bytes: {agent_ws_urls:?}"
+            );
+        }
+        _ => panic!("expected Relay action"),
+    }
+}

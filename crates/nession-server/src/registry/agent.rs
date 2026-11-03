@@ -363,6 +363,71 @@ pub fn legacy_agent_address(addresses: &[ProbedAddress]) -> Option<String> {
         .map(|p| p.address.url.clone())
 }
 
+/// The Server-owned identity of a dialable Agent endpoint (#2652).
+///
+/// Two spellings name the same endpoint only when scheme, host, port and path
+/// agree. Userinfo, query and fragment are not part of an Agent endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentEndpointIdentity {
+    scheme: String,
+    host: String,
+    port: u16,
+    path: String,
+}
+
+fn endpoint_identity(url: &str) -> Option<AgentEndpointIdentity> {
+    let parsed = url::Url::parse(url).ok()?;
+    let scheme = parsed.scheme();
+    if scheme != "ws" && scheme != "wss" {
+        return None;
+    }
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let port = parsed.port_or_known_default()?;
+    let path = parsed.path();
+    Some(AgentEndpointIdentity {
+        scheme: scheme.to_string(),
+        host,
+        port,
+        path: if path.is_empty() { "/" } else { path }.to_string(),
+    })
+}
+
+/// The registered Agent endpoint a browser-supplied Relay URL names, if any.
+///
+/// The Server, not the browser, owns the endpoint set. A manual Relay route
+/// may select one of the Agent's registered addresses (or its Server-owned
+/// legacy address), but it may not introduce a host, port or path of its own:
+/// that is the relay dial's trust boundary. The **registered** spelling is
+/// returned, so the dial never uses the browser's bytes.
+///
+/// **Ambiguous spellings are refused, not normalized away.** A candidate
+/// carrying userinfo, a query or a fragment is not an Agent endpoint. The
+/// query is where the scoped credential rides, and admitting one here would
+/// smuggle an arbitrary query into the dial that presents it.
+#[must_use]
+pub fn agent_bound_relay_url(
+    agent: &AgentInfo,
+    legacy_url: &str,
+    candidate: &str,
+) -> Option<String> {
+    let parsed = url::Url::parse(candidate).ok()?;
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    let target = endpoint_identity(candidate)?;
+    agent
+        .addresses
+        .iter()
+        .map(|probed| probed.address.url.as_str())
+        .chain(std::iter::once(legacy_url))
+        .find(|url| endpoint_identity(url).as_ref() == Some(&target))
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,5 +580,95 @@ mod tests {
     fn legacy_agent_address_empty_list() {
         let result = legacy_agent_address(&[]);
         assert!(result.is_none());
+    }
+
+    fn make_agent(urls: &[&str]) -> AgentInfo {
+        AgentInfo {
+            agent_id: "agent-a".to_string(),
+            hostname: "host".to_string(),
+            ip_address: "10.0.0.5".to_string(),
+            port: 19091,
+            display_name: None,
+            connect_url: None,
+            addresses: urls
+                .iter()
+                .map(|url| make_probed(url, NetworkType::Lan, AddressStatus::Unknown))
+                .collect(),
+            registered_at: Utc::now(),
+            last_heartbeat: Utc::now(),
+            status: AgentStatus::Online,
+            metadata: AgentMetadata {
+                tmux_version: "3.3".to_string(),
+                os_version: "linux".to_string(),
+                nession_version: "0.1".to_string(),
+                image_tag: "unknown".to_string(),
+            },
+            session_count: 0,
+            active_sessions: 0,
+            protocol_manifest: None,
+        }
+    }
+
+    #[test]
+    fn relay_url_binds_registered_spellings_to_the_server_owned_string() {
+        let agent = make_agent(&["ws://10.0.0.5:19091/ws", "wss://tunnel.example.com/ws"]);
+        let legacy = "ws://10.0.0.5:19091/ws";
+
+        assert_eq!(
+            agent_bound_relay_url(&agent, legacy, "ws://10.0.0.5:19091/ws"),
+            Some("ws://10.0.0.5:19091/ws".to_string())
+        );
+        // Scheme and host are case-insensitive, but the dial receives the
+        // registered spelling rather than the browser's.
+        assert_eq!(
+            agent_bound_relay_url(&agent, legacy, "WS://10.0.0.5:19091/ws"),
+            Some("ws://10.0.0.5:19091/ws".to_string())
+        );
+        assert_eq!(
+            agent_bound_relay_url(&agent, legacy, "wss://TUNNEL.EXAMPLE.COM/ws"),
+            Some("wss://tunnel.example.com/ws".to_string())
+        );
+
+        // A registered URL with a default port matches its explicit form.
+        let default_port = make_agent(&["ws://host/ws"]);
+        assert_eq!(
+            agent_bound_relay_url(&default_port, "ws://host/ws", "ws://host:80/ws"),
+            Some("ws://host/ws".to_string())
+        );
+
+        // The Server-owned legacy address is part of the Agent's endpoint set.
+        let relay_only = make_agent(&[]);
+        assert_eq!(
+            agent_bound_relay_url(&relay_only, legacy, "ws://10.0.0.5:19091/ws"),
+            Some(legacy.to_string())
+        );
+    }
+
+    #[test]
+    fn relay_url_rejects_foreign_and_ambiguous_endpoints() {
+        let agent = make_agent(&["ws://10.0.0.5:19091/ws"]);
+        let legacy = "ws://10.0.0.5:19091/ws";
+        for candidate in [
+            // Foreign or structurally different endpoints.
+            "ws://evil.example/ws",
+            "ws://10.0.0.5:19092/ws",
+            "ws://10.0.0.5:19091/other",
+            "ws://10.0.0.5:19091/ws/",
+            "ws://10.0.0.5:19091/%77s",
+            "wss://10.0.0.5:19091/ws",
+            "http://10.0.0.5:19091/ws",
+            // Forms that can make two targets look equivalent.
+            "ws://user:pass@10.0.0.5:19091/ws",
+            "ws://10.0.0.5:19091@evil.example/ws",
+            "ws://10.0.0.5:19091/ws?token=stolen",
+            "ws://10.0.0.5:19091/ws#fragment",
+            "not a url",
+        ] {
+            assert_eq!(
+                agent_bound_relay_url(&agent, legacy, candidate),
+                None,
+                "a manual relay URL must not bind: {candidate}"
+            );
+        }
     }
 }
