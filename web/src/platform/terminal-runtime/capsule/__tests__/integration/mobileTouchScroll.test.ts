@@ -87,7 +87,7 @@ describe('mobile terminal vertical drag scroll routing', () => {
   });
 
   it('converts a drag to wheel only for a mouse-reporting TUI', () => {
-    const f = fixture({ mouse: 'sgr' });
+    const f = fixture({ mouse: 'vt200' });
     touch(f.element, 'touchstart', 100, 200);
     const event = touch(f.element, 'touchmove', 100, 170);
     expect(event.defaultPrevented).toBe(true);
@@ -110,7 +110,7 @@ describe('mobile terminal vertical drag scroll routing', () => {
   });
 
   it('does not steal horizontal selection, ordinary taps or untracked gestures', () => {
-    const f = fixture({ mouse: 'sgr' });
+    const f = fixture({ mouse: 'vt200' });
     touch(f.element, 'touchstart', 100, 200);
     touch(f.element, 'touchmove', 140, 198);
     touch(f.element, 'touchmove', 145, 140);
