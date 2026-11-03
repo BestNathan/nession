@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c773929e5898b5d543f8cd28f4faf04e2889b16865c7b7ba0078cc25fdd9fb7d",
+  "run_id": 41587196107,
+  "run_attempt": 1,
+  "issue": 2652,
+  "criterion": "SC-03",
+  "criterion_text": "Successful, refused, timed-out and failed Relay attempts never emit a raw scoped credential or credential-bearing URL to Server logs, structured errors or other unintended outputs.",
+  "stage": "staging",
+  "target_sha": "0a88efe8794282045c93c051d9256ebecb368d36",
+  "contract_sha256": "fb9c2d3d05e92c3ac0dd09396c7f6ceef844b23b850d06584a827234e340e83a",
+  "case_revision": "0a88efe8794282045c93c051d9256ebecb368d36",
+  "case_tree_sha": "3316ca949f82f29ac2041740f0f460aaa80867e4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T06:03:49.070Z",
+  "finished_at": "2026-11-03T06:03:49.701Z",
+  "duration_ms": 631,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Relay diagnostics carry a sanitized endpoint and a bounded failure category; no relay log or refusal emits the scoped credential or the browser-supplied URL",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0a88efe8794282045c93c051d9256ebecb368d36: the relay diagnostic helper strips userinfo and the credential query and all four attempt/success/failure/timeout logs use it; failures log a bounded category; the refusal names the Agent and never the candidate"
+        }
+      ],
+      "duration_ms": 613,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41587196107,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0a88efe8794282045c93c051d9256ebecb368d36",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41587196107",
+    "record_path": "runs/2026-11-03/41587196107-1/2652/SC-03.json",
+    "source_result_sha256": "652b0ac18f0665da163c61d47fba6ca6ea0261da1ed62432ca99b1ba2e91d866"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41587196107-1",
+    "sha256": "652b0ac18f0665da163c61d47fba6ca6ea0261da1ed62432ca99b1ba2e91d866",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41587196107",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5339979cfb6ea61472c308932a3e2b3ffd970f345688b7cd4f9d378d489029bf",
+  "run_id": 41587196107,
+  "run_attempt": 1,
+  "issue": 2652,
+  "criterion": "SC-01",
+  "criterion_text": "An authenticated Relay begin naming an unrelated or forged `relay_url` is refused before any outbound dial or token disclosure; negative fixtures cover equivalent/ambiguous URL encodings and registered-Agent identity binding.",
+  "stage": "staging",
+  "target_sha": "0a88efe8794282045c93c051d9256ebecb368d36",
+  "contract_sha256": "fb9c2d3d05e92c3ac0dd09396c7f6ceef844b23b850d06584a827234e340e83a",
+  "case_revision": "0a88efe8794282045c93c051d9256ebecb368d36",
+  "case_tree_sha": "8474d4684c52c69e2b29702822fc2f772a48d264",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T06:03:38.468Z",
+  "finished_at": "2026-11-03T06:03:48.419Z",
+  "duration_ms": 9951,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A manual relay_url binds only to an endpoint the Agent registered; foreign and ambiguous spellings are refused before mint, grant, or dial",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0a88efe8794282045c93c051d9256ebecb368d36: registry binding tests reject foreign/ambiguous endpoints; the handler refuses an unregistered manual relay_url before minting or granting a credential, and never dials the browser-supplied spelling"
+        }
+      ],
+      "duration_ms": 9920,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41587196107,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0a88efe8794282045c93c051d9256ebecb368d36",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41587196107",
+    "record_path": "runs/2026-11-03/41587196107-1/2652/SC-01.json",
+    "source_result_sha256": "43c788303ff9c89225ac5c6c494344336ad953946b658a12ebd3b1033791cf62"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41587196107-1",
+    "sha256": "43c788303ff9c89225ac5c6c494344336ad953946b658a12ebd3b1033791cf62",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41587196107",
+    "durability": "time-limited; object archival not configured"
+  }
+}
