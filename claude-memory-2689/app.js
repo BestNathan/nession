@@ -198,7 +198,7 @@ let x0=0,y0=0,edge=false;
 $("app").addEventListener("touchstart",e=>{
  if(window.innerWidth>700)return;
  const t=e.target;
- if(t.closest(".conversation-capsule,.context-surface,.memory-layout,.workspace-dock,.sessions-layer")){edge=false;return;}
+ if(t.closest(".conversation-capsule,.context-surface,.workspace-dock,.sessions-layer") || (state.page==="workspace" && state.detail)){edge=false;return;}
  x0=e.touches[0].clientX;y0=e.touches[0].clientY;edge=x0<28||x0>window.innerWidth-28;
 },{passive:true});
 $("app").addEventListener("touchend",e=>{
