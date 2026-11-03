@@ -38,6 +38,8 @@ export interface TerminalCapsuleProps {
    * it owns a slot in the dock region, never what fills it.
    */
   adjacentAction?: ReactNode;
+  /** Contextual, opt-in status action inside the composer; never over the grid. */
+  statusAction?: ReactNode;
   /**
    * Work-awareness context (#1347): whether any capability is working.
    *
@@ -73,6 +75,7 @@ export function TerminalCapsule({
   capabilityDisclosure,
   capabilityProjection,
   adjacentAction,
+  statusAction,
   workContext,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
@@ -232,6 +235,7 @@ export function TerminalCapsule({
           onFieldFocus={handleFieldFocus}
           fieldRef={fieldRef}
           workContext={workContext}
+          statusAction={statusAction}
         />
       </CapsuleShell>
     </CapsuleProvider>
