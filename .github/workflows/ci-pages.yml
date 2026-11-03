@@ -9,6 +9,7 @@ on:
       - 'pages/**'
       - '.github/workflows/ci-pages.yml'
       - 'e2e/tests/browser/pages-*.spec.ts'
+      - 'e2e/pages/**'
       - 'e2e/helpers/pagesStandalone.ts'
       - 'e2e/playwright.pages.config.ts'
       - 'e2e/package*.json'
