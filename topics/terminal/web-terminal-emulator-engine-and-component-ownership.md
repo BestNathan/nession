@@ -5,8 +5,8 @@ topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-11-03T12:36:38Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694"]
+updated_at: 2026-11-03T15:13:31Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694","https://github.com/BestNathan/nession/blob/af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2656","https://github.com/BestNathan/nession/pull/2708","https://github.com/BestNathan/nession/pull/2709"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -50,6 +50,22 @@ transports because the shipped server config
 data travels only through the negotiated in-band protocol: there is no
 FilesPlugin, upload, remote-file or path conversion, and an unnegotiated
 image-only paste becomes an honest status-strip message instead.
+
+The browser text-copy path is one shared owner, not a Terminal-local
+implementation ([#2656](https://github.com/BestNathan/nession/issues/2656)).
+`web/src/shared/lib/clipboard.ts` integrates the MIT `copy-to-clipboard`
+library (v4.0.2, lockfile-pinned) and is the single implementation behind every
+user-gesture text copy: ordinary UI actions and the blocked-OSC notice both call
+it. The library uses the Async Clipboard API on secure origins and a
+hidden-selection `execCommand('copy')` on ordinary HTTP; its HTTP branch runs
+inside the call, before the returned Promise settles, so callers invoke the
+owner from the activating event and never retry the legacy path from an async
+rejection continuation. `copyText` reports the browser's boolean truthfully and
+the library's `window.prompt` fallback stays disabled; Nession's bounded
+selectable surface is the failure affordance. Automatic remote OSC 52/5522
+writes remain separately authorized in `platform/terminal-runtime/clipboard`,
+which keeps the negotiated MIME transfer, `EPERM`/`EIO` mapping and notices;
+the Terminal adapter delegates only the user-gesture text path.
 
 The Terminal Surface's status chrome is part of the same boundary, and since
 [#2658](https://github.com/BestNathan/nession/issues/2658) it is **never
@@ -181,6 +197,21 @@ the gesture unchanged.
   and `ui-contract-matrix` — Pass (6/3/15/24/72 tests) at the PR head
   `54c69f6d7de3025fa52d61127c273b124803e10f` (run 41634677535), and the merged
   staging push run 41635932685 is green.
+- The shared browser text-copy owner merged at
+  `af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475`; the canonical rule is the “One
+  browser text-copy owner” paragraph in
+  `docs/design/design-system/patterns/terminal-surface.md`. Proof at staging:
+  SC-02 (a real non-loopback HTTP origin with `isSecureContext=false` and no
+  `navigator.clipboard`: the Terminal OSC 52 notice copy carried a Unicode plus
+  multiline payload exactly, the Environment UI copy carried its exact value,
+  focus stayed on the activating button, and a refused command produced the
+  bounded selectable text), SC-03 (secure-origin denied writeText+execCommand
+  produced the truthful manual state, then a fresh explicit click completed the
+  exact write) and SC-04 (protocol/controller/binding tests plus source checks
+  for one `copy-to-clipboard` owner, version/license pinning and `EPERM`/`EIO`
+  mapping) all Pass at that SHA (run 41660956251). The declared regression E2E
+  IDs `terminal-io` and `fixture-app` Pass (24/24 and 6/6 tests) at PR head
+  `0194d3feb67e98f810b68766a6df343cf796f3d9` (run 41659738026).
 - HTTP clipboard capability merged at
   `bccd9928983ab2818a34e36cdd16d015966f7100`; the canonical matrix is the
   “Ordinary HTTP is not a secure context” section in
@@ -259,5 +290,12 @@ the gesture unchanged.
   and `TerminalController` owners. Expiry must key on the notice's `id`/`kind`,
   not on object or callback identity, or an unrelated parent render can extend
   a transient state; clipboard text must not enter the DOM before the gesture.
+- Browser text copy has one owner: `shared/lib/clipboard.ts` integrates
+  `copy-to-clipboard`. Do not add another hidden-selection/`execCommand`
+  implementation, call `navigator.clipboard` directly for user-initiated text,
+  or re-enable the library's prompt fallback. Invoke the owner inside the
+  activating event; never retry the legacy path after an awaited rejection.
+  Automatic remote writes stay in `platform/terminal-runtime/clipboard` with
+  their own authorization and `EPERM`/`EIO` mapping.
 - The engine is internal to `platform/terminal-runtime/xterm/`; there is no npm
   package extraction decision.

@@ -183,3 +183,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record #2658's owner decision that Terminal notices are never automatic: status is reachable only through the Capsule's explicit disclosure, clipboard text stays out of the DOM until that gesture, expiry keys on notice identity, and diagnostics are surface data attributes; supersede #2621's automatic overlay presentation while keeping its zero-reserved-height objective
 - Source: https://github.com/BestNathan/nession/issues/2658
+
+## 2026-11-03T15:13:31Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record #2656's canonical shared browser text-copy owner: copy-to-clipboard 4.0.2 (MIT, lockfile-pinned) is the single user-gesture implementation behind ordinary UI and the blocked-OSC notice, invoked inside the activating event with no post-await legacy retry; automatic remote OSC 52/5522 writes stay separately authorized with EPERM/EIO mapping, and staging SC-02..SC-04 Pass at the merged SHA
+- Source: https://github.com/BestNathan/nession/issues/2656
