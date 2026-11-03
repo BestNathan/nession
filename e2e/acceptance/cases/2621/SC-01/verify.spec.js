@@ -15,7 +15,7 @@ const ROUTES = [
   ['input-drop', '?drop=epoch', ['input-drop']],
   ['history-degraded', '?history=degraded', ['history-degraded']],
   ['observer', '?role=observer', ['observer']],
-  ['clipboard', '?clipboard=write-denied', ['clipboard']],
+  ['clipboard', '?clipboard=copy-required', ['clipboard']],
   ['all four together', ALL_FOUR, ['history-degraded', 'input-drop', 'clipboard', 'observer']],
 ];
 
