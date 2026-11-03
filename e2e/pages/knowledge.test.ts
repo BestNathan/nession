@@ -76,6 +76,11 @@ test.describe('standalone Pages Knowledge Explorer',()=>{
   await page.goto(site.origin+'/#/knowledge');
   await expect(page.locator('.knowledge-listbox')).toBeVisible();
   await expect(page.locator('.knowledge-reader-slot')).toBeHidden();
+  // Compact layouts must keep both topic and category controls accessible.
+  const mobileCategory=page.locator('.knowledge-categories').getByRole('button',{name:'terminal',exact:true});
+  await expect(mobileCategory).toBeVisible();
+  await mobileCategory.click();
+  await expect(page.locator('.knowledge-entry')).toHaveCount(1);
   await page.locator('.knowledge-entry').filter({hasText:'Terminal routing'}).click();
   await expect(page).toHaveURL(/article=topics%2Fterminal%2Fterminal-routing\.md/);
   await expect(page.locator('.knowledge-reader-slot')).toBeVisible();
@@ -86,6 +91,16 @@ test.describe('standalone Pages Knowledge Explorer',()=>{
   await page.getByRole('link',{name:'← All articles'}).click();
   await expect(page.locator('.knowledge-listbox')).toBeVisible();
   await expect(page.locator('.knowledge-reader-slot')).toBeHidden();
+ });
+
+ test('keyboard activates the same deep-linkable article as pointer input',async({page})=>{
+  await page.goto(site.origin+'/#/knowledge');
+  const item=page.locator('.knowledge-entry').filter({hasText:'Terminal routing'});
+  await item.focus();
+  await expect(item).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/article=topics%2Fterminal%2Fterminal-routing\\.md/);
+  await expect(page.locator('.knowledge-reader').getByRole('heading',{name:'Terminal routing'})).toBeVisible();
  });
 
  test('global Changes uses one source log and links to current articles',async({page})=>{
