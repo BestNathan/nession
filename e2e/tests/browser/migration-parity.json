@@ -50,7 +50,7 @@
     "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "11783b88cd34b364a4a1698d0e24bfd9628c8582",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-linux.png": "be41d555dcb75b3ce1f9c6c59e5dc7a792766187",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-multiline-linux.png": "2f158e83a3cf8d7c15aa0143bdb72a661e023408",
-    "__snapshots__/fixture-visual.spec.ts/app-work-context-disclosure-linux.png": "0beb196d0bb55534571563991f5eae24b50dd264",
+    "__snapshots__/fixture-visual.spec.ts/app-cli-open-context-disclosure-linux.png": "e31a570823fe663757573ae8a76da107405f0d53",
     "__snapshots__/fixture-visual.spec.ts/app-workspace-linux.png": "3a5e030295c92cf4e4b8ab00ff61d836a766e981",
     "__snapshots__/fixture-visual.spec.ts/web-active-terminal-linux.png": "226d846ac395ae7595320310a23a295380a3fb7d",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-chat-dialect-linux.png": "ca595fee079b3302997dc529188c040f37e29cd4",
