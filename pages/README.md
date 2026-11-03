@@ -35,6 +35,36 @@ Publishing has a stricter proof than a successful artifact upload or matching ma
 
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
+
+## Knowledge Explorer / public reading surface (#2664)
+
+The native Pages route \`#/knowledge\` reads \`data/knowledge.json\`, an allowlisted,
+bounded projection of the public \`knowledge\` orphan branch. It provides a
+topic-first article directory, category/full-text search, source-grounded
+Markdown reading, pinned evidence links and a view of the single global
+\`CHANGELOG.md\`. On narrow screens, the list navigates to a full article
+and Back returns to the list.
+
+In the trusted \`Deploy / Public Pages\` workflow, checkout \`knowledge\` into
+\`knowledge-store\` with \`persist-credentials: false\`, execute
+\`node scripts/knowledge-ledger-contract.mjs check knowledge-store\`, and pass
+\`KNOWLEDGE_DIR\` and exact \`KNOWLEDGE_SHA\` to the Pages build. Pages only
+publishes a static projection and never writes the branch or grants a
+Knowledge publisher identity. The deploy readback checks the exact published
+Knowledge SHA, article count and JSON SHA-256 from anonymous HTTPS responses.
+
+For offline Pages tests and local builds without a \`knowledge\` checkout,
+\`data/knowledge.json\` has \`status: "unavailable"\`, not an invented empty
+or verified ledger. A provided-but-invalid checkout fails the build. Markdown
+is rendered using DOM text nodes, a small allowlisted inline/block subset and
+safe HTTPS links; never insert Knowledge content as HTML or execute it.
+
+The Knowledge ledger remains subordinate to current canonical code, Gates,
+owner decisions and docs. \`verified\` refers to article source provenance,
+not actual live system behavior. Git commits, not invented article IDs or
+version files, are the historical snapshots. The dedicated Knowledge writer
+security boundary is governed separately by #2358.
+
 ## Phase 2-A — public source-backed observations
 
 The build-only `agent-metrics.json` source supplies rolling 7-day and 30-day `runs.by_provider` and `runs.by_workflow` counts, and 7-day `runs.by_issue` counts. The versioned public projection includes only bounded, safe category names, observed nonnegative integer counts and source metadata. Missing observations remain `null` / N/A (not an inferred zero). It does **not** establish causal PR↔Agent linkage, exact-SHA Acceptance verdicts, live presence, per-Agent cost or orphan integrity. The independent Pages layout and UI do not depend on product `web/`.
