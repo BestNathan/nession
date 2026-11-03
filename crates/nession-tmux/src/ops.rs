@@ -1121,9 +1121,10 @@ impl TmuxOps {
     ///    line into the initial shell. On that path this line is the only thing
     ///    that delivers the environment to the process that exists; a failure is
     ///    returned rather than swallowed.
-    /// 3. Without `-e`, also `set-environment` on the session for windows that
-    ///    do not exist yet. `-e` sets the Session environment itself, so that
-    ///    path does not repeat the variables one spawn at a time.
+    /// 3. `set-environment` on the session for windows that do not exist yet.
+    ///    `-e` fills the Session environment on current tmux, but older 3.x
+    ///    releases did not guarantee it; the replay is best-effort and keeps
+    ///    future panes correct on every supported version.
     pub async fn new_session(&self, request: &NewSession) -> Result<NewSessionOutcome> {
         let args = new_session_args(request);
         let output = tokio::time::timeout(
@@ -1144,9 +1145,7 @@ impl TmuxOps {
         })??;
 
         if output.status.success() {
-            // `new-session -e` installed these on the Session environment, which
-            // is what future panes inherit. Replaying them with
-            // `set-environment` is one spawn per variable for no change.
+            self.propagate_env_best_effort(request).await;
             return Ok(NewSessionOutcome { used_e: true });
         }
 
@@ -1191,13 +1190,12 @@ impl TmuxOps {
         Ok(NewSessionOutcome { used_e: false })
     }
 
-    /// Install the requested environment on the session for future windows on
-    /// the no-`-e` fallback path.
+    /// Install the requested environment on the session for future windows.
     ///
-    /// Best effort: the initial shell already has the environment through the
+    /// Best effort: the session already has the environment through `-e` or the
     /// typed line, so a refused variable is observable but not the operation's
-    /// failure. The `-e` path does not call this — `new-session -e` already set
-    /// the Session environment.
+    /// failure. The `-e` path still calls this because older supported tmux 3.x
+    /// releases did not guarantee that `-e` populated the Session environment.
     async fn propagate_env_best_effort(&self, request: &NewSession) {
         for (key, value) in &request.env {
             if let Err(e) = self.set_environment(&request.name, key, value).await {
