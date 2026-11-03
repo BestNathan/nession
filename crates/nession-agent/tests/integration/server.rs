@@ -949,11 +949,12 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
     // Enough concurrent creates and env commands to keep the server busy;
     // deliberately below the mutation bound so this width test does not
     // re-test admission (the flood test owns that) or hold more panes than
-    // the schedule needs. Under LLVM instrumentation a production-sized flood
-    // can also push the measured `new-session` past its 10 s budget, which
-    // would turn a width test into a timeout test.
-    const FLOOD: usize = 8;
-    const PARK_VARS: usize = 20;
+    // the schedule needs. Every session environment variable is one tmux spawn
+    // under the SDK's fallback propagation, and LLVM instrumentation multiplies
+    // its cost; the counts leave headroom so a width test cannot become a
+    // timeout test.
+    const FLOOD: usize = 4;
+    const PARK_VARS: usize = 8;
     const CREATES: usize = 3;
 
     let (addr_a, handle_a, credentials_a) = start_server_with_terminal_cols(AttachMode::Plain, 96)
