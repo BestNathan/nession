@@ -15,13 +15,16 @@ describe('useWorkSignals (#1347 SC-14)', () => {
     expect(result.current.status).toBe('quiet');
   });
 
-  it('is working while the pane runs a Claude Code command (passive sensing)', () => {
+  it('stays quiet while the pane runs a Claude Code command (#2663)', () => {
+    // A foreground `claude`/`claude.exe` proves the CLI is OPEN, not that a
+    // task is running. The owner rejected the old Work Ring and the false
+    // "Working in this session" claim it was fed by this observation.
     const { result } = renderHook(() => useWorkSignals(facts('claude.exe')));
 
-    expect(result.current.status).toBe('working');
-    expect(result.current.summaries).toContainEqual(
-      expect.objectContaining({ capabilityId: 'claude-code', status: 'working' }),
-    );
+    expect(result.current.status).toBe('quiet');
+    expect(result.current.summaries).toEqual([]);
+    // The production binding list contributes nothing from process presence.
+    expect(collectWorkSignals(facts('claude.exe'))).toEqual([]);
   });
 
   it('is quiet when the pane runs an unrelated command', () => {
@@ -30,13 +33,13 @@ describe('useWorkSignals (#1347 SC-14)', () => {
     expect(result.current.status).toBe('quiet');
   });
 
-  it('follows the foreground command as it changes', () => {
+  it('stays quiet as the foreground command changes', () => {
     const { result, rerender } = renderHook(
       ({ command }: { command: string | null }) => useWorkSignals(facts(command)),
       { initialProps: { command: 'claude' as string | null } },
     );
 
-    expect(result.current.status).toBe('working');
+    expect(result.current.status).toBe('quiet');
 
     rerender({ command: null });
 

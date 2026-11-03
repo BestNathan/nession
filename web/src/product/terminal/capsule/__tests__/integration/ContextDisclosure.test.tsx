@@ -229,7 +229,6 @@ describe('Context Disclosure', () => {
     const item = await screen.findByTestId('capsule-context-item-terminal-keys');
     expect(item).toHaveTextContent('Terminal Keys');
     expect(item).toHaveTextContent('Touch controls for Terminal');
-    expect(screen.queryByTestId('work-ring')).not.toBeInTheDocument();
 
     // …and it is selection, not decoration: the row selects through the same
     // path a work-sensed or ordinary row does (SC-38/SC-40).
@@ -389,7 +388,6 @@ describe('Context Disclosure', () => {
     const shell = screen.getByTestId('capsule-shell');
     const sensed = screen.getByTestId('capsule-context-item-claude-code');
     expect(sensed).toHaveFocus();
-    expect(screen.getByTestId('work-ring')).toBeInTheDocument();
 
     rerender(
       <TerminalCapsule
@@ -411,7 +409,6 @@ describe('Context Disclosure', () => {
     expect(ordinaryClaude).toBe(sensed);
     expect(ordinaryClaude).toHaveFocus();
     expect(screen.getByTestId('capsule-capability-picker-git')).toBeInTheDocument();
-    expect(screen.queryByTestId('work-ring')).not.toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 

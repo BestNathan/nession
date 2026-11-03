@@ -52,7 +52,7 @@ import {
   assertCapabilityRowCssStress,
   assertWebCapsuleOuterGeometry,
   assertDestinationSharesCapsuleMaterial,
-  assertWorkRingPerceptible,
+  assertCapabilityTriggerPlain,
   assertCapsuleControls
 } from '../../helpers/uiContractMatrix';
 
@@ -199,8 +199,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await assertCapabilityRowCssStress(page, 'app');
     });
 
-    test('App working state ring is quiet but perceptible (#1455)', async ({ page }) => {
-      await assertWorkRingPerceptible(page, '/#/fixture/app?pane=claude.exe');
+    test('App + is identical while the Claude CLI is open, with no Work Ring (#2663)', async ({ page }) => {
+      await assertCapabilityTriggerPlain(
+        page,
+        '/#/fixture/app?pane=claude.exe',
+        '/#/fixture/app',
+      );
     });
 
     test('session rows meet the App touch target and stay clipped', async ({ page }) => {

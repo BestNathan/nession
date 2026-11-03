@@ -17,7 +17,6 @@ import {
   capsuleProjectionClass,
   capsuleUpperSurfaceClass,
   capsuleUpperTitleClass,
-  capsuleWorkRingClass,
   contextCapsuleReasonClass,
   contextCapsuleSurfaceClass,
   contextCapsuleTitleClass,
@@ -50,12 +49,6 @@ describe('capsuleStyles', () => {
     expect(capsulePeekActionClass).toContain('var(--nession-typography-body-weight)');
     expect(capsulePeekActionClass).toContain('var(--nession-radius-control)');
     expect(capsulePeekActionClass).not.toMatch(/\bfont-medium\b/);
-  });
-
-  it('keeps working state perceptible without inventing a second material', () => {
-    expect(capsuleWorkRingClass).toContain('text-muted-foreground');
-    expect(capsuleWorkRingClass).not.toContain('terminal-capsule-surface');
-    expect(capsuleWorkRingClass).not.toMatch(/animate-|spin|pulse/);
   });
 
   it('keeps Capsule history/popover chrome off the composer writing scale', () => {

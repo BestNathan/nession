@@ -168,30 +168,30 @@ test.describe('App 390×844', () => {
     });
   });
 
-  // #1347 work-awareness review (2026-10-03): the same `+` while something is
-  // working. No canonical route could reach this state — the fixture's selected
-  // Session runs `bash` — so `?pane=claude.exe` names the input the work sense
-  // resolves from, and the sensed-first Context Disclosure gets coverage that
-  // can fail (SC-18/SC-33/SC-35).
-  test('Context Disclosure while working: sensed first, anchored, never a modal', async ({ page }) => {
+  // #2663 (owner decision 2026-11-03): a foreground `claude.exe` means the CLI
+  // is OPEN in this Session, not that it is working. The resting `+` draws no
+  // ambient marker (the old static Work Ring is gone), and the disclosure lists
+  // Claude Code as an ordinary active capability rather than a sensed
+  // "Working in this session" row. `?pane=claude.exe` names the observation;
+  // the product decides what it means.
+  test('Context Disclosure with the Claude CLI open: ordinary list, no ambient ring', async ({ page }) => {
     await gotoFixtureApp(page, '?pane=claude.exe');
     await waitForFixtureTerminal(page);
 
-    // Sensing is ambient: the ring appears, and nothing opens by itself —
-    // neither the disclosure nor a projection for the same observation (SC-34).
-    await expect(page.getByTestId('work-ring')).toBeVisible();
+    // Nothing is ambient: no ring, and nothing opens by itself.
+    await expect(page.getByTestId('work-ring')).toHaveCount(0);
     await expect(page.getByTestId('capsule-context-disclosure')).toHaveCount(0);
     await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
 
     await page.getByTestId('capsule-capability-more').click();
 
-    // The sensed capability is the first layer, by display identity and reason.
-    const sensed = page.getByTestId('capsule-context-item-claude-code');
-    await expect(sensed).toBeVisible();
-    await expect(sensed).toContainText('Claude Code');
-    await expect(sensed).toContainText('Working in this session');
-    // The ordinary entries are in this same list rather than a step away
-    // (SC-35 as amended).
+    // Claude Code is present and active — as a row, not a work claim.
+    const claude = page.getByTestId('capsule-capability-picker-claude-code');
+    await expect(claude).toBeVisible();
+    await expect(claude).toHaveAttribute('data-capability-state', 'active');
+    await expect(page.getByText('Working in this session')).toHaveCount(0);
+    await expect(page.getByTestId('capsule-context-item-claude-code')).toHaveCount(0);
+    // The ordinary entries are in this same list (SC-35 as amended).
     await expect(page.getByTestId('capsule-capability-picker-git')).toBeVisible();
     // Nothing about this is a modal: no dialog role, no backdrop (SC-33).
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
@@ -219,13 +219,13 @@ test.describe('App 390×844', () => {
     await expect.poll(async () => (await pairGeometry())?.gap ?? -1).toBeGreaterThanOrEqual(7);
     await expect.poll(async () => (await pairGeometry())?.gap ?? -1).toBeLessThanOrEqual(9);
 
-    await expect(page).toHaveScreenshot('app-work-context-disclosure.png', {
+    await expect(page).toHaveScreenshot('app-cli-open-context-disclosure.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
 
-    // Selecting the sensed row opens its Peek directly (SC-20).
-    await sensed.click();
+    // Selecting the ordinary row opens its Peek (SC-20).
+    await claude.click();
     await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
   });
 
