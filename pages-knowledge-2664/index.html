@@ -136,13 +136,13 @@ var A=[
 {path:'topics/terminal/web-terminal-emulator-engine-and-component-ownership.md',title:'Web terminal emulator engine and component ownership',description:'One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 parsing and non-reserving status overlay; Product/UI consumes a narrow emulator port',topic:'terminal',tags:['architecture','ownership','terminal','web'],updated:'2026-10-29T19:22:00Z',status:'verified',sections:[['Decision','XtermEmulator is the only production owner of the raw @xterm/xterm Terminal instance. The Product/UI layer consumes a narrow typed emulator port.'],['Boundaries','SessionRuntime owns session/transport synchronization, SerializedTerminalWriter orders writes, TerminalGeometry owns fixed columns and sizing, and TerminalInteractionController owns PTY-bound input.'],['Clipboard and status','OSC 52 and 5522 are handled inside the emulator boundary. Status notices are non-reserving overlays rather than content that changes the terminal grid.']],related:['topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md'],sources:['https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md','https://github.com/BestNathan/nession/issues/2598','https://github.com/BestNathan/nession/issues/2614']}
 ];
 var E=[
-{date:'2026-10-29T19:22:00Z',action:'update',path:A[2].path,title:A[2].title,reason:'Refine terminal engine, clipboard and status overlay ownership',source:'https://github.com/BestNathan/nession/issues/2598'},
-{date:'2026-10-28T17:46:56Z',action:'update',path:A[0].path,title:A[0].title,reason:'Align current knowledge with the scoped instruction architecture',source:'https://github.com/BestNathan/nession/issues/2325'},
-{date:'2026-10-24T12:24:00Z',action:'update',path:A[1].path,title:A[1].title,reason:'Correct source provenance and verification evidence',source:'https://github.com/BestNathan/nession/issues/2343'},
+{date:'2026-10-29T19:22:00Z',action:'update',path:A[2].path,title:A[2].title,reason:'Record the HTTP clipboard capability matrix after #2614: DOM copy-event fallback and native paste/image ingress on non-secure origins',source:'https://github.com/BestNathan/nession/issues/2614'},
+{date:'2026-10-28T17:46:56Z',action:'update',path:A[0].path,title:A[0].title,reason:'Add a related-knowledge link to the terminal engine ownership article',source:'https://github.com/BestNathan/nession/issues/2581'},
+{date:'2026-10-24T12:24:00Z',action:'update',path:A[1].path,title:A[1].title,reason:'Point verified article provenance at a merged canonical Skill commit',source:'https://github.com/BestNathan/nession/issues/2343'},
 {date:'2026-10-24T05:34:00Z',action:'create',path:A[1].path,title:A[1].title,reason:'Record the source-grounded LLM Wiki maintenance model',source:'https://github.com/BestNathan/nession/issues/2343'},
 {date:'2026-10-24T04:03:25Z',action:'rename',path:A[0].path,title:A[0].title,reason:'Use full title-derived filename, removing abbreviated identity',source:'https://github.com/BestNathan/nession/issues/2325'}
 ];
-var current=A[0].path,topic='all',tag='all',q='',unavailable=false,view='browse';
+var current='',topic='all',tag='all',q='',unavailable=false,view='browse';
 var $=function(id){return document.getElementById(id)};
 function el(type,cls,text){var x=document.createElement(type);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x}
 function add(parent){for(var i=1;i<arguments.length;i++)if(arguments[i])parent.append(arguments[i]);return parent}
@@ -157,7 +157,7 @@ if(replace)history.replaceState(null,'',hash);else if(location.hash!==hash)locat
 function readHash(){
 var hash=location.hash,raw=hash.split('?')[1]||'',p=new URLSearchParams(raw),path=p.get('article');
 view=p.get('view')==='changes'?'changes':'browse';
-if(path&&A.some(function(x){return x.path===path}))current=path;
+current=path&&A.some(function(x){return x.path===path})?path:(window.matchMedia('(max-width:860px)').matches?'':A[0].path);
 if(!hash.startsWith('#/knowledge'))updateHash(true);
 render();
 }
@@ -178,7 +178,7 @@ function changes(){var wrap=$('events');wrap.replaceChildren();E.forEach(functio
 function render(){
 $('tab-browse').setAttribute('aria-selected',view==='browse');$('tab-changes').setAttribute('aria-selected',view==='changes');
 $('workspace').style.display=view==='browse'&&!unavailable?'':'none';
-$('timeline').style.display=view==='changes'&&!unavailable?'grid':'none';
+$('timeline').style.display=view==='changes'&&!unavailable?(window.matchMedia('(max-width:860px)').matches?'block':'grid'):'none';
 var old=$('unavailable');if(old)old.remove();
 if(unavailable){var p=el('div','no-snapshot');add(p,el('h2','', 'Knowledge snapshot unavailable'),el('p','','The pinned source could not be read or validated. This is not an empty knowledge base and no articles are claimed current.'),el('p','','Use “Reset view” to restore the public fixture.'));p.id='unavailable';$('workspace').before(p);return}
 topics();list();read();changes();
