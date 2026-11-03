@@ -36,7 +36,12 @@ working_dir?: string | null,
  * having to notice it.
  */
 env_files: Array<EnvFileRef>, };
-export type ClientSessionCreateResponsePayload = { success: boolean, session_id?: string | null, error?: string | null, };
+export type ClientSessionCreateResponsePayload = { success: boolean, session_id?: string | null, error?: string | null, 
+/**
+ * Non-fatal warnings from resolving/materializing the initial Environment
+ * Binding (reserved-key collisions, parse warnings). Empty on refusal.
+ */
+warnings: Array<string>, };
 export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
@@ -60,5 +65,10 @@ working_dir?: string | null,
 env_files: Array<EnvFileRef>, };
 
 /** The payload the provider answers with. */
-export type SessionCreateReply = { success: boolean, session_id?: string | null, error?: string | null, };
+export type SessionCreateReply = { success: boolean, session_id?: string | null, error?: string | null, 
+/**
+ * Non-fatal warnings from resolving/materializing the initial Environment
+ * Binding (reserved-key collisions, parse warnings). Empty on refusal.
+ */
+warnings: Array<string>, };
 

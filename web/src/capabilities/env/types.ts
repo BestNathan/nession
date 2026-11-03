@@ -63,3 +63,41 @@ export interface SessionEnvQueryResponse {
   sourced_files: EnvFileRef[];
   error?: string;
 }
+
+/**
+ * The observed half of a Session Environment Binding (#170). Values are never
+ * on this wire: only the keys the binding manages and how far convergence got.
+ */
+export interface SessionEnvObservedState {
+  applied_revision: number;
+  /** in_sync | applying | pending_shell | unsupported_shell | error */
+  status: string;
+  profiles: EnvFileRef[];
+  managed_keys: string[];
+  shell?: string | null;
+  shell_revision?: number | null;
+  last_error?: string | null;
+}
+
+export interface SessionEnvBindingProfileState {
+  profile: EnvFileRef;
+  phase: string;
+  content_hash?: string | null;
+  /** The file changed since the Session materialized this revision. */
+  outdated: boolean;
+}
+
+export interface SessionEnvBindingState {
+  session_id: string;
+  desired_revision: number;
+  desired_profiles: SessionEnvBindingProfileState[];
+  observed?: SessionEnvObservedState | null;
+  error?: string | null;
+}
+
+export interface SessionEnvBindingResponse {
+  success: boolean;
+  binding?: SessionEnvBindingState | null;
+  warnings: string[];
+  error?: string | null;
+}

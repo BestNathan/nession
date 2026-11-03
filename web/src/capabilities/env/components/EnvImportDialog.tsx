@@ -204,8 +204,8 @@ function PhaseBody({
       <p className={chromeSansRole('body')} data-testid="env-import-impact">
         That profile is used by{' '}
         {inUseBy.length === 1 ? '1 running session' : `${inUseBy.length} running sessions`}
-        {inUseBy.length > 0 ? ` (${inUseBy.join(', ')})` : ''}. Importing may re-source those
-        sessions.
+        {inUseBy.length > 0 ? ` (${inUseBy.join(', ')})` : ''}. Importing changes the
+        profile only; bound Sessions keep their current materialization.
       </p>
     );
   }

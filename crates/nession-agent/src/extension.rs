@@ -940,9 +940,14 @@ mod tests {
         // Session-scoped observation the Server asks this Agent for on behalf of
         // a browser. It is not a new capability surface — it is the Agent
         // answering a question only it can answer.
+        // Down by one for #170: the three attach-scoped env units
+        // (`env.apply`, `env.unset`, `env.query`) left this surface and the two
+        // binding units (`session.env.binding.get|set`) arrived. The binding is
+        // Session state, so it is asked for by Session name; the removed units
+        // were client-attachment state.
         assert_eq!(
             manifest.protocols.len(),
-            33,
+            32,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );
@@ -969,5 +974,7 @@ mod tests {
         assert!(manifest.offers(&ProtocolId::new("agent.file.read").unwrap()));
         // Served only on the server connection.
         assert!(manifest.offers(&ProtocolId::new("agent.env.write").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("agent.session.env.binding.get").unwrap()));
+        assert!(manifest.offers(&ProtocolId::new("agent.session.env.binding.set").unwrap()));
     }
 }

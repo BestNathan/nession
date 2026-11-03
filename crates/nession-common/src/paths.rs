@@ -71,6 +71,16 @@ pub fn agent_envs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("envs"))
 }
 
+/// Durable Session Environment Binding state: ~/.nession/agent/env-bindings
+///
+/// One directory per Session holding the Agent's observed binding record, the
+/// generated shell overlay, and the revision files. It must outlive an Agent
+/// process because the tmux Sessions do; see `docs/architecture/session-env-binding.md`
+/// for the secret-copy consequence of the baseline values stored here.
+pub fn agent_env_bindings_dir() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("env-bindings"))
+}
+
 /// Server logs directory: ~/.nession/server/logs
 pub fn server_logs_dir() -> io::Result<PathBuf> {
     server_dir().map(|d| d.join("logs"))

@@ -156,6 +156,8 @@ async fn integration_session_create_and_kill() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        binding_profiles: Vec::new(),
+        binding_revision: None,
         terminal_cols: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
@@ -203,8 +205,8 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
                 "name": "snap",
                 "source": "agent",
                 "vars": [
-                    ["NESSON_LANDS", "through-the-wire"],
-                    ["NESSON_LANDS_SPACED", "a b  c"],
+                    ["NS_LANDS", "through-the-wire"],
+                    ["NS_LANDS_SPACED", "a b  c"],
                 ],
                 "warnings": [],
             }],
@@ -226,7 +228,7 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
     );
 
     assert_eq!(
-        super::tmux_show_environment(&name, "NESSON_LANDS")
+        super::tmux_show_environment(&name, "NS_LANDS")
             .await
             .as_deref(),
         Some("through-the-wire"),
@@ -234,7 +236,7 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
          instead of the session"
     );
     assert_eq!(
-        super::tmux_show_environment(&name, "NESSON_LANDS_SPACED")
+        super::tmux_show_environment(&name, "NS_LANDS_SPACED")
             .await
             .as_deref(),
         Some("a b  c"),
@@ -244,21 +246,16 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
     handle.shutdown().await.ok();
 }
 
-/// A required env mutation tmux refuses is an error reply, not a warning.
+/// A required initial environment that cannot be materialized is an error
+/// reply, not a warning.
 ///
-/// #980's second half, and the reason the first half survived: failures here
-/// were a `Vec<String>` of warnings that every caller logged before answering
-/// `ok`. A repair that only fixed the grammar would leave #980's real lesson
-/// in place — the agent could still report a mutation it did not perform.
-///
-/// The variable is deliberately one tmux refuses *for its own sake*
-/// (`variable name contains =`, exit 1 — measured on tmux 3.6b), so what is
-/// under test is the propagation and not the grammar: this payload fails
-/// whether `env.rs` encodes `set-environment` correctly or not, and the only
-/// way it can answer `ok` is if a required failure was downgraded to a log
-/// line. That is what it did before the fix.
+/// #980's second half: failures here used to be warnings every caller logged
+/// before answering `ok`. The binding path keeps the same rule — a key no
+/// shell can export (`BAD=NAME`) fails the create instead of being skipped with
+/// a warning, because answering `ok` would claim a Session that does not have
+/// the environment it was asked for.
 #[tokio::test]
-async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
+async fn an_invalid_initial_environment_is_an_error_reply_not_a_warning() {
     use std::time::Duration;
 
     let (addr, handle, credentials) = start_server(0).await.unwrap();
@@ -274,7 +271,7 @@ async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
             "env_snapshots": [{
                 "name": "bad",
                 "source": "agent",
-                "vars": [["NESSON_BAD=NAME", "value"]],
+                "vars": [["BAD=NAME", "value"]],
                 "warnings": [],
             }],
         }),
@@ -292,21 +289,19 @@ async fn a_refused_env_mutation_is_an_error_reply_not_a_warning() {
     assert_eq!(
         answered["msg_type"],
         serde_json::json!(msg_types::ERROR),
-        "a required env mutation the tmux layer refused was converted into protocol \
-         success: {answered}"
+        "an environment no shell can export was converted into protocol success: {answered}"
     );
     assert_eq!(
         answered["payload"]["code"],
-        serde_json::json!("env_apply_failed"),
-        "the failure was reported as something other than the env mutation: {answered}"
+        serde_json::json!("create_failed"),
+        "the failure was reported as something other than the create: {answered}"
     );
-    // tmux's own words, which `stderr(Stdio::null())` used to discard — without
-    // them the caller learns that something failed and nothing about what.
+    // The diagnostic names the variable, so the caller can repair the profile.
     assert!(
-        answered["payload"]["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("contains =")),
-        "the error does not retain tmux's diagnostic: {answered}"
+        answered["payload"]["message"].as_str().is_some_and(
+            |m| m.contains("BAD=NAME") && m.contains("invalid environment variable name")
+        ),
+        "the error does not name the rejected variable: {answered}"
     );
 
     handle.shutdown().await.ok();
@@ -459,6 +454,8 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        binding_profiles: Vec::new(),
+        binding_revision: None,
         terminal_cols: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
@@ -712,6 +709,8 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        binding_profiles: Vec::new(),
+        binding_revision: None,
         // No Server stated a value, so the Agent's own configuration decides.
         terminal_cols: None,
     };
@@ -817,6 +816,8 @@ async fn shared_agent_keeps_independent_session_widths() {
             height: 30,
             working_dir: None,
             env_snapshots: Vec::new(),
+            binding_profiles: Vec::new(),
+            binding_revision: None,
             terminal_cols,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
@@ -948,11 +949,12 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
     // Enough concurrent creates and env commands to keep the server busy;
     // deliberately below the mutation bound so this width test does not
     // re-test admission (the flood test owns that) or hold more panes than
-    // the schedule needs. Under LLVM instrumentation a production-sized flood
-    // can also push the measured `new-session` past its 10 s budget, which
-    // would turn a width test into a timeout test.
-    const FLOOD: usize = 8;
-    const PARK_VARS: usize = 20;
+    // the schedule needs. Every session environment variable is one tmux spawn
+    // under the SDK's fallback propagation, and LLVM instrumentation multiplies
+    // its cost; the counts leave headroom so a width test cannot become a
+    // timeout test.
+    const FLOOD: usize = 4;
+    const PARK_VARS: usize = 8;
     const CREATES: usize = 3;
 
     let (addr_a, handle_a, credentials_a) = start_server_with_terminal_cols(AttachMode::Plain, 96)
@@ -1011,6 +1013,8 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
             height: 24,
             working_dir: None,
             env_snapshots: Vec::new(),
+            binding_profiles: Vec::new(),
+            binding_revision: None,
             terminal_cols: None,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
@@ -3520,7 +3524,7 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
     let prefix = unique_session_name("flood");
 
     let vars: Vec<serde_json::Value> = (0..PARK_VARS)
-        .map(|i| serde_json::json!([format!("NESSION_FLOOD_{i}"), "1"]))
+        .map(|i| serde_json::json!([format!("NS_FLOOD_{i}"), "1"]))
         .collect();
     for n in 0..FLOOD {
         let create = new_message(

@@ -7,14 +7,17 @@ use super::{
 };
 
 impl ConnectionHandler {
-    /// Handle `server.session.env.apply` — apply env files to a running session.
+    /// Handle `server.session.env.apply` — the pre-#170 per-file apply unit.
+    ///
+    /// **Compatibility adapter.** The canonical model is a whole-binding
+    /// replacement; this adds the named files to the Session's current desired
+    /// selection and materializes the result as one revision. It is never the
+    /// authority the canonical units use, and it does not make the call an
+    /// attach-owned operation.
     pub(super) async fn handle_client_session_env_apply(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
-        // Typed at the contract boundary. `refs` used to be read beside a
-        // `session_id` also read by hand; both are fields of the payload the
-        // contract already described.
         if !self.authenticated_client {
             return Ok(session_env_reply(
                 &msg.id,
@@ -26,38 +29,59 @@ impl ConnectionHandler {
                 },
             ));
         }
-        let ClientSessionEnvApplyPayload {
+        let Ok(ClientSessionEnvApplyPayload {
             session_id,
-            env_files: refs,
-        } = serde_json::from_value(msg.payload).unwrap_or_else(|_| ClientSessionEnvApplyPayload {
-            session_id: String::new(),
-            env_files: Vec::new(),
-        });
-
-        match self.source_env_into_session(&session_id, &refs).await {
-            Ok(warnings) => {
-                // An explicit apply is a new attachment. The forced-write
-                // re-source is not — that session already had the file — which
-                // is why usage is recorded here rather than in the helper.
-                self.env_service
-                    .usage
-                    .record_attach(&session_id, &refs, None);
-                Ok(session_env_reply(
-                    &msg.id,
-                    "server.session.env.apply",
-                    ClientSessionEnvResponsePayload {
-                        success: true,
-                        error: None,
-                        warnings,
-                    },
-                ))
-            }
-            Err(e) => Ok(session_env_reply(
+            env_files,
+        }) = serde_json::from_value(msg.payload)
+        else {
+            return Ok(session_env_reply(
                 &msg.id,
                 "server.session.env.apply",
                 ClientSessionEnvResponsePayload {
                     success: false,
-                    error: Some(e),
+                    error: Some("session_id is required".to_string()),
+                    warnings: Vec::new(),
+                },
+            ));
+        };
+
+        let mut refs = match self.env_service.bindings.get(&session_id).await {
+            Ok(Some(record)) => record
+                .profiles
+                .into_iter()
+                .map(|profile| profile.profile)
+                .collect::<Vec<_>>(),
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                return Ok(session_env_reply(
+                    &msg.id,
+                    "server.session.env.apply",
+                    ClientSessionEnvResponsePayload {
+                        success: false,
+                        error: Some(format!("could not read the Session binding: {e:#}")),
+                        warnings: Vec::new(),
+                    },
+                ))
+            }
+        };
+        refs.extend(env_files);
+
+        match self.set_session_binding(&session_id, &refs, "attach").await {
+            Ok((warnings, error, _binding)) => Ok(session_env_reply(
+                &msg.id,
+                "server.session.env.apply",
+                ClientSessionEnvResponsePayload {
+                    success: error.is_none(),
+                    error,
+                    warnings,
+                },
+            )),
+            Err(error) => Ok(session_env_reply(
+                &msg.id,
+                "server.session.env.apply",
+                ClientSessionEnvResponsePayload {
+                    success: false,
+                    error: Some(error),
                     warnings: Vec::new(),
                 },
             )),

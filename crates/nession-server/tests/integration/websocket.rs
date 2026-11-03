@@ -1706,22 +1706,6 @@ fn session_kill_request(id: &str, session_id: &str) -> serde_json::Value {
     })
 }
 
-/// `server.session.env.apply` as a client sends it, with no files to source.
-///
-/// Used here as the *second* mutation of a session, because it is one that
-/// always reaches the agent: an empty file list still produces an
-/// `agent.session.env.apply` command (`source_env_into_session` sends whether or
-/// not there is anything to source), so "did it reach the agent yet" is a
-/// question the Server's dispatch answers rather than the registry.
-fn session_env_apply_request(id: &str, session_id: &str) -> serde_json::Value {
-    serde_json::json!({
-        "msg_type": "server.session.env.apply",
-        "id": id,
-        "timestamp": current_timestamp(),
-        "payload": { "session_id": session_id, "env_files": [] },
-    })
-}
-
 /// The agent's answer to a brokered command, under the request id it answers.
 ///
 /// Generic rather than an echo, because the commands in this section are
@@ -1829,11 +1813,11 @@ async fn reader_caught_up(client: &mut TestWs, id: &str) -> anyhow::Result<()> {
 /// Two mutations of one session reach the agent one at a time, in the order the
 /// client wrote them.
 ///
-/// A `kill` behind an `env.apply` for one session is the ordering `#961` calls
-/// out by name ("同一 resource mutation 有 FIFO/等价确定性 guarantee"), and it is
-/// the one that matters most: run independently, the second mutation's side
-/// effect can land before the first's, and the session that survives is
-/// whichever task won a scheduling race.
+/// A `kill` followed by another mutation of the same session is the ordering
+/// `#961` calls out by name ("同一 resource mutation 有 FIFO/等价确定性
+/// guarantee"), and it is the one that matters most: run independently, the
+/// second mutation's side effect can land before the first's, and the session
+/// that survives is whichever task won a scheduling race.
 ///
 /// The witness is on the agent's connection, where both commands travel: the
 /// second mutation is written while the first is unanswered, and it must not be
@@ -1868,18 +1852,21 @@ async fn mutations_of_one_session_are_ordered() -> anyhow::Result<()> {
     send_json(&mut client, session_kill_request("kill-1", "a1:s1")).await?;
     let (kill_request, _) = next_command(&mut agent, "agent.session.kill").await?;
 
-    // The second mutation for the same session, written behind it.
-    send_json(&mut client, session_env_apply_request("apply-2", "a1:s1")).await?;
+    // The second mutation for the same session, written behind it. A create is
+    // a keyed mutation that reaches the agent on its own wire; it is not the
+    // first mutation's wire, so the negative assertion below can tell them
+    // apart.
+    send_json(&mut client, session_create_request("create-2", "a1", "s1")).await?;
     reader_caught_up(&mut client, "sync-3").await?;
 
     no_command_within(
         &mut agent,
-        "agent.session.env.apply",
+        "agent.session.create",
         std::time::Duration::from_millis(300),
     )
     .await?;
 
-    // Answering the kill frees the session's queue, and the apply is admitted.
+    // Answering the kill frees the session's queue, and the create is admitted.
     send_json(
         &mut agent,
         command_response(
@@ -1888,22 +1875,26 @@ async fn mutations_of_one_session_are_ordered() -> anyhow::Result<()> {
         ),
     )
     .await?;
-    let (apply_request, _) = next_command(&mut agent, "agent.session.env.apply").await?;
+    let (apply_request, _) = next_command(&mut agent, "agent.session.create").await?;
     send_json(
         &mut agent,
         command_response(
             &apply_request,
-            serde_json::json!({ "request_id": apply_request, "success": true }),
+            serde_json::json!({
+                "request_id": apply_request,
+                "success": true,
+                "session_name": "s1",
+            }),
         ),
     )
     .await?;
 
     // And the client sees the two answers in the order it asked: the mutation's
     // reply cannot overtake the one read before it.
-    let replies = replies_in_arrival_order(&mut client, &["kill-1", "apply-2"]).await?;
+    let replies = replies_in_arrival_order(&mut client, &["kill-1", "create-2"]).await?;
     assert_eq!(
         ids_of(&replies),
-        vec!["kill-1".to_string(), "apply-2".to_string()],
+        vec!["kill-1".to_string(), "create-2".to_string()],
         "the session's mutations were answered out of order"
     );
     assert_eq!(
@@ -1911,8 +1902,8 @@ async fn mutations_of_one_session_are_ordered() -> anyhow::Result<()> {
         serde_json::json!(true)
     );
     assert_eq!(
-        payload_of(&replies[1], "server.session.env.apply")?["success"],
-        serde_json::json!(true)
+        payload_of(&replies[1], "server.session.create")?["session_id"],
+        serde_json::json!("a1:s1")
     );
     Ok(())
 }
@@ -2034,7 +2025,7 @@ async fn an_ordered_frame_is_applied_after_the_mutations_read_before_it() -> any
 ///
 /// The first client's `kill` is brokered and never answered, which parks the
 /// session's key for as long as the test stays silent. The second client's
-/// `env.apply` for that same session is written on another socket and must not
+/// create for that same session is written on another socket and must not
 /// reach the agent until the kill is answered. With a lane per connection — what
 /// this was — the second client's frame goes straight through: its connection has
 /// its own map, its own worker, and no idea that anyone else is mutating `a1:s1`.
@@ -2060,12 +2051,12 @@ async fn mutations_of_one_session_are_ordered_across_connections() -> anyhow::Re
     // and a query written behind it on that same connection, so the Server is
     // known to have *read* it. That is what makes the wait below a statement
     // about the lane rather than about the other client's socket.
-    send_json(&mut second, session_env_apply_request("apply-2", "a1:s1")).await?;
+    send_json(&mut second, session_create_request("create-2", "a1", "s1")).await?;
     reader_caught_up(&mut second, "sync-3").await?;
 
     no_command_within(
         &mut agent,
-        "agent.session.env.apply",
+        "agent.session.create",
         std::time::Duration::from_millis(300),
     )
     .await?;
@@ -2080,12 +2071,16 @@ async fn mutations_of_one_session_are_ordered_across_connections() -> anyhow::Re
         ),
     )
     .await?;
-    let (apply_request, _) = next_command(&mut agent, "agent.session.env.apply").await?;
+    let (apply_request, _) = next_command(&mut agent, "agent.session.create").await?;
     send_json(
         &mut agent,
         command_response(
             &apply_request,
-            serde_json::json!({ "request_id": apply_request, "success": true }),
+            serde_json::json!({
+                "request_id": apply_request,
+                "success": true,
+                "session_name": "s1",
+            }),
         ),
     )
     .await?;
@@ -2096,10 +2091,10 @@ async fn mutations_of_one_session_are_ordered_across_connections() -> anyhow::Re
         payload_of(&first_replies[0], "server.session.kill")?["success"],
         serde_json::json!(true)
     );
-    let second_replies = replies_in_arrival_order(&mut second, &["apply-2"]).await?;
+    let second_replies = replies_in_arrival_order(&mut second, &["create-2"]).await?;
     assert_eq!(
-        payload_of(&second_replies[0], "server.session.env.apply")?["success"],
-        serde_json::json!(true)
+        payload_of(&second_replies[0], "server.session.create")?["session_id"],
+        serde_json::json!("a1:s1")
     );
     Ok(())
 }

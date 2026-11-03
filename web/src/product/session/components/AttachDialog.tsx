@@ -8,7 +8,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react';
-import { Wifi, WifiOff, ChevronDown, ChevronRight } from 'lucide-react';
+import { Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import {
@@ -20,9 +20,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import type { AttachInfo, AttachMode, AddressLatency, ProbedAddress, Session, EnvFileInfo, EnvFileRef } from '@/types';
+import type { AttachInfo, AttachMode, AddressLatency, ProbedAddress, Session } from '@/types';
 import type { AgentProbe } from '@/product/agent/state';
-import { EnvFileMultiSelect, envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
 import {
@@ -48,8 +47,6 @@ export interface AttachChoice {
   relayUrl?: string | null;
   /** Renderer the user picked (webgl/canvas). */
   renderer: 'webgl' | 'canvas';
-  /** Env files to source in the session after attach. */
-  envRefs: EnvFileRef[];
 }
 
 interface AttachDialogProps {
@@ -140,17 +137,13 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<'webgl' | 'canvas'>('webgl');
-  const [envFiles, setEnvFiles] = useState<EnvFileInfo[]>([]);
-  const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
 
   const agentId = session?.agent_id ?? session?.session_id.split(':')[0] ?? null;
   const webglSupported = detectWebGLSupport();
 
-  // Profile captured at open time, used to prefill mode/renderer/env/URL.
-  // Both the env-list and the attach-info continuations consume it, in either
-  // resolution order, so it is NOT cleared between them; the reset effect
-  // re-assigns it on every open and attach-info fetches are cancelled-guarded,
-  // so a stale profile can never prefill a later open.
+  // Profile captured at open time, used to prefill mode/renderer/URL. The
+  // reset effect re-assigns it on every open and attach-info fetches are
+  // cancelled-guarded, so a stale profile can never prefill a later open.
   const prefillProfileRef = useRef<SessionAttachProfile | null>(null);
   // True once the user picked ANY path row this open (including the explicit
   // Auto row, which also stores AUTO_URL) — the manual-url preselect must
@@ -173,9 +166,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
       setRenderer,
       setAttachInfo,
       setSelectedUrl,
-      setSelectedEnv,
       setError,
-      setEnvFiles,
     });
   }, [isOpen, webglSupported, session, setAttachInfo]);
 
@@ -227,8 +218,8 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
     }
     const manual = selectedUrl === AUTO_URL ? null : selectedUrl;
     const relayUrl = mode === 'relay' ? manual : null;
-    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer, envRefs: selectedEnv });
-  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm, selectedEnv]);
+    onConfirm(session, { mode, attachInfo, orderedUrls, latencies: results, selectedUrl: manual, relayUrl, renderer });
+  }, [session, attachInfo, selectedUrl, orderedUrls, results, mode, renderer, onConfirm]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -241,9 +232,6 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
             <Label>Connection Mode</Label>
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
-
-          {/* Env files to source after attach (collapsible, remembers open state). */}
-          <EnvPickerSection files={envFiles} selected={selectedEnv} onChange={setSelectedEnv} />
 
           {/* Candidate address list.
               P2P mode: browser-measured latency.
@@ -294,9 +282,7 @@ interface DialogStateSetters {
   setRenderer: Dispatch<SetStateAction<'webgl' | 'canvas'>>;
   setAttachInfo: Dispatch<SetStateAction<AttachInfo | null>>;
   setSelectedUrl: Dispatch<SetStateAction<string>>;
-  setSelectedEnv: Dispatch<SetStateAction<EnvFileRef[]>>;
   setError: Dispatch<SetStateAction<string | null>>;
-  setEnvFiles: Dispatch<SetStateAction<EnvFileInfo[]>>;
 }
 
 interface OpenPrefillOptions extends DialogStateSetters {
@@ -312,9 +298,7 @@ interface OpenPrefillOptions extends DialogStateSetters {
  * Reset dialog state for a fresh open: prefill mode (relay kept as-is) and
  * renderer (webgl → canvas fallback) from the session profile when one
  * exists, else from the legacy global prefs (relay prefs still map to Auto —
- * the classic first-attach experience). The env file list loads async, so the
- * profile's env selection is restored once it arrives, filtered to files that
- * still exist.
+ * the classic first-attach experience).
  */
 function prefillOnOpen(options: OpenPrefillOptions): void {
   const {
@@ -326,9 +310,7 @@ function prefillOnOpen(options: OpenPrefillOptions): void {
     setRenderer,
     setAttachInfo,
     setSelectedUrl,
-    setSelectedEnv,
     setError,
-    setEnvFiles,
   } = options;
   prefillProfileRef.current = session ? loadSessionProfile(session) : null;
   userPickedRef.current = false;
@@ -346,26 +328,7 @@ function prefillOnOpen(options: OpenPrefillOptions): void {
   );
   setAttachInfo(null);
   setSelectedUrl(AUTO_URL);
-  setSelectedEnv([]);
   setError(null);
-  envApi.listEnvFiles()
-    .then((resp) => {
-      setEnvFiles(resp.files);
-      const prof = prefillProfileRef.current;
-      if (prof) {
-        setSelectedEnv(
-          prof.choice.envRefs.filter((ref) =>
-            resp.files.some(
-              (f) =>
-                f.name === ref.name &&
-                f.source === ref.source &&
-                (!ref.agent_id || f.agent_id === ref.agent_id),
-            ),
-          ),
-        );
-      }
-    })
-    .catch(() => {});
 }
 
 interface AttachFetchOptions {
@@ -679,51 +642,5 @@ function AddressRow({ label, badge, sublabel, selected, onSelect, reachable, isC
         )}>{statusLabel}</span>
       ) : null}
     </button>
-  );
-}
-
-/**
- * Collapsible env-file picker for the attach dialog. Tracks its own expanded
- * state (persisted to localStorage) so the dialog stays out of the way until
- * the user opts in. Selected files are sourced in the session after attach.
- */
-function EnvPickerSection({
-  files,
-  selected,
-  onChange,
-}: {
-  files: EnvFileInfo[];
-  selected: EnvFileRef[];
-  onChange: (selected: EnvFileRef[]) => void;
-}) {
-  const [expanded, setExpanded] = useState(() => localStorage.getItem('attach-env-expanded') === 'true');
-  const toggle = () => {
-    const next = !expanded;
-    setExpanded(next);
-    localStorage.setItem('attach-env-expanded', String(next));
-  };
-  return (
-    <div className="flex flex-col gap-2">
-      <button
-        type="button"
-        onClick={toggle}
-        className={cn('flex items-center gap-1 text-muted-foreground hover:text-foreground', chromeSansRole('body'))}
-      >
-        {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        Environment Files
-        {selected.length > 0 && (
-          <span className={cn('text-muted-foreground ml-1', chromeSansRole('caption'))}>
-            ({selected.length} selected)
-          </span>
-        )}
-      </button>
-      {expanded && (
-        <EnvFileMultiSelect
-          files={files}
-          selected={selected}
-          onChange={onChange}
-        />
-      )}
-    </div>
   );
 }

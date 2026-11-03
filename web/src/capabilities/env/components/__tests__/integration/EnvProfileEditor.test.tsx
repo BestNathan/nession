@@ -137,7 +137,7 @@ describe('EnvProfileEditor — existing', () => {
     const user = userEvent.setup();
     await user.click(screen.getByTestId('env-editor-save'));
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('Save and update running sessions?');
+    expect(dialog).toHaveTextContent('Save while used by running sessions?');
     expect(dialog).toHaveTextContent('used by 2 running sessions (api-tests, deploy)');
     expect(dialog).not.toHaveTextContent(/force/i);
     expect(d.onSave).not.toHaveBeenCalled();

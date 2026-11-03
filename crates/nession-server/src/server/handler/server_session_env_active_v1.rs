@@ -27,13 +27,18 @@ impl ConnectionHandler {
             .unwrap_or_else(|_| ClientSessionEnvActivePayload {
                 session_id: String::new(),
             });
-        let active = self.env_service.usage.active_for(&session_id);
+        // Visibility is a projection of the desired binding, not of an
+        // in-memory usage index. An empty binding is a valid empty projection.
+        let (active, error) = match self.env_service.bindings.get(&session_id).await {
+            Ok(record) => (record.map_or_else(Vec::new, |record| record.active()), None),
+            Err(e) => (
+                Vec::new(),
+                Some(format!("could not read the Session binding: {e:#}")),
+            ),
+        };
         Ok(session_env_active_reply(
             &msg.id,
-            SessionEnvActiveResponse {
-                active,
-                error: None,
-            },
+            SessionEnvActiveResponse { active, error },
         ))
     }
 }

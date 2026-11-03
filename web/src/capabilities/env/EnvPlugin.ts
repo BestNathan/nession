@@ -4,6 +4,8 @@ import { WIRE as ENV_LIST_WIRE } from '@/generated/protocol/core/server-env-list
 import { WIRE as ENV_WRITE_WIRE } from '@/generated/protocol/core/server-env-write/v1';
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
 import { WIRE as SESSION_ENV_APPLY_WIRE } from '@/generated/protocol/core/server-session-env-apply/v1';
+import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
+import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
 import { WIRE as SESSION_ENV_QUERY_WIRE } from '@/generated/protocol/core/server-session-env-query/v1';
 import { WIRE as SESSION_ENV_UNSET_WIRE } from '@/generated/protocol/core/server-session-env-unset/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
@@ -14,6 +16,7 @@ import type {
   EnvListResponse,
   EnvWriteResponse,
   SessionEnvActiveResponse,
+  SessionEnvBindingResponse,
   SessionEnvQueryResponse,
   SessionEnvResponse,
 } from './types';
@@ -110,6 +113,31 @@ export class EnvPlugin implements TransportPlugin {
       session_id: sessionId,
       env_files: envFiles,
     });
+  }
+
+  /**
+   * Replace a Session's whole Environment Binding (#170).
+   *
+   * The canonical mutation: the ordered list is the complete desired selection,
+   * and the server materializes it as one revision. An empty list clears the
+   * binding.
+   */
+  async setSessionEnvBinding(
+    sessionId: string,
+    envFiles: EnvFileRef[],
+  ): Promise<SessionEnvBindingResponse> {
+    return this.requireConnection().request<SessionEnvBindingResponse>(
+      SESSION_ENV_BINDING_SET_WIRE,
+      { session_id: sessionId, profiles: envFiles },
+    );
+  }
+
+  /** Read a Session's desired + observed Environment Binding state. */
+  async getSessionEnvBinding(sessionId: string): Promise<SessionEnvBindingResponse> {
+    return this.requireConnection().request<SessionEnvBindingResponse>(
+      SESSION_ENV_BINDING_GET_WIRE,
+      { session_id: sessionId },
+    );
   }
 
   /** List the env files currently sourced into a session. */

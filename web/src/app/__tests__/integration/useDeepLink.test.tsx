@@ -218,7 +218,6 @@ describe('useDeepLink', () => {
       latencies: [],
       selectedUrl: null,
       renderer: 'webgl',
-      envRefs: [],
     };
 
     // attachToSessionAtom writes sessionIdAtom=B and navigates in one jotai

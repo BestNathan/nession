@@ -115,6 +115,25 @@ fn show_environment_args<'a>(session: &'a str, name: &'a str) -> [&'a str; 4] {
     ["show-environment", "-t", session, name]
 }
 
+/// The argument vector for one `set-environment -u`.
+///
+/// `set-environment [-u] [-t target-session] name [value]` — with `-u` the
+/// variable is removed from the session environment instead of set. The arity
+/// is part of the type for the same reason as `set_environment_args`: a value
+/// entry appended to an unset is a different command.
+fn unset_environment_args<'a>(session: &'a str, name: &'a str) -> [&'a str; 5] {
+    ["set-environment", "-u", "-t", session, name]
+}
+
+/// The argument vector for reading tmux's default shell.
+///
+/// `show-options -gv default-shell` — global (`-g`), value only (`-v`). The
+/// Session adapter must launch the same shell tmux would, not the Agent's
+/// guess from its own `SHELL`.
+fn default_shell_args() -> [&'static str; 3] {
+    ["show-options", "-gv", "default-shell"]
+}
+
 /// The value half of the one `NAME=VALUE` line `show-environment` prints.
 ///
 /// `split_once` rather than a split on every `=`: tmux prints the variable name
@@ -497,6 +516,12 @@ pub struct NewSession {
     /// typed into the initial shell when `-e` is unsupported, and installed on
     /// the session for future windows.
     pub env: Vec<(String, String)>,
+    /// Process to run instead of tmux's default command, as an argv.
+    ///
+    /// Empty (the default) preserves tmux's own `default-command` / login-shell
+    /// behaviour. Used by a Session-local shell adapter that has to install
+    /// itself after the user's own startup files without editing them.
+    pub command: Vec<String>,
 }
 
 /// How a session was created, for a follow-up step only the fallback needs.
@@ -558,7 +583,7 @@ fn session_summary_from_line(line: &str) -> Option<SessionSummary> {
     })
 }
 
-/// The `new-session` argv without environment injection.
+/// The `new-session` options, without environment injection or the command.
 fn new_session_args(request: &NewSession) -> Vec<String> {
     vec![
         "new-session".to_string(),
@@ -572,6 +597,15 @@ fn new_session_args(request: &NewSession) -> Vec<String> {
         "-c".to_string(),
         request.working_dir.clone(),
     ]
+}
+
+/// The options followed by the caller's command argv.
+///
+/// The command is an argv, not a shell string: nothing re-parses it.
+fn new_session_command_args(request: &NewSession) -> Vec<String> {
+    let mut args = new_session_args(request);
+    args.extend(request.command.iter().cloned());
+    args
 }
 
 /// One `list-panes -a` row, in tmux's own terms.
@@ -730,6 +764,53 @@ impl TmuxOps {
                 "tmux show-environment -t {session} {name} printed no NAME=VALUE line: {line:?}"
             )
         })
+    }
+
+    /// Remove one variable from a session's tmux environment:
+    /// `tmux set-environment -u -t <session> <name>`.
+    ///
+    /// Removing a variable that is already absent is successful: tmux treats
+    /// the operation as idempotent, which is what a binding removal needs when
+    /// a key was never managed or was removed concurrently.
+    pub async fn unset_environment(&self, session: &str, name: &str) -> Result<()> {
+        let output = self
+            .command
+            .output(&unset_environment_args(session, name))
+            .await
+            .with_context(|| {
+                format!("failed to spawn tmux set-environment -u for {name} on session {session}")
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "tmux set-environment -u -t {session} {name} failed: {} ({})",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+
+    /// The default shell tmux would run for a new Session.
+    ///
+    /// `None` when tmux answers with an empty value (an unset option). The
+    /// adapter installs only for a shell it can prove it supports; guessing
+    /// from the Agent process's `SHELL` would let a launch that tmux never
+    /// intended be called "the Session's shell".
+    pub async fn default_shell(&self) -> Result<Option<String>> {
+        let output = self
+            .command
+            .output(&default_shell_args())
+            .await
+            .context("failed to spawn tmux show-options -gv default-shell")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux show-options -gv default-shell failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(if value.is_empty() { None } else { Some(value) })
     }
 
     /// The current size of `session`'s active window, as tmux reports it:
@@ -1044,17 +1125,24 @@ impl TmuxOps {
     ///    line into the initial shell. On that path this line is the only thing
     ///    that delivers the environment to the process that exists; a failure is
     ///    returned rather than swallowed.
-    /// 3. `set-environment` on the session for windows that do not exist yet
-    ///    (best effort: the session already has the environment).
+    /// 3. `set-environment` on the session for windows that do not exist yet.
+    ///    `-e` fills the Session environment on current tmux, but older 3.x
+    ///    releases did not guarantee it; the replay is best-effort and keeps
+    ///    future panes correct on every supported version.
     pub async fn new_session(&self, request: &NewSession) -> Result<NewSessionOutcome> {
-        let args = new_session_args(request);
+        let options = new_session_args(request);
+        // `-e` is a `new-session` flag, so it must come before the command:
+        // anything after the command belongs to that process. A bash adapter
+        // command followed by `-e TERM=...` made bash read the flags itself and
+        // exit, which on a Session at creation looked like a resize failure.
         let output = tokio::time::timeout(
             self.create_timeout,
             self.command.output_with(|cmd| {
-                cmd.args(&args).stderr(std::process::Stdio::piped());
+                cmd.args(&options).stderr(std::process::Stdio::piped());
                 for (key, value) in &request.env {
                     cmd.arg("-e").arg(format!("{key}={value}"));
                 }
+                cmd.args(&request.command);
             }),
         )
         .await
@@ -1070,10 +1158,11 @@ impl TmuxOps {
             return Ok(NewSessionOutcome { used_e: true });
         }
 
+        let fallback_args = new_session_command_args(request);
         let output2 = tokio::time::timeout(
             self.create_timeout,
             self.command
-                .output(&args.iter().map(String::as_str).collect::<Vec<_>>()),
+                .output(&fallback_args.iter().map(String::as_str).collect::<Vec<_>>()),
         )
         .await
         .map_err(|_| {
@@ -1115,7 +1204,8 @@ impl TmuxOps {
     ///
     /// Best effort: the session already has the environment through `-e` or the
     /// typed line, so a refused variable is observable but not the operation's
-    /// failure.
+    /// failure. The `-e` path still calls this because older supported tmux 3.x
+    /// releases did not guarantee that `-e` populated the Session environment.
     async fn propagate_env_best_effort(&self, request: &NewSession) {
         for (key, value) in &request.env {
             if let Err(e) = self.set_environment(&request.name, key, value).await {
@@ -1420,6 +1510,29 @@ mod tests {
             "the target is what binds the answer to the session asked about: {argv:?}"
         );
         assert_eq!(argv.len(), 4, "arity is part of the grammar: {argv:?}");
+    }
+
+    #[test]
+    fn unset_environment_argv_carries_the_unset_flag_and_the_session() {
+        let argv = unset_environment_args("sess", "KEY");
+        assert_eq!(argv, ["set-environment", "-u", "-t", "sess", "KEY"]);
+        assert!(
+            argv.contains(&"-u"),
+            "`-u` is what makes this a removal rather than a set: {argv:?}"
+        );
+        assert_eq!(argv.len(), 5, "arity is part of the grammar: {argv:?}");
+        assert!(
+            !argv.contains(&"-e"),
+            "`-e` is new-session's flag; set-environment refuses it: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn default_shell_argv_reads_the_global_value() {
+        // The adapter launches the shell tmux itself would, so it asks tmux
+        // rather than reading the Agent process's SHELL.
+        let argv = default_shell_args();
+        assert_eq!(argv, ["show-options", "-gv", "default-shell"]);
     }
 
     #[test]

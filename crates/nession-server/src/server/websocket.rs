@@ -179,7 +179,7 @@ impl WebSocketServer {
                                     let removed =
                                         session_registry.remove_by_agent(&agent_id_clone).await;
                                     for session_id in &removed {
-                                        env_service.usage.clear_session(session_id);
+                                        env_service.clear_session_state(session_id).await;
                                     }
                                     if !removed.is_empty() {
                                         // Push the shrunken list so browsers stop
@@ -224,8 +224,9 @@ impl WebSocketServer {
                                     row.session_id, row.agent_id, row.last_activity
                                 );
                                 session_registry.remove(&row.session_id).await;
-                                // Release env usage locks held by this session.
-                                env_service.usage.clear_session(&row.session_id);
+                                // The Session is gone; its desired binding and
+                                // observed cache are no longer a live claim.
+                                env_service.clear_session_state(&row.session_id).await;
                             }
                             tracing::info!("Cleaned {} orphaned sessions", rows.len());
                         }
