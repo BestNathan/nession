@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "86455dfd0e08e7f28f1e0157bb033bc07264a134b3eeff5130bcd6cf3e2b5582",
+  "run_id": 41667686736,
+  "run_attempt": 1,
+  "issue": 2657,
+  "criterion": "SC-03",
+  "criterion_text": "**Exclusive event ownership:** from Armed onward, tracked `touchmove` and `touchend`/`touchcancel` never reach Terminal/xterm, shell or other surface listeners; no terminal/page movement, scrollback offset changes, text selection, compatibility click or duplicated navigation while sending arrows. A real mobile swipe before arming still scrolls normally. On release/cancel, Session/input ownership loss, connection loss or backgrounding, all interception, scroll locks, listeners, timers and overlays terminate without leakage. Replacing the mock editor's text/caret during a gesture must not detach the initiating DOM element or interrupt motion input. Verify repeated speed changes, direction reversal, center return, and explicit touchend all work after every rendered arrow.",
+  "stage": "staging",
+  "target_sha": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+  "contract_sha256": "e4c3c14014a08b6dce0c1ae46663f9b254362bb74f5c9b693cf37ee003ecfa85",
+  "case_revision": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+  "case_tree_sha": "d19ad2a509575cd9dacbfd22af7513ab0661659e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T15:50:15.939Z",
+  "finished_at": "2026-11-03T15:50:28.951Z",
+  "duration_ms": 13012,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (2 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=35"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 35
+      },
+      "duration_ms": 7162,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41667686736,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41667686736",
+    "record_path": "runs/2026-11-03/41667686736-1/2657/SC-03.json",
+    "source_result_sha256": "15a874d3422b133ca905053ef28b163311606df3ae1c150417e59fbec1b62a9b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41667686736-1",
+    "sha256": "15a874d3422b133ca905053ef28b163311606df3ae1c150417e59fbec1b62a9b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41667686736",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b030e91e8562c8a357039533a1e3fcab4cc3a99ff0ff941ce820fedab628ace9",
+  "run_id": 41667686736,
+  "run_attempt": 1,
+  "issue": 2657,
+  "criterion": "SC-05",
+  "criterion_text": "A **touch-first** mobile interactive mock demonstrates actual TouchEvent activation, 4 directions, center/stop, speed bands, repeated changes of speed while moving, repeat while stationary, cancellation, scroll/edge conflicts and reveals touch-vs-mouse input diagnostics. The mock TUI must contain sufficient rows/columns to avoid editor boundaries being mistaken for a stalled repeat. Pin the exact source commit and verify in a mobile browser before marking it ready.",
+  "stage": "staging",
+  "target_sha": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+  "contract_sha256": "e4c3c14014a08b6dce0c1ae46663f9b254362bb74f5c9b693cf37ee003ecfa85",
+  "case_revision": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+  "case_tree_sha": "2401b7d34d9f7cc750c4cb4d93678046388ebf3f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T15:50:41.094Z",
+  "finished_at": "2026-11-03T15:50:53.332Z",
+  "duration_ms": 12238,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=13"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 13
+      },
+      "duration_ms": 6388,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41667686736,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "613a3d0094e5472be714f80e0db0c7730fed18a7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41667686736",
+    "record_path": "runs/2026-11-03/41667686736-1/2657/SC-05.json",
+    "source_result_sha256": "cfe6e71a9d51950255bdb0965c84d487a164e8938841e7adfac74adf6661e97b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41667686736-1",
+    "sha256": "cfe6e71a9d51950255bdb0965c84d487a164e8938841e7adfac74adf6661e97b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41667686736",
+    "durability": "time-limited; object archival not configured"
+  }
+}
