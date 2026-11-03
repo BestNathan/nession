@@ -27,6 +27,7 @@ const PROTOTYPE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]+$/;
 let prototypeCatalog = null;
 let prototypeCatalogStatus = 'loading';
 let snapshot = null;
+let siteSnapshotStatus = 'loading';
 let knowledgeSnapshot = null;
 
 function node(tag, className, content) {
@@ -557,6 +558,19 @@ function render(){
     else link.removeAttribute('aria-current');
   });
   root.replaceChildren();
+  // A hashchange may arrive while the independent site.json request is still
+  // pending. Only these routes need that snapshot; Prototypes and Knowledge
+  // have their own read-only manifests and remain independently navigable.
+  const needsSite=!!match||['/','/agents','/work','/repository','/evidence'].includes(route);
+  if(needsSite&&!snapshot){
+    const unavailable=siteSnapshotStatus==='unavailable';
+    root.append(node('p',unavailable?'failure':'loading',unavailable
+      ?'Engineering snapshot unavailable. Source data could not be loaded or validated; this does not imply zero activity.'
+      :'Loading public engineering snapshot…'));
+    document.title=(route==='/'?'Overview':route==='/work'?'Collaboration':
+      route.slice(1).replace(/^\w/,x=>x.toUpperCase()))+' — Nession';
+    return;
+  }
   try {
     if(match)renderWorkDetail(match[1],Number(match[2]));
     else if(detail) {
@@ -603,17 +617,22 @@ async function init(){
   window.addEventListener('hashchange',render);
   void loadPrototypeCatalog();
   void loadKnowledgeCatalog();
+  // Keep deep links correct even if a user navigates before site.json resolves.
+  if(!location.hash.startsWith('#/knowledge')&&!location.hash.startsWith('#/prototypes'))render();
   try{
-    const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache'});
+    const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache',signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error('snapshot unavailable');
     const parsed=await response.json();
     if(parsed.schema_version!==1||!parsed.source)throw new Error('invalid schema');
     snapshot=parsed;
+    siteSnapshotStatus='available';
     freshness.textContent='Generated '+date(parsed.generated_at)+' · public snapshot, not live presence';
     render();
   } catch(error) {
-    root.replaceChildren(node('p','failure','Engineering data is temporarily unavailable. View the authoritative GitHub repository for current activity.'));
-    freshness.textContent='Snapshot unavailable';
+    console.warn('Pages public engineering snapshot unavailable',error);
+    siteSnapshotStatus='unavailable';
+    freshness.textContent='Engineering snapshot unavailable';
+    render();
   }
 }
 init();
