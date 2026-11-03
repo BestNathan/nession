@@ -76,7 +76,7 @@ test('client routes preserve true path identity, reject traversal and allow deep
 });
 test('topic, category and text filters work on published article data',()=>{
  const docs=projectKnowledge(fixture()).articles;
- assert.equal(filterKnowledge(docs,{query:'sourced'}).length,2);
+ assert.equal(filterKnowledge(docs,{query:'source-grounded'}).length,2);
  assert.equal(filterKnowledge(docs,{topic:'terminal'}).length,1);
  assert.equal(filterKnowledge(docs,{category:'knowledge'}).length,1);
  assert.equal(filterKnowledge(docs,{query:'not in docs'}).length,0);
