@@ -55,6 +55,7 @@ export const CATALOG = [
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
   ['ci-web-dist-reuse-proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci'],
   ['ci-run-store-integrity-audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci'],
+  ['ci-run-store-anchor', 'ci-run-store-anchor.yml', 'CI / Run Store Signed Checkpoint', 'ci-run-store-anchor.yml', 'CI / Run Store Signed Checkpoint', 'ci'],
   ['ci-knowledge-ledger-audit', 'ci-knowledge-ledger-audit.yml', 'CI / Knowledge Ledger Audit', 'ci-knowledge-ledger-audit.yml', 'CI / Knowledge Ledger Audit', 'ci'],
   ['ci-run-store-fixture-evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci'],
   ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
@@ -122,29 +123,25 @@ export function reusableReferences(content) {
 // This is a deliberately restricted reader for GitHub's top-level
 // on.workflow_run.workflows YAML list (inline or block). It is not a YAML
 // parser or a new policy engine for arbitrary workflow syntax.
-// One expressly bounded cross-branch source: the producer lives on the
-// history-isolated prototype branch, never in main's workflow catalog.
-// Keep its consumer, workflow name and trusted event restrictions together.
-export const EXTERNAL_WORKFLOW_RUN_SOURCE = Object.freeze({
-  consumerFile: 'deploy-pages.yml',
-  displayName: 'Prototype / Change Signal',
-  branch: 'prototype',
-  producerFile: '.github/workflows/prototype-changed.yml',
-});
-
+// Only two orphan-branch signals are authorized, never executed in main.
+// The Knowledge signal source bytes are pinned by knowledge-ledger-contract.mjs.
+export const EXTERNAL_WORKFLOW_RUN_SOURCES = Object.freeze([
+  Object.freeze({consumerFile:'deploy-pages.yml',displayName:'Prototype / Change Signal',branch:'prototype',producerFile:'.github/workflows/prototype-changed.yml'}),
+  Object.freeze({consumerFile:'deploy-pages.yml',displayName:'Knowledge / Change Signal',branch:'knowledge',producerFile:'.github/workflows/knowledge-changed.yml'}),
+]);
+export const EXTERNAL_WORKFLOW_RUN_SOURCE = EXTERNAL_WORKFLOW_RUN_SOURCES[0];
+// Exact one-owner routing guard: disallow spoofed name/branch combinations,
+// permissive OR clauses, unrelated consumers, or altered event conditions.
+const EXTERNAL_PAGES_RUN_GUARD = ["${{","  github.event_name != 'workflow_run' || (","    github.event.workflow_run.event == 'push' &&","    github.event.workflow_run.conclusion == 'success' &&","    github.event.workflow_run.head_repository.full_name == github.repository &&","    (","      (github.event.workflow_run.name == 'Prototype / Change Signal' &&","       github.event.workflow_run.head_branch == 'prototype') ||","      (github.event.workflow_run.name == 'Knowledge / Change Signal' &&","       github.event.workflow_run.head_branch == 'knowledge')","    )","  )","}}"].join(' ').replace(/\s+/g, ' ').trim();
 export function approvedExternalWorkflowRunSource(consumerFile, content, displayName) {
-  const source = EXTERNAL_WORKFLOW_RUN_SOURCE;
-  if (consumerFile !== source.consumerFile || displayName !== source.displayName) return false;
-  // Require the signal to be branch-scoped, originate from a successful push
-  // in the same repository, and be used only in the trusted Pages workflow.
-  return /^  workflow_run:\s*$/m.test(content) &&
-    /^    workflows: \['Prototype \/ Change Signal'\]\s*$/m.test(content) &&
-    /^    types: \[completed\]\s*$/m.test(content) &&
-    /^    branches: \[prototype\]\s*$/m.test(content) &&
-    content.includes("github.event.workflow_run.event == 'push'") &&
-    content.includes("github.event.workflow_run.conclusion == 'success'") &&
-    content.includes("github.event.workflow_run.head_branch == 'prototype'") &&
-    content.includes('github.event.workflow_run.head_repository.full_name == github.repository');
+  if (consumerFile !== 'deploy-pages.yml' ||
+      !EXTERNAL_WORKFLOW_RUN_SOURCES.some(source => source.displayName === displayName)) return false;
+  if (!/^  workflow_run:\s*$/m.test(content) ||
+      !/^    workflows: \['Prototype \/ Change Signal', 'Knowledge \/ Change Signal'\]\s*$/m.test(content) ||
+      !/^    types: \[completed\]\s*$/m.test(content) ||
+      !/^    branches: \[prototype, knowledge\]\s*$/m.test(content)) return false;
+  const found = content.match(/^    if: >-\n((?: {6}.*\n)+)    name: Build independent Pages\s*$/m);
+  return Boolean(found) && found[1].replace(/\s+/g,' ').trim() === EXTERNAL_PAGES_RUN_GUARD;
 }
 
 export function upstreamWorkflowNames(content) {
@@ -358,22 +355,35 @@ function selfTest() {
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
-  // The one non-main producer cannot become a generic dangling-name bypass.
+  // The two unprivileged orphan producers cannot create a generic bypass.
   const signalConsumer = [
     'name: Deploy / Public Pages',
     'on:',
     '  workflow_run:',
-    "    workflows: ['Prototype / Change Signal']",
+    "    workflows: ['Prototype / Change Signal', 'Knowledge / Change Signal']",
     '    types: [completed]',
-    '    branches: [prototype]',
+    '    branches: [prototype, knowledge]',
     'jobs:',
     '  build:',
-    "    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'prototype' && github.event.workflow_run.head_repository.full_name == github.repository",
-  ].join('\n');
-  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer, 'Prototype / Change Signal'), true);
-  assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml', signalConsumer, 'Prototype / Change Signal'), false);
-  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer.replace('branches: [prototype]', 'branches: [main]'), 'Prototype / Change Signal'), false);
-  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer.replace('head_repository.full_name == github.repository', 'head_repository.full_name == unknown'), 'Prototype / Change Signal'), false);
+    '    if: >-',
+    ...["${{","  github.event_name != 'workflow_run' || (","    github.event.workflow_run.event == 'push' &&","    github.event.workflow_run.conclusion == 'success' &&","    github.event.workflow_run.head_repository.full_name == github.repository &&","    (","      (github.event.workflow_run.name == 'Prototype / Change Signal' &&","       github.event.workflow_run.head_branch == 'prototype') ||","      (github.event.workflow_run.name == 'Knowledge / Change Signal' &&","       github.event.workflow_run.head_branch == 'knowledge')","    )","  )","}}"].map(line => '      '+line),
+    '    name: Build independent Pages',
+  ].join('\n')+'\n';
+  for (const source of EXTERNAL_WORKFLOW_RUN_SOURCES) {
+    assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',signalConsumer,source.displayName),true);
+    assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml',signalConsumer,source.displayName),false);
+  }
+  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',signalConsumer,'Fake / Signal'),false);
+  for (const [from,to] of [
+    ['branches: [prototype, knowledge]','branches: [main]'],
+    ["'Knowledge / Change Signal']","'Other / Signal']"],
+    ["event == 'push'","event == 'workflow_dispatch'"],
+    ["conclusion == 'success'","conclusion == 'failure'"],
+    ["head_repository.full_name == github.repository","head_repository.full_name == unknown"],
+    ["head_branch == 'knowledge'","head_branch == 'prototype'"],
+    ["github.event_name != 'workflow_run'","true"],
+    ["name == 'Knowledge / Change Signal' &&","name == 'Knowledge / Change Signal' ||"],
+  ])assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',signalConsumer.replace(from,to),'Knowledge / Change Signal'),false);
   assert.equal(workflowName('name: One\nname: Two'), null);
   const docs = new Map([
     ['.claude/skills/nession-acceptance/SKILL.md',
@@ -387,7 +397,7 @@ function selfTest() {
   const staleDoc = new Map(docs);
   staleDoc.set('.claude/skills/nession-acceptance/SKILL.md', 'Actions -> Acceptance');
   assert.match(auditWorkflowDocumentation(staleDoc).join('\n'), /missing current workflow display name/);
-  console.log('workflow-conventions: 11 positive/negative scenarios passed');
+  console.log('workflow-conventions: standard and dual-orphan positive/negative scenarios passed');
 }
 
 function check() {

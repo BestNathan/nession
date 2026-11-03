@@ -200,8 +200,10 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
 @media(max-width:850px){
 .knowledge-layout{display:block;min-height:0;padding-bottom:40px}
 .knowledge-side{display:flex;align-items:center;gap:12px;overflow-x:auto;border:0;padding:0 0 14px;white-space:nowrap}
-.knowledge-side>.eyebrow,.knowledge-category-title,.knowledge-categories{display:none}
-.knowledge-topic-group{display:flex;gap:8px;margin:0}
+.knowledge-side>.eyebrow,.knowledge-category-title{display:none}
+.knowledge-topic-group{display:flex;gap:8px;margin:0;flex:none}
+.knowledge-categories{display:flex;flex-wrap:nowrap;gap:6px;margin:0;padding-left:12px;border-left:1px solid var(--line);flex:none}
+.knowledge-category{white-space:nowrap}
 .knowledge-filter{width:auto;white-space:nowrap;border:1px solid var(--line);padding:8px 12px}
 .knowledge-reader-slot{display:none}.knowledge-layout.reading .knowledge-reader-slot{display:block}
 .knowledge-layout.reading .knowledge-listbox,.knowledge-layout.reading .knowledge-side{display:none}

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import { approvedExternalWorkflowRunSource } from '../../scripts/workflow-conventions.mjs';
 
 const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
@@ -61,14 +62,16 @@ test('published mocks remain discoverable and source is secondary',()=>{
   assert.doesNotMatch(app.slice(app.indexOf('function renderPrototypes('),app.indexOf('function renderAgents(')),/innerHTML/);
 });
 
-test('prototype push bridge triggers only trusted main-owned publication',async()=>{
+test('Prototype and Knowledge push signals reach only the trusted main Pages publisher',async()=>{
   const workflow=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
-  assert.ok(workflow.includes("workflows: ['Prototype / Change Signal']"));
+  assert.ok(workflow.includes("workflows: ['Prototype / Change Signal', 'Knowledge / Change Signal']"));
   assert.ok(workflow.includes('types: [completed]'));
-  assert.ok(workflow.includes('branches: [prototype]'));
-  assert.ok(workflow.includes("workflow_run.conclusion == 'success'"));
-  assert.ok(workflow.includes("workflow_run.event == 'push'"));
-  assert.ok(workflow.includes("workflow_run.head_branch == 'prototype'"));
-  assert.ok(workflow.includes('workflow_run.head_repository.full_name == github.repository'));
+  assert.ok(workflow.includes('branches: [prototype, knowledge]'));
+  // One canonical guard owns the exact workflow-name/branch and provenance
+  // pairing. Pages tests exercise integration rather than copying its policy.
+  for (const name of ['Prototype / Change Signal','Knowledge / Change Signal']) {
+    assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',workflow,name),true);
+  }
+  assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml',workflow,'Knowledge / Change Signal'),false);
   assert.ok(!workflow.includes("cron: '*/15 * * * *'"));
 });
