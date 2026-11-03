@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f9fafb">
+  <title>Nession · Claude Code Memory · Prototype #2689</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="app show-workspace" id="app">
+  <header class="global-bar">
+    <a class="identity" href="https://bestnathan.github.io/nession/#/prototypes" title="Nession 原型中心">
+      <span class="logo">n</span><span class="wordmark">nession</span>
+    </a>
+    <div class="bar-separator"></div>
+    <div class="session-anchor">
+      <button type="button" id="session-toggle" class="session-select" aria-haspopup="true" aria-expanded="false" aria-controls="session-menu" aria-label="切换当前 Session">
+        <span class="session-dot"></span><span id="session-label">dev-session</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m7 10 5 5 5-5"/></svg>
+      </button>
+      <div class="session-menu" id="session-menu" hidden></div>
+    </div>
+    <div class="global-right">
+      <span class="mock-indicator"><span></span>INTERACTIVE MOCK</span>
+      <button type="button" id="reset-demo" class="ghost small" title="恢复默认 Session 与视图">重置</button>
+    </div>
+  </header>
+  <main class="surface" id="surface">
+    <section class="terminal" id="terminal" aria-label="当前 Session 终端">
+      <div class="terminal-topline">
+        <span class="section-glyph" aria-hidden="true">›_</span><span>Terminal</span>
+        <span id="terminal-state" class="terminal-live">Session attached</span>
+      </div>
+      <div class="terminal-frame">
+        <div class="terminal-content" id="terminal-content" aria-label="模拟终端输出"></div>
+        <div class="terminal-gradient"></div>
+      </div>
+      <div class="terminal-bottom">
+        <div class="capsule-shell">
+          <button id="open-workspace" class="capability-button" type="button" aria-label="打开 Claude Code 工作区">
+            <span class="capability-symbol">✳</span><span>Claude Code</span>
+            <span class="capability-more" aria-hidden="true">↗</span>
+          </button>
+          <div class="capsule-subtitle">当前 Session 的相关能力</div>
+        </div>
+      </div>
+    </section>
+    <section class="workspace" id="workspace" aria-label="Claude Code Workspace">
+      <div class="workspace-topline">
+        <div class="capability-header">
+          <span class="capability-avatar" aria-hidden="true">✳</span>
+          <div class="capability-header-title">
+            <strong>Claude Code</strong>
+            <span>当前 Session 的工作上下文</span>
+          </div>
+        </div>
+        <button id="close-workspace" type="button" class="ghost return-terminal"><span aria-hidden="true">↙</span> 返回终端</button>
+      </div>
+      <nav class="workspace-tabs" aria-label="Claude Code 视图" role="tablist">
+        <button type="button" data-tab="conversations" role="tab" aria-selected="false">对话</button>
+        <button type="button" data-tab="memory" role="tab" aria-selected="true">Memory</button>
+        <button type="button" data-tab="configuration" role="tab" aria-selected="false">配置</button>
+      </nav>
+      <div class="workspace-content" id="workspace-content" role="tabpanel" aria-live="polite"></div>
+    </section>
+  </main>
+  <div class="prototype-footnote" id="prototype-footnote"><span>原型数据 · 无真实 Agent / 文件读取</span><span>需求 <a href="https://github.com/BestNathan/nession/issues/2689" target="_blank" rel="noopener">#2689</a></span></div>
+</div>
+<script src="./app.js"></script>
+</body>
+</html>
