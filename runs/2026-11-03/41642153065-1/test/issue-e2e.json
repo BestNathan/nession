@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "6b6b531cd826ec281f89b3f5dc52a874e83d545c",
+  "run_id": 41642153065,
+  "run_attempt": 1,
+  "plan_digest": "c1734a6bc82073ed0b99ca8cd25c78ea3ef629501140b501cd857a4fc3533739",
+  "artifact_digest": "sha256:d9420fec3d728698f363506a1c27b7ebd14c81b650290f191e5c4fe02e946a75",
+  "results": [
+    {
+      "id": "fixture-env",
+      "result": "Pass",
+      "discovered": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 56
+    }
+  ]
+}
