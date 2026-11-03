@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0d121a"><title>Nession — Touch Direction Lab</title>
 <style>
-*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0c1119;color:#e4e9f0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1020px;padding:25px;margin:auto}.brand{color:#91b1d1;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}h1{font-size:32px;margin:12px 0;letter-spacing:-.04em}.sub{font-size:14px;line-height:1.6;color:#91a1b6;margin:0 0 23px}.layout{display:grid;grid-template-columns:minmax(290px,420px) 1fr;gap:22px}.phone{display:flex;flex-direction:column;height:min(76dvh,735px);min-height:530px;background:#0a111c;border:6px solid #304051;border-radius:27px;overflow:hidden;box-shadow:0 20px 65px #0008}.bar{flex:none;height:60px;padding:10px 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2c3b4c;font-size:13px}.bar small{display:block;color:#778da2;font-size:10px;margin-top:4px}.status{font-size:11px;color:#9cdbb8}.term{flex:1;min-height:0;position:relative;overflow:auto;background:#090f19;overscroll-behavior:contain;touch-action:manipulation;-webkit-touch-callout:none;-webkit-overflow-scrolling:touch}.content{min-height:100%;padding:20px 15px 100px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:none;-webkit-user-select:none}.prompt{color:#8eddb4}.muted{color:#71859d}.code{margin-top:18px}.line{display:flex;white-space:pre;min-height:22px}.line.on{background:#233b5566;border-radius:4px}.num{width:26px;text-align:right;margin-right:14px;color:#5b7189}.cursor{display:inline-block;width:2px;height:14px;background:#afebd3;vertical-align:middle}.footer{flex:none;height:57px;border-top:1px solid #2c3b4c;display:flex;align-items:center;gap:12px;padding:10px 15px;background:#131c29}.plus{font-size:22px;color:#97a9c0}.input{border:1px solid #3a4a60;background:#1d2938;color:#b7c8da;border-radius:13px;padding:10px 15px;font-size:12px;flex:1}
+*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0c1119;color:#e4e9f0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1020px;padding:25px;margin:auto}.brand{color:#91b1d1;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}h1{font-size:32px;margin:12px 0;letter-spacing:-.04em}.sub{font-size:14px;line-height:1.6;color:#91a1b6;margin:0 0 23px}.layout{display:grid;grid-template-columns:minmax(290px,420px) 1fr;gap:22px}.phone{display:flex;flex-direction:column;height:min(76dvh,735px);min-height:530px;background:#0a111c;border:6px solid #304051;border-radius:27px;overflow:hidden;box-shadow:0 20px 65px #0008}.bar{flex:none;height:60px;padding:10px 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2c3b4c;font-size:13px}.bar small{display:block;color:#778da2;font-size:10px;margin-top:4px}.status{font-size:11px;color:#9cdbb8}.term{flex:1;min-height:0;position:relative;overflow:auto;background:#090f19;overscroll-behavior:contain;touch-action:manipulation;-webkit-touch-callout:none;-webkit-overflow-scrolling:touch}.term.direction-owned{overflow:hidden;overscroll-behavior:none}body.direction-owned{overscroll-behavior:none}.content{min-height:100%;padding:20px 15px 100px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:none;-webkit-user-select:none}.prompt{color:#8eddb4}.muted{color:#71859d}.code{margin-top:18px}.line{display:flex;white-space:pre;min-height:22px}.line.on{background:#233b5566;border-radius:4px}.num{width:26px;text-align:right;margin-right:14px;color:#5b7189}.cursor{display:inline-block;width:2px;height:14px;background:#afebd3;vertical-align:middle}.footer{flex:none;height:57px;border-top:1px solid #2c3b4c;display:flex;align-items:center;gap:12px;padding:10px 15px;background:#131c29}.plus{font-size:22px;color:#97a9c0}.input{border:1px solid #3a4a60;background:#1d2938;color:#b7c8da;border-radius:13px;padding:10px 15px;font-size:12px;flex:1}
 .guide{position:absolute;z-index:6;width:188px;height:188px;transform:translate(-50%,-50%) scale(.92);pointer-events:none;opacity:0;transition:opacity .14s,transform .18s;filter:drop-shadow(0 12px 24px #0009)}.guide.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
 .dial{position:absolute;inset:11px;border-radius:50%;border:1px solid #7e98b0a8;background:radial-gradient(circle,#1c2938 0 31%,transparent 32%),conic-gradient(from 45deg,#253648f0 0deg 87deg,#172534f2 90deg 177deg,#253648f0 180deg 267deg,#172534f2 270deg 357deg);box-shadow:inset 0 2px 4px #dcecff10,inset 0 -10px 20px #0005,0 0 0 6px #8fa6bf15}
 .dial:before{content:"";position:absolute;inset:21px;border:1px solid #b3c7d126;border-radius:50%}.dial:after{content:"";position:absolute;inset:46px;border:1px solid #93c7b93c;border-radius:50%}
@@ -22,9 +22,9 @@
 <section class="phone"><div class="bar"><div><b>dev-session</b><small>Beijing Agent · Terminal</small></div><div class="status" id="conn">● Connected</div></div>
 <div class="term" id="term"><div class="content"><span class="prompt">nession@dev</span> <span class="muted">~/workspace $</span> vim agent.ts<div style="margin-top:10px" class="muted">agent.ts · mock editor · NORMAL</div><div class="code" id="lines"></div><div id="pos" class="muted" style="margin-top:16px">1:1</div><div style="height:210px;margin-top:40px" class="muted"># Quick swipe to scroll normally.<p># Long press and drag to navigate.</p></div></div>
 <div id="guide" class="guide" aria-hidden="true"><div class="dial"></div><div class="arrow" data-dir="up">↑</div><div class="arrow" data-dir="down">↓</div><div class="arrow" data-dir="left">←</div><div class="arrow" data-dir="right">→</div><div class="center"><span class="center-main" id="centerMain">·</span><span class="center-sub" id="centerSub">READY</span></div><div class="speed-pips"><span class="speed-pip"></span><span class="speed-pip"></span><span class="speed-pip"></span><span class="speed-pip"></span></div><div class="guide-hint" id="gestureHint">移出中心选择方向</div></div><div class="origin-dot" id="originDot" aria-hidden="true"></div><div class="tip" id="tip">按住终端 → 方向盘 → 拖动</div></div><div class="footer"><span class="plus">+</span><div class="input">✦ Ask, command, or describe...</div></div></section>
-<section class="panel"><h2>交互测试 · Gesture Lab</h2><p class="step"><strong>01</strong>普通点击、快速拖动、上下滚动，不触发方向键。</p><p class="step"><strong>02</strong>单指静止长按，激活四方向浮层。中心死区不输入；进出中心有独立阈值以避免抖动。</p><p class="step"><strong>03</strong>滑向 ↑ ↓ ← → 发送语义方向键；保持方向连续输入，距离决定 1 / 2 / 4 / 8 次/秒。</p><p class="step"><strong>04</strong>回中心停止；松开、切换到只读、断线、页面切后台都会取消。</p>
+<section class="panel"><h2>交互测试 · Gesture Lab</h2><p class="step"><strong>01</strong>普通点击、快速拖动、上下滚动，不触发方向键。</p><p class="step"><strong>02</strong>单指静止长按，激活四方向浮层。中心死区不输入；进出中心有独立阈值以避免抖动。</p><p class="step"><strong>03</strong>方向盘浮现后立即独占当前触点：拦截方向拖动、滚动和其他组件的 Touch Events；按 1 / 2 / 4 / 8 次/秒重复方向键。</p><p class="step"><strong>04</strong>回中心停止；松开、切换到只读、断线、页面切后台都会取消。</p>
 <button id="reset">重置</button><button id="observer" aria-pressed="false">只读观察者</button><button id="offline" aria-pressed="false">断开连接</button>
-<div class="readout"><div class="label">Live gesture states</div><div class="row"><span>Phase</span><span id="phase">IDLE</span></div><div class="row"><span>Direction</span><span id="dir">—</span></div><div class="row"><span>Repeat rate</span><span id="rate">—</span></div><div class="row"><span>Keys sent</span><span id="count">0</span></div><div class="row"><span>Input path</span><span id="inputPath">—</span></div><div class="row"><span>Last touch event</span><span id="lastTouchEvent">—</span></div><div class="label" style="margin-top:13px">PTY input (mock)</div><div class="history" id="log">No keys</div></div>
+<div class="readout"><div class="label">Live gesture states</div><div class="row"><span>Phase</span><span id="phase">IDLE</span></div><div class="row"><span>Direction</span><span id="dir">—</span></div><div class="row"><span>Repeat rate</span><span id="rate">—</span></div><div class="row"><span>Keys sent</span><span id="count">0</span></div><div class="row"><span>Input path</span><span id="inputPath">—</span></div><div class="row"><span>Last touch event</span><span id="lastTouchEvent">—</span></div><div class="row"><span>Touch owner</span><span id="touchOwner">Free</span></div><div class="row"><span>Exclusive moves</span><span id="exclusiveMoves">0</span></div><div class="row"><span>Leaks to Terminal</span><span id="leakedMoves">0</span></div><div class="label" style="margin-top:13px">PTY input (mock)</div><div class="history" id="log">No keys</div></div>
 <p class="footnote">移动端真实 Touch Events 是主路径；鼠标只作桌面调试。左/右 28px 边缘保留 App 导航。真正实现应通过现有 TerminalInteractionController.sendSemanticKey()，不能直接改动本地 xterm 光标。此原型无网络和真实 PTY。</p><p class="footnote"><a href="https://github.com/BestNathan/nession/issues/2657">Requirement #2657</a> · <a href="https://github.com/BestNathan/nession/tree/prototype/terminal-direction-2657">View source</a></p>
 </section></div></main>
 <script>
@@ -34,7 +34,7 @@
 var term=document.getElementById('term'),guide=document.getElementById('guide'),originDot=document.getElementById('originDot');
 var code=['function greet(name) {','  const message = "hello";','  console.log(message);','  return message;','}','', 'export default greet;'];
 var row=1,col=1,count=0,log=[],gesture=null,touchId=null,hold=null,repeat=null,observer=false,offline=false,symbol={up:'↑',down:'↓',left:'←',right:'→'};
-var lastTouchAt=0,inputPath='—',lastTouchEvent='—',mouseHeld=false;
+var lastTouchAt=0,inputPath='—',lastTouchEvent='—',mouseHeld=false,exclusiveMoves=0,leakedMoves=0,suppressClickUntil=0;
 var SPEEDS=[1,2,4,8],ENTER_PX=24,EXIT_PX=17,SPEED_EDGES=[48,76,108],BAND_HYSTERESIS=5,AXIS_RATIO=1.28;
 function view(){
  var lines=document.getElementById('lines');lines.replaceChildren();
@@ -47,7 +47,10 @@ function display(){
  document.getElementById('rate').textContent=gesture&&gesture.dir?String(gesture.rate)+'/s':'—';
  document.getElementById('count').textContent=String(count);document.getElementById('log').textContent=log.join(' ')||'No keys';
  document.getElementById('inputPath').textContent=inputPath;document.getElementById('lastTouchEvent').textContent=lastTouchEvent;
+ document.getElementById('touchOwner').textContent=gesture&&gesture.phase!=='pending'?'Direction pad':'Free';
+ document.getElementById('exclusiveMoves').textContent=String(exclusiveMoves);document.getElementById('leakedMoves').textContent=String(leakedMoves);
  var visible=!!gesture&&gesture.phase!=='pending';
+ term.classList.toggle('direction-owned',visible);document.body.classList.toggle('direction-owned',visible);
  guide.classList.toggle('show',visible);guide.classList.toggle('moving',!!gesture&&!!gesture.dir);
  guide.querySelectorAll('.arrow').forEach(function(el){el.classList.toggle('active',!!gesture&&gesture.dir===el.dataset.dir)});
  guide.querySelectorAll('.speed-pip').forEach(function(el,i){el.classList.toggle('on',!!gesture&&!!gesture.dir&&i<=gesture.gear)});
@@ -58,10 +61,10 @@ function display(){
  document.getElementById('tip').textContent=observer?'Observer mode: input disabled':offline?'Offline: input disabled':'按住终端 → 方向盘 → 拖动';
 }
 function detachTouchListeners(){
- document.removeEventListener('touchstart',onExtraTouch,true);
- document.removeEventListener('touchmove',onTouchMove,true);
- document.removeEventListener('touchend',onTouchEnd,true);
- document.removeEventListener('touchcancel',onTouchCancel,true);
+ window.removeEventListener('touchstart',onExtraTouch,true);
+ window.removeEventListener('touchmove',onTouchMove,true);
+ window.removeEventListener('touchend',onTouchEnd,true);
+ window.removeEventListener('touchcancel',onTouchCancel,true);
 }
 function stop(reason){
  clearTimeout(hold);clearTimeout(repeat);hold=null;repeat=null;gesture=null;touchId=null;mouseHeld=false;
@@ -94,6 +97,9 @@ function begin(x,y){
  hold=setTimeout(function(){
   if(!gesture||gesture.phase!=='pending')return;
   gesture.phase='armed';
+  // One touch is now owned by the direction pad until release/cancel.
+  // Preserve the scroll position before changing any scroll-related CSS.
+  gesture.lockScrollTop=term.scrollTop;gesture.lockScrollLeft=term.scrollLeft;
   var r=term.getBoundingClientRect(),x0=gesture.x-r.left,y0=gesture.y-r.top;
   var visualX=Math.max(95,Math.min(r.width-95,x0)),visualY=Math.max(95,Math.min(r.height-127,y0));
   guide.style.left=visualX+term.scrollLeft+'px';guide.style.top=visualY+term.scrollTop+'px';
@@ -116,14 +122,28 @@ function move(x,y){
 }
 
 /**
- * Touch Events are the PRIMARY mobile path. The active document capture listeners
- * follow the same finger even when it moves outside the Terminal viewport.
- * They are registered only for the lifetime of a touch, so ordinary page/terminal
- * scrolling remains passive and fast when no gesture is being considered.
+ * One-finger ownership arbitration:
+ * - Pending: observe in CAPTURE phase, never cancel or stop the event; native
+ *   scroll/selection may win by moving >12px before the hold timer.
+ * - Armed: WINDOW CAPTURE owns move/end/cancel for the tracked finger. Prevent
+ *   the default browser action AND stop the event from reaching xterm, the app
+ *   pager, ancestors, and any other document/terminal listeners.
+ * - End/cancel/visibility/unmount: release everything. Never keep a page-wide
+ *   non-passive touchmove listener between gestures.
+ *
+ * Changing touch-action after touchstart is not a reliable lock: browser
+ * touch-action negotiation occurs at gesture start. This is why ownership is
+ * established before the first post-hold movement (not when direction selects).
  */
 function onExtraTouch(e){
  lastTouchAt=Date.now();
  if(touchId!==null&&e.touches.length!==1)stop('touch: multi-finger cancel');
+}
+function claimEvent(e){
+ // Calling preventDefault alone does NOT stop handlers at other layers.
+ // Calling stopPropagation alone does NOT prevent native scrolling.
+ if(e.cancelable)e.preventDefault();
+ e.stopImmediatePropagation();
 }
 function onTouchMove(e){
  if(touchId===null||!gesture)return;
@@ -131,23 +151,39 @@ function onTouchMove(e){
  if(e.touches.length!==1){stop('touch: multi-finger cancel');return}
  var finger=Array.from(e.touches).find(function(t){return t.identifier===touchId});
  if(!finger){stop('touch: tracking lost');return}
- if(gesture.phase!=='pending'){
-  // Claim movement BEFORE directional processing so the browser cannot
-  // perform a native scroll or selection in place of the armed gesture.
-  if(!e.cancelable){stop('touch: browser took scroll');return}
-  e.preventDefault();
+ if(gesture.phase==='pending'){
+  // Until 380ms, event ownership belongs to native scrolling.
+  move(finger.clientX,finger.clientY);
+  return;
  }
- lastTouchEvent='touchmove';move(finger.clientX,finger.clientY);
+ if(!e.cancelable){
+  // Browser already committed to a native gesture: cannot claim it retroactively.
+  e.stopImmediatePropagation();
+  stop('touch: browser took native scroll');
+  return;
+ }
+ claimEvent(e);
+ exclusiveMoves++;
+ lastTouchEvent='touchmove (exclusive)';
+ move(finger.clientX,finger.clientY);
 }
 function onTouchEnd(e){
  lastTouchAt=Date.now();
- if(touchId!==null&&Array.from(e.changedTouches).some(function(t){return t.identifier===touchId})){
-  stop('touchend');
+ if(touchId===null||!gesture)return;
+ if(!Array.from(e.changedTouches).some(function(t){return t.identifier===touchId}))return;
+ if(gesture.phase!=='pending'){
+  claimEvent(e);
+  // The browser may dispatch a compatibility click after touchend. Reject it
+  // only on the Terminal surface and only for this completed owned touch.
+  suppressClickUntil=Date.now()+700;
  }
+ stop('touchend');
 }
-function onTouchCancel(){
+function onTouchCancel(e){
  lastTouchAt=Date.now();
- if(touchId!==null)stop('touchcancel');
+ if(touchId===null||!gesture)return;
+ if(gesture.phase!=='pending')e.stopImmediatePropagation();
+ stop('touchcancel');
 }
 term.addEventListener('touchstart',function(e){
  lastTouchAt=Date.now();
@@ -157,14 +193,25 @@ term.addEventListener('touchstart',function(e){
  begin(finger.clientX,finger.clientY);
  if(!gesture)return;
  inputPath='touch';lastTouchEvent='touchstart';touchId=finger.identifier;
- document.addEventListener('touchstart',onExtraTouch,true);
- document.addEventListener('touchmove',onTouchMove,{capture:true,passive:false});
- document.addEventListener('touchend',onTouchEnd,true);
- document.addEventListener('touchcancel',onTouchCancel,true);
+ window.addEventListener('touchstart',onExtraTouch,true);
+ window.addEventListener('touchmove',onTouchMove,{capture:true,passive:false});
+ window.addEventListener('touchend',onTouchEnd,true);
+ window.addEventListener('touchcancel',onTouchCancel,true);
  display();
 },{passive:true});
+// Diagnostics: while the dial owns the finger, NO touchmove should reach the
+// terminal's own listeners. Any count >0 proves an arbitration regression.
+term.addEventListener('touchmove',function(){
+ if(gesture&&gesture.phase!=='pending'){leakedMoves++;display()}
+},{passive:true});
+window.addEventListener('click',function(e){
+ if(Date.now()<suppressClickUntil&&e.detail>0&&term.contains(e.target)){
+  claimEvent(e);
+  suppressClickUntil=0;
+ }
+},true);
 term.addEventListener('contextmenu',function(e){
- if(touchId!==null&&gesture)e.preventDefault();
+ if(touchId!==null&&gesture&&gesture.phase!=='pending')claimEvent(e);
 });
 /** Fine-pointer mouse simulation is only for desktop prototype inspection. */
 term.addEventListener('mousedown',function(e){
@@ -185,12 +232,17 @@ document.addEventListener('visibilitychange',function(){
 window.addEventListener('pagehide',function(){stop('pagehide')});
 window.addEventListener('blur',function(){stop('window blur')});
 term.addEventListener('scroll',function(){
- if(gesture&&gesture.phase!=='pending')stop('native scroll cancel');
+ // Keep the Terminal scrollback at the pre-activation offset while the pad
+ // owns touch input. A stray scroll must not move the terminal under the dial.
+ if(gesture&&gesture.phase!=='pending'){
+  if(Math.abs(term.scrollTop-gesture.lockScrollTop)>0.5)term.scrollTop=gesture.lockScrollTop;
+  if(Math.abs(term.scrollLeft-gesture.lockScrollLeft)>0.5)term.scrollLeft=gesture.lockScrollLeft;
+ }
 },{passive:true});
-document.getElementById('reset').onclick=function(){stop();row=1;col=1;count=0;log=[];view();display()};
+document.getElementById('reset').onclick=function(){stop();row=1;col=1;count=0;log=[];exclusiveMoves=0;leakedMoves=0;view();display()};
 document.getElementById('observer').onclick=function(){observer=!observer;this.setAttribute('aria-pressed',String(observer));stop()};
 document.getElementById('offline').onclick=function(){offline=!offline;this.setAttribute('aria-pressed',String(offline));document.getElementById('conn').textContent=offline?'○ Offline':'● Connected';stop()};
-window.__nessionMock={state:function(){return{phase:gesture?gesture.phase:'idle',dir:gesture?gesture.dir:null,rate:gesture?gesture.rate:0,count:count,inputPath:inputPath,lastTouchEvent:lastTouchEvent}},cancel:stop};
+window.__nessionMock={state:function(){return{phase:gesture?gesture.phase:'idle',dir:gesture?gesture.dir:null,rate:gesture?gesture.rate:0,count:count,inputPath:inputPath,lastTouchEvent:lastTouchEvent,owner:gesture&&gesture.phase!=='pending'?'direction':'free',exclusiveMoves:exclusiveMoves,leakedMoves:leakedMoves,scrollTop:term.scrollTop}},cancel:stop};
 view();display();
 })();
 </script></body></html>
