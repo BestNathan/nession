@@ -48,14 +48,16 @@ function renderSurface(
   );
 }
 
+/** A notice is visible only after explicitly opening its contextual Capsule action. */
+function openNotices() {
+  fireEvent.click(screen.getByTestId('terminal-notices-trigger'));
+}
+
 describe('TerminalSurface', () => {
   it('hosts xterm tree and floating capsule without legacy layout', () => {
     renderSurface('web');
 
-    // The host is the *inner* box, not the surface root: it carries the
-    // scrollback mode and the capsule the occlusion band is drawn for, and the
-    // notices stay outside that host (#1307) while floating against the root
-    // rather than shrinking the well (#2621).
+    // One terminal host remains, with no automatic notice layer.
     const surface = screen.getByTestId('terminal-surface');
     const host = surface.querySelector('[data-terminal-capsule-host]');
     expect(host).toHaveAttribute('data-terminal-scrollback-mode', 'local-buffer');
@@ -105,6 +107,8 @@ describe('input that will never arrive (#1307 SC-09)', () => {
     // user who reads silence here is a user who re-runs a command that may
     // already have run.
     renderSurface('web', { inputDrop: { reason: 'epoch', chunks: 1, at: 0 } });
+    expect(screen.queryByTestId('terminal-input-drop')).toBeNull();
+    openNotices();
 
     expect(screen.getByTestId('terminal-input-drop')).toHaveTextContent(
       'Some input may not have reached the session — check before re-running it.',
@@ -123,6 +127,7 @@ describe('input that will never arrive (#1307 SC-09)', () => {
 
     for (const [props, phrase] of explained) {
       const view = renderSurface('web', props);
+      openNotices();
       expect(screen.getByTestId('terminal-input-drop')).toHaveTextContent(phrase);
       view.unmount();
     }
@@ -139,6 +144,7 @@ describe('input that will never arrive (#1307 SC-09)', () => {
       inputDrop: { reason: 'epoch', chunks: 1, at: 0 },
       onDismissInputDrop,
     });
+    openNotices();
 
     const strip = screen.getByTestId('terminal-input-drop');
     const actions = strip.querySelectorAll('button');
@@ -149,30 +155,7 @@ describe('input that will never arrive (#1307 SC-09)', () => {
   });
 });
 
-/**
- * What the capsule host wraps (#1307 stage 6).
- *
- * `[data-terminal-capsule-host]` is not merely the capsule's positioning
- * anchor. `index.css` gives it the occlusion band — an `::after` at its own
- * bottom, `height: var(--terminal-content-bottom-inset)` — and the dock is
- * `absolute z-30` against it, so *anything laid out inside the host at its
- * bottom* is drawn under the composer. That is what happened: measured at
- * 390×844 on `/fixture/app?drop=epoch`, the notice was 366×49 (75%) covered by
- * an opaque `backdrop-filter` shell, `elementFromPoint` at its own centre
- * returned the capsule's textarea, and the frame was byte-identical to the
- * route with no notice at all.
- *
- * jsdom performs no layout, so this file cannot assert the actual pixels. It
- * asserts both the #1307 visibility boundary and #2621's absolute root layer,
- * with browser layout proof still required separately:
- *
- *   root ⊇ { host, absolute notice overlay }, host ⊇ { well, capsule };
- *   host ⊅ { notices }; notices contribute no normal-flow rows.
- *
- * The capsule is asserted *inside* the host for the same reason the strips are
- * asserted outside it: it is `z-30` and measured against the host, so a fix
- * that moved it out would trade one occlusion bug for another.
- */
+/** Status detail is portaled outside the terminal host only after user activation. */
 describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () => {
   function hostOf(view: ReturnType<typeof renderSurface>): HTMLElement {
     const surface = view.getByTestId('terminal-surface');
@@ -190,6 +173,7 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
 
   it('keeps the delivery-unknown notice out of the host', () => {
     const view = renderSurface('web', { inputDrop: { reason: 'epoch', chunks: 1, at: 0 } });
+    openNotices();
     const notice = view.getByTestId('terminal-input-drop');
 
     expect(hostOf(view).contains(notice)).toBe(false);
@@ -199,6 +183,7 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
     // The same geometry as the notice, and the same occlusion — it predates
     // #1307, which is why it is asserted here rather than in that change.
     const view = renderSurface('web', { terminalControl: { role: 'observer' } });
+    openNotices();
     const bar = view.getByTestId('terminal-observer-bar');
 
     expect(hostOf(view).contains(bar)).toBe(false);
@@ -210,9 +195,10 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
     healthy.unmount();
 
     const degraded = renderSurface('web', { historyDegraded: true });
+    openNotices();
     const notice = degraded.getByTestId('terminal-history-degraded');
     expect(notice).toHaveTextContent(/history may be incomplete/i);
-    // Compact absolute overlay still stays outside the capsule host.
+    // The on-demand details are portaled outside the capsule host.
     expect(hostOf(degraded).contains(notice)).toBe(false);
   });
 
@@ -243,18 +229,17 @@ describe('explicit stream state (#1926 SC-08)', () => {
 });
 
 /**
- * #2621: status chrome may be visible for the entire observer lifetime, but it
- * must NEVER create a bottom flex row and change xterm geometry. jsdom cannot
- * measure the box, so pin the DOM/layout contract here and require a browser
- * viewport/row measurement separately before Acceptance.
+ * The former top overlay (#2621) is entirely gone. Even while observing or
+ * losing clipboard/input/history, no pixels may be laid over the terminal.
  */
-describe('Terminal status overlays do not reserve grid height (#2621)', () => {
+describe('Terminal notices stay off the grid', () => {
   it('has no status placeholder in the healthy/controller state', () => {
     renderSurface('web');
     expect(screen.queryByTestId('terminal-status-overlay')).toBeNull();
+    expect(screen.queryByTestId('terminal-notices-trigger')).toBeNull();
   });
 
-  it('owns a compact root-absolute notice layer outside the capsule host', () => {
+  it('keeps all notice details inaccessible until explicitly opened in the capsule', () => {
     const view = renderSurface('web', {
       historyDegraded: true,
       inputDrop: { reason: 'epoch', chunks: 1, at: 0 },
@@ -262,39 +247,38 @@ describe('Terminal status overlays do not reserve grid height (#2621)', () => {
       terminalControl: { role: 'observer' },
     });
     const root = view.getByTestId('terminal-surface');
-    const overlay = view.getByTestId('terminal-status-overlay');
     const host = root.querySelector('[data-terminal-capsule-host]');
 
-    expect(overlay.parentElement).toBe(root);
-    expect(root.children).toHaveLength(2);
-    expect(overlay).toHaveClass('absolute', 'pointer-events-none');
-    expect(overlay).not.toHaveClass('shrink-0');
+    expect(root.children).toHaveLength(1);
     expect(host).toHaveClass('flex-1');
-    expect(host?.contains(overlay)).toBe(false);
+    expect(view.queryByTestId('terminal-status-overlay')).toBeNull();
+    expect(view.queryByTestId('terminal-notice-details')).toBeNull();
+    expect(view.getByTestId('terminal-notices-trigger')).toBeInTheDocument();
 
+    openNotices();
+    const details = view.getByTestId('terminal-notice-details');
+    expect(host?.contains(details)).toBe(false);
     for (const testId of [
       'terminal-history-degraded',
       'terminal-input-drop',
       'terminal-clipboard-notice',
       'terminal-observer-bar',
     ]) {
-      const notice = view.getByTestId(testId);
-      expect(overlay).toContainElement(notice);
-      expect(notice).toHaveClass('pointer-events-auto', 'w-fit', 'max-w-full');
-      expect(notice).not.toHaveClass('shrink-0');
+      expect(details).toContainElement(view.getByTestId(testId));
     }
   });
 
-  it('keeps the observer takeover action while the status is floating', async () => {
+  it('retains observer takeover as an explicit action', async () => {
     const onTakeControl = vi.fn();
     const view = renderSurface('app', {
       terminalControl: { role: 'observer' },
       onTakeControl,
     });
 
+    expect(view.queryByTestId('terminal-observer-bar')).toBeNull();
+    openNotices();
     const badge = view.getByTestId('terminal-observer-bar');
     expect(badge).toHaveTextContent('View only — another client is controlling this session.');
-    expect(badge.closest('[data-testid="terminal-status-overlay"]')).not.toBeNull();
     await userEvent.click(view.getByRole('button', { name: 'Take control' }));
     expect(onTakeControl).toHaveBeenCalledTimes(1);
   });
@@ -305,6 +289,7 @@ describe('transient clipboard state (#2598)', () => {
     const view = renderSurface('web', {
       clipboardNotice: { id: 1, notice: { kind: 'unsupported-image-paste' } },
     });
+    openNotices();
     const notice = view.getByTestId('terminal-clipboard-notice');
     expect(notice).toHaveTextContent('Image clipboard protocol not supported by this TUI');
     // A root-owned overlay outside the capsule host, not a reserved flex row.
@@ -326,6 +311,7 @@ describe('transient clipboard state (#2598)', () => {
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
       onDismissClipboardNotice,
     });
+    openNotices();
     await userEvent.click(view.getByRole('button', { name: 'Copy' }));
     expect(copyClipboardText).toHaveBeenCalledWith('remote text');
     await Promise.resolve();
@@ -348,6 +334,7 @@ describe('transient clipboard state (#2598)', () => {
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
       onDismissClipboardNotice,
     });
+    openNotices();
     fireEvent.click(view.getByRole('button', { name: 'Copy' }));
     // Synchronous within the gesture: no await happened before the DOM copy.
     expect(copyClipboardTextFromGesture).toHaveBeenCalledWith('remote text');
@@ -387,6 +374,7 @@ describe('transient clipboard state (#2598)', () => {
       } as unknown as TerminalSurfaceProps['controller'],
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'x'.repeat(64 * 1024 + 1) } },
     });
+    openNotices();
     await userEvent.click(view.getByRole('button', { name: 'Copy' }));
     expect(view.getByTestId('terminal-clipboard-notice'))
       .toHaveTextContent('too large to copy here');
@@ -397,6 +385,7 @@ describe('transient clipboard state (#2598)', () => {
     const view = renderSurface('app', {
       clipboardNotice: { id: 1, notice: { kind: 'write-denied' } },
     });
+    openNotices();
     expect(view.getByTestId('terminal-clipboard-notice'))
       .toHaveTextContent('Clipboard write was blocked by the browser.');
     expect(view.queryByRole('button', { name: 'Copy' })).toBeNull();
