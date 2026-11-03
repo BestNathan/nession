@@ -231,7 +231,7 @@ async function selfTest() {
   assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
   assert.deepEqual(extractUsage(sample,{usage:{input_tokens:2,output_tokens:1}}),
     {input_tokens:12,output_tokens:5,cache_read_tokens:20,cache_write_tokens:3});
-  assert.equal(combinedReportedCost(sample,{total_cost_usd:0.02}),0.03);
+  assert.ok(Math.abs(combinedReportedCost(sample,{total_cost_usd:0.02})-0.03)<1e-10);
   const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
   assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
   const oldRepo = process.env.GITHUB_REPOSITORY;
@@ -338,7 +338,7 @@ async function main() {
         format_repair_attempted: repairAttempted,
         started_at: agentStartedAt.toISOString(),
         finished_at: new Date().toISOString(),
-        duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime())), 
+        duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime())),
         usage,
         reported_cost_usd: combinedReportedCost(failed,repairEnvelope),
         reported_cost_basis: providerCostBasis(),
@@ -373,7 +373,7 @@ async function main() {
       format_repair_attempted: repairAttempted,
       started_at: agentStartedAt.toISOString(),
       finished_at: new Date().toISOString(),
-      duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())), 
+      duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())),
       usage,
       reported_cost_usd: combinedReportedCost(claude,repairEnvelope),
       reported_cost_basis: providerCostBasis(),
