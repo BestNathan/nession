@@ -67,9 +67,10 @@ export function pickOriginalBundle(raw){
     let u;try{u=new URL(value);}catch{continue;}
     // GitHub REST returns a short-lived, independently hosted signed bundle
     // URL. Reject internal, plaintext, arbitrary-HTTP and attacker locations.
+    const host=u.hostname.toLowerCase();
     if(u.protocol!=='https:'||
-       !(/(^|\\.)blob\\.core\\.windows\\.net$/.test(u.hostname)||
-         /(^|\\.)githubusercontent\\.com$/.test(u.hostname)))
+       !(host.endsWith('.blob.core.windows.net')||
+         host.endsWith('.githubusercontent.com')))
       continue;
     return value;
   }
