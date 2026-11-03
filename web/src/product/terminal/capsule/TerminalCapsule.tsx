@@ -41,8 +41,8 @@ export interface TerminalCapsuleProps {
   /**
    * Work-awareness context (#1347): whether any capability is working.
    *
-   * When working, the `+` button shows a partial work ring. The ring is a
-   * restrained static indicator — not a spinner, pulse, or animation.
+   * The disclosed Context Capsule is the only consumer of this (#2663): the
+   * resting `+` never draws work state.
    */
   workContext?: ResolvedWorkContext;
 }
@@ -231,7 +231,6 @@ export function TerminalCapsule({
           capabilityDisclosure={capabilityDisclosure}
           onFieldFocus={handleFieldFocus}
           fieldRef={fieldRef}
-          workContext={workContext}
         />
       </CapsuleShell>
     </CapsuleProvider>

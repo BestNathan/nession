@@ -10,10 +10,8 @@ import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
-import { WorkRing } from '@/product/terminal/capsule/WorkRing';
 import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleContext';
 import { CONTEXT_CAPSULE_ID } from '@/product/terminal/capsule/contextCapsuleId';
-import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 interface CapsuleInputTrailingActionsProps {
   /** Whether this experience declares a history trigger in the composer row. */
@@ -40,12 +38,15 @@ interface CapsuleInputTrailingActionsProps {
  * **Capsule V2 (#1347, 2026-10-04 review):** this button is a plain toggle onto
  * the upper Context Capsule, which is a sibling surface above this one rather
  * than a menu anchored to `+` (SC-41). It carries `aria-expanded` and
- * `aria-controls`, and nothing else about it changes: the resting capsule stays
- * identical across lifecycle states, the Work Ring is the whole ambient
- * representation (SC-34), and opening the surface is always the user's own tap.
+ * `aria-controls`, and nothing else about it changes.
+ *
+ * **No ambient work marker (#2663, 2026-11-03 owner decision).** The resting
+ * `+` is identical in every lifecycle state: the static 270° `WorkRing` (and
+ * the `working` sense behind it) was rejected as reading like a frozen
+ * spinner. Contextual identity and status live only in the disclosed Context
+ * Capsule, which the user opens explicitly.
  */
-function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkContext }) {
-  const isWorking = workContext?.status === 'working';
+function CapsuleCapabilityMore() {
   const { contextOpen, setContextOpen, contextTriggerRef } = useCapsuleContext();
 
   return (
@@ -59,13 +60,12 @@ function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkCont
       onClick={() => setContextOpen(!contextOpen)}
       className={cn(
         capsuleIconButtonClass,
-        'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
+        'inline-flex items-center justify-center bg-transparent hover:bg-transparent',
       )}
     >
       <CapsuleIconVisual>
         <Plus className="size-[length:var(--nession-icon-md)]" />
       </CapsuleIconVisual>
-      <WorkRing working={isWorking} />
     </button>
   );
 }
@@ -78,21 +78,20 @@ function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkCont
  * the intent composer's resting row is built around. Nothing else earns this
  * slot: the capsule is conversational first and extensible second.
  *
- * **Capsule V2 (#1347):** Accepts workContext to show work ring on `+`.
+ * **Capsule V2 (#1347):** the leading slot is the plain `+` in every state;
+ * work context is not drawn here (#2663).
  */
 export function CapsuleInputLeading({
   capabilityDisclosure,
-  workContext,
 }: {
   capabilityDisclosure?: CapsuleCapabilityDisclosure;
-  workContext?: ResolvedWorkContext;
 }) {
   if (!capabilityDisclosure || capabilityDisclosure.entries.length === 0) {
     return null;
   }
   return (
     <div data-testid="capsule-input-leading" className={capsuleControlRowClass}>
-      <CapsuleCapabilityMore workContext={workContext} />
+      <CapsuleCapabilityMore />
     </div>
   );
 }

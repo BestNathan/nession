@@ -1,6 +1,5 @@
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { WorkSignal } from '@/product/terminal/capsule/workAwareness';
-import { claudeCodeWork } from '@/capabilities/claude-code';
 
 /**
  * How a capability contributes work semantics to the capsule (#1347 SC-14/19).
@@ -41,8 +40,15 @@ export interface CapabilityWorkBinding {
 
 /**
  * Capabilities that can report work, in registration order.
+ *
+ * Empty since #2663: the only producer sensed a foreground `claude`/`claude.exe`
+ * process, which proves the CLI is **open**, not that a task is running — the
+ * owner rejected the resulting ambient Work Ring and the false "Working in this
+ * session" claim. The seam stays so a capability with a real activity signal can
+ * contribute one without touching the shell; until then the resolved context is
+ * the quiet state.
  */
-const CAPSULE_WORK_BINDINGS: readonly CapabilityWorkBinding[] = [claudeCodeWork];
+const CAPSULE_WORK_BINDINGS: readonly CapabilityWorkBinding[] = [];
 
 /**
  * Aggregate every contribution's signal from one observation.

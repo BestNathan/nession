@@ -109,9 +109,6 @@ export const capsuleFloatingSurfaceClass = cn(
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 
-/** Quiet but perceivable ambient working state around the + affordance. */
-export const capsuleWorkRingClass = 'text-muted-foreground';
-
 /**
  * Canonical visual grammar for the dock's one upper Capsule slot (#1446).
  *
