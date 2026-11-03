@@ -40,6 +40,7 @@ function main(){
     assert.match(outputs,/(^|\n)allow_agent=true\n/);
     assert.match(outputs,/(^|\n)mode=tree\n/);
     assert.match(outputs,/(^|\n)issue_number=1645\n/);
+    assert.match(outputs,/(^|\n)provider=qwen\n/);
     assert.match(outputs,/(^|\n)environment=dev-claude-qwen\n/);
     assert.equal(resolveAuditComment(evt,'x/y','owner','qwen','dev-claude-qwen').environment,
       'dev-claude-qwen');
