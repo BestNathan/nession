@@ -196,7 +196,7 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
