@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="description" content="Nession Environment Workspace – context-first status & profile layout mock">
 <title>Nession · Session Environment prototype #2654</title>
 <style>
 :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark;--bg:#f8f9fa;--panel:#fff;--nav:#f3f5f6;--line:#e2e6e9;--ink:#20282d;--muted:#6b767d;--accent:#177b73;--soft:#e8f4f1;--shadow:0 7px 26px #1a2a3211}
@@ -15,11 +16,43 @@
 .workspace{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:14px;min-height:630px;height:calc(100dvh - 120px);display:grid;grid-template-columns:290px minmax(0,1fr);overflow:hidden}
 .navigator{background:var(--nav);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}.nav-head{padding:16px 15px 10px}.section-title{font-size:11px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.11em;margin:11px 0}.search{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 11px;color:var(--ink);outline-offset:2px}.nav-list{overflow:auto;min-height:0;flex:1}.nav-section{padding:0 8px 12px}.item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;border:0;background:transparent;color:var(--ink);padding:11px 10px;border-radius:9px}.item:hover{background:var(--panel)}.item.current{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}.item strong{font-size:13px;font-weight:650}.item small{display:block;color:var(--muted);margin-top:3px;line-height:1.4}.item .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}.mini{font-size:11px;color:var(--muted)}.nav-bottom{padding:13px 15px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.main{overflow:auto;min-width:0}.content{max-width:920px;margin:0 auto;padding:35px clamp(20px,5vw,60px) 54px}.eyebrow{letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-size:11px;font-weight:750}h1{font-size:clamp(23px,3vw,32px);font-weight:700;letter-spacing:-.035em;margin:9px 0 8px}h2{font-size:16px;font-weight:680;letter-spacing:-.015em;margin:25px 0 12px}p{line-height:1.6;margin:6px 0}p.sub{color:var(--muted);font-size:13px}.bar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.btn{padding:9px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-weight:600}.btn:hover{border-color:var(--accent)}.btn.primary{background:var(--ink);color:var(--panel);border-color:var(--ink)}.btn:disabled{opacity:.4;cursor:not-allowed}.btn.small{padding:6px 9px;font-size:12px}.pill{display:inline-flex;align-items:center;gap:6px;color:var(--accent);background:var(--soft);font-weight:660;border-radius:100px;padding:6px 10px;font-size:12px}.pill.neutral{background:var(--nav);color:var(--muted)}.rule{border:0;border-top:1px solid var(--line);margin:22px 0}.list{border:1px solid var(--line);border-radius:10px;overflow:hidden}.listrow{display:flex;align-items:center;gap:13px;padding:14px 16px;border-bottom:1px solid var(--line);min-height:67px}.listrow:last-child{border-bottom:0}.idx{font-size:12px;color:var(--muted);background:var(--nav);padding:5px 8px;border-radius:6px;min-width:32px;text-align:center}.grow{flex:1;min-width:0}.rowname{font-weight:650}.rowmeta{font-size:12px;color:var(--muted);margin-top:4px}.rowtools{display:flex;gap:6px}.empty{border:1px dashed var(--line);color:var(--muted);text-align:center;padding:40px 18px;border-radius:10px}.metricline{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:14px}.metricline strong{color:var(--ink)}.callout{margin-top:20px;border:1px solid var(--line);border-radius:9px;padding:14px 16px;background:var(--nav);font-size:12px;color:var(--muted);line-height:1.6}.callout strong{color:var(--ink)}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:20px}.keylist{width:100%;border-collapse:collapse}.keylist th{text-align:left;color:var(--muted);font-size:11px;padding:9px 10px;border-bottom:1px solid var(--line);letter-spacing:.06em;text-transform:uppercase}.keylist td{padding:11px 10px;border-bottom:1px solid var(--line);font-size:13px}.keylist code{font-size:12px}.tabbar{display:flex;border-bottom:1px solid var(--line);margin:20px 0 12px;gap:20px}.tab{border:0;border-bottom:2px solid transparent;background:transparent;padding:9px 1px;color:var(--muted)}.tab.active{border-color:var(--accent);color:var(--ink);font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--nav);padding:18px;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:12px;line-height:1.6}.status{font-size:12px;color:var(--muted);margin:14px 0}.status strong{color:var(--ink)}.check{display:flex;align-items:center;gap:10px}.check input{accent-color:var(--accent);width:16px;height:16px}.selectrow{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border-bottom:1px solid var(--line)}.selectrow:last-child{border:0}.selection{border:1px solid var(--line);border-radius:10px;max-height:230px;overflow:auto}.back{display:none}.foot{font-size:12px;color:var(--muted);padding:2px 4px}.muted{color:var(--muted)}[hidden]{display:none!important}button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:720px){.shell{padding:7px;gap:7px}.top{padding:7px}.mock-controls{gap:5px}.mock-controls button{font-size:11px;padding:5px 7px}.workspace{height:calc(100dvh - 112px);min-height:420px;display:block;border-radius:10px;position:relative}.navigator{height:100%;border:0}.main{height:100%;display:none}.workspace.detail .navigator{display:none}.workspace.detail .main{display:block}.content{padding:18px 16px 58px}.back{display:inline-flex;margin:0 0 18px;border:0;background:transparent;color:var(--ink);font-weight:650;padding:6px 0}.twocol{grid-template-columns:1fr}.listrow{padding:12px}.nav-bottom{font-size:11px}.actions{gap:6px}.btn{padding:8px 10px}}
+
+/* #2701 post-implementation review: no full-width status strip. The Session owns its observation. */
+:root{--warning:#956900;--danger:#d0383a}
+@media(prefers-color-scheme:dark){:root{--warning:#e8bd65;--danger:#ff8788}}
+.state-switch{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.state-switch select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--panel);color:var(--ink);max-width:160px}
+.session-summary{padding:10px 11px;border-radius:9px;border:0;background:transparent;text-align:left;display:block;width:100%;color:var(--ink)}
+.session-summary:hover{background:var(--panel)}.session-summary.selected{background:var(--panel)}
+.session-summary .sname{font-weight:650;font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session-summary .smeta{font-size:11px;color:var(--muted);display:block;margin-top:4px}
+.session-summary .sstate{display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-top:8px;color:var(--muted)}
+.session-summary .sstate:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.session-summary .sstate.warning{color:var(--warning)}.session-summary .sstate.error{color:var(--danger)}
+.status-summary{margin:24px 0 8px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.status-message{display:flex;gap:11px;align-items:flex-start;min-width:0}
+.status-dot{width:8px;height:8px;margin-top:7px;flex-shrink:0;border-radius:50%;background:var(--muted)}
+.status-summary.warning .status-dot{background:var(--warning)}
+.status-summary.error .status-dot{background:var(--danger)}
+.status-title{font-size:13px;font-weight:660;line-height:1.5}
+.status-desc{font-size:12px;color:var(--muted);line-height:1.55;max-width:60ch;margin-top:3px}
+.status-summary.warning .status-title{color:var(--warning)}
+.status-summary.error .status-title{color:var(--danger)}
+.status-toggle{flex:none;font-size:12px;color:var(--muted);background:transparent;border:0;padding:4px 2px}
+.status-toggle:hover{text-decoration:underline;text-underline-offset:3px;color:var(--ink)}
+.status-details{background:var(--nav);border-radius:9px;padding:12px 14px;margin:12px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.status-details dt{font-size:11px;color:var(--muted);margin-bottom:5px}
+.status-details dd{font:600 13px ui-monospace,SFMono-Regular,monospace;margin:0;overflow-wrap:anywhere}
+.status-note{border-left:2px solid var(--line);margin:18px 0;padding:3px 0 3px 12px;color:var(--muted);font-size:12px;line-height:1.6}
+.status-note.warning{border-color:var(--warning)}.status-note.error{border-color:var(--danger)}
+.profile-session-link{display:inline-block;border:0;padding:0;margin-top:6px;background:transparent;color:var(--muted);font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.pill{background:var(--nav);color:var(--muted)}
+@media(max-width:720px){.status-summary{margin-top:18px}.status-details{gap:8px}.state-switch{order:4;flex-basis:100%}.state-switch select{flex:1;max-width:none}.session-summary{padding:12px 10px}.status-title{font-size:13px}}
 </style>
 </head>
 <body>
 <div class="shell">
-  <header class="top"><div class="brand">nession <span>/ Environment</span></div><div class="mock-controls"><button id="toggleSession">无 Session 场景</button><button id="toggleAgent">模拟 Agent 断线</button><button id="reset">Reset</button></div></header>
+  <header class="top"><div class="brand">nession <span>/ Environment</span></div><div class="mock-controls"><button id="toggleSession">无 Session 场景</button><button id="toggleAgent">模拟 Agent 断线</button><label class="state-switch">Observed <select id="stateSelect" aria-label="模拟当前 Session 观察状态"><option value="in_sync">In sync</option><option value="pending_shell">Pending shell</option><option value="unsupported_shell">Unsupported shell</option><option value="error">Apply error</option><option value="unavailable">Unavailable</option></select></label><button id="reset">Reset</button></div></header>
   <div class="workspace" id="workspace">
     <aside class="navigator">
       <div class="nav-head"><div class="section-title">Profiles <span class="mini" id="profileCount"></span></div><input class="search" id="search" placeholder="搜索 Profile 或来源…" aria-label="搜索环境配置"></div>
@@ -40,7 +73,7 @@ const profiles=[
   {id:'agent:ops.env',name:'ops.env',source:'Agent · dev-node-01',vars:{MODE:'diagnostic',LOG_LEVEL:'debug'}}
 ];
 const base={MODE:'default',LANG:'C.UTF-8'};
-const S={hasSession:true,agentOnline:true,selected:'session',mode:'view',active:['server:base.env','agent:development.env'],draft:null,revision:12,pending:false,modified:false,sourceTab:'variables',notice:''};
+const S={hasSession:true,agentOnline:true,selected:'session',mode:'view',active:['server:base.env','agent:development.env'],draft:null,revision:12,pending:false,modified:false,sourceTab:'variables',notice:'',demoState:'in_sync',detailsOpen:false};
 const byId=id=>profiles.find(p=>p.id===id);
 const el=id=>document.getElementById(id);
 const escape=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -49,11 +82,30 @@ function effective(ids){const values={...base},from={};for(const id of ids){cons
 function collisions(ids){const seen={},hits=[];for(const id of ids){const p=byId(id);if(!p)continue;for(const k of Object.keys(p.vars)){if(seen[k] && !hits.includes(k))hits.push(k);seen[k]=p.name}}return hits}
 function toMain(){el('workspace').classList.add('detail');el('main').focus({preventScroll:true})}
 function open(id){S.selected=id;S.mode='view';S.sourceTab='variables';S.notice='';render();toMain()}
-function statusText(){if(!S.agentOnline)return 'Agent unreachable · observed state unavailable';if(S.pending)return 'Revision '+S.revision+' materialized · waiting for next Bash prompt';return 'Revision '+S.revision+' materialized · last simulated Bash prompt in sync'}
+
+function stateMeta(){
+ const code=S.agentOnline?S.demoState:'unavailable';
+ const applied=code==='error'?Math.max(0,S.revision-1):S.revision;
+ const states={
+   in_sync:{tone:'quiet',title:'Environment in sync',description:'Current Session environment is applied.',reason:''},
+   pending_shell:{tone:'info',title:'Waiting for next shell prompt',description:'tmux is updated. The running Bash picks up changes when it returns to the next prompt.',reason:''},
+   unsupported_shell:{tone:'warning',title:'Current shell cannot converge',description:'No Session-local adapter for shell /usr/bin/fish. New panes and processes still inherit the environment.',reason:'No Session-local adapter for shell /usr/bin/fish.'},
+   error:{tone:'error',title:'Environment apply failed',description:'tmux rejected the environment update. The previous applied revision remains intact.',reason:'tmux set-environment returned an error (synthetic fixture).'},
+   unavailable:{tone:'warning',title:'Environment status unavailable',description:S.agentOnline?'The Agent did not report an observed binding state.':'Agent is unreachable; no observed state is available.',reason:'Observed state is missing or could not be queried.'}
+ };
+ return {code,applied,...states[code]};
+}
+function bindingPanel(){
+ const m=stateMeta(),count=Object.keys(effective(S.active).values).length;
+ let out='<section class="status-summary '+m.tone+'" data-status="'+m.code+'"><div class="status-message"><span class="status-dot" aria-hidden="true"></span><div><div class="status-title">'+escape(m.title)+'</div><p class="status-desc">'+escape(m.description)+'</p></div></div><button class="status-toggle" id="statusToggle" aria-expanded="'+S.detailsOpen+'">Details '+(S.detailsOpen?'⌃':'⌄')+'</button></section>';
+ if(S.detailsOpen)out+='<dl class="status-details"><div><dt>Desired revision</dt><dd>'+S.revision+'</dd></div><div><dt>Applied revision</dt><dd>'+(m.code==='unavailable'?'Unavailable':m.applied)+'</dd></div><div><dt>Managed keys</dt><dd>'+count+'</dd></div></dl>';
+ if(m.reason)out+='<div class="status-note '+m.tone+'">'+escape(m.reason)+'</div>';
+ return out;
+}
 function header(eyebrow,title,desc,actions){return '<div class="eyebrow">'+eyebrow+'</div><div class="bar"><div><h1>'+escape(title)+'</h1><p class="sub">'+desc+'</p></div><div class="actions">'+actions+'</div></div>'}
 function preview(ids){const eff=effective(ids);const overlaps=collisions(ids);return '<div class="metricline"><span><strong>'+ids.length+'</strong> profiles</span><span><strong>'+Object.keys(eff.values).length+'</strong> effective variables (incl. base)</span><span><strong>'+overlaps.length+'</strong> overridden keys</span></div>'+(overlaps.length?'<div class="callout"><strong>覆盖结果：</strong>'+overlaps.map(k=>'<code>'+escape(k)+'</code> → '+escape(eff.from[k])).join(' · ')+'。密钥值不会出现在预览中。</div>':'')}
 function items(ids,editing){if(!ids.length)return '<div class="empty">当前没有挂载 Environment Profile。</div>';return '<div class="list">'+ids.map((id,i)=>{const p=byId(id);return '<div class="listrow"><span class="idx">'+(i+1)+'</span><div class="grow"><div class="rowname">'+escape(p.name)+'</div><div class="rowmeta">'+escape(p.source)+' · '+Object.keys(p.vars).length+' variables</div></div>'+(editing?'<div class="rowtools"><button class="btn small" data-move="'+i+'" data-step="-1" aria-label="'+escape(p.name)+' 上移" '+(i===0?'disabled':'')+'>↑</button><button class="btn small" data-move="'+i+'" data-step="1" aria-label="'+escape(p.name)+' 下移" '+(i===ids.length-1?'disabled':'')+'>↓</button><button class="btn small" data-del="'+escape(id)+'">移除</button></div>':'<button class="btn small" data-profile="'+escape(id)+'">查看</button>')+'</div>'}).join('')+'</div>'}
-function sessionView(){const buttons=S.agentOnline?'<button class="btn primary" id="manage">Manage binding</button>':'';let html=header('Current Session · dev-session','Session Environment','dev-node-01 · Bash · Session-owned binding',buttons);html+='<div class="status"><span class="pill '+(S.pending?'':'neutral')+'">'+(S.pending?'Pending next prompt':'Materialized')+'</span>　<strong>'+escape(statusText())+'</strong></div>';if(S.modified)html+='<div class="callout"><strong>Profile changed:</strong> development.env has been edited since the materialized snapshot. The current Session retains revision '+S.revision+'. <button class="btn small" id="reapply" '+(!S.agentOnline?'disabled':'')+'>Reapply explicitly</button></div>';
+function sessionView(){const buttons=S.agentOnline?'<button class="btn primary" id="manage">Manage binding</button>':'';let html=header('Current Session · dev-session','Session Environment','dev-node-01 · Bash · Session-owned binding',buttons);html+=bindingPanel();if(S.modified)html+='<div class="callout"><strong>Profile changed:</strong> development.env has been edited since the materialized snapshot. The current Session retains revision '+S.revision+'. <button class="btn small" id="reapply" '+(!S.agentOnline?'disabled':'')+'>Reapply explicitly</button></div>';
 html+='<h2>Mounted profiles · ordered</h2>'+items(S.active,false)+preview(S.active);
 html+='<div class="callout"><strong>生效边界：</strong>配置发布后，新 Pane 将继承新的 Session 环境；已运行的 Bash 在下次 Prompt 更新。正在运行的 Claude Code、Vim 等程序不会被修改，也不会收到任何键盘注入。</div>';
 if(S.pending)html+='<p class="status"><button class="btn" id="prompt">模拟 Bash 返回下次 Prompt</button>　此操作仅推进演示状态，不代表真实 Bash 回执。</p>';
@@ -63,33 +115,41 @@ html+='<h2>Binding order (later wins)</h2>'+items(ids,true);
 html+='<h2>Add a profile</h2><div class="selection">'+profiles.filter(p=>!ids.includes(p.id)).map(p=>'<label class="selectrow"><input type="checkbox" data-add="'+escape(p.id)+'"><span class="grow"><strong>'+escape(p.name)+'</strong><small class="rowmeta" style="display:block">'+escape(p.source)+'</small></span><span class="mini">Add</span></label>').join('')+'</div>';
 html+='<h2>Change preview</h2>'+preview(ids);const old=effective(S.active),next=effective(ids);const ks=new Set([...Object.keys(old.values),...Object.keys(next.values)]);let changed=[...ks].filter(k=>old.values[k]!==next.values[k]);html+='<div class="callout"><strong>'+changed.length+' effective variable changes:</strong> '+(changed.length?changed.map(k=>'<code>'+escape(k)+'</code>').join(' · '):'No effective-value changes')+'. Apply publishes one new Session binding revision. Existing foreground process stays unchanged.</div>';return html}
 function profileView(id){const p=byId(id);if(!p)return '<p>Profile not found.</p>';let actions='<button class="btn" id="editSimulation">Simulate profile edit</button>';if(S.hasSession&&S.agentOnline)actions+='<button class="btn primary" id="addThis">'+(S.active.includes(id)?'Manage binding':'Add to Session')+'</button>';let html=header('Environment profile · '+escape(p.source),p.name,Object.keys(p.vars).length+' variables · reusable Profile',actions);
-html+='<p class="status">'+(S.active.includes(id)?'<span class="pill">Bound to current Session</span>':'<span class="pill neutral">Not bound</span>')+'　File Save and Session Reapply are separate operations.</p>';
+html+='<p class="status">'+(S.hasSession?(S.active.includes(id)?'Included in the Session binding':'Available to current Session'):'Reusable profile')+' · File Save and Session Reapply are separate operations.</p>';if(S.hasSession)html+='<button class="profile-session-link" data-open="session">Current Session · '+escape(stateMeta().title)+' ↗</button>';
 html+='<div class="tabbar"><button class="tab '+(S.sourceTab==='variables'?'active':'')+'" data-tab="variables">Variables</button><button class="tab '+(S.sourceTab==='raw'?'active':'')+'" data-tab="raw">Raw (mock)</button></div>';
 if(S.sourceTab==='raw'){html+='<pre>'+escape(Object.keys(p.vars).map(k=>k+'='+(mask(k)?'[REDACTED]':p.vars[k])).join('\n'))+'</pre>'}else{html+='<table class="keylist"><thead><tr><th>KEY</th><th>VALUE</th></tr></thead><tbody>'+Object.keys(p.vars).map(k=>'<tr><td><code>'+escape(k)+'</code></td><td><code>'+escape(mask(k)?'••••••••':p.vars[k])+'</code></td></tr>').join('')+'</tbody></table>'}
 html+='<div class="callout">这里沿用 #1202 的 read-first Profile Details。实际生产版本继续使用 CodeMirror 编辑器、权限检查和敏感字段临时 Reveal；本模拟仅演示 Profile 修改与 Session revision 的分离。</div>';return html}
 function noSessionView(){return header('Environment profiles','No active Session','You can still browse, import and edit profiles. Mounting is available only after selecting a Session.','')+'<div class="empty">Select a profile in the navigator to inspect variables. No Session binding is invented here.</div>'}
-function renderNav(){el('profileCount').textContent='· '+profiles.length;const section=el('sessionNav');section.innerHTML=S.hasSession?'<div class="section-title">Current Session</div><button class="item '+(S.selected==='session'?'current':'')+'" data-open="session"><span><strong>dev-session</strong><small>'+S.active.length+' mounted · '+(S.pending?'pending prompt':('rev '+S.revision))+'</small></span><span class="dot"></span></button>':'';const q=el('search').value.toLowerCase();el('profileNav').innerHTML=profiles.filter(p=>(p.name+' '+p.source).toLowerCase().includes(q)).map(p=>'<button class="item '+(S.selected===p.id?'current':'')+'" data-open="'+escape(p.id)+'"><span><strong>'+escape(p.name)+'</strong><small>'+escape(p.source)+' · '+Object.keys(p.vars).length+' keys</small></span>'+(S.active.includes(p.id)?'<span class="dot"></span>':'')+'</button>').join('')||'<p class="muted" style="padding:10px">No matching profiles</p>'}
+function renderNav(){
+ el('profileCount').textContent='· '+profiles.length;
+ const section=el('sessionNav'),m=stateMeta(),count=Object.keys(effective(S.active).values).length;
+ section.innerHTML=S.hasSession?'<div class="section-title">Current Session</div><button class="session-summary '+(S.selected==='session'?'selected':'')+'" data-open="session"><span class="sname">dev-session</span><span class="smeta">'+S.active.length+' profiles · '+count+' keys</span><span class="sstate '+m.tone+'">'+escape(m.title)+'</span></button>':'';
+ const q=el('search').value.toLowerCase();
+ el('profileNav').innerHTML=profiles.filter(p=>(p.name+' '+p.source).toLowerCase().includes(q)).map(p=>'<button class="item '+(S.selected===p.id?'current':'')+'" data-open="'+escape(p.id)+'"><span><strong>'+escape(p.name)+'</strong><small>'+escape(p.source)+' · '+Object.keys(p.vars).length+' keys</small></span>'+(S.active.includes(p.id)&&S.hasSession?'<span class="mini">Included</span>':'')+'</button>').join('')||'<p class="muted" style="padding:10px">No matching profiles</p>';
+}
 function render(){renderNav();let html=S.mode==='manage'?manageView():S.selected==='session'?(S.hasSession?sessionView():noSessionView()):profileView(S.selected);if(S.notice)html='<div class="callout">'+escape(S.notice)+'</div>'+html;el('content').innerHTML=html}
 document.addEventListener('click',e=>{const t=e.target.closest('button');if(!t)return;
 if(t.dataset.open){open(t.dataset.open);return}
 if(t.dataset.profile){open(t.dataset.profile);return}
 if(t.dataset.tab){S.sourceTab=t.dataset.tab;render();return}
+if(t.id==='statusToggle'){S.detailsOpen=!S.detailsOpen;render();return}
 if(t.id==='back'){el('workspace').classList.remove('detail');return}
 if(t.id==='manage'){S.mode='manage';S.draft=[...S.active];render();return}
 if(t.id==='cancel'){S.mode='view';S.draft=null;render();return}
 if(t.dataset.del){S.draft=S.draft.filter(id=>id!==t.dataset.del);render();return}
 if(t.dataset.move!==undefined){const i=Number(t.dataset.move),j=i+Number(t.dataset.step);if(j>=0&&j<S.draft.length){const a=[...S.draft];[a[i],a[j]]=[a[j],a[i]];S.draft=a;render()}return}
-if(t.id==='apply'){if(!S.agentOnline)return;S.active=[...S.draft];S.draft=null;S.mode='view';S.revision++;S.pending=true;S.modified=false;S.notice='Binding revision '+S.revision+' published. Existing running processes did not change.';render();return}
-if(t.id==='prompt'){S.pending=false;S.notice='Simulated next Bash prompt: subsequent children inherit revision '+S.revision+'. This is not a real runtime acknowledgement.';render();return}
-if(t.id==='reapply'){if(!S.agentOnline)return;S.revision++;S.modified=false;S.pending=true;S.notice='Explicit Reapply published a new snapshot revision '+S.revision+'.';render();return}
+if(t.id==='apply'){if(!S.agentOnline)return;S.active=[...S.draft];S.draft=null;S.mode='view';S.revision++;S.pending=true;S.demoState='pending_shell';el('stateSelect').value=S.demoState;S.modified=false;S.notice='Binding revision '+S.revision+' published. Existing running processes did not change.';render();return}
+if(t.id==='prompt'){S.pending=false;S.demoState='in_sync';el('stateSelect').value=S.demoState;S.notice='Simulated next Bash prompt: subsequent children inherit revision '+S.revision+'. This is not a real runtime acknowledgement.';render();return}
+if(t.id==='reapply'){if(!S.agentOnline)return;S.revision++;S.modified=false;S.pending=true;S.demoState='pending_shell';el('stateSelect').value=S.demoState;S.notice='Explicit Reapply published a new snapshot revision '+S.revision+'.';render();return}
 if(t.id==='editSimulation'){S.modified=true;S.notice='Simulated Profile Save. Bound Session retains its previously materialized content until explicit Reapply.';render();return}
 if(t.id==='addThis'){S.mode='manage';S.draft=[...S.active];if(!S.draft.includes(S.selected))S.draft.push(S.selected);render();return}
 if(t.id==='toggleSession'){S.hasSession=!S.hasSession;S.selected='session';S.mode='view';t.textContent=S.hasSession?'无 Session 场景':'恢复 Session';render();el('workspace').classList.remove('detail');return}
 if(t.id==='toggleAgent'){S.agentOnline=!S.agentOnline;t.textContent=S.agentOnline?'模拟 Agent 断线':'恢复 Agent 连接';render();return}
-if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.modified=false;S.notice='';el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';render();el('workspace').classList.remove('detail');return}
+if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.demoState='in_sync';S.detailsOpen=false;S.modified=false;S.notice='';el('stateSelect').value=S.demoState;el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';render();el('workspace').classList.remove('detail');return}
 });
 document.addEventListener('change',e=>{const t=e.target;if(t.matches('[data-add]')){if(t.checked&&!S.draft.includes(t.dataset.add))S.draft.push(t.dataset.add);render()}});
 el('search').addEventListener('input',renderNav);
+el('stateSelect').addEventListener('change',e=>{S.demoState=e.target.value;S.pending=S.demoState==='pending_shell';S.detailsOpen=false;S.notice='';render()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.mode==='manage'){S.mode='view';S.draft=null;render()}else if(e.key==='Escape'&&el('workspace').classList.contains('detail')){el('workspace').classList.remove('detail')}});
 render();
 })();
