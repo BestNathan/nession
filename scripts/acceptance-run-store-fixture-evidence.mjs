@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 
 export const FIXTURE_WORKFLOW = '.github/workflows/ci-run-store-fixture-evidence.yml';
 export const FIXTURE_NAME = 'CI / Run Store Fixture Evidence';
+function isTrustedFixturePath(value) {
+  return value === FIXTURE_WORKFLOW || value === FIXTURE_WORKFLOW + '@refs/heads/main';
+}
 const JOB_NAME = 'Immutable encrypted checkpoint and CAS fixture';
 const REQUIRED_STEPS = [
   'Checkout exact trusted main SHA (no persisted credentials)',
@@ -20,7 +23,7 @@ export function attestRunStoreFixture(run, jobs, artifacts, targetSha, repo) {
   if (repo !== 'BestNathan/nession' || !SHA.test(targetSha) ||
       !Number.isSafeInteger(run?.id) || run.id <= 0 ||
       !Number.isSafeInteger(run?.run_attempt) || run.run_attempt < 1 ||
-      run.name !== FIXTURE_NAME || run.path !== FIXTURE_WORKFLOW ||
+      run.name !== FIXTURE_NAME || !isTrustedFixturePath(run.path) ||
       !['push', 'repository_dispatch'].includes(run.event) ||
       run.head_branch !== 'main' || run.head_sha !== targetSha ||
       run.status !== 'completed' || run.conclusion !== 'success' ||
@@ -75,7 +78,7 @@ export async function collectRunStoreFixtureEvidence(repo, sha, directRuns, get)
       !Array.isArray(directRuns) || typeof get !== 'function')
     throw Error('invalid Run Store fixture evidence discovery');
   const candidates = directRuns.filter(run =>
-    run?.name === FIXTURE_NAME && run.path === FIXTURE_WORKFLOW &&
+    run?.name === FIXTURE_NAME && isTrustedFixturePath(run.path) &&
     run.head_sha === sha && run.head_branch === 'main' &&
     ['push', 'repository_dispatch'].includes(run.event) &&
     run.status === 'completed' && run.conclusion === 'success')
@@ -110,6 +113,8 @@ export function selfTestRunStoreFixtureEvidence() {
   const verify = (r=run, j=job, a=artifact) =>
     attestRunStoreFixture(r, {jobs:[j]}, {artifacts:[a]}, sha, repo);
   assert.equal(verify().verdict, 'fixture_pass');
+  assert.equal(verify({...run,path:FIXTURE_WORKFLOW+'@refs/heads/main'}).verdict, 'fixture_pass');
+  assert.throws(() => verify({...run,path:FIXTURE_WORKFLOW+'@refs/heads/untrusted'}));
   assert.equal(verify().live_branch_enforcement, 'not_tested');
   assert.throws(() => verify({...run,head_sha:'c'.repeat(40)}));
   assert.throws(() => verify({...run,event:'pull_request'}));
