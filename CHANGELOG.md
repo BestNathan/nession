@@ -176,3 +176,10 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Promote to verified after authenticated end-to-end Knowledge push, main Pages publish and exact anonymous HTTPS digest readback, plus trusted Acceptance SC-01 through SC-04 Pass
 - Source: https://github.com/BestNathan/nession/issues/2683
+
+## 2026-11-03T12:36:38Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record #2658's owner decision that Terminal notices are never automatic: status is reachable only through the Capsule's explicit disclosure, clipboard text stays out of the DOM until that gesture, expiry keys on notice identity, and diagnostics are surface data attributes; supersede #2621's automatic overlay presentation while keeping its zero-reserved-height objective
+- Source: https://github.com/BestNathan/nession/issues/2658

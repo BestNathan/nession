@@ -46,7 +46,7 @@
     "terminal": [
       {
         "title": "Web terminal emulator engine and component ownership",
-        "description": "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the non-reserving status overlay and mode-owned touch scrolling; Product/UI consumes a narrow emulator port",
+        "description": "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure and mode-owned touch scrolling; Product/UI consumes a narrow emulator port",
         "path": "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
         "status": "verified",
         "categories": [
@@ -55,7 +55,7 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-03T08:52:21.743Z"
+        "updated_at": "2026-11-03T12:36:38Z"
       }
     ],
     "workflows": [

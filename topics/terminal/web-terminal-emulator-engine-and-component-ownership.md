@@ -1,12 +1,12 @@
 ---
 title: "Web terminal emulator engine and component ownership"
-description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the non-reserving status overlay and mode-owned touch scrolling; Product/UI consumes a narrow emulator port"
+description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure and mode-owned touch scrolling; Product/UI consumes a narrow emulator port"
 topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-11-03T08:52:21.743Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681"]
+updated_at: 2026-11-03T12:36:38Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -51,17 +51,26 @@ data travels only through the negotiated in-band protocol: there is no
 FilesPlugin, upload, remote-file or path conversion, and an unnegotiated
 image-only paste becomes an honest status-strip message instead.
 
-The Terminal Surface's status chrome is part of the same boundary
-([#2621](https://github.com/BestNathan/nession/issues/2621)). History-degraded,
-input-drop, clipboard and observer notices all render in one root-owned,
-absolute overlay (`TerminalStatusOverlay` in
-`product/terminal/patterns/TerminalSurface.tsx`) that is a sibling of — never a
-child of, and never a flex participant with — `[data-terminal-capsule-host]`.
-The host stays the only flex-filling region, so the xterm grid and viewport are
-identical when a notice appears, is replaced or expires. The overlay keeps the
-measured #1307 rule that status is never painted under the opaque bottom
-capsule: a `pointer-events-none` layer with compact `pointer-events-auto`
-content-width pills at the top end.
+The Terminal Surface's status chrome is part of the same boundary, and since
+[#2658](https://github.com/BestNathan/nession/issues/2658) it is **never
+automatic**. History-degraded, input-drop, clipboard and observer notices are
+reachable only through one explicit notices action in the existing Capsule; the
+sentences and their actions live in a user-opened dialog
+(`TerminalNoticeDetails` in `product/terminal/patterns/TerminalSurface.tsx`).
+The Terminal mounts no overlay, banner, strip, badge or reserved status row, so
+`[data-terminal-capsule-host]` remains the only flex-filling region and the
+xterm grid, viewport and host geometry are identical in healthy, degraded,
+observer, input-drop and clipboard states — including while the disclosure is
+open and after a notice expires. Clipboard text is absent from the DOM until
+the user opens the disclosure; expiry is keyed on the notice's `id`/`kind`, so
+an unrelated parent render cannot re-arm a transient state. Diagnostics stay
+observable without paint: `data-terminal-stream-state` and
+`data-terminal-notices` on the always-present Terminal surface name the
+runtime state and the available notice kinds (never clipboard content). The
+Capsule trigger exists only while a notice does, so a healthy Terminal offers no
+status action. This supersedes #2621's automatic top overlay; its
+zero-reserved-height objective is unchanged, and status is still never painted
+under the opaque bottom capsule (#1307).
 
 The clipboard paths split by origin capability, not by protocol
 ([#2614](https://github.com/BestNathan/nession/issues/2614)). The deployed
@@ -142,7 +151,7 @@ the gesture unchanged.
   `1de6185df91526b6561fed6dce048c59eeb6abe7` (runs 40852433372 and
   40853260244).
 - Status overlays merged at `7c816a909d1d748cf8c36cec934421b090a1309c`; the
-  canonical rule is the “No Terminal height reservation” paragraph in
+  then-canonical rule was the “No Terminal height reservation” paragraph in
   `docs/design/design-system/patterns/terminal-surface.md`. The four inputs
   are reachable from `/fixture/app` and `/fixture/clipboard` (`?history=`,
   `?drop=`, `?role=`, `?clipboard=`). Measured App 390x844 and Web 1280x800:
@@ -150,7 +159,28 @@ the gesture unchanged.
   each notice and for all four at once, and after the clipboard notice expires.
   Staging Acceptance recorded Pass for SC-01/SC-02/SC-03 at
   `176fa0ec92509227fd413c70f6f625d5d4d90307` (run 40892078393) and SC-04 at
-  `04e62467d1255121cda8ddd96e9a25147fb49828`.
+  `04e62467d1255121cda8ddd96e9a25147fb49828`. The automatic presentation is
+  historical: #2658 superseded it with the explicit disclosure below, keeping
+  the zero-reserved-height objective.
+- The explicit-notices decision merged at
+  `7c633f14a91ff09646c3d69f97420255bbce8548`; the canonical rule is the “No
+  automatic Terminal notice” paragraph in
+  `docs/design/design-system/patterns/terminal-surface.md`. Proof at staging:
+  SC-01 (App 390x844 and Web 1280x800 keep identical rows, columns, capsule
+  host, viewport and surface boxes across healthy, input-drop, history-degraded,
+  observer, clipboard and all-four states, including after opening the
+  disclosure and after expiry; no automatic overlay or notice row is mounted
+  in any of them), SC-02 (Dismiss, Copy and Take control execute from the
+  disclosure with zero PTY frames, and Escape returns focus to the trigger) and
+  SC-03 (plain-HTTP user-gesture DOM copy carries exactly the probe text with
+  `isSecureContext=false` and no `navigator.clipboard`, the write-denied state
+  expires, and typing still reaches the PTY) all Pass at
+  `7c633f14a91ff09646c3d69f97420255bbce8548` (run 41635932769; 73/21/20
+  Playwright assertions). The declared regression E2E IDs — `fixture-app`,
+  `terminal-attach-bootstrap`, `terminal-consistency-faults`, `terminal-io`
+  and `ui-contract-matrix` — Pass (6/3/15/24/72 tests) at the PR head
+  `54c69f6d7de3025fa52d61127c273b124803e10f` (run 41634677535), and the merged
+  staging push run 41635932685 is green.
 - HTTP clipboard capability merged at
   `bccd9928983ab2818a34e36cdd16d015966f7100`; the canonical matrix is the
   “Ordinary HTTP is not a secure context” section in
@@ -221,10 +251,13 @@ the gesture unchanged.
 - Revisit if xterm's private render-service shape changes (the negative fixture
   and `XtermMetrics` are the compatibility point), if a second raw xterm
   consumer appears outside the engine, or if Addon/link ownership moves.
-- A new Terminal status type must reuse the same root-owned overlay; a second
-  footer or any full-width in-flow status band re-opens #2621 (and a
-  capsule-band placement re-opens #1307). Status chrome is presentation only:
-  protocol, authority and provenance rules stay with the clipboard protocol,
-  `SerializedTerminalWriter` and `TerminalController` owners.
+- A new Terminal status type must stay inside the Capsule's explicit notices
+  disclosure. An automatically mounted overlay, banner, strip, badge, footer or
+  reserved status row re-opens #2658 (and a capsule-band placement re-opens
+  #1307). Status chrome is presentation only: protocol, authority and
+  provenance rules stay with the clipboard protocol, `SerializedTerminalWriter`
+  and `TerminalController` owners. Expiry must key on the notice's `id`/`kind`,
+  not on object or callback identity, or an unrelated parent render can extend
+  a transient state; clipboard text must not enter the DOM before the gesture.
 - The engine is internal to `platform/terminal-runtime/xterm/`; there is no npm
   package extraction decision.
