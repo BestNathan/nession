@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0a8a34a2fa42d77e6a181038c3aaba268a750b5c2fb2d9f044196cb19373ef71",
+  "run_id": 41660956251,
+  "run_attempt": 1,
+  "issue": 2656,
+  "criterion": "SC-04",
+  "criterion_text": "The consolidated adapter does not regress OSC 52/5522 semantics, authorized-controller/observer/replay guards, bounded notices, or native text and negotiated image paste. HTTP never advertises automatic remote clipboard write capability it cannot provide, and no remote request reads local clipboard without user authorization.",
+  "stage": "staging",
+  "target_sha": "af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475",
+  "contract_sha256": "04dae83228183e1a4544d5eac7eb42c90d0b901fb378c33cc5bed956eb74ffdf",
+  "case_revision": "af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475",
+  "case_tree_sha": "094628e2c7c77da8f9cc899c54051d898f296924",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T15:12:17.694Z",
+  "finished_at": "2026-11-03T15:12:40.800Z",
+  "duration_ms": 23106,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The shared clipboard owner keeps the Terminal protocol, authorization, replay/observer, notice and paste semantics intact, with one lockfile-pinned library integration",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475: clipboard protocol/controller tests pass (31 + 5 + 9 + 3 tests); the Terminal adapter keeps EPERM/EIO mapping and MIME writes, delegates gesture text to the single copy-to-clipboard owner (4.0.2, MIT, lockfile-pinned), and preserves secure-context detection for automatic writes"
+        }
+      ],
+      "duration_ms": 17252,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41660956251,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41660956251",
+    "record_path": "runs/2026-11-03/41660956251-1/2656/SC-04.json",
+    "source_result_sha256": "ade3ded64866d2a48fd96130ccdc6bfd370855c1d08482c1d23adcc2e222f8ac"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41660956251-1",
+    "sha256": "ade3ded64866d2a48fd96130ccdc6bfd370855c1d08482c1d23adcc2e222f8ac",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41660956251",
+    "durability": "time-limited; object archival not configured"
+  }
+}
