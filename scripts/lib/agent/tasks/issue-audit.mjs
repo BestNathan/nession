@@ -74,8 +74,8 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   if (Object.keys(proposal).some((key) => !['title', 'body', 'labels', 'comment', 'verification_tier', 'tier_reason'].includes(key))) {
     throw new Error('Issue Audit proposal contains unauthorized fields');
   }
-  const repair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
-  if (repair) {
+  const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
+  if (hasIssueRepair) {
     await createIssueUpdateTool(issue, repository).execute({
       title: proposal.title, body: proposal.body, labels: proposal.labels,
     });
