@@ -41,6 +41,13 @@ const rules = Object.freeze({
 });
 export const RUN_STORE_INTEGRITY_SCHEMA_VERSION=1;
 export const RUN_STORE_REFS=Object.freeze(Object.keys(rules));
+// Canonical machine-readable projection of the actual executable path policy.
+// Inventory JSON is derived documentation and MUST be Gate-compared to this
+// function: it never becomes an alternative source for path authorization.
+export function runStorePathPolicy(store){
+  if(!rules[store])throw Error('run-store-integrity: unclassified run store');
+  return rules[store].map(({path,kind})=>({pattern:path.source,kind}));
+}
 function reject(s){throw new Error('run-store-integrity: '+s);}
 function git(root,args){
   try{return execFileSync('git',['-C',root,...args],{
