@@ -95,6 +95,7 @@ test('Pages native navigation, trusted deployment and safe text-only rendering a
  assert.match(reader,/document\.createTextNode/);
  assert.doesNotMatch(reader,/\binnerHTML\b\s*=/);
  assert.match(workflow,/ref: knowledge/);
+ assert.match(workflow,/ref: knowledge\n\s+path: knowledge-store\n[\s\S]*?fetch-depth: 0/);
  assert.match(workflow,/persist-credentials: false/);
  assert.match(workflow,/knowledge-ledger-contract\.mjs check knowledge-store/);
  assert.match(workflow,/EXPECTED_KNOWLEDGE_SHA/);
