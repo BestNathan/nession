@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "627cdf9208c89e822e1081c0bf7dbad130ec5db2e560e2d8b5e52e56b11f3e58",
+  "run_id": 41635932769,
+  "run_attempt": 1,
+  "issue": 2658,
+  "criterion": "SC-03",
+  "criterion_text": "Existing clipboard HTTP user-gesture copy, event expiry, focus/keyboard semantics remain correct.",
+  "stage": "staging",
+  "target_sha": "7c633f14a91ff09646c3d69f97420255bbce8548",
+  "contract_sha256": "e6dfbfa569c673ee0e62ba331cde57bdab6962e05d3b91408482518ca5a23b27",
+  "case_revision": "7c633f14a91ff09646c3d69f97420255bbce8548",
+  "case_tree_sha": "d474aa46a76f4d5586451c620a2e5ff474ee6f38",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T12:31:40.671Z",
+  "finished_at": "2026-11-03T12:31:55.410Z",
+  "duration_ms": 14739,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=20"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 20
+      },
+      "duration_ms": 8875,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41635932769,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "7c633f14a91ff09646c3d69f97420255bbce8548",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41635932769",
+    "record_path": "runs/2026-11-03/41635932769-1/2658/SC-03.json",
+    "source_result_sha256": "c606894da88955f9344168e48125298ec6397300d38b1b1fca5faed250493df4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41635932769-1",
+    "sha256": "c606894da88955f9344168e48125298ec6397300d38b1b1fca5faed250493df4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41635932769",
+    "durability": "time-limited; object archival not configured"
+  }
+}
