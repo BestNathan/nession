@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nession · Mobile terminal key & command capsule</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#232528;background:#e9eaed;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0}
+a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible,input:focus-visible{outline:2px solid #3974bc;outline-offset:2px}
+.page{min-height:100dvh;display:grid;place-content:center;gap:13px;padding:16px}
+.demo-note{max-width:390px;color:#666b70;font-size:12px;line-height:1.45;display:flex;justify-content:space-between;gap:18px}
+.phone{width:min(390px,calc(100vw - 24px));height:min(816px,calc(100dvh - 20px));min-height:500px;position:relative;overflow:hidden;background:#fff;box-shadow:0 12px 48px #1a1b2522,0 1px 3px #1a1b2512;border-radius:32px;isolation:isolate}
+.topbar{height:58px;padding:17px 16px 10px;display:flex;align-items:center;gap:11px;background:#fff}
+.back{width:30px;height:30px;border:0;background:transparent;border-radius:50%;font-size:26px;line-height:1}
+.sess{min-width:0;flex:1}.sess strong{display:block;font-weight:620;font-size:14px;letter-spacing:-.02em}.sess small{display:block;color:#777b80;font-size:11px;margin-top:3px}
+.topdot{width:9px;height:9px;border-radius:50%;background:#76aa87}
+.terminal{position:absolute;inset:58px 0 0;padding:17px 17px 110px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow:auto;overscroll-behavior:contain;word-break:break-word}
+.terminal .faint{color:#8f949a}.terminal .prompt{color:#587364}.terminal .strong{color:#292d31}
+.terminal .entry{white-space:pre-wrap;margin:0 0 7px}.terminal .entry.blank{height:10px}
+.terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:-2px;background:#31363a;opacity:.8}
+.dock{position:absolute;inset-inline:12px;bottom:max(14px,env(safe-area-inset-bottom));z-index:3;display:flex;flex-direction:column;gap:9px}
+.surface{background:rgba(246,248,250,.98);box-shadow:0 0 0 1px #30353a12,0 5px 18px #222c3414,0 18px 38px #2b303716;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:23px;color:#232528}
+.composer{height:56px;padding:6px 7px;display:flex;align-items:center;gap:5px}
+.tap{min-width:44px;min-height:44px;display:grid;place-items:center;border:0;background:transparent;border-radius:12px;color:#4d5257}
+.plus{font-size:26px;font-weight:300;line-height:1}.plus.active{background:#e5e8ea}
+.intent{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#222;font-size:14px;padding:10px 2px}
+.intent::placeholder{color:#888d91}
+.send{width:36px;height:36px;min-width:36px;border-radius:50%;border:0;color:white;background:#292e31;font-size:19px;display:grid;place-items:center;margin:0 4px}
+.chooser{padding:12px 8px 8px}
+.chooser-title{color:#8a9095;letter-spacing:.06em;font-size:10px;font-weight:700;text-transform:uppercase;margin:5px 11px 5px}
+.choose{height:50px;display:flex;align-items:center;gap:11px;width:100%;background:transparent;border:0;text-align:left;color:#292d31;border-radius:14px;padding:0 12px}
+.choose:hover,.choose:active{background:#eaedef}
+.choose .sym{width:27px;text-align:center;font-size:18px;color:#6a6f75}
+.choose .cname{flex:1;font-size:14px;font-weight:560}
+.choose .sub{font-size:11px;color:#92979b}
+.panel{padding:8px;max-height:min(360px,48dvh);overflow:hidden;display:flex;flex-direction:column;animation:rise .15s ease-out}
+@keyframes rise{from{opacity:.5;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+.panel-head{height:39px;display:flex;align-items:center;padding:0 2px 0 6px;gap:4px;flex:0 0 auto}
+.switch{display:flex;align-items:center;gap:4px;min-width:0;flex:1}
+.switch button{height:33px;padding:0 12px;border:0;background:transparent;border-radius:11px;color:#7a8084;font-size:13px;font-weight:580}
+.switch button.sel{background:#e8ebed;color:#2a3033}
+.close{border:0;background:none;min-width:38px;min-height:38px;border-radius:50%;color:#81878c;font-size:22px}
+.panel-body{min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:8px 6px 6px;gap:11px}
+.caption{font-size:10px;color:#81868b;letter-spacing:.03em;font-weight:580;margin-bottom:7px}
+.quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.quickkey{height:42px;border:0;border-radius:12px;background:#e9edef;color:#2b3136;font:600 13px/1 "SFMono-Regular",Menlo,monospace}
+.quickkey:active{background:#dadee1}
+.keyrow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.key{min-width:0;height:44px;border:0;border-radius:12px;background:#fff;color:#373d42;box-shadow:inset 0 0 0 1px #e6e9ea;font-size:12px;font-weight:560}
+.key:active,.mod:active{background:#e3e7e9}
+.bottom-row{display:flex;align-items:center;justify-content:space-between;gap:7px}
+.mods{display:flex;flex:1;min-width:0;gap:5px}
+.mod{flex:1;min-width:0;max-width:67px;height:44px;border:0;border-radius:12px;background:#e9edef;color:#44494c;font-size:12px;font-weight:620}
+.mod.on{background:#313638;color:white}
+.arrows{display:flex;gap:4px}
+.arrow{width:39px;height:44px;display:grid;place-items:center;border:0;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px #e6e9ea;color:#41484c;font-size:17px}
+.chord-row{height:42px;display:flex;align-items:center;gap:8px;min-width:0}
+.chord-label{white-space:nowrap;font:650 12px/1 Menlo,monospace;letter-spacing:-.04em;color:#292f33}
+.letters{min-width:0;flex:1;display:flex;overflow-x:auto;gap:4px;overscroll-behavior-x:contain;scrollbar-width:none}
+.letters::-webkit-scrollbar{display:none}
+.letter{flex:0 0 42px;height:42px;background:white;border:0;border-radius:11px;box-shadow:inset 0 0 0 1px #e3e6e8;font:650 13px Menlo,monospace}
+.cancel{border:0;background:transparent;color:#7f858a;font-size:12px;height:42px;padding:0 4px}
+.commands{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:1px 0 1px}
+.command{display:flex;align-items:center;gap:7px;min-height:64px;padding:8px 3px 8px 7px;border-radius:13px}
+.command+.command{border-top:1px solid #e9ecee}
+.command-main{flex:1;min-width:0;cursor:pointer}
+.command-main b{font-size:13px;font-weight:620;display:block;margin-bottom:5px}
+.command-main code{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font:11px Menlo,monospace;color:#777e83}
+.insert,.run{height:40px;border:0;border-radius:11px;padding:0 10px;font-size:12px;font-weight:560}
+.insert{background:transparent;color:#636b70}
+.run{background:#303538;color:#fff;min-width:46px}
+.commands-head{display:flex;justify-content:space-between;align-items:center;color:#858b90;font-size:11px;margin:2px 8px 0}
+.hint{color:#8e9497;font-size:10.5px;padding:0 5px;min-height:14px}
+.status{display:flex;justify-content:space-between;gap:8px;max-width:390px;font-size:11px;color:#686e73}
+.status strong{color:#3d4448}
+@media(max-width:440px){body{background:#fff}.page{padding:0;display:block}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.status{display:none}.panel{max-height:min(370px,50dvh)}} 
+@media(max-height:640px){.panel{max-height:42dvh}.panel-body{gap:7px}.keyrow{display:none}}
+@media(prefers-reduced-motion:reduce){.panel{animation:none}}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="demo-note"><span>NESSION / INTERACTIVE PROTOTYPE <b>#2710</b></span><span>Mock transport · no real commands</span></div>
+<div class="phone">
+  <header class="topbar"><button class="back" type="button" aria-label="Back is a mock" title="Navigation is not part of this prototype">‹</button><div class="sess"><strong>dev-session</strong><small>beijing · zsh</small></div><span class="topdot" aria-label="Connected (mock)"></span></header>
+  <main class="terminal" id="terminal" aria-label="Simulated terminal">
+    <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
+    <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
+    <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› cargo test</span></div><div class="entry">running 38 tests</div><div class="entry">test result: ok. 38 passed; 0 failed</div><div class="entry blank"></div>
+    <div class="entry"><span class="prompt">~/nession</span> <span class="strong">›</span> <span class="cursor"></span></div>
+  </main>
+  <div class="dock" id="dock">
+    <div id="upper" aria-live="polite"></div>
+    <div class="surface composer" id="composer">
+      <button class="tap plus" type="button" id="plus" aria-label="Open capabilities" title="Capabilities">+</button>
+      <input class="intent" id="intent" placeholder="Ask Nession…" aria-label="Terminal input">
+      <button class="send" id="send" aria-label="Send terminal input">↑</button>
+    </div>
+  </div>
+</div>
+<div class="status"><span>Try <strong>Ctrl+C</strong>, then <strong>Ctrl → X</strong>, or select <strong>Commands</strong>.</span><a id="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
+</div>
+<script>
+(function(){
+  "use strict";
+  const upper=document.getElementById("upper");
+  const term=document.getElementById("terminal");
+  const intent=document.getElementById("intent");
+  const plus=document.getElementById("plus");
+  let view=""; // "", menu, keys, commands
+  let modifier="";
+  let seq=0;
+  const saved=[
+    {name:"Git status",text:"git status"},
+    {name:"List tmux sessions",text:"tmux list-sessions"},
+    {name:"Run Rust tests",text:"cargo test -q"},
+    {name:"Show Kubernetes pods",text:"kubectl get pods -A"},
+    {name:"Inspect recent logs",text:"journalctl -n 80 --no-pager"}
+  ];
+  function append(message){
+    const last=term.lastElementChild;
+    if(last && last.querySelector(".cursor"))last.remove();
+    const node=document.createElement("div");node.className="entry";node.textContent=message;term.appendChild(node);
+    const prompt=document.createElement("div");prompt.className="entry";prompt.innerHTML='<span class="prompt">~/nession</span> <span class="strong">›</span> <span class="cursor"></span>';
+    term.appendChild(prompt);term.scrollTop=term.scrollHeight;
+  }
+  function sendKey(label,bytes){
+    seq++;
+    const suffix=bytes ? " · " + bytes : "";
+    append("[mock " + seq + "] " + label + suffix);
+  }
+  function keyEncoding(chord){
+    if(/^Ctrl\+[A-Z]$/.test(chord))return "0x"+(chord.charCodeAt(5)-64).toString(16).padStart(2,"0");
+    if(chord==="Ctrl+C")return "0x03";
+    if(chord==="Ctrl+L")return "0x0c";
+    if(chord==="Ctrl+R")return "0x12";
+    if(chord==="Shift+Tab")return "ESC [ Z";
+    if(chord==="Esc")return "0x1b";
+    if(chord==="Tab")return "0x09";
+    if(chord==="Enter")return "0x0d";
+    if(chord==="Space")return "0x20";
+    if(chord==="Delete")return "ESC [ 3 ~";
+    return "encoded by terminal runtime";
+  }
+  function chord(key){
+    const label=modifier?modifier+"+"+key:key;
+    const used=modifier;modifier="";
+    sendKey(label,keyEncoding(label));
+    if(used)render();
+  }
+  function open(next){view=next;modifier="";render();}
+  function render(){
+    plus.classList.toggle("active",!!view);
+    if(!view){upper.innerHTML="";return;}
+    if(view==="menu"){
+      upper.innerHTML='<div class="surface chooser"><div class="chooser-title">Terminal tools</div>'+
+      '<button class="choose" type="button" data-act="keys"><span class="sym">⌘</span><span class="cname">Terminal Keys</span><span class="sub">Keys & chords</span></button>'+
+      '<button class="choose" type="button" data-act="commands"><span class="sym">›_</span><span class="cname">Quick Commands</span><span class="sub">Saved commands</span></button></div>';
+      return;
+    }
+    let body="";
+    if(view==="keys"){
+      const code=modifier ? '<div class="chord-row"><span class="chord-label">'+modifier+' +</span><div class="letters" aria-label="Letter selector, swipe to find a letter">'+
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(x=>'<button class="letter" type="button" data-letter="'+x+'" aria-label="'+modifier+' plus '+x+'">'+x+'</button>').join("")+
+        '</div><button type="button" class="cancel" data-act="cancel">Cancel</button></div>'
+        :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C">⌃ C</button><button class="quickkey" data-chord="Ctrl+R">⌃ R</button><button class="quickkey" data-chord="Ctrl+L">⌃ L</button></div>';
+      body='<div class="panel-body">'+
+        '<div><div class="caption">'+(modifier?"Select a key · one-shot":"Common shortcuts · one tap")+'</div>'+code+'</div>'+
+        '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
+        '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["←","↑","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
+        '<div class="hint">'+(modifier?"Selected modifier clears after the next key or Cancel.":"Modifiers are one-shot. The Terminal stays interactive.")+'</div></div>';
+    }else if(view==="commands"){
+      body='<div class="panel-body"><div class="commands-head"><span>Saved for this Session · mock data</span><span>'+saved.length+' commands</span></div><div class="commands">'+
+       saved.map((c,i)=>'<div class="command"><div class="command-main" data-insert="'+i+'" role="button" tabindex="0"><b>'+c.name+'</b><code>'+c.text+'</code></div><button class="insert" data-insert="'+i+'">Insert</button><button class="run" data-run="'+i+'">Run</button></div>').join("")+
+       '</div><div class="hint">Insert edits the input. Run sends the command with Return.</div></div>';
+    }
+    upper.innerHTML='<section class="surface panel" role="region" aria-label="Terminal '+(view==="keys"?"Keys":"Quick Commands")+'">'+
+      '<div class="panel-head"><div class="switch" role="tablist" aria-label="Terminal tools"><button role="tab" aria-selected="'+(view==="keys")+'" class="'+(view==="keys"?"sel":"")+'" data-act="keys">Keys</button><button role="tab" aria-selected="'+(view==="commands")+'" class="'+(view==="commands"?"sel":"")+'" data-act="commands">Commands</button></div><button class="close" aria-label="Close" data-act="close">×</button></div>'+body+'</section>';
+  }
+  plus.addEventListener("click",()=>open(view?"":"menu"));
+  document.getElementById("send").addEventListener("click",()=>{const v=intent.value.trim();if(v){append("[mock] sent input: "+v);intent.value="";}open("");});
+  intent.addEventListener("focus",()=>{if(view)open("");});
+  intent.addEventListener("keydown",(e)=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("send").click();}});
+  upper.addEventListener("click",(e)=>{
+    const el=e.target.closest("button,[data-insert]");
+    if(!el||!upper.contains(el))return;
+    const a=el.dataset.act;
+    if(a){if(a==="cancel"){modifier="";render();}else if(a==="close"){open("");}else open(a);return;}
+    if(el.dataset.mod){modifier=modifier===el.dataset.mod?"":el.dataset.mod;render();return;}
+    if(el.dataset.chord){sendKey(el.dataset.chord,keyEncoding(el.dataset.chord));return;}
+    if(el.dataset.letter){chord(el.dataset.letter);return;}
+    if(el.dataset.key){chord(el.dataset.key);return;}
+    if(el.dataset.insert!==undefined){const c=saved[Number(el.dataset.insert)];intent.value=c.text;open("");intent.focus();return;}
+    if(el.dataset.run!==undefined){const c=saved[Number(el.dataset.run)];append("[mock] RUN: "+c.text+" ↵");return;}
+  });
+  upper.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-insert][role=button]")){e.preventDefault();e.target.click();}});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&view){if(modifier){modifier="";render();}else open("");}});
+  // Pages manifest identifies the source revision that actually got published.
+  // Fall back to branch source when the document is opened locally or elsewhere.
+  fetch("../manifest.json").then(r=>r.ok?r.json():null).then(m=>{
+    const sha=m&&(m.prototype_sha||m.source_sha||m.sha);
+    if(typeof sha==="string"&&/^[0-9a-f]{40}$/.test(sha)){
+      document.getElementById("source").href="https://github.com/BestNathan/nession/tree/"+sha+"/terminal-keys-commands-2710";
+    }
+  }).catch(()=>{});
+  render();
+})();
+</script>
+</body>
+</html>
