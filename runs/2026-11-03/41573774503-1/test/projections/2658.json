@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2658,
+  "run_id": 41573774503,
+  "run_attempt": 1,
+  "target_sha": "cc817d1dda76645b10e3f6752ffcb2771e9ee5ca",
+  "plan_digest": "8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a",
+  "artifact_digest": "sha256:e769294c9a47f7f417a56f072b4fe4c8d741e0468a4c83f069b3de4f173b9bf5",
+  "ingest_run_id": 41574272018,
+  "ingest_attempt": 1,
+  "declaration_digest": "d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625",
+  "before_body_sha256": "d85d505e2ac7ed60ec5b58aac4be806ae4a9f9281d90fbc74a294c5314a5a743",
+  "body_sha256": "5e23ea6403ba0778f93f36df4f5c4d9bcae729e8c2824c3500753303e56908aa",
+  "readback_body": "## Requirements: Keep Terminal free of automatic notices\n\nOwner request (2026-11-03): the Terminal status/prompt area is visually intrusive and must no longer cover any terminal content. This is a new *presentation* decision distinct from #2621's earlier fix (which moved bottom strips to a top absolute overlay). Preserve terminal runtime semantics rather than removing critical information.\n\n- No automatic floating notice strips or reserved status rows inside the Terminal grid, on Web or App.\n- History uncertainty, dropped input, clipboard manual Copy, and observer Take control remain available through the existing Capsule as an **explicit, context-only disclosure**, without a permanent toolbar.\n- Clipboard text is not exposed in the DOM until a deliberate disclosure. The user-gesture copy path on insecure HTTP must continue to work.\n- Keep stream state observable as a data attribute for diagnostics.\n- Related: #2621 (old overlay behavior, intentionally superseded), #2614, #2598, #2656.\n\n### Success Criteria\n- [ ] SC-01 Web/App Terminal shows no automatic status overlay and its host/grid size is identical in healthy, degraded, observer, input-drop and clipboard states.\n- [ ] SC-02 A user can explicitly open all relevant notices and execute Dismiss, Copy and Take control without losing their meaning or changing PTY state.\n- [ ] SC-03 Existing clipboard HTTP user-gesture copy, event expiry, focus/keyboard semantics remain correct.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: case\n  SC-02:\n    when: pr\n    method: case\n  SC-03:\n    when: pr\n    method: case\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | PR browser fixture / unit evidence |\n| SC-02 | Pending | PR interaction and clipboard test evidence |\n| SC-03 | Pending | PR HTTP clipboard and focus regression |\n\n## E2E Verification\n### New\n- none: existing canonical Terminal fixture and clipboard E2E are the same screens/behavior\n### Regression\n- terminal-io\n- fixture-app\n- ui-contract-matrix\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| fixture-app | Regression | Error | run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503) |\n| terminal-io | Regression | Error | run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503) |\n| ui-contract-matrix | Regression | Error | run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503) |\n\n## Product alignment\n- [x] VISION.md: terminal as distraction-free primary work surface.\n- [x] PRINCIPLE.md: reduce persistent UI.\n- [x] Relevant Terminal Surface and Capsule design reviewed.\n- [x] Supersedes the specific #2621 overlay presentation, not its zero-row-height objective.\n\n---\n**Status:** Approved — implementation and acceptance pending.",
+  "patch_updated_at": "2026-11-03T03:47:45Z",
+  "readback_updated_at": "2026-11-03T03:47:45Z",
+  "rows": [
+    {
+      "id": "fixture-app",
+      "result": "Error",
+      "evidence": "run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503)"
+    },
+    {
+      "id": "terminal-io",
+      "result": "Error",
+      "evidence": "run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503)"
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Error",
+      "evidence": "run 41573774503/1, SHA cc817d1dda76645b10e3f6752ffcb2771e9ee5ca, contract d5000036163a71f518f735159dd61ad60b5f144697c4defeaf0efb78e9155625, plan 8b9469f9660cd755f2cfb7355eff9d9dc31fddec9aed08653198b6362239926a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/41573774503)"
+    }
+  ]
+}
