@@ -27,6 +27,39 @@ const fixture={
     url:'https://github.com/BestNathan/nession/actions/runs/81'}],pr_references:{status:'available',prs:[{number:1787,url:'https://github.com/BestNathan/nession/pull/1787',relation:'github_cross_reference'}]}}],pulls:[{number:1787,title:'Pages MVP',url:'https://github.com/BestNathan/nession/pull/1787',state:'open',updated_at:'2026-10-14T12:00:00Z',workflow:{head_sha:'a'.repeat(40),ci:{run_id:42,attempt:1,status:'success',url:'https://github.com/BestNathan/nession/actions/runs/42'},e2e:null},review:{status:'available',latest:{review_id:89,commit_sha:'a'.repeat(40),state:'changes_requested',submitted_at:'2026-10-14T12:00:00Z',url:'https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89'}}}]},
  evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics',updated_at:'2026-10-14T12:00:00Z',freshness:{state:'fresh',age_hours:0},records:42,truncated:false}]}
 };
+// Minimal source-pinned Knowledge projection for isolated Pages browser tests.
+// All URLs are public canonical GitHub links; no product Web or provider runtime.
+const knowledge={
+ schema_version:1,status:'available',
+ source:{branch:'knowledge',sha:'c'.repeat(40),generated_at:'2026-11-03T06:00:00Z'},
+ topics:['engineering','terminal'],categories:['knowledge','provenance','terminal'],
+ articles:[
+  {path:'topics/engineering/knowledge-provenance.md',title:'Knowledge provenance',
+   description:'How project knowledge retains authoritative source links.',
+   topic:'engineering',categories:['knowledge','provenance'],status:'verified',
+   updated_at:'2026-11-02T12:00:00Z',
+   sources:['https://github.com/BestNathan/nession/issues/2358'],
+   body:'## Source-bound decisions\n\nRead the [Terminal routing](../terminal/terminal-routing.md) article.\n\n' +
+     'Evidence remains traceable to GitHub sources.'},
+  {path:'topics/terminal/terminal-routing.md',title:'Terminal routing',
+   description:'The terminal transport and rendering responsibilities.',
+   topic:'terminal',categories:['terminal'],status:'candidate',
+   updated_at:'2026-11-01T12:00:00Z',
+   sources:['https://github.com/BestNathan/nession/issues/2487'],
+   body:'## Terminal boundaries\n\nKeep the terminal resize policy stable.'},
+ ],
+ changes:[
+  {at:'2026-11-02T12:00:00Z',action:'update',title:'Knowledge provenance',
+   path:'topics/engineering/knowledge-provenance.md',
+   reason:'Clarify canonical evidence linkage.',
+   source:'https://github.com/BestNathan/nession/issues/2358'},
+  {at:'2026-11-01T12:00:00Z',action:'create',title:'Terminal routing',
+   path:'topics/terminal/terminal-routing.md',
+   reason:'Capture the transport boundary.',
+   source:'https://github.com/BestNathan/nession/issues/2487'},
+ ],
+};
+
 // Browser fixture for the independent, source-only workflow definitions UI.
 const topology={
  schema_version:1,
@@ -53,11 +86,12 @@ const topology={
  edges:[{from:'ci-quality',to:'acceptance-orchestrator',kind:'workflow_run'}],
 };
 export async function startPagesFixture(){
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(fixture));return;}
   if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
+  if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
   try {const name=allowed[path],content=await readFile(join(root,name));
    res.writeHead(200,{'content-type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html'});
