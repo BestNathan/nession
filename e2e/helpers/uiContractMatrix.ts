@@ -296,11 +296,13 @@ export async function contextCapsuleBoxInState(
  * unless a test does.
  *
  * The App routes are the ones that can express the difference. On App a Session
- * always senses Terminal Keys, so `/#/fixture/app` has one sensed row (two lines)
- * and `?pane=claude.exe` adds a second; before the row-band fix those rows
- * measured 48px against an ordinary row's 44, so the two states came out 4px
- * apart. Web cannot vary its sense state at all — the Web fixture drives no
- * pane command and never senses Terminal Keys — so this runs where it can.
+ * always senses Terminal Keys, so `/#/fixture/app` has one sensed row (two
+ * lines). `?pane=claude.exe` used to add a second sensed row; since #2663 it
+ * only flips Claude Code's presence state to `active`, so the two states now
+ * differ in a row's state rather than in row count — the height invariant must
+ * hold either way. Web cannot vary its sense state at all — the Web fixture
+ * drives no pane command and never senses Terminal Keys — so this runs where it
+ * can.
  */
 export async function assertSameHeightAcrossSenseStates(
   page: import('@playwright/test').Page,
@@ -676,63 +678,42 @@ export async function assertDestinationSharesCapsuleMaterial(
   expect(Math.abs(actionVisual.y - capsuleVisual.y)).toBeLessThanOrEqual(1);
 }
 
-export async function assertWorkRingPerceptible(
+/**
+ * The resting `+` is the same plain trigger in every lifecycle state (#2663).
+ *
+ * The owner rejected the static 270 degree Work Ring: it read as a frozen
+ * spinner and told the user nothing. This compares the trigger's rendered
+ * markup and box between a plain route and a route whose pane runs
+ * `claude.exe`, and asserts no ambient work marker exists on either.
+ */
+export async function assertCapabilityTriggerPlain(
   page: import('@playwright/test').Page,
-  route: string,
+  stateRoute: string,
+  baselineRoute: string,
 ): Promise<void> {
-  await page.goto(route);
-  const ring = page.getByTestId('work-ring');
-  await expect(ring).toBeVisible();
+  const read = async (route: string) => {
+    await page.goto(route);
+    const trigger = page.getByTestId('capsule-capability-more');
+    await expect(trigger).toBeVisible();
+    await expect(page.getByTestId('work-ring')).toHaveCount(0);
+    return trigger.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const icon = node.querySelector('svg');
+      const iconRect = icon?.getBoundingClientRect();
+      return {
+        html: node.innerHTML,
+        box: [Math.round(rect.width), Math.round(rect.height)],
+        icon: iconRect ? [Math.round(iconRect.width), Math.round(iconRect.height)] : null,
+        expanded: node.getAttribute('aria-expanded'),
+      };
+    });
+  };
 
-  const signal = await ring.locator('circle').evaluate((node) => {
-    const style = getComputedStyle(node);
-    const surface = document.querySelector<HTMLElement>('[data-testid="capsule-shell"]');
-    if (!surface) throw new Error('capsule-shell not found');
-
-    // Chromium preserves modern CSS colors such as oklch() in computed style.
-    // Rasterize a 1px fill so the browser performs the CSS Color -> device-sRGB
-    // conversion before applying the WCAG relative-luminance calculation.
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) throw new Error('2d canvas context unavailable');
-
-    const toRgb = (value: string): [number, number, number] => {
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = value;
-      context.fillRect(0, 0, 1, 1);
-      const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-      return [r, g, b];
-    };
-    const luminance = (value: string): number => {
-      const [r, g, b] = toRgb(value).map((part) => {
-        const channel = part / 255;
-        return channel <= 0.04045
-          ? channel / 12.92
-          : ((channel + 0.055) / 1.055) ** 2.4;
-      }) as [number, number, number];
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-
-    const color = style.color;
-    const surfaceColor = getComputedStyle(surface).backgroundColor;
-    const lighter = Math.max(luminance(color), luminance(surfaceColor));
-    const darker = Math.min(luminance(color), luminance(surfaceColor));
-
-    return {
-      color,
-      surfaceColor,
-      contrastRatio: (lighter + 0.05) / (darker + 0.05),
-      animationName: style.animationName,
-    };
-  });
-
-  // The ring is non-text state UI; 3:1 keeps the signal deliberately quiet
-  // while making perceptibility an executable relationship rather than merely
-  // proving the two CSS strings are not identical.
-  expect(signal.contrastRatio).toBeGreaterThanOrEqual(3);
-  expect(signal.animationName).toBe('none');
+  const baseline = await read(baselineRoute);
+  const state = await read(stateRoute);
+  expect(state).toEqual(baseline);
+  expect(state.box[0]).toBeGreaterThan(0);
+  expect(state.box[1]).toBeGreaterThan(0);
 }
 
 // ── Terminal capsule — the Session's primary input surface ─────────────────

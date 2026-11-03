@@ -40,7 +40,7 @@ A small Session-scoped contextual surface that answers:
 
 > **What is happening here, and do I want to go deeper?**
 
-**Nothing emerges on its own (owner decision, 2026-10-04).** There used to be a shallower depth beside the Peek — a *Signal*: a mostly read-only projection carrying the smallest identifying state, which Nession was meant to materialize by observation. It could not be **selected into** — choosing a capability opens its Peek, not a Signal — and it survived only as the residue on the way back out of a Peek, which the owner asked to remove. A capability now appears when the **user chooses it**, at its Peek. The smallest identifying state the Signal used to carry — Git's branch · worktree · change count, Claude Code's active/running state — is the first thing the Peek draws, not a separate level. Sensing is expressed by the Work Ring and by a sensed row leading the Context Capsule; it is never expressed by a projection opening by itself.
+**Nothing emerges on its own (owner decision, 2026-10-04).** There used to be a shallower depth beside the Peek — a *Signal*: a mostly read-only projection carrying the smallest identifying state, which Nession was meant to materialize by observation. It could not be **selected into** — choosing a capability opens its Peek, not a Signal — and it survived only as the residue on the way back out of a Peek, which the owner asked to remove. A capability now appears when the **user chooses it**, at its Peek. The smallest identifying state the Signal used to carry — Git's branch · worktree · change count, Claude Code's active/running state — is the first thing the Peek draws, not a separate level. Sensing is expressed by a sensed row leading the Context Capsule; the ambient Work Ring that used to share that job was removed on 2026-11-03 (#2663), and sensing is never expressed by a projection opening by itself.
 
 Peek may contain a concise summary and one or two contextual interactions, but it must remain subordinate to the Terminal.
 
@@ -85,14 +85,17 @@ The `+` affordance is the explicit entry for **peeking** at a capability from th
 
 Once the user has chosen a capability, Nession may materialize a temporary Peek adjacent to the capsule while keeping the resting capsule itself unchanged. The choice is the trigger — `+` is its explicit entry, and a sensed row is another way to the same choice.
 
-> **An observation is expressed once (owner decision, 2026-10-03; #1347 SC-34).**
+> **An observation is expressed once (owner decision, 2026-10-03; #1347 SC-34;
+> ambient form superseded 2026-11-03 by #2663).**
 > The 2026-10-03 review measured one fact — "the pane is running Claude Code" —
 > arriving three times: an auto-materialized Signal from the observed-command
 > path, the Work Ring from the work sense, and the Context Capsule. A sensed
-> observation now has exactly **one** ambient representation: the Work Ring.
-> The observed-command path stands down for a capability whose sensed work is
-> `working`, and the user's own step — tapping `+`, choosing a sensed row — is
-> what opens a Peek. `earned contextual presence` alone opens nothing.
+> observation has exactly **one** representation: the sensed row inside the
+> Context Capsule. The Work Ring was removed by the owner on 2026-11-03 (#2663)
+> — a foreground `claude`/`claude.exe` proves the CLI is open, not that a task
+> is working — so nothing is drawn ambiently around the resting composer. The
+> user's own step — tapping `+`, choosing a sensed row — is what opens a Peek.
+> `earned contextual presence` alone opens nothing.
 
 This refines the 2026-09-16 #748 decision:
 

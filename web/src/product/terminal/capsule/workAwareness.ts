@@ -9,9 +9,10 @@
  * 1. **WorkSummary schema**: Minimal interface — capability identity, status,
  *    and a human-readable summary. Plugins provide this; Nession owns rendering.
  *
- * 2. **Work Ring tokens/motion**: Partial ring (270° arc) around the `+` button.
- *    Uses `--motion-shell-duration` and `--motion-shell-ease` for consistency.
- *    Not a spinner, pulse, or count badge — a restrained static indicator.
+ * 2. **No ambient work marker** (#2663, superseding #1347's Work Ring): the
+ *    resting `+` is identical in every state. Work status, when a capability
+ *    can prove it, is disclosed only in the Context Capsule — never painted as
+ *    a ring, badge, spinner or pulse around the composer.
  *
  * 3. **Work ordering**: Active capabilities first, then relevant, then available.
  *    This matches the existing capability presence model.
@@ -24,8 +25,9 @@
  * - SC-13: Formal work-awareness state `quiet | working`
  * - SC-14: Working from active or passive capability sensing
  * - SC-15: `+` remains stable entry for work disclosure
- * - SC-16: Working indicated without replacing `+`
- * - SC-17: Work Ring is not spinner/counter/animation
+ * - SC-16: Working is never indicated by replacing `+`
+ * - SC-17: No ambient animation/counter/badge is drawn for work (#2663 removes
+ *   the static ring this SC originally described)
  */
 import type { CapabilityId } from '@/product/capability';
 
@@ -66,8 +68,8 @@ export interface WorkSignal {
  * Resolved work context — the aggregated work state the capsule consumes.
  *
  * The resolver takes work signals from all capabilities and produces a single
- * context: is anything working? what's the summary? The capsule uses this to
- * decide whether to show the work ring and what to display in the work overview.
+ * context: is anything working? what's the summary? The Context Capsule uses
+ * the summaries as sensed rows; the resting composer draws nothing (#2663).
  */
 export interface ResolvedWorkContext {
   status: WorkStatus;

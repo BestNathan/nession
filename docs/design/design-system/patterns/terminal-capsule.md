@@ -64,6 +64,13 @@ The exact ordering is experience-specific. The semantic regions are:
 | Primary action | Send / execute current intent |
 | Terminal-local capability | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view. (It is a Peek like any other since 2026-10-03 — the separate "accessory" family retired, `capability-emergence.md`.) |
 
+
+### The resting `+` carries no work state (#2663)
+
+The resting trigger is the same plain `+` in every lifecycle state — idle, Claude CLI open, or a capability reporting activity. No Work Ring, spinner, badge or other ambient work marker is painted, and none gets a reserved slot. The product owner rejected the static 270° Work Ring on 2026-11-03: it read like a frozen spinner and added noise without saying what was happening.
+
+Contextual identity, relevance and status appear only in the Context Capsule the user opens with `+`. A foreground `claude`/`claude.exe` proves the CLI is **open** in the Session, not that a task is running; it may set the capability's active presence, never a working claim. #1347's ring acceptance and the #1455/#1458 assertions that described it remain historical evidence; this rule supersedes them at the current owner, and a genuine activity signal added later enriches the disclosed details rather than the resting composer.
+
 ## Contextual capability presence
 
 Capabilities follow the lifecycle defined in [product-model.md](../../product-model.md):
@@ -123,7 +130,7 @@ full capability surface
 
 The Peek should answer what matters **now**. Full history, management, configuration, large diffs, graphs, forms, and complex multi-step workflows belong in Workspace.
 
-A Terminal-local capability such as Terminal Keys may stop at its Peek and have no Workspace projection. On App it is *context-sensed* — a touch device with a Terminal is what makes it relevant (SC-37) — and it is not work: it never lights the Work Ring.
+A Terminal-local capability such as Terminal Keys may stop at its Peek and have no Workspace projection. On App it is *context-sensed* — a touch device with a Terminal is what makes it relevant (SC-37) — and it is not work: it never claims a working state.
 
 ### The `+` opens the Context Capsule (owner decision, 2026-10-04)
 

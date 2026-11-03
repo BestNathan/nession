@@ -18,10 +18,12 @@ import { collectWorkSignals } from '@/app/workSignals';
  *
  * The input is the facts object `useCapsuleCapability` already derives, not a
  * Session: the Workspace panel and the capsule read the same observations, so
- * they are made once, and "the capability is active in the capsule but quiet
- * in the ring" cannot happen for the same session.
+ * they are made once, and the disclosed context cannot disagree with the
+ * capability list for the same session.
  *
  * Graceful degradation: no facts or no signals resolves to the quiet context.
+ * That is the current state for every Session (#2663): no capability reports a
+ * verified activity signal yet.
  */
 export function useWorkSignals(facts: CapabilityFacts | undefined): ResolvedWorkContext {
   return useMemo(() => resolveWorkContext(collectWorkSignals(facts)), [facts]);
