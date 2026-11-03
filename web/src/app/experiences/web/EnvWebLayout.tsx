@@ -6,6 +6,7 @@ import {
   EnvProfileDetail,
   EnvProfileEditor,
   refKey,
+  SessionBindingStatus,
   useEnvironmentWorkspace,
 } from '@/capabilities/env';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -20,7 +21,7 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
  */
 export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
   const env = useEnvironmentWorkspace(ctx.session?.session_id ?? null);
-  const { profiles, screen, selectedProfile } = env;
+  const { profiles, screen, selectedProfile, binding } = env;
 
   const detail = () => {
     if (screen.editor) {
@@ -45,8 +46,8 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           sourcedAtCreate={profiles.createKeys.has(refKey(selectedProfile))}
           hasSession={profiles.sessionId !== null}
           sessionActionPending={profiles.sessionActionPending}
-          onApply={() => void profiles.applyToSession(selectedProfile)}
-          onRemove={() => void profiles.removeFromSession(selectedProfile)}
+          onApply={() => void env.applyToSession(selectedProfile)}
+          onRemove={() => void env.removeFromSession(selectedProfile)}
           onEdit={screen.startEdit}
           onDuplicate={() => screen.startDuplicate(selectedProfile)}
           onDelete={() => env.deleteProfile(selectedProfile)}
@@ -64,10 +65,19 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
   };
 
   return (
-    <div data-testid="env-workspace" className="h-full min-h-0 overflow-hidden">
+    <div
+      data-testid="env-workspace"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+    >
+      <SessionBindingStatus
+        sessionId={profiles.sessionId}
+        binding={binding.binding}
+        loading={binding.loading}
+        error={binding.error}
+      />
       <div
         data-testid="env-web-layout"
-        className="grid h-full min-h-0 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
+        className="grid min-h-0 flex-1 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
       >
         <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <EnvironmentNavigator
