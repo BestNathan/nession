@@ -34,7 +34,9 @@ run(({ evidence }) => {
   if (!source.includes('tokio::time::timeout(deadline, upgrade)')) {
     throw new Error('one deadline must cover the TLS handshake and the WebSocket upgrade');
   }
-  const tlsAt = source.indexOf('acceptor.accept(stream)');
+  // `rustfmt` splits `acceptor.accept(stream)` across lines, so match the
+  // method call itself rather than one formatting of it.
+  const tlsAt = source.indexOf('.accept(stream)');
   const upgradeAt = source.indexOf('accept_hdr_async(');
   const deadlineAt = source.indexOf('tokio::time::timeout(deadline, upgrade)');
   if (tlsAt < 0 || upgradeAt < 0 || deadlineAt < 0 || tlsAt > deadlineAt || upgradeAt > deadlineAt) {
