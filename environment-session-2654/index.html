@@ -99,7 +99,7 @@ function bindingPanel(){
  const m=stateMeta(),count=Object.keys(effective(S.active).values).length;
  let out='<section class="status-summary '+m.tone+'" data-status="'+m.code+'"><div class="status-message"><span class="status-dot" aria-hidden="true"></span><div><div class="status-title">'+escape(m.title)+'</div><p class="status-desc">'+escape(m.description)+'</p></div></div><button class="status-toggle" id="statusToggle" aria-expanded="'+S.detailsOpen+'">Details '+(S.detailsOpen?'⌃':'⌄')+'</button></section>';
  if(S.detailsOpen)out+='<dl class="status-details"><div><dt>Desired revision</dt><dd>'+S.revision+'</dd></div><div><dt>Applied revision</dt><dd>'+(m.code==='unavailable'?'Unavailable':m.applied)+'</dd></div><div><dt>Managed keys</dt><dd>'+count+'</dd></div></dl>';
- if(m.reason)out+='<div class="status-note '+m.tone+'">'+escape(m.reason)+'</div>';
+ if(m.reason&&S.detailsOpen)out+='<div class="status-note '+m.tone+'">'+escape(m.reason)+'</div>';
  return out;
 }
 function header(eyebrow,title,desc,actions){return '<div class="eyebrow">'+eyebrow+'</div><div class="bar"><div><h1>'+escape(title)+'</h1><p class="sub">'+desc+'</p></div><div class="actions">'+actions+'</div></div>'}
