@@ -149,7 +149,7 @@ function render(){
  $("terminal").hidden=state.page!=="terminal";
  $("workspace").hidden=state.page!=="workspace";
  $("sessions-layer").hidden=state.page!=="sessions";
- $("session-heading").textContent=S().title;
+ $("session-heading").textContent=state.page==="sessions"?"Sessions":state.page==="workspace"?(state.detail&&state.capability==="claude"&&state.tab==="memory"?state.file:"Claude Code"):S().title;
  $("sessions-open").textContent=state.page==="terminal"?"☰":"‹";
  $("sessions-open").setAttribute("aria-label",state.page==="terminal"?"打开 Sessions":state.page==="workspace"?(state.detail?"返回 Memory 列表":"返回 Terminal"):"返回 Terminal");
  renderTerminal();renderContext();renderWorkspace();renderSessions();
