@@ -23,6 +23,77 @@ export interface CapsuleScrollTerminalPort {
   scrollToBottom(): void;
 }
 
+/** Finger travel (px) before a gesture's axis is decided (#2659). */
+const TOUCH_AXIS_SLOP_PX = 8;
+
+export type TouchScrollAxis = 'undecided' | 'vertical' | 'horizontal';
+
+/** One single-finger drag, tracked across its moves (#2659). */
+export interface TouchScrollGesture {
+  axis: TouchScrollAxis;
+  startX: number;
+  startY: number;
+  lastY: number;
+  /** Sub-cell vertical travel carried between moves. */
+  accumY: number;
+}
+
+export function beginTouchScrollGesture(clientX: number, clientY: number): TouchScrollGesture {
+  return { axis: 'undecided', startX: clientX, startY: clientY, lastY: clientY, accumY: 0 };
+}
+
+export interface TouchScrollStep {
+  /** This move belongs to the terminal's vertical scroll gesture. */
+  claimed: boolean;
+  axis: TouchScrollAxis;
+  /** Whole terminal lines, wheel convention: negative moves toward history. */
+  lines: number;
+}
+
+/**
+ * Advance one drag and decide what it means (#2659).
+ *
+ * The axis is locked once the finger leaves the slop circle, so a horizontal
+ * pager/selection gesture never leaks into terminal scrolling (and vice
+ * versa). Vertical travel accumulates *pixels* and only emits whole lines, so a
+ * high-frequency touch stream cannot turn each 1px move into a line jump — the
+ * remainder carries to the next move.
+ */
+export function advanceTouchScrollGesture(
+  gesture: TouchScrollGesture,
+  point: { clientX: number; clientY: number },
+  cellHeightPx: number,
+): TouchScrollStep {
+  if (gesture.axis === 'horizontal') {
+    gesture.lastY = point.clientY;
+    return { claimed: false, axis: 'horizontal', lines: 0 };
+  }
+  if (gesture.axis === 'undecided') {
+    const dx = Math.abs(point.clientX - gesture.startX);
+    const dy = Math.abs(point.clientY - gesture.startY);
+    if (Math.max(dx, dy) < TOUCH_AXIS_SLOP_PX) {
+      gesture.lastY = point.clientY;
+      return { claimed: false, axis: 'undecided', lines: 0 };
+    }
+    gesture.axis = dy >= dx ? 'vertical' : 'horizontal';
+    if (gesture.axis === 'horizontal') {
+      gesture.lastY = point.clientY;
+      gesture.accumY = 0;
+      return { claimed: false, axis: 'horizontal', lines: 0 };
+    }
+  }
+  const cell = cellHeightPx > 0 ? cellHeightPx : 16;
+  gesture.accumY += point.clientY - gesture.lastY;
+  gesture.lastY = point.clientY;
+  const steps = Math.trunc(gesture.accumY / cell);
+  if (steps === 0) {
+    return { claimed: true, axis: 'vertical', lines: 0 };
+  }
+  gesture.accumY -= steps * cell;
+  // A downward finger drag (positive accumY) pulls older content into view.
+  return { claimed: true, axis: 'vertical', lines: -steps };
+}
+
 export type ScrollMode = 'following' | 'history';
 
 /** Read published occlusion height from the capsule host (inline style wins). */
@@ -73,7 +144,7 @@ export class CapsuleOcclusionScroll {
   private occlusionListener: (() => void) | null = null;
   private touchStartListener: ((event: TouchEvent) => void) | null = null;
   private touchMoveListener: ((event: TouchEvent) => void) | null = null;
-  private touchLastY: number | null = null;
+  private touchGesture: TouchScrollGesture | null = null;
   private wasFollowing = true;
   private currentMode: ScrollMode = 'following';
   private observedDock: HTMLElement | null = null;
@@ -126,12 +197,34 @@ export class CapsuleOcclusionScroll {
     if (element) {
       this.terminal.attachCustomWheelHandler((event) => this.handleWheel(event));
 
-      this.touchStartListener = (event) => {
-        this.touchLastY = event.touches[0]?.clientY ?? null;
+      // Bound on the host in the capture phase, deliberately: xterm also binds
+      // touch handlers on its own element, and listeners on the same node run
+      // in registration order — so a listener there could only react after
+      // xterm had already scrolled `scrollTop`, which is the doubled movement
+      // #2659 was reported with. Capturing one level up lets a claimed drag be
+      // pre-empted before xterm's native touch scroll instead of fighting it.
+      // Touches on the capsule composer live in the same host and are ignored.
+      const insideTerminal = (event: Event): boolean => {
+        const target = event.target;
+        return target instanceof Node && (target === element || element.contains(target));
       };
-      this.touchMoveListener = (event) => this.handleTouchMove(event);
-      element.addEventListener('touchstart', this.touchStartListener, { capture: true, passive: true });
-      element.addEventListener('touchmove', this.touchMoveListener, { capture: true, passive: false });
+      this.touchStartListener = (event) => {
+        if (!insideTerminal(event)) {
+          return;
+        }
+        const touch = event.touches.length === 1 ? event.touches[0] : undefined;
+        this.touchGesture = touch
+          ? beginTouchScrollGesture(touch.clientX, touch.clientY)
+          : null;
+      };
+      this.touchMoveListener = (event) => {
+        if (!insideTerminal(event)) {
+          return;
+        }
+        this.handleTouchMove(event);
+      };
+      this.host.addEventListener('touchstart', this.touchStartListener, { capture: true, passive: true });
+      this.host.addEventListener('touchmove', this.touchMoveListener, { capture: true, passive: false });
     }
 
     updateFollowingFromScroll();
@@ -152,17 +245,16 @@ export class CapsuleOcclusionScroll {
     this.scrollDisposable = null;
     this.resizeDisposable?.dispose();
     this.resizeDisposable = null;
-    const element = this.terminal.element;
     this.terminal.attachCustomWheelHandler(() => true);
-    if (element && this.touchStartListener) {
-      element.removeEventListener('touchstart', this.touchStartListener, true);
+    if (this.touchStartListener) {
+      this.host.removeEventListener('touchstart', this.touchStartListener, true);
     }
-    if (element && this.touchMoveListener) {
-      element.removeEventListener('touchmove', this.touchMoveListener, true);
+    if (this.touchMoveListener) {
+      this.host.removeEventListener('touchmove', this.touchMoveListener, true);
     }
     this.touchStartListener = null;
     this.touchMoveListener = null;
-    this.touchLastY = null;
+    this.touchGesture = null;
     this.host.style.removeProperty('--nession-local-terminal-content-bottom-inset');
     delete this.host.dataset.terminalScrollMode;
   }
@@ -259,28 +351,85 @@ export class CapsuleOcclusionScroll {
     return Math.sign(deltaY) * Math.max(1, Math.round(Math.abs(deltaY) / pixelsPerLine));
   }
 
+  /**
+   * One-finger vertical drags scroll *the terminal*, whichever owner that is
+   * (#2659).
+   *
+   * The mode decides the owner, not a guess: Nession's local history scrolls
+   * xterm's buffer, while a mouse-reporting or alternate-screen application
+   * receives the same drag through xterm's own wheel path — the path a desktop
+   * wheel already takes. Before this, the non-local branch returned without
+   * doing anything at all, so those TUIs could not be scrolled by touch.
+   *
+   * A horizontal drag (pager, selection), a second finger, and a tap are not
+   * claimed: they never reach `preventDefault`, so their owners keep them.
+   */
   private handleTouchMove(event: TouchEvent): void {
-    if (!this.shouldScrollLocally()) {
+    if (event.touches.length !== 1) {
+      // A second finger is a page gesture (pinch/selection): stop xterm's
+      // native touch scroll from reading `touches[0]`, but do not prevent the
+      // browser's own pinch default.
+      this.touchGesture = null;
+      event.stopPropagation();
       return;
     }
-    const currentY = event.touches[0]?.clientY;
-    if (currentY === undefined || this.touchLastY === null) {
-      this.touchLastY = currentY ?? null;
+    const touch = event.touches[0];
+    if (!touch) {
       return;
     }
-    const deltaY = currentY - this.touchLastY;
-    this.touchLastY = currentY;
-    const lines = this.wheelLines(-deltaY, 0);
-    if (lines === 0) {
+    if (!this.touchGesture) {
+      this.touchGesture = beginTouchScrollGesture(touch.clientX, touch.clientY);
       return;
     }
-    if (lines < 0) {
-      this.enterHistory();
+    const step = advanceTouchScrollGesture(this.touchGesture, touch, this.getCellHeightForTouch());
+    if (!step.claimed) {
+      // Horizontal or still inside the slop: the pager, selection and tap
+      // owners keep the event, so nothing here stops or prevents it.
+      return;
     }
     event.preventDefault();
     event.stopPropagation();
-    this.terminal.scrollLines(lines);
-    this.syncModeFromViewport();
+    if (step.lines === 0) {
+      return;
+    }
+    if (this.shouldScrollLocally()) {
+      // xterm's native touch scroll is pre-empted above, so this handler is
+      // the only local scroller — no doubled movement, and the accumulated
+      // pixel remainder is what keeps a high-frequency drag from jumping.
+      if (step.lines < 0) {
+        this.enterHistory();
+      }
+      this.terminal.scrollLines(step.lines);
+      this.syncModeFromViewport();
+      return;
+    }
+    // Mouse-reporting and alternate-screen applications get the drag through
+    // xterm's own wheel path, exactly like a desktop wheel.
+    this.dispatchWheelFromTouch(touch, step.lines * this.getCellHeightForTouch());
+  }
+
+  private getCellHeightForTouch(): number {
+    const cellHeight = this.getCellHeight();
+    return cellHeight > 0 ? cellHeight : 16;
+  }
+
+  private dispatchWheelFromTouch(touch: Touch, deltaY: number): void {
+    const element = this.terminal.element;
+    if (!element) {
+      return;
+    }
+    const point = typeof document !== 'undefined' && typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(touch.clientX, touch.clientY)
+      : null;
+    const target = point && element.contains(point) ? point : element;
+    target.dispatchEvent(new WheelEvent('wheel', {
+      deltaY,
+      deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      bubbles: true,
+      cancelable: true,
+    }));
   }
 
   scheduleScrollToMarginBottom(): void {

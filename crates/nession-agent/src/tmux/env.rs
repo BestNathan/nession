@@ -147,7 +147,13 @@ struct StoredBinding {
     baseline: BTreeMap<String, Option<String>>,
     shell: Option<String>,
     adapter: bool,
+    /// Why no Session-local shell adapter was installed. Informational: an
+    /// unsupported shell is a real state, not a failed tmux mutation, so this
+    /// must not be read as an error.
+    #[serde(default)]
+    adapter_reason: Option<String>,
     status: String,
+    /// The last tmux mutation failure. Never the adapter's explanation.
     last_error: Option<String>,
     updated_at: u64,
 }
@@ -298,6 +304,7 @@ impl EnvManager {
                 baseline: BTreeMap::new(),
                 shell: None,
                 adapter: false,
+                adapter_reason: None,
                 status: STATUS_IN_SYNC.to_string(),
                 last_error: None,
                 updated_at: now_secs(),
@@ -452,12 +459,13 @@ impl EnvManager {
             baseline,
             shell: adapter.shell.clone(),
             adapter: adapter.supported,
+            adapter_reason: adapter.reason.clone(),
             status: if adapter.supported {
                 STATUS_IN_SYNC.to_string()
             } else {
                 STATUS_UNSUPPORTED_SHELL.to_string()
             },
-            last_error: adapter.reason.clone(),
+            last_error: None,
             updated_at: now_secs(),
         };
         self.save_state(session_name, &state).await
@@ -728,7 +736,13 @@ fn observed_from(state: &StoredBinding, shell_revision: Option<u64>) -> SessionE
         managed_keys: state.baseline.keys().cloned().collect(),
         shell: state.shell.clone(),
         shell_revision,
-        last_error: state.last_error.clone(),
+        // The reason an unsupported shell could not converge is useful to
+        // reporting, but it is not a tmux failure. Expose it only when there
+        // is no real error to show.
+        last_error: state
+            .last_error
+            .clone()
+            .or_else(|| state.adapter_reason.clone()),
     }
 }
 
@@ -1025,6 +1039,35 @@ mod tests {
     }
 
     #[test]
+    fn reordering_profiles_changes_the_effective_value() {
+        let forward = EnvManager::merge_snapshots(&[
+            snapshot("a.env", &[("MODE", "a")]),
+            snapshot("b.env", &[("MODE", "b")]),
+        ])
+        .expect("valid names merge");
+        let reverse = EnvManager::merge_snapshots(&[
+            snapshot("b.env", &[("MODE", "b")]),
+            snapshot("a.env", &[("MODE", "a")]),
+        ])
+        .expect("valid names merge");
+
+        assert_eq!(
+            forward.vars,
+            vec![("MODE".to_string(), "b".to_string())],
+            "the later profile must win"
+        );
+        assert_eq!(
+            reverse.vars,
+            vec![("MODE".to_string(), "a".to_string())],
+            "the same profiles in the opposite order must produce the other value"
+        );
+        assert_ne!(
+            forward.vars, reverse.vars,
+            "reordering the selection must change the materialized value"
+        );
+    }
+
+    #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_quote("a'b"), "'a'\\''b'");
         assert_eq!(shell_quote(""), "''");
@@ -1254,6 +1297,144 @@ mod tests {
             .is_some_and(|error| error.contains("refused by fake")));
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn materializing_a_binding_never_injects_terminal_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_with_a_base_value(dir.path());
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+
+        mgr.apply_binding(
+            "nession-no-input-sess",
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("X", "1")])],
+        )
+        .await
+        .expect("the fake accepts the overlay");
+
+        // A foreground TUI must receive no input when the binding changes.
+        // The mutation path may inspect tmux's environment and mutate it; it
+        // must never type into the pane.
+        let calls = fake.calls();
+        let commands: Vec<&str> = calls
+            .iter()
+            .filter_map(|call| call.first().map(String::as_str))
+            .collect();
+        assert!(
+            commands
+                .iter()
+                .all(|command| matches!(*command, "show-environment" | "set-environment")),
+            "a binding change wrote to the terminal instead of the environment: {calls:#?}"
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                *command,
+                "send-keys" | "paste-buffer" | "load-buffer" | "set-buffer"
+            )),
+            "a binding change injected terminal input: {calls:#?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unsupported_shell_reports_its_status_and_still_materializes_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_with_a_base_value(dir.path());
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+
+        let adapter = mgr
+            .install_shell_adapter("nession-fish-sess", Some("/usr/local/bin/fish"))
+            .await;
+        assert!(!adapter.supported, "fish has no proven adapter");
+        assert_eq!(adapter.shell.as_deref(), Some("fish"));
+
+        let overlay = EnvManager::merge_snapshots(&[snapshot("a.env", &[("X", "1")])]).unwrap();
+        mgr.record_created_binding(
+            "nession-fish-sess",
+            1,
+            &[profile_ref("a.env")],
+            &overlay,
+            BTreeMap::new(),
+            &adapter,
+        )
+        .await
+        .expect("the created binding is recorded");
+
+        let observed = mgr
+            .observe("nession-fish-sess")
+            .await
+            .expect("the binding is recorded");
+        assert_eq!(observed.status, STATUS_UNSUPPORTED_SHELL);
+
+        let outcome = mgr
+            .apply_binding(
+                "nession-fish-sess",
+                2,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("X", "2")])],
+            )
+            .await
+            .expect("the tmux layer still converges");
+        assert_eq!(
+            outcome.observed.status, STATUS_UNSUPPORTED_SHELL,
+            "an unsupported shell must report its real status, not success"
+        );
+        assert!(
+            fake.calls().iter().any(|call| call
+                == &vec![
+                    "set-environment".to_string(),
+                    "-t".to_string(),
+                    "nession-fish-sess".to_string(),
+                    "X".to_string(),
+                    "2".to_string()
+                ]),
+            "an unsupported shell still has to materialize the tmux layer: {:#?}",
+            fake.calls()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_recorded_binding_survives_an_agent_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_with_a_base_value(dir.path());
+        let state_dir = dir.path().join("state");
+
+        let mut first = EnvManager::new(state_dir.clone());
+        first.with_tmux(fake.dep());
+        first
+            .apply_binding(
+                "nession-restart-sess",
+                3,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("X", "1")])],
+            )
+            .await
+            .expect("the binding applies");
+        drop(first);
+
+        // A new process has only the durable state directory, not the old
+        // manager's memory.
+        let mut restarted = EnvManager::new(state_dir);
+        restarted.with_tmux(fake.dep());
+        let observed = restarted
+            .observe("nession-restart-sess")
+            .await
+            .expect("the binding survives an Agent restart");
+        assert_eq!(observed.applied_revision, 3);
+        assert_eq!(observed.managed_keys, vec!["X".to_string()]);
+
+        let live = restarted.live_binding_states().await;
+        assert!(
+            live.iter()
+                .any(|(name, state)| name == "nession-restart-sess" && state.applied_revision == 3),
+            "the restart report must include the recovered binding: {live:#?}"
+        );
+    }
+
     // ── the shell adapter, against a real shell ──────────────────────────────
 
     /// Spawn the generated adapter in a real interactive shell and return the
@@ -1402,6 +1583,100 @@ mod tests {
             "2",
             "the shell reported the revision it applied"
         );
+
+        drop(stdin);
+        let _ = child.wait().await;
+    }
+
+    /// A child started before the binding changes keeps the environment it was
+    /// born with. The shell converges at its next prompt; processes already
+    /// running are not rewritten.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_running_child_keeps_its_environment_when_the_binding_changes() {
+        let shell = "/bin/bash";
+        assert!(
+            std::path::Path::new(shell).exists(),
+            "bash is required for this test"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let adapter = mgr
+            .install_shell_adapter("nession-child-sess", Some(shell))
+            .await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        let session_dir = mgr.session_dir("nession-child-sess");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
+
+        // The child inherits `one` at fork. It reports the value it was born
+        // with after the binding has been replaced in the shell.
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "(sleep 2; echo \"CHILD:$NESSION_TEST\") & echo \"CHILD-STARTED\"",
+            "CHILD-STARTED",
+        )
+        .await;
+        assert!(line.contains("CHILD-STARTED"), "{line}");
+
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"VAL2:$NESSION_TEST\"",
+            "VAL2:",
+        )
+        .await;
+        assert!(
+            line.contains("VAL2:two"),
+            "the interactive shell did not converge: {line}"
+        );
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "the running child never reported its inherited environment"
+            );
+            let line = tokio::time::timeout(remaining, lines.next_line())
+                .await
+                .expect("the child reports within the deadline")
+                .expect("the shell stdout is readable")
+                .expect("the shell is still running");
+            if let Some(value) = line.split("CHILD:").nth(1) {
+                assert!(
+                    value.contains("one"),
+                    "a running child's environment was rewritten: {line}"
+                );
+                break;
+            }
+        }
 
         drop(stdin);
         let _ = child.wait().await;

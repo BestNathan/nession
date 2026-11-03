@@ -105,6 +105,10 @@ export function FixtureClipboard() {
     };
     const instance = new TerminalController(session, () => transport, {
       rendererType: 'canvas',
+      // The orchestrated product surface defaults to local-buffer scrollback
+      // (`useTerminalOrchestration`); the fixture must mount the same scroll
+      // ownership the touch Cases exercise (#2659).
+      scrollbackMode: 'local-buffer',
       events,
     });
     instance.attach(host);
