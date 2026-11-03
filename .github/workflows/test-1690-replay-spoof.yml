@@ -1,0 +1,18 @@
+name: Metrics / Replay Request
+
+# #1690 SC-09: deliberately spoof the DISPLAY NAME from an unprivileged
+# off-main branch, but not the canonical workflow path/ID. Negative test ONLY.
+on:
+  push:
+    branches: [test/1690-replay-spoofed-workflow-20261103]
+
+permissions:
+  contents: read
+
+jobs:
+  untrusted-producer:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/test/1690-replay-spoofed-workflow-20261103'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Emit only a non-privileged test source
+        run: echo 'untrusted source with spoofed workflow display name; no Store token, no refs mutated'
