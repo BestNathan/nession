@@ -233,6 +233,9 @@ jobs:
           EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
           EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
+          EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
+          EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
+          EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
           EXPECTED_PROTO_SHA: ${{ needs.build.outputs.prototype_sha }}
           EXPECTED_PROTO_MANIFEST_SHA256: ${{ needs.build.outputs.prototype_manifest_sha256 }}
           EXPECTED_PROTO_GALLERY_SHA256: ${{ needs.build.outputs.prototype_gallery_sha256 }}
