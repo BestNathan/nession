@@ -34,4 +34,6 @@
 
 | Claude Code Auto Memory / Session → Repository contextual reader | [#2689](https://github.com/BestNathan/nession/issues/2689) | [Interactive HTML](claude-memory-2689/index.html) · [Scenario & fidelity](claude-memory-2689/README.md) |
 
+| Mobile Terminal Keys / Quick Commands (chords, Insert vs Run) | [#2710](https://github.com/BestNathan/nession/issues/2710) | [Interactive HTML](terminal-keys-commands-2710/index.html) · [Scenario & fidelity](terminal-keys-commands-2710/README.md) |
+
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
