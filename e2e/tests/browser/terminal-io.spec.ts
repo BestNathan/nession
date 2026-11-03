@@ -31,6 +31,12 @@ import {
   lastNonEmptyLine,
   tapCapsuleArrowUp
 } from '../../helpers/terminalRegression';
+import {
+  cancelTerminalTouch,
+  endTerminalTouch,
+  moveTerminalTouch,
+  startTerminalTouch,
+} from '../../helpers/terminalTouch';
 
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
@@ -1020,5 +1026,176 @@ test.describe('Terminal clipboard protocols', () => {
     await expect(page.getByTestId('terminal-clipboard-notice')).toHaveCount(0);
     const read = await page.evaluate(() => navigator.clipboard.readText());
     expect(read).toBe('gesture payload');
+  });
+});
+
+/**
+ * The terminal grid's centre, high enough to stay clear of the capsule.
+ *
+ * The gesture is touch-only, but the coordinates are ordinary client pixels:
+ * the synthetic `Touch` objects below are dispatched on the real element at
+ * this point, so the App edge band and the capsule's work-surface handoff see
+ * the same geometry a finger would.
+ */
+async function terminalGridCenter(
+  page: import('@playwright/test').Page,
+): Promise<{ x: number; y: number }> {
+  const box = await page.locator('.xterm-screen').boundingBox();
+  if (!box) {
+    throw new Error('the terminal grid has no box');
+  }
+  return { x: box.x + box.width / 2, y: box.y + box.height * 0.4 };
+}
+
+test.describe('Terminal touch direction pad (#2657)', () => {
+  test('a stationary long-press arms, sends one arrow, repeats and releases', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const sessionName = `e2e-direction-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'normal');
+
+    const center = await terminalGridCenter(page);
+    const before = await readViewport(page);
+    await startTerminalTouch(page, center);
+    await page.waitForTimeout(450);
+
+    const pad = page.getByTestId('terminal-direction-pad');
+    await expect(pad).toHaveAttribute('data-phase', 'armed');
+    await expect(pad).toHaveAttribute('data-direction', 'none');
+    expect(await countInBuffer(page, '^[[A')).toBe(0);
+
+    // Inside the centre dead zone the dial appears but no key is sent.
+    await moveTerminalTouch(page, { x: center.x, y: center.y - 12 });
+    await expect(pad).toHaveAttribute('data-direction', 'none');
+    expect(await countInBuffer(page, '^[[A')).toBe(0);
+
+    await moveTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await expect(pad).toHaveAttribute('data-direction', 'up');
+    await expect.poll(async () => countInBuffer(page, '^[[A'), { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(1);
+    const afterOne = await countInBuffer(page, '^[[A');
+
+    // Holding still in the chosen direction repeats on the pad's own clock.
+    await page.waitForTimeout(1_300);
+    await expect.poll(async () => countInBuffer(page, '^[[A'), { timeout: 5_000 })
+      .toBeGreaterThan(afterOne);
+
+    // The owned drag never scrolled the terminal: an upward leak would have
+    // entered history and moved the viewport back.
+    expect((await readViewport(page)).viewportY).toBeGreaterThanOrEqual(before.viewportY);
+    expect(await readScrollMode(page)).toBe('following');
+
+    await endTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await expect(pad).toHaveCount(0);
+    await stopPtyProbe(page);
+  });
+
+  test('a quick swipe still scrolls and never sends an arrow', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const sessionName = `e2e-direction-swipe-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, 'seq 1 80');
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'normal');
+
+    const center = await terminalGridCenter(page);
+    const before = await readViewport(page);
+    await startTerminalTouch(page, center);
+    // No hold: the pending touch is surrendered as soon as it travels.
+    await moveTerminalTouch(page, { x: center.x, y: center.y + 70 });
+    await endTerminalTouch(page, { x: center.x, y: center.y + 70 });
+
+    await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
+    expect(await countInBuffer(page, '^[[A')).toBe(0);
+    await expect.poll(async () => (await readViewport(page)).viewportY, { timeout: 5_000 })
+      .toBeLessThan(before.viewportY);
+    await stopPtyProbe(page);
+  });
+
+  test('touchcancel ends the gesture without further keys', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const sessionName = `e2e-direction-cancel-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'normal');
+
+    const center = await terminalGridCenter(page);
+    await startTerminalTouch(page, center);
+    await page.waitForTimeout(450);
+    await moveTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await expect.poll(async () => countInBuffer(page, '^[[A'), { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(1);
+    const beforeCancel = await countInBuffer(page, '^[[A');
+
+    await cancelTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
+    await page.waitForTimeout(1_300);
+    expect(await countInBuffer(page, '^[[A')).toBe(beforeCancel);
+
+    await stopPtyProbe(page);
+  });
+
+  test('the pad honours application cursor-key mode (DECCKM)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const sessionName = `e2e-direction-appcursor-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'appcursor');
+
+    const center = await terminalGridCenter(page);
+    await startTerminalTouch(page, center);
+    await page.waitForTimeout(450);
+    await moveTerminalTouch(page, { x: center.x, y: center.y + 40 });
+
+    await expect.poll(async () => countInBuffer(page, '^[OA'), { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(1);
+    expect(await countInBuffer(page, '^[[A')).toBe(0);
+
+    await endTerminalTouch(page, { x: center.x, y: center.y + 40 });
+    await stopPtyProbe(page);
+  });
+
+  test('a transport disconnect cancels the armed pad and stops its clock', async ({ page, context }, testInfo) => {
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const sessionName = `e2e-direction-offline-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await submitTerminalCommand(page, ptyProbeInstaller());
+    await startPtyProbe(page, 'normal');
+
+    const center = await terminalGridCenter(page);
+    await startTerminalTouch(page, center);
+    await page.waitForTimeout(450);
+    await moveTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await expect.poll(async () => countInBuffer(page, '^[[A'), { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(1);
+    const beforeDrop = await countInBuffer(page, '^[[A');
+
+    try {
+      await context.setOffline(true);
+      await expect(page.getByTestId('terminal-connecting')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
+
+      // The finger is still down, but a disconnected pad must not keep
+      // repeating into a transport that is no longer there.
+      await page.waitForTimeout(1_300);
+      expect(await countInBuffer(page, '^[[A')).toBe(beforeDrop);
+    } finally {
+      await context.setOffline(false);
+    }
+
+    await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+    await endTerminalTouch(page, { x: center.x, y: center.y - 40 });
+    await stopPtyProbe(page);
   });
 });

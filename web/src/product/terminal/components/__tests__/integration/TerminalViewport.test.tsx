@@ -1,17 +1,49 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import type { TerminalSession } from '@/product/terminal/state/session';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 
-function makeController(): TerminalController {
+function makeController() {
   return {
     attach: vi.fn(),
     detach: vi.fn(),
     registerLinkMatcher: vi.fn(() => null),
-  } as unknown as TerminalController;
+    sendPhysKey: vi.fn(),
+    isObserverReadOnly: false,
+  } as unknown as TerminalController & {
+    sendPhysKey: ReturnType<typeof vi.fn>;
+    isObserverReadOnly: boolean;
+  };
+}
+
+function fakeTouchEvent(
+  type: 'touchstart' | 'touchmove' | 'touchend',
+  point: { identifier: number; clientX: number; clientY: number },
+): Event {
+  const touch = { ...point, target: document.body } as unknown as Touch;
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  const list = type === 'touchend' ? [] : [touch];
+  Object.defineProperty(event, 'touches', { value: list });
+  Object.defineProperty(event, 'targetTouches', { value: list });
+  Object.defineProperty(event, 'changedTouches', { value: [touch] });
+  return event;
+}
+
+function setRect(element: Element): void {
+  element.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 800,
+    right: 400,
+    bottom: 800,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
 }
 
 // xterm.open() requires window.matchMedia in jsdom; ResizeObserver likewise,
@@ -94,7 +126,7 @@ describe('TerminalViewport', () => {
 
     const el = container.firstElementChild;
     expect(el).not.toBeNull();
-    expect(el).toHaveClass('h-full', 'w-full', 'bg-terminal-background');
+    expect(el).toHaveClass('h-full', 'w-full', 'relative', 'bg-terminal-background');
   });
 
   it('reserves the capsule occlusion inside the xterm viewport', () => {
@@ -114,6 +146,57 @@ describe('TerminalViewport', () => {
 
     unmount();
     expect(controller.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('arms the direction pad on a hold and forwards semantic arrows', () => {
+    vi.useFakeTimers();
+    const controller = makeController();
+    const { container } = render(<TerminalViewport controller={controller} />);
+    const viewport = container.firstElementChild as HTMLElement;
+    setRect(viewport);
+
+    act(() => {
+      viewport.dispatchEvent(fakeTouchEvent('touchstart', { identifier: 1, clientX: 100, clientY: 300 }));
+      vi.advanceTimersByTime(380);
+    });
+
+    expect(screen.getByTestId('terminal-direction-pad')).toBeInTheDocument();
+
+    act(() => {
+      viewport.dispatchEvent(fakeTouchEvent('touchmove', { identifier: 1, clientX: 100, clientY: 260 }));
+    });
+
+    expect(controller.sendPhysKey).toHaveBeenCalledWith({ semanticKey: 'ArrowUp' });
+
+    act(() => {
+      viewport.dispatchEvent(fakeTouchEvent('touchend', { identifier: 1, clientX: 100, clientY: 260 }));
+    });
+    expect(screen.queryByTestId('terminal-direction-pad')).toBeNull();
+
+    vi.useRealTimers();
+  });
+
+  it('defers arming inside the App shell edge band', () => {
+    vi.useFakeTimers();
+    const controller = makeController();
+    const { container } = render(
+      <TerminalViewport
+        controller={controller}
+        touchEdgeReservation={(_target, clientX) => clientX < 28}
+      />,
+    );
+    const viewport = container.firstElementChild as HTMLElement;
+    setRect(viewport);
+
+    act(() => {
+      viewport.dispatchEvent(fakeTouchEvent('touchstart', { identifier: 1, clientX: 10, clientY: 300 }));
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(screen.queryByTestId('terminal-direction-pad')).toBeNull();
+    expect(controller.sendPhysKey).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
   });
 
   it('sends one typed keystroke exactly once under StrictMode (#1096)', async () => {

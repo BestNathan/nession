@@ -2,6 +2,8 @@ import { useRef, useLayoutEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 import { workspaceFileLinkMatcher } from '@/product/terminal/workspaceFileLinks';
+import { DirectionPadOverlay } from './DirectionPadOverlay';
+import { useTerminalDirectionPad } from '../hooks/useTerminalDirectionPad';
 
 /**
  * The terminal well's box and inset, exported so a second xterm mount cannot
@@ -30,7 +32,7 @@ import { workspaceFileLinkMatcher } from '@/product/terminal/workspaceFileLinks'
  * would be the anti-pattern `terminal-surface.md` names outright: "shrink the
  * terminal grid with large fixed padding to reserve hypothetical UI".
  */
-export const terminalViewportBoxClass = 'h-full w-full box-border bg-terminal-background';
+export const terminalViewportBoxClass = 'relative h-full w-full box-border bg-terminal-background';
 
 /** The Experience inset, as a class: `px` plus top only — see the note above. */
 export const terminalViewportInsetClass =
@@ -47,13 +49,25 @@ export const terminalViewportInsetClass =
 export function TerminalViewport({
   controller,
   onOpenWorkspaceFile,
+  inputDisabled = false,
+  touchEdgeReservation,
 }: {
   controller: TerminalController | null;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  /** False while this client may not send input (observer/reconnect/switch). */
+  inputDisabled?: boolean;
+  /** The App shell's reserved edge band, supplied by the App layer. */
+  touchEdgeReservation?: (target: EventTarget | null, clientX: number) => boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const linkHandlerRef = useRef(onOpenWorkspaceFile);
   linkHandlerRef.current = onOpenWorkspaceFile;
+  const directionPad = useTerminalDirectionPad({
+    containerRef,
+    controller,
+    inputDisabled,
+    touchEdgeReservation,
+  });
 
   // Mount/unmount only. A transport swap is pushed to the controller by the
   // SessionRuntime itself (#1309) — no epoch prop, no React-driven rewire.
@@ -81,6 +95,11 @@ export function TerminalViewport({
       data-terminal-viewport
       className={cn(terminalViewportBoxClass, terminalViewportInsetClass)}
       style={{ paddingBottom: 'var(--nession-local-terminal-content-bottom-inset, 0px)' }}
-    />
+    >
+      {/* React owns this child; xterm mounts imperatively beside it. The
+          overlay is pointer-events-none and above the grid (z-20), so it can
+          never become the touch target or steal a selection. */}
+      <DirectionPadOverlay view={directionPad} />
+    </div>
   );
 }

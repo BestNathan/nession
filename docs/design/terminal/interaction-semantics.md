@@ -46,4 +46,17 @@ A single-finger vertical drag scrolls the terminal, and which answer that is com
 
 Vertical travel accumulates in pixels and emits whole lines (16px cell = one line in the fixtures), carrying the remainder: a high-frequency touch stream must not turn each 1px move into a line jump. Sub-slop movement before the axis is decided is absorbed.
 
+## Touch direction pad (#2657)
+
+A stationary single-finger hold inside the Terminal viewport arms a compact four-direction dial. The gesture is a **terminal input accelerator**, not cursor repositioning: each direction is forwarded as the semantic key a physical arrow would produce, through `TerminalInteractionController.sendSemanticKey` (via `TerminalController.sendPhysKey`). The pad never writes ANSI bytes, fakes a `KeyboardEvent`, moves the local xterm cursor, or bypasses the input lease, so application cursor-key mode (DECCKM), `onData`, the observer gate and the existing Terminal Keys path all apply unchanged.
+
+- **Before arming** (≈380 ms): nothing is prevented or stopped. A tap, a quick swipe, native scrolling, the App's edge pager and text selection keep their gestures. A pending touch that travels past ~12 px is surrendered to whichever native gesture won.
+- **After arming**: the pad claims the tracked `Touch.identifier` in the shared ownership registry and consumes every move, end and cancel for that finger. It registers a non-passive capture-phase move listener, calls `preventDefault()` and `stopImmediatePropagation()`, suppresses the compatibility click, and locks the terminal scrollback offset for the gesture. `useSwipePager` and `CapsuleOcclusionScroll` consult the registry rather than relying on listener registration order, so a shell or scroll owner that started earlier stands down.
+- **Direction**: a ~24 px enter / ~17 px exit centre dead zone and a 1.28 axis preference stop diagonal chatter. Returning to the centre stops repetition; leaving it again emits one new key.
+- **Repeat**: the clock is anchored to the last **emitted key**, not the last touchmove, at 1/2/4/8 keys per second across ~48/76/108 px with ±5 px band hysteresis. A speed change re-anchors the next tick and never emits an immediate extra key; a late timer emits at most one key, so a suspended tab or a frame stall cannot produce a burst.
+- **Release/cancel**: end, cancel, a lost input lease (observer/reconnect/route switch), visibility loss, `pagehide`, a second finger or unmount stops the clock, drops the claim and removes the guide. The browser's long-press callout is suppressed only while the pad owns the finger; ordinary long-press semantics and pinch are not disabled globally.
+- **Target lifetime**: a native touch keeps targeting the element that received `touchstart`. Production touches land on xterm's canvas/screen node, which persists across buffer updates; the adapter also watches the initiating target and cancels if it leaves the document (for example a renderer swap), rather than leaving a gesture with a lost end.
+
+The dial is transient and non-interactive (`pointer-events-none`); Terminal Keys remain the visible, keyboard-reachable fallback. The App's 28 px edge band stays shell navigation's: the App layer supplies the exclusion predicate, and the pad never arms inside it.
+
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).

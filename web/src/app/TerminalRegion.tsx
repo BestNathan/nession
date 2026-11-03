@@ -3,6 +3,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
+import { appEdgeBandReservation } from './experiences/app/edgeBand';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type {
   CapsuleCapabilityProjection,
@@ -109,6 +110,8 @@ export function TerminalRegion({
             terminalState={terminalState}
             viewportReady={viewportReady}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
+            inputDisabled={inputDisabled}
+            touchEdgeReservation={appEdgeBandReservation}
           />
         </TerminalSurface>
       )}

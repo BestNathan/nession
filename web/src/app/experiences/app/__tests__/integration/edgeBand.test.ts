@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { edgeBandSide, edgeOwnsDrag } from '../../edgeBand';
+import { appEdgeBandReservation, edgeBandSide, edgeOwnsDrag } from '../../edgeBand';
 import { EDGE_BAND_PX } from '../../gesture';
 
 /** A 390px App — the App's narrowest shipping portrait width. */
@@ -90,5 +90,62 @@ describe('edgeOwnsDrag', () => {
   it('treats a zero delta as no direction at all', () => {
     expect(edgeOwnsDrag('left', 0)).toBe(false);
     expect(edgeOwnsDrag('right', 0)).toBe(false);
+  });
+});
+
+describe('appEdgeBandReservation', () => {
+  function shell(rect: { left: number; right: number }): HTMLDivElement {
+    const element = document.createElement('div');
+    element.dataset.experience = 'app';
+    element.getBoundingClientRect = () => ({
+      left: rect.left,
+      right: rect.right,
+      top: 0,
+      bottom: 800,
+      width: rect.right - rect.left,
+      height: 800,
+      x: rect.left,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    document.body.appendChild(element);
+    return element;
+  }
+
+  it('reserves only the shell band for a target inside the app experience', () => {
+    const root = shell(PHONE);
+    const child = document.createElement('div');
+    root.appendChild(child);
+
+    expect(appEdgeBandReservation(child, EDGE_BAND_PX)).toBe(true);
+    expect(appEdgeBandReservation(child, PHONE.right - EDGE_BAND_PX)).toBe(true);
+    expect(appEdgeBandReservation(child, EDGE_BAND_PX + 1)).toBe(false);
+    expect(appEdgeBandReservation(child, PHONE.right / 2)).toBe(false);
+
+    root.remove();
+  });
+
+  it('resolves a text target through its parent element', () => {
+    const root = shell(PHONE);
+    const text = document.createTextNode('terminal');
+
+    expect(appEdgeBandReservation(text, 4)).toBe(false);
+
+    const parent = document.createElement('span');
+    parent.appendChild(text);
+    root.appendChild(parent);
+    expect(appEdgeBandReservation(text, 4)).toBe(true);
+
+    root.remove();
+  });
+
+  it('reserves nothing outside an app experience', () => {
+    const loose = document.createElement('div');
+    document.body.appendChild(loose);
+
+    expect(appEdgeBandReservation(loose, 2)).toBe(false);
+    expect(appEdgeBandReservation(null, 2)).toBe(false);
+
+    loose.remove();
   });
 });
