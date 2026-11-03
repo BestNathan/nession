@@ -806,18 +806,20 @@ test.describe('Terminal clipboard protocols', () => {
     await page.evaluate(() => {
       const host = window as unknown as {
         __realClipboard: Clipboard;
-        __copyProbe: { texts: string[]; executed: boolean | null; commands: number };
+        __copyProbe: { selected: string[]; executed: boolean | null; commands: number };
       };
       host.__realClipboard = navigator.clipboard;
-      host.__copyProbe = { texts: [], executed: null, commands: 0 };
+      host.__copyProbe = { selected: [], executed: null, commands: 0 };
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
       const original = document.execCommand.bind(document);
       document.execCommand = (command, showUI, value) => {
         if (command !== 'copy') { return original(command, showUI, value); }
         host.__copyProbe.commands += 1;
-        const snoop = (event: Event) => {
-          const data = (event as ClipboardEvent).clipboardData;
-          host.__copyProbe.texts.push(data ? data.getData('text/plain') : '');
+        // copy-to-clipboard selects a hidden span and lets the browser's
+        // default copy action carry it; capture that selection (the old
+        // scoped-listener path set clipboardData explicitly instead).
+        const snoop = () => {
+          host.__copyProbe.selected.push(document.getSelection()?.toString() ?? '');
         };
         document.addEventListener('copy', snoop, true);
         try {
@@ -839,7 +841,7 @@ test.describe('Terminal clipboard protocols', () => {
     const result = await page.evaluate(async () => {
       const host = window as unknown as {
         __realClipboard: Clipboard;
-        __copyProbe: { texts: string[]; executed: boolean | null; commands: number };
+        __copyProbe: { selected: string[]; executed: boolean | null; commands: number };
       };
       const read = await host.__realClipboard.readText();
       return {
@@ -848,7 +850,7 @@ test.describe('Terminal clipboard protocols', () => {
         dismissed: document.querySelector('[data-testid="terminal-clipboard-notice"]') === null,
       };
     });
-    expect(result.probe.texts).toEqual(['http copy payload']);
+    expect(result.probe.selected).toEqual(['http copy payload']);
     expect(result.probe.executed).toBe(true);
     expect(result.probe.commands).toBe(1);
     expect(result.read).toBe('http copy payload');

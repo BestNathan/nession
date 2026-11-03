@@ -409,14 +409,12 @@ export class TerminalController {
   }
 
   /**
-   * Complete a blocked OSC 52 copy from an explicit user gesture (the "Copy"
-   * action in the surface notice). Returns whether the browser accepted it.
+   * Write text through the automatic (`navigator.clipboard`) path. Returns
+   * whether the browser accepted it.
    *
-   * This is the async path. On an ordinary HTTP origin there is no
-   * `navigator.clipboard` to call (#2614): the surface must ask
-   * {@link canWriteClipboardProgrammatically} first and use
-   * {@link copyClipboardTextFromGesture} in the click instead of spending the
-   * gesture on a call that cannot succeed.
+   * A remote OSC 52 emission cannot manufacture user activation, so this is
+   * not the blocked-copy action's path; the surface's explicit Copy gesture
+   * uses {@link copyClipboardTextFromGesture}, which owns the HTTP fallback.
    */
   async copyClipboardText(text: string): Promise<boolean> {
     const effects = this.clipboardEffects;
@@ -438,13 +436,14 @@ export class TerminalController {
   }
 
   /**
-   * Copy text synchronously from inside the activating click (#2614), for
-   * origins without the async API. Must be called in the same task as the
-   * event; `false` means the browser refused and the surface must offer the
+   * Copy text from inside the activating click (#2614), through the shared
+   * browser clipboard owner (#2656). Must be called in the same task as the
+   * event: the shared owner's HTTP branch runs the DOM copy before its Promise
+   * settles. `false` means the browser refused and the surface must offer the
    * selectable-text path instead of claiming a copy.
    */
-  copyClipboardTextFromGesture(text: string): boolean {
-    return this.clipboardEffects?.writeTextFromGesture?.(text) ?? false;
+  async copyClipboardTextFromGesture(text: string): Promise<boolean> {
+    return (await this.clipboardEffects?.writeTextFromGesture?.(text)) ?? false;
   }
 
   /**

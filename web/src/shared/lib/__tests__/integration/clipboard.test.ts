@@ -1,54 +1,83 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { copyToClipboard } from '@/shared/lib/clipboard';
 
-describe('copyToClipboard', () => {
-  const originalExecCommand = document.execCommand;
+const { copy } = vi.hoisted(() => ({
+  copy: vi.fn<(text: string, options?: unknown) => Promise<boolean>>(),
+}));
 
-  afterEach(() => {
-    // Restore navigator.clipboard and document.execCommand.
-    delete (navigator as { clipboard?: unknown }).clipboard;
-    document.execCommand = originalExecCommand;
-    vi.restoreAllMocks();
+vi.mock('copy-to-clipboard', () => ({ default: copy }));
+
+import {
+  asyncClipboardWriteAvailable,
+  copyText,
+  copyToClipboard,
+} from '@/shared/lib/clipboard';
+
+/** Present an async Clipboard API on the (otherwise API-less) jsdom navigator. */
+function withClipboardApi(): void {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: vi.fn(async () => {}) },
+  });
+}
+
+function withoutClipboardApi(): void {
+  Reflect.deleteProperty(navigator, 'clipboard');
+}
+
+function withSecureContext(value: boolean): void {
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value });
+}
+
+afterEach(() => {
+  withoutClipboardApi();
+  Reflect.deleteProperty(window, 'isSecureContext');
+  copy.mockReset();
+});
+
+describe('programmatic capability (#2614, #2656)', () => {
+  it('is unavailable when the origin exposes no clipboard API (plain HTTP)', () => {
+    withSecureContext(false);
+    expect(asyncClipboardWriteAvailable()).toBe(false);
   });
 
-  it('uses the async Clipboard API when available', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
-
-    await copyToClipboard('hello');
-
-    expect(writeText).toHaveBeenCalledWith('hello');
+  it('is available only with the API on a secure origin', () => {
+    withSecureContext(true);
+    withClipboardApi();
+    expect(asyncClipboardWriteAvailable()).toBe(true);
+    withSecureContext(false);
+    expect(asyncClipboardWriteAvailable()).toBe(false);
   });
 
-  it('falls back to execCommand when navigator.clipboard is unavailable', async () => {
-    Object.defineProperty(navigator, 'clipboard', {
-      value: undefined,
-      configurable: true,
-    });
+  it('treats a missing writeText on a secure origin as unavailable', () => {
+    withSecureContext(true);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {} });
+    expect(asyncClipboardWriteAvailable()).toBe(false);
+  });
+});
 
-    let captured = '';
-    document.execCommand = vi.fn().mockImplementation(() => {
-      captured = document.body.querySelector('textarea')?.value ?? '';
-      return true;
-    });
-
-    await copyToClipboard('hello');
-
-    expect(document.execCommand).toHaveBeenCalledWith('copy');
-    expect(captured).toBe('hello');
+describe('shared browser clipboard owner (#2656)', () => {
+  it('invokes the library synchronously, inside the gesture task', () => {
+    copy.mockResolvedValueOnce(true);
+    const pending = copyText('hello');
+    // The call is the activation contract: on plain HTTP the library runs its
+    // execCommand path before its Promise settles, so an unrelated await
+    // before this call would already have spent the gesture.
+    expect(copy).toHaveBeenCalledWith('hello', { fallbackToPrompt: false });
+    return expect(pending).resolves.toBe(true);
   });
 
-  it('rejects when the fallback execCommand fails', async () => {
-    Object.defineProperty(navigator, 'clipboard', {
-      value: undefined,
-      configurable: true,
-    });
-    document.execCommand = vi.fn().mockReturnValue(false);
+  it('reports a refused copy as false rather than success', async () => {
+    copy.mockResolvedValueOnce(false);
+    await expect(copyText('hello')).resolves.toBe(false);
+  });
 
+  it('keeps the rejecting UI contract over the library result', async () => {
+    copy.mockResolvedValueOnce(false);
     await expect(copyToClipboard('hello')).rejects.toThrow();
+
+    copy.mockResolvedValueOnce(true);
+    await expect(copyToClipboard('hello')).resolves.toBeUndefined();
+    expect(copy).toHaveBeenCalledWith('hello', { fallbackToPrompt: false });
   });
 });
