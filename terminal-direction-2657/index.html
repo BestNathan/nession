@@ -72,7 +72,7 @@ function display(){
  guide.querySelectorAll('.arrow').forEach(function(el){el.classList.toggle('active',!!gesture&&gesture.dir===el.dataset.dir)});
  guide.querySelectorAll('.speed-pip').forEach(function(el,i){el.classList.toggle('on',!!gesture&&!!gesture.dir&&i<=gesture.gear)});
  document.getElementById('centerMain').textContent=gesture&&gesture.dir?gesture.rate+'/s':'·';
- document.getElementById('centerSub').textContent=gesture&&gesture.dir?'REPEAT':'READY';
+ document.getElementById('centerSub').textContent=gesture&&gesture.dir?'KEYS · '+count:'READY';
  document.getElementById('gestureHint').textContent=gesture&&gesture.dir?symbol[gesture.dir]+' · '+gesture.rate+' 次/秒':'移出中心选择方向';
  originDot.classList.toggle('show',visible&&!!gesture&&gesture.markerOffset);
  document.getElementById('tip').textContent=observer?'Observer mode: input disabled':offline?'Offline: input disabled':'按住终端 → 方向盘 → 拖动';
