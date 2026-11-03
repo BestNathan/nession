@@ -132,6 +132,74 @@ describe('useEnvironmentScreen', () => {
   });
 });
 
+describe('useEnvironmentScreen — Session-first draft', () => {
+  const staging = { name: 'staging.env', source: 'server' as const };
+  const prod = { name: 'prod.env', source: 'server' as const };
+
+  it('opens a draft with the live selection as its baseline', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.startBindingDraft([staging]));
+    expect(result.current.view).toBe('draft');
+    expect(result.current.draft).toEqual([staging]);
+    expect(result.current.draftBaseline).toEqual([staging]);
+    expect(result.current.dirty).toBe(false);
+
+    act(() => result.current.setDraftRefs([staging, prod]));
+    expect(result.current.dirty).toBe(true);
+    act(() => result.current.setDraftRefs([staging]));
+    expect(result.current.dirty).toBe(false);
+  });
+
+  it('Cancel discards the draft without a guard and returns to the Session view', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.startBindingDraft([staging]));
+    act(() => result.current.setDraftRefs([prod]));
+    act(() => result.current.cancelBindingDraft());
+    expect(result.current.view).toBe('session');
+    expect(result.current.draft).toBeNull();
+    expect(result.current.dirty).toBe(false);
+    expect(result.current.guardOpen).toBe(false);
+  });
+
+  it('a dirty draft guards Back; confirming returns to the Session view', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.startBindingDraft([staging]));
+    act(() => result.current.setDraftRefs([prod]));
+    act(() => result.current.leaveDepth());
+    expect(result.current.guardOpen).toBe(true);
+    expect(result.current.view).toBe('draft');
+
+    act(() => result.current.confirmGuard());
+    expect(result.current.guardOpen).toBe(false);
+    expect(result.current.view).toBe('session');
+    expect(result.current.draft).toBeNull();
+  });
+
+  it('a clean draft Back pops without the guard', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.startBindingDraft([staging]));
+    act(() => result.current.leaveDepth());
+    expect(result.current.guardOpen).toBe(false);
+    expect(result.current.view).toBe('session');
+  });
+
+  it('showSession returns a profile detail to the Session view', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.selectProfile(info('a.env')));
+    act(() => result.current.showSession());
+    expect(result.current.view).toBe('session');
+    expect(result.current.selectedKey).toBeNull();
+  });
+
+  it('Back from the pushed Session view returns to the root', () => {
+    const { result } = renderHook(() => useEnvironmentScreen());
+    act(() => result.current.showSession());
+    expect(result.current.view).toBe('session');
+    act(() => result.current.leaveDepth());
+    expect(result.current.view).toBe('root');
+  });
+});
+
 describe('editorTargetKey', () => {
   it('is one key per target, so drafts never cross targets', () => {
     expect(editorTargetKey({ kind: 'new' }, null)).toBe('new');

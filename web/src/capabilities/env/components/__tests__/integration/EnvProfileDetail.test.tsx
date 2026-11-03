@@ -52,13 +52,10 @@ function renderDetail(overrides: Partial<Parameters<typeof EnvProfileDetail>[0]>
   const merged = {
     profile: info('staging.env'),
     agents: [] as Agent[],
-    active: false,
-    sourcedAtCreate: false,
-    hasSession: true,
-    sessionActionPending: false,
+    includedInBinding: false,
+    sessionLabel: null as string | null,
     ...overrides,
-    onApply: vi.fn(),
-    onRemove: vi.fn(),
+    onShowSession: vi.fn(),
     onEdit: vi.fn(),
     onDuplicate: vi.fn(),
     onDelete: vi.fn(async () => {}),
@@ -82,54 +79,36 @@ describe('EnvProfileDetail', () => {
     expect(screen.getByText('Agent · devbox-01 · 18 variables')).toBeInTheDocument();
   });
 
-  it('shows the quiet Active state only for the Session-active profile', () => {
-    renderDetail({ active: true });
-    expect(screen.getByTestId('env-profile-active')).toHaveTextContent(
-      'Active in current Session',
+  it('marks a profile in the desired binding without claiming convergence', () => {
+    renderDetail({ includedInBinding: true });
+    expect(screen.getByTestId('env-profile-included')).toHaveTextContent(
+      'Included in binding',
     );
+    expect(screen.queryByText('Active in current Session')).not.toBeInTheDocument();
   });
 
-  it('names the sessions using the profile, including this one', () => {
+  it('names the session bindings that include the profile', () => {
     contentHook.useEnvProfileContent.mockReturnValue(
       hookResult({ inUseBy: ['api-tests', 'deploy'] }),
     );
-    renderDetail({ active: true });
+    renderDetail({ includedInBinding: true });
     expect(screen.getByTestId('env-profile-usage')).toHaveTextContent(
-      'Used by 2 sessions · api-tests, deploy — including this Session',
+      'Included in 2 session bindings · api-tests, deploy',
     );
   });
 
-  it('Apply and Remove are contextual to the current Session', async () => {
+  it('offers the current Session status and returns to it without applying anything', async () => {
     const user = userEvent.setup();
-    const first = renderDetail({ active: false });
-    await user.click(screen.getByTestId('env-apply-to-session'));
-    expect(first.onApply).toHaveBeenCalledTimes(1);
-    first.onRemove.mockClear();
-
-    const second = renderDetail({ active: true });
-    await user.click(screen.getByTestId('env-remove-from-session'));
-    expect(second.onRemove).toHaveBeenCalledTimes(1);
-  });
-
-  it('hides session actions entirely without a Session', () => {
-    renderDetail({ hasSession: false });
+    const d = renderDetail({ sessionLabel: 'Waiting for the next shell prompt' });
+    await user.click(screen.getByTestId('env-profile-session-link'));
+    expect(d.onShowSession).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('env-apply-to-session')).not.toBeInTheDocument();
     expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
   });
 
-  it('a profile the Session was created with explains itself instead of offering Remove', () => {
-    // The backend spares create-phase usage from `server.session.env.unset`,
-    // so Remove there would unset the variables while the Active marker
-    // stays — #1202 offers Apply/Remove only "when runtime semantics safely
-    // permit it".
-    renderDetail({ active: true, sourcedAtCreate: true });
-    expect(screen.getByTestId('env-sourced-at-create')).toHaveTextContent(
-      'Sourced at session creation',
-    );
-    expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('env-apply-to-session')).not.toBeInTheDocument();
-    // The Active recognition itself is unaffected.
-    expect(screen.getByTestId('env-profile-active')).toBeInTheDocument();
+  it('hides the Session link without a current Session', () => {
+    renderDetail({ sessionLabel: null });
+    expect(screen.queryByTestId('env-profile-session-link')).not.toBeInTheDocument();
   });
 
   it('Variables is the primary tab; Raw is one tab away and read-only', async () => {
@@ -168,7 +147,7 @@ describe('EnvProfileDetail', () => {
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Delete prod.env?');
     expect(dialog).toHaveTextContent('Agent · devbox-01');
-    expect(dialog).toHaveTextContent('currently used by 1 session (api-tests)');
+    expect(dialog).toHaveTextContent('included in 1 session binding (api-tests)');
     expect(dialog).toHaveTextContent('This cannot be undone');
 
     await user.click(screen.getByTestId('env-delete-confirm'));

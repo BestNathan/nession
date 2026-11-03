@@ -31,11 +31,10 @@ export const envApi = new EnvPlugin();
 export { EnvFileMultiSelect } from './components/EnvFileMultiSelect';
 export { EnvironmentNavigator } from './components/EnvironmentNavigator';
 export { EnvProfileDetail } from './components/EnvProfileDetail';
-export {
-  SessionBindingStatus,
-  type SessionBindingStatusProps,
-} from './components/SessionBindingStatus';
 export { EnvProfileEditor, type EnvProfileSaveInput } from './components/EnvProfileEditor';
+export { BindingDraftView } from './components/BindingDraftView';
+export { SessionEnvironmentView } from './components/SessionEnvironmentView';
+export { SessionEnvironmentSummary } from './components/SessionEnvironmentSummary';
 export { EnvImportDialog } from './components/EnvImportDialog';
 export { EnvironmentGuardDialog } from './components/EnvironmentGuardDialog';
 export {
@@ -46,5 +45,15 @@ export {
   useSessionEnvBinding,
   type SessionEnvBinding,
 } from './hooks/useSessionEnvBinding';
-export { editorTargetKey, type EditorTarget } from './hooks/useEnvironmentScreen';
-export { refKey } from './model/envRef';
+export {
+  editorTargetKey,
+  type EditorTarget,
+  type EnvironmentScreen,
+  type EnvironmentView,
+} from './hooks/useEnvironmentScreen';
+export { refKey, sourceLabel } from './model/envRef';
+export {
+  bindingStatus,
+  type BindingStatusView,
+  type BindingTone,
+} from './model/bindingStatus';

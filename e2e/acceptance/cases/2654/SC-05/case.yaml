@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 2654
+criterion: SC-05
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: protocol
+    entry: verify-live.js
+  - type: runtime
+    entry: verify-pinned-tests.js
+result_policy: all-pass

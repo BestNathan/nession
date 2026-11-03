@@ -23,8 +23,16 @@ export function EnvironmentGuardDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // Mount the dialog only while it is open. Opening the guard again before an
+  // exit animation finishes re-inserts Radix's overlay after the dialog
+  // content, which leaves the overlay above the buttons and intercepts every
+  // click. A confirmation does not need an exit animation; a fresh portal per
+  // open keeps the overlay/content order stable.
+  if (!open) {
+    return null;
+  }
   return (
-    <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
+    <AlertDialog open onOpenChange={(o) => !o && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
