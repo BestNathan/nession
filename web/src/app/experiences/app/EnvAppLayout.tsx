@@ -7,6 +7,7 @@ import {
   EnvProfileDetail,
   EnvProfileEditor,
   refKey,
+  SessionBindingStatus,
   useEnvironmentWorkspace,
   type EditorTarget,
 } from '@/capabilities/env';
@@ -33,7 +34,7 @@ function pushedTitle(editor: EditorTarget | null, selectedName: string | null): 
  */
 export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   const env = useEnvironmentWorkspace(ctx.session?.session_id ?? null);
-  const { profiles, screen, selectedProfile } = env;
+  const { profiles, screen, selectedProfile, binding } = env;
   const listScrollTop = useRef(0);
 
   const title = pushedTitle(screen.editor, selectedProfile?.name ?? null);
@@ -59,9 +60,19 @@ export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
     </>
   );
 
+  const status = (
+    <SessionBindingStatus
+      sessionId={profiles.sessionId}
+      binding={binding.binding}
+      loading={binding.loading}
+      error={binding.error}
+    />
+  );
+
   if (screen.editor) {
     return (
       <div data-testid="env-workspace-app" className="flex h-full min-h-0 flex-col">
+        {status}
         <div className="min-h-0 flex-1 overflow-hidden">
           <EnvProfileEditor
             key={editorTargetKey(screen.editor, screen.selectedKey)}
@@ -81,6 +92,7 @@ export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   if (selectedProfile) {
     return (
       <div data-testid="env-workspace-app" className="flex h-full min-h-0 flex-col">
+        {status}
         <div className="min-h-0 flex-1 overflow-hidden">
           <EnvProfileDetail
             profile={selectedProfile}
@@ -89,8 +101,8 @@ export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
             sourcedAtCreate={profiles.createKeys.has(refKey(selectedProfile))}
             hasSession={profiles.sessionId !== null}
             sessionActionPending={profiles.sessionActionPending}
-            onApply={() => void profiles.applyToSession(selectedProfile)}
-            onRemove={() => void profiles.removeFromSession(selectedProfile)}
+            onApply={() => void env.applyToSession(selectedProfile)}
+            onRemove={() => void env.removeFromSession(selectedProfile)}
             onEdit={screen.startEdit}
             onDuplicate={() => screen.startDuplicate(selectedProfile)}
             onDelete={() => env.deleteProfile(selectedProfile)}
@@ -103,6 +115,7 @@ export function EnvAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
 
   return (
     <div data-testid="env-workspace-app" className="flex h-full min-h-0 flex-col">
+      {status}
       <div className="min-h-0 flex-1 overflow-hidden">
         <EnvironmentNavigator
           profiles={profiles.profiles}

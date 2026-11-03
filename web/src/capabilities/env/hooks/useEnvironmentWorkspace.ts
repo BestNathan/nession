@@ -12,12 +12,21 @@ import {
   type EnvironmentScreen,
 } from '@/capabilities/env/hooks/useEnvironmentScreen';
 import type { EnvProfileSaveInput } from '@/capabilities/env/hooks/useEnvProfileSave';
+import {
+  useSessionEnvBinding,
+  type SessionEnvBinding,
+} from '@/capabilities/env/hooks/useSessionEnvBinding';
 
 export interface EnvironmentWorkspace {
   profiles: EnvironmentProfiles;
   screen: EnvironmentScreen;
+  /** The current Session's desired + observed Environment Binding. */
+  binding: SessionEnvBinding;
   /** The selected profile object, derived — robust across list refreshes. */
   selectedProfile: EnvFileInfo | null;
+  /** Apply/remove through the same refresh the binding status reads. */
+  applyToSession: (profile: EnvFileInfo) => Promise<boolean>;
+  removeFromSession: (profile: EnvFileInfo) => Promise<boolean>;
   importOpen: boolean;
   openImport: () => void;
   closeImport: () => void;
@@ -42,8 +51,35 @@ export interface EnvironmentWorkspace {
  */
 export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWorkspace {
   const profiles = useEnvironmentProfiles(sessionId);
+  const binding = useSessionEnvBinding(sessionId);
   const screen = useEnvironmentScreen();
   const [importOpen, setImportOpen] = useState(false);
+
+  // Apply/remove refresh the active list *and* the binding status; the two
+  // answer different questions and must not disagree after a mutation.
+  const refreshBinding = binding.refresh;
+  const applyProfile = profiles.applyToSession;
+  const removeProfile = profiles.removeFromSession;
+  const applyToSession = useCallback(
+    async (profile: EnvFileInfo) => {
+      const ok = await applyProfile(profile);
+      if (ok) {
+        await refreshBinding();
+      }
+      return ok;
+    },
+    [applyProfile, refreshBinding],
+  );
+  const removeFromSession = useCallback(
+    async (profile: EnvFileInfo) => {
+      const ok = await removeProfile(profile);
+      if (ok) {
+        await refreshBinding();
+      }
+      return ok;
+    },
+    [removeProfile, refreshBinding],
+  );
 
   // A Session switch abandons the old Session's selection and any edit in
   // flight — they name that Session's context and must not reappear.
@@ -103,7 +139,10 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
   return {
     profiles,
     screen,
+    binding,
     selectedProfile,
+    applyToSession,
+    removeFromSession,
     importOpen,
     openImport: () => setImportOpen(true),
     closeImport: () => setImportOpen(false),

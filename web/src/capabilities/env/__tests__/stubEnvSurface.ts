@@ -7,12 +7,14 @@ import { WIRE as ENV_DELETE_WIRE } from '@/generated/protocol/core/server-env-de
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
 import { WIRE as SESSION_ENV_APPLY_WIRE } from '@/generated/protocol/core/server-session-env-apply/v1';
 import { WIRE as SESSION_ENV_UNSET_WIRE } from '@/generated/protocol/core/server-session-env-unset/v1';
+import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
 import {
   envApi,
   type ActiveEnvFile,
   type EnvFileInfo,
   type EnvGetResponse,
   type EnvWriteResponse,
+  type SessionEnvBindingResponse,
 } from '@/capabilities/env';
 
 /**
@@ -48,6 +50,7 @@ export interface EnvStub {
   setFile(response: EnvGetResponse): void;
   setWrite(response: EnvWriteResponse): void;
   setActiveSessionFiles(active: ActiveEnvFile[]): void;
+  setBinding(response: SessionEnvBindingResponse): void;
   /** Detach the stub — call in `afterEach` so the singleton goes back to unbound. */
   teardown(): void;
 }
@@ -58,6 +61,15 @@ export function stubEnvApi(): EnvStub {
   let getResponse: EnvGetResponse = { success: true, content: '', in_use_by: [] };
   let writeResponse: EnvWriteResponse = { success: true };
   let active: ActiveEnvFile[] = [];
+  let bindingResponse: SessionEnvBindingResponse = {
+    success: true,
+    binding: {
+      session_id: 's1',
+      desired_revision: 0,
+      desired_profiles: [],
+    },
+    warnings: [],
+  };
 
   const surface: PluginSurface = {
     connectionState: 'connected',
@@ -78,6 +90,9 @@ export function stubEnvApi(): EnvStub {
       }
       if (type === SESSION_ENV_ACTIVE_WIRE) {
         return Promise.resolve({ active } as T);
+      }
+      if (type === SESSION_ENV_BINDING_GET_WIRE) {
+        return Promise.resolve(bindingResponse as T);
       }
       if (type === SESSION_ENV_APPLY_WIRE || type === SESSION_ENV_UNSET_WIRE) {
         return Promise.resolve({ success: true } as T);
@@ -113,6 +128,9 @@ export function stubEnvApi(): EnvStub {
     },
     setActiveSessionFiles(next) {
       active = next;
+    },
+    setBinding(next) {
+      bindingResponse = next;
     },
     teardown: release,
   };

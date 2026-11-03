@@ -161,9 +161,45 @@ test.describe('Web 1440×900', () => {
     await expect(dialog).not.toContainText(/force/i);
   });
 
+  test('the binding status states how far the environment got', async ({ page }) => {
+    await gotoEnvWorkspace(page);
+
+    const status = page.getByTestId('env-binding-status');
+    await expect(status).toBeVisible();
+    await expect(status).toHaveAttribute('data-status', 'in_sync');
+    await expect(page.getByTestId('env-binding-status-label')).toHaveText(
+      'Environment in sync',
+    );
+    // Desired and observed are stated together, not collapsed into "Active".
+    await expect(page.getByTestId('env-binding-status-detail')).toContainText(
+      'Revision 3 · 6 keys',
+    );
+  });
+
+  test('an unsupported shell is a warning, not a quiet Active', async ({ page }) => {
+    await page.goto('/#/fixture/workspace?capability=env&env=unsupported');
+    await page.getByTestId('env-profile-list').waitFor();
+
+    const status = page.getByTestId('env-binding-status');
+    await expect(status).toHaveAttribute('data-status', 'unsupported_shell');
+    await expect(status).toHaveAttribute('data-tone', 'warning');
+    await expect(page.getByTestId('env-binding-status-label')).toHaveText(
+      'Unsupported shell',
+    );
+    await expect(page.getByTestId('env-binding-status-detail')).toContainText(
+      'No Session-local adapter for shell /usr/bin/fish.',
+    );
+    await expect(page.getByTestId('env-binding-status-detail')).toContainText(
+      'New panes and processes still inherit the environment.',
+    );
+  });
+
   test('the empty inventory speaks Environment, not files', async ({ page }) => {
     await page.goto('/#/fixture/workspace?capability=env&env=empty');
     await expect(page.getByTestId('env-navigator-empty')).toContainText('No environments yet');
+    await expect(page.getByTestId('env-binding-status-label')).toHaveText(
+      'No environment applied',
+    );
   });
 });
 
@@ -191,6 +227,8 @@ test.describe('App 390×844', () => {
     // decision (#1347; see `fixture-app`'s "one navigation bar per depth").
     await expect(page.getByTestId('app-page-header')).toContainText('Environment');
     await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
+    // The binding status is part of the capability page at the root depth.
+    await expect(page.getByTestId('env-binding-status')).toBeVisible();
 
     await page.getByTestId(STAGING_ROW).click();
     await expect(page.getByTestId('env-profile-detail')).toBeVisible();

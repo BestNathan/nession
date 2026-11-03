@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { Agent, EnvFileInfo, Session } from '@/types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { stubEnvApi, type EnvStub } from '@/capabilities/env/__tests__/stubEnvSurface';
+import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -141,5 +142,72 @@ describe('EnvWebLayout', () => {
     );
     expect(screen.queryByTestId('env-remove-from-session')).not.toBeInTheDocument();
     expect(screen.getByTestId('env-profile-active')).toBeInTheDocument();
+  });
+
+  it('states the binding status and refreshes it after Apply', async () => {
+    const user = userEvent.setup();
+    const session = { session_id: 's1', session_name: 'api' } as Session;
+    const ref = { name: 'staging.env', source: 'server' as const };
+    stub.setBinding({
+      success: true,
+      binding: {
+        session_id: 's1',
+        desired_revision: 2,
+        desired_profiles: [{ profile: ref, phase: 'attach', outdated: false }],
+        observed: {
+          applied_revision: 2,
+          status: 'pending_shell',
+          profiles: [ref],
+          managed_keys: ['A'],
+        },
+      },
+      warnings: [],
+    });
+    render(<EnvWebLayout ctx={ctx({ session })} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('env-binding-status')).toHaveAttribute(
+        'data-status',
+        'pending_shell',
+      ),
+    );
+    const before = stub.requests.filter(
+      (request) => request.type === SESSION_ENV_BINDING_GET_WIRE,
+    ).length;
+
+    await user.click(screen.getByTestId('env-profile-row-server::staging.env'));
+    await waitFor(() =>
+      expect(screen.getByTestId('env-apply-to-session')).toBeInTheDocument(),
+    );
+
+    // The next read is what the Agent reports after the apply.
+    stub.setBinding({
+      success: true,
+      binding: {
+        session_id: 's1',
+        desired_revision: 3,
+        desired_profiles: [{ profile: ref, phase: 'attach', outdated: false }],
+        observed: {
+          applied_revision: 3,
+          status: 'in_sync',
+          profiles: [ref],
+          managed_keys: ['A'],
+        },
+      },
+      warnings: [],
+    });
+    await user.click(screen.getByTestId('env-apply-to-session'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('env-binding-status')).toHaveAttribute(
+        'data-status',
+        'in_sync',
+      ),
+    );
+    expect(
+      stub.requests.filter(
+        (request) => request.type === SESSION_ENV_BINDING_GET_WIRE,
+      ).length,
+    ).toBeGreaterThan(before);
   });
 });

@@ -6,10 +6,12 @@ import type {
   EnvGetResponse,
   EnvListResponse,
   SessionEnvActiveResponse,
+  SessionEnvBindingResponse,
 } from '@/capabilities/env';
 import { WIRE as ENV_LIST_WIRE } from '@/generated/protocol/core/server-env-list/v1';
 import { WIRE as ENV_GET_WIRE } from '@/generated/protocol/core/server-env-get/v1';
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
+import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
 import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
 
 /**
@@ -36,8 +38,9 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  * product cannot produce (the "saved" content would be gone on the next
  * read). Specs drive dialogs up to confirmation, not past it.
  *
- *   /#/fixture/workspace?capability=env            → three profiles, one Session-active
- *   /#/fixture/workspace?capability=env&env=empty  → the empty inventory
+ *   /#/fixture/workspace?capability=env                  → three profiles, one Session-active
+ *   /#/fixture/workspace?capability=env&env=empty        → the empty inventory
+ *   /#/fixture/workspace?capability=env&env=unsupported  → tmux applied, shell unsupported
  */
 
 /**
@@ -118,9 +121,81 @@ function activeFor(sessionId: unknown): SessionEnvActiveResponse {
   return { active };
 }
 
+const BINDING_REF = { name: 'staging.env', source: 'server' as const };
+const BINDING_KEYS = [
+  'API_BASE',
+  'API_KEY',
+  'EMPTY_OVERRIDE',
+  'FEATURE_FLAGS',
+  'LOG_LEVEL',
+  'NODE_ENV',
+];
+
+/**
+ * The current Session's desired + observed binding, matching the active file
+ * above. `env=unsupported` is the staging shape: applied to tmux, but the
+ * running shell has no adapter.
+ */
+function bindingFor(scenario: string): SessionEnvBindingResponse {
+  if (scenario === 'empty') {
+    return {
+      success: true,
+      binding: {
+        session_id: FIXTURE_SELECTED_ID,
+        desired_revision: 0,
+        desired_profiles: [],
+      },
+      warnings: [],
+    };
+  }
+  if (scenario === 'unsupported') {
+    return {
+      success: true,
+      binding: {
+        session_id: FIXTURE_SELECTED_ID,
+        desired_revision: 3,
+        desired_profiles: [
+          { profile: BINDING_REF, phase: 'attach', content_hash: null, outdated: false },
+        ],
+        observed: {
+          applied_revision: 3,
+          status: 'unsupported_shell',
+          profiles: [BINDING_REF],
+          managed_keys: BINDING_KEYS,
+          shell: 'fish',
+          shell_revision: null,
+          last_error: 'No Session-local adapter for shell /usr/bin/fish.',
+        },
+      },
+      warnings: [],
+    };
+  }
+  return {
+    success: true,
+    binding: {
+      session_id: FIXTURE_SELECTED_ID,
+      desired_revision: 3,
+      desired_profiles: [
+        { profile: BINDING_REF, phase: 'attach', content_hash: null, outdated: false },
+      ],
+      observed: {
+        applied_revision: 3,
+        status: 'in_sync',
+        profiles: [BINDING_REF],
+        managed_keys: BINDING_KEYS,
+        shell: 'bash',
+        shell_revision: 3,
+        last_error: null,
+      },
+    },
+    warnings: [],
+  };
+}
+
 export function fixtureEnvSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('env') ?? 'profiles';
   const list: EnvListResponse = scenario === 'empty' ? { files: [] } : { files: FILES };
+  const binding = bindingFor(scenario);
 
   // The real directory is filled from the agent list; the fixture fills the
   // same directory from the same FIXTURE_AGENTS the rest of the route renders
@@ -140,6 +215,9 @@ export function fixtureEnvSurface(search: string): PluginSurface {
       }
       if (type === SESSION_ENV_ACTIVE_WIRE) {
         return Promise.resolve(activeFor(payload.session_id) as T);
+      }
+      if (type === SESSION_ENV_BINDING_GET_WIRE) {
+        return Promise.resolve(binding as T);
       }
       return Promise.reject(new Error(`fixture env surface is read-only and does not answer ${type}`));
     },

@@ -10,6 +10,10 @@ export type {
   EnvSource,
   EnvWriteResponse,
   SessionEnvActiveResponse,
+  SessionEnvBindingProfileState,
+  SessionEnvBindingResponse,
+  SessionEnvBindingState,
+  SessionEnvObservedState,
   SessionEnvQueryResponse,
   SessionEnvResponse,
 } from './types';
@@ -27,6 +31,10 @@ export const envApi = new EnvPlugin();
 export { EnvFileMultiSelect } from './components/EnvFileMultiSelect';
 export { EnvironmentNavigator } from './components/EnvironmentNavigator';
 export { EnvProfileDetail } from './components/EnvProfileDetail';
+export {
+  SessionBindingStatus,
+  type SessionBindingStatusProps,
+} from './components/SessionBindingStatus';
 export { EnvProfileEditor, type EnvProfileSaveInput } from './components/EnvProfileEditor';
 export { EnvImportDialog } from './components/EnvImportDialog';
 export { EnvironmentGuardDialog } from './components/EnvironmentGuardDialog';
@@ -34,5 +42,9 @@ export {
   useEnvironmentWorkspace,
   type EnvironmentWorkspace,
 } from './hooks/useEnvironmentWorkspace';
+export {
+  useSessionEnvBinding,
+  type SessionEnvBinding,
+} from './hooks/useSessionEnvBinding';
 export { editorTargetKey, type EditorTarget } from './hooks/useEnvironmentScreen';
 export { refKey } from './model/envRef';
