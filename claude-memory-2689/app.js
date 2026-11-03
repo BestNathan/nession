@@ -146,7 +146,7 @@ function renderSessions(){
 }
 function render(){
  $("app").dataset.page=state.page;
- $("terminal").hidden=state.page!=="terminal";
+ $("terminal").hidden=!(state.page==="terminal"||state.page==="sessions");
  $("workspace").hidden=state.page!=="workspace";
  $("sessions-layer").hidden=state.page!=="sessions";
  $("session-heading").textContent=state.page==="sessions"?"Sessions":state.page==="workspace"?(state.detail&&state.capability==="claude"&&state.tab==="memory"?state.file:"Claude Code"):S().title;
@@ -193,7 +193,7 @@ $("workspace-inner").addEventListener("click",e=>{
  else if(btn.dataset.action==="origin"){state.origin=!state.origin;renderWorkspace();}
  else if(btn.dataset.action==="retry")retry();
 });
-document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(state.context!=="closed"){state.context="closed";renderContext();}else returnOneDepth();});
+document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(state.context!=="closed"){state.context="closed";renderContext();}else if(state.page!=="terminal")returnOneDepth();});
 let x0=0,y0=0,edge=false;
 $("app").addEventListener("touchstart",e=>{
  if(window.innerWidth>700)return;
