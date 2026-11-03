@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {auditLiveRunStores} from './audit-live-run-stores.mjs';
-import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
+import {auditLiveRunStores,AGENT_STORE_AUDIT_REFS} from './audit-live-run-stores.mjs';
+import {GOVERNED_REFS,POLICY_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
   validateMigrationBaseline,assertTrustedAuditContext,
   withRuleParameters} from './run-store-policy.mjs';
 import {makePolicyObservabilityReceipt,POLICY_OBSERVABILITY_LOG_PREFIX}
@@ -75,11 +75,19 @@ function updateRuleParameter(id){
 }
 // The first three stores have a historical baseline; the fourth was
 // provisioned afterwards. A live ref or Ruleset match is not an external anchor.
-export function observeAgentStoreGovernance(branch,rulesets){
+export function observeAgentStoreGovernance(branch,rulesets,agentHistory=null){
   if(branch?.name!==ACTIVE_AGENT_REF||
      !SHA.test(branch?.commit?.sha??'')||typeof branch.protected!=='boolean'||
      !Array.isArray(rulesets))fail('real agent-store ref or Ruleset observation unavailable');
   const ref='refs/heads/'+ACTIVE_AGENT_REF;
+  // A Git ancestry audit is separate from writer authorization and independent
+  // anchoring. Confirm the API HEAD also matches the fetched Git audit HEAD.
+  const audited=agentHistory?.records?.length===1&&
+    agentHistory.records[0]?.store===ACTIVE_AGENT_REF&&
+    agentHistory.records[0]?.observed===branch.commit.sha&&
+    agentHistory.records[0]?.mode==='anchored-history'&&
+    agentHistory.records[0]?.api_ref_verified===true&&
+    agentHistory.anchoring==='repository_main_bootstrap_observation_only';
   const candidates=rulesets.filter(rule=>
     rule?.source===REPO&&rule?.source_type==='Repository'&&
     rule?.target==='branch'&&rule?.enforcement==='active'&&
@@ -94,18 +102,23 @@ export function observeAgentStoreGovernance(branch,rulesets){
     active_ruleset_includes_ref_ids:candidates.map(x=>x.id)
       .filter(x=>Number.isSafeInteger(x)&&x>0),
     history_in_2026_10_15_three_store_baseline:false,
-    historical_immutability_audited:false,
+    post_bootstrap_history_audited:audited,
+    audited_changes:audited?agentHistory.records[0].checked_changes:null,
+    audited_commits:audited?agentHistory.records[0].checked_commits:null,
+    audit_anchor_class:'repository_main_bootstrap_observation_only; not externally independent',
+    historical_immutability_audited:audited,
     server_side_app_only_writer_verified:false,
     authorized_and_denied_write_matrix_verified:false,
     independent_external_anchor_verified:false,
-    verdict:'UNVERIFIED: real encrypted Store exists; full write authorization and history audit pending',
+    verdict:audited?'PARTIAL: post-bootstrap history audited; write authorization and external anchor pending'
+      :'UNVERIFIED: real encrypted Store exists; write authorization and history audit pending',
   };
 }
 
 export function summarizeGovernance(manifest,rulesets,appId,history){
   validateMigrationBaseline(manifest);
   if(!Array.isArray(rulesets))fail('unavailable GitHub Ruleset details');
-  const decisions=GOVERNED_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
+  const decisions=POLICY_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
   const records=history?.records??[];
   const coverage=records.length===GOVERNED_REFS.length&&
     new Set(records.map(x=>x.store)).size===GOVERNED_REFS.length&&
@@ -197,11 +210,41 @@ async function live(out){
   });
   const appId=Number(process.env.STORE_WRITER_APP_ID??0);
   const report=summarizeGovernance(manifest,details,appId,history);
-  // The real fourth Store must not silently disappear from the historical
-  // three-store audit. Observe only GitHub API; never mutate the ref.
+  // The agent-store orphan ref now exists. The 2026-10-15 legacy migration
+  // baseline must not be rewritten or mislabeled as a four-store anchor. Use
+  // the independently API-observed (but NOT independently controlled) real
+  // agent-store bootstrap root as a separate read-only ancestry baseline.
+  const bootstrap=JSON.parse(fs.readFileSync(path.join(ROOT,
+    'scripts/run-store-agent-bootstrap-observation.json'),'utf8'));
+  if(bootstrap.schema_version!==1||bootstrap.kind!=='agent_store_main_bootstrap_observation'||
+     bootstrap.repository!==REPO||bootstrap.ref!==ACTIVE_AGENT_REF||
+     bootstrap.independently_anchored!==false||
+     !SHA.test(bootstrap.baseline_commit_sha)||!SHA.test(bootstrap.baseline_tree_sha)||
+     bootstrap.baseline_kind!=='2026-10-18_bootstrap_root_observed_2026-11-02')
+    fail('invalid or falsely independent real agent-store bootstrap observation');
+  const agentHistory=await auditLiveRunStores({
+    checkout:ROOT,sourceSha:process.env.GITHUB_SHA,
+    anchors:{[ACTIVE_AGENT_REF]:bootstrap.baseline_commit_sha},
+    token:process.env.GH_TOKEN??process.env.GITHUB_TOKEN,
+    storeRefs:AGENT_STORE_AUDIT_REFS,anchorTrust:'main_bootstrap_observation',
+    baselineTrees:{[ACTIVE_AGENT_REF]:bootstrap.baseline_tree_sha},
+  });
   report.provisioned_agent_store=observeAgentStoreGovernance(
-    api('branches/'+ACTIVE_AGENT_REF),details);
-  report.full_four_store_history_audit_proven=false;
+    api('branches/'+ACTIVE_AGENT_REF),details,agentHistory);
+  // Separate historical baselines remain intact; populate the fourth Store's
+  // actual Git-ancestry evidence into its server-side policy observation.
+  const agentPolicy=report.stores.find(x=>x.ref===ACTIVE_AGENT_REF);
+  if(!agentPolicy)fail('missing fourth Store policy observation');
+  agentPolicy.branch_observed_sha=report.provisioned_agent_store.observed_head_sha;
+  agentPolicy.checked_commits=report.provisioned_agent_store.audited_commits;
+  agentPolicy.checked_changes=report.provisioned_agent_store.audited_changes;
+  report.provisioned_agent_store.app_only_ruleset_configuration_verified=
+    agentPolicy.configuration_verified;
+  report.provisioned_agent_store.app_only_ruleset_unobservable_capabilities=
+    agentPolicy.unobservable_capabilities;
+  report.full_four_store_history_audit_proven=report.actual_history_checked_against_unanchored_baseline&&
+    report.provisioned_agent_store.post_bootstrap_history_audited;
+  report.four_store_audit_anchor_trust='repository_main_unanchored; NOT independent/WORM';
   report.observed_at=new Date().toISOString();
   report.trusted_main_sha=process.env.GITHUB_SHA;
   report.audit_run_id=process.env.GITHUB_RUN_ID??null;
@@ -212,15 +255,19 @@ async function live(out){
     process.env.GITHUB_STEP_SUMMARY,
     '## Store Governance Live Read-only Audit\n\n'+
     '| Branch | Audited changes | App-only branch policy |\n|---|---:|---|\n'+
-    report.stores.map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
+    report.stores.filter(x=>x.ref!==ACTIVE_AGENT_REF).map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
       (x.configuration_verified?'configured'
         :x.unobservable_capabilities.length>0?'NOT OBSERVABLE HERE'
         :'NOT CONFIGURED')+' |').join('\n')+
-    '\n| '+report.provisioned_agent_store.ref+' | NOT AUDITED (no historical baseline) | '+
+    '\n| '+report.provisioned_agent_store.ref+' | '+
+      (report.provisioned_agent_store.post_bootstrap_history_audited
+        ?report.provisioned_agent_store.audited_changes+' (from Git bootstrap root)'
+        :'NOT AUDITED')+' | '+
       (report.provisioned_agent_store.active_ruleset_includes_ref_ids.length
         ?'RULESET INCLUSION ONLY; NO APP-ONLY DENIAL PROOF'
         :'NO ACTIVE EXACT-REF RULESET OBSERVED')+' |'+
-    '\n\n**'+report.result+'**. Full four-Store history audit NOT PROVEN. '+
+    '\n\n**'+report.result+'**. Four-Store post-baseline Git history coverage: '+
+    (report.full_four_store_history_audit_proven?'verified against unanchored Git baselines':'UNVERIFIED')+'. '+
     'This is not an external anchor, writer denial, or SC Pass.\n'+
     (report.policy_observability.establishes_neither_presence_nor_absence?
       '\nBounded limitation: '+report.policy_observability.note+'\n':''));
@@ -263,6 +310,19 @@ function selfTest(){
   const scopedAgentRule={id:552244,target:'branch',source_type:'Repository',
     source:REPO,enforcement:'active',
     conditions:{ref_name:{include:['refs/heads/agent-store'],exclude:[]}}};
+  const postRootAudit={anchoring:'repository_main_bootstrap_observation_only',records:[{
+    store:ACTIVE_AGENT_REF,observed:sha,mode:'anchored-history',
+    api_ref_verified:true,checked_commits:39,checked_changes:52,
+  }]};
+  const auditable=observeAgentStoreGovernance(liveBranch,[],postRootAudit);
+  assert.equal(auditable.post_bootstrap_history_audited,true);
+  assert.equal(auditable.historical_immutability_audited,true);
+  assert.equal(auditable.audited_commits,39);
+  assert.equal(auditable.server_side_app_only_writer_verified,false);
+  assert.equal(auditable.independent_external_anchor_verified,false);
+  assert.equal(observeAgentStoreGovernance(liveBranch,[],{...postRootAudit,
+    records:[{...postRootAudit.records[0],observed:'b'.repeat(40)}]})
+    .post_bootstrap_history_audited,false);
   const withRule=observeAgentStoreGovernance(liveBranch,[scopedAgentRule]);
   assert.deepEqual(withRule.active_ruleset_includes_ref_ids,[552244]);
   assert.equal(withRule.server_side_app_only_writer_verified,false);
@@ -292,7 +352,7 @@ function selfTest(){
   // render as the same line. Both stay fail-closed (policy false, alert
   // non-zero); only the reason differs, so a reader can choose Pending over
   // Fail without ever being able to read it as a Pass.
-  const refs=GOVERNED_REFS,app=77881;
+  const refs=POLICY_REFS,app=77881;
   const shape=over=>({id:25248129,name:'run-store',target:'branch',
     source_type:'Repository',source:REPO,enforcement:'active',
     conditions:{ref_name:{include:refs.map(r=>'refs/heads/'+r),exclude:[]}},
@@ -303,6 +363,18 @@ function selfTest(){
   // verified, and the bounded-limitation note stays out of the report.
   const readable=summarizeGovernance(migration,[shape({})],app,history);
   assert.equal(readable.protected_by_server_ruleset,true);
+  assert.equal(readable.stores.length,POLICY_REFS.length);
+  assert.equal(readable.stores.find(x=>x.ref===ACTIVE_AGENT_REF)
+    .configuration_verified,true);
+  // A three-ref Ruleset is no longer sufficient once the fourth orphan Store
+  // is active. Historical migration coverage still refers to the old three.
+  const missingAgent=summarizeGovernance(migration,[shape({conditions:{
+    ref_name:{include:GOVERNED_REFS.map(x=>'refs/heads/'+x),exclude:[]}}})],
+  app,history);
+  assert.equal(missingAgent.actual_history_checked_against_unanchored_baseline,true);
+  assert.equal(missingAgent.protected_by_server_ruleset,false);
+  assert.equal(missingAgent.stores.find(x=>x.ref===ACTIVE_AGENT_REF)
+    .configuration_verified,false);
   assert.equal(readable.policy_observability.verdict,'verified');
   assert.equal(readable.policy_observability
     .establishes_neither_presence_nor_absence,false);

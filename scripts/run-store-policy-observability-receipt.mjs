@@ -20,7 +20,7 @@
 // receipt can support is Pending instead of Fail. It can never support Pass.
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
-import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
+import {POLICY_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 
 export const POLICY_OBSERVABILITY_LOG_PREFIX='RUN_STORE_POLICY_OBSERVABILITY_V1 ';
 export const POLICY_WORKFLOW='.github/workflows/store-governance-audit.yml';
@@ -63,7 +63,7 @@ export function makePolicyObservabilityReceipt(env,report){
   // A receipt that names nothing, or names something outside the governed
   // vocabulary, would be an unfalsifiable claim. Refuse to emit it.
   if(capabilities.length===0||capabilities.some(x=>!CAPABILITY_NAMES.includes(x))||
-     refs.length===0||refs.some(x=>!GOVERNED_REFS.includes(x))||
+     refs.length===0||refs.some(x=>!POLICY_REFS.includes(x))||
      observability.establishes_neither_presence_nor_absence!==true||
      report.protected_by_server_ruleset!==false)return null;
   return Object.freeze({
@@ -97,10 +97,10 @@ export function validatePolicyObservabilityReceipt(receipt){
      receipt.unobservable_capabilities.some(x=>!CAPABILITY_NAMES.includes(x))||
      !Array.isArray(receipt.refs_whose_policy_is_unobservable_here)||
      receipt.refs_whose_policy_is_unobservable_here.length===0||
-     receipt.refs_whose_policy_is_unobservable_here.length>GOVERNED_REFS.length||
+     receipt.refs_whose_policy_is_unobservable_here.length>POLICY_REFS.length||
      new Set(receipt.refs_whose_policy_is_unobservable_here).size!==
        receipt.refs_whose_policy_is_unobservable_here.length||
-     receipt.refs_whose_policy_is_unobservable_here.some(x=>!GOVERNED_REFS.includes(x))||
+     receipt.refs_whose_policy_is_unobservable_here.some(x=>!POLICY_REFS.includes(x))||
      receipt.protected_by_server_ruleset!==false||
      receipt.establishes_neither_presence_nor_absence!==true||
      receipt.authorized_write_test_verified!==false||
@@ -167,7 +167,7 @@ function selfTest(){
   const report={protected_by_server_ruleset:false,policy_observability:{
     verdict:'unobservable_by_this_credential',
     unobservable_capabilities:[UNOBSERVABLE_CAPABILITIES.bypass],
-    refs_whose_policy_is_unobservable_here:[...GOVERNED_REFS],
+    refs_whose_policy_is_unobservable_here:[...POLICY_REFS],
     establishes_neither_presence_nor_absence:true}};
   const receipt=makePolicyObservabilityReceipt(env,report);
   assert.equal(validatePolicyObservabilityReceipt(receipt).verdict,
@@ -208,7 +208,7 @@ function selfTest(){
   // A receipt with nothing named is unfalsifiable.
   assert.equal(makePolicyObservabilityReceipt(env,{protected_by_server_ruleset:false,
     policy_observability:{verdict:'unobservable_by_this_credential',
-      unobservable_capabilities:[],refs_whose_policy_is_unobservable_here:[...GOVERNED_REFS],
+      unobservable_capabilities:[],refs_whose_policy_is_unobservable_here:[...POLICY_REFS],
       establishes_neither_presence_nor_absence:true}}),null);
   assert.equal(makePolicyObservabilityReceipt(env,{protected_by_server_ruleset:false,
     policy_observability:{verdict:'unobservable_by_this_credential',
@@ -218,7 +218,7 @@ function selfTest(){
   assert.equal(makePolicyObservabilityReceipt(env,{protected_by_server_ruleset:false,
     policy_observability:{verdict:'unobservable_by_this_credential',
       unobservable_capabilities:['invented_capability'],
-      refs_whose_policy_is_unobservable_here:[...GOVERNED_REFS],
+      refs_whose_policy_is_unobservable_here:[...POLICY_REFS],
       establishes_neither_presence_nor_absence:true}}),null);
   // Untrusted context never produces a receipt.
   assert.equal(makePolicyObservabilityReceipt({...env,GITHUB_REF:'refs/heads/feature'},

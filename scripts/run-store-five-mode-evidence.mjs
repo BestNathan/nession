@@ -16,32 +16,52 @@ const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^sha256:[a-f0-9]{64}$/;
 const N=n=>Number.isSafeInteger(Number(n))&&Number(n)>0;
 const fail=msg=>{throw Error('run-store-five-mode-evidence: '+msg);};
+// These are *verified candidate locators* from current Actions history, not
+// source-of-truth claims. Every collection re-fetches run identities, attempts,
+// finite-retention publisher/consumer artifacts and independently verified Git
+// bytes. Replace expired examples with newly authenticated live receipts; no
+// historical proof survives its evidence TTL automatically.
+//
+// Success is NOT a prerequisite for an Agent telemetry *source*: a failed Agent
+// run can produce valid diagnostic telemetry. Only a successful, trusted-main
+// ingester and independent successful readback can attest such a source.
 export const PINS=Object.freeze([
-  {mode:'case',store:'acceptance-results',source:38739424244,ingest:38739721565,readback:38739786359,
-    source_sha:'e44e8ed0198ae7156fe8def4e08c624c4fda29c7',source_name:'Acceptance / Cases',
-    source_path:'.github/workflows/acceptance-cases.yml',source_branch:'main',
+  {mode:'case',store:'acceptance-results',
+    source:41473925992,ingest:41474512821,readback:41474646163,
+    source_sha:'b2f321bcf412c4790c55425c793c67d03339679f',
+    source_name:'Acceptance / Cases',source_path:'.github/workflows/acceptance-cases.yml',
+    source_branch:'staging',source_event:'push',source_conclusion:'success',
     ingest_name:'Acceptance / Case Ingest',ingest_path:'.github/workflows/acceptance-case-ingest.yml',suffix:'case'},
-  {mode:'scenario',store:'acceptance-results',source:38728790471,ingest:38729038975,readback:38729088678,
-    source_sha:'4137181a048a4ea0df974388b60d57cb4b02722f',source_name:'E2E / Scenario Smoke',
-    source_path:'.github/workflows/e2e-scenario-smoke.yml',source_branch:'main',
+  {mode:'scenario',store:'acceptance-results',
+    source:41583565950,ingest:41583800977,readback:41583837519,
+    source_sha:'d275d8c61bfc3ebc92ef3c116bab0e6dd70f831d',
+    source_name:'E2E / Scenario Smoke',source_path:'.github/workflows/e2e-scenario-smoke.yml',
+    source_branch:'feat/170-session-env-binding',source_event:'pull_request',source_conclusion:'success',
     ingest_name:'E2E / Scenario Ingest',ingest_path:'.github/workflows/e2e-scenario-ingest.yml',suffix:'scenario'},
-  {mode:'test',store:'acceptance-results',source:38728790646,ingest:38730210108,readback:38730243043,
-    source_sha:'4137181a048a4ea0df974388b60d57cb4b02722f',source_name:'E2E / Tests',
-    source_path:'.github/workflows/e2e-tests.yml',source_branch:'main',
+  {mode:'test',store:'acceptance-results',
+    source:41565864619,ingest:41565905545,readback:41565973551,
+    source_sha:'4afa87efbab45381df0df5e7c72e6327c440cd87',
+    source_name:'E2E / Tests',source_path:'.github/workflows/e2e-tests.yml',
+    source_branch:'main',source_event:'push',source_conclusion:'success',
     ingest_name:'E2E / Test Ingest',ingest_path:'.github/workflows/e2e-test-ingest.yml',suffix:'test'},
-  {mode:'task',store:'task-results',source:38723112110,ingest:38723146662,readback:38723199260,
-    source_sha:'336fa6e8172e59a564671c8e7e3d49c503ff2b39',source_name:'Task / Ephemeral Runner',
-    source_path:'.github/workflows/task-runner.yml',source_branch:'task/1690-provenance-smoke-20261015',
+  {mode:'task',store:'task-results',
+    source:39908810295,ingest:39908836622,readback:39908886587,
+    source_sha:'093b34b5c8c7bb392741272f756f2f25e9ef4ba0',
+    source_name:'Task / Ephemeral Runner',source_path:'.github/workflows/task-runner.yml',
+    source_branch:'task/jev-goal-relevance-2221-20261023',source_event:'push',source_conclusion:'success',
     ingest_name:'Task / Result Ingest',ingest_path:'.github/workflows/task-result-ingest.yml',suffix:'task'},
-  {mode:'agent-metrics',store:'metrics',source:38739424149,ingest:38739572009,readback:38739627396,
-    source_sha:'e44e8ed0198ae7156fe8def4e08c624c4fda29c7',source_name:'Agent / Provider Smoke',
-    source_path:'.github/workflows/agent-provider-smoke.yml',source_branch:'main',
-    ingest_name:'Metrics / Agent Telemetry Ingest',ingest_path:'.github/workflows/metrics-agent-telemetry.yml',suffix:'agent'},
+  {mode:'agent-metrics',store:'metrics',
+    source:41583746825,ingest:41583797554,readback:41583841783,
+    source_sha:'35eb1fab37fc58e25554c0ceb03c3a2e6c28fae1',
+    source_name:'Agent / Issue Audit',source_path:'.github/workflows/agent-issue-audit.yml',
+    source_branch:'main',source_event:'issues',source_conclusion:'failure',
+    ingest_name:'Metrics / Agent Telemetry Ingest',
+    ingest_path:'.github/workflows/metrics-agent-telemetry.yml',suffix:'agent'},
 ]);
 const normalizePath=r=>String(r?.path??'').replace(/@refs\/heads\/main$/,'');
-const complete=r=>r?.status==='completed'&&r.conclusion==='success'&&
-  r.repository?.full_name===REPO&&r.head_repository?.full_name===REPO&&
-  N(r.id)&&N(r.run_attempt)&&SHA.test(r.head_sha??'');
+const trustedIdentity=r=>r?.repository?.full_name===REPO&&
+  r.head_repository?.full_name===REPO&&N(r.id)&&N(r.run_attempt)&&SHA.test(r.head_sha??'');
+const complete=r=>trustedIdentity(r)&&r.status==='completed'&&r.conclusion==='success';
 function requireArtifact(list,run,name){
   if(!Array.isArray(list?.artifacts)||list.artifacts.length>100)fail('untrusted artifact list');
   const matches=list.artifacts.filter(x=>x.name===name);
@@ -57,10 +77,12 @@ function requireArtifact(list,run,name){
 export function attestFiveMode(pin,source,ingest,readback,ingestArtifacts,readbackArtifacts,statements){
   if(!PINS.some(p=>JSON.stringify(p)===JSON.stringify(pin)))
     fail('unknown or altered evidence locator');
-  if(!complete(source)||source.id!==pin.source||source.event!=='push'||
+  if(!trustedIdentity(source)||source.status!=='completed'||
+     source.conclusion!==pin.source_conclusion||
+     source.id!==pin.source||source.event!==pin.source_event||
      source.name!==pin.source_name||normalizePath(source)!==pin.source_path||
      source.head_branch!==pin.source_branch||source.head_sha!==pin.source_sha)
-    fail('untrusted source workflow/attempt/SHA/branch');
+    fail('untrusted source workflow/event/conclusion/attempt/SHA/branch');
   if(!complete(ingest)||ingest.id!==pin.ingest||ingest.event!=='workflow_run'||
      ingest.name!==pin.ingest_name||normalizePath(ingest)!==pin.ingest_path||
      ingest.head_branch!=='main')fail('untrusted ingester workflow/attempt');
@@ -174,13 +196,14 @@ function selfTest(){
   const p=PINS[0],sha=p.source_sha;
   const base={repository:{full_name:REPO},head_repository:{full_name:REPO},
     head_branch:'main',head_sha:sha,status:'completed',conclusion:'success',run_attempt:1};
-  const source={...base,id:p.source,name:p.source_name,path:p.source_path,event:'push',
-    updated_at:'2026-10-15T12:00:00Z'};
+  const source={...base,id:p.source,name:p.source_name,path:p.source_path,
+    event:p.source_event,head_branch:p.source_branch,
+    conclusion:p.source_conclusion,updated_at:'2026-11-02T12:00:00Z'};
   const ingest={...base,id:p.ingest,name:p.ingest_name,path:p.ingest_path,event:'workflow_run',
-    created_at:'2026-10-15T12:01:00Z',updated_at:'2026-10-15T12:02:00Z'};
+    created_at:'2026-11-02T12:01:00Z',updated_at:'2026-11-02T12:02:00Z'};
   const readback={...base,id:p.readback,name:'Store / Receipt Readback',
     path:'.github/workflows/store-receipt-readback.yml',event:'workflow_run',
-    created_at:'2026-10-15T12:03:00Z'};
+    created_at:'2026-11-02T12:03:00Z'};
   const artifact=(run,id,name)=>({id,name,expired:false,digest:'sha256:'+'a'.repeat(64),
     size_in_bytes:100,workflow_run:{id:run.id,head_sha:run.head_sha}});
   const ia={artifacts:[artifact(ingest,111,'run-store-receipt-'+ingest.id+'-1-case')]};
@@ -201,11 +224,13 @@ function selfTest(){
     /untrusted|unclassified|unknown|positive|missing|invalid|out-of-order|duplicate|ambiguous|not an authenticated/);};
   bad(1,{...source,head_sha:'d'.repeat(40)});
   bad(1,{...source,name:'foreign workflow'});
+  bad(1,{...source,event:'workflow_dispatch'});
+  bad(1,{...source,conclusion:'failure'});
   bad(1,{...source,head_branch:'pull/1/merge'});
   bad(2,{...ingest,event:'pull_request'});
   bad(2,{...ingest,head_branch:'untrusted'});
   bad(3,{...readback,path:p.ingest_path});
-  bad(3,{...readback,created_at:'2026-10-15T11:50:00Z'});
+  bad(3,{...readback,created_at:'2026-11-02T11:50:00Z'});
   assert.equal(run(p,source,ingest,readback,{artifacts:ia.artifacts.map(x=>({...x,expired:true}))},ra,[stmt]),null);
   bad(4,{artifacts:ia.artifacts.map(x=>({...x,digest:'invalid'}))});
   bad(5,{artifacts:[...ra.artifacts,...ra.artifacts]});
@@ -218,6 +243,30 @@ function selfTest(){
   const task=PINS.find(x=>x.mode==='task');
   assert.match(task.source_branch,/^task\//);
   assert.notEqual(task.source_sha,PINS[0].source_sha);
+  // The authenticated Metrics writer may legitimately persist telemetry from
+  // an unsuccessful Agent producer. This does NOT allow a failed ingester.
+  const agent=PINS.find(x=>x.mode==='agent-metrics');
+  assert.equal(agent.source_event,'issues');
+  assert.equal(agent.source_conclusion,'failure');
+  const agentSource={...source,id:agent.source,name:agent.source_name,
+    event:agent.source_event,conclusion:agent.source_conclusion,
+    path:agent.source_path,head_branch:agent.source_branch,head_sha:agent.source_sha};
+  const agentIngest={...ingest,id:agent.ingest,name:agent.ingest_name,
+    path:agent.ingest_path,head_sha:'f'.repeat(40)};
+  const agentReadback={...readback,id:agent.readback,head_sha:agentIngest.head_sha};
+  const agentIA={artifacts:[artifact(agentIngest,333,
+    'run-store-receipt-'+agent.ingest+'-1-agent')]};
+  const agentRA={artifacts:[artifact(agentReadback,444,
+    'run-store-receipt-readback-'+agent.readback+'-1')]};
+  const agentStatement={...stmt,store:agent.store,source_workflow:agent.ingest_path,
+    ingester_run_id:String(agent.ingest),source_run_id:String(agent.source),
+    upstream_run_id:String(agent.source),artifact_id:333};
+  assert.equal(run(agent,agentSource,agentIngest,agentReadback,
+    agentIA,agentRA,[agentStatement]).status,'Verified');
+  assert.throws(()=>run(agent,{...agentSource,conclusion:'success'},
+    agentIngest,agentReadback,agentIA,agentRA,[agentStatement]),/untrusted source/);
+  assert.throws(()=>run(agent,agentSource,{...agentIngest,conclusion:'failure'},
+    agentReadback,agentIA,agentRA,[agentStatement]),/untrusted ingester/);
   // The readback must be carried by a workflow that can succeed at the
   // evaluated SHA, on every main push. It used to run only inside
   // Store / Governance Audit, whose fail-closed policy alert fails that run and

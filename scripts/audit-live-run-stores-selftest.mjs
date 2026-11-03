@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {AUDITED_STORES,parseProtectedAnchors,auditLiveRunStores} from './audit-live-run-stores.mjs';
+import {AUDITED_STORES,AGENT_STORE_AUDIT_REFS,parseProtectedAnchors,auditLiveRunStores,githubRefRead} from './audit-live-run-stores.mjs';
 
 function git(root,...args) {
   return execFileSync('git',['-C',root,...args],{
@@ -23,6 +23,43 @@ assert.throws(()=>parseProtectedAnchors(JSON.stringify({
 })),/exact store/);
 assert.deepEqual(Object.keys(parseProtectedAnchors(JSON.stringify(Object.fromEntries(
   AUDITED_STORES.map(s=>[s,sha]))))),[...AUDITED_STORES]);
+
+// The live audit uses a strictly GET-only, exact-ref GitHub CLI read
+// transport. Exercise it with an injected process runner so CI never requires
+// writer credentials or server-side mutations to test this adapter.
+{
+  const store='agent-store';
+  const url='https://api.github.com/repos/BestNathan/nession/git/ref/heads/'+store;
+  const opts={method:'GET',redirect:'error',
+    headers:{Authorization:'Bearer fixture-readonly-token'}};
+  let seen=0;
+  const stub=(program,args,options)=>{
+    seen++;
+    assert.equal(program,'gh');
+    assert.deepEqual(args,['api','--method','GET',
+      'repos/BestNathan/nession/git/ref/heads/'+store]);
+    assert.equal(options.env.GH_TOKEN,'fixture-readonly-token');
+    assert.ok(!args.join(' ').includes('fixture-readonly-token'));
+    return JSON.stringify({ref:'refs/heads/'+store,object:{type:'commit',sha}});
+  };
+  const good=await githubRefRead(url,opts,{run:stub});
+  assert.equal(good.ok,true);
+  assert.equal((await good.json()).object.sha,sha);
+  assert.equal(seen,1);
+  for(const bad of [
+    ['https://api.github.com/repos/BestNathan/nession/git/ref/heads/main',opts],
+    ['https://evil.test/repos/BestNathan/nession/git/ref/heads/agent-store',opts],
+    [url,{...opts,method:'POST'}],
+    [url,{...opts,redirect:'follow'}],
+    [url,{...opts,headers:{Authorization:'Bearer short'}}],
+  ]) await assert.rejects(()=>githubRefRead(bad[0],bad[1],{run:stub}),
+    /unsafe or unauthenticated GitHub ref GET/);
+  assert.equal(seen,1,'negative requests must never reach the transport');
+  await assert.rejects(()=>githubRefRead(url,opts,{run:()=>{throw Error('network down');}}),
+    /GitHub CLI read-only ref request failed/);
+  await assert.rejects(()=>githubRefRead(url,opts,{run:()=>'{broken-json'}),
+    /invalid GitHub ref JSON/);
+}
 
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-live-audit-fixture-'));
 try {
@@ -52,6 +89,20 @@ try {
     originalTips[store]=git(repo,'rev-parse','HEAD');
     git(repo,'push','-q','origin',store);
   }
+  // The fourth orphan Store is provisioned later than the historical three.
+  // Record its *root* as a distinct, non-independent baseline and audit only
+  // its real descendant commits with exactly the same shared Git validator.
+  const agent=AGENT_STORE_AUDIT_REFS[0];
+  git(repo,'checkout','-q','--orphan',agent);
+  git(repo,'rm','-rfq','.');
+  write(repo,'README.md','agent bootstrap (unanchored)\n');
+  git(repo,'add','-A');git(repo,'commit','-qm','agent root bootstrap');
+  const agentRoot=git(repo,'rev-parse','HEAD');
+  const agentRootTree=git(repo,'rev-parse',agentRoot+'^{tree}');
+  write(repo,'workflows/issues/1690/states/00000001.json','{"state":"initial"}\n');
+  git(repo,'add','-A');git(repo,'commit','-qm','agent append');
+  const agentTip=git(repo,'rev-parse','HEAD');
+  git(repo,'push','-q','origin',agent);
   git(repo,'checkout','-q','main');
   const api=async(url,opts)=>{
     assert.equal(opts.method,'GET');
@@ -66,6 +117,26 @@ try {
   const result=await auditLiveRunStores(base);
   assert.equal(result.passed,true);
   assert.equal(result.records.length,3);
+  const agentAnchors={[agent]:agentRoot};
+  assert.deepEqual(parseProtectedAnchors(JSON.stringify(agentAnchors),AGENT_STORE_AUDIT_REFS),agentAnchors);
+  assert.throws(()=>parseProtectedAnchors(JSON.stringify(anchors),AGENT_STORE_AUDIT_REFS),/exact store/);
+  const agentAudit={...base,anchors:agentAnchors,storeRefs:AGENT_STORE_AUDIT_REFS,
+    anchorTrust:'main_bootstrap_observation',baselineTrees:{[agent]:agentRootTree}};
+  const agentResult=await auditLiveRunStores(agentAudit);
+  assert.equal(agentResult.anchoring,'repository_main_bootstrap_observation_only');
+  assert.equal(agentResult.historical_provenance_trust,'not_independent_or_retroactive');
+  assert.equal(agentResult.records.length,1);
+  assert.equal(agentResult.records[0].store,agent);
+  assert.equal(agentResult.records[0].observed,agentTip);
+  assert.equal(agentResult.records[0].checked_changes,1);
+  await assert.rejects(()=>auditLiveRunStores({...agentAudit,
+    anchors:{[agent]:agentTip},baselineTrees:{[agent]:git(repo,'rev-parse',agentTip+'^{tree}')}}),
+    /bootstrap baseline is not the orphan root/);
+  await assert.rejects(()=>auditLiveRunStores({...agentAudit,
+    baselineTrees:{[agent]:'f'.repeat(40)}}),/baseline tree identity does not match/);
+  await assert.rejects(()=>auditLiveRunStores({...agentAudit,storeRefs:[]}),/unsupported exact store/);
+  await assert.rejects(()=>auditLiveRunStores({...agentAudit,
+    storeRefs:AUDITED_STORES}),/bootstrap observation must audit only/);
   // `git rev-parse --show-toplevel` resolves symlinks, so the root comparison
   // must realpath both sides. Reaching the same checkout through a symlinked
   // ancestor is the same tree and must be accepted — otherwise the check can
@@ -136,7 +207,15 @@ try {
   tipAnchors['task-results']=originalTips['task-results'];
   await assert.rejects(()=>auditLiveRunStores({...base,anchors:tipAnchors}),
     /baseline is not ancestor|checkout HEAD differs/);
-  console.log('live anchored Run Store audit fixtures: three refs, API cross-check, malicious fast-forward, forged ref and history reset passed');
+  // An ordinary fast-forward rewrite of an agent-store checkpoint is forbidden,
+  // even though server-side authorization and WORM trust remain unproven.
+  git(repo,'checkout','-q',agent);
+  write(repo,'workflows/issues/1690/states/00000001.json','{"state":"forged"}\n');
+  git(repo,'add','-A');git(repo,'commit','-qm','malicious agent checkpoint overwrite');
+  git(repo,'push','-q','origin',agent);
+  git(repo,'checkout','-q','main');
+  await assert.rejects(()=>auditLiveRunStores(agentAudit),/forbidden agent-store M/);
+  console.log('live anchored Run Store audit fixtures: legacy three and agent bootstrap fourth, API/tree/root checks, bad checkout and fast-forward rewrite negatives passed');
 }finally{
   fs.rmSync(tmp,{recursive:true,force:true});
 }

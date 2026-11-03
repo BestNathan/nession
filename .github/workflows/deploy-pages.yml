@@ -47,6 +47,9 @@ jobs:
       workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
       public_agent_source: ${{ steps.public_data.outputs.source }}
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
+      knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
+      knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
+      knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
       prototype_sha: ${{ steps.public_data.outputs.prototype_sha }}
       prototype_manifest_sha256: ${{ steps.public_data.outputs.prototype_manifest_sha256 }}
       prototype_gallery_sha256: ${{ steps.public_data.outputs.prototype_gallery_sha256 }}
@@ -87,11 +90,23 @@ jobs:
           ref: prototype
           path: prototype-store
           persist-credentials: false
+      - name: Checkout read-only Knowledge snapshot
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: knowledge
+          path: knowledge-store
+          # The canonical ledger verifier audits the pre-v2 ancestor chain.
+          fetch-depth: 0
+          persist-credentials: false
       - name: Setup standalone Node toolchain
         if: steps.detect.outputs.active == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Validate Knowledge ledger at pinned checkout
+        if: steps.detect.outputs.active == 'true'
+        run: node scripts/knowledge-ledger-contract.mjs check knowledge-store
       - name: Validate independent public projection
         if: steps.detect.outputs.active == 'true'
         run: cd pages && npm run check
@@ -102,11 +117,13 @@ jobs:
           SOURCE_MAIN_SHA: ${{ github.sha }}
           METRICS_DIR: ${{ github.workspace }}/metrics-store
           ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
+          KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge-store
         shell: bash
         run: |
           set -euo pipefail
           export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
           export ACCEPTANCE_RESULTS_SHA="$(git -C acceptance-store rev-parse HEAD)"
+          export KNOWLEDGE_SHA="$(git -C knowledge-store rev-parse HEAD)"
           node pages/scripts/build.mjs
           prototype_sha="$(git -C prototype-store rev-parse HEAD)"
           node pages/scripts/publish-prototypes.mjs "$GITHUB_WORKSPACE/prototype-store" "$GITHUB_WORKSPACE/pages/dist/prototypes" "$prototype_sha"
@@ -117,6 +134,7 @@ jobs:
           test -s pages/dist/data/site.json
           test -s pages/dist/workflows.html
           test -s pages/dist/data/workflows.json
+          test -s pages/dist/data/knowledge.json
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
@@ -127,6 +145,7 @@ jobs:
           file=pages/dist/data/site.json
           workflow_json=pages/dist/data/workflows.json
           workflow_html=pages/dist/workflows.html
+          knowledge_json=pages/dist/data/knowledge.json
           prototype_manifest=pages/dist/prototypes/manifest.json
           prototype_gallery=pages/dist/prototypes/index.html
           jq -e --arg sha "$(git -C prototype-store rev-parse HEAD)" '
@@ -134,6 +153,14 @@ jobs:
             .source.sha == $sha and (.entries | length) >= 1 and
             ([.entries[] | .source] | all(.[]; startswith("https://github.com/BestNathan/nession/blob/" + $sha + "/")))
           ' "$prototype_manifest" >/dev/null
+          jq -e --arg sha "$(git -C knowledge-store rev-parse HEAD)" '
+            .schema_version == 1 and .status == "available" and
+            .source.branch == "knowledge" and .source.sha == $sha and
+            (.articles | type == "array") and (.changes | type == "array")
+          ' "$knowledge_json" >/dev/null
+          echo "knowledge_sha=$(jq -r .source.sha "$knowledge_json")" >> "$GITHUB_OUTPUT"
+          echo "knowledge_json_sha256=$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "knowledge_articles=$(jq '.articles | length' "$knowledge_json")" >> "$GITHUB_OUTPUT"
           echo "prototype_sha=$(jq -r .source.sha "$prototype_manifest")" >> "$GITHUB_OUTPUT"
           echo "prototype_manifest_sha256=$(sha256sum "$prototype_manifest" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "prototype_gallery_sha256=$(sha256sum "$prototype_gallery" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -208,6 +235,9 @@ jobs:
           EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
           EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
+          EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
+          EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
+          EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
           EXPECTED_PROTO_SHA: ${{ needs.build.outputs.prototype_sha }}
           EXPECTED_PROTO_MANIFEST_SHA256: ${{ needs.build.outputs.prototype_manifest_sha256 }}
           EXPECTED_PROTO_GALLERY_SHA256: ${{ needs.build.outputs.prototype_gallery_sha256 }}
@@ -309,6 +339,33 @@ jobs:
             echo "::error::Published Pages did not serve the exact prototype gallery and preview HTML"
             exit 1
           }
+          # Independently compare anonymous HTTPS Knowledge bytes with the
+          # exact validated orphan checkout and build artifact.
+          [[ "$EXPECTED_KNOWLEDGE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$EXPECTED_KNOWLEDGE_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_KNOWLEDGE_ARTICLES" =~ ^[0-9]+$ ]] || exit 1
+          knowledge_json="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html" "$prototype_manifest" "$prototype_gallery" "$prototype_detail" "$knowledge_json"' EXIT
+          knowledge_ready=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/knowledge.json?revision=$EXPECTED_KNOWLEDGE_SHA" -o "$knowledge_json" \
+              && jq -e --arg sha "$EXPECTED_KNOWLEDGE_SHA" --argjson count "$EXPECTED_KNOWLEDGE_ARTICLES" '
+                .schema_version == 1 and .status == "available" and
+                .source.branch == "knowledge" and .source.sha == $sha and
+                (.articles | length) == $count
+              ' "$knowledge_json" >/dev/null \
+              && [[ "$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" == "$EXPECTED_KNOWLEDGE_JSON_SHA256" ]]; then
+              knowledge_ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$knowledge_ready" == true ]] || {
+            echo "::error::Published Knowledge snapshot does not match pinned source/digest"
+            exit 1
+          }
+          echo "Public Knowledge verified: source=$EXPECTED_KNOWLEDGE_SHA articles=$EXPECTED_KNOWLEDGE_ARTICLES digest=$EXPECTED_KNOWLEDGE_JSON_SHA256"
           # This is only source observation; never infer SC acceptance or PR
           # lineage from matching bytes. The existing trusted attester rechecks
           # the published SHA-256 against the exact GitHub Run/Attempt.
@@ -328,6 +385,8 @@ jobs:
             echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
+            echo "- Public Knowledge: $url/#/knowledge · source $EXPECTED_KNOWLEDGE_SHA · $EXPECTED_KNOWLEDGE_ARTICLES articles"
+            echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
             echo "- Direct HTML example: $url/prototypes/terminal-fixed-cols-2487/index.html (source link visible)"
             echo "- Prototype manifest SHA-256: \`$EXPECTED_PROTO_MANIFEST_SHA256\` (exact HTTPS bytes)"
