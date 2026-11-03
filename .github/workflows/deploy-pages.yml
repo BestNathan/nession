@@ -383,6 +383,8 @@ jobs:
             echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
+            echo "- Public Knowledge: $url/#/knowledge · source $EXPECTED_KNOWLEDGE_SHA · $EXPECTED_KNOWLEDGE_ARTICLES articles"
+            echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
             echo "- Direct HTML example: $url/prototypes/terminal-fixed-cols-2487/index.html (source link visible)"
             echo "- Prototype manifest SHA-256: \`$EXPECTED_PROTO_MANIFEST_SHA256\` (exact HTTPS bytes)"
