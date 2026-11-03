@@ -147,6 +147,10 @@ export function verifyRestore(manifest,repo,lookup=githubRef){
        (entries.length?entries.toString('utf8').split('\0').length-1:0)!==
          stored.tree_entry_count)
       deny('signed Store content commitment mismatch: '+stored.ref);
+    // The canonical auditor requires HEAD == observed. Move ONLY the
+    // disposable local symbolic HEAD; no checkout, production ref, or tracked
+    // file is modified. This also prevents accidental worktree execution.
+    git(repo,'symbolic-ref','HEAD',currentName);
     // Reuse the canonical Git policy: a later fast-forward destructive change
     // is corruption, not a valid signed-checkpoint successor.
     const audit=auditAnchoredRunStore(repo,stored.ref,pinned,current);
