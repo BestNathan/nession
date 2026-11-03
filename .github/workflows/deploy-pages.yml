@@ -11,9 +11,9 @@ on:
   schedule:
     - cron: '43 */4 * * *'
   workflow_run:
-    workflows: ['Prototype / Change Signal']
+    workflows: ['Prototype / Change Signal', 'Knowledge / Change Signal']
     types: [completed]
-    branches: [prototype]
+    branches: [prototype, knowledge]
   workflow_dispatch:
 
 concurrency:
@@ -22,15 +22,20 @@ concurrency:
 
 jobs:
   build:
-    # workflow_run runs trusted main workflow code only. The upstream signal
-    # is unprivileged and never supplies executable code, artifacts, or input.
+    # workflow_run uses trusted main code. Each unprivileged orphan signal is
+    # bound to its name + branch; no source code/artifacts enter this publisher.
     if: >-
       ${{
         github.event_name != 'workflow_run' || (
           github.event.workflow_run.event == 'push' &&
           github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.head_branch == 'prototype' &&
-          github.event.workflow_run.head_repository.full_name == github.repository
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          (
+            (github.event.workflow_run.name == 'Prototype / Change Signal' &&
+             github.event.workflow_run.head_branch == 'prototype') ||
+            (github.event.workflow_run.name == 'Knowledge / Change Signal' &&
+             github.event.workflow_run.head_branch == 'knowledge')
+          )
         )
       }}
     name: Build independent Pages

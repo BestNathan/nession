@@ -14,6 +14,7 @@ Knowledge stores durable, curated, **current** project explanations. It must be 
 README.md
 schema/v2.json
 topics/<primary-topic>/<title-slug>.md
+.github/workflows/knowledge-changed.yml  # optional pinned signal, not a record
 index.json                           # derived search cache
 CHANGELOG.md                         # append-only global time/change index
 ```
@@ -44,7 +45,7 @@ Knowledge publication and audit do not enforce GitHub-side write permissions. Th
 
 ## Trust and atomicity
 
-Normal editor workflow is `edit current Markdown -> append one log record -> regenerate index -> validate -> commit -> publish`. The canonical validator checks frontmatter/path constraints, title-to-filename matching, content/source requirements, topic index, category index, timestamped log entries, and per-commit historical mutations. No article revisions or separate receipt pushes are required. Every successful publication is identified by the resulting Git commit SHA.
+Normal editor workflow is `edit current Markdown -> append one log record -> regenerate index -> validate -> commit -> publish`. **Exception #2683:** a single addition of `.github/workflows/knowledge-changed.yml` is allowed when its complete bytes match the trusted-main `scripts/knowledge-ledger-contract.mjs` constant. Other `.github` paths, signal changes/deletions, and commits without normal article/index/CHANGELOG updates remain invalid. This unprivileged notification cannot execute Knowledge content or authorize publication; the trusted main Pages workflow validates and builds the source independently. The canonical validator checks frontmatter/path constraints, title-to-filename matching, content/source requirements, topic index, category index, timestamped log entries, and per-commit historical mutations. No article revisions or separate receipt pushes are required. Every successful publication is identified by the resulting Git commit SHA.
 
 Use `node scripts/knowledge-ledger-publish.mjs publish <knowledge-worktree> <expected-remote-sha>` from a trusted operator environment. It fails on stale `knowledge` head and never force-pushes. If concurrent edits happen, reconcile both the affected current articles and the global log, regenerate the index, and revalidate. Failed readback is **Pending**, not a Pass. Do not execute PR-head writer code with GitHub credentials.
 
@@ -78,7 +79,7 @@ Run deterministic checks for schema/frontmatter, full-title path, topic/category
 
 ## Record layout and invariants
 
-The only active published layout is README.md, schema/v2.json, topics/<topic>/<full-title-slug>.md, derived index.json and append-only global CHANGELOG.md. A record is one current Markdown article per full title/topic, not an ID-based record or revision series. Frontmatter fields are exactly title, description, topic, categories, status, created_at, updated_at and sources. The body captures conclusion, evidence/rationale, related-article links and limits/open questions. Categories are multi-select tags; topic is the primary directory/index.
+The only active Knowledge **records** are README.md, schema/v2.json, topics/<topic>/<full-title-slug>.md, derived index.json and append-only global CHANGELOG.md. The one byte-pinned `.github/workflows/knowledge-changed.yml` is strictly a non-record notification exception; it is neither a Knowledge writer nor an audit bypass. A record is one current Markdown article per full title/topic, not an ID-based record or revision series. Frontmatter fields are exactly title, description, topic, categories, status, created_at, updated_at and sources. The body captures conclusion, evidence/rationale, related-article links and limits/open questions. Categories are multi-select tags; topic is the primary directory/index.
 
 For every publication, article edits, index regeneration and changelog append must be in one commit. The changelog event contains timestamp, action, full title, current path, topic, categories, reason and owning Issue/PR; rename/move also contain previous path. Git commits preserve prior article contents. Never create short IDs, per-article versions, per-article event files or per-article receipts. A failed or unrun audit is PENDING, never PASS.
 

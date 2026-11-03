@@ -51,6 +51,9 @@ import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
 import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
+import {collectRunStoreFixtureEvidence,selfTestRunStoreFixtureEvidence} from './acceptance-run-store-fixture-evidence.mjs';
+import {collectAuthenticatedCheckpoint,selfTestAuthenticatedCheckpoint} from './acceptance-run-store-checkpoint-evidence.mjs';
+import {collectFiveModeAcceptanceEvidence,selfTestFiveModeAcceptanceEvidence} from './acceptance-run-store-five-mode-evidence.mjs';
 import {selfTestDevelopmentReadback} from './acceptance-development-readback-selftest.mjs';
 import os from 'node:os';
 import path from 'node:path';
@@ -173,7 +176,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], verifiedRunStoreFixtureEvidence = [], verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -210,6 +213,9 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     ...(verifiedAgentTelemetryRecords.length
       ? { verified_agent_telemetry_records: verifiedAgentTelemetryRecords } : {}),
     verified_development_checkpoint_readbacks: developmentReadback,
+    verified_run_store_fixture_evidence: verifiedRunStoreFixtureEvidence,
+    authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
+    authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
     verified_public_pages_agent_observations: publicPagesObservations,
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
@@ -1534,6 +1540,25 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const verifiedRunStoreFixtureEvidence = process.env.ACCEPTANCE_STAGE === 'post-merge' && String(process.env.ISSUE_NUMBER ?? '') === '1690'
+    ? await collectRunStoreFixtureEvidence(repo, sha, directRuns, githubGet) : [];
+  // SC-08: independent Sigstore signer proof and read-only restore. The prior
+  // source run is only a locator; re-authenticate exact GitHub Job/Artifact,
+  // then run the canonical signature/Rekor/four-Store verifier ourselves.
+  const verifiedRunStoreExternalCheckpoint = await collectAuthenticatedCheckpoint({
+    repo,sha,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,
+    githubSha:process.env.GITHUB_SHA,githubRef:process.env.GITHUB_REF,
+  },directRuns,githubGet);
+  // SC-06: a current green Workflow summary is NOT evidence of five-mode
+  // coverage, and an earlier Pass may expire. Re-run the canonical bounded
+  // read-only verifier at the exact trusted main SHA instead of duplicating
+  // its source/ingester/consumer Git-byte identity contract.
+  const authenticatedRunStoreFiveModeReadback=collectFiveModeAcceptanceEvidence({
+    repo,sha,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,githubSha:process.env.GITHUB_SHA,
+    githubRef:process.env.GITHUB_REF,
+  });
   // Canonical Agent telemetry persisted by the trusted Metrics ingest is only
   // valid when its identity matches this exact run/attempt/repository and its
   // canonical storage path. The metrics branch is already checked out at
@@ -1798,6 +1823,8 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays,
+    verifiedRunStoreFixtureEvidence, verifiedRunStoreExternalCheckpoint,
+    authenticatedRunStoreFiveModeReadback,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
     stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
@@ -3058,6 +3085,18 @@ async function selfTest() {
     async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
       {jobs:[{...fnrScope,steps:[fnrScope.steps[0]]},fnrFullSkipped]},
     async()=>fnrLog),[],'missing scope steps are not a trusted decision');
+  selfTestRunStoreFixtureEvidence();
+  selfTestAuthenticatedCheckpoint();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    verifiedRunStoreExternalCheckpoint:{kind:'authenticated_run_store_external_checkpoint',verdict:'Verified'}})
+    .authenticated_run_store_external_checkpoint.verdict,'Verified');
+  selfTestFiveModeAcceptanceEvidence();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedRunStoreFiveModeReadback:{coverage:5,total:5,verdict:'Verified'}})
+    .authenticated_run_store_five_mode_readback.coverage,5);
+  assert.deepEqual(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    verifiedRunStoreFixtureEvidence:[{verdict:'fixture_pass'}]}).verified_run_store_fixture_evidence,
+    [{verdict:'fixture_pass'}]);
   selfTestCiCostStudy();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();

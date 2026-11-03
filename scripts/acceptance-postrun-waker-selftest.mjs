@@ -29,7 +29,7 @@ assert.match(yaml,/target_ref: \$\{\{ needs\.select\.outputs\.target_sha \}\}/);
 assert.match(yaml,/types: \[completed\]/);
 assert.match(yaml,/workflow_run:\s*\n(?:[^\n]*\n)*?\s+branches: \[main\]/,
   'subscribe only to main upstream runs, not PR completion events');
-assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/);
+assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/);
 // A Not Required Full run concludes success with the `full` job skipped; only
 // a real exact-SHA Full execution may wake release qualification.
 assert.match(yaml,/Full Regression did not execute the Full browser job/);
@@ -41,6 +41,7 @@ assert.match(yaml,/persist-credentials: false/);
 const sources=[
   ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
   ['CI / Run Store Fixture Evidence','.github/workflows/ci-run-store-fixture-evidence.yml'],
+  ['CI / Run Store Signed Checkpoint','.github/workflows/ci-run-store-anchor.yml'],
   ['E2E / Tests','.github/workflows/e2e-tests.yml'],
   ['E2E / Full Regression','.github/workflows/e2e-full-regression.yml'],
   ['Deploy / Public Pages','.github/workflows/deploy-pages.yml'],

@@ -19,7 +19,8 @@ knowledge (independent orphan branch)
 │   └── engineering/
 │       └── nession-instruction-architecture-and-knowledge-ownership.md
 ├── index.json                     # derived; topic -> current files, category -> article paths
-└── CHANGELOG.md                  # ONE append-only ledger-wide change log
+├── CHANGELOG.md                  # ONE append-only ledger-wide change log
+└── .github/workflows/knowledge-changed.yml  # optional fixed-content push signal
 ```
 
 Each knowledge **title** determines the entire Markdown filename: `topics/<topic>/<title-slug>.md`. For example `Nession instruction architecture and knowledge ownership` becomes `topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md`. A slug uses the whole lowercased title with whitespace/punctuation converted into `-` (Chinese/Unicode characters remain intact). **Never invent or abbreviate an `id`, and do not put `id` in frontmatter.** A topic is the primary navigation path; `categories` are reusable multi-value tags. Category index entries point to full article paths. No article revision files, per-article event logs or receipt documents. Git commits provide historical snapshots; the global changelog records **what changed, when, why and in which topic/category**.
@@ -132,6 +133,8 @@ git log --format='%H %cI %s' origin/knowledge -- topics/  # exact prior content
 For a topic, choose `index.json.topics[topic]`; for tag filtering use `index.json.categories[category]` (array of **current Markdown paths**). Combine filters by path or complete title; no synthetic short ID is used. Normal answers use `status: verified` records and cite current authoritative source, full title/topic and observed knowledge Git SHA. For “what changed?” search `CHANGELOG.md` by title, topic, category and timestamp. For “what was true before?” select a historical Git commit; do not invent vNNNN identifiers.
 
 ## Edit / update
+
+**Knowledge push-signal exception:** Exactly one immutable, read-only `.github/workflows/knowledge-changed.yml` can be added to the orphan branch as part of a normal Knowledge article/index/CHANGELOG transaction. Its bytes are pinned and enforced by the trusted-main ledger validator. No other `.github` file, later change/delete, privileged scope or execution of Knowledge content is permitted; the signal is never a ledger verdict or a Pages publisher (#2683).
 
 1. Inspect the relevant topic, categories, complete title, current entry and authoritative sources. Before creating anything, check for an existing article with the same concept/title. **Do not assign a separate ID.**
 2. Work in an isolated `origin/knowledge` worktree, **not** product `main` or shared `knowledge` checkout. Keep the root checkout read-only:

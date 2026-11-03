@@ -100,7 +100,28 @@
             "trusted_job_only": true
           }
         }
-      ]
+      ],
+      "path_policy": {
+        "owner": "scripts/run-store-integrity.mjs:runStorePathPolicy",
+        "classes": [
+          {
+            "pattern": "^runs\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^indexes\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^sources\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^README\\.md$",
+            "kind": "immutable"
+          }
+        ]
+      }
     },
     {
       "ref": "task-results",
@@ -125,7 +146,28 @@
             "trusted_job_only": true
           }
         }
-      ]
+      ],
+      "path_policy": {
+        "owner": "scripts/run-store-integrity.mjs:runStorePathPolicy",
+        "classes": [
+          {
+            "pattern": "^runs\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^indexes\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^sources\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^README\\.md$",
+            "kind": "immutable"
+          }
+        ]
+      }
     },
     {
       "ref": "metrics",
@@ -172,7 +214,32 @@
             "trusted_job_only": true
           }
         }
-      ]
+      ],
+      "path_policy": {
+        "owner": "scripts/run-store-integrity.mjs:runStorePathPolicy",
+        "classes": [
+          {
+            "pattern": "^raw\\/workflows\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^raw\\/events\\/.+$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^(?:metrics|agent-metrics|repo-metrics)\\.json$",
+            "kind": "projection"
+          },
+          {
+            "pattern": "^(?:repo-metrics|agent-metrics)-(?:light|dark)\\.svg$",
+            "kind": "projection"
+          },
+          {
+            "pattern": "^README\\.md$",
+            "kind": "immutable"
+          }
+        ]
+      }
     },
     {
       "ref": "agent-store",
@@ -258,6 +325,47 @@
         "trigger": "owner/main manual request -> authenticated main-owned workflow_run",
         "boundaries": "manual request read-only; new scoped App token minted after Run/Artifact verification",
         "acceptance_blocker": "Owner/main Controller, Worker and encrypted native checkpoint have live readback under #1664; full #1690 server enforcement and external anchor are deferred, not Pass."
+      },
+      "path_policy": {
+        "owner": "scripts/run-store-integrity.mjs:runStorePathPolicy",
+        "classes": [
+          {
+            "pattern": "^roles\\/(?:developer|reviewer|acceptor|auditor)\\/[a-z][a-z0-9-]*\\/issues\\/[1-9][0-9]*\\/checkpoints\\/[0-9]{8}\\.json$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^roles\\/(?:developer|reviewer|acceptor|auditor)\\/[a-z][a-z0-9-]*\\/issues\\/[1-9][0-9]*\\/runs\\/[1-9][0-9]*-[1-9][0-9]*\\.json$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^roles\\/(?:developer|reviewer|acceptor|auditor)\\/[a-z][a-z0-9-]*\\/issues\\/[1-9][0-9]*\\/head\\.json$",
+            "kind": "cas-pointer"
+          },
+          {
+            "pattern": "^workflows\\/issues\\/[1-9][0-9]*\\/states\\/[0-9]{8}\\.json$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^workflows\\/issues\\/[1-9][0-9]*\\/results\\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\\.json$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^workflows\\/issues\\/[1-9][0-9]*\\/head\\.json$",
+            "kind": "cas-pointer"
+          },
+          {
+            "pattern": "^e2e-failures\\/[a-f0-9]{64}\\/states\\/[0-9]{8}\\.json$",
+            "kind": "immutable"
+          },
+          {
+            "pattern": "^e2e-failures\\/[a-f0-9]{64}\\/head\\.json$",
+            "kind": "cas-pointer"
+          },
+          {
+            "pattern": "^e2e-failure-observations\\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\\.json$",
+            "kind": "immutable"
+          }
+        ]
       }
     }
   ],

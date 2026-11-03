@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {RUN_STORE_REFS} from './run-store-integrity.mjs';
+import {RUN_STORE_REFS,runStorePathPolicy} from './run-store-integrity.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[0-9a-f]{40}$/;
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -53,6 +53,14 @@ export function checkInventory(manifest,workflows){
     fail('inventory stores diverge from canonical run-store-integrity refs');
   const seen=new Map();
   for(const store of manifest.stores){
+    // The manifest's patterns are a checked projection, not a second
+    // authority. Any drift from executable canonical classifying regexes
+    // fails the existing blocking inventory Gate.
+    const pathPolicy=store.path_policy;
+    if(pathPolicy?.owner!=='scripts/run-store-integrity.mjs:runStorePathPolicy'||
+       !Array.isArray(pathPolicy.classes)||
+       JSON.stringify(pathPolicy.classes)!==JSON.stringify(runStorePathPolicy(store.ref)))
+      fail('run store path-policy inventory drift: '+store.ref);
     if(!['active','planned'].includes(store.lifecycle)||
        !Array.isArray(store.writers)||store.writers.length>20)
       fail('invalid Store state or writer inventory: '+store.ref);
@@ -395,6 +403,16 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,15);
+  const missingPathPolicy=JSON.parse(JSON.stringify(manifest));
+  delete missingPathPolicy.stores[0].path_policy;
+  assert.throws(()=>checkInventory(missingPathPolicy,sources),/path-policy inventory drift/);
+  const forgedPathPolicy=JSON.parse(JSON.stringify(manifest));
+  forgedPathPolicy.stores.find(x=>x.ref==='metrics').path_policy.classes[0].kind='projection';
+  assert.throws(()=>checkInventory(forgedPathPolicy,sources),/path-policy inventory drift/);
+  const extraAllowlist=JSON.parse(JSON.stringify(manifest));
+  extraAllowlist.stores.find(x=>x.ref==='agent-store').path_policy.classes.push({
+    pattern:'^unauthorized-path',kind:'immutable'});
+  assert.throws(()=>checkInventory(extraAllowlist,sources),/path-policy inventory drift/);
   const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
