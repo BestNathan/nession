@@ -107,10 +107,11 @@ impl ClaudeCodeAgentExtension {
 
         let mut categories = scanner::scan_claude_dir(&root);
 
-        // History is only available at global scope: it lives under
-        // `projects/*/`, which is a machine-wide record rather than a project's.
+        // History and Auto Memory are machine-wide Claude data under
+        // ~/.claude/projects/, not <session cwd>/.claude/ configuration.
+        // A project-local directory named projects/ must not impersonate them.
         if request.scope == Scope::Project {
-            categories.retain(|c| c.name != "History");
+            categories.retain(|c| c.name != "History" && c.name != "Memory");
         }
 
         Ok(serde_json::to_value(ListResponseV1::listing(categories))?)
