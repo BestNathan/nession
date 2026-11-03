@@ -79,10 +79,12 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
       NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-    # 30m covers the bounded Full-reuse wait plus the strictly necessary
-    # selected-suite fallback; the ordinary selected/not-required paths are
+    # 60m covers the bounded Full-reuse wait plus the strictly necessary
+    # selected-suite fallback. A selection that includes the long real-stack
+    # terminal consistency/attach suites can legitimately exceed 30m while
+    # still finishing (#2658); the ordinary selected/not-required paths are
     # unchanged (#2478 SC-05).
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
