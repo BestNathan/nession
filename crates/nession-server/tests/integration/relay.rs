@@ -141,6 +141,7 @@ async fn start_agent(
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+            handshake_policy: Default::default(),
         },
     )?;
 

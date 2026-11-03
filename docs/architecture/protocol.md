@@ -1117,6 +1117,34 @@ chosen. A refusal **answers and keeps the connection** — a caller outside its
 scope has made an ordinary mistake, and hanging up turns it into a reattach storm
 that reports nothing.
 
+### Admission is bounded before either question is asked (#2653)
+
+The two layers above decide *who* may connect and *what* they may do. Neither
+bounds how much work a peer can create **before** it answers either question.
+Until `#2653` the accept loop spawned one task per accepted socket and the
+TLS/WebSocket upgrade had no deadline, so a peer that sent nothing held a task
+and a socket indefinitely — a resource-exhaustion path that never reached the
+credential callback at all.
+
+The listener therefore owns a *third*, separate boundary:
+[`P2pHandshakePolicy`](../../crates/nession-agent/src/server/websocket.rs)
+bounds how many accepted sockets may be mid-handshake at once and how long one
+handshake may take. The accept loop takes a slot **before** spawning anything and
+closes the socket immediately when the budget is exhausted; `complete_handshake`
+runs TLS and the HTTP upgrade (including the credential callback) under one
+finite deadline. A slot is released when the peer authenticates, is refused, times
+out, disconnects, or the listener shuts down — authenticated Sessions never hold
+one, however long they live.
+
+This is deliberately not the `#961` execution-lane bound and does not replace it.
+`#961` bounds the Protocol Units an **authenticated** connection may run in
+flight; this bounds becoming an authenticated connection. A listener that bounded
+only the former would still let unauthenticated peers accumulate; one that bounded
+only the latter would starve legitimate clients behind silent sockets. The
+credential check itself is unchanged: a refused upgrade still fails closed, and
+the admission budget only decides whether the agent will spend a handshake on the
+peer in the first place.
+
 ### What the credential is, and what it deliberately is not
 
 Scope is *what kind of work*, not *which connection*, and it is enforced per wire

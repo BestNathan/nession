@@ -89,6 +89,7 @@ async fn start_server_with_terminal_cols(
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
             terminal_cols,
+            handshake_policy: Default::default(),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -2865,6 +2866,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+            handshake_policy: Default::default(),
         },
     )?;
     let (handle, addr) = server.start().await?;
