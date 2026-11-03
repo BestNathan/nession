@@ -226,6 +226,10 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             mutations: Arc::clone(&mutation_lane),
             tmux: Arc::clone(&tmux_for_client),
             terminal_cols: config.terminal_cols,
+            // The P2P listener's default pre-authentication budget (#2653):
+            // bounded pending handshakes plus a finite deadline, owned by the
+            // listener rather than tunable from the config for now.
+            handshake_policy: Default::default(),
         },
     )
     .context("failed to create agent server")?;

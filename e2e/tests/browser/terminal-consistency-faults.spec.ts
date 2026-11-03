@@ -309,7 +309,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // Reclaim control with a real gesture before driving the Session again —
     // a displaced client observes until it is activated.
     await page.locator('.xterm').click();
-    await expect(page.getByTestId('terminal-observer-bar')).toHaveCount(0, {
+    await expect(page.locator('[data-terminal-notices~="observer"]')).toHaveCount(0, {
       timeout: 20_000,
     });
 
@@ -622,10 +622,13 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
 
     // #2286 SC-02: opening the session's terminal on the second device is a
     // meaningful foreground activation, so it becomes the Controller without
-    // an explicit Take control. The displaced client is the observer, and the
-    // lease is visible as state on both sides (#2157).
-    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 20_000 });
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 20_000 });
+    // an explicit Take control. The displaced client is the observer; #2658
+    // keeps that state off the grid but publishes it on the surface for
+    // diagnostics, so ownership is still observable on both sides (#2157).
+    await expect(observer.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(0, { timeout: 20_000 });
+    await expect(controller.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(1, { timeout: 20_000 });
 
     // Output still reaches both clients; the command comes from whoever holds
     // the lease now, which the takeover above has already established.
@@ -634,10 +637,14 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
 
     // The retained manual fallback moves control back for the observer checks
     // below: an explicit Take control is still how a displaced user seizes the
-    // session while the other device remains attached.
+    // session while the other device remains attached. It lives in the
+    // Capsule's opt-in notices disclosure (#2658).
+    await controller.getByTestId('terminal-notices-trigger').click();
     await controller.getByRole('button', { name: 'Take control' }).click();
-    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
-    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+    await expect(controller.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(1, { timeout: 10_000 });
 
     // SC-03: the observer's input and passive viewport change neither reach
     // the PTY nor move the lease. Its client knows it is the observer and
@@ -668,7 +675,7 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
       .poll(async () => readGrid(observer), { timeout: 15_000 })
       .toEqual(controllerGrid);
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
-    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
+    await expect(observer.locator('[data-terminal-notices~="observer"]')).toHaveCount(1);
 
     // #2286 SC-02 / #2487 PC → phone → PC: a real gesture on the observer's
     // terminal takes the lease automatically, and the shared PTY follows the
@@ -676,25 +683,29 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     // the takeover must not widen the grid. A gesture on the first client
     // returns ownership and the rows follow it back.
     await observer.locator('.xterm').click();
-    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
-    // Same bar-driven container change as above, now on the newly controlling
-    // client: settle before reading the grid its PTY size is asserted against.
+    await expect(observer.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(0, { timeout: 15_000 });
+    await expect(controller.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(1, { timeout: 15_000 });
+    // Settle before reading the grid the newly controlling client's PTY size
+    // is asserted against.
     await waitForStableGrid(observer);
     const observerGrid = await readGrid(observer);
     expect(observerGrid.cols).toBe(controllerGrid.cols);
     expect(observerGrid.rows).not.toBe(controllerGrid.rows);
     await expectPtySize(observer, observerGrid.cols, observerGrid.rows);
     // The displaced client is an observer, not a copy of the pane: its own
-    // container still measures its local grid (and the observer bar has just
-    // changed that container's height). The PTY size above and the observer
-    // bar are the ownership witnesses; the displaced xterm's rows are not.
+    // container still measures its local grid. The PTY size above and the
+    // observer state are the ownership witnesses; the displaced xterm's rows
+    // are not.
 
     await controller.locator('.xterm').click();
-    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
-    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
-    // And back: the bar toggle is layout work on both pages, so the returning
-    // controller's grid must settle before its PTY is asserted against it.
+    await expect(controller.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(0, { timeout: 15_000 });
+    await expect(observer.locator('[data-terminal-notices~="observer"]'))
+      .toHaveCount(1, { timeout: 15_000 });
+    // And back: settle the returning controller's grid before its PTY is
+    // asserted against it.
     await waitForStableGrid(controller);
     const controllerReturned = await readGrid(controller);
     await expectPtySize(controller, controllerReturned.cols, controllerReturned.rows);
@@ -1002,14 +1013,19 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   expect(missingTail, 'a tail line never reached the parser across the fallback').toEqual([]);
 
   // #1926 SC-08: the recovered route may be synchronized or degraded-live
-  // depending on whether its bootstrap proved a baseline — but a visible
-  // degraded notice and a synchronized claim may never coexist.
+  // depending on whether its bootstrap proved a baseline — but an announced
+  // history gap and a synchronized claim may never coexist (#2658: the
+  // announcement is the surface token, not an automatic notice).
   const recoveredState = await streamState();
   expect(['synchronized', 'degraded-live', 'unavailable']).toContain(recoveredState);
-  if (await page.getByTestId('terminal-history-degraded').count() > 0) {
+  // The surface always exists; the attribute is absent in the healthy state,
+  // so selecting by the attribute itself would miss and error here.
+  const recoveredNotices = await page.getByTestId('terminal-surface')
+    .getAttribute('data-terminal-notices');
+  if ((recoveredNotices ?? '').split(/\s+/).includes('history-degraded')) {
     expect(
       recoveredState,
-      'a visible degraded notice must not coexist with a synchronized claim',
+      'an announced history gap must not coexist with a synchronized claim',
     ).toBe('degraded-live');
   }
 
@@ -1064,7 +1080,8 @@ for (const mode of ['Relay', 'P2P'] as const) {
       const domFacts = () => ({
         state: document.querySelector('[data-terminal-stream-state]')
           ?.getAttribute('data-terminal-stream-state') ?? null,
-        notice: document.querySelector('[data-testid="terminal-history-degraded"]') !== null,
+        notices: document.querySelector('[data-terminal-notices]')
+          ?.getAttribute('data-terminal-notices') ?? null,
         original: document.querySelector('.xterm[data-e2e-restart-instance="original"]') !== null,
         xterms: document.querySelectorAll('.xterm').length,
       });
@@ -1093,7 +1110,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
       };
       new MutationObserver(() => {
         const facts = domFacts();
-        const key = `${facts.state}|${facts.notice}|${facts.original}|${facts.xterms}`;
+        const key = `${facts.state}|${facts.notices}|${facts.original}|${facts.xterms}`;
         const previous = w.__restartLog!.filter((e) => e.label === 'dom').at(-1);
         if (previous?.key !== key) {
           w.__restartLog!.push({ t: Date.now(), label: 'dom', key, ...facts });
@@ -1145,7 +1162,9 @@ for (const mode of ['Relay', 'P2P'] as const) {
     const rendererSurvived = await page
       .locator('.xterm[data-e2e-restart-instance="original"]')
       .count();
-    const degraded = await page.getByTestId('terminal-history-degraded').count();
+    const degraded = ((await page.getByTestId('terminal-surface')
+      .getAttribute('data-terminal-notices')) ?? '')
+      .split(/\s+/).includes('history-degraded');
     const bootstraps = wire.received
       .filter((frame) => frame.msg_type === 'agent.terminal.output'
         && frame.payload?.bootstrap !== undefined)
@@ -1205,14 +1224,17 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     // No silent skip at the boundary. tmux history normally survives, so the
     // pre-restart line should be repainted by the new Agent's bootstrap. If it
-    // is not, the runtime must say so with the degraded notice rather than
-    // showing a continuous-looking terminal — on **either** route (#2194: a
-    // route change onto a new stream epoch states the gap even when the
-    // recovery lands on Relay for a P2P attach). Asserted after the wire log
-    // so a failure reports what actually crossed the boundary.
+    // is not, the runtime must announce the gap rather than showing a
+    // continuous-looking terminal — on **either** route (#2194: a route change
+    // onto a new stream epoch states the gap even when the recovery lands on
+    // Relay for a P2P attach). #2658 keeps that statement behind the Capsule
+    // disclosure but exposes it on the surface for this diagnostic. Asserted
+    // after the wire log so a failure reports what actually crossed the
+    // boundary.
     expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
     if (before === 0) {
-      await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-terminal-notices~="history-degraded"]'))
+        .toHaveCount(1, { timeout: 10_000 });
     }
 
     // A second post-restart command proves the recovered route is stable, not
@@ -1332,10 +1354,12 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 60_000 });
 
   // The tail may be repainted by a fresh capture or explicitly marked
-  // degraded; what may not happen is a missing tail with no statement.
+  // degraded; what may not happen is a missing tail with no statement. #2658
+  // publishes the statement as surface state, not as an automatic notice.
   const tailLine = await countInBuffer(page, `BIG-${COUNT}`);
   if (tailLine === 0) {
-    await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-terminal-notices~="history-degraded"]'))
+      .toHaveCount(1, { timeout: 15_000 });
   }
 
   // The recovered route is still usable.
@@ -1465,9 +1489,10 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   expect(injected.ok, `overflow dispatch (${JSON.stringify(injected)})`).toBe(true);
 
   // 1. The halt is stated. gapDetected stays set until a proven capture is
-  //    parsed, so this also proves the writer actually overflowed.
-  await expect(page.getByTestId('terminal-history-degraded'))
-    .toBeVisible({ timeout: 60_000 });
+  //    parsed, so this also proves the writer actually overflowed. #2658
+  //    exposes the statement as surface state, not as an automatic notice.
+  await expect(page.locator('[data-terminal-notices~="history-degraded"]'))
+    .toHaveCount(1, { timeout: 60_000 });
 
   // 2. The renderer that halted is gone.
   await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
@@ -1508,8 +1533,8 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     bootstraps: bootstraps.slice(-4),
     state: await page.locator('[data-terminal-stream-state]').getAttribute('data-terminal-stream-state'),
   })}`);
-  await expect(page.getByTestId('terminal-history-degraded'))
-    .toBeHidden({ timeout: 60_000 });
+  await expect(page.locator('[data-terminal-notices~="history-degraded"]'))
+    .toHaveCount(0, { timeout: 60_000 });
 
   // The repaired session keeps working.
   await expect(async () => {

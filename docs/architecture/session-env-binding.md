@@ -117,6 +117,13 @@ profile content without updating this owner.
 
 ## Shell bootstrap
 
+The shell an adapter targets is resolved from tmux's `default-shell` first,
+then the Agent process's `SHELL`, then the passwd login shell for the Agent's
+uid. The passwd fallback matters in container images that set neither: the
+adapter is resolved before `new-session` starts a tmux server, so the
+pre-session query cannot answer even though tmux resolves the passwd shell a
+moment later. Do not treat the pre-session tmux answer as the only authority.
+
 Only `bash` and `zsh` have adapters in this phase. Both are Session-local:
 
 - **bash** is launched as `bash --rcfile <session>/shell/bash/bashrc -i`. The

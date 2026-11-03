@@ -1,6 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
+import {
+  capsuleDetailDialogClass,
+  capsuleIconButtonClass,
+} from '@/product/terminal/capsule/capsuleStyles';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import type {
   CapsuleCapabilityProjection,
   CapsuleExperience,
@@ -14,10 +26,11 @@ import type { TerminalStreamState } from '@/platform/session-runtime/SessionRunt
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
+import { useNoticeDisclosure } from '@/product/terminal/hooks/useNoticeDisclosure';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -119,11 +132,12 @@ export interface TerminalSurfaceProps {
  *   35 061 bytes) whether the route named a drop or not, while the DOM differed
  *   by this whole band. Adding the notice changed no pixel.
  *
- * The first repair kept notices outside the capsule host, which prevented
- * occlusion but made each full-width flex sibling reserve terminal height.
- * #2621 preserves that host boundary and instead places all notices in a
- * compact root-owned absolute overlay near the top, leaving the full grid
- * height unchanged when an observer takes control or a notice is dismissed.
+ * #2621 moved the notices out of the capsule host into an absolute overlay so
+ * they no longer reserved Terminal height, but the owner decision in #2658 is
+ * stricter: the Terminal carries no automatic notice at all. This sentence is
+ * therefore only reachable through the Capsule's explicit notices disclosure;
+ * it is still the same sentence, and the loss it describes is still never
+ * silent.
  */
 function inputDropNotice(drop: InputDrop): string {
   switch (drop.reason) {
@@ -152,12 +166,15 @@ function clipboardNoticeText(notice: ClipboardNotice): string {
   }
 }
 
-/** The only status chrome: compact, accessible and never a flex row (#2621). */
-const terminalNoticeClass = cn(
-  'pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-[var(--nession-radius-control)]',
-  'border border-border/70 bg-background/95 px-2.5 py-1 text-muted-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-sm',
-  chromeSansRole('secondary'),
-);
+/**
+ * One opt-in status row inside the notices dialog (#2658).
+ *
+ * The Terminal never mounts this: the row exists only while the user has
+ * opened the notices disclosure, so no automatic strip can cover the grid or
+ * reserve a Terminal row.
+ */
+const terminalNoticeRowClass =
+  'flex min-w-0 flex-wrap items-center gap-2 border-b border-border/60 pb-3 last:border-b-0 last:pb-0';
 
 /**
  * The compact clipboard notice (#2598, #2621, #2614).
@@ -195,13 +212,6 @@ function TerminalClipboardNoticeStrip({
   useEffect(() => {
     setManualCopy(false);
   }, [state.id]);
-  useEffect(() => {
-    // A manual copy needs time to select and press the shortcut; the payload
-    // still expires, just not while the user is mid-gesture.
-    const lifetime = manualCopy ? 30_000 : notice.kind === 'copy-required' ? 10_000 : 5_000;
-    const timer = setTimeout(() => onDismiss?.(), lifetime);
-    return () => clearTimeout(timer);
-  }, [state.id, notice.kind, manualCopy, onDismiss]);
   const copy = () => {
     if (notice.kind !== 'copy-required') { return; }
     const active = controller;
@@ -225,13 +235,13 @@ function TerminalClipboardNoticeStrip({
   const tooLarge = exactText.length > MAX_SELECTABLE_COPY_TEXT;
   return (
     <div
-      className={cn(terminalNoticeClass, manualCopy && 'w-full flex-col items-stretch')}
+      className={cn(terminalNoticeRowClass, 'flex-col items-stretch')}
       data-testid="terminal-clipboard-notice"
       data-clipboard-notice={notice.kind}
       role="status"
       aria-live="polite"
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span>
           {manualCopy
             ? tooLarge
@@ -261,16 +271,13 @@ function TerminalClipboardNoticeStrip({
 }
 
 /**
- * The one root-owned, absolute status layer (#2621).
+ * The opt-in notice details (#2658).
  *
- * It is deliberately a sibling of — never a child of — the capsule host, and
- * it is absolutely positioned, so no notice participates in flex layout. The
- * host stays the sole flex-filling region and xterm's rows never change when a
- * notice appears, is replaced or expires. `pointer-events-none` on the
- * container with `pointer-events-auto` only on the notices keeps the terminal's
- * pointer/IME surface intact everywhere else.
+ * Rendered only inside the Capsule's notices dialog, after an explicit user
+ * gesture. It keeps the same sentences and actions the #2621 overlay had; what
+ * changed is when they exist: never automatically, and never over the grid.
  */
-function TerminalStatusOverlay({
+function TerminalNoticeDetails({
   historyDegraded,
   inputDrop,
   clipboardNotice,
@@ -289,17 +296,11 @@ function TerminalStatusOverlay({
   onDismissClipboardNotice?: () => void;
   onTakeControl?: () => void;
 }) {
-  if (!(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer')) {
-    return null;
-  }
   return (
-    <div
-      data-testid="terminal-status-overlay"
-      className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[40%] flex-col items-end gap-1.5 overflow-y-auto"
-    >
+    <div data-testid="terminal-notice-details" className="flex flex-col gap-3">
       {historyDegraded ? (
         <div
-          className={terminalNoticeClass}
+          className={terminalNoticeRowClass}
           data-testid="terminal-history-degraded"
           role="status"
         >
@@ -308,7 +309,7 @@ function TerminalStatusOverlay({
       ) : null}
       {inputDrop ? (
         <div
-          className={terminalNoticeClass}
+          className={terminalNoticeRowClass}
           data-testid="terminal-input-drop"
           role="status"
         >
@@ -333,7 +334,7 @@ function TerminalStatusOverlay({
       ) : null}
       {terminalControl?.role === 'observer' ? (
         <div
-          className={terminalNoticeClass}
+          className={terminalNoticeRowClass}
           data-testid="terminal-observer-bar"
           role="status"
         >
@@ -376,6 +377,14 @@ export function TerminalSurface({
   surfaceAction,
   workContext,
 }: TerminalSurfaceProps) {
+  const { hasNotices, dialogOpen: noticesDialogOpen, setOpen: setNoticesOpen, notices } =
+    useNoticeDisclosure({
+      historyDegraded,
+      inputDrop,
+      clipboardNotice,
+      terminalControl,
+      onDismissClipboardNotice,
+    });
 
   const capsuleSendText = (text: string) => {
     if (inputDisabled) {
@@ -399,13 +408,14 @@ export function TerminalSurface({
     <div
       data-testid="terminal-surface"
       data-terminal-stream-state={streamState}
+      data-terminal-notices={notices || undefined}
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {/*
         The capsule host stays limited to the well and bottom composer (#1307).
-        All status actions live in a separate absolute top-end layer below:
-        outside the opaque capsule/occlusion band, but no longer consuming
-        height or causing xterm row/resize churn (#2621).
+        Status details are reached only through the capsule's notices action
+        (#2658): the Terminal mounts no automatic overlay, so the host remains
+        the only flex-filling region and the grid cannot move with a notice.
       */}
       <div
         data-terminal-capsule-host
@@ -420,27 +430,55 @@ export function TerminalSurface({
           )}
           {children}
         </div>
-        <TerminalCapsule
-          experience={experience}
-          sendText={capsuleSendText}
-          sendPhysKey={capsuleSendPhysKey}
-          disabled={inputDisabled}
-          capabilityDisclosure={capsuleCapabilities?.disclosure}
-          capabilityProjection={capsuleProjection}
-          adjacentAction={surfaceAction}
-          workContext={workContext}
-        />
+        <Dialog open={noticesDialogOpen} onOpenChange={setNoticesOpen}>
+          <TerminalCapsule
+            experience={experience}
+            sendText={capsuleSendText}
+            sendPhysKey={capsuleSendPhysKey}
+            disabled={inputDisabled}
+            capabilityDisclosure={capsuleCapabilities?.disclosure}
+            capabilityProjection={capsuleProjection}
+            adjacentAction={surfaceAction}
+            workContext={workContext}
+            statusAction={hasNotices ? (
+              <DialogTrigger
+                data-testid="terminal-notices-trigger"
+                aria-label="Terminal notices"
+                title="Terminal notices"
+                className={cn(
+                  capsuleIconButtonClass,
+                  'inline-flex items-center justify-center text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <CapsuleIconVisual>
+                  <AlertCircle />
+                </CapsuleIconVisual>
+              </DialogTrigger>
+            ) : null}
+          />
+          {noticesDialogOpen ? (
+            <DialogContent
+              data-testid="terminal-notices-dialog"
+              aria-describedby={undefined}
+              className={capsuleDetailDialogClass}
+            >
+              <DialogHeader>
+                <DialogTitle>Terminal notices</DialogTitle>
+              </DialogHeader>
+              <TerminalNoticeDetails
+                historyDegraded={historyDegraded}
+                inputDrop={inputDrop}
+                clipboardNotice={clipboardNotice}
+                controller={controller}
+                terminalControl={terminalControl}
+                onDismissInputDrop={onDismissInputDrop}
+                onDismissClipboardNotice={onDismissClipboardNotice}
+                onTakeControl={onTakeControl}
+              />
+            </DialogContent>
+          ) : null}
+        </Dialog>
       </div>
-      <TerminalStatusOverlay
-        historyDegraded={historyDegraded}
-        inputDrop={inputDrop}
-        clipboardNotice={clipboardNotice}
-        controller={controller}
-        terminalControl={terminalControl}
-        onDismissInputDrop={onDismissInputDrop}
-        onDismissClipboardNotice={onDismissClipboardNotice}
-        onTakeControl={onTakeControl}
-      />
     </div>
   );
 }

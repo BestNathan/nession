@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { FixtureApp } from '@/app/fixture/FixtureApp';
@@ -48,28 +49,34 @@ function renderFixture(route = '/fixture/app') {
  * which then dropped it.
  */
 describe('FixtureApp input drop', () => {
-  it('renders the notice for a reason the route names', () => {
+  it('renders the notice for a reason the route names', async () => {
     renderFixture('/fixture/app?drop=epoch');
 
+    // #2658: the route's state reaches the surface, but the sentence is only
+    // mounted after the Capsule's explicit notices gesture.
+    expect(screen.queryByTestId('terminal-input-drop')).toBeNull();
+    await userEvent.click(screen.getByTestId('terminal-notices-trigger'));
     const notice = screen.getByTestId('terminal-input-drop');
     expect(notice).toHaveTextContent(
       'Some input may not have reached the session — check before re-running it.',
     );
   });
 
-  it('draws no notice on the canonical route', () => {
+  it('draws no notice and no status action on the canonical route', () => {
     // The 37 golden baselines capture this route, so the parameter has to be
     // absent-by-default rather than merely optional.
     renderFixture();
 
     expect(screen.queryByTestId('terminal-input-drop')).toBeNull();
+    expect(screen.queryByTestId('terminal-notices-trigger')).toBeNull();
   });
 
-  it('reads the reason the route named, not a fixed one', () => {
+  it('reads the reason the route named, not a fixed one', async () => {
     // One reason is a notice that ignores its input. `age` is the furthest from
     // `epoch` textually, so a hardcoded sentence cannot satisfy both.
     renderFixture('/fixture/app?drop=age');
 
+    await userEvent.click(screen.getByTestId('terminal-notices-trigger'));
     expect(screen.getByTestId('terminal-input-drop')).toHaveTextContent(
       'Input was discarded before it could be delivered — it waited too long.',
     );

@@ -605,6 +605,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+            handshake_policy: Default::default(),
         },
     )
     .unwrap();

@@ -39,6 +39,11 @@ export interface TerminalCapsuleProps {
    */
   adjacentAction?: ReactNode;
   /**
+   * Contextual, opt-in status action inside the composer (#2658). Present only
+   * while the Terminal has notices to disclose; never a permanent toolbar.
+   */
+  statusAction?: ReactNode;
+  /**
    * Work-awareness context (#1347): whether any capability is working.
    *
    * The disclosed Context Capsule is the only consumer of this (#2663): the
@@ -73,6 +78,7 @@ export function TerminalCapsule({
   capabilityDisclosure,
   capabilityProjection,
   adjacentAction,
+  statusAction,
   workContext,
 }: TerminalCapsuleProps) {
   const resolvedExperience = experience;
@@ -231,6 +237,7 @@ export function TerminalCapsule({
           capabilityDisclosure={capabilityDisclosure}
           onFieldFocus={handleFieldFocus}
           fieldRef={fieldRef}
+          statusAction={statusAction}
         />
       </CapsuleShell>
     </CapsuleProvider>

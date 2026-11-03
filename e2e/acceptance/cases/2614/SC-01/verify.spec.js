@@ -25,16 +25,23 @@ test('SC-01: HTTP OSC 52 copy completes through a real user gesture', async ({ p
     expect(capability.secure, 'this Case must run on a non-secure origin').toBe(false);
     expect(capability.hasAsyncClipboard, 'plain HTTP has no async Clipboard API').toBe(false);
 
-    // The notice must not steal focus from the terminal it describes.
+    // #2658: availability is a Capsule action, and appearing must not steal
+    // focus from the terminal it describes. Clipboard text is not mounted
+    // until the user opens the disclosure.
     await page.locator('.xterm-helper-textarea').focus();
     await armCopyProbe(page);
     await emit(page, '\x1b]52;c;' + b64(text) + '\x1b\\');
+    await expect(page.getByTestId('terminal-clipboard-notice')).toHaveCount(0);
+    const trigger = page.getByTestId('terminal-notices-trigger');
+    await expect(trigger).toBeVisible();
+    expect(await page.evaluate(() => document.activeElement === document.querySelector('.xterm-helper-textarea')),
+      'the available notice must not take focus').toBe(true);
+
+    await trigger.click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
     await expect(notice).toContainText('The terminal wants to copy to your clipboard.');
-    expect(await page.evaluate(() => document.activeElement === document.querySelector('.xterm-helper-textarea')),
-      'the status notice must not take focus').toBe(true);
 
     await notice.getByRole('button', { name: 'Copy' }).click();
 
@@ -52,8 +59,9 @@ test('SC-01: HTTP OSC 52 copy completes through a real user gesture', async ({ p
       type: 'evidence',
       description: 'exact SHA ' + sha + ': origin ' + origin.origin + ' reported ' +
         'isSecureContext=false and no navigator.clipboard; an OSC 52 write of "' + text +
-        '" produced the copy-required notice without moving focus; the Copy click executed one ' +
-        'DOM copy command carrying exactly "' + text + '" and dismissed the notice; no PTY bytes',
+        '" announced itself through the Capsule action without moving focus or mounting the ' +
+        'text; after the explicit disclosure gesture the Copy click executed one DOM copy ' +
+        'command carrying exactly "' + text + '" and dismissed it; no PTY bytes',
     });
   } finally {
     await origin.close();
