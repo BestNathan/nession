@@ -5,7 +5,7 @@ topic: workflows
 categories: ["delivery","knowledge","pages","security"]
 status: candidate
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-03T10:00:48Z
+updated_at: 2026-11-03T10:03:18Z
 sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/deploy-pages.yml","https://github.com/BestNathan/nession/issues/2519","https://github.com/BestNathan/nession/issues/2664","https://github.com/BestNathan/nession/issues/2683","https://github.com/BestNathan/nession/blob/c01bf9791ce1e5ed2da790f6689bc391c9180818/.github/workflows/deploy-pages.yml"]
 ---
 
@@ -30,6 +30,10 @@ A genuine Knowledge push Run, its triggered main Pages Run, and anonymous SHA/di
 Add a separate, unprivileged **Knowledge / Change Signal** on `knowledge` pushes, feeding the **existing** trusted main Pages publisher. Its event must only notify the consumer. The consumer should validate event identity, fetch the read-only source, check the canonical ledger, build sanitized static content and verify anonymous public bytes against the validated Knowledge SHA.
 
 Do not add another Pages writer, execute untrusted orphan content, introduce frequent polling or treat signal success as an integrity audit. GitHub Actions often suppresses recursive workflow triggers from default `GITHUB_TOKEN` pushes; trusted publisher identity or constrained dispatch must explicitly address such writers.
+
+## First live run and integrity correction
+
+The actual source push at [Knowledge commit 23326bb](https://github.com/BestNathan/nession/commit/23326bb990b50a178871ada07442400a6b6433f6) emitted [Knowledge / Change Signal run 41615705357](https://github.com/BestNathan/nession/actions/runs/41615705357), completed successfully. The main-owned Pages build independently exposed a pre-existing Terminal article timestamp drift in the derived `index.json` (the current Terminal article records `2026-11-03T08:52:21.743Z` but the index still recorded `08:46:49Z`). This follow-up Knowledge transaction regenerates the index from current article frontmatter; the notification run alone is not accepted as publication evidence.
 
 ## Acceptance and follow-up
 
