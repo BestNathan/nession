@@ -199,6 +199,24 @@ async function main(){
     const report=await runMatrix();assertReport(report);
     if(process.env.RUN_STORE_CAS_EVIDENCE_OUTPUT)
       writeMatrixEvidence(report,process.env.RUN_STORE_CAS_EVIDENCE_OUTPUT);
+    // The optional main-owned evidence handoff is independently fail-closed.
+    const evidenceHome=fs.mkdtempSync(path.join(os.tmpdir(),'nession-cas-evidence-test-'));
+    try{
+      const outputDir=path.join(evidenceHome,'store-fixture-evidence');
+      fs.mkdirSync(outputDir);
+      const output=path.join(outputDir,'cas-matrix.json');
+      const env={RUNNER_TEMP:evidenceHome,GITHUB_REPOSITORY:REPO,
+        GITHUB_REF:'refs/heads/main',GITHUB_SHA:'a'.repeat(40),
+        GITHUB_RUN_ID:'333',GITHUB_RUN_ATTEMPT:'2'};
+      const sealed=writeMatrixEvidence(report,output,env);
+      assert.equal(JSON.parse(fs.readFileSync(output,'utf8')).workflow_run_id,333);
+      assert.equal(sealed.observed_main_sha,env.GITHUB_SHA);
+      assert.throws(()=>writeMatrixEvidence(report,output,env),/trusted exact-main/);
+      assert.throws(()=>writeMatrixEvidence(report,path.join(outputDir,'invalid.json'),
+        {...env,GITHUB_REF:'refs/heads/feature'}),/trusted exact-main/);
+      assert.throws(()=>writeMatrixEvidence({...report,coverage:2},
+        path.join(outputDir,'wrong.json'),env));
+    }finally{fs.rmSync(evidenceHome,{recursive:true,force:true});}
     const wf=fs.readFileSync('.github/workflows/store-governance-audit.yml','utf8');
     assert.match(wf,/run-store-cas-matrix\.mjs collect/);
     assert.match(wf,/permissions:\s*\n  contents: read\s*\n  actions: read/);
