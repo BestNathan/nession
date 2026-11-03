@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
@@ -54,17 +54,32 @@ export function useNoticeDisclosure({
    * a fresh 30 s once the user opens the disclosure to act on it; the other
    * three are bounded statements with no action. `dialogOpen` is a dependency
    * so opening restarts the window.
+   *
+   * The dependencies are the notice's identity (`id`/`kind`) rather than the
+   * object: a parent that recreates the state object or the dismissal callback
+   * on an unrelated render must not re-arm the timer, or a transient notice
+   * could outlive its boundary indefinitely. This is the rule the pre-#2658
+   * strip used, kept because moving the sentence into the dialog did not move
+   * the expiry owner.
    */
+  const clipboardNoticeId = clipboardNotice?.id ?? null;
+  const clipboardNoticeKind = clipboardNotice?.notice.kind ?? null;
+  const canDismiss = Boolean(onDismissClipboardNotice);
+  // The latest callback without making its identity a timer dependency.
+  const dismissRef = useRef(onDismissClipboardNotice);
   useEffect(() => {
-    if (!clipboardNotice || !onDismissClipboardNotice) {
+    dismissRef.current = onDismissClipboardNotice;
+  }, [onDismissClipboardNotice]);
+  useEffect(() => {
+    if (clipboardNoticeId === null || !canDismiss) {
       return;
     }
-    const lifetime = clipboardNotice.notice.kind === 'copy-required'
+    const lifetime = clipboardNoticeKind === 'copy-required'
       ? (dialogOpen ? 30_000 : 10_000)
       : 5_000;
-    const timer = setTimeout(onDismissClipboardNotice, lifetime);
+    const timer = setTimeout(() => dismissRef.current?.(), lifetime);
     return () => clearTimeout(timer);
-  }, [clipboardNotice, onDismissClipboardNotice, dialogOpen]);
+  }, [clipboardNoticeId, clipboardNoticeKind, dialogOpen, canDismiss]);
 
   // A diagnostic seam, never content: the token names which notices exist so
   // browser tests can observe state without opening (or mounting) the dialog.

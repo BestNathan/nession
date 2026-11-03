@@ -262,6 +262,34 @@ describe('Terminal notices stay off the grid (#2658)', () => {
     expect(onDismissClipboardNotice).toHaveBeenCalledTimes(1);
   });
 
+  it('does not restart expiry when a parent recreates the notice props', () => {
+    vi.useFakeTimers();
+    const onDismissClipboardNotice = vi.fn();
+    // Fresh object and fresh callback identity on every parent render, as the
+    // fixtures do: neither may buy the transient state another full window.
+    const view = (notice: TerminalSurfaceProps['clipboardNotice']) => (
+      <TerminalSurface
+        experience="web"
+        inputDisabled={false}
+        controller={null}
+        clipboardNotice={notice}
+        onDismissClipboardNotice={() => onDismissClipboardNotice()}
+      >
+        <div data-testid="terminal-viewport-slot" />
+      </TerminalSurface>
+    );
+    const rendered = render(view({ id: 1, notice: { kind: 'write-denied' } }));
+
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    rendered.rerender(view({ id: 1, notice: { kind: 'write-denied' } }));
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(onDismissClipboardNotice).toHaveBeenCalledTimes(1);
+  });
+
   it('gives copy-required a fresh 30 s once the user opens the disclosure', () => {
     vi.useFakeTimers();
     const onDismissClipboardNotice = vi.fn();
