@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7ba4055b119149b10e1e5c57e6e88bd87ab8a0c10cee0362e306b9508dd80535",
+  "run_id": 41601652472,
+  "run_attempt": 1,
+  "issue": 2659,
+  "criterion": "SC-03",
+  "criterion_text": "Horizontal selection, edge pager, quick tap, multitouch, and the separate planned long-press gesture (#2657) are not hijacked.",
+  "stage": "staging",
+  "target_sha": "705d511b6db150ebd7a03bf9e113a88deb72237a",
+  "contract_sha256": "a02931cc5525c743e4f62171cb40387405a4064b583d9c4e79f135d2c822e307",
+  "case_revision": "705d511b6db150ebd7a03bf9e113a88deb72237a",
+  "case_tree_sha": "c1a5949c6185fef5f4a723c67b45016350e0b47e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T08:15:53.015Z",
+  "finished_at": "2026-11-03T08:16:03.387Z",
+  "duration_ms": 10372,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=6"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 6
+      },
+      "duration_ms": 2987,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the App edge pager keeps horizontal gesture ownership",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA 705d511b6db150ebd7a03bf9e113a88deb72237a: 27 swipe-pager tests passed (edge band, axis surrender, commit threshold and page bounds)"
+        }
+      ],
+      "duration_ms": 1534,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41601652472,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "705d511b6db150ebd7a03bf9e113a88deb72237a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41601652472",
+    "record_path": "runs/2026-11-03/41601652472-1/2659/SC-03.json",
+    "source_result_sha256": "62a8f7e69c47fb0667582efcd67fe4680358eae85c5888b2655f68767d89c4df"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41601652472-1",
+    "sha256": "62a8f7e69c47fb0667582efcd67fe4680358eae85c5888b2655f68767d89c4df",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41601652472",
+    "durability": "time-limited; object archival not configured"
+  }
+}
