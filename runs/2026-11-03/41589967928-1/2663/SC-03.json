@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a56be41d0ef60b1c597ad365fab6dc7fe4084cb60f7feb3035754287082ecb88",
+  "run_id": 41589967928,
+  "run_attempt": 1,
+  "issue": 2663,
+  "criterion": "SC-03",
+  "criterion_text": "With `claude` or `claude.exe` foreground but no verified task activity, Claude Code is still discoverable as present/active, but no `working` status or “Working in this session” copy is produced solely by process presence.",
+  "stage": "staging",
+  "target_sha": "ca48f8395ebce5899e1cf9b651ad68b1834c3548",
+  "contract_sha256": "49e3cce92b0953076aabeb5c24ade9b6a897e3e05668f05744401dd264662996",
+  "case_revision": "ca48f8395ebce5899e1cf9b651ad68b1834c3548",
+  "case_tree_sha": "51f796be25398c4b33ea5f88abf6eb4c83ca0569",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T06:29:46.989Z",
+  "finished_at": "2026-11-03T06:29:59.692Z",
+  "duration_ms": 12703,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=16"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 16
+      },
+      "duration_ms": 3357,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "process presence establishes active presence, never a working status",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA ca48f8395ebce5899e1cf9b651ad68b1834c3548: 19 capability-sense tests passed (CLI-open resolves active presence, production work bindings emit no signal, generic seam unchanged)"
+        }
+      ],
+      "duration_ms": 3486,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41589967928,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca48f8395ebce5899e1cf9b651ad68b1834c3548",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41589967928",
+    "record_path": "runs/2026-11-03/41589967928-1/2663/SC-03.json",
+    "source_result_sha256": "29694bba9c27673589e9d8cdfb026ac48b56e58b4ccf956fe5847fb891f428cf"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41589967928-1",
+    "sha256": "29694bba9c27673589e9d8cdfb026ac48b56e58b4ccf956fe5847fb891f428cf",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41589967928",
+    "durability": "time-limited; object archival not configured"
+  }
+}
