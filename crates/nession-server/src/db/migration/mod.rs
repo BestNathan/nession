@@ -9,6 +9,7 @@ use sea_orm_migration::prelude::*;
 mod m001_initial;
 mod m002_env_files;
 mod m003_quick_commands;
+mod m004_session_env_bindings;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m001_initial::Migration),
             Box::new(m002_env_files::Migration),
             Box::new(m003_quick_commands::Migration),
+            Box::new(m004_session_env_bindings::Migration),
         ]
     }
 }

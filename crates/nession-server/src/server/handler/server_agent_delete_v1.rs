@@ -134,6 +134,9 @@ impl ConnectionHandler {
         // gone rather than quiet.
         self.agent_registry.unregister(agent_id).await;
         self.session_registry.remove_by_agent(agent_id).await;
+        // Sessions and their bindings are gone with the Agent; a desired row
+        // for a session nobody can serve is not intent worth keeping.
+        self.env_service.clear_agent_state(agent_id).await;
         self.command_broker.forget_agent(agent_id).await;
 
         // Broadcast updated lists to all connected web clients.

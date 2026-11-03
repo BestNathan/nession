@@ -1,99 +1,198 @@
-//! Environment variable management for tmux sessions.
+//! Session Environment Binding materialization and shell convergence (#170).
 //!
-//! Sets, sources, and unsources environment variables on running tmux sessions
-//! via the [`TmuxOps`] semantic operations, temp shell scripts, and
-//! `send-keys`. Scripts are written to a configurable temporary directory
-//! (default `std::env::temp_dir`).
+//! A Session owns exactly one Environment Binding. The binding has three
+//! runtime layers, and this module keeps them apart:
 //!
-//! This module owns what is *domain* about a session's environment: which
-//! variables a batch contains, how a batch's failures are reported, and the
-//! script/send-keys mechanism `source_env`/`unsource_env` use. The grammar of
-//! the tmux subcommands it needs is [`TmuxOps`]'s — see [`super::ops`] for why
-//! that split is load-bearing rather than stylistic (#980, #991).
+//! * **Layer A — creation.** `SessionManager::create_session_with_binding`
+//!   resolves the ordered profile snapshots and passes the effective
+//!   environment to `tmux new-session -e`, so the initial process starts with
+//!   it.
+//! * **Layer B — future panes/windows.** [`EnvManager::apply_binding`] writes
+//!   the binding into tmux's Session environment with `set-environment`, and
+//!   restores the captured base value (or unsets) for keys the binding stops
+//!   managing.
+//! * **Layer C — the already-running interactive shell.** A Session-local shell
+//!   adapter sources a generated overlay at the next prompt. It never uses
+//!   `send-keys`, never evals the whole tmux environment, and never edits the
+//!   user's global rc files.
+//!
+//! ## Durable state and secrets
+//!
+//! The Agent must know, after its own restart, which keys a binding manages and
+//! what each key's base value was; otherwise it would either lose the ability
+//! to restore a value or blindly unset a key the shell already had. That state
+//! lives beside the Session's overlay under `<agent>/env-bindings/<session>/`,
+//! in files mode `0600` inside a directory mode `0700`.
+//!
+//! **This is a plaintext copy of the base values the binding overrides, and it
+//! can contain secrets.** The generated `env-runtime.sh` is likewise a
+//! plaintext copy of the managed overlay (the shell has to source it). Both are
+//! scoped to the Agent's own state directory, are never sent on the wire, and
+//! exist so removal can restore `MODE=default` rather than silently unsetting
+//! it. The alternative — not persisting a baseline — trades a secret copy for
+//! incorrect restoration after an Agent restart. This consequence is stated in
+//! `docs/architecture/session-env-binding.md`; do not add another durable copy
+//! without updating that owner.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use nession_protocol::contracts::env::v1::{
+    EnvFileRef, EnvSnapshot, SessionEnvObservedState, SessionEnvProfile,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use super::ops::TmuxDep;
 
-/// Path for the source script of a given (client, session, env-name) triple.
-fn source_script_path(base_dir: PathBuf, client_id: &str, session: &str, name: &str) -> PathBuf {
-    let safe = name.replace(['/', '\\'], "_");
-    base_dir.join(format!("nession-source-{client_id}-{session}-{safe}"))
-}
+/// The overlay script the interactive shell sources. It contains only the
+/// operations needed to converge the keys this binding manages.
+const ENV_RUNTIME_FILE: &str = "env-runtime.sh";
+/// The revision the overlay represents. The adapter reads it before sourcing.
+const ENV_REVISION_FILE: &str = "revision";
+/// The revision the shell last reported converging to, written by the adapter.
+const SHELL_REVISION_FILE: &str = "shell-revision";
+/// The Agent's durable record for one Session's materialization.
+const BINDING_STATE_FILE: &str = "binding.json";
 
-/// Path for the unsource script of a given (client, session, env-name) triple.
-fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name: &str) -> PathBuf {
-    let safe = name.replace(['/', '\\'], "_");
-    base_dir.join(format!("nession-unsource-{client_id}-{session}-{safe}"))
-}
+const ENV_RUNTIME_VAR: &str = "NESSON_ENV_RUNTIME";
+const ENV_REVISION_VAR: &str = "NESSON_ENV_REVISION";
+const SHELL_REVISION_VAR: &str = "NESSON_ENV_SHELL_REVISION";
+const USER_ZDOTDIR_VAR: &str = "NESSON_USER_ZDOTDIR";
 
-/// Clear a session's scrollback, hiding the `. <script>` line the caller just
-/// printed.
+const STATUS_IN_SYNC: &str = "in_sync";
+const STATUS_PENDING_SHELL: &str = "pending_shell";
+const STATUS_UNSUPPORTED_SHELL: &str = "unsupported_shell";
+const STATUS_ERROR: &str = "error";
+
+/// Clear a session's scrollback, hiding a line the caller just printed.
 ///
-/// **BestEffort**, and the class is stated here rather than left implicit: a
-/// failure does not change `source_env`/`unsource_env`'s result — a session
-/// whose scrollback could not be cleared is still a session the script was
-/// sourced into — but it is logged, because `let _ =` on a command whose
-/// stderr is `Stdio::null()` is unobservable, and unobservable is a policy
-/// nobody chose (#991's edge cases: a cosmetic failure after a successful
-/// primary is observable and does not rewrite the primary).
-///
-/// `clear-history` is still written here rather than in [`super::ops`]: #991
-/// step 5 inventoried it as two call sites in one shape and left it, and
-/// rewiring the *dependency* is what step 6 is — the grammar migrates when
-/// there is a second shape to unify, not to make this file shorter.
-///
-/// `pub(crate)` since #991 step 7, for the same reason: the crate's other
-/// `clear-history` site is `SessionManager`'s stage-2 path, which hides the
-/// same kind of typed line from the same kind of pane. It is the same
-/// operation and the same class, so it is one implementation — the argument
-/// vector and the policy cannot drift apart, which is what #980 did to the two
-/// `set-environment` encodings. Both callers state the class at their own
-/// call site; this function is where it is enacted.
+/// **BestEffort**: a failure does not change the primary operation's result,
+/// but it is logged because an unobservable failure is a policy nobody chose.
+/// The only remaining caller is `SessionManager`'s create fallback, which
+/// hides the typed environment line.
 pub(crate) async fn clear_history(tmux: &TmuxDep, session_name: &str) {
     tmux.ops().clear_history(session_name).await;
 }
 
-/// Manages environment variables for tmux sessions.
+/// Build profile refs from snapshots for a legacy caller that only knows
+/// snapshots (`env_snapshots` on attach/create).
+///
+/// The snapshot carries the same `(name, source, agent_id)` identity as
+/// [`EnvFileRef`], so no profile is invented — the ref is read from the content
+/// the caller already resolved.
+pub(crate) fn profiles_from_snapshots(
+    snapshots: &[EnvSnapshot],
+    phase: &str,
+) -> Vec<SessionEnvProfile> {
+    snapshots
+        .iter()
+        .map(|snapshot| SessionEnvProfile {
+            profile: EnvFileRef {
+                name: snapshot.name.clone(),
+                source: snapshot.source,
+                agent_id: snapshot.agent_id.clone(),
+            },
+            phase: phase.to_string(),
+            content_hash: None,
+        })
+        .collect()
+}
+
+/// The merged effective overlay of an ordered profile selection.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct EffectiveOverlay {
+    /// Ordered key/value pairs; a later profile wins.
+    pub vars: Vec<(String, String)>,
+    /// Non-fatal reasons a profile entry was ignored.
+    pub warnings: Vec<String>,
+}
+
+/// The Session-local shell adapter this Agent installed, if any.
+#[derive(Debug, Clone)]
+pub(crate) struct ShellAdapter {
+    /// The shell the adapter targets (`bash`, `zsh`), when one was recognized.
+    pub shell: Option<String>,
+    /// Environment entries the adapter needs in the Session.
+    pub env: Vec<(String, String)>,
+    /// Process argv to run instead of tmux's default command. Empty for zsh,
+    /// whose adapter is selected by `ZDOTDIR` alone.
+    pub command: Vec<String>,
+    /// Whether the adapter can converge the current interactive shell.
+    pub supported: bool,
+    /// Why it cannot, when it cannot.
+    pub reason: Option<String>,
+}
+
+impl ShellAdapter {
+    pub(crate) fn unsupported(shell: Option<String>, reason: impl Into<String>) -> Self {
+        Self {
+            shell,
+            env: Vec::new(),
+            command: Vec::new(),
+            supported: false,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+/// The durable half of a Session's binding, written after every materialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredBinding {
+    session_name: String,
+    applied_revision: u64,
+    profiles: Vec<StoredProfile>,
+    /// For every key the binding manages, what tmux held before Nession began
+    /// managing it. `None` means it was absent.
+    baseline: BTreeMap<String, Option<String>>,
+    shell: Option<String>,
+    adapter: bool,
+    status: String,
+    last_error: Option<String>,
+    updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredProfile {
+    profile: EnvFileRef,
+    phase: String,
+}
+
+/// What one binding materialization produced, for the caller's reply.
+#[derive(Debug, Clone)]
+pub(crate) struct BindingApplyOutcome {
+    pub warnings: Vec<String>,
+    pub observed: SessionEnvObservedState,
+}
+
+/// Manages Session Environment Bindings and their tmux/process materialization.
 pub struct EnvManager {
-    /// Base directory for temporary scripts. Defaults to `std::env::temp_dir()`.
-    script_dir: PathBuf,
+    /// Root of the durable per-Session state. `0700` in production.
+    state_dir: PathBuf,
     /// The tmux everything this manager runs is addressed to.
-    ///
-    /// Before #991 step 6 the manager had no such field and reached
-    /// `cmd::global()` / `TmuxOps::global()` at each call, so a fake tmux
-    /// binary injected into a `SessionManager` covered session creation and
-    /// stopped there: the env operations went to the real binary on the process
-    /// socket, and the one path #980 was about could not be exercised without
-    /// real tmux to fail.
     tmux: TmuxDep,
 }
 
 impl EnvManager {
-    /// Create a new `EnvManager` with the given temporary directory, addressed
-    /// to the process-wide tmux.
-    pub fn new(script_dir: PathBuf) -> Self {
+    /// Create an `EnvManager` whose per-Session state lives under `state_dir`.
+    pub fn new(state_dir: PathBuf) -> Self {
         Self {
-            script_dir,
+            state_dir,
             tmux: TmuxDep::global(),
         }
     }
 
-    /// Bind this manager to a specific tmux dependency, replacing the
-    /// process-wide one — **the substitution seam**.
-    ///
-    /// A test hands in a [`TmuxDep::injected`] fake tmux and thereby exercises
-    /// the whole mutation path — the grammar, the spawn, the exit status, the
-    /// stderr — without a tmux server, and observes what it ran. Nothing else
-    /// in this type resolves tmux addressing, so a substitution here is total.
-    ///
-    /// `SessionManager::with_tmux_bin` calls this too, so one injected binary
-    /// covers the manager *and* the env operations a caller reaches through
-    /// [`SessionManager::env`](super::manager::SessionManager::env).
+    /// Bind this manager to a specific tmux dependency — **the substitution
+    /// seam**. See `SessionManager::with_tmux_cmd`.
     pub fn with_tmux(&mut self, tmux: TmuxDep) -> &mut Self {
         self.tmux = tmux;
+        self
+    }
+
+    /// Move the durable per-Session state to `state_dir`. Production uses the
+    /// Agent's own directory; tests use a temporary one.
+    pub fn with_state_dir(mut self, state_dir: PathBuf) -> Self {
+        self.state_dir = state_dir;
         self
     }
 
@@ -102,23 +201,16 @@ impl EnvManager {
         &self.tmux
     }
 
-    /// Set tmux-level environment variables on a running session, making them
-    /// available to new windows/panes in that session.
+    /// The durable state root, for the caller that has to create it.
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
+    /// Set tmux-level environment variables on a running session.
     ///
-    /// One [`TmuxOps::set_environment`] per variable — that operation owns the
-    /// `set-environment` argument vector, and this function owns only what is
-    /// domain about it: how a batch of variables is attempted and how their
-    /// failures are reported. Before #991 this function built the argument
-    /// vector itself, and the copy it built was wrong (`-e KEY=VALUE`, both
-    /// halves refused by tmux — #980).
-    ///
-    /// **Required.** These are variables a caller asked for, and "set" and
-    /// "not set" look identical from the outside — which is how every variable
-    /// this function was asked for went unset while its callers reported
-    /// success (#980). Every variable is still attempted (one bad name must not
-    /// hide the rest), and any tmux failure — non-zero exit or a spawn error —
-    /// is returned as an error carrying tmux's own stderr, never downgraded to
-    /// a warning. See #991 for the operation classes.
+    /// One [`TmuxOps::set_environment`] per variable. Every variable is
+    /// attempted (one bad name must not hide the rest), and any failure is an
+    /// error carrying tmux's own stderr.
     pub async fn set_environment(
         &self,
         session_name: &str,
@@ -127,11 +219,6 @@ impl EnvManager {
         let ops = self.tmux.ops();
         let mut failures: Vec<String> = Vec::new();
         for (key, value) in vars {
-            // One spawn per variable, deliberately: the failure of one variable
-            // must not hide the others, and the error each reports names the
-            // variable it was setting. It is also what the ordering tests
-            // measure — `server.rs` parks a session key for the length of this
-            // loop, and that length is this many tmux spawns.
             if let Err(e) = ops.set_environment(session_name, key, value).await {
                 failures.push(format!("{e:#}"));
             }
@@ -143,577 +230,1261 @@ impl EnvManager {
         }
     }
 
-    /// Write a shell script with `export` lines and source it into the
-    /// session. The command line is cleared afterwards via ANSI escape so
-    /// it barely flashes on screen.
-    pub async fn source_env(
-        &self,
-        client_id: &str,
-        session_name: &str,
-        env_name: &str,
-        vars: &[(String, String)],
-    ) -> Result<()> {
-        let path = source_script_path(self.script_dir.clone(), client_id, session_name, env_name);
-        let mut content = String::new();
-        for (k, v) in vars {
-            content.push_str(&format!("export {k}='{}'\n", v.replace('\'', "'\\''")));
-        }
-        fs::write(&path, &content)
-            .await
-            .with_context(|| format!("failed to write source script: {}", path.display()))?;
+    /// Merge ordered snapshots into the effective overlay. A later profile
+    /// wins; keys Nession reserves are refused with a warning, never silently
+    /// applied. A key that is not a valid shell variable name is an error:
+    /// it cannot be exported, and answering success would claim a mutation the
+    /// shell can never observe.
+    pub(crate) fn merge_snapshots(snapshots: &[EnvSnapshot]) -> Result<EffectiveOverlay> {
+        let mut vars: Vec<(String, String)> = Vec::new();
+        let mut index: HashMap<String, usize> = HashMap::new();
+        let mut warnings: Vec<String> = Vec::new();
+        let mut refused: HashSet<String> = HashSet::new();
 
-        // Use tmux send-keys to source the script, then clear the scrollback
-        // history so the command doesn't appear when re-attaching.
-        // **Required**: a script that was never sourced is the whole operation
-        // failing, and it is invisible from the outside — the variables simply
-        // are not there. The grammar is the owner's; the class is this line's.
-        let cmd = format!(" . {}", path.display());
-        self.tmux.ops().send_keys(session_name, &cmd).await?;
-
-        // Clear tmux scrollback history to hide the source command
-        clear_history(&self.tmux, session_name).await;
-
-        Ok(())
-    }
-
-    /// Write a shell script with `unset` lines and source it into the
-    /// session, clearing the command from view.
-    pub async fn unsource_env(
-        &self,
-        client_id: &str,
-        session_name: &str,
-        env_name: &str,
-        keys: &[String],
-    ) -> Result<()> {
-        let path = unsource_script_path(self.script_dir.clone(), client_id, session_name, env_name);
-        let content = keys.iter().fold(String::new(), |mut s, k| {
-            s.push_str(&format!("unset {k}\n"));
-            s
-        });
-        fs::write(&path, &content)
-            .await
-            .with_context(|| format!("failed to write unsource script: {}", path.display()))?;
-
-        let cmd = format!(" . {}", path.display());
-        self.tmux.ops().send_keys(session_name, &cmd).await?;
-
-        // Clear tmux scrollback history to hide the unsource command
-        clear_history(&self.tmux, session_name).await;
-
-        Ok(())
-    }
-
-    /// Remove all env source/unsource scripts from the temp directory for the
-    /// given session. Called automatically by
-    /// [`SessionManager::kill_session`](super::manager::SessionManager::kill_session)
-    /// so that `sourced_env_files()` doesn't report stale entries.
-    pub async fn cleanup_session_scripts(&self, session_name: &str) {
-        let session_marker = format!("-{session_name}-");
-        let mut dir = match tokio::fs::read_dir(&self.script_dir).await {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(
-                    "failed to read {} for env script cleanup (session {session_name}): {e}",
-                    self.script_dir.display()
-                );
-                return;
+        for snapshot in snapshots {
+            for (key, value) in &snapshot.vars {
+                if let Some(reason) = reserved_key_reason(key) {
+                    if refused.insert(key.clone()) {
+                        warnings.push(format!(
+                            "{}: {key} is reserved by Nession ({reason}); it was not applied",
+                            snapshot.name
+                        ));
+                    }
+                    continue;
+                }
+                if !is_valid_env_key(key) {
+                    anyhow::bail!(
+                        "{}: invalid environment variable name {key:?}",
+                        snapshot.name
+                    );
+                }
+                if let Some(&existing) = index.get(key) {
+                    if let Some(slot) = vars.get_mut(existing) {
+                        slot.1 = value.clone();
+                    }
+                } else {
+                    index.insert(key.clone(), vars.len());
+                    vars.push((key.clone(), value.clone()));
+                }
             }
-        };
-        while let Ok(Some(entry)) = dir.next_entry().await {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if (name_str.starts_with("nession-source-")
-                || name_str.starts_with("nession-unsource-"))
-                && name_str.contains(&session_marker)
+        }
+
+        Ok(EffectiveOverlay { vars, warnings })
+    }
+
+    /// Apply one binding revision to a running Session.
+    ///
+    /// This is a **whole-binding replacement**: every key in `snapshots` is
+    /// managed, every previously managed key that is no longer present is
+    /// restored to its captured base value or unset, and the shell overlay is
+    /// rewritten. There are no per-file apply/unset calls to compose.
+    pub(crate) async fn apply_binding(
+        &self,
+        session_name: &str,
+        revision: u64,
+        profiles: &[SessionEnvProfile],
+        snapshots: &[EnvSnapshot],
+    ) -> Result<BindingApplyOutcome> {
+        let overlay = Self::merge_snapshots(snapshots)?;
+        let warnings = overlay.warnings.clone();
+        let dir = self.session_dir(session_name);
+        let mut state = self
+            .load_state(session_name)
+            .await
+            .unwrap_or_else(|| StoredBinding {
+                session_name: session_name.to_string(),
+                applied_revision: 0,
+                profiles: Vec::new(),
+                baseline: BTreeMap::new(),
+                shell: None,
+                adapter: false,
+                status: STATUS_IN_SYNC.to_string(),
+                last_error: None,
+                updated_at: now_secs(),
+            });
+
+        // Capture the base value of every newly managed key before changing
+        // anything. A read failure aborts the whole apply: proceeding would
+        // record a baseline we did not observe, and removal would then restore
+        // a value nobody measured.
+        let mut baseline = state.baseline.clone();
+        for (key, _) in &overlay.vars {
+            if baseline.contains_key(key) {
+                continue;
+            }
+            let value = self
+                .tmux
+                .ops()
+                .show_environment(session_name, key)
+                .await
+                .with_context(|| {
+                    format!("capturing the base value of {key} for session {session_name}")
+                })?;
+            baseline.insert(key.clone(), value);
+        }
+
+        let new_keys: HashSet<&str> = overlay.vars.iter().map(|(k, _)| k.as_str()).collect();
+        let mut failures: Vec<String> = Vec::new();
+
+        for (key, value) in &overlay.vars {
+            if let Err(e) = self
+                .tmux
+                .ops()
+                .set_environment(session_name, key, value)
+                .await
             {
-                let path = entry.path();
-                if let Err(e) = tokio::fs::remove_file(&path).await {
-                    tracing::warn!("failed to remove env script {}: {e}", path.display());
+                failures.push(format!("{e:#}"));
+            }
+        }
+
+        // Keys this binding no longer manages. Restore what was there before
+        // Nession took the key over; do not blindly unset.
+        let removed: Vec<String> = baseline
+            .keys()
+            .filter(|key| !new_keys.contains(key.as_str()))
+            .cloned()
+            .collect();
+        let mut runtime_ops: Vec<(String, Option<String>)> = Vec::new();
+        let mut restored_ok: HashSet<String> = HashSet::new();
+        for key in &removed {
+            let restore = baseline.get(key).cloned().flatten();
+            // The shell overlay gets the operation even when the tmux
+            // restoration failed: the failure is about future processes, and
+            // the current shell can still converge at its next prompt.
+            runtime_ops.push((key.clone(), restore.clone()));
+            let result = match &restore {
+                Some(value) => {
+                    self.tmux
+                        .ops()
+                        .set_environment(session_name, key, value)
+                        .await
                 }
+                None => self.tmux.ops().unset_environment(session_name, key).await,
+            };
+            match result {
+                Ok(()) => {
+                    restored_ok.insert(key.clone());
+                }
+                Err(e) => failures.push(format!("{e:#}")),
+            }
+        }
+
+        // A key whose restoration failed keeps its baseline so a later binding
+        // can still restore it; a key that was restored releases it.
+        for key in &restored_ok {
+            baseline.remove(key);
+        }
+        baseline.retain(|key, _| new_keys.contains(key.as_str()));
+
+        // The shell overlay contains only this binding's own operations, plus
+        // restoration for keys the previous revision managed. The adapter
+        // compares revisions before sourcing it, so an unchanged binding is
+        // free.
+        self.write_runtime_files(&dir, revision, &overlay, &runtime_ops)
+            .await?;
+
+        let shell_revision = read_revision(&dir.join(SHELL_REVISION_FILE)).await;
+        let last_error = if failures.is_empty() {
+            None
+        } else {
+            Some(failures.join("; "))
+        };
+        let status = self.status_for(
+            state.adapter,
+            revision,
+            shell_revision,
+            last_error.as_deref(),
+        );
+        state.applied_revision = revision;
+        state.profiles = profiles
+            .iter()
+            .map(|profile| StoredProfile {
+                profile: profile.profile.clone(),
+                phase: profile.phase.clone(),
+            })
+            .collect();
+        state.baseline = baseline;
+        state.status = status;
+        state.last_error = last_error.clone();
+        state.updated_at = now_secs();
+        self.save_state(session_name, &state).await?;
+
+        // A required tmux mutation that failed is never reported as success.
+        // The state above records the failure so a later observe can show it;
+        // this is what makes the caller fail too.
+        if let Some(error) = last_error {
+            return Err(anyhow::anyhow!(error));
+        }
+
+        let observed = observed_from(&state, shell_revision);
+        Ok(BindingApplyOutcome { warnings, observed })
+    }
+
+    /// Record the binding a just-created Session was born with.
+    ///
+    /// The initial process already has the effective environment (Layer A), so
+    /// the shell revision starts at `revision`: there is nothing to converge.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn record_created_binding(
+        &self,
+        session_name: &str,
+        revision: u64,
+        profiles: &[SessionEnvProfile],
+        overlay: &EffectiveOverlay,
+        baseline: BTreeMap<String, Option<String>>,
+        adapter: &ShellAdapter,
+    ) -> Result<()> {
+        let dir = self.session_dir(session_name);
+        self.write_runtime_files(&dir, revision, overlay, &[])
+            .await?;
+        write_atomic(&dir.join(SHELL_REVISION_FILE), format!("{revision}\n")).await?;
+
+        let state = StoredBinding {
+            session_name: session_name.to_string(),
+            applied_revision: revision,
+            profiles: profiles
+                .iter()
+                .map(|profile| StoredProfile {
+                    profile: profile.profile.clone(),
+                    phase: profile.phase.clone(),
+                })
+                .collect(),
+            baseline,
+            shell: adapter.shell.clone(),
+            adapter: adapter.supported,
+            status: if adapter.supported {
+                STATUS_IN_SYNC.to_string()
+            } else {
+                STATUS_UNSUPPORTED_SHELL.to_string()
+            },
+            last_error: adapter.reason.clone(),
+            updated_at: now_secs(),
+        };
+        self.save_state(session_name, &state).await
+    }
+
+    /// The observed binding state for one Session, or `None` when no binding
+    /// was ever recorded (a Session that predates the binding model).
+    pub(crate) async fn observe(&self, session_name: &str) -> Option<SessionEnvObservedState> {
+        let mut state = self.load_state(session_name).await?;
+        let shell_revision =
+            read_revision(&self.session_dir(session_name).join(SHELL_REVISION_FILE)).await;
+        state.status = self.status_for(
+            state.adapter,
+            state.applied_revision,
+            shell_revision,
+            state.last_error.as_deref(),
+        );
+        Some(observed_from(&state, shell_revision))
+    }
+
+    /// The observed state of every Session that has a recorded binding.
+    ///
+    /// Used after registration so a Server restart does not erase the observed
+    /// half of a binding that tmux still holds. States are reported from the
+    /// durable record without asking tmux to list Sessions: the Server already
+    /// knows its registry, and a stale name is dropped there rather than paying
+    /// for a tmux round trip on every reconnect.
+    pub(crate) async fn live_binding_states(&self) -> Vec<(String, SessionEnvObservedState)> {
+        self.stored_states().await
+    }
+
+    /// Every durable binding state on disk, live or stale.
+    async fn stored_states(&self) -> Vec<(String, SessionEnvObservedState)> {
+        let mut out = Vec::new();
+        let mut dir = match fs::read_dir(&self.state_dir).await {
+            Ok(dir) => dir,
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(
+                        "cannot read env binding state dir {}: {e}",
+                        self.state_dir.display()
+                    );
+                }
+                return out;
+            }
+        };
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let Ok(file_type) = entry.file_type().await else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let Some(session_name) =
+                read_state_session_name(&entry.path().join(BINDING_STATE_FILE)).await
+            else {
+                continue;
+            };
+            if let Some(observed) = self.observe(&session_name).await {
+                out.push((session_name, observed));
+            }
+        }
+        out
+    }
+
+    /// The revision a locally-created binding should use next.
+    pub(crate) async fn next_local_revision(&self, session_name: &str) -> u64 {
+        self.load_state(session_name)
+            .await
+            .map_or(1, |state| state.applied_revision.saturating_add(1))
+    }
+
+    /// Remove a Session's durable binding state. Called when the Session is
+    /// killed; a state file left behind would describe a Session that no
+    /// longer exists.
+    pub(crate) async fn clear_session_binding(&self, session_name: &str) {
+        let dir = self.session_dir(session_name);
+        if let Err(e) = fs::remove_dir_all(&dir).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("failed to remove env binding state {}: {e}", dir.display());
             }
         }
     }
 
-    /// Remove all env source/unsource scripts from the temp directory for the
-    /// given client. Called when a client disconnects so that only that
-    /// client's sourced envs are cleaned up, leaving other clients' scripts
-    /// intact.
-    pub async fn cleanup_client_scripts(&self, client_id: &str) {
-        let source_prefix = format!("nession-source-{client_id}-");
-        let unsource_prefix = format!("nession-unsource-{client_id}-");
-        let mut dir = match tokio::fs::read_dir(&self.script_dir).await {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(
-                    "failed to read {} for env script cleanup (client {client_id}): {e}",
-                    self.script_dir.display()
-                );
-                return;
-            }
+    /// Install the Session-local shell adapter for `shell_path`.
+    ///
+    /// `bash` and `zsh` are the only shells with a proven adapter. Everything
+    /// else degrades explicitly: the binding still materializes into tmux and
+    /// future processes, and the observed status says the current shell is not
+    /// supported rather than pretending it converged.
+    pub(crate) async fn install_shell_adapter(
+        &self,
+        session_name: &str,
+        shell_path: Option<&str>,
+    ) -> ShellAdapter {
+        let Some(shell_path) = shell_path.filter(|path| !path.is_empty()) else {
+            return ShellAdapter::unsupported(None, "tmux reported no default shell");
         };
-        while let Ok(Some(entry)) = dir.next_entry().await {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with(&source_prefix) || name_str.starts_with(&unsource_prefix) {
-                let path = entry.path();
-                if let Err(e) = tokio::fs::remove_file(&path).await {
-                    tracing::warn!("failed to remove env script {}: {e}", path.display());
-                }
+        let kind = shell_kind(shell_path);
+        match kind.as_deref() {
+            Some("bash") => match self.install_bash_adapter(session_name, shell_path).await {
+                Ok(adapter) => adapter,
+                Err(e) => ShellAdapter::unsupported(Some("bash".to_string()), format!("{e:#}")),
+            },
+            Some("zsh") => match self.install_zsh_adapter(session_name).await {
+                Ok(adapter) => adapter,
+                Err(e) => ShellAdapter::unsupported(Some("zsh".to_string()), format!("{e:#}")),
+            },
+            _ => ShellAdapter::unsupported(
+                Some(shell_basename(shell_path)),
+                format!("no Session-local adapter for shell {shell_path}"),
+            ),
+        }
+    }
+
+    async fn install_bash_adapter(
+        &self,
+        session_name: &str,
+        shell_path: &str,
+    ) -> Result<ShellAdapter> {
+        let dir = self.session_dir(session_name).join("shell").join("bash");
+        secure_dir(&dir).await?;
+        let rcfile = dir.join("bashrc");
+        write_atomic(&rcfile, BASH_ADAPTER).await?;
+        Ok(ShellAdapter {
+            shell: Some("bash".to_string()),
+            env: self.adapter_env(session_name),
+            command: vec![
+                shell_path.to_string(),
+                "--rcfile".to_string(),
+                rcfile.to_string_lossy().into_owned(),
+                "-i".to_string(),
+            ],
+            supported: true,
+            reason: None,
+        })
+    }
+
+    async fn install_zsh_adapter(&self, session_name: &str) -> Result<ShellAdapter> {
+        let dir = self.session_dir(session_name).join("shell").join("zsh");
+        secure_dir(&dir).await?;
+        for (name, content) in ZSH_ADAPTER_FILES {
+            write_atomic(&dir.join(name), content).await?;
+        }
+        let mut env = self.adapter_env(session_name);
+        // Only an explicitly configured ZDOTDIR has to be preserved. When the
+        // Agent inherited none, the wrapper uses the Session's `$HOME` at
+        // runtime — which is the home the shell itself will have, not the
+        // Agent process's.
+        if let Ok(original) = std::env::var("ZDOTDIR") {
+            if !original.is_empty() {
+                env.push((USER_ZDOTDIR_VAR.to_string(), original));
             }
+        }
+        env.push(("ZDOTDIR".to_string(), dir.to_string_lossy().into_owned()));
+        Ok(ShellAdapter {
+            shell: Some("zsh".to_string()),
+            env,
+            command: Vec::new(),
+            supported: true,
+            reason: None,
+        })
+    }
+
+    fn adapter_env(&self, session_name: &str) -> Vec<(String, String)> {
+        let dir = self.session_dir(session_name);
+        vec![
+            (
+                ENV_RUNTIME_VAR.to_string(),
+                dir.join(ENV_RUNTIME_FILE).to_string_lossy().into_owned(),
+            ),
+            (
+                ENV_REVISION_VAR.to_string(),
+                dir.join(ENV_REVISION_FILE).to_string_lossy().into_owned(),
+            ),
+            (
+                SHELL_REVISION_VAR.to_string(),
+                dir.join(SHELL_REVISION_FILE).to_string_lossy().into_owned(),
+            ),
+        ]
+    }
+
+    fn session_dir(&self, session_name: &str) -> PathBuf {
+        self.state_dir.join(sanitize_component(session_name))
+    }
+
+    async fn load_state(&self, session_name: &str) -> Option<StoredBinding> {
+        let path = self.session_dir(session_name).join(BINDING_STATE_FILE);
+        let bytes = fs::read(&path).await.ok()?;
+        match serde_json::from_slice::<StoredBinding>(&bytes) {
+            Ok(state) => Some(state),
+            Err(e) => {
+                tracing::warn!("cannot parse env binding state {}: {e}", path.display());
+                None
+            }
+        }
+    }
+
+    async fn save_state(&self, session_name: &str, state: &StoredBinding) -> Result<()> {
+        let dir = self.session_dir(session_name);
+        secure_dir(&dir).await?;
+        let json = serde_json::to_vec_pretty(state).context("serialising env binding state")?;
+        write_atomic(&dir.join(BINDING_STATE_FILE), json).await
+    }
+
+    async fn write_runtime_files(
+        &self,
+        dir: &Path,
+        revision: u64,
+        overlay: &EffectiveOverlay,
+        restore: &[(String, Option<String>)],
+    ) -> Result<()> {
+        secure_dir(dir).await?;
+        let mut script = String::new();
+        script.push_str(&format!(
+            "# Nession Session Environment Binding, revision {revision}.\n"
+        ));
+        script.push_str(
+            "# This file is sourced by the Session-local shell adapter. It is not\n\
+             # a general environment dump: only keys this binding manages appear.\n",
+        );
+        for (key, value) in &overlay.vars {
+            script.push_str(&format!("export {key}={}\n", shell_quote(value)));
+        }
+        for (key, value) in restore {
+            match value {
+                Some(value) => {
+                    script.push_str(&format!("export {key}={}\n", shell_quote(value)));
+                }
+                None => script.push_str(&format!("unset {key}\n")),
+            }
+        }
+        write_atomic(&dir.join(ENV_RUNTIME_FILE), script).await?;
+        write_atomic(&dir.join(ENV_REVISION_FILE), format!("{revision}\n")).await
+    }
+
+    fn status_for(
+        &self,
+        adapter: bool,
+        revision: u64,
+        shell_revision: Option<u64>,
+        last_error: Option<&str>,
+    ) -> String {
+        if last_error.is_some() {
+            return STATUS_ERROR.to_string();
+        }
+        if !adapter {
+            // A Session with no recognized shell has Layer B but not Layer C.
+            return STATUS_UNSUPPORTED_SHELL.to_string();
+        }
+        if shell_revision == Some(revision) {
+            STATUS_IN_SYNC.to_string()
+        } else {
+            STATUS_PENDING_SHELL.to_string()
         }
     }
 }
 
+fn observed_from(state: &StoredBinding, shell_revision: Option<u64>) -> SessionEnvObservedState {
+    SessionEnvObservedState {
+        applied_revision: state.applied_revision,
+        status: state.status.clone(),
+        profiles: state
+            .profiles
+            .iter()
+            .map(|profile| profile.profile.clone())
+            .collect(),
+        managed_keys: state.baseline.keys().cloned().collect(),
+        shell: state.shell.clone(),
+        shell_revision,
+        last_error: state.last_error.clone(),
+    }
+}
+
+/// Why Nession refuses to let an Environment profile control `key`.
+///
+/// The policy is one place so the same key cannot be reserved on one path and
+/// accepted on another. A profile that collides is warned about and skipped;
+/// the base value wins.
+fn reserved_key_reason(key: &str) -> Option<&'static str> {
+    match key {
+        "TMUX" => Some("tmux would stop addressing Nession's own server"),
+        "TMUX_TMPDIR" => Some("tmux isolation is the explicit socket, never this variable"),
+        "TERM" => Some("the Session's terminal policy is owned by Nession"),
+        "LANG" => Some("locale policy is owned by Nession"),
+        "ZDOTDIR" => Some("the zsh Session-local adapter owns this directory"),
+        _ if key.starts_with("LC_") => Some("locale policy is owned by Nession"),
+        _ if key.starts_with("NESSON_") => {
+            Some("Nession runtime and integration variables are owned by Nession")
+        }
+        _ => None,
+    }
+}
+
+/// Whether `key` is a portable shell variable name.
+///
+/// `export`/`unset` cannot express a name containing `=`, whitespace, or an
+/// empty string; accepting one would make the binding claim a key every shell
+/// silently mishandles. This is deliberately narrower than tmux's own
+/// `show-environment` grammar, because the shell overlay is the layer that
+/// consumes these names.
+fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn shell_basename(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn shell_kind(path: &str) -> Option<String> {
+    match shell_basename(path).as_str() {
+        "bash" => Some("bash".to_string()),
+        "zsh" => Some("zsh".to_string()),
+        _ => None,
+    }
+}
+
+fn sanitize_component(session_name: &str) -> String {
+    session_name.replace(['/', '\\'], "_")
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+async fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    fs::write(&tmp, contents)
+        .await
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    secure_file(&tmp).await?;
+    fs::rename(&tmp, path)
+        .await
+        .with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+async fn secure_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path)
+        .await
+        .with_context(|| format!("creating {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .await
+            .with_context(|| format!("securing {}", path.display()))?;
+    }
+    Ok(())
+}
+
+async fn secure_file(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .with_context(|| format!("securing {}", path.display()))?;
+    }
+    Ok(())
+}
+
+async fn read_revision(path: &Path) -> Option<u64> {
+    let text = fs::read_to_string(path).await.ok()?;
+    text.trim().parse().ok()
+}
+
+async fn read_state_session_name(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).await.ok()?;
+    serde_json::from_slice::<StoredBinding>(&bytes)
+        .ok()
+        .map(|state| state.session_name)
+}
+
+/// The bash adapter.
+///
+/// tmux normally starts a login shell. `bash --rcfile` replaces the interactive
+/// startup file, so this wrapper first sources the login profile chain bash
+/// would have read, then installs the prompt hook after the user's own
+/// configuration has run. It never writes to `~/.bashrc`.
+const BASH_ADAPTER: &str = r#"# Nession Session-local bash adapter (#170 Phase B).
+# This file is generated per Session. It sources the user's normal startup
+# configuration; it never replaces or edits it.
+if [ -r /etc/profile ]; then
+  . /etc/profile
+fi
+if [ -r "$HOME/.bash_profile" ]; then
+  . "$HOME/.bash_profile"
+elif [ -r "$HOME/.bash_login" ]; then
+  . "$HOME/.bash_login"
+elif [ -r "$HOME/.profile" ]; then
+  . "$HOME/.profile"
+fi
+
+__nession_env_sync() {
+  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  local __nession_rev
+  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSON_ENV_RUNTIME}"
+  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  fi
+}
+
+case "${PROMPT_COMMAND:-}" in
+  *__nession_env_sync*) ;;
+  "") PROMPT_COMMAND="__nession_env_sync" ;;
+  *) PROMPT_COMMAND="__nession_env_sync;$PROMPT_COMMAND" ;;
+esac
+"#;
+
+/// The zsh adapter files. `.zshenv` is read by every zsh invocation, so it only
+/// forwards the user's own file; the hook belongs in `.zshrc`, after the user's
+/// configuration has had its say.
+const ZSH_ADAPTER_FILES: [(&str, &str); 5] = [
+    (
+        ".zshenv",
+        r#"# Nession Session-local zsh adapter (#170 Phase B).
+__nession_session_zdotdir="${ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zshenv" ]; then
+  . "${__nession_user_zdotdir}/.zshenv"
+fi
+# A user .zshenv may change ZDOTDIR. Keep the Session-local startup chain ours;
+# the user's own files are sourced explicitly by the wrappers below.
+ZDOTDIR="$__nession_session_zdotdir"
+export ZDOTDIR
+"#,
+    ),
+    (
+        ".zprofile",
+        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zprofile" ]; then
+  . "${__nession_user_zdotdir}/.zprofile"
+fi
+"#,
+    ),
+    (
+        ".zshrc",
+        r#"# Nession Session-local zsh adapter (#170 Phase B).
+__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zshrc" ]; then
+  . "${__nession_user_zdotdir}/.zshrc"
+fi
+
+__nession_env_sync() {
+  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  local __nession_rev
+  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSON_ENV_RUNTIME}"
+  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  fi
+}
+
+autoload -Uz add-zsh-hook
+if [ -n "${precmd_functions[(r)__nession_env_sync]:-}" ]; then
+  :
+else
+  add-zsh-hook precmd __nession_env_sync
+fi
+"#,
+    ),
+    (
+        ".zlogin",
+        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zlogin" ]; then
+  . "${__nession_user_zdotdir}/.zlogin"
+fi
+"#,
+    ),
+    (
+        ".zlogout",
+        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zlogout" ]; then
+  . "${__nession_user_zdotdir}/.zlogout"
+fi
+"#,
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nession_protocol::contracts::env::v1::EnvSource;
 
-    fn tmp() -> PathBuf {
-        std::env::temp_dir()
+    fn snapshot(name: &str, vars: &[(&str, &str)]) -> EnvSnapshot {
+        EnvSnapshot {
+            name: name.to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            vars: vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            warnings: Vec::new(),
+        }
     }
 
     #[test]
-    fn source_script_path_sanitizes_slashes() {
-        let path = source_script_path(tmp(), "client-1", "sess", "my/env.file");
-        assert_eq!(path, tmp().join("nession-source-client-1-sess-my_env.file"));
-    }
-
-    #[test]
-    fn source_script_path_backslash_sanitized() {
-        let path = source_script_path(tmp(), "c", "s", r"a\b");
-        assert_eq!(path, tmp().join("nession-source-c-s-a_b"));
-    }
-
-    #[test]
-    fn unsource_script_path_format() {
-        let path = unsource_script_path(tmp(), "cid", "sess", "vars.env");
-        assert_eq!(path, tmp().join("nession-unsource-cid-sess-vars.env"));
-    }
-
-    #[test]
-    fn source_script_path_no_special_chars() {
-        let path = source_script_path(tmp(), "abc", "def", "ghi.env");
-        assert_eq!(path, tmp().join("nession-source-abc-def-ghi.env"));
-    }
-
-    #[tokio::test]
-    async fn cleanup_session_scripts_removes_matching_files() {
-        // Own temp dir. These script names are fixed, so sharing the system
-        // temp dir let a concurrent test run delete the file this test needs to
-        // survive — a race a single run passes every time.
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let mgr = EnvManager::new(root.clone());
-        let session = "test-cleanup-sess";
-        let source_path = source_script_path(root.clone(), "c1", session, "a.env");
-        let unsource_path = unsource_script_path(root.clone(), "c1", session, "b.env");
-        let other_session_path = source_script_path(root.clone(), "c1", "other-sess", "c.env");
-
-        tokio::fs::write(&source_path, "export X=1\n")
-            .await
-            .unwrap();
-        tokio::fs::write(&unsource_path, "unset X\n").await.unwrap();
-        tokio::fs::write(&other_session_path, "export Y=2\n")
-            .await
-            .unwrap();
-
-        mgr.cleanup_session_scripts(session).await;
-
-        assert!(!source_path.exists());
-        assert!(!unsource_path.exists());
-        assert!(other_session_path.exists());
-    }
-
-    #[tokio::test]
-    async fn cleanup_client_scripts_removes_matching_files() {
-        // Own temp dir, same reasoning as above.
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let mgr = EnvManager::new(root.clone());
-        let client_id = "test-cleanup-client";
-        let source_path = source_script_path(root.clone(), client_id, "sess1", "a.env");
-        let unsource_path = unsource_script_path(root.clone(), client_id, "sess2", "b.env");
-        let other_client_path = source_script_path(root.clone(), "other-client", "sess1", "c.env");
-
-        tokio::fs::write(&source_path, "export X=1\n")
-            .await
-            .unwrap();
-        tokio::fs::write(&unsource_path, "unset X\n").await.unwrap();
-        tokio::fs::write(&other_client_path, "export Y=2\n")
-            .await
-            .unwrap();
-
-        mgr.cleanup_client_scripts(client_id).await;
-
-        assert!(!source_path.exists());
-        assert!(!unsource_path.exists());
-        assert!(other_client_path.exists());
-    }
-
-    #[tokio::test]
-    async fn cleanup_session_scripts_no_match_is_noop() {
-        let mgr = EnvManager::new(tmp());
-        mgr.cleanup_session_scripts("nonexistent-session-xyz").await;
-    }
-
-    #[tokio::test]
-    async fn cleanup_client_scripts_no_match_is_noop() {
-        let mgr = EnvManager::new(tmp());
-        mgr.cleanup_client_scripts("nonexistent-client-xyz").await;
-    }
-
-    #[tokio::test]
-    async fn set_environment_on_nonexistent_session_fails_with_tmux_diagnostic() {
-        // A real non-zero exit from real tmux, and the property that makes a
-        // failure actionable rather than merely visible: the message carries
-        // tmux's own words. `stderr(Stdio::null())` used to discard them, so
-        // every failure — this one included — was indistinguishable from any
-        // other (#991: required failures retain useful tmux stderr context).
-        //
-        // The name is one no other test creates, so the only way tmux answers
-        // successfully is a session that exists.
-        //
-        // A session is created first, so that the *server* exists too and the
-        // only missing thing is the session the name is about. Without it this
-        // test only held in a full run, where an earlier test had already
-        // started a server on the shared socket; on a socket no server has
-        // bound — a filtered run with a fresh `NESSION_TMUX_SOCKET` — tmux
-        // answers `error connecting to <path> (No such file or directory)`,
-        // which is a different situation that the same call would report the
-        // same way for any session name, existing or not. The cold socket has
-        // its own test, by name:
-        // `tmux::ops::tests::a_socket_with_no_server_fails_with_tmux_own_words`.
-        // `show_environment_tells_an_unset_variable_apart_from_an_unanswerable_question`
-        // (tests/integration/tmux.rs) is the same shape for the sibling
-        // operation — a session is created there for this same reason.
-        use super::super::manager::{SessionManager, SESSION_HEIGHT, SESSION_WIDTH};
-        let guard = crate::test_support::TestSession::new("env-missing-session");
-        SessionManager::new()
-            .create_session(guard.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
-            .await
-            .expect("a running server, so the failure below can only be about the session");
-
-        let mgr = EnvManager::new(tmp());
-        let result = mgr
-            .set_environment(
-                "nession_nonexistent_xyz_123",
-                &[("TEST_KEY".to_string(), "TEST_VALUE".to_string())],
-            )
-            .await;
-        let err = result.expect_err("setting a variable on a session that does not exist");
-        let message = err.to_string();
-        assert!(
-            message.contains("TEST_KEY"),
-            "the failure must name the variable it was setting: {message}"
-        );
-        assert!(
-            message.contains("no such session"),
-            "the failure must carry tmux's own diagnostic for *this* session missing \
-             rather than only our summary: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn cleanup_uses_configured_script_dir() {
-        // Scripts in a configured dir are cleaned up, proving EnvManager honours
-        // the dir it was given rather than always using the system temp dir.
-        //
-        // The dir is a TempDir rather than a fixed `temp_dir()/nession-env-test-dir`:
-        // sharing that name across concurrent test runs let one run's
-        // `remove_dir_all` delete the other's file, and because the assertion
-        // below is "the file is gone", the test would still pass — silently
-        // proving nothing.
-        let dir = tempfile::tempdir().unwrap();
-        let custom = dir.path().to_path_buf();
-        let mgr = EnvManager::new(custom.clone());
-
-        let in_custom = source_script_path(custom.clone(), "cid", "sess", "a.env");
-        tokio::fs::write(&in_custom, "export X=1\n").await.unwrap();
-        assert!(in_custom.exists(), "script should exist before cleanup");
-
-        mgr.cleanup_client_scripts("cid").await;
-        assert!(!in_custom.exists());
-    }
-
-    // ── the injected tmux (#991 step 6) ──────────────────────────────────────
-    //
-    // Everything below runs against a fake binary and needs no tmux, no server
-    // and no harness socket: the substitution is total, which is what the seam
-    // was added for. Two independent things are asserted in each test — what
-    // the fake *recorded* (so "the operation ran, with this grammar" is
-    // observed rather than assumed) and what the caller got back. The first is
-    // the load-bearing one: a test that only checked the caller's result would
-    // pass against real tmux and prove nothing about which binary ran — which
-    // is exactly how the pre-step-6 seam (`SessionManager::with_tmux_bin`)
-    // could look injectable and send every env operation to the real binary.
-    //
-    // The injected [`TmuxDep`] addresses a socket inside the test's own
-    // temporary directory that no server has ever bound, so "the injection did
-    // not take" is not a silent pass either: a call that reached the real
-    // binary would fail to connect, and the `expect` below would redden.
-
-    /// An `EnvManager` whose tmux is a fake that records its argv.
-    #[cfg(unix)]
-    fn manager_on(dep: TmuxDep, dir: &std::path::Path) -> EnvManager {
-        let mut mgr = EnvManager::new(dir.to_path_buf());
-        mgr.with_tmux(dep);
-        mgr
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_fake_tmux_runs_the_whole_env_mutation_path() {
-        // The criterion #991's `#### Testability` was missing: "a fake tmux
-        // binary can exercise the complete env mutation path, not only
-        // `SessionManager`". Before step 6 this test could not exist — the
-        // argument vector was the owner's, but the *process* was resolved by
-        // `TmuxOps::global()` inside `set_environment`, so a fake could be
-        // injected into the manager and this call would still reach real tmux.
-        //
-        // What makes it a proof rather than a formality is the recorded argv:
-        // it is the owner's grammar (`set-environment -t <session> <name>
-        // <value>`, one spawn per variable) seen from outside the process, and
-        // if the injection had not taken there would be nothing in the log at
-        // all — the real binary writes to no log.
-        let dir = tempfile::tempdir().unwrap();
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
-        let mgr = manager_on(fake.dep(), dir.path());
-
-        mgr.set_environment(
-            "nession-fake-sess",
-            &[
-                ("NESSON_FAKE_A".to_string(), "1".to_string()),
-                ("NESSON_FAKE_B".to_string(), "two words".to_string()),
-            ],
-        )
-        .await
-        .expect("the injected tmux exits 0 for every call");
-
+    fn later_profile_wins_and_reserved_keys_are_refused() {
+        let overlay = EnvManager::merge_snapshots(&[
+            snapshot("base.env", &[("MODE", "base"), ("TERM", "dumb")]),
+            snapshot("staging.env", &[("MODE", "staging"), ("TMUX", "/tmp/x")]),
+        ])
+        .expect("reserved keys are warnings, not errors");
         assert_eq!(
-            fake.calls(),
-            vec![
-                vec![
-                    "set-environment",
-                    "-t",
-                    "nession-fake-sess",
-                    "NESSON_FAKE_A",
-                    "1"
-                ],
-                vec![
-                    "set-environment",
-                    "-t",
-                    "nession-fake-sess",
-                    "NESSON_FAKE_B",
-                    "two words"
-                ],
-            ],
-            "one spawn per variable, in the owner's grammar, run by the injected binary"
+            overlay.vars,
+            vec![("MODE".to_string(), "staging".to_string())]
         );
+        assert_eq!(overlay.warnings.len(), 2);
+        assert!(overlay.warnings.iter().any(|w| w.contains("TERM")));
+        assert!(overlay.warnings.iter().any(|w| w.contains("TMUX")));
+    }
+
+    #[test]
+    fn an_invalid_variable_name_is_an_error_not_a_warning() {
+        let err = EnvManager::merge_snapshots(&[snapshot("bad.env", &[("BAD=NAME", "value")])])
+            .expect_err("a name no shell can export must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("BAD=NAME"), "{message}");
+        assert!(
+            message.contains("invalid environment variable name"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_key_stays_in_its_first_position_when_a_later_profile_overrides_it() {
+        // Order is the product's: [A, B] where both define X means X is in A's
+        // position and B's value. Reordering the profiles changes the value
+        // deterministically, not the key's position.
+        let overlay = EnvManager::merge_snapshots(&[
+            snapshot("a.env", &[("X", "1"), ("Y", "2")]),
+            snapshot("b.env", &[("X", "3")]),
+        ])
+        .expect("valid names merge");
+        assert_eq!(
+            overlay.vars,
+            vec![
+                ("X".to_string(), "3".to_string()),
+                ("Y".to_string(), "2".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn session_components_do_not_escape_the_state_dir() {
+        assert_eq!(sanitize_component("a/b\\c"), "a_b_c");
+        assert!(!sanitize_component("../x").contains('/'));
+    }
+
+    #[test]
+    fn zsh_adapter_keeps_the_users_files_in_the_chain() {
+        let files = ZSH_ADAPTER_FILES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            vec![".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"]
+        );
+        let zshrc = ZSH_ADAPTER_FILES
+            .iter()
+            .find(|(name, _)| *name == ".zshrc")
+            .expect("the hook belongs in .zshrc")
+            .1;
+        assert!(zshrc.contains("NESSON_USER_ZDOTDIR"));
+        assert!(zshrc.contains("add-zsh-hook precmd"));
+        assert!(zshrc.contains("NESSON_ENV_RUNTIME"));
+        assert!(!zshrc.contains("tmux show-environment"));
+    }
+
+    #[test]
+    fn bash_adapter_never_mentions_global_rc_files_or_send_keys() {
+        assert!(!BASH_ADAPTER.contains(".bashrc"));
+        assert!(!BASH_ADAPTER.contains("send-keys"));
+        assert!(!BASH_ADAPTER.contains("show-environment"));
+        assert!(BASH_ADAPTER.contains("PROMPT_COMMAND"));
+        assert!(BASH_ADAPTER.contains("NESSON_ENV_RUNTIME"));
+    }
+
+    #[test]
+    fn unsupported_shell_degrades_explicitly() {
+        let adapter = ShellAdapter::unsupported(Some("fish".to_string()), "no adapter");
+        assert!(!adapter.supported);
+        assert_eq!(adapter.shell.as_deref(), Some("fish"));
+        assert!(adapter.reason.is_some());
+    }
+
+    #[test]
+    fn reserved_policy_covers_runtime_keys_but_allows_path() {
+        for key in [
+            "TMUX",
+            "TMUX_TMPDIR",
+            "TERM",
+            "LANG",
+            "LC_ALL",
+            "ZDOTDIR",
+            "NESSON_PS1",
+        ] {
+            assert!(reserved_key_reason(key).is_some(), "{key} must be reserved");
+        }
+        assert!(reserved_key_reason("PATH").is_none());
+        assert!(reserved_key_reason("ANTHROPIC_API_KEY").is_none());
+    }
+
+    // ── the binding engine, against a fake tmux ──────────────────────────────
+
+    /// A fake that answers `show-environment` for `BASE_KEPT` and reports the
+    /// rest as unset, and accepts every mutation.
+    #[cfg(unix)]
+    fn fake_with_a_base_value(dir: &std::path::Path) -> crate::test_support::FakeTmux {
+        crate::test_support::FakeTmux::new(
+            dir,
+            "case \"$1\" in \
+             show-environment) case \"$4\" in \
+               BASE_KEPT) printf 'BASE_KEPT=base\\n'; exit 0;; \
+               *) echo \"unknown variable: $4\" >&2; exit 1;; \
+             esac;; \
+             *) exit 0;; esac",
+        )
+    }
+
+    fn profile_ref(name: &str) -> SessionEnvProfile {
+        SessionEnvProfile {
+            profile: EnvFileRef {
+                name: name.to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            },
+            phase: "attach".to_string(),
+            content_hash: None,
+        }
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_fake_tmux_runs_the_source_and_unsource_paths() {
-        // The rest of the mutation path: the script goes to disk, the session
-        // is told to source it, and the scrollback is cleared — the same three
-        // steps in the other direction for `unsource_env`. All of it through
-        // the injected binary, which is what "the complete path" means.
-        //
-        // `clear-history`'s `BestEffort` class is asserted here too, from the
-        // caller's side: the fake fails it, and `source_env` still returns
-        // `Ok` — a scrollback that could not be cleared is still a script that
-        // was sourced. Its failure is observable (a `tracing::warn!`), which is
-        // the difference from the `let _ =` it replaced.
+    async fn replacing_a_binding_restores_the_captured_base_value_and_unsets_absent_keys() {
         let dir = tempfile::tempdir().unwrap();
-        let fake = crate::test_support::FakeTmux::new(
-            dir.path(),
-            "case \"$1\" in clear-history) echo 'no server' >&2; exit 1;; *) exit 0;; esac",
-        );
-        let mgr = manager_on(fake.dep(), dir.path());
+        let fake = fake_with_a_base_value(dir.path());
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
 
-        mgr.source_env(
-            "cid",
-            "nession-fake-sess",
-            "vars.env",
-            &[("NESSON_SOURCED".to_string(), "v".to_string())],
-        )
-        .await
-        .expect("a failed clear-history is BestEffort");
-        mgr.unsource_env(
-            "cid",
-            "nession-fake-sess",
-            "vars.env",
-            &["NESSON_SOURCED".to_string()],
-        )
-        .await
-        .expect("a failed clear-history is BestEffort");
+        let first = mgr
+            .apply_binding(
+                "nession-binding-sess",
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot(
+                    "a.env",
+                    &[("BASE_KEPT", "profile"), ("ABSENT", "x")],
+                )],
+            )
+            .await
+            .expect("the fake accepts the overlay");
+        assert!(first.warnings.is_empty());
+        assert_eq!(
+            first.observed.managed_keys,
+            vec!["ABSENT".to_string(), "BASE_KEPT".to_string()],
+            "the baseline is the record of what the binding manages"
+        );
+        let overlay_path = mgr
+            .session_dir("nession-binding-sess")
+            .join(ENV_RUNTIME_FILE);
+        let first_overlay = tokio::fs::read_to_string(&overlay_path).await.unwrap();
+        assert!(first_overlay.contains("export BASE_KEPT='profile'"));
+        assert!(first_overlay.contains("export ABSENT='x'"));
+
+        let second = mgr
+            .apply_binding("nession-binding-sess", 2, &[], &[])
+            .await
+            .expect("clearing the binding restores the base");
+        assert!(second.observed.managed_keys.is_empty());
 
         let calls = fake.calls();
-        assert_eq!(
-            calls.len(),
-            4,
-            "source and unsource are each send-keys + clear-history: {calls:?}"
-        );
-        for (call, script) in [
-            (&calls[0], "nession-source-cid-nession-fake-sess-vars.env"),
-            (&calls[2], "nession-unsource-cid-nession-fake-sess-vars.env"),
-        ] {
-            assert_eq!(
-                &call[..3],
-                ["send-keys", "-t", "nession-fake-sess"],
-                "the script is typed into the session with the owner's grammar: {call:?}"
-            );
-            assert_eq!(
-                call.last().map(String::as_str),
-                Some("Enter"),
-                "a line that is typed but never submitted sources nothing: {call:?}"
-            );
-            assert!(
-                call[3].contains(script),
-                "the line sources the script this manager wrote ({script}): {call:?}"
-            );
-            assert!(
-                dir.path().join(script).exists(),
-                "the script must exist on disk: {script}"
-            );
-        }
-        assert_eq!(
-            calls[1],
-            vec!["clear-history", "-t", "nession-fake-sess"],
-            "the source line is cleared from view afterwards: {calls:?}"
-        );
-        assert_eq!(
-            calls[3],
-            vec!["clear-history", "-t", "nession-fake-sess"],
-            "and so is the unsource line: {calls:?}"
+        assert!(
+            calls.iter().any(|call| call
+                == &vec![
+                    "set-environment".to_string(),
+                    "-t".to_string(),
+                    "nession-binding-sess".to_string(),
+                    "BASE_KEPT".to_string(),
+                    "base".to_string()
+                ]),
+            "the base value must be restored, not unset: {calls:#?}"
         );
         assert!(
-            std::fs::read_to_string(
-                dir.path()
-                    .join("nession-source-cid-nession-fake-sess-vars.env")
-            )
-            .unwrap()
-            .contains("export NESSON_SOURCED='v'"),
-            "the script holds the variables the caller asked for"
+            calls.iter().any(|call| call
+                == &vec![
+                    "set-environment".to_string(),
+                    "-u".to_string(),
+                    "-t".to_string(),
+                    "nession-binding-sess".to_string(),
+                    "ABSENT".to_string()
+                ]),
+            "a key with no base value must be unset: {calls:#?}"
         );
+        let second_overlay = tokio::fs::read_to_string(&overlay_path).await.unwrap();
+        assert!(second_overlay.contains("export BASE_KEPT='base'"));
+        assert!(second_overlay.contains("unset ABSENT"));
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_required_mutation_that_the_injected_tmux_refuses_is_never_success() {
-        // The Error-semantics arm, made reachable without needing real tmux to
-        // fail for the right reason. The fake answers the way the drifted
-        // grammar made real tmux answer — non-zero, with tmux's own words on
-        // stderr — and the two things #980 was missing are both asserted: the
-        // failure is an `Err` (not a warning that every caller logged before
-        // answering `ok`), and the message carries tmux's diagnostic rather
-        // than only our summary.
-        //
-        // Every variable is still attempted: one bad name must not hide the
-        // rest, and the count of recorded calls is what proves the loop kept
-        // going past the first failure.
+    async fn a_reserved_key_is_warned_about_and_never_sent_to_tmux() {
         let dir = tempfile::tempdir().unwrap();
-        let fake = crate::test_support::FakeTmux::new(
-            dir.path(),
-            "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; *) exit 0;; esac",
-        );
-        let mgr = manager_on(fake.dep(), dir.path());
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
 
-        let err = mgr
-            .set_environment(
-                "nession-fake-sess",
-                &[
-                    ("NESSON_ALPHA".to_string(), "1".to_string()),
-                    ("NESSON_BETA".to_string(), "2".to_string()),
-                ],
+        let outcome = mgr
+            .apply_binding(
+                "nession-reserved-sess",
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot(
+                    "a.env",
+                    &[("TMUX", "/tmp/other"), ("TERM", "dumb")],
+                )],
             )
             .await
-            .expect_err("the injected tmux refused every variable");
-        let message = err.to_string();
-
+            .expect("reserved keys are skipped, not fatal");
+        assert_eq!(outcome.warnings.len(), 2);
+        assert!(outcome.observed.managed_keys.is_empty());
         assert!(
-            message.contains("unknown flag -e"),
-            "the failure must carry tmux's own stderr: {message}"
-        );
-        for name in ["NESSON_ALPHA", "NESSON_BETA"] {
-            assert!(
-                message.contains(name),
-                "every variable is attempted and named, not just the first ({name}): {message}"
-            );
-        }
-        assert_eq!(
-            fake.calls().len(),
-            2,
-            "one spawn per variable, so the second is not skipped after the first fails"
+            fake.calls()
+                .iter()
+                .all(|call| call.first().map(String::as_str) != Some("set-environment")),
+            "a reserved key must never reach the tmux environment: {:#?}",
+            fake.calls()
         );
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_failed_primary_keeps_its_error_when_the_cleanup_also_fails() {
-        // #991's cleanup edge case — "cleanup fails while the primary operation
-        // already failed: primary error is preserved; cleanup error may be
-        // attached/logged" — for the one place in this file where the two run
-        // back to back. `source-env`'s `send-keys` is the primary (a script
-        // that was never sourced is the whole operation failing); `clear-history`
-        // is the cosmetic cleanup behind it. Here *both* fail, with different
-        // words, so the assertion can tell which error the caller got.
-        //
-        // What holds it: `send_keys` propagates with `?` before the cleanup is
-        // reached, and the cleanup's own failure is a `tracing::warn!` that
-        // cannot travel. The mutation that reddens this is the plausible future
-        // edit the class exists to forbid: giving the cleanup a `Result` and
-        // `?`-ing it *before* the primary — the caller then reads
-        // "clear-history-marker" instead.
+    async fn a_required_tmux_refusal_is_returned_as_an_error_and_recorded() {
         let dir = tempfile::tempdir().unwrap();
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
             "case \"$1\" in \
-             send-keys) echo 'injected tmux refuses send-keys' >&2; exit 1;; \
-             clear-history) echo 'clear-history-marker' >&2; exit 1;; \
+             show-environment) echo \"unknown variable: $4\" >&2; exit 1;; \
+             set-environment) echo 'refused by fake' >&2; exit 1;; \
              *) exit 0;; esac",
         );
-        let mgr = manager_on(fake.dep(), dir.path());
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
 
         let err = mgr
-            .source_env("cid", "nession-fake-sess", "vars.env", &[])
+            .apply_binding(
+                "nession-refused-sess",
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("REFUSED", "v")])],
+            )
             .await
-            .expect_err("the script was never sourced, so the operation failed");
-        let message = format!("{err:#}");
-        assert!(
-            message.starts_with("tmux send-keys"),
-            "the failure the caller reads must be the primary's, not the \
-             cleanup's: {message}"
-        );
-        assert!(
-            message.contains("injected tmux refuses send-keys"),
-            "with the primary's own context: {message}"
-        );
-        assert_eq!(
-            fake.calls()
-                .iter()
-                .filter(|args| args.first().map(String::as_str) == Some("send-keys"))
-                .count(),
-            1,
-            "the primary really was attempted: {:#?}",
-            fake.calls()
-        );
+            .expect_err("a refused required mutation is not success");
+        assert!(format!("{err:#}").contains("refused by fake"));
+
+        let observed = mgr
+            .observe("nession-refused-sess")
+            .await
+            .expect("the failed apply is recorded");
+        assert_eq!(observed.status, STATUS_ERROR);
+        assert!(observed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("refused by fake")));
+    }
+
+    // ── the shell adapter, against a real shell ──────────────────────────────
+
+    /// Spawn the generated adapter in a real interactive shell and return the
+    /// child, its stdin, and a line reader over stdout.
+    #[cfg(unix)]
+    async fn spawn_adapter_shell(
+        shell_path: &str,
+        adapter: &ShellAdapter,
+        home: &Path,
+    ) -> (
+        tokio::process::Child,
+        tokio::process::ChildStdin,
+        tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+    ) {
+        use std::process::Stdio;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        // not-tmux: this test launches the user's shell to exercise the
+        // Session adapter; it never invokes tmux.
+        let mut command = tokio::process::Command::new(shell_path);
+        if adapter.command.is_empty() {
+            command.arg("-i");
+        } else {
+            command.args(&adapter.command[1..]);
+        }
+        command
+            .env_clear()
+            .env("HOME", home)
+            .env(
+                "PATH",
+                std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string()),
+            )
+            .env("SHELL", shell_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        for (key, value) in &adapter.env {
+            command.env(key, value);
+        }
+        let mut child = command.spawn().expect("the shell starts");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        (child, stdin, BufReader::new(stdout).lines())
+    }
+
+    #[cfg(unix)]
+    async fn write_and_wait(
+        stdin: &mut tokio::process::ChildStdin,
+        lines: &mut tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+        command: &str,
+        marker: &str,
+    ) -> String {
+        use tokio::io::AsyncWriteExt;
+        stdin
+            .write_all(format!("{command}\n").as_bytes())
+            .await
+            .expect("writing to the shell");
+        loop {
+            let line = tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line())
+                .await
+                .expect("the shell answers a prompt")
+                .expect("the shell stdout is readable")
+                .expect("the shell is still running");
+            if line.contains(marker) {
+                return line;
+            }
+        }
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_managers_own_tmux_is_the_process_one_until_it_is_replaced() {
-        // The default is the process-wide addressing, and it must be resolved
-        // per use rather than frozen when the manager is built — a `TmuxDep`
-        // captured before `cmd::configure` would pin the process to the
-        // fallback socket for its whole life (the reason `TmuxOps::global`
-        // gives). This asserts the property without a configure() call: what
-        // the default resolves to is what `cmd::global()` currently is.
-        let mgr = EnvManager::new(std::env::temp_dir());
-        assert_eq!(
-            mgr.tmux().cmd().socket_path(),
-            crate::tmux::cmd::global().socket_path(),
-            "an unreplaced manager must address the process socket"
+    async fn the_bash_adapter_converges_at_the_next_prompt_and_preserves_user_config() {
+        let shell = "/bin/bash";
+        assert!(
+            std::path::Path::new(shell).exists(),
+            "bash is required for this test"
         );
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".bash_profile"), "export NESSION_USER_VAR=kept\n").unwrap();
+
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let adapter = mgr
+            .install_shell_adapter("nession-shell-sess", Some(shell))
+            .await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        let session_dir = mgr.session_dir("nession-shell-sess");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"USER:$NESSION_USER_VAR VAL1:$NESSION_TEST\"",
+            "USER:",
+        )
+        .await;
+        assert!(line.contains("USER:kept"), "user config was lost: {line}");
+        assert!(
+            line.contains("VAL1:one"),
+            "the first overlay did not apply: {line}"
+        );
+
+        // The Agent materializes a new revision while the shell is idle at its
+        // prompt. Nothing is typed into the terminal; the next prompt boundary
+        // is what converges.
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"VAL2:$NESSION_TEST\"",
+            "VAL2:",
+        )
+        .await;
+        assert!(
+            line.contains("VAL2:two"),
+            "the new revision did not converge: {line}"
+        );
+
+        let marker = tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
+            .await
+            .unwrap();
+        assert_eq!(
+            marker.trim(),
+            "2",
+            "the shell reported the revision it applied"
+        );
+
+        drop(stdin);
+        let _ = child.wait().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_zsh_adapter_converges_at_the_next_prompt_and_preserves_user_config() {
+        let shell = "/bin/zsh";
+        assert!(
+            std::path::Path::new(shell).exists(),
+            "zsh is required for this test; install it on the test host"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".zshrc"), "export NESSION_USER_VAR=kept\n").unwrap();
+
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let adapter = mgr
+            .install_shell_adapter("nession-zsh-sess", Some(shell))
+            .await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        let session_dir = mgr.session_dir("nession-zsh-sess");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"USER:$NESSION_USER_VAR VAL1:$NESSION_TEST\"",
+            "USER:",
+        )
+        .await;
+        assert!(line.contains("USER:kept"), "user config was lost: {line}");
+        assert!(
+            line.contains("VAL1:one"),
+            "the first overlay did not apply: {line}"
+        );
+
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"VAL2:$NESSION_TEST\"",
+            "VAL2:",
+        )
+        .await;
+        assert!(
+            line.contains("VAL2:two"),
+            "the new revision did not converge: {line}"
+        );
+
+        let marker = tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
+            .await
+            .unwrap();
+        assert_eq!(
+            marker.trim(),
+            "2",
+            "the shell reported the revision it applied"
+        );
+
+        drop(stdin);
+        let _ = child.wait().await;
     }
 }

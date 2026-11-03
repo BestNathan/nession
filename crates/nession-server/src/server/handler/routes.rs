@@ -91,6 +91,7 @@ server_routes!(handler, msg, payload;
     // unit the server offers. It is handled in `handle_protocol_message`, ahead
     // of the relay path — see the match there for why the position matters.
     "server.agent.session-update" => "server.agent.session-update" => 1 => Inline => handler.handle_agent_session_update(msg).await,
+    "server.agent.session-env-binding" => "server.agent.session-env-binding" => 1 => Inline => handler.handle_agent_session_env_binding(msg).await,
     "server.agent.command-response" => "server.agent.command-response" => 1 => Inline => handler.handle_agent_command_response(msg).await,
     "server.agent.git-invalidated" => "server.agent.git-invalidated" => 1 => Inline => handler.handle_agent_git_invalidated(msg).await,
     "server.agent.terminal-resize" => "server.agent.terminal-resize" => 1 => Inline => handler.handle_agent_terminal_resize(msg).await,
@@ -126,6 +127,12 @@ server_routes!(handler, msg, payload;
     "server.session.env.unset" => "server.session.env.unset" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_unset(msg).await,
     "server.session.env.active" => "server.session.env.active" => 1 => Query => handler.handle_client_session_env_active(msg).await,
     "server.session.env.query" => "server.session.env.query" => 1 => Query => handler.handle_client_session_env_query(msg).await,
+    // The canonical Session Environment Binding units (#170). Set and reapply
+    // are whole-binding replacements, so they take the session's key lane; get
+    // is a query and never competes with a materialization.
+    "server.session.env.binding.get" => "server.session.env.binding.get" => 1 => Query => handler.handle_client_session_env_binding_get(msg).await,
+    "server.session.env.binding.set" => "server.session.env.binding.set" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_binding_set(msg).await,
+    "server.session.env.binding.reapply" => "server.session.env.binding.reapply" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_env_binding_reapply(msg).await,
     "server.info" => "server.info" => 1 => Query => handler.handle_client_server_info(msg).await,
     "server.agent.rename" => "server.agent.rename" => 1 => Inline => handler.handle_client_agent_rename(msg).await,
     "server.agent.delete" => "server.agent.delete" => 1 => Inline => handler.handle_client_agent_delete(msg).await,

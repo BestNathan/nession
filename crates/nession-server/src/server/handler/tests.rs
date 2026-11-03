@@ -1627,6 +1627,33 @@ async fn commands_update() {
     assert_eq!(cmds[0]["command"], "new cmd");
 }
 
+/// Bind a Session to a set of files the way the canonical set unit does, so
+/// the in-use lock tests exercise the durable authority rather than the removed
+/// in-memory usage registry.
+pub(super) async fn bind_for_test(
+    handler: &ConnectionHandler,
+    session_id: &str,
+    files: &[EnvFileRef],
+) {
+    let agent_id = session_id
+        .split_once(':')
+        .map_or("", |(agent, _)| agent)
+        .to_string();
+    let profiles = crate::env::binding::materialized_profiles(&[], files, "create");
+    handler
+        .env_service
+        .bindings
+        .put(&crate::env::BindingRecord {
+            session_id: session_id.to_string(),
+            agent_id,
+            desired_revision: 1,
+            profiles,
+            updated_at: 0,
+        })
+        .await
+        .expect("the test binding is durable");
+}
+
 mod control;
 mod server_agent_address_update_v1;
 mod server_agent_command_response_v1;
@@ -1647,6 +1674,7 @@ mod server_session_attach_v1;
 mod server_session_create_v1;
 mod server_session_env_active_v1;
 mod server_session_env_apply_v1;
+mod server_session_env_binding_v1;
 mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;

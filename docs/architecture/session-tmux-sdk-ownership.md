@@ -348,7 +348,7 @@ promise requires new evidence.
 - #2469 — this requirement.
 - #991 — tmux semantics; #2307 — Control Mode client; #575 — explicit socket
   isolation; #1645/#1925 — terminal consistency; #2286 — active-device
-  ControlLease; #1619 — shared Agent session streams; #170 — Session
-  Environment Binding.
+  ControlLease; #1619 — shared Agent session streams; #170 — [Session
+  Environment Binding](session-env-binding.md).
 - [tmux Control Mode](https://github.com/tmux/tmux/wiki/Control-Mode)
 - [Cargo publishing](https://doc.rust-lang.org/cargo/reference/publishing.html)

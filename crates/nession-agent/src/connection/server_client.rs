@@ -41,15 +41,16 @@ use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
 };
-use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot};
+use nession_protocol::contracts::env::v1::{
+    AgentSessionEnvBindingReportEntry, AgentSessionEnvBindingReportPayload,
+    ServerSessionEnvBindingGetPayload, ServerSessionEnvBindingSetPayload,
+};
 use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionEnvApplyPayload, ServerSessionEnvUnsetPayload,
-    ServerSessionProcessesPayload,
+    ServerSessionCreatePayload, ServerSessionProcessesPayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -71,7 +72,8 @@ use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
-use crate::tmux::manager::SessionManager;
+use crate::tmux::env::profiles_from_snapshots;
+use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
 use nession_runtime::lane::KeyedLane;
 
@@ -122,6 +124,10 @@ pub mod msg_types {
     pub const CONTROL_PING: &str = "control.ping";
     pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
+    /// One-way: the Agent reports every live Session's observed Environment
+    /// Binding after registration, so the Server's observed cache can be
+    /// rebuilt from the runtime that owns it (#170).
+    pub const AGENT_SESSION_ENV_BINDING: &str = "server.agent.session-env-binding";
     pub const AGENT_GIT_INVALIDATED: &str = "server.agent.git-invalidated";
     pub const AGENT_ADDRESS_UPDATE: &str = "server.agent.address-update";
     /// Server asks the agent for its live tmux session list. Used by the web
@@ -187,8 +193,6 @@ pub struct ServerClient {
     tmux: Arc<SessionManager>,
     /// Store for agent-local env files under `~/.nession/agent/envs`.
     env_store: EnvStore,
-    /// Track sourced env files per session (session_id -> Vec<EnvFileRef>)
-    sourced_envs: std::sync::Mutex<HashMap<String, Vec<EnvFileRef>>>,
     /// The **process's** mutation lane (#1021).
     ///
     /// Shared with the peer-to-peer listener: both mutate the same tmux
@@ -419,7 +423,6 @@ impl ServerClient {
             p2p_credentials,
             mutations,
             env_store: EnvStore::new(env_root),
-            sourced_envs: std::sync::Mutex::new(HashMap::new()),
             session_publish: Arc::new(Mutex::new(None)),
         }
     }
@@ -672,6 +675,29 @@ impl ServerClient {
                 }
                 None => anyhow::bail!("connection closed before registration response"),
             }
+        }
+
+        // Report the observed Environment Binding state of every live Session
+        // (#170). The Server's cache is not authority; the Agent's durable
+        // state is, and a reconnect is when the Server may have lost it.
+        let binding_states = self.tmux.env().live_binding_states().await;
+        if !binding_states.is_empty() {
+            let payload = AgentSessionEnvBindingReportPayload {
+                agent_id: self.agent_id.clone(),
+                sessions: binding_states
+                    .into_iter()
+                    .map(
+                        |(session_name, observed)| AgentSessionEnvBindingReportEntry {
+                            session_name,
+                            observed,
+                        },
+                    )
+                    .collect(),
+            };
+            let msg = new_message(msg_types::AGENT_SESSION_ENV_BINDING, payload);
+            sink.send(WsMessage::Text(serde_json::to_string(&msg)?))
+                .await
+                .context("failed to report Session Environment Binding state")?;
         }
 
         Ok((sink, stream, interval))
@@ -1083,19 +1109,7 @@ fn str_field(payload: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-/// List env file refs currently sourced on any tmux session.
-///
-/// Returns the tracked EnvFileRef information from sourced_envs map.
-/// If no files are tracked, returns an empty list.
 impl ServerClient {
-    fn get_sourced_env_files(&self) -> Vec<EnvFileRef> {
-        if let Ok(sourced) = self.sourced_envs.lock() {
-            sourced.values().flatten().cloned().collect()
-        } else {
-            vec![]
-        }
-    }
-
     fn session_publish_handle(&self) -> Option<ServerClientHandle> {
         self.session_publish
             .lock()
@@ -1108,27 +1122,6 @@ impl ServerClient {
             *guard = handle;
         }
     }
-}
-
-/// Flatten multiple env-file snapshots into a single ordered variable list.
-///
-/// Files are applied in order; within the merged result the last occurrence of
-/// a key wins (later files override earlier ones), while first-seen position is
-/// preserved for stable ordering.
-fn flatten_snapshots(snapshots: &[EnvSnapshot]) -> Vec<(String, String)> {
-    let mut vars: Vec<(String, String)> = Vec::new();
-    let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for snap in snapshots {
-        for (key, value) in &snap.vars {
-            if let Some(slot) = index.get(key).and_then(|&i| vars.get_mut(i)) {
-                slot.1 = value.clone();
-            } else {
-                index.insert(key.clone(), vars.len());
-                vars.push((key.clone(), value.clone()));
-            }
-        }
-    }
-    vars
 }
 
 // ---------------------------------------------------------------------------
@@ -2053,78 +2046,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn flatten_snapshots_empty() {
-        let result = flatten_snapshots(&[]);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn flatten_snapshots_single_snapshot() {
-        let snapshots = vec![EnvSnapshot {
-            name: "a.env".to_string(),
-            source: nession_protocol::contracts::env::v1::EnvSource::Server,
-            agent_id: None,
-            vars: vec![("FOO".into(), "bar".into()), ("BAZ".into(), "qux".into())],
-            warnings: vec![],
-        }];
-        let result = flatten_snapshots(&snapshots);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0], ("FOO".to_string(), "bar".to_string()));
-        assert_eq!(result[1], ("BAZ".to_string(), "qux".to_string()));
-    }
-
-    #[test]
-    fn flatten_snapshots_later_overrides_earlier() {
-        let snapshots = vec![
-            EnvSnapshot {
-                name: "first.env".to_string(),
-                source: nession_protocol::contracts::env::v1::EnvSource::Server,
-                agent_id: None,
-                vars: vec![
-                    ("KEY".into(), "first_value".into()),
-                    ("ONLY".into(), "1".into()),
-                ],
-                warnings: vec![],
-            },
-            EnvSnapshot {
-                name: "second.env".to_string(),
-                source: nession_protocol::contracts::env::v1::EnvSource::Server,
-                agent_id: None,
-                vars: vec![("KEY".into(), "second_value".into())],
-                warnings: vec![],
-            },
-        ];
-        let result = flatten_snapshots(&snapshots);
-        // KEY should be overridden in place (position 0)
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0], ("KEY".to_string(), "second_value".to_string()));
-        assert_eq!(result[1], ("ONLY".to_string(), "1".to_string()));
-    }
-
-    #[test]
-    fn flatten_snapshots_preserves_insertion_order() {
-        let snapshots = vec![
-            EnvSnapshot {
-                name: "a.env".to_string(),
-                source: nession_protocol::contracts::env::v1::EnvSource::Server,
-                agent_id: None,
-                vars: vec![("B".into(), "1".into()), ("A".into(), "2".into())],
-                warnings: vec![],
-            },
-            EnvSnapshot {
-                name: "b.env".to_string(),
-                source: nession_protocol::contracts::env::v1::EnvSource::Server,
-                agent_id: None,
-                vars: vec![("C".into(), "3".into())],
-                warnings: vec![],
-            },
-        ];
-        let result = flatten_snapshots(&snapshots);
-        let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, vec!["B", "A", "C"]);
-    }
-
-    #[test]
     fn str_field_extracts_string() {
         let value = serde_json::json!({"request_id": "abc", "name": "test"});
         assert_eq!(str_field(&value, "request_id"), "abc");
@@ -2459,10 +2380,10 @@ mod tests {
                 let _ = stream.next().await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "agent.env.query",
-                    "id": "cmd-env-query",
+                    "msg_type": "agent.session.env.binding.get",
+                    "id": "cmd-env-binding-get",
                     "timestamp": 1234567891,
-                    "payload": { "request_id": "req-env-query-1" }
+                    "payload": { "request_id": "req-env-binding-get-1", "name": "no-such-session" }
                 });
                 let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
 
@@ -2509,22 +2430,19 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
-            .await
-            .expect("timeout waiting for env.query response")
-            .expect("no message received");
-
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["payload"]["command"], "env.query");
+        let parsed = next_command_response(&mut msg_rx, Duration::from_secs(5)).await;
+        assert_eq!(parsed["payload"]["command"], "session.env.binding.get");
         assert_eq!(parsed["payload"]["success"], true);
-        assert!(parsed["payload"]["sourced_files"].is_array());
+        // No recorded binding for this name, and that is not the same claim as
+        // an intentionally empty one.
+        assert!(parsed["payload"]["observed"].is_null());
 
         handle.shutdown().await.ok();
         server_handle.abort();
     }
 
-    /// Mock server that sends server.session.env.unset command.
-    async fn start_mock_server_env_unset(
+    /// Mock server that sends a whole-binding replacement command.
+    async fn start_mock_server_env_binding_set(
         session_name: String,
     ) -> (
         std::net::SocketAddr,
@@ -2551,21 +2469,30 @@ mod tests {
                 let _ = sink.send(WsMessage::Text(response.to_string())).await;
                 let _ = stream.next().await;
 
-                // First create a session to apply env to
+                // First create a session to apply the binding to.
                 let tmux = SessionManager::new();
                 let _ = tmux
                     .create_session(&session_name, 80, 24, "/tmp", &[])
                     .await;
 
                 let cmd = serde_json::json!({
-                    "msg_type": "agent.session.env.unset",
-                    "id": "cmd-env-unset",
+                    "msg_type": "agent.session.env.binding.set",
+                    "id": "cmd-env-binding-set",
                     "timestamp": 1234567891,
                     "payload": {
-                        "request_id": "req-env-unset-1",
+                        "request_id": "req-env-binding-set-1",
                         "name": session_name,
-                        "keys": ["FOO", "BAR"],
-                        "client_id": "test-client"
+                        "revision": 1,
+                        "profiles": [{
+                            "profile": { "name": "bound.env", "source": "server" },
+                            "phase": "attach"
+                        }],
+                        "snapshots": [{
+                            "name": "bound.env",
+                            "source": "server",
+                            "vars": [["FOO", "bar"]],
+                            "warnings": []
+                        }]
                     }
                 });
                 let _ = sink.send(WsMessage::Text(cmd.to_string())).await;
@@ -2582,11 +2509,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_session_env_unset_command() {
-        let session = TestSession::new("env-unset");
+    async fn test_server_session_env_binding_set_command() {
+        let session = TestSession::new("env-binding-set");
         let session_name = session.name().to_string();
         let (addr, server_handle, mut msg_rx) =
-            start_mock_server_env_unset(session_name.clone()).await;
+            start_mock_server_env_binding_set(session_name.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -2599,7 +2526,7 @@ mod tests {
         let client = ServerClient::new(
             format!("ws://{addr}"),
             "test-token",
-            "test-agent-env-unset",
+            "test-agent-env-binding-set",
             "test-host",
             "127.0.0.1",
             8080,
@@ -2616,14 +2543,15 @@ mod tests {
 
         let (handle, _interval) = client.connect_and_run().await.expect("connect failed");
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
-            .await
-            .expect("timeout waiting for env.unset response")
-            .expect("no message received");
-
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(parsed["payload"]["command"], "session.env.unset");
-        assert_eq!(parsed["payload"]["request_id"], "req-env-unset-1");
+        let parsed = next_command_response(&mut msg_rx, Duration::from_secs(5)).await;
+        assert_eq!(parsed["payload"]["command"], "session.env.binding.set");
+        assert_eq!(parsed["payload"]["request_id"], "req-env-binding-set-1");
+        assert_eq!(parsed["payload"]["success"], true);
+        assert_eq!(parsed["payload"]["observed"]["applied_revision"], 1);
+        assert_eq!(
+            parsed["payload"]["observed"]["managed_keys"],
+            serde_json::json!(["FOO"])
+        );
 
         // Clean up
         let tmux = SessionManager::new();
@@ -3232,6 +3160,28 @@ esac"#,
         }
     }
 
+    /// The next `server.agent.command-response`, skipping any other frame —
+    /// the registration-time Environment Binding report is a one-way message on
+    /// the same socket.
+    async fn next_command_response(
+        msg_rx: &mut mpsc::Receiver<String>,
+        within: Duration,
+    ) -> serde_json::Value {
+        let deadline = std::time::Instant::now() + within;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(!remaining.is_zero(), "no command response arrived");
+            let Ok(Some(text)) = tokio::time::timeout(remaining, msg_rx.recv()).await else {
+                panic!("no command response arrived");
+            };
+            let parsed: serde_json::Value =
+                serde_json::from_str(&text).expect("the agent sends JSON");
+            if parsed["payload"]["command"].is_string() {
+                return parsed;
+            }
+        }
+    }
+
     /// Collect `count` command responses, in the order they arrived.
     async fn collect_responses(
         msg_rx: &mut mpsc::Receiver<String>,
@@ -3673,7 +3623,14 @@ core_routes!(agent, msg, responses;
                         };
                     let request_id = payload.request_id.clone();
                     let name = payload.name.clone();
-                    let env = flatten_snapshots(&payload.env_snapshots);
+                    // A caller that only knows resolved snapshots still gets
+                    // the one binding model: the refs are read from the
+                    // snapshots, not invented.
+                    let profiles = if payload.binding_profiles.is_empty() {
+                        profiles_from_snapshots(&payload.env_snapshots, "create")
+                    } else {
+                        payload.binding_profiles.clone()
+                    };
 
                     info!(
                         "Server requested session create: name={}, width={}, height={}, env_files={}",
@@ -3682,6 +3639,24 @@ core_routes!(agent, msg, responses;
                         payload.height,
                         payload.env_snapshots.len()
                     );
+
+                    if profiles.len() != payload.env_snapshots.len() {
+                        let response = serde_json::json!({
+                            "msg_type": "server.agent.command-response",
+                            "id": uuid::Uuid::new_v4().to_string(),
+                            "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                            "payload": {
+                                "request_id": request_id,
+                                "command": "session.create",
+                                "success": false,
+                                "error": "binding profiles and env snapshots must have the same length",
+                                "session_name": null,
+                                "warnings": [],
+                            }
+                        });
+                        responses.send(WsMessage::Text(response.to_string())).await?;
+                        return Ok(());
+                    }
 
                     // The Server states the release-selected width (#2487);
                     // an older Server that omits it gets the product default
@@ -3692,18 +3667,25 @@ core_routes!(agent, msg, responses;
                     let terminal_cols = payload
                         .terminal_cols
                         .unwrap_or(nession_common::config::DEFAULT_TERMINAL_COLS);
-                    let (success, error, session_name) = match agent
+                    let revision = payload
+                        .binding_revision
+                        .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
+                    let (success, error, session_name, warnings) = match agent
                         .tmux
-                        .create_session(
+                        .create_session_with_binding(
                             &name,
                             terminal_cols,
                             payload.height,
                             &agent.default_working_dir,
-                            &env,
+                            SessionBindingInput {
+                                revision,
+                                profiles: &profiles,
+                                snapshots: &payload.env_snapshots,
+                            },
                         )
                         .await
                     {
-                        Ok(()) => {
+                        Ok(warnings) => {
                             if let Some(publish) = agent.session_publish_handle() {
                                 if let Err(e) = crate::sync::session_watcher::publish_session_snapshot(
                                     &publish,
@@ -3717,9 +3699,9 @@ core_routes!(agent, msg, responses;
                                     );
                                 }
                             }
-                            (true, None, Some(name.clone()))
+                            (true, None, Some(name.clone()), warnings)
                         }
-                        Err(e) => (false, Some(e.to_string()), None),
+                        Err(e) => (false, Some(e.to_string()), None, Vec::new()),
                     };
 
                     let response = serde_json::json!({
@@ -3732,6 +3714,7 @@ core_routes!(agent, msg, responses;
                             "success": success,
                             "error": error,
                             "session_name": session_name,
+                            "warnings": warnings,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -3828,98 +3811,87 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.session.env.apply" => "agent.session.env.apply" => 1 => Key(session_by_name(&msg.payload)) => {
-                    let payload: ServerSessionEnvApplyPayload =
+    "agent.session.env.binding.set" => "agent.session.env.binding.set" => 1 => Key(session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionEnvBindingSetPayload =
                         match serde_json::from_value(msg.payload.clone()) {
                             Ok(p) => p,
                             Err(e) => {
-                                warn!("Invalid server.session.env.apply payload: {e}");
+                                warn!("Invalid server.session.env.binding.set payload: {e}");
                                 return Ok(());
                             }
                         };
-                    // Extract client_id or use "unknown" if not provided
-                    let client_id = payload.client_id.as_deref().unwrap_or("unknown");
-                    // One source script per snapshot (env file), sent via send-keys
-                    // to the session. Each command is hidden from view with tput.
-                    let mut error: Option<String> = None;
-                    for snap in &payload.snapshots {
-                        if let Err(e) = agent
-                            .tmux
-                            .env()
-                            .source_env(client_id, &payload.name, &snap.name, &snap.vars)
-                            .await
-                        {
-                            error = Some(e.to_string());
-                            break;
-                        }
-                    }
-                    // Track sourced env files if no error occurred
-                    if error.is_none() && !payload.env_files.is_empty() {
-                        if let Ok(mut sourced) = agent.sourced_envs.lock() {
-                            sourced
-                                .entry(payload.name.clone())
-                                .or_insert_with(Vec::new)
-                                .extend(payload.env_files.clone());
-                        }
-                    }
-                    let response = serde_json::json!({
-                        "msg_type": "server.agent.command-response",
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
-                        "payload": {
-                            "request_id": payload.request_id,
-                            "command": "session.env.apply",
-                            "success": error.is_none(),
-                            "error": error,
-                        }
-                    });
-                    responses.send(WsMessage::Text(response.to_string())).await?;
-    }
-    "agent.session.env.unset" => "agent.session.env.unset" => 1 => Key(session_by_name(&msg.payload)) => {
-                    let payload: ServerSessionEnvUnsetPayload =
-                        match serde_json::from_value(msg.payload.clone()) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                warn!("Invalid server.session.env.unset payload: {e}");
-                                return Ok(());
+                    // The two lists are one ordered selection seen from two
+                    // sides; a length mismatch means the Server and Agent would
+                    // disagree about which profile each snapshot belongs to.
+                    if payload.profiles.len() != payload.snapshots.len() {
+                        let response = serde_json::json!({
+                            "msg_type": "server.agent.command-response",
+                            "id": uuid::Uuid::new_v4().to_string(),
+                            "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                            "payload": {
+                                "request_id": payload.request_id,
+                                "command": "session.env.binding.set",
+                                "success": false,
+                                "error": "binding profiles and snapshots must have the same length",
                             }
-                        };
-                    // Extract client_id or use "unknown" if not provided
-                    let client_id = payload.client_id.as_deref().unwrap_or("unknown");
-                    let mut error: Option<String> = None;
-                    if let Err(e) = agent
+                        });
+                        responses.send(WsMessage::Text(response.to_string())).await?;
+                        return Ok(());
+                    }
+                    let outcome = agent
                         .tmux
                         .env()
-                        .unsource_env(client_id, &payload.name, "all", &payload.keys)
-                        .await
-                    {
-                        error = Some(e.to_string());
-                    }
+                        .apply_binding(
+                            &payload.name,
+                            payload.revision,
+                            &payload.profiles,
+                            &payload.snapshots,
+                        )
+                        .await;
+                    let (success, error, warnings, observed) = match outcome {
+                        Ok(outcome) => (true, None, outcome.warnings, Some(outcome.observed)),
+                        Err(e) => (
+                            false,
+                            Some(format!("{e:#}")),
+                            Vec::new(),
+                            agent.tmux.env().observe(&payload.name).await,
+                        ),
+                    };
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
                             "request_id": payload.request_id,
-                            "command": "session.env.unset",
-                            "success": error.is_none(),
+                            "command": "session.env.binding.set",
+                            "success": success,
                             "error": error,
+                            "warnings": warnings,
+                            "observed": observed,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
-    "agent.env.query" => "agent.env.query" => 1 => Query => {
-                    let request_id = str_field(&msg.payload, "request_id");
-                    let sourced_files = agent.get_sourced_env_files();
+    "agent.session.env.binding.get" => "agent.session.env.binding.get" => 1 => Query => {
+                    let payload: ServerSessionEnvBindingGetPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Invalid server.session.env.binding.get payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let observed = agent.tmux.env().observe(&payload.name).await;
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
                         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
                         "payload": {
-                            "request_id": request_id,
-                            "command": "env.query",
+                            "request_id": payload.request_id,
+                            "command": "session.env.binding.get",
                             "success": true,
-                            "sourced_files": sourced_files,
+                            "error": null,
+                            "observed": observed,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

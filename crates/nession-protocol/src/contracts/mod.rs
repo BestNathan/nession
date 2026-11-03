@@ -5,7 +5,7 @@
 //! ```text
 //! contracts/
 //! ├── agent/v1.rs      agent.register, agent.heartbeat, agent.address.update
-//! ├── session/v1.rs    session.create, session.attach, session.env.apply
+//! ├── session/v1.rs    session.create, session.attach, session.env.binding.*
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
 //! ├── client/v1.rs     server.auth — the peer-to-peer door
 //! ├── commands/v1.rs   commands.{list,add,remove,update}

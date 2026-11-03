@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createStore, Provider } from 'jotai';
 import { AttachDialog } from '@/product/session/components/AttachDialog';
-import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Session, AttachInfo, AddressLatency } from '@/types';
 import { attachInfoAtom } from '@/product/session/state';
@@ -13,7 +12,6 @@ import { saveSessionProfile, type PersistedAttachChoice } from '@/platform/attac
 // capability's components too, and this dialog renders one of them.
 vi.mock('@/capabilities/env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/capabilities/env')>()),
-  envApi: { listEnvFiles: vi.fn() },
 }));
 
 /**
@@ -42,7 +40,6 @@ vi.mock('@/product/session', () => ({
   sessionsApi: { requestAttach: vi.fn() },
 }));
 
-const mockedEnvApi = vi.mocked(envApi);
 const mockedSessionsApi = vi.mocked(sessionsApi);
 
 function session(): Session {
@@ -71,7 +68,6 @@ function attachInfo(addresses: AttachInfo['addresses'] = []): AttachInfo {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
-  mockedEnvApi.listEnvFiles.mockResolvedValue({ files: [] });
   mockedSessionsApi.requestAttach.mockImplementation(async () => attachInfo());
   measures();
 });
@@ -266,32 +262,6 @@ describe('AttachDialog', () => {
     expect(screen.getByText('Canvas')).toBeInTheDocument();
   });
 
-  it('selects env files and passes them as envRefs on confirm', async () => {
-    const onConfirm = vi.fn();
-    mockedEnvApi.listEnvFiles.mockResolvedValue({
-      files: [{ name: 'prod.env', source: 'server', size: 10, modified: 0, var_count: 3 }],
-    });
-    const user = userEvent.setup();
-    render(
-      <AttachDialog
-        isOpen
-        onClose={vi.fn()}
-        session={session()}
-        onConfirm={onConfirm}
-      />,
-    );
-    // The env section starts collapsed; expand it to reveal the file list.
-    await user.click(screen.getByText('Environment Files'));
-    await user.click(await screen.findByText('prod.env'));
-    const attachBtn = screen.getByRole('button', { name: /^Attach$/ });
-    await waitFor(() => expect(attachBtn).toBeEnabled());
-    await user.click(attachBtn);
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ envRefs: [{ name: 'prod.env', source: 'server' }] }),
-    );
-  });
-
   it('does not clear the active session attachInfoAtom when opened for preview', async () => {
     const store = createStore();
     // The currently-attached session's descriptor — a DIFFERENT session than
@@ -331,7 +301,6 @@ describe('AttachDialog profile prefill + configure intent', () => {
   const choice: PersistedAttachChoice = {
     mode: 'p2p',
     renderer: 'webgl',
-    envRefs: [],
     selectedUrl: null,
   };
 
@@ -443,12 +412,12 @@ describe('AttachDialog profile prefill + configure intent', () => {
     // Session A: p2p with a manual url; session B: relay, server-auto only.
     saveSessionProfile(
       { session_id: 'agent-1:dev', agent_id: 'agent-1' },
-      { mode: 'p2p', renderer: 'webgl', envRefs: [], selectedUrl: 'ws://a/ws' },
+      { mode: 'p2p', renderer: 'webgl', selectedUrl: 'ws://a/ws' },
       'any-fp',
     );
     saveSessionProfile(
       { session_id: 'agent-1:other', agent_id: 'agent-1' },
-      { mode: 'relay', renderer: 'canvas', envRefs: [], selectedUrl: null },
+      { mode: 'relay', renderer: 'canvas', selectedUrl: null },
       'any-fp',
     );
     seedRequest([
@@ -505,28 +474,5 @@ describe('AttachDialog profile prefill + configure intent', () => {
     render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={vi.fn()} />);
     await screen.findByRole('button', { name: /^Attach$/ });
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
-  });
-
-  it('prefills env file selection from the profile, filtering missing files', async () => {
-    const onConfirm = vi.fn();
-    const user = userEvent.setup();
-    mockedEnvApi.listEnvFiles.mockResolvedValue({
-      files: [{ name: 'prod.env', source: 'server', size: 10, modified: 0, var_count: 3 }],
-    });
-    seedProfile({
-      envRefs: [
-        { name: 'prod.env', source: 'server' },
-        { name: 'gone.env', source: 'server' },
-      ],
-    });
-    seedRequest();
-    render(<AttachDialog isOpen onClose={vi.fn()} session={session()} onConfirm={onConfirm} />);
-    const attachBtn = await screen.findByRole('button', { name: /^Attach$/ });
-    await waitFor(() => expect(attachBtn).toBeEnabled());
-    await user.click(attachBtn);
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ envRefs: [{ name: 'prod.env', source: 'server' }] }),
-    );
   });
 });

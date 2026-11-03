@@ -27,7 +27,7 @@ impl ConnectionHandler {
             .unwrap_or_else(|_| ClientSessionEnvQueryPayload {
                 session_id: String::new(),
             });
-        let Some((agent_id, _session_name)) = session_id.split_once(':') else {
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
             return Ok(session_env_query_reply(
                 &msg.id,
                 SessionEnvQueryResponse {
@@ -36,18 +36,35 @@ impl ConnectionHandler {
                 },
             ));
         };
+        // Session-scoped by construction: the Agent is asked about this tmux
+        // Session, not asked to flatten its whole process state (#170).
         let resp = self
-            .agent_command(agent_id, "agent.env.query", json!({}))
+            .agent_command(
+                agent_id,
+                "agent.session.env.binding.get",
+                json!({ "name": session_name }),
+            )
             .await;
         match resp {
-            Ok(r) => {
-                let sourced = r
-                    .get("sourced_files")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect::<Vec<_>>()
+            Ok(value) => {
+                let observed = value.get("observed").and_then(|observed| {
+                    serde_json::from_value::<
+                        nession_protocol::contracts::env::v1::SessionEnvObservedState,
+                    >(observed.clone())
+                    .ok()
+                });
+                if let Some(ref observed) = observed {
+                    self.env_service
+                        .observed
+                        .set(&format!("{agent_id}:{session_name}"), observed.clone());
+                }
+                let sourced: Vec<String> = observed
+                    .map(|observed| {
+                        observed
+                            .profiles
+                            .into_iter()
+                            .map(|profile| profile.name)
+                            .collect()
                     })
                     .unwrap_or_default();
                 Ok(session_env_query_reply(

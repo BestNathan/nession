@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         width: 80,
         height: 24,
         env: vec![("SDK_EXAMPLE".to_string(), "1".to_string())],
+        command: Vec::new(),
     })
     .await?;
     println!("created {name}");

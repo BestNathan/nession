@@ -23,17 +23,22 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvDeleteResponsePayload, ClientEnvGetPayload,
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload, EnvFileRef, EnvSnapshot, EnvSource,
+    SessionEnvBindingProfileState, SessionEnvBindingState, SessionEnvObservedState,
+    SessionEnvProfile,
 };
 use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
-    ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
-    ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ClientSessionProcessesPayload,
-    ProcessSnapshot, ServerSessionListPayload, ServerSessionListReply, ServerSessionProcessesReply,
-    SessionEnvActiveResponse, SessionEnvQueryResponse, SessionProcessesResponse, SessionRefusal,
-    WebSessionInfo, WebSessionKillResponse, WebSessionsListResponse,
+    ClientSessionEnvApplyPayload, ClientSessionEnvBindingGetPayload,
+    ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
+    ClientSessionEnvBindingSetPayload, ClientSessionEnvQueryPayload,
+    ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
+    ClientSessionProcessesPayload, ProcessSnapshot, ServerSessionListPayload,
+    ServerSessionListReply, ServerSessionProcessesReply, SessionEnvActiveResponse,
+    SessionEnvQueryResponse, SessionProcessesResponse, SessionRefusal, WebSessionInfo,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -512,10 +517,10 @@ impl ConnectionHandler {
                         .session_registry
                         .replace_agent_sessions(&agent_id, incoming)
                         .await;
-                    // Sessions that vanished must release their env locks so
-                    // the files become editable again.
+                    // Sessions that vanished must release their desired
+                    // bindings so the files become editable again.
                     for session_id in &removed {
-                        self.env_service.usage.clear_session(session_id);
+                        self.env_service.clear_session_state(session_id).await;
                     }
                 }
                 Err(e) => {
@@ -630,6 +635,266 @@ impl ConnectionHandler {
         }
     }
 
+    /// Split a wire session id into the Agent and the bare tmux name.
+    fn session_agent_and_name(session_id: &str) -> Result<(String, String), String> {
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Err("Invalid session_id".to_string());
+        };
+        Ok((agent_id.to_string(), session_name.to_string()))
+    }
+
+    /// Replace a Session's whole Environment Binding (#170).
+    ///
+    /// This is the one mutation. The old `env.apply` / `env.unset` units are
+    /// adapters that compose their intent here, so an overlapping or reordered
+    /// set is never expressed as independent per-file operations.
+    ///
+    /// The desired binding is persisted before the Agent is asked to
+    /// materialize it: it is user intent, and a restarted Server must not lose
+    /// it. A failed materialization therefore leaves a desired revision that
+    /// the observed state can disagree with, which is the signal to reapply.
+    async fn set_session_binding(
+        &self,
+        session_id: &str,
+        refs: &[EnvFileRef],
+        default_phase: &str,
+    ) -> Result<(Vec<String>, Option<String>, SessionEnvBindingState), String> {
+        let (agent_id, session_name) = Self::session_agent_and_name(session_id)?;
+        if self.session_registry.get(session_id).await.is_none() {
+            return Err(format!("Session '{session_id}' not found"));
+        }
+
+        // The same profile twice in one replacement is one entry; later
+        // duplicates do not move its position. This is what makes the adapter
+        // for an old `apply` call idempotent.
+        let mut unique_refs: Vec<EnvFileRef> = Vec::new();
+        for reference in refs {
+            if !unique_refs
+                .iter()
+                .any(|existing| crate::env::binding::same_profile(existing, reference))
+            {
+                unique_refs.push(reference.clone());
+            }
+        }
+
+        let existing = self
+            .env_service
+            .bindings
+            .get(session_id)
+            .await
+            .map_err(|e| format!("could not read the Session binding: {e:#}"))?;
+        let previous = existing
+            .as_ref()
+            .map_or(&[][..], |record| record.profiles.as_slice());
+        let mut materialized =
+            crate::env::binding::materialized_profiles(previous, &unique_refs, default_phase);
+
+        let snapshots = self.resolve_snapshots(&agent_id, &unique_refs).await?;
+        if snapshots.len() != materialized.len() {
+            return Err("the resolved profile set does not match the requested set".to_string());
+        }
+        let warnings: Vec<String> = snapshots
+            .iter()
+            .flat_map(|snapshot| snapshot.warnings.clone())
+            .collect();
+        for (materialized, snapshot) in materialized.iter_mut().zip(&snapshots) {
+            materialized.content_hash = Some(crate::env::binding::snapshot_hash(snapshot));
+        }
+
+        let revision = existing
+            .as_ref()
+            .map_or(1, |record| record.desired_revision.saturating_add(1));
+        let record = crate::env::BindingRecord {
+            session_id: session_id.to_string(),
+            agent_id: agent_id.clone(),
+            desired_revision: revision,
+            profiles: materialized,
+            updated_at: i64::try_from(current_timestamp()).unwrap_or(0),
+        };
+        self.env_service
+            .bindings
+            .put(&record)
+            .await
+            .map_err(|e| format!("could not persist the Session binding: {e:#}"))?;
+
+        let profiles: Vec<SessionEnvProfile> = record
+            .profiles
+            .iter()
+            .map(|materialized| SessionEnvProfile {
+                profile: materialized.profile.clone(),
+                phase: materialized.phase.clone(),
+                content_hash: materialized.content_hash.clone(),
+            })
+            .collect();
+
+        let response = self
+            .agent_command(
+                &agent_id,
+                "agent.session.env.binding.set",
+                json!({
+                    "name": session_name,
+                    "revision": revision,
+                    "profiles": profiles,
+                    "snapshots": snapshots,
+                }),
+            )
+            .await;
+
+        match response {
+            Ok(value) => {
+                let observed = value.get("observed").and_then(|observed| {
+                    serde_json::from_value::<SessionEnvObservedState>(observed.clone()).ok()
+                });
+                if let Some(ref observed) = observed {
+                    self.env_service.observed.set(session_id, observed.clone());
+                }
+                let error =
+                    if value.get("success").and_then(serde_json::Value::as_bool) == Some(true) {
+                        None
+                    } else {
+                        Some(
+                            value
+                                .get("error")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("the Agent could not materialize the binding")
+                                .to_string(),
+                        )
+                    };
+                let mut state = self.binding_state(record, observed, error.clone());
+                state.error = error.clone();
+                Ok((warnings, error, state))
+            }
+            Err(error) => {
+                // The desired revision is persisted; the observed cache may
+                // still hold the last state the Agent reported. Returning the
+                // desired side is what lets the caller see what to retry.
+                let observed = self.env_service.observed.get(session_id);
+                let mut state = self.binding_state(record, observed, Some(error.clone()));
+                state.error = Some(error.clone());
+                Ok((warnings, Some(error), state))
+            }
+        }
+    }
+
+    /// The desired + observed state a client reads.
+    async fn session_binding_state(&self, session_id: &str) -> SessionEnvBindingState {
+        let (agent_id, session_name) = match Self::session_agent_and_name(session_id) {
+            Ok(parts) => parts,
+            Err(error) => {
+                return SessionEnvBindingState {
+                    session_id: session_id.to_string(),
+                    desired_revision: 0,
+                    desired_profiles: Vec::new(),
+                    observed: None,
+                    error: Some(error),
+                }
+            }
+        };
+        let (record, mut state_error) = match self.env_service.bindings.get(session_id).await {
+            Ok(Some(record)) => (record, None),
+            Ok(None) => (
+                crate::env::BindingRecord::empty(session_id, &agent_id),
+                None,
+            ),
+            Err(e) => (
+                crate::env::BindingRecord::empty(session_id, &agent_id),
+                Some(format!("could not read the Session binding: {e:#}")),
+            ),
+        };
+
+        let observed = match self
+            .agent_command(
+                &agent_id,
+                "agent.session.env.binding.get",
+                json!({ "name": session_name }),
+            )
+            .await
+        {
+            Ok(value) => {
+                let observed = value.get("observed").and_then(|observed| {
+                    serde_json::from_value::<SessionEnvObservedState>(observed.clone()).ok()
+                });
+                if let Some(ref observed) = observed {
+                    self.env_service.observed.set(session_id, observed.clone());
+                }
+                observed
+            }
+            Err(_) => self.env_service.observed.get(session_id),
+        };
+
+        let mut state = self.binding_state(record, observed, state_error.clone());
+        let outdated_error = self
+            .refresh_outdated(session_id, &agent_id, &mut state)
+            .await;
+        if let Some(error) = outdated_error {
+            state_error = Some(match state_error {
+                Some(existing) => format!("{existing}; {error}"),
+                None => error,
+            });
+        }
+        state.error = state_error;
+        state
+    }
+
+    /// Mark a profile whose current content no longer matches the hash captured
+    /// at materialization. A resolution failure is reported, not treated as
+    /// "not outdated": the two are different claims.
+    async fn refresh_outdated(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        state: &mut SessionEnvBindingState,
+    ) -> Option<String> {
+        if state.desired_profiles.is_empty() {
+            return None;
+        }
+        let refs: Vec<EnvFileRef> = state
+            .desired_profiles
+            .iter()
+            .map(|profile| profile.profile.clone())
+            .collect();
+        match self.resolve_snapshots(agent_id, &refs).await {
+            Ok(snapshots) => {
+                for (profile, snapshot) in state.desired_profiles.iter_mut().zip(&snapshots) {
+                    let current = crate::env::binding::snapshot_hash(snapshot);
+                    profile.outdated = profile
+                        .content_hash
+                        .as_deref()
+                        .is_some_and(|stored| stored != current);
+                }
+                None
+            }
+            Err(error) => {
+                tracing::warn!("could not compare Session {session_id}'s profiles: {error}");
+                Some(format!("could not compare profile content: {error}"))
+            }
+        }
+    }
+
+    fn binding_state(
+        &self,
+        record: crate::env::BindingRecord,
+        observed: Option<SessionEnvObservedState>,
+        error: Option<String>,
+    ) -> SessionEnvBindingState {
+        SessionEnvBindingState {
+            session_id: record.session_id,
+            desired_revision: record.desired_revision,
+            desired_profiles: record
+                .profiles
+                .into_iter()
+                .map(|materialized| SessionEnvBindingProfileState {
+                    profile: materialized.profile,
+                    phase: materialized.phase,
+                    content_hash: materialized.content_hash,
+                    outdated: false,
+                })
+                .collect(),
+            observed,
+            error,
+        }
+    }
+
     /// Resolve a set of env-file references into snapshots, capturing content at
     /// this moment (snapshot semantics). Server files are read locally; agent
     /// files are fetched from the owning agent. Missing files produce an error.
@@ -673,48 +938,6 @@ impl ConnectionHandler {
             });
         }
         Ok(snapshots)
-    }
-
-    /// Source env-file refs into a running session, on the agent that owns it.
-    ///
-    /// The one path for "put this env into that running session": resolve the
-    /// refs into snapshots (content captured now), then ask the owning agent to
-    /// source them. Both the `server.session.env.apply` handler and the
-    /// re-source that follows a forced write go through here, so the two cannot
-    /// drift into separate behaviours.
-    ///
-    /// Returns the resolution's non-fatal warnings on success. Usage recording
-    /// is left to the caller: a forced write re-sources a file the session
-    /// *already* has, which is not a new attachment.
-    async fn source_env_into_session(
-        &self,
-        session_id: &str,
-        refs: &[EnvFileRef],
-    ) -> Result<Vec<String>, String> {
-        let Some((agent_id, session_name)) = session_id.split_once(':') else {
-            return Err("Invalid session_id".to_string());
-        };
-        let snapshots = self.resolve_snapshots(agent_id, refs).await?;
-        let warnings: Vec<String> = snapshots.iter().flat_map(|s| s.warnings.clone()).collect();
-
-        match self
-            .agent_command(
-                agent_id,
-                "agent.session.env.apply",
-                json!({ "name": session_name, "snapshots": snapshots }),
-            )
-            .await
-        {
-            Ok(r) if r.get("success").and_then(serde_json::Value::as_bool) == Some(true) => {
-                Ok(warnings)
-            }
-            Ok(r) => Err(r
-                .get("error")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("the agent could not source the env")
-                .to_string()),
-            Err(e) => Err(e),
-        }
     }
 
     // ── Quick Commands (issue #95, part 3) ───────────────────────────
@@ -847,6 +1070,19 @@ fn session_env_active_reply(id: &str, payload: SessionEnvActiveResponse) -> Hand
         id,
         "server.session.env.active",
         serde_json::to_value(&payload).unwrap_or(json!({ "active": [] })),
+    )
+}
+
+/// Serialize a `server.session.env.binding.*` reply.
+fn session_env_binding_reply(
+    id: &str,
+    msg_type: &str,
+    payload: ClientSessionEnvBindingResponsePayload,
+) -> HandlerAction {
+    reply_json(
+        id,
+        msg_type,
+        serde_json::to_value(&payload).unwrap_or(json!({ "success": false })),
     )
 }
 
@@ -1063,6 +1299,7 @@ mod server_agent_git_invalidated_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
 mod server_agent_rename_v1;
+mod server_agent_session_env_binding_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
 mod server_auth_v1;
@@ -1080,6 +1317,9 @@ mod server_session_capture_preview_v1;
 mod server_session_create_v1;
 mod server_session_env_active_v1;
 mod server_session_env_apply_v1;
+mod server_session_env_binding_get_v1;
+mod server_session_env_binding_reapply_v1;
+mod server_session_env_binding_set_v1;
 mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;

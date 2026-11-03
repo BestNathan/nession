@@ -21,6 +21,7 @@ impl ConnectionHandler {
             success: false,
             session_id: None,
             error: Some(error.to_string()),
+            warnings: Vec::new(),
         };
 
         if !self.authenticated_client {
@@ -72,8 +73,10 @@ impl ConnectionHandler {
         let request_id = uuid::Uuid::new_v4().to_string();
 
         // `env_refs` came out of the parsed payload above — the create-time
-        // injection selection.
-        let env_snapshots = if env_refs.is_empty() {
+        // binding selection. The same resolution produces both the Agent's
+        // snapshots and the desired binding the Server persists, so the two
+        // cannot describe different content.
+        let snapshots = if env_refs.is_empty() {
             Vec::new()
         } else {
             match self.resolve_snapshots(agent_id, &env_refs).await {
@@ -83,6 +86,34 @@ impl ConnectionHandler {
                 }
             }
         };
+        let mut materialized = crate::env::binding::materialized_profiles(&[], &env_refs, "create");
+        for (materialized, snapshot) in materialized.iter_mut().zip(&snapshots) {
+            materialized.content_hash = Some(crate::env::binding::snapshot_hash(snapshot));
+        }
+        let binding_profiles: Vec<super::SessionEnvProfile> = materialized
+            .iter()
+            .map(|materialized| super::SessionEnvProfile {
+                profile: materialized.profile.clone(),
+                phase: materialized.phase.clone(),
+                content_hash: materialized.content_hash.clone(),
+            })
+            .collect();
+        let binding_revision = if env_refs.is_empty() { 0 } else { 1 };
+        if !env_refs.is_empty() {
+            let record = crate::env::BindingRecord {
+                session_id: format!("{agent_id}:{name}"),
+                agent_id: agent_id.to_string(),
+                desired_revision: binding_revision,
+                profiles: materialized,
+                updated_at: i64::try_from(super::current_timestamp()).unwrap_or(0),
+            };
+            if let Err(e) = self.env_service.bindings.put(&record).await {
+                return Ok(session_create_reply(
+                    &msg.id,
+                    refusal(&format!("could not persist the Session binding: {e:#}")),
+                ));
+            }
+        }
 
         info!(
             "Client requested session create on agent {}: name={}, env_files={}",
@@ -114,7 +145,13 @@ impl ConnectionHandler {
                     // field existed and is ignored by a current one.
                     "terminal_cols": self.config.terminal_cols,
                     "working_dir": working_dir,
-                    "env_snapshots": env_snapshots,
+                    "env_snapshots": snapshots,
+                    "binding_profiles": binding_profiles,
+                    "binding_revision": if binding_revision == 0 {
+                        None
+                    } else {
+                        Some(binding_revision)
+                    },
                 }),
             )
             .await;
@@ -156,18 +193,34 @@ impl ConnectionHandler {
                     // Broadcast the current registry snapshot, which might
                     // contain a newer Agent report than this create reply.
                     self.broadcast_sessions().await;
-                    // Record create-time env usage for visibility + in-use lock.
-                    if !env_refs.is_empty() {
-                        self.env_service.usage.record_create(&sid, &env_refs, None);
-                    }
                     Some(sid)
                 } else {
+                    // The Session was never created, so the desired binding
+                    // persisted above describes nothing. Remove it rather than
+                    // leave a record that a later same-named Session could pick
+                    // up as a stale baseline.
+                    if !env_refs.is_empty() {
+                        self.env_service
+                            .bindings
+                            .clear_session(&format!("{agent_id}:{name}"))
+                            .await;
+                    }
                     None
                 };
                 let error = response
                     .get("error")
                     .and_then(|v| v.as_str())
                     .map(std::string::ToString::to_string);
+                let warnings = response
+                    .get("warnings")
+                    .and_then(|value| value.as_array())
+                    .map(|warnings| {
+                        warnings
+                            .iter()
+                            .filter_map(|warning| warning.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
 
                 Ok(session_create_reply(
                     &msg.id,
@@ -175,9 +228,14 @@ impl ConnectionHandler {
                         success,
                         session_id,
                         error,
+                        warnings,
                     },
                 ))
             }
+            // The Agent may have processed the create even though its answer
+            // did not arrive. The desired binding is kept: losing a real
+            // Session's intent is worse than a stale row a later session list
+            // can clean up.
             Ok(Err(_)) => Ok(session_create_reply(&msg.id, refusal("Agent disconnected"))),
             Err(_) => Ok(session_create_reply(
                 &msg.id,

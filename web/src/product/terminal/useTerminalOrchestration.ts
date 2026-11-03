@@ -2,17 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
 import { useP2PAttachTransport } from '@/product/terminal/hooks/useP2PAttachTransport';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
-import { envApi } from '@/capabilities/env';
-import type { TerminalAgentApi } from '@/product/terminal/agent';
-import type { ConnectionState } from '@/platform/socket/types';
 import {
   relayServerHandle,
   type RelayServerHandle,
 } from '@/platform/attach/relayServerConnection';
-import type { EnvFileRef } from '@/types';
 import {
   attachInfoAtom,
-  envRefsAtom,
   manualOverrideAtom,
   orderedUrlsAtom,
   sessionIdAtom,
@@ -31,40 +26,6 @@ import {
 import { useClipboardNotice } from '@/product/terminal/hooks/useClipboardNotice';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
 import { useTerminalActivation } from '@/product/terminal/hooks/useTerminalActivation';
-
-function useSessionEnvSourcing(opts: {
-  envRefs: EnvFileRef[];
-  sessionId: string;
-  effectiveMode: 'p2p' | 'relay';
-  agentTerminalApi: TerminalAgentApi | null;
-  connectionState: ConnectionState;
-}) {
-  const { envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState } = opts;
-  const envSourcedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!envRefs || envRefs.length === 0 || envSourcedRef.current === sessionId) {
-      return;
-    }
-    const apply = () => {
-      if (envSourcedRef.current === sessionId) {
-        return;
-      }
-      envSourcedRef.current = sessionId;
-      for (const ref of envRefs) {
-        void envApi.applySessionEnv(sessionId, [ref]).catch(() => {});
-      }
-    };
-    if (effectiveMode === 'relay') {
-      apply();
-      return;
-    }
-    // P2P: env refs are applied once the agent transport is up (the socket
-    // being open is the legacy waitForConnection().then(apply) edge).
-    if (agentTerminalApi && connectionState === 'connected') {
-      apply();
-    }
-  }, [envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState]);
-}
 
 /**
  * Adopt the live Session's authoritative width when the Agent states it on an
@@ -148,7 +109,6 @@ export function useTerminalOrchestration({
   const [attachInfo] = useAtom(attachInfoAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
-  const [envRefs] = useAtom(envRefsAtom);
 
   const wsService = useWebSocket();
   // One relay handle per service instance, shared by every relay consumer —
@@ -205,7 +165,6 @@ export function useTerminalOrchestration({
   const terminalState = snapshot?.phase ?? 'idle';
   const reconnectCount = snapshot?.reconnectCount ?? 0;
 
-  useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
   const { clipboardNotice, dismissClipboardNotice } = useClipboardNotice(sessionId);
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));

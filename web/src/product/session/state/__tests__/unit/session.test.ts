@@ -6,7 +6,7 @@ import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
 import {
   sessionIdAtom, sessionNameAtom, attachInfoAtom, orderedUrlsAtom,
-  manualOverrideAtom, rendererAtom, envRefsAtom,
+  manualOverrideAtom, rendererAtom,
   agentIdAtom, addressesAtom, hasActiveSessionAtom,
   attachToSessionAtom, disconnectAtom, switchAddressAtom,
   attachDialogSessionAtom, attachDialogIntentAtom,
@@ -30,7 +30,7 @@ function makeChoice(session: Session): AttachChoice {
       addresses: [{ url: 'ws://a/ws', label: 'lan', network_type: 'lan', priority: 0, status: 'reachable' }],
     },
     orderedUrls: ['ws://a/ws'], latencies: [], selectedUrl: null,
-    renderer: 'webgl', envRefs: [],
+    renderer: 'webgl',
   } as AttachChoice;
 }
 
@@ -43,7 +43,6 @@ describe('base atoms', () => {
     expect(store.get(orderedUrlsAtom)).toEqual([]);
     expect(store.get(manualOverrideAtom)).toBeNull();
     expect(store.get(rendererAtom)).toBe('webgl');
-    expect(store.get(envRefsAtom)).toEqual([]);
     expect(store.get(attachDialogSessionAtom)).toBeNull();
   });
 });
@@ -78,7 +77,6 @@ describe('action atoms', () => {
     expect(store.get(attachInfoAtom)?.connection_token).toBe('tok');
     expect(store.get(orderedUrlsAtom)).toEqual(['ws://a/ws']);
     expect(store.get(rendererAtom)).toBe('webgl');
-    expect(store.get(envRefsAtom)).toEqual([]);
     expect(store.get(attachDialogSessionAtom)).toBeNull();
   });
 

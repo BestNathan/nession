@@ -140,6 +140,7 @@ async fn admin_creates_lists_and_kills_a_real_isolated_session() -> anyhow::Resu
         width: 80,
         height: 24,
         env: vec![("NESSON_SDK_ADMIN".to_string(), "delivered".to_string())],
+        command: Vec::new(),
     })
     .await?;
 

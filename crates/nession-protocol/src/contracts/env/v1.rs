@@ -238,6 +238,102 @@ pub struct ClientEnvDeleteResponsePayload {
     pub error: Option<String>,
 }
 
+// ============================================================================
+// Session Environment Binding (#170 Phase A)
+// ============================================================================
+
+/// One profile selected by a Session's Environment Binding.
+///
+/// The profile identity is [`EnvFileRef`]; the extra fields are provenance and
+/// materialization state, not a second identity. `phase` keeps the historical
+/// "create" / "attach" distinction for the visibility projection: a profile
+/// selected while the Session was created keeps `create` for the Session's
+/// lifetime, and one added later is `attach`. The binding itself is ordered and
+/// replace-whole; nothing here makes a client the owner of the binding.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionEnvProfile {
+    pub profile: EnvFileRef,
+    /// `"create"` or `"attach"` (provenance only).
+    #[serde(default)]
+    pub phase: String,
+    /// SHA-256 of the profile content captured when this revision was
+    /// materialized. Absent on the Agent-facing wire: the Agent records the
+    /// content it applied, not a Server-side identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+/// One desired profile plus what the Server currently knows about its
+/// materialization.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEnvBindingProfileState {
+    pub profile: EnvFileRef,
+    pub phase: String,
+    /// Hash captured at the binding revision the Session is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// The file's current content no longer hashes to `content_hash`. This is
+    /// the "profile changed since Session materialization" signal; it does not
+    /// mutate the running Session.
+    #[serde(default)]
+    pub outdated: bool,
+}
+
+/// What the Agent has actually materialized for one Session.
+///
+/// Values are deliberately **not** on this wire: the Server and the UI need to
+/// know which keys are managed and how far convergence got, not what their
+/// secrets are.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionEnvObservedState {
+    /// The binding revision the Agent last applied.
+    pub applied_revision: u64,
+    /// `in_sync`, `applying`, `pending_shell`, `unsupported_shell`, or `error`.
+    pub status: String,
+    /// The profiles materialized at `applied_revision`, in order.
+    #[serde(default)]
+    pub profiles: Vec<EnvFileRef>,
+    /// Keys the binding currently manages. Names only.
+    #[serde(default)]
+    pub managed_keys: Vec<String>,
+    /// The shell the Session adapter was installed for, when one was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
+    /// The revision the interactive shell last reported converging to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+/// The full Session Environment Binding state: desired intent plus observed
+/// materialization.
+///
+/// A Session always has a binding state, even when it is empty: `desired` is
+/// then empty with revision 0, and `observed` says what the Agent has (or
+/// `None` when the Agent cannot be asked).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEnvBindingState {
+    pub session_id: String,
+    pub desired_revision: u64,
+    #[serde(default)]
+    pub desired_profiles: Vec<SessionEnvBindingProfileState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<SessionEnvObservedState>,
+    /// Why `observed` is absent or the binding could not be read. Desired
+    /// state is still returned when only the Agent query failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// An active env application on a session (for visibility). Reported alongside
 /// session listings / attach info.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -295,26 +391,81 @@ pub struct ServerEnvDeletePayload {
     pub name: String,
 }
 
-// --- Env state query payloads ---
+// --- Session Environment Binding, Server → Agent ---
 
-/// `server.env.query` — ask an agent for its currently sourced env files.
-/// Used by the EnvPanel to show which env files are active on each agent.
+/// `agent.session.env.binding.set` — replace the whole binding of one
+/// Session.
+///
+/// The Server has already resolved the ordered profile snapshots; the Agent
+/// materializes them. `revision` is the Server's desired revision and is echoed
+/// back in the observed state, which is how the two sides tell "applied" from
+/// "desired but not applied".
+///
+/// `profiles` and `snapshots` are the same ordered selection: entry `i` of one
+/// describes entry `i` of the other. They are separate because the profile ref
+/// is the durable identity and the snapshot is the content captured for this
+/// revision.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerEnvQueryPayload {
+pub struct ServerSessionEnvBindingSetPayload {
     pub request_id: String,
+    /// Bare tmux session name, as the Agent knows it.
+    pub name: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub profiles: Vec<SessionEnvProfile>,
+    #[serde(default)]
+    pub snapshots: Vec<EnvSnapshot>,
 }
 
-/// Agent response to `server.env.query`. The agent reports which env files
-/// it has currently sourced (applied to its environment).
-/// Response message type: `server.agent.command-response` with command="env.query"
-/// and this payload structure in the JSON.
+/// `agent.session.env.binding.get` — read one Session's observed binding state.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentEnvStatePayload {
+pub struct ServerSessionEnvBindingGetPayload {
     pub request_id: String,
-    /// List of env file refs currently sourced by this agent.
-    pub sourced_files: Vec<EnvFileRef>,
+    pub name: String,
+}
+
+/// The `observed` half of the Agent's answer to
+/// `agent.session.env.binding.get`, carried on `server.agent.command-response`.
+///
+/// A Session with no recorded binding has `observed: None` rather than a
+/// synthetic empty state: an old Session's absence of a binding is not the same
+/// claim as a Session intentionally bound to `[]`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionEnvBindingGetResponsePayload {
+    pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed: Option<SessionEnvObservedState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One Session's observed state, as an Agent reports it after a reconnect.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionEnvBindingReportEntry {
+    pub session_name: String,
+    pub observed: SessionEnvObservedState,
+}
+
+/// `server.agent.session-env-binding` — an Agent reports the observed binding
+/// state of its live Sessions.
+///
+/// One-way, like `server.agent.session-update`: the Server updates its observed
+/// cache and answers nothing. Sent after registration, so a Server restart (or
+/// an Agent reconnect) does not make a live Session look unbound merely because
+/// the Server's cache was empty.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionEnvBindingReportPayload {
+    pub agent_id: String,
+    #[serde(default)]
+    pub sessions: Vec<AgentSessionEnvBindingReportEntry>,
 }

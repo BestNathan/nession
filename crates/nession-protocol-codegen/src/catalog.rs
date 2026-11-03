@@ -1053,7 +1053,9 @@ wires: &["client.auth"],
 wires: &["agent.session.create"],
             decls: vec![
                 decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
                 decl_of::<nession_protocol::contracts::env::v1::EnvSnapshot>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvProfile>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionCreatePayload>(cfg),
                 decl_of::<nession_protocol::contracts::session::v1::SessionCreateResponse>(cfg),
             ],
@@ -1334,28 +1336,6 @@ wires: &["agent.session.capture-preview"],
         },
         Unit {
             owner: "core",
-            id: "agent.session.env.apply",
-            version: 1,
-wires: &["agent.session.env.apply"],
-            decls: vec![
-                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>(cfg),
-                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
-            ],
-            request: Some((
-                "SessionEnvApplyCall",
-                nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvApplyPayload>,
-            )),
-            response: Some((
-                "SessionEnvApplyReply",
-                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>,
-            )),
-        },
-        Unit {
-            owner: "core",
             id: "server.session.env.unset",
             version: 1,
             wires: &["server.session.env.unset"],
@@ -1383,28 +1363,6 @@ wires: &["agent.session.env.apply"],
                 schema_of::<
                     nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload,
                 >,
-            )),
-        },
-        Unit {
-            owner: "core",
-            id: "agent.session.env.unset",
-            version: 1,
-wires: &["agent.session.env.unset"],
-            decls: vec![
-                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>(cfg),
-                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
-            ],
-            request: Some((
-                "SessionEnvUnsetCall",
-                nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvUnsetPayload>,
-            )),
-            response: Some((
-                "SessionEnvUnsetReply",
-                nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload::inline,
-                schema_of::<nession_protocol::contracts::session::v1::ClientSessionEnvResponsePayload>,
             )),
         },
         Unit {
@@ -1457,6 +1415,191 @@ wires: &["agent.session.env.unset"],
                 nession_protocol::contracts::session::v1::SessionEnvQueryResponse::inline,
                 schema_of::<nession_protocol::contracts::session::v1::SessionEnvQueryResponse>,
             )),
+        },
+        // --- Session Environment Binding (#170) ---
+        //
+        // The canonical model is a Session-owned binding whose mutation is a
+        // whole-set replacement. The older `env.apply` / `env.unset` units stay
+        // beside it as compatibility adapters; they translate to a replacement
+        // and never own the binding themselves.
+        Unit {
+            owner: "core",
+            id: "server.session.env.binding.get",
+            version: 1,
+            wires: &["server.session.env.binding.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvBindingGetPayload>(
+                    cfg,
+                ),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvBindingGetCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingGetPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingGetPayload,
+                >,
+            )),
+            response: Some((
+                "SessionEnvBindingGetReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.env.binding.set",
+            version: 1,
+            wires: &["server.session.env.binding.set"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::ClientSessionEnvBindingSetPayload>(
+                    cfg,
+                ),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvBindingSetCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingSetPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingSetPayload,
+                >,
+            )),
+            response: Some((
+                "SessionEnvBindingSetReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.env.binding.reapply",
+            version: 1,
+            wires: &["server.session.env.binding.reapply"],
+            decls: vec![
+                decl_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingReapplyPayload,
+                >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvBindingProfileState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "SessionEnvBindingReapplyCall",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingReapplyPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingReapplyPayload,
+                >,
+            )),
+            response: Some((
+                "SessionEnvBindingReapplyReply",
+                nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::session::v1::ClientSessionEnvBindingResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.env.binding.set",
+            version: 1,
+            wires: &["agent.session.env.binding.set"],
+            decls: vec![
+                decl_of::<
+                    nession_protocol::contracts::env::v1::ServerSessionEnvBindingSetPayload,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvProfile>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSnapshot>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ServerSessionEnvBindingSetCall",
+                nession_protocol::contracts::env::v1::ServerSessionEnvBindingSetPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::env::v1::ServerSessionEnvBindingSetPayload,
+                >,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.env.binding.get",
+            version: 1,
+            wires: &["agent.session.env.binding.get"],
+            decls: vec![
+                decl_of::<
+                    nession_protocol::contracts::env::v1::ServerSessionEnvBindingGetPayload,
+                >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::env::v1::AgentSessionEnvBindingGetResponsePayload,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "ServerSessionEnvBindingGetCall",
+                nession_protocol::contracts::env::v1::ServerSessionEnvBindingGetPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::env::v1::ServerSessionEnvBindingGetPayload,
+                >,
+            )),
+            response: Some((
+                "AgentSessionEnvBindingGetReply",
+                nession_protocol::contracts::env::v1::AgentSessionEnvBindingGetResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::env::v1::AgentSessionEnvBindingGetResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.agent.session-env-binding",
+            version: 1,
+            wires: &["server.agent.session-env-binding"],
+            // One-way: the Agent reports and the Server answers nothing.
+            decls: vec![
+                decl_of::<
+                    nession_protocol::contracts::env::v1::AgentSessionEnvBindingReportPayload,
+                >(cfg),
+                decl_of::<
+                    nession_protocol::contracts::env::v1::AgentSessionEnvBindingReportEntry,
+                >(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::SessionEnvObservedState>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
+                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
+            ],
+            request: Some((
+                "AgentSessionEnvBindingReportCall",
+                nession_protocol::contracts::env::v1::AgentSessionEnvBindingReportPayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::env::v1::AgentSessionEnvBindingReportPayload,
+                >,
+            )),
+            response: None,
         },
         Unit {
             owner: "core",
@@ -1639,28 +1782,6 @@ wires: &["agent.env.delete"],
                 "EnvDeleteReply",
                 nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload::inline,
                 schema_of::<nession_protocol::contracts::env::v1::ClientEnvDeleteResponsePayload>,
-            )),
-        },
-                Unit {
-            owner: "core",
-            id: "agent.env.query",
-            version: 1,
-wires: &["agent.env.query"],
-            decls: vec![
-                decl_of::<nession_protocol::contracts::env::v1::ServerEnvQueryPayload>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::AgentEnvStatePayload>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvFileRef>(cfg),
-                decl_of::<nession_protocol::contracts::env::v1::EnvSource>(cfg),
-            ],
-            request: Some((
-                "EnvQueryCall",
-                nession_protocol::contracts::env::v1::ServerEnvQueryPayload::inline,
-                schema_of::<nession_protocol::contracts::env::v1::ServerEnvQueryPayload>,
-            )),
-            response: Some((
-                "EnvQueryReply",
-                nession_protocol::contracts::env::v1::AgentEnvStatePayload::inline,
-                schema_of::<nession_protocol::contracts::env::v1::AgentEnvStatePayload>,
             )),
         },
         Unit {

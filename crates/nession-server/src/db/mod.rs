@@ -15,7 +15,7 @@ pub mod migration;
 pub mod schema;
 
 use anyhow::{Context, Result};
-use entities::{agents, env_files, quick_commands, sessions};
+use entities::{agents, env_files, quick_commands, session_env_bindings, sessions};
 use migration::Migrator;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
@@ -97,6 +97,17 @@ pub struct QuickCommandRow {
     pub raw: bool,
     pub sort_order: i32,
     pub created_at: i64,
+}
+
+/// One Session's desired Environment Binding (#170 Phase A).
+#[derive(Debug, Clone)]
+pub struct SessionEnvBindingRow {
+    pub session_id: String,
+    pub agent_id: String,
+    pub desired_revision: u64,
+    /// JSON-encoded ordered materialized profiles.
+    pub profiles_json: String,
+    pub updated_at: i64,
 }
 
 impl Database {
@@ -351,6 +362,77 @@ impl Database {
         Ok(())
     }
 
+    // ── Session Environment Bindings (#170 Phase A) ───────────────────
+
+    /// Read one Session's desired binding.
+    pub async fn get_session_env_binding(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionEnvBindingRow>> {
+        let row = session_env_bindings::Entity::find_by_id(session_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read session env binding")?;
+        Ok(row.map(session_env_binding_row_from_model))
+    }
+
+    /// Insert or replace one Session's desired binding (replace-whole).
+    pub async fn upsert_session_env_binding(&self, row: &SessionEnvBindingRow) -> Result<()> {
+        let model = session_env_bindings::ActiveModel {
+            session_id: Set(row.session_id.clone()),
+            agent_id: Set(row.agent_id.clone()),
+            desired_revision: Set(i64::try_from(row.desired_revision).unwrap_or(i64::MAX)),
+            profiles_json: Set(row.profiles_json.clone()),
+            updated_at: Set(row.updated_at),
+        };
+        session_env_bindings::Entity::insert(model)
+            .on_conflict(
+                OnConflict::column(session_env_bindings::Column::SessionId)
+                    .update_columns([
+                        session_env_bindings::Column::AgentId,
+                        session_env_bindings::Column::DesiredRevision,
+                        session_env_bindings::Column::ProfilesJson,
+                        session_env_bindings::Column::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.conn)
+            .await
+            .context("failed to upsert session env binding")?;
+        Ok(())
+    }
+
+    /// Delete one Session's binding (idempotent).
+    pub async fn delete_session_env_binding(&self, session_id: &str) -> Result<()> {
+        session_env_bindings::Entity::delete_by_id(session_id.to_owned())
+            .exec(&self.conn)
+            .await
+            .context("failed to delete session env binding")?;
+        Ok(())
+    }
+
+    /// Delete every binding owned by one Agent.
+    pub async fn delete_session_env_bindings_by_agent(&self, agent_id: &str) -> Result<()> {
+        session_env_bindings::Entity::delete_many()
+            .filter(session_env_bindings::Column::AgentId.eq(agent_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to delete agent session env bindings")?;
+        Ok(())
+    }
+
+    /// Every persisted binding, for the derived usage queries.
+    pub async fn list_session_env_bindings(&self) -> Result<Vec<SessionEnvBindingRow>> {
+        let rows = session_env_bindings::Entity::find()
+            .all(&self.conn)
+            .await
+            .context("failed to list session env bindings")?;
+        Ok(rows
+            .into_iter()
+            .map(session_env_binding_row_from_model)
+            .collect())
+    }
+
     // ── Quick commands (issue #95, part 3) ────────────────────────────
 
     /// List all quick commands, ordered by `sort_order` then `created_at`.
@@ -483,6 +565,16 @@ fn env_file_row_from_model(m: env_files::Model) -> EnvFileRow {
         name: m.name,
         content: m.content,
         created_at: m.created_at,
+        updated_at: m.updated_at,
+    }
+}
+
+fn session_env_binding_row_from_model(m: session_env_bindings::Model) -> SessionEnvBindingRow {
+    SessionEnvBindingRow {
+        session_id: m.session_id,
+        agent_id: m.agent_id,
+        desired_revision: u64::try_from(m.desired_revision).unwrap_or(0),
+        profiles_json: m.profiles_json,
         updated_at: m.updated_at,
     }
 }
