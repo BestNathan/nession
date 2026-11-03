@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7efeba96d3aff93a32dd0b560c3cbe958bc1e5236ac1c96235bbc82d5644081e",
+  "run_id": 41618761386,
+  "run_attempt": 1,
+  "issue": 2683,
+  "criterion": "SC-03",
+  "criterion_text": "A new public Knowledge article or update becomes visible in the deployed `#/knowledge` explorer after the signal, with published `data/knowledge.json` source SHA and anonymous HTTPS bytes matching the exact validated build; malformed ledger or unauthorized signals fail closed.",
+  "stage": "post-merge",
+  "target_sha": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+  "contract_sha256": "42f6cacd1d9b512c8d2599a1382b06e5aa2abaf615ec20ca36a01339de063657",
+  "case_revision": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+  "case_tree_sha": "f0bb014fe792c6ffc41f7f7ffbd21226c841de26",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T10:25:53.727Z",
+  "finished_at": "2026-11-03T10:26:00.357Z",
+  "duration_ms": 6630,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real Knowledge push triggered main-owned Pages publication and public SHA-256 bytes match the validated 7-article artifact",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Knowledge push Signal Run 41617084950 attempt 1 completed/success at a0d92aa9088c50fb1956463f466a1f25e2a1dc47"
+        },
+        {
+          "type": "runtime",
+          "value": "Trusted Pages Run 41617110852 attempt 1 completed/success; event=workflow_run; main_sha=9a78cad805a51238ba088155a1af459dd991687c"
+        },
+        {
+          "type": "runtime",
+          "value": "Anonymous HTTPS data/knowledge.json: source a0d92aa9088c50fb1956463f466a1f25e2a1dc47, articles=7, SHA-256=73b36102abbbf9d06c70ef2bfbe351710cfb833cacf3eacb03c6d11a7fd79fa2, native #/knowledge navigation present"
+        },
+        {
+          "type": "runtime",
+          "value": "Acceptance main SHA 00ba70db36bf97d04bc9c3a6e149e7c6816e40e6 descends from publisher; public bytes match immutable witnessed publication"
+        }
+      ],
+      "duration_ms": 770,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41618761386,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41618761386",
+    "record_path": "runs/2026-11-03/41618761386-1/2683/SC-03.json",
+    "source_result_sha256": "02db2a28e61d0e101e59a227efe197f0bf4694212c582d2b02c60e201f3628da"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41618761386-1",
+    "sha256": "02db2a28e61d0e101e59a227efe197f0bf4694212c582d2b02c60e201f3628da",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41618761386",
+    "durability": "time-limited; object archival not configured"
+  }
+}

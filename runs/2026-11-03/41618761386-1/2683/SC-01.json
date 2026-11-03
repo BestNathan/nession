@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "41b7496ba9c4e49ad336a88209a06b8dde69b437c723b4871548ad0645990779",
+  "run_id": 41618761386,
+  "run_attempt": 1,
+  "issue": 2683,
+  "criterion": "SC-01",
+  "criterion_text": "An actual approved write to `knowledge` produces a successful **read-only** Knowledge change signal on the pushed source revision, without executing untrusted content or having privileged write scopes.",
+  "stage": "post-merge",
+  "target_sha": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+  "contract_sha256": "42f6cacd1d9b512c8d2599a1382b06e5aa2abaf615ec20ca36a01339de063657",
+  "case_revision": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+  "case_tree_sha": "8a01269415bb0e0a99cd5e2b00fe8998dc1e54bb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T10:25:47.394Z",
+  "finished_at": "2026-11-03T10:25:53.726Z",
+  "duration_ms": 6332,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real Knowledge push produced the byte-pinned unprivileged change signal on the exact source commit",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "GitHub push Run 41617084950 attempt 1: success; name=Knowledge / Change Signal branch=knowledge head=a0d92aa9088c50fb1956463f466a1f25e2a1dc47 source_workflow=.github/workflows/knowledge-changed.yml"
+        },
+        {
+          "type": "runtime",
+          "value": "Current Knowledge source a0d92aa9088c50fb1956463f466a1f25e2a1dc47: workflow source SHA-256=2a546df4f9e7d4bb49a4aa01cca7ca4b5366cfe88937ac3cae3a728d5274b98a equals trusted pinned read-only notifier"
+        },
+        {
+          "type": "runtime",
+          "value": "Exact main Acceptance target SHA=00ba70db36bf97d04bc9c3a6e149e7c6816e40e6 checked from Git worktree"
+        }
+      ],
+      "duration_ms": 409,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41618761386,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00ba70db36bf97d04bc9c3a6e149e7c6816e40e6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41618761386",
+    "record_path": "runs/2026-11-03/41618761386-1/2683/SC-01.json",
+    "source_result_sha256": "3c94c485978f7f88c2516bcfe5907fe70c52fe625be47c0206f26e680e6f0940"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41618761386-1",
+    "sha256": "3c94c485978f7f88c2516bcfe5907fe70c52fe625be47c0206f26e680e6f0940",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41618761386",
+    "durability": "time-limited; object archival not configured"
+  }
+}
