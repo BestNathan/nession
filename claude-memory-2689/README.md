@@ -1,61 +1,59 @@
-# Claude Code Auto Memory · Session-first prototype (#2689)
+# Claude Code Auto Memory — Nession Information Architecture prototype (#2689)
 
-[Owning Requirement #2689](https://github.com/BestNathan/nession/issues/2689) · [Interactive HTML](index.html) · [Nession prototype library](https://bestnathan.github.io/nession/#/prototypes)
+[Issue #2689](https://github.com/BestNathan/nession/issues/2689) · [Interactive HTML](index.html) · [Prototype library](../index.html)
 
-## Question and decision
+## Design review — revised after product IA audit (2026-11-03)
 
-**Question:** How does a person working in a Nession Session read that Session's Claude Code Auto Memory without selecting a Repository, browsing the global Claude directory, or navigating away from their current work?
+The **first mock was incorrect**: it used Terminal and Claude Workspace side-by-side by default, hardcoded a persistent Claude button below Terminal, put an extension-owned shell/header above Workspace, and used the desktop structure as the App shell. This violated the current repository product sources, even though the Session→Repo Memory association was right.
 
-**Decision to test:** Session is the only work entry. Claude Code capability appears contextually; its Workspace Memory view resolves **current Session → owning Git repository → effective Claude Code Memory**. The Repository appears only as *read-only provenance*, never as an editable filter. The same repository/worktree shares its Memory; a different repo cannot show the previous repository's content.
+This revision replaces those assumptions with the official current **Standard Session interaction model**:
 
-## Mock scenario
+- [Information Architecture](https://github.com/BestNathan/nession/blob/main/docs/design/information-architecture.md): Session is active work; Terminal dominates; Workspace is contextual depth, not a right panel.
+- [Capability Emergence](https://github.com/BestNathan/nession/blob/main/docs/design/capability-emergence.md): dormant → **user-selected Peek** → explicitly opened Workspace, not an always-on Claude surface.
+- [TerminalCapsule](https://github.com/BestNathan/nession/blob/main/docs/design/design-system/patterns/terminal-capsule.md) and [ContextCapsule](https://github.com/BestNathan/nession/blob/main/docs/design/design-system/patterns/context-capsule.md): minimal stable composer; `+` opens a contextual capability list in a sibling surface above it; selection opens Peek in the **same** upper slot.
+- [SurfaceSwitcher](https://github.com/BestNathan/nession/blob/main/docs/design/design-system/patterns/surface-switcher.md): Web has a **destination circle beside** TerminalCapsule/Workspace capability dock, never a full-height split or a global Terminal/Workspace tab bar.
+- [WorkspaceNavigation](https://github.com/BestNathan/nession/blob/main/docs/design/design-system/patterns/workspace-navigation.md): a bounded bottom **Capability Capsule** for Workspace view bindings, present at all depths, no extra shell toolbar above every capability.
+- [App Interaction](https://github.com/BestNathan/nession/blob/main/docs/design/interaction/app.md): **Sessions ← Terminal → Workspace** spatial relationship; each App depth owns one Back, the Terminal remains mounted underneath. The App is not a shrunk Web sidebar layout.
+- [Web Interaction](https://github.com/BestNathan/nession/blob/main/docs/design/interaction/web.md): collapsed navigation rail with a single Expand action and informational summaries, no mandatory healthy Session header. This mock hides the Web header entirely.
 
-1. Open the prototype: the **current `dev-session`** is in a terminal, with the contextual Claude Code Workspace open to **Memory** for immediate visual review. Click **返回终端**, then **Claude Code** to exercise the whole entry transition.
-2. Read the automatically selected `MEMORY.md` index, choose a topic file, and use index links to open another file. No repository selector appears.
-3. Open the read-only **来源** disclosure: it explains the current Session CWD, Git root, shared repository identity, and mock effective Memory directory.
-4. Click the **Session name** to switch to `review-worktree`. It has a different CWD but the same Git repository identity, so the Memory content remains shared and a valid topic selection can persist.
-5. Switch to `vol-agent`: repository identity and memory content change atomically; old selected topic and in-flight content must never appear under the new context.
-6. Switch to `clean-repo` (valid Repo, no Memory), `offline-shell` (Session CWD unavailable), `restricted` (read denied), or `scratch` (documented non-Git fallback with no Memory); inspect distinct empty/error states.
-7. Return to `dev-session`, open a topic file, then rapidly change Sessions while content is loading. Observe stale response cancellation.
-8. Narrow the viewport to ~390 px: Workspace occupies the screen, file selection pushes to a full-width reader, **返回列表** preserves list position, and **返回终端** returns to the work surface.
+**Not a claim about the separate experimental AI Workspace/System One/Two design (#2221/#2254).** This is the existing standard Nession Session + Claude Code capability path; introducing an AI Workspace Scene here would conflate two deliberately separate product experiences.
 
-## Ownership and interaction contract
+## User flow — complete interactive mock
 
-- **No global Memory inventory or Repo dropdown.** Session switching is normal Nession navigation. Repo name/path under **来源** is read-only and is automatically derived from the current Session.
-- **Memory is inside Claude Code Capability**, adjacent to conversations/configuration, not a standalone global feature or a permanent new navigation node.
-- **Read-only content:** `MEMORY.md` functions as an index, topic Markdown files as details. Opening a file performs a simulated bounded read. File list and reader have their own scroll owners on desktop; mobile uses list → detail.
-- **State separation:** `ready`, `empty`, `unavailable`, `access_denied`, and non-Git fallback are distinct fixture cases. The mock uses a request generation counter so delayed callbacks from an old Session cannot write content into a newer one.
-- **Same-Repo cross-worktree behavior:** `dev-session` and `review-worktree` intentionally resolve to one shared fixture; same key means the selected topic can be retained, but UI still refreshes after the Session switch.
-- **No false inference:** This prototype does not implement Git identity resolution, Claude Code config override handling, Agent RPC, permission checks, actual file reads, or any production protocol. Source locations are illustrative, not verified effective Claude Code paths.
+1. Open the HTML: it starts on the **full-width current Session Terminal**. The resting capsule is `[+] Ask Nession… [↑]`; it has **no Claude status ring, tab, or permanent capability button**.
+2. Click `+`: Context Capsule appears **above** composer. Choose **Claude Code**. The same upper slot turns into Claude Code **Peek**, saying that Claude is open and summarizing this Session's repository Memory without rendering the full file browser.
+3. Select **在 Workspace 查看 Memory**: transition to **Workspace** as the active surface, with the Claude capability selected in the bottom capsule and **Memory already focused**. There is no feature lobby, repository picker, or redundant navigation step.
+4. Inside Claude Code, open `MEMORY.md` then choose topic Markdown. The source disclosure is secondary; it reveals how current Session CWD → Git repository → effective Auto Memory was **mocked**.
+5. Use the bottom **Terminal** destination to return directly to the same live Terminal. Use the Workspace destination circle for a direct Workspace transition, independent of Peek.
+6. Click **☰** (Web: collapsed rail Expand; App: visible Sessions control) to open the flat Session navigator. Choose the **review worktree** Session; it has different CWD but the **same Repo and Memory**. Re-enter Workspace: a previously selected valid topic can persist for that repo.
+7. Choose **Vol** from Sessions: another Repo's Memory appears; no previous Nession topic or stale loaded content leaks. Try clean repo (empty), offline Session (unavailable), denied read, and non-Git scratch (no Memory).
+8. Test the intent composer: `查看当前 Session 的 Memory` opens a **locally simulated** contextual Memory view; unrelated text reports the limited mock scope, not a fake AI answer.
+9. Phone viewport: Terminal is its own full surface. Top control or an edge swipe goes left to Sessions / right to Workspace. In Workspace, a topic opens as a pushed detail; the top Back returns to file list, then Terminal. The bottom **Capability Capsule remains** at every detail depth.
 
-## Fidelity
+## Source of truth and mock fidelity
 
 | Dimension | Fidelity |
 |---|---|
-| Session, Agent, CWD, worktree/repo identity and Memory files | Entirely synthetic, public-safe fixtures |
-| Repository resolution, non-Git fallback, Claude configuration path | Deterministic mock mapping, not real Git or Claude Code detection |
-| Memory topics and `MEMORY.md` contents | Synthetic Markdown-like editorial samples |
-| Listing, reading, Session switching, stale-response prevention | Browser-only JavaScript state simulation |
-| Terminal, Capsule, Workspace, mobile push navigation | Approximation of Nession product grammar |
-| Runtime/transport/authentication/security/production E2E | Not connected or verified |
+| Session, repo, worktree, Memory, Git branch and CLI presence | Synthetic public-safe fixtures |
+| Repo/memory resolution, custom Claude config, non-Git fallback | Explicit fixture mapping only, not actual Git/Claude discovery |
+| File listing, indexing, document read and stale reply cancellation | Browser-only deterministic JS simulation |
+| Context Capsule, Peek, Web/App navigation and layout | Interactive visual approximation based on current repository design docs |
+| Terminal text and continued Session state | Mock Terminal; DOM persists when the Workspace page is shown |
+| Real filesystem, Agent, websocket, Claude Code runtime, auth, AI calls, memory mutation | Not implemented, not verified |
+| Security / Acceptance / production E2E | Not proved by this mock |
 
-## Verification
+## Verification requirements
 
-- Standalone HTML/CSS/JS, no network calls, CDN dependencies, live terminal data or credentials.
-- Static check: `node --check app.js`; inspect local relative assets, interactive controls and CSS viewport rules.
-- Browser clickthrough: desktop and mobile, Session switch/worktree sharing/cross-repo isolation/empty/denied/unavailable/memory index/topic/back/keyboard.
-- Never infer production Acceptance Pass from this prototype. Exact browser verification and any live Pages SHA validation must be recorded separately.
+Static: `index.html`, `styles.css`, `app.js` and the catalog must exist at the same commit, have no missing assets, broken event targets or external runtime resources. Run `node --check app.js` and narrow mock checks when a local checkout is available.
 
-## Publication
+Browser: click the complete Terminal → `+` → Peek → Workspace → Memory → Terminal loop; check desktop and 375–390 px widths, keyboard Escape and App detail Back, context preservation and Session isolation. Verify JS console, scroll and layering. Source checks alone are **not browser verification**.
 
-After publishing from the shared orphan `prototype` branch, the intended direct HTML URL is:
-https://bestnathan.github.io/nession/prototypes/claude-memory-2689/index.html
+Check canonical Pages `prototypes/manifest.json` source SHA and actual HTTPS HTML after publication. A remote commit is **not** proof that Pages has deployed it.
 
-The directory's source is:
-https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689
+## Decision / non-goals
 
-The Pages URL is **not verified** until `prototypes/manifest.json` matches the exact published prototype commit and HTTPS readback confirms that this HTML is served.
+Memory remains **inside** the Claude Code Workspace capability, as a sibling internal view to conversations/configuration, with a Repository derived from the **current Session**. Do not add a global Memory explorer, repo dropdown, new permanent nav, AI Workspace Scene, write operations or separate Memory service. Internal Claude tab choices and file-row density are prototype decisions, subject to owner visual review, not production API contracts.
 
-## Non-goals
+Canonical direct HTML (verify live deployment separately): https://bestnathan.github.io/nession/prototypes/claude-memory-2689/index.html
 
-No separate Memory storage/index service, no global Memory explorer, no manual repository selection, no editing/writing/import/export, no actual model decisions, no file synchronization, no unapproved new product shell or fixed always-visible navigation, and no production change to Claude Code Protocol Units.
+Source: https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689
