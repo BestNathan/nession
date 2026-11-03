@@ -99,11 +99,37 @@ test('recovered, valid source renders public Issues and PRs after pending startu
   assert.doesNotMatch(h.main.textContent,/could not be rendered/);
   assert.equal(h.errors.length,0);
 });
+test('missing or failed Knowledge data cannot prevent independent site initialization',async()=>{
+  const site=makeProjection({issues:[{number:55,title:'Visible public issue',state:'open',updated_at:now}],
+    pulls:[],workflowRuns:[],meta:{generated_at:now,main_sha:'a'.repeat(40)}});
+  const h=harness('#/work',async url=>{
+    if(url.pathname.endsWith('/data/site.json'))return {ok:true,json:async()=>site};
+    throw Error('independent fixture unavailable');
+  });
+  await h.run('init()');
+  assert.match(h.main.textContent,/Visible public issue/);
+  assert.match(h.fresh.textContent,/Generated/);
+  assert.doesNotMatch(h.main.textContent,/could not be rendered/);
+  assert.equal(h.errors.length,0);
+});
+test('Knowledge loads separately even if the public site source is unavailable',async()=>{
+  const h=harness('#/knowledge',async url=>{
+    if(url.pathname.endsWith('/data/knowledge.json'))
+      return {ok:true,json:async()=>({schema_version:1,status:'available',source:{sha:'a'.repeat(40)}})};
+    throw Error('other snapshots unavailable');
+  });
+  await h.run('init()');
+  // The Knowledge view uses its own loader, regardless of site.json availability.
+  assert.match(h.main.textContent,/Knowledge independent/);
+  assert.equal(h.errors.length,0);
+});
 test('source fetch is bounded and app schedules a rerender after success or failure',()=>{
-  assert.match(app,/siteSnapshotStatus='loading'/);
+  assert.match(app,/let siteSnapshotStatus\s*=\s*'loading'/);
   assert.match(app,/signal:AbortSignal\.timeout\(15000\)/);
   assert.match(app,/siteSnapshotStatus='available';/);
   assert.match(app,/siteSnapshotStatus='unavailable';/);
   assert.match(app,/if\(needsSite&&!snapshot\)/);
+  assert.match(app,/async function loadKnowledgeCatalog\(\)/);
+  assert.match(app,/data\/knowledge\.json/);
   assert.match(app,/window\.addEventListener\('hashchange',render\)/);
 });
