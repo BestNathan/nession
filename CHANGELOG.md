@@ -92,3 +92,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record the HTTP clipboard capability matrix after #2614: DOM copy-event gesture fallback without a dead async retry, native paste/OSC 5522 image ingress that is not secure-context gated, bounded manual-copy limits, and the deployed staging evidence
 - Source: https://github.com/BestNathan/nession/issues/2614
+
+## 2026-11-03T07:14:25Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the #2663 plain-+ decision: the ambient Work Ring is superseded, work state flows only through the generic binding seam into the disclosed Context Capsule, and CLI process presence is not a working signal
+- Source: https://github.com/BestNathan/nession/issues/2663

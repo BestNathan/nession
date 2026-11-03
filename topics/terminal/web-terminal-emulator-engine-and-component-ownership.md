@@ -5,8 +5,8 @@ topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-10-29T19:22:00Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/pull/2583"]
+updated_at: 2026-11-03T07:14:25Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -79,6 +79,20 @@ they enter through the browser's `paste` event (`ClipboardEvent.clipboardData`,
 prerequisite for *programmatic* clipboard access only, not for clipboard
 usability.
 
+The Capsule composer's **work state** follows the same ownership rule
+([#2663](https://github.com/BestNathan/nession/issues/2663)). The resting `+`
+is one plain trigger in every lifecycle state: no Work Ring, badge, spinner,
+pulse or reserved ambient slot, and no second decoration in its place. A
+capability's work contribution flows only through the generic seam
+(`app/workSignals.ts` → `resolveWorkContext` → the disclosed Context Capsule's
+sensed rows); with no verified activity producer, the production binding list
+is empty and the resting composer draws nothing. Presence is not work: a
+foreground `claude`/`claude.exe` proves the CLI is open in the Session and may
+resolve the capability to `active`, but it must not manufacture a `working`
+status or the former "Working in this session" copy. The 2026-11-03 owner
+decision supersedes #1347's static ambient Work Ring rule; the old ring
+acceptance and its screenshots remain historical evidence.
+
 ## Context and evidence
 
 - Requirement: [#2581](https://github.com/BestNathan/nession/issues/2581);
@@ -133,6 +147,17 @@ usability.
   authenticated staging deployment attestation (runs 40934579327, 40934973435),
   including a 5522 image SHA-256 match with zero secure-context API use and a
   DOM copy event carrying the exact text.
+- The plain-`+` decision merged at
+  `deb647ec128576b722d7b390c084b4614db9e23a`; the canonical rule is the
+  “resting `+` carries no work state” section in
+  `docs/design/design-system/patterns/terminal-capsule.md`. Proof: SC-01
+  (identical trigger markup/box/icon for idle and `claude.exe`-open on Web and
+  App, zero ring nodes and zero animation), SC-02 (disclosure open/close,
+  keyboard, Escape, outside pointer, focus return, every Peek) and SC-03
+  (active presence without a work claim; production bindings emit no signal)
+  Pass at staging `276e046f1ba1b345b6e80635648febd43730658a` (run
+  41592140794); SC-04 Pass at `589bdf51d7008d3f92351decff95ea4b83e1c36a`.
+  The CLI-open disclosure baseline is `app-cli-open-context-disclosure.png`.
 
 ## Related knowledge
 
@@ -153,6 +178,10 @@ usability.
   do not mark the copy successful without the browser's own confirmation. The
   manual-copy surface is bounded (64 KiB); a larger payload is refused honestly
   rather than truncated.
+- Do not reintroduce an ambient work marker around the resting composer. A
+  future verified activity signal belongs to the `CapabilityWorkBinding` seam
+  and enriches the disclosed Context Capsule; process presence is never proof
+  of work, and the `+` must not reserve a slot for one.
 - Revisit if xterm's private render-service shape changes (the negative fixture
   and `XtermMetrics` are the compatibility point), if a second raw xterm
   consumer appears outside the engine, or if Addon/link ownership moves.
