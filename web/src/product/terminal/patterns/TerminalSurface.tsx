@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
   CapsuleCapabilityProjection,
@@ -13,11 +13,12 @@ import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -84,47 +85,7 @@ export interface TerminalSurfaceProps {
   workContext?: ResolvedWorkContext;
 }
 
-/**
- * What the surface says about input that will never arrive (#1307 SC-09).
- *
- * One sentence, and it is a statement rather than a question, because the
- * client cannot answer the question. That inability *is* the delivery-unknown
- * state: an agent that restarted cannot say whether the input in flight when
- * it died reached the PTY, so those bytes may already have run, and a user who
- * assumes they did not is a user who runs them a second time.
- *
- * `epoch` is therefore the case that must not be silent, and the others are
- * losses the client *can* account for — the requirement's "discard with
- * explicit UX" rather than three more kinds of silence. **None of them offers
- * a re-send**, and that is deliberate on both halves: the bytes were discarded
- * rather than stored (SC-15 keeps input contents out of durable state), and
- * re-sending input that may already have run is the automatic replay the
- * requirement forbids. What is left is the smallest useful thing — telling the
- * user what is uncertain, and getting out of the way.
- *
- * ## It was invisible until stage 6, and the geometry is why (measured)
- *
- * The band used to be the last flex child of the surface *while the surface
- * root was itself the capsule host*, so the capsule — `absolute z-30` against
- * that host — floated over the band rather than after it. Measured at 390x844
- * on `/fixture/app?drop=epoch`, which renders this surface through the same
- * components the product mounts:
- *
- * * notice 390x61 at y=783; capsule shell 366x56 at y=776, `z-index: 30`,
- *   background `oklch(1 0 0 / 0.96)` with `backdrop-filter: blur(12px)`;
- * * **366x49 of the two overlapped — 75% of the notice**, sentence included, and
- *   `document.elementFromPoint` at the notice's own centre landed on the
- *   capsule's textarea;
- * * the frame was **byte-identical** (md5 `fa3c7ea907eaf6b212152736620aff1c`,
- *   35 061 bytes) whether the route named a drop or not, while the DOM differed
- *   by this whole band. Adding the notice changed no pixel.
- *
- * The first repair kept notices outside the capsule host, which prevented
- * occlusion but made each full-width flex sibling reserve terminal height.
- * #2621 preserves that host boundary and instead places all notices in a
- * compact root-owned absolute overlay near the top, leaving the full grid
- * height unchanged when an observer takes control or a notice is dismissed.
- */
+/** Delivery uncertainty remains visible on demand, never as Terminal chrome. */
 function inputDropNotice(drop: InputDrop): string {
   switch (drop.reason) {
     case 'epoch':
@@ -152,33 +113,10 @@ function clipboardNoticeText(notice: ClipboardNotice): string {
   }
 }
 
-/** The only status chrome: compact, accessible and never a flex row (#2621). */
-const terminalNoticeClass = cn(
-  'pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-[var(--nession-radius-control)]',
-  'border border-border/70 bg-background/95 px-2.5 py-1 text-muted-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-sm',
-  chromeSansRole('secondary'),
-);
+/** Opt-in notice rows belong to the dialog, not to the xterm viewport. */
+const terminalNoticeClass = 'flex min-w-0 flex-col gap-2 border-b border-border/60 pb-3 last:border-b-0 last:pb-0';
 
-/**
- * The compact clipboard notice (#2598, #2621, #2614).
- *
- * A blocked OSC 52 write keeps its text only until the user acts or the
- * notice expires. The parent status overlay is positioned outside the capsule
- * host, so this notice neither reserves a Terminal row nor hides behind the
- * bottom composer. A repeated notice re-arms through `state.id`.
- *
- * ## The action has to work on ordinary HTTP too (#2614)
- *
- * The deployed staging origin is plain HTTP, where browsers do **not** expose
- * the async Clipboard API. The notice's Copy action therefore reads the
- * origin's capability *synchronously*: a secure origin keeps the async write,
- * while an insecure one spends the click on the DOM copy command
- * (`execCommand('copy')` with a scoped listener). Awaiting a call that cannot
- * exist would burn the user activation the DOM path needs, which is exactly
- * how the previous action became a dead end. If neither path can act, the
- * notice presents a bounded selectable surface and says so — it never claims
- * a copy that did not happen.
- */
+/** Clipboard actions require explicit user activation; keep them reachable in the contextual dialog. */
 const MAX_SELECTABLE_COPY_TEXT = 64 * 1024;
 
 function TerminalClipboardNoticeStrip({
@@ -195,13 +133,6 @@ function TerminalClipboardNoticeStrip({
   useEffect(() => {
     setManualCopy(false);
   }, [state.id]);
-  useEffect(() => {
-    // A manual copy needs time to select and press the shortcut; the payload
-    // still expires, just not while the user is mid-gesture.
-    const lifetime = manualCopy ? 30_000 : notice.kind === 'copy-required' ? 10_000 : 5_000;
-    const timer = setTimeout(() => onDismiss?.(), lifetime);
-    return () => clearTimeout(timer);
-  }, [state.id, notice.kind, manualCopy, onDismiss]);
   const copy = () => {
     if (notice.kind !== 'copy-required') { return; }
     const active = controller;
@@ -225,7 +156,7 @@ function TerminalClipboardNoticeStrip({
   const tooLarge = exactText.length > MAX_SELECTABLE_COPY_TEXT;
   return (
     <div
-      className={cn(terminalNoticeClass, manualCopy && 'w-full flex-col items-stretch')}
+      className={terminalNoticeClass}
       data-testid="terminal-clipboard-notice"
       data-clipboard-notice={notice.kind}
       role="status"
@@ -260,17 +191,8 @@ function TerminalClipboardNoticeStrip({
   );
 }
 
-/**
- * The one root-owned, absolute status layer (#2621).
- *
- * It is deliberately a sibling of — never a child of — the capsule host, and
- * it is absolutely positioned, so no notice participates in flex layout. The
- * host stays the sole flex-filling region and xterm's rows never change when a
- * notice appears, is replaced or expires. `pointer-events-none` on the
- * container with `pointer-events-auto` only on the notices keeps the terminal's
- * pointer/IME surface intact everywhere else.
- */
-function TerminalStatusOverlay({
+/** Detail only: the Terminal never mounts an automatic notice overlay. */
+function TerminalNoticeDetails({
   historyDegraded,
   inputDrop,
   clipboardNotice,
@@ -289,14 +211,8 @@ function TerminalStatusOverlay({
   onDismissClipboardNotice?: () => void;
   onTakeControl?: () => void;
 }) {
-  if (!(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer')) {
-    return null;
-  }
   return (
-    <div
-      data-testid="terminal-status-overlay"
-      className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[40%] flex-col items-end gap-1.5 overflow-y-auto"
-    >
+    <div data-testid="terminal-notice-details" className="flex flex-col gap-3">
       {historyDegraded ? (
         <div
           className={terminalNoticeClass}
@@ -376,6 +292,16 @@ export function TerminalSurface({
   surfaceAction,
   workContext,
 }: TerminalSurfaceProps) {
+  const hasNotices = Boolean(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer');
+
+  // The original notice had a bounded lifetime. Keep that lifecycle even
+  // when the user never opens its detail dialog.
+  useEffect(() => {
+    if (!clipboardNotice || !onDismissClipboardNotice) { return; }
+    const lifetime = clipboardNotice.notice.kind === 'copy-required' ? 30_000 : 5_000;
+    const timer = setTimeout(onDismissClipboardNotice, lifetime);
+    return () => clearTimeout(timer);
+  }, [clipboardNotice, onDismissClipboardNotice]);
 
   const capsuleSendText = (text: string) => {
     if (inputDisabled) {
@@ -403,9 +329,8 @@ export function TerminalSurface({
     >
       {/*
         The capsule host stays limited to the well and bottom composer (#1307).
-        All status actions live in a separate absolute top-end layer below:
-        outside the opaque capsule/occlusion band, but no longer consuming
-        height or causing xterm row/resize churn (#2621).
+        Status details are opt-in in the existing Capsule, not floating UI over
+        terminal cells. The xterm grid never resizes when notices change.
       */}
       <div
         data-terminal-capsule-host
@@ -420,7 +345,8 @@ export function TerminalSurface({
           )}
           {children}
         </div>
-        <TerminalCapsule
+        <Dialog>
+          <TerminalCapsule
           experience={experience}
           sendText={capsuleSendText}
           sendPhysKey={capsuleSendPhysKey}
@@ -429,18 +355,36 @@ export function TerminalSurface({
           capabilityProjection={capsuleProjection}
           adjacentAction={surfaceAction}
           workContext={workContext}
+          statusAction={hasNotices ? (
+            <DialogTrigger
+              data-testid="terminal-notices-trigger"
+              aria-label="Terminal notices"
+              title="Terminal notices"
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+            >
+              <AlertCircle className="size-4" />
+            </DialogTrigger>
+          ) : null}
         />
+        {hasNotices ? (
+          <DialogContent aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle>Terminal notices</DialogTitle>
+            </DialogHeader>
+            <TerminalNoticeDetails
+              historyDegraded={historyDegraded}
+              inputDrop={inputDrop}
+              clipboardNotice={clipboardNotice}
+              controller={controller}
+              terminalControl={terminalControl}
+              onDismissInputDrop={onDismissInputDrop}
+              onDismissClipboardNotice={onDismissClipboardNotice}
+              onTakeControl={onTakeControl}
+            />
+          </DialogContent>
+        ) : null}
+        </Dialog>
       </div>
-      <TerminalStatusOverlay
-        historyDegraded={historyDegraded}
-        inputDrop={inputDrop}
-        clipboardNotice={clipboardNotice}
-        controller={controller}
-        terminalControl={terminalControl}
-        onDismissInputDrop={onDismissInputDrop}
-        onDismissClipboardNotice={onDismissClipboardNotice}
-        onTakeControl={onTakeControl}
-      />
     </div>
   );
 }
