@@ -22,9 +22,9 @@
 <section class="phone"><div class="bar"><div><b>dev-session</b><small>Beijing Agent · Terminal</small></div><div class="status" id="conn">● Connected</div></div>
 <div class="term" id="term"><div class="content"><span class="prompt">nession@dev</span> <span class="muted">~/workspace $</span> vim agent.ts<div style="margin-top:10px" class="muted">agent.ts · mock editor · NORMAL</div><div class="code" id="lines"></div><div id="pos" class="muted" style="margin-top:16px">1:1</div><div style="height:210px;margin-top:40px" class="muted"># Quick swipe to scroll normally.<p># Long press and drag to navigate.</p></div></div>
 <div id="guide" class="guide" aria-hidden="true"><div class="dial"></div><div class="arrow" data-dir="up">↑</div><div class="arrow" data-dir="down">↓</div><div class="arrow" data-dir="left">←</div><div class="arrow" data-dir="right">→</div><div class="center"><span class="center-main" id="centerMain">·</span><span class="center-sub" id="centerSub">READY</span></div><div class="speed-pips"><span class="speed-pip"></span><span class="speed-pip"></span><span class="speed-pip"></span><span class="speed-pip"></span></div><div class="guide-hint" id="gestureHint">移出中心选择方向</div></div><div class="origin-dot" id="originDot" aria-hidden="true"></div><div class="tip" id="tip">按住终端 → 方向盘 → 拖动</div></div><div class="footer"><span class="plus">+</span><div class="input">✦ Ask, command, or describe...</div></div></section>
-<section class="panel"><h2>交互测试 · Gesture Lab</h2><p class="step"><strong>01</strong>普通点击、快速拖动、上下滚动，不触发方向键。</p><p class="step"><strong>02</strong>单指静止长按，激活四方向浮层。中心死区不输入；进出中心有独立阈值以避免抖动。</p><p class="step"><strong>03</strong>方向盘浮现后立即独占当前触点：拦截方向拖动、滚动和其他组件的 Touch Events；按 1 / 2 / 4 / 8 次/秒重复方向键。</p><p class="step"><strong>04</strong>回中心停止；松开、切换到只读、断线、页面切后台都会取消。</p>
+<section class="panel"><h2>交互测试 · Gesture Lab</h2><p class="step"><strong>01</strong>普通点击、快速拖动、上下滚动，不触发方向键。</p><p class="step"><strong>02</strong>单指静止长按，激活四方向浮层。中心死区不输入；进出中心有独立阈值以避免抖动。</p><p class="step"><strong>03</strong>方向盘激活后独占触点。持续移动、跨越速度档位或保持手指静止，都以独立时钟稳定重复 1 / 2 / 4 / 8 次/秒；80 行模拟缓冲区支持连续观察。</p><p class="step"><strong>04</strong>回中心停止；松开、切换到只读、断线、页面切后台都会取消。</p>
 <button id="reset">重置</button><button id="observer" aria-pressed="false">只读观察者</button><button id="offline" aria-pressed="false">断开连接</button>
-<div class="readout"><div class="label">Live gesture states</div><div class="row"><span>Phase</span><span id="phase">IDLE</span></div><div class="row"><span>Direction</span><span id="dir">—</span></div><div class="row"><span>Repeat rate</span><span id="rate">—</span></div><div class="row"><span>Keys sent</span><span id="count">0</span></div><div class="row"><span>Input path</span><span id="inputPath">—</span></div><div class="row"><span>Last touch event</span><span id="lastTouchEvent">—</span></div><div class="row"><span>Touch owner</span><span id="touchOwner">Free</span></div><div class="row"><span>Exclusive moves</span><span id="exclusiveMoves">0</span></div><div class="row"><span>Leaks to Terminal</span><span id="leakedMoves">0</span></div><div class="label" style="margin-top:13px">PTY input (mock)</div><div class="history" id="log">No keys</div></div>
+<div class="readout"><div class="label">Live gesture states</div><div class="row"><span>Phase</span><span id="phase">IDLE</span></div><div class="row"><span>Direction</span><span id="dir">—</span></div><div class="row"><span>Repeat rate</span><span id="rate">—</span></div><div class="row"><span>Repeat clock</span><span id="repeatClock">Stopped</span></div><div class="row"><span>Keys sent</span><span id="count">0</span></div><div class="row"><span>Input path</span><span id="inputPath">—</span></div><div class="row"><span>Last touch event</span><span id="lastTouchEvent">—</span></div><div class="row"><span>Touch owner</span><span id="touchOwner">Free</span></div><div class="row"><span>Exclusive moves</span><span id="exclusiveMoves">0</span></div><div class="row"><span>Leaks to Terminal</span><span id="leakedMoves">0</span></div><div class="label" style="margin-top:13px">PTY input (mock)</div><div class="history" id="log">No keys</div></div>
 <p class="footnote">移动端真实 Touch Events 是主路径；鼠标只作桌面调试。左/右 28px 边缘保留 App 导航。真正实现应通过现有 TerminalInteractionController.sendSemanticKey()，不能直接改动本地 xterm 光标。此原型无网络和真实 PTY。</p><p class="footnote"><a href="https://github.com/BestNathan/nession/issues/2657">Requirement #2657</a> · <a href="https://github.com/BestNathan/nession/tree/prototype/terminal-direction-2657">View source</a></p>
 </section></div></main>
 <script>
@@ -32,19 +32,36 @@
 'use strict';
 
 var term=document.getElementById('term'),guide=document.getElementById('guide'),originDot=document.getElementById('originDot');
-var code=['function greet(name) {','  const message = "hello";','  console.log(message);','  return message;','}','', 'export default greet;'];
-var row=1,col=1,count=0,log=[],gesture=null,touchId=null,hold=null,repeat=null,observer=false,offline=false,symbol={up:'↑',down:'↓',left:'←',right:'→'};
+var code=Array.from({length:80},function(_,i){
+ var samples=['function greet(name) {','  const message = "hello";','  console.log(message);','  return message;','}','', 'export default greet;','// navigation stays continuous across the buffer'];
+ return i===0?'// agent.ts · mobile gesture lab':i===79?'// end of mock buffer':samples[(i-1)%samples.length];
+});
+var row=26,col=6,visibleRows=11,count=0,log=[],gesture=null,touchId=null,hold=null,repeat=null,observer=false,offline=false,symbol={up:'↑',down:'↓',left:'←',right:'→'};
 var lastTouchAt=0,inputPath='—',lastTouchEvent='—',mouseHeld=false,exclusiveMoves=0,leakedMoves=0,suppressClickUntil=0;
 var SPEEDS=[1,2,4,8],ENTER_PX=24,EXIT_PX=17,SPEED_EDGES=[48,76,108],BAND_HYSTERESIS=5,AXIS_RATIO=1.28;
 function view(){
  var lines=document.getElementById('lines');lines.replaceChildren();
- code.forEach(function(line,i){var el=document.createElement('div');el.className='line'+(i===row-1?' on':'');var n=document.createElement('span');n.className='num';n.textContent=String(i+1);el.appendChild(n);var content=document.createElement('span');if(i===row-1){content.append(document.createTextNode(line.slice(0,col-1)));var caret=document.createElement('span');caret.className='cursor';content.appendChild(caret);content.append(document.createTextNode(line.slice(col-1)))}else{content.textContent=line}el.appendChild(content);lines.appendChild(el)});
- document.getElementById('pos').textContent='NORMAL · '+row+':'+col+' (mock Vim caret)';
+ // Keep a stable-height mock viewport with long scrollable TUI content.
+ // This prevents the old seven-line editor edge from visually masking repeats.
+ var first=Math.max(0,Math.min(code.length-visibleRows,row-1-Math.floor(visibleRows/2)));
+ code.slice(first,first+visibleRows).forEach(function(line,j){
+  var i=first+j,el=document.createElement('div');el.className='line'+(i===row-1?' on':'');
+  var n=document.createElement('span');n.className='num';n.textContent=String(i+1);el.appendChild(n);
+  var content=document.createElement('span');
+  if(i===row-1){
+   content.append(document.createTextNode(line.slice(0,col-1)));
+   var caret=document.createElement('span');caret.className='cursor';content.appendChild(caret);
+   content.append(document.createTextNode(line.slice(col-1)));
+  }else{content.textContent=line}
+  el.appendChild(content);lines.appendChild(el)
+ });
+ document.getElementById('pos').textContent='NORMAL · '+row+':'+col+' / '+code.length+' lines (mock TUI)';
 }
 function display(){
  document.getElementById('phase').textContent=gesture?gesture.phase.toUpperCase():'IDLE';
  document.getElementById('dir').textContent=gesture&&gesture.dir?symbol[gesture.dir]:'—';
  document.getElementById('rate').textContent=gesture&&gesture.dir?String(gesture.rate)+'/s':'—';
+ document.getElementById('repeatClock').textContent=gesture&&gesture.dir?'Active · move-independent':'Stopped';
  document.getElementById('count').textContent=String(count);document.getElementById('log').textContent=log.join(' ')||'No keys';
  document.getElementById('inputPath').textContent=inputPath;document.getElementById('lastTouchEvent').textContent=lastTouchEvent;
  document.getElementById('touchOwner').textContent=gesture&&gesture.phase!=='pending'?'Direction pad':'Free';
@@ -62,8 +79,7 @@ function display(){
 }
 function detachTouchListeners(){
  window.removeEventListener('touchstart',onExtraTouch,true);
- window.removeEventListener('touchmove',onTouchMove,true);
- window.removeEventListener('touchend',onTouchEnd,true);
+  window.removeEventListener('touchend',onTouchEnd,true);
  window.removeEventListener('touchcancel',onTouchCancel,true);
 }
 function stop(reason){
@@ -72,12 +88,26 @@ function stop(reason){
 }
 function emit(dir){
  if(!gesture||!gesture.dir||observer||offline)return;
- count++;log.push(symbol[dir]);if(log.length>56)log.shift();
+ count++;gesture.lastEmitAt=performance.now();log.push(symbol[dir]);if(log.length>56)log.shift();
  if(dir==='up')row=Math.max(1,row-1);if(dir==='down')row=Math.min(code.length,row+1);
  if(dir==='left')col=Math.max(1,col-1);if(dir==='right')col=Math.min(code[row-1].length+1,col+1);
  col=Math.min(col,code[row-1].length+1);view();display();
 }
-function schedule(){clearTimeout(repeat);if(!gesture||!gesture.dir)return;repeat=setTimeout(function(){if(!gesture||!gesture.dir)return;emit(gesture.dir);schedule()},1000/gesture.rate)}
+function schedule(){
+ clearTimeout(repeat);
+ if(!gesture||!gesture.dir)return;
+ // Always anchor to the LAST KEY, never to the most recent finger movement.
+ // Speed changes may reschedule a timer but cannot postpone the next key forever.
+ var due=gesture.lastEmitAt+1000/gesture.rate;
+ repeat=setTimeout(function(){
+  if(!gesture||!gesture.dir)return;
+  // No catch-up bursts after browser timer throttling or tab suspension.
+  var remaining=gesture.lastEmitAt+1000/gesture.rate-performance.now();
+  if(remaining>2){schedule();return}
+  emit(gesture.dir);
+  schedule();
+ },Math.max(0,due-performance.now()));
+}
 function speedBand(distance,previous){
  var band=0;for(var i=0;i<SPEED_EDGES.length;i++){if(distance>=SPEED_EDGES[i]+(previous>i?-BAND_HYSTERESIS:BAND_HYSTERESIS))band=i+1}return band;
 }
@@ -93,7 +123,7 @@ function getDirection(dx,dy,previous){
 function begin(x,y){
  if(gesture||observer||offline)return;
  var box=term.getBoundingClientRect();if(x<box.left+28||x>box.right-28)return;
- gesture={phase:'pending',x:x,y:y,dir:null,gear:-1,rate:0,markerOffset:false};display();
+ gesture={phase:'pending',x:x,y:y,dir:null,gear:-1,rate:0,markerOffset:false,lastEmitAt:0};display();
  hold=setTimeout(function(){
   if(!gesture||gesture.phase!=='pending')return;
   gesture.phase='armed';
@@ -157,7 +187,7 @@ function onTouchMove(e){
   return;
  }
  if(!e.cancelable){
-  // Browser already committed to a native gesture: cannot claim it retroactively.
+  // Cannot retroactively claim native panning. Keep an explicit diagnostic.
   e.stopImmediatePropagation();
   stop('touch: browser took native scroll');
   return;
@@ -185,6 +215,11 @@ function onTouchCancel(e){
  if(gesture.phase!=='pending')e.stopImmediatePropagation();
  stop('touchcancel');
 }
+// Install once before any touch starts: WebKit may not honor cancellation by
+// a non-passive touchmove listener added dynamically during touchstart.
+// The touch target is fixed at contact, so capture on the Terminal ancestor
+// continues to receive this finger's moves even if it drags outside its box.
+term.addEventListener('touchmove',onTouchMove,{capture:true,passive:false});
 term.addEventListener('touchstart',function(e){
  lastTouchAt=Date.now();
  if(e.touches.length!==1){if(gesture)stop('touch: multi-finger cancel');return}
@@ -194,8 +229,7 @@ term.addEventListener('touchstart',function(e){
  if(!gesture)return;
  inputPath='touch';lastTouchEvent='touchstart';touchId=finger.identifier;
  window.addEventListener('touchstart',onExtraTouch,true);
- window.addEventListener('touchmove',onTouchMove,{capture:true,passive:false});
- window.addEventListener('touchend',onTouchEnd,true);
+  window.addEventListener('touchend',onTouchEnd,true);
  window.addEventListener('touchcancel',onTouchCancel,true);
  display();
 },{passive:true});
@@ -239,10 +273,10 @@ term.addEventListener('scroll',function(){
   if(Math.abs(term.scrollLeft-gesture.lockScrollLeft)>0.5)term.scrollLeft=gesture.lockScrollLeft;
  }
 },{passive:true});
-document.getElementById('reset').onclick=function(){stop();row=1;col=1;count=0;log=[];exclusiveMoves=0;leakedMoves=0;view();display()};
+document.getElementById('reset').onclick=function(){stop();row=26;col=6;count=0;log=[];exclusiveMoves=0;leakedMoves=0;view();display()};
 document.getElementById('observer').onclick=function(){observer=!observer;this.setAttribute('aria-pressed',String(observer));stop()};
 document.getElementById('offline').onclick=function(){offline=!offline;this.setAttribute('aria-pressed',String(offline));document.getElementById('conn').textContent=offline?'○ Offline':'● Connected';stop()};
-window.__nessionMock={state:function(){return{phase:gesture?gesture.phase:'idle',dir:gesture?gesture.dir:null,rate:gesture?gesture.rate:0,count:count,inputPath:inputPath,lastTouchEvent:lastTouchEvent,owner:gesture&&gesture.phase!=='pending'?'direction':'free',exclusiveMoves:exclusiveMoves,leakedMoves:leakedMoves,scrollTop:term.scrollTop}},cancel:stop};
+window.__nessionMock={state:function(){return{phase:gesture?gesture.phase:'idle',dir:gesture?gesture.dir:null,rate:gesture?gesture.rate:0,count:count,row:row,col:col,inputPath:inputPath,lastTouchEvent:lastTouchEvent,owner:gesture&&gesture.phase!=='pending'?'direction':'free',exclusiveMoves:exclusiveMoves,leakedMoves:leakedMoves,scrollTop:term.scrollTop}},cancel:stop};
 view();display();
 })();
 </script></body></html>
