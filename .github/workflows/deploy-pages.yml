@@ -96,6 +96,8 @@ jobs:
         with:
           ref: knowledge
           path: knowledge-store
+          # The canonical ledger verifier audits the pre-v2 ancestor chain.
+          fetch-depth: 0
           persist-credentials: false
       - name: Setup standalone Node toolchain
         if: steps.detect.outputs.active == 'true'
