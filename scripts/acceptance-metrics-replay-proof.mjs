@@ -16,9 +16,14 @@ const positive=Object.freeze({
 });
 const negatives=Object.freeze([
   Object.freeze({source:41612523346,consumer:41612550381,
-    case:'off_main_canonical_path_unexpected_push'}),
+    case:'off_main_canonical_path_unexpected_push',
+    expected_reason:'unexpected_source_event'}),
   Object.freeze({source:41617665993,consumer:41617692764,
-    case:'off_main_spoofed_display_name_wrong_workflow_id_and_path'}),
+    case:'off_main_spoofed_display_name_wrong_workflow_id_and_path',
+    expected_reason:'unexpected_source_event'}),
+  Object.freeze({source:38946994222,source_attempt:2,consumer:41629375892,
+    case:'old_owner_main_dispatch_source_sha_drift',
+    expected_reason:'source_sha_drift'}),
 ]);
 const allowedNames=['authorize-replay','rust-health','web-health','e2e-health','publish'];
 const fail=x=>{throw Error('authenticated Metrics replay: '+x);};
@@ -111,10 +116,13 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
     stdio:['ignore','pipe','pipe']});
   if(git!=='' )fail('unexpected Git ancestry stdout');
   const prefix='/repos/'+REPO;
-  const getRun=id=>get(prefix+'/actions/runs/'+id);
+  // A re-run changes the default /runs/:id Run attempt. Always bind the
+  // exact historical attempt so an unrelated safe replay cannot invalidate
+  // either the original authorized proof or its later denied attempt.
+  const getRun=(id,attempt=1)=>get(prefix+'/actions/runs/'+id+'/attempts/'+attempt);
   const getJobs=run=>get(prefix+'/actions/runs/'+run.id+
     '/attempts/'+run.run_attempt+'/jobs?per_page=100');
-  const [source,recipient]=await Promise.all([getRun(positive.source),getRun(positive.consumer)]);
+  const [source,recipient]=await Promise.all([getRun(positive.source,1),getRun(positive.consumer,1)]);
   if(!validRun(source,positive.source)||!validRun(recipient,positive.consumer))
     fail('historical positive Replay locator is not authenticated');
   const jobs=await getJobs(recipient);
@@ -123,9 +131,12 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
   const yes=attestPositiveReplay(source,recipient,jobs,log,true);
   const denied=[];
   for(const pin of negatives){
-    const [badSource,badRecipient]=await Promise.all([getRun(pin.source),getRun(pin.consumer)]);
-    if(!validRun(badSource,pin.source)||!validRun(badRecipient,pin.consumer))
-      fail('historical denied source locator is not authenticated');
+    const [badSource,badRecipient]=await Promise.all([
+      getRun(pin.source,pin.source_attempt??1),getRun(pin.consumer,1)]);
+    if(!validRun(badSource,pin.source)||!validRun(badRecipient,pin.consumer)||
+       badSource.run_attempt!==(pin.source_attempt??1)||
+       badRecipient.run_attempt!==1)
+      fail('historical denied source Run/Attempt locator is not authenticated');
     const attemptJobs=await getJobs(badRecipient);
     const authorizer=originalJob(attemptJobs,badRecipient,'authorize-replay');
     if(authorizer.conclusion!=='failure')fail('denied source Authorizer unexpectedly succeeded');
@@ -134,26 +145,39 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
     if(!receipt)fail('missing actual denial receipt for '+pin.case);
     const workflow=await get(prefix+'/actions/workflows/'+badSource.workflow_id);
     const proof=attestReplayDenial(receipt,badSource,badRecipient,attemptJobs,workflow);
-    if(proof.reason_code!=='unexpected_source_event'||
-       proof.privileged_publisher_job!=='skipped'||
-       badSource.event!=='push'||
-       badSource.head_branch==='main'||
-       (pin.case.includes('spoofed')&&
-         (badSource.name!=='Metrics / Replay Request'||
-          normalized(badSource)===SOURCE_WORKFLOW)))
-      fail('historical denied source did not match deliberate hostile-case scope');
+    if(proof.reason_code!==pin.expected_reason||
+       proof.privileged_publisher_job!=='skipped')
+      fail('historical denied source reason or Publisher did not match actual outcome');
+    if(pin.expected_reason==='unexpected_source_event'&&
+       (badSource.event!=='push'||badSource.head_branch==='main'||
+        (pin.case.includes('spoofed')&&
+          (badSource.name!=='Metrics / Replay Request'||
+           normalized(badSource)===SOURCE_WORKFLOW))))
+      fail('off-main denied source does not match the observed hostile push');
+    if(pin.expected_reason==='source_sha_drift'&&
+       (badSource.event!=='workflow_dispatch'||badSource.head_branch!=='main'||
+        badSource.name!=='Metrics / Replay Request'||
+        normalized(badSource)!==SOURCE_WORKFLOW||
+        badSource.workflow_id!==positive.source_workflow_id||
+        badSource.actor?.login!=='BestNathan'||
+        badSource.triggering_actor?.login!=='BestNathan'||
+        badSource.head_sha===badRecipient.head_sha||
+        badSource.head_sha!==positive.sha||
+        badSource.run_attempt!==2))
+      fail('real owner-main stale source was not an exact dispatched-SHA drift');
     denied.push({...proof,case:pin.case,source_workflow_path:normalized(badSource)});
   }
-  if(denied.length!==2)fail('incomplete real negative-source matrix');
+  if(denied.length!==negatives.length)
+    fail('incomplete real negative-source matrix');
   return {
     schema_version:1,kind:'authenticated_metrics_replay_provenance_matrix',
     repository:REPO,authenticated_target_sha:targetSha,
     verdict:'HistoricalSourceEvidenceVerified',
     authorized_owner_main_replay:yes,
     denied_untrusted_producers:denied,
-    positive_coverage:1,negative_coverage:2,
+    positive_coverage:1,negative_coverage:3,
     additional_policy_fixtures_owner:'scripts/metrics-replay-source.mjs:attestReplay',
-    not_yet_live_tested:'wrong workflow ID/path with a separately successfully dispatched workflow_dispatch, forged attempt/digest and fresh owner manual replay are not proven by these two unexpected-event denials',
+    not_yet_live_tested:'wrong workflow ID/path with a separately successfully dispatched workflow_dispatch and forged wake attempt/metadata are not proven by these real producer events; legitimate old owner dispatch and its actual SHA drift are verified at their own historical attempts',
     github_server_ref_write_denials_verified:false,
   };
 }
@@ -198,5 +222,9 @@ export function selfTestMetricsReplayLineage(){
     x.name==='publish'?{...x,steps:x.steps.map(step=>
       step.name==='Publish durable metrics branch'?{...step,conclusion:'skipped'}:step)}:x)}));
   assert.throws(()=>verify(source,recipient,jobs,authLog.replace(String(source.id),'999')));
+  assert.equal(negatives.length,3);
+  assert.equal(negatives[2].source_attempt,2);
+  assert.equal(negatives[2].expected_reason,'source_sha_drift');
+  assert.equal(negatives[0].expected_reason,'unexpected_source_event');
   return true;
 }
