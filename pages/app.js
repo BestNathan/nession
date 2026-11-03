@@ -1,7 +1,8 @@
+import { renderKnowledge, validKnowledgeSnapshot } from './knowledge.js';
 // Pages deliberately has no dependency on nession/web, runtime APIs, or UI packages.
 const root = document.getElementById('main');
 const freshness = document.getElementById('freshness');
-const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence', '/prototypes']);
+const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence', '/prototypes', '/knowledge']);
 const PROTOTYPE_INFO = {
   'terminal-fixed-cols-2487': {
     title: 'Fixed-column Terminal Lab',
@@ -26,6 +27,7 @@ const PROTOTYPE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]+$/;
 let prototypeCatalog = null;
 let prototypeCatalogStatus = 'loading';
 let snapshot = null;
+let knowledgeSnapshot = null;
 
 function node(tag, className, content) {
   const item = document.createElement(tag);
@@ -548,7 +550,7 @@ function render(){
   const raw=location.hash.replace(/^#/,'')||'/';
   const match=raw.match(/^\/work\/(issue|pr)\/([1-9][0-9]{0,8})$/);
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
-  const route=match?'/work':routes.has(raw)?raw:detail?'/work':raw==='/'
+  const route=match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
   document.querySelectorAll('[data-route]').forEach(link=>{
     if(link.dataset.route===route)link.setAttribute('aria-current','page');
@@ -561,7 +563,8 @@ function render(){
       root.append(local('← All recent work','/work'));
       root.append(empty('Invalid evidence reference',
         'This address does not identify a bounded public Issue or PR. No source has been verified.'));
-    }else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
+    }else if(route==='/knowledge')renderKnowledge(root,knowledgeSnapshot,location.hash);
+    else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
   } catch(error){
@@ -599,6 +602,7 @@ async function loadPrototypeCatalog() {
 async function init(){
   window.addEventListener('hashchange',render);
   void loadPrototypeCatalog();
+  void loadKnowledgeCatalog();
   try{
     const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache'});
     if(!response.ok)throw new Error('snapshot unavailable');
