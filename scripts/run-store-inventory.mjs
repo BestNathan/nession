@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {RUN_STORE_REFS} from './run-store-integrity.mjs';
+import {RUN_STORE_REFS,runStorePathPolicy} from './run-store-integrity.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[0-9a-f]{40}$/;
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -53,6 +53,14 @@ export function checkInventory(manifest,workflows){
     fail('inventory stores diverge from canonical run-store-integrity refs');
   const seen=new Map();
   for(const store of manifest.stores){
+    // The manifest's patterns are a checked projection, not a second
+    // authority. Any drift from executable canonical classifying regexes
+    // fails the existing blocking inventory Gate.
+    const pathPolicy=store.path_policy;
+    if(pathPolicy?.owner!=='scripts/run-store-integrity.mjs:runStorePathPolicy'||
+       !Array.isArray(pathPolicy.classes)||
+       JSON.stringify(pathPolicy.classes)!==JSON.stringify(runStorePathPolicy(store.ref)))
+      fail('run store path-policy inventory drift: '+store.ref);
     if(!['active','planned'].includes(store.lifecycle)||
        !Array.isArray(store.writers)||store.writers.length>20)
       fail('invalid Store state or writer inventory: '+store.ref);
@@ -395,6 +403,359 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,15);
+  const missingPathPolicy=JSON.parse(JSON.stringify(manifest));
+  delete missingPathPolicy.stores[0].path_policy;
+  assert.throws(()=>checkInventory(missingPathPolicy,sources),/path-policy inventory drift/);
+  const forgedPathPolicy=JSON.parse(JSON.stringify(manifest));
+  forgedPathPolicy.stores.find(x=>x.ref==='metrics').path_policy.classes[0].kind='projection';
+  assert.throws(()=>checkInventory(forgedPathPolicy,sources),/path-policy inventory drift/);
+  const extraAllowlist=JSON.parse(JSON.stringify(manifest));
+  extraAllowlist.stores.find(x=>x.ref==='agent-store').path_policy.classes.push({
+    pattern:'^secrets\\/.+
+  assert.equal(agentStore.lifecycle,'active');
+  const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
+  unknownAgentWriter.stores.find(x=>x.ref==='agent-store').writers[0].workflow=
+    '.github/workflows/untrusted-agent-writer.yml';
+  assert.throws(()=>checkInventory(unknownAgentWriter,sources),/unclassified active agent-store writer/);
+  const missingAgentWriter=JSON.parse(JSON.stringify(manifest));
+  missingAgentWriter.stores.find(x=>x.ref==='agent-store').writers.pop();
+  assert.throws(()=>checkInventory(missingAgentWriter,sources),/incomplete live agent-store writer roster|unreviewed Controller Store rollout status/);
+  const falselyProtectedAgent=JSON.parse(JSON.stringify(manifest));
+  falselyProtectedAgent.stores.find(x=>x.ref==='agent-store').rollout_blocker=
+    'all requirements passed';
+  assert.throws(()=>checkInventory(falselyProtectedAgent,sources),
+    /deferred admin proof must be classified honestly/);
+  const directAgentPush=new Map(sources);
+  const agentIngest='.github/workflows/store-agent-development-ingest.yml';
+  directAgentPush.set(agentIngest,directAgentPush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git push origin HEAD:agent-store\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(directAgentPush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,directAgentPush),
+    /agent-store writer bypasses bounded CAS/);
+  const directAgentPushWithGitC=new Map(sources);
+  directAgentPushWithGitC.set(agentIngest,directAgentPushWithGitC.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git -C agent-store push origin HEAD:agent-store\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(directAgentPushWithGitC.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,directAgentPushWithGitC),
+    /agent-store writer bypasses bounded CAS/);
+  // Literal ref detection alone misses direct pushes with runtime-selected
+  // refspecs. Preserve the existing Task SHA-leased cleanup exception while
+  // rejecting additions that could write ANY ref using an App writer token.
+  assert.deepEqual(findDirectGitPushes(
+    'git push origin HEAD:${ref}\n'+
+    'git -C worktree push origin\n'+
+    'if git push origin HEAD:agent-store; then :; fi'
+  ).map(x=>x.line),[1,2,3]);
+  // A harmless-looking command prefix must not hide a second shell command.
+  assert.equal(findDirectGitPushes('echo preparing; git push origin HEAD:${ref}').length,1);
+  const variablePush=new Map(sources);
+  variablePush.set(agentIngest,variablePush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git push origin "HEAD:${target_ref}"\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(variablePush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,variablePush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const compoundPush=new Map(sources);
+  compoundPush.set(agentIngest,compoundPush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          echo preparing; git push origin "HEAD:${target_ref}"\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(compoundPush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,compoundPush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const unclassifiedLegacyPush=new Map(sources);
+  const caseIngest='.github/workflows/acceptance-case-ingest.yml';
+  unclassifiedLegacyPush.set(caseIngest,unclassifiedLegacyPush.get(caseIngest).replace(
+    '      - uses: actions/setup-node@v4',
+    '      - run: git push origin HEAD:${target_ref}\n      - uses: actions/setup-node@v4'));
+  assert.notEqual(unclassifiedLegacyPush.get(caseIngest),sources.get(caseIngest));
+  assert.throws(()=>checkInventory(manifest,unclassifiedLegacyPush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const taskCleanupPlusPush=new Map(sources);
+  const taskIngest='.github/workflows/task-result-ingest.yml';
+  taskCleanupPlusPush.set(taskIngest,taskCleanupPlusPush.get(taskIngest).replace(
+    '          git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"',
+    '          git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"\n          git push origin'));
+  assert.notEqual(taskCleanupPlusPush.get(taskIngest),sources.get(taskIngest));
+  assert.throws(()=>checkInventory(manifest,taskCleanupPlusPush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const untrustedExtraCheckout=new Map(sources);
+  untrustedExtraCheckout.set(agentIngest,untrustedExtraCheckout.get(agentIngest).replace(
+    '      - uses: actions/setup-node@v4',
+    '      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.workflow_run.head_sha }}\n      - uses: actions/setup-node@v4'));
+  assert.notEqual(untrustedExtraCheckout.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,untrustedExtraCheckout),
+    /agent-store writer checkout persists credentials/);
+  const leakingAgentWriter=new Map(sources);
+  const agentWriter='.github/workflows/agent-controller-dispatch.yml';
+  leakingAgentWriter.set(agentWriter,leakingAgentWriter.get(agentWriter)
+    .replace('persist-credentials: false','persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,leakingAgentWriter),
+    /real agent-store Writer lacks trusted main\/App path/);
+  const bootstrapPath='.github/workflows/store-agent-bootstrap.yml';
+  const bootstrapSource=sources.get(bootstrapPath);
+  for(const [label,mutate] of [
+    ['arbitrary-ref manual workflow',s=>s.replace(/^  push:/m,'  workflow_dispatch:\n  push:')],
+    ['untrusted branch selection',s=>s.replace('    branches: [main]','    branches: [main, feature]')],
+    ['missing trusted checkout',s=>s.replace('ref: ${{ github.sha }}','ref: ${{ github.head_ref }}')],
+    ['unscoped writer token',s=>s.replace('permission-contents: write','permission-contents: read')],
+    ['inherited checkout credential',s=>s.replace('persist-credentials: false','persist-credentials: true')],
+  ]){
+    const changed=mutate(bootstrapSource);
+    assert.notEqual(changed,bootstrapSource,'fixture must change '+label);
+    const candidate=new Map(sources);candidate.set(bootstrapPath,changed);
+    assert.throws(()=>checkInventory(manifest,candidate),
+      /Agent Store bootstrap must use authenticated main push only/,label);
+  }
+  const smokePath='.github/workflows/store-app-writer-smoke.yml';
+  const smokeSource=sources.get(smokePath);
+  for(const [label,mutate] of [
+    ['arbitrary-ref App smoke',s=>s.replace(/^  push:/m,'  workflow_dispatch:\n  push:')],
+    ['untrusted App smoke branch',s=>s.replace('    branches: [main]','    branches: [main, feature]')],
+    ['missing App smoke main guard',s=>s.replace("github.ref == 'refs/heads/main'","github.ref == 'refs/heads/feature'")],
+    ['weakened App smoke token',s=>s.replace('permission-contents: write','permission-contents: read')],
+  ]){
+    const changed=mutate(smokeSource);
+    assert.notEqual(changed,smokeSource,'fixture must change '+label);
+    const candidate=new Map(sources);candidate.set(smokePath,changed);
+    assert.throws(()=>checkInventory(manifest,candidate),
+      /App Writer Smoke must use trusted main push only/,label);
+  }
+  const controllerRequest='.github/workflows/acceptance-agent-controller.yml';
+  const controllerWriter='.github/workflows/store-agent-controller-ingest.yml';
+  const unsafeControllerRequest=new Map(sources);
+  unsafeControllerRequest.set(controllerRequest,unsafeControllerRequest.get(controllerRequest)
+    .replace('  contents: read','  contents: write'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerRequest),
+    /Controller manual request must be unprivileged/);
+  const unsafeControllerActor=new Map(sources);
+  unsafeControllerActor.set(controllerRequest,unsafeControllerActor.get(controllerRequest)
+    .replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerActor),
+    /Controller manual request must be unprivileged/);
+  const unsafeControllerWriter=new Map(sources);
+  unsafeControllerWriter.set(controllerWriter,unsafeControllerWriter.get(controllerWriter)
+    .replace(/^  workflow_run:$/m,'  workflow_dispatch:'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerWriter),
+    /Controller Store ingester is not authenticated/);
+  const unsafeControllerCheckout=new Map(sources);
+  unsafeControllerCheckout.set(controllerWriter,unsafeControllerCheckout.get(controllerWriter)
+    .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerCheckout),
+    /Controller Store ingester is not authenticated/);
+
+  const bypass=new Map(sources);
+  const scenario='.github/workflows/e2e-scenario-ingest.yml';
+  bypass.set(scenario,bypass.get(scenario).replace(
+    'node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"',
+    'git -C results-repo push origin acceptance-results'));
+  assert.throws(()=>checkInventory(manifest,bypass),/bounded CAS Store publisher/);
+  const clone=x=>JSON.parse(JSON.stringify(x));
+  const unmatched=clone(manifest);
+  unmatched.stores.find(x=>x.ref==='metrics').writers.pop();
+  assert.throws(()=>checkInventory(unmatched,sources),/unknown privileged Store push/);
+  const foreign=clone(manifest);
+  foreign.stores.find(x=>x.ref==='task-results').writers[0].source='attacker';
+  assert.throws(()=>checkInventory(foreign,sources),/unclassified writer/);
+  const downgraded=clone(manifest);
+  downgraded.stores.find(x=>x.ref==='metrics').writers[0].app_token.scope='all repositories';
+  assert.throws(()=>checkInventory(downgraded,sources),/unclassified App writer/);
+  const fallback=new Map(sources);
+  const caseWriter='.github/workflows/acceptance-case-ingest.yml';
+  fallback.set(caseWriter,fallback.get(caseWriter).replace("legacy) ;;","''|legacy) ;;"));
+  assert.throws(()=>checkInventory(manifest,fallback),/missing pinned and scoped App/);
+  const appFallback=new Map(sources);
+  appFallback.set(caseWriter,appFallback.get(caseWriter)
+    .replace("vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token",
+      "vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN"));
+  assert.throws(()=>checkInventory(manifest,appFallback),/missing pinned and scoped App/);
+  const unscoped=new Map(sources);
+  const testWriter='.github/workflows/e2e-scenario-ingest.yml';
+  unscoped.set(testWriter,unscoped.get(testWriter).replace('permission-contents: write','permission-contents: read'));
+  assert.throws(()=>checkInventory(manifest,unscoped),/missing pinned and scoped App/);
+  const undeclared=clone(manifest);
+  undeclared.stores.push({ref:'private-secrets',lifecycle:'active',writers:[]});
+  assert.throws(()=>checkInventory(undeclared,sources),/canonical/);
+  const forged=clone(manifest);
+  forged.governance.ruleset_enforcement='enforced';
+  assert.throws(()=>checkInventory(forged,sources),/must not assert/);
+  const replaySource='.github/workflows/metrics-replay-request.yml';
+  const replayWriter='.github/workflows/metrics-repository.yml';
+  const requestWithWriterToken=new Map(sources);
+  requestWithWriterToken.set(replaySource,
+    requestWithWriterToken.get(replaySource).replace('contents: read','contents: write'));
+  assert.throws(()=>checkInventory(manifest,requestWithWriterToken),
+    /privilege-bearing Metrics Replay request/);
+  const requestWithWrongActor=new Map(sources);
+  requestWithWrongActor.set(replaySource,
+    requestWithWrongActor.get(replaySource).replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,requestWithWrongActor),
+    /privilege-bearing Metrics Replay request/);
+  const requestFromWrongWorkflow=new Map(sources);
+  requestFromWrongWorkflow.set(replayWriter,
+    requestFromWrongWorkflow.get(replayWriter)
+      .replace('workflows: ["Metrics / Replay Request"]','workflows: ["Untrusted / Job"]'));
+  assert.throws(()=>checkInventory(manifest,requestFromWrongWorkflow),
+    /schedule-or-attested-request/);
+  const noAuthorization=new Map(sources);
+  noAuthorization.set(replayWriter,
+    noAuthorization.get(replayWriter).replace(
+      'needs: [authorize-replay, rust-health, web-health, e2e-health]',
+      'needs: [rust-health, web-health, e2e-health]'));
+  assert.throws(()=>checkInventory(manifest,noAuthorization),
+    /schedule-or-attested-request/);
+  const bypassAuthorizer=new Map(sources);
+  bypassAuthorizer.set(replayWriter,
+    bypassAuthorizer.get(replayWriter).replace(
+      "needs.authorize-replay.result == 'success'",
+      "needs.authorize-replay.result != 'cancelled'"));
+  assert.throws(()=>checkInventory(manifest,bypassAuthorizer),
+    /schedule-or-attested-request/);
+  const ownerAuthRemoved=new Map(sources);
+  ownerAuthRemoved.set(replayWriter,
+    ownerAuthRemoved.get(replayWriter).replace(
+      'node scripts/metrics-replay-source.mjs authorize','echo skipping provenance'));
+  assert.throws(()=>checkInventory(manifest,ownerAuthRemoved),
+    /schedule-or-attested-request/);
+  const manuallyDispatched=new Map(sources);
+  const privilegedMetrics='.github/workflows/metrics-repository.yml';
+  manuallyDispatched.set(privilegedMetrics,
+    manuallyDispatched.get(privilegedMetrics).replace(
+      /^  schedule:/m,'  workflow_dispatch:\n  schedule:'));
+  assert.throws(()=>checkInventory(manifest,manuallyDispatched),/untrusted manual dispatch\/trigger/);
+  const repoDispatched=new Map(sources);
+  repoDispatched.set(caseWriter,repoDispatched.get(caseWriter).replace(
+    /^  workflow_run:/m,'  repository_dispatch:\n  workflow_run:'));
+  assert.throws(()=>checkInventory(manifest,repoDispatched),/untrusted manual dispatch\/trigger/);
+  const noTrustedCheckout=new Map(sources);
+  noTrustedCheckout.set(caseWriter,noTrustedCheckout.get(caseWriter)
+    .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
+  assert.throws(()=>checkInventory(manifest,noTrustedCheckout),/checkout trusted main/);
+  const metricsCheckoutLeak=new Map(sources);
+  const health='.github/workflows/metrics-repository.yml';
+  metricsCheckoutLeak.set(health,metricsCheckoutLeak.get(health)
+    .replace('ref: ${{ github.sha }}\n          persist-credentials: false',
+      'ref: ${{ github.sha }}\n          persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,metricsCheckoutLeak),
+    /checkout persists credentials/);
+  const extraUntrustedCheckout=new Map(sources);
+  extraUntrustedCheckout.set(caseWriter,extraUntrustedCheckout.get(caseWriter)
+    .replace('      - uses: actions/setup-node@v4',
+      '      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.workflow_run.head_sha }}\n      - uses: actions/setup-node@v4'));
+  assert.throws(()=>checkInventory(manifest,extraUntrustedCheckout),
+    /checkout persists credentials/);
+  const noPersistDisabled=new Map(sources);
+  noPersistDisabled.set(caseWriter,noPersistDisabled.get(caseWriter)
+    .replace('persist-credentials: false','persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,noPersistDisabled),/checkout persists credentials/);
+  const triggerStripped=new Map(sources);
+  triggerStripped.set(privilegedMetrics,triggerStripped.get(privilegedMetrics)
+    .replace(/^  schedule:/m,'  workflow_dispatch:'));
+  assert.throws(()=>checkInventory(manifest,triggerStripped),/untrusted manual dispatch\/trigger/);
+  // Unknown privileged workflows are not allowed to quietly gain a
+  // dynamic-ref Git Store writer identity outside the canonical inventory.
+  const unclassifiedWriter=new Map(sources);
+  unclassifiedWriter.set('.github/workflows/unclassified-writer.yml',[
+    'name: Unclassified Writer',
+    'on:',
+    '  push:',
+    'permissions:',
+    '  contents: write',
+    'jobs:',
+    '  write:',
+    '    steps:',
+    '      - run: git push origin "HEAD:${target_ref}"',
+    '',
+  ].join('\n'));
+  assert.throws(()=>checkInventory(manifest,unclassifiedWriter),
+    /unclassified direct Git push in privileged Workflow/);
+  const unclassifiedRelease=new Map(sources);
+  const release='.github/workflows/release-staging.yml';
+  unclassifiedRelease.set(release,unclassifiedRelease.get(release)+
+    '\n      - run: git push origin "HEAD:${ref}"\n');
+  assert.throws(()=>checkInventory(manifest,unclassifiedRelease),
+    /unclassified direct Git push in privileged Workflow/);
+  const appSmokeBypass=new Map(sources);
+  const smokeWorkflow='.github/workflows/store-app-writer-smoke.yml';
+  appSmokeBypass.set(smokeWorkflow,appSmokeBypass.get(smokeWorkflow).replace(
+    '          git -C "$root" push origin "HEAD:${probe}"',
+    '          git push origin "HEAD:${target_ref}"'));
+  assert.throws(()=>checkInventory(manifest,appSmokeBypass),
+    /unclassified direct Git push in privileged Workflow/);
+  const appSmokeReassignment=new Map(sources);
+  appSmokeReassignment.set(smokeWorkflow,appSmokeReassignment.get(smokeWorkflow).replace(
+    '          root="${RUNNER_TEMP}/run-store-smoke"',
+    '          probe="refs/heads/acceptance-results"\n          root="${RUNNER_TEMP}/run-store-smoke"'));
+  assert.throws(()=>checkInventory(manifest,appSmokeReassignment),
+    /unclassified direct Git push in privileged Workflow/);
+  const unknownWorkflow=new Map(sources);
+  unknownWorkflow.set('.github/workflows/unreviewed.yml',
+    'on: push\npermissions:\n  contents: write\njobs:\n  writer:\n    steps:\n      - run: git push origin HEAD:metrics\n');
+  assert.throws(()=>checkInventory(manifest,unknownWorkflow),
+    /unclassified direct Git push in privileged Workflow/);
+  const unsupported=new Map(sources);
+  unsupported.delete('.github/workflows/e2e-tests.yml');
+  assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
+  assert.deepEqual(findStorePushes('git -C result push origin acceptance-results\n'+
+    'git push origin HEAD:metrics').map(x=>x.ref),['acceptance-results','metrics']);
+  console.log('Run Store inventory: 4 active refs, 6 legacy plus 6 live agent-store scoped App writers, explicit deferred server authorization, no silent App fallback, negative fixtures passed');
+}
+function gh(endpoint){
+  try{
+    return JSON.parse(execFileSync('gh',['api','repos/'+REPO+'/'+endpoint],{
+      encoding:'utf8',timeout:30000,maxBuffer:2*1024*1024,
+      stdio:['ignore','pipe','pipe'],
+    }));
+  }catch(e){return {unavailable:true,error_class:'permission-or-api-error',
+    status:e.status??null};}
+}
+export function assertTrustedLiveContext(env){
+  if(env.GITHUB_REPOSITORY!==REPO||
+     env.GITHUB_REF!=='refs/heads/main'||
+     !['push','schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
+     !HEX40.test(env.GITHUB_SHA??''))
+    fail('live protection audit must run on trusted main source SHA');
+  return true;
+}
+function live(out){
+  assertTrustedLiveContext(process.env);
+  const inventory=data();
+  checkInventory(inventory,workflows());
+  const rulesets=gh('rulesets?per_page=100');
+  const rows=[];
+  for(const store of inventory.stores){
+    const branch=gh('branches/'+store.ref);
+    const protection=gh('branches/'+store.ref+'/protection');
+    rows.push({ref:store.ref,lifecycle:store.lifecycle,
+      branch_exists:!branch.unavailable,
+      branch_protected:branch.unavailable?null:branch.protected===true,
+      protection_endpoint_available:!protection.unavailable,
+      protection_error:protection.unavailable?protection.error_class:null,
+      // A non-admin caller cannot prove configured permissions by querying
+      // only a summary; this is explicitly NOT an enforcement attestation.
+      authorization_verified:false});
+  }
+  const output={schema_version:1,kind:'run_store_governance_observation',
+    repo:REPO,source_sha:process.env.GITHUB_SHA,
+    action_run_id:process.env.GITHUB_RUN_ID??null,
+    observed_at:new Date().toISOString(),
+    rulesets_readable:!rulesets.unavailable,
+    rulesets:rulesets.unavailable?[]:
+      (Array.isArray(rulesets)?rulesets:[]).map(r=>({id:r.id,
+        name:r.name,enforcement:r.enforcement,target:r.target})),
+    stores:rows,
+    verdict:'not-enforced-until-independent-admin-and-authorization-proof'};
+  fs.writeFileSync(out,JSON.stringify(output,null,2)+'\n',{flag:'wx'});
+  console.log('Run Store governance live snapshot written; no server-side enforcement claimed');
+}
+const [command,file]=process.argv.slice(2);
+if(command==='self-test')selfTest();
+else if(command==='check')console.log(JSON.stringify(checkInventory(data(),workflows())));
+else if(command==='live'&&file&&path.isAbsolute(file))live(file);
+else fail('usage: self-test | check | live ABS_OUTPUT_JSON');
+,kind:'immutable'});
+  assert.throws(()=>checkInventory(extraAllowlist,sources),/path-policy inventory drift/);
   const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
