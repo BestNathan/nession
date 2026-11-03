@@ -411,7 +411,9 @@ function selfTest(){
   assert.throws(()=>checkInventory(forgedPathPolicy,sources),/path-policy inventory drift/);
   const extraAllowlist=JSON.parse(JSON.stringify(manifest));
   extraAllowlist.stores.find(x=>x.ref==='agent-store').path_policy.classes.push({
-    pattern:'^secrets\\/.+
+    pattern:'^unauthorized-path',kind:'immutable'});
+  assert.throws(()=>checkInventory(extraAllowlist,sources),/path-policy inventory drift/);
+  const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
   unknownAgentWriter.stores.find(x=>x.ref==='agent-store').writers[0].workflow=
