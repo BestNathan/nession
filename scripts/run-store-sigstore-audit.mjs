@@ -219,6 +219,11 @@ function selfTest(){
     .toString('utf8'),'hello');
   assert.equal(decodeSnappyBundle(Buffer.from([8,4,97,98,9,2]))
     .toString('utf8'),'abababab');
+  // Decode the same overlapping copy with 16-bit and 32-bit offsets.
+  assert.equal(decodeSnappyBundle(Buffer.from([8,4,97,98,22,2,0]))
+    .toString('utf8'),'abababab');
+  assert.equal(decodeSnappyBundle(Buffer.from([8,4,97,98,23,2,0,0,0]))
+    .toString('utf8'),'abababab');
   for(const bad of [
     Buffer.from([5,16,104,101]),                // truncated literal
     Buffer.from([8,4,97,98,9,0]),              // illegal zero offset
