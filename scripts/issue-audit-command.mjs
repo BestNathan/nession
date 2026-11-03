@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const COMMANDS=new Map([['/audit','single'],['/audit tree','tree']]);
 const TRUSTED=new Set(['OWNER','MEMBER','COLLABORATOR']);
 const SHA=/^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$/;
-export function resolveAuditComment(event,repo,actor,provider='cursor',environment='cursor'){
+export function resolveAuditComment(event,repo,actor,provider='qwen',environment='dev-claude-qwen'){
   if(!event||!repo||!actor||event.action!=='created')return null;
   if(event.repository?.full_name!==repo||!event.issue||
     event.issue.pull_request!=null||!Number.isSafeInteger(event.issue.number)||
@@ -40,7 +40,7 @@ function main(){
     assert.match(outputs,/(^|\n)allow_agent=true\n/);
     assert.match(outputs,/(^|\n)mode=tree\n/);
     assert.match(outputs,/(^|\n)issue_number=1645\n/);
-    assert.match(outputs,/(^|\n)environment=cursor\n/);
+    assert.match(outputs,/(^|\n)environment=dev-claude-qwen\n/);
     assert.equal(resolveAuditComment(evt,'x/y','owner','qwen','dev-claude-qwen').environment,
       'dev-claude-qwen');
     assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),
@@ -68,8 +68,8 @@ function main(){
   if(process.argv[2]!=='resolve')throw Error('usage: issue-audit-command.mjs resolve EVENT_PATH REPO ACTOR | self-test');
   const event=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
   const resolved=resolveAuditComment(event,process.argv[4],process.argv[5],
-    process.env.ISSUE_AUDIT_PROVIDER_SELECTION || 'cursor',
-    process.env.ISSUE_AUDIT_ENVIRONMENT_SELECTION || 'cursor');
+    process.env.ISSUE_AUDIT_PROVIDER_SELECTION || 'qwen',
+    process.env.ISSUE_AUDIT_ENVIRONMENT_SELECTION || 'dev-claude-qwen');
   if(!resolved){console.log('ignored-untrusted-or-noncommand');return;}
   const out=process.env.GITHUB_OUTPUT;
   if(!out)throw Error('GITHUB_OUTPUT missing');
