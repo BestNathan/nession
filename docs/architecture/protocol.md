@@ -1160,6 +1160,32 @@ Rust sides share one function
 (`nession_protocol::contracts::p2p::agent_url_with_credential`) and its inverse
 for reading it back.
 
+### The Relay target is Server-owned
+
+An authenticated browser may express a Relay **preference**, not an endpoint.
+`server.session.relay.begin` carries an optional `relay_url`, and until `#2652`
+the Server treated it as authoritative: it appended an Agent-scoped credential
+and dialled whatever host, port and path the browser named. That made the relay
+dial a WebSocket-handshake SSRF primitive and sent a live token to a
+non-Agent peer.
+
+The endpoint set belongs to the Agent. A manual `relay_url` must resolve to one
+of the addresses that Agent registered (or its Server-owned legacy address)
+under the WHATWG URL parser: scheme, host, port and path must match, and the
+Server dials the **registered** spelling rather than the browser's bytes.
+Candidates carrying userinfo, a query or a fragment are refused outright
+instead of normalized, because those are exactly the forms that make two
+targets look equivalent — and the query is where the scoped credential rides.
+The binding check runs **before** the credential is minted or granted, so a
+forged target receives neither a dial nor a token. A refused begin answers with
+a structured error that names the rule and the Agent, never the candidate.
+
+The credential still rides the dial URL's query, but the relay's diagnostics
+never do. Attempt, success, failure and timeout logs state a sanitized endpoint
+(scheme, host, port, path) and a bounded failure category; the raw dial URL —
+and any error display that could embed it — is never formatted into a log or a
+response.
+
 ### This is a capability, not a principal
 
 The Server's relay pipeline above has **no** authorization step and no

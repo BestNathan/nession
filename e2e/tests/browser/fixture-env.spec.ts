@@ -156,7 +156,7 @@ test.describe('Web 1440×900', () => {
     await page.getByTestId('env-editor-save').click();
 
     const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('Save and update running sessions?');
+    await expect(dialog).toContainText('Save while used by running sessions?');
     await expect(dialog).toContainText('api-tests, deploy');
     await expect(dialog).not.toContainText(/force/i);
   });
