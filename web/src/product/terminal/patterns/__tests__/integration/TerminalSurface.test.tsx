@@ -353,6 +353,7 @@ describe('transient clipboard state (#2598)', () => {
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
       onDismissClipboardNotice,
     });
+    openNotices();
     await userEvent.click(view.getByRole('button', { name: 'Copy' }));
     expect(view.getByTestId('terminal-clipboard-notice')).toHaveTextContent(
       'select the text below and press Ctrl/Cmd+C',
