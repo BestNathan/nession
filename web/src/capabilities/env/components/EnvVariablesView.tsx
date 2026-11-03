@@ -7,13 +7,14 @@ import { MASKED_VALUE, isSensitiveKey } from '@/capabilities/env/model/sensitive
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { copyToClipboard } from '@/shared/lib/clipboard';
 
 /** Below this count a filter field would be chrome in search of a problem. */
 const SEARCH_THRESHOLD = 6;
 
 async function copyValue(key: string, value: string) {
   try {
-    await navigator.clipboard.writeText(value);
+    await copyToClipboard(value);
     toast.success(`Copied ${key}`);
   } catch {
     toast.error('Copy failed — the browser denied clipboard access');

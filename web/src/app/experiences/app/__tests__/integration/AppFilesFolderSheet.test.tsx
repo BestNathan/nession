@@ -26,12 +26,15 @@ function makeFileOps(): FileOps {
 
 describe('AppFilesFolderSheet', () => {
   afterEach(() => {
+    Reflect.deleteProperty(window, 'isSecureContext');
     delete (navigator as { clipboard?: unknown }).clipboard;
     vi.clearAllMocks();
   });
 
   it('copies the workspace-relative path and closes', async () => {
     const user = userEvent.setup();
+    // The shared clipboard owner takes the async branch only on secure origins.
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },

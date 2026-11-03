@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useCommandHistory } from '@/product/terminal/hooks/useCommandHistory';
+import { copyToClipboard } from '@/shared/lib/clipboard';
 import { layoutFromLineCount } from '@/product/terminal/capsule/measure/layoutFromLineCount';
 import type {
   CapsulePopoverId,
@@ -100,7 +101,7 @@ export function useCapsuleState({
 
   const copyInput = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(inputValue);
+      await copyToClipboard(inputValue);
     } catch {
       // clipboard unavailable
     }

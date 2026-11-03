@@ -11,11 +11,17 @@
  * served over plain HTTP (the deployed staging origin is one) has no
  * `navigator.clipboard`. A remote `OSC 52`/`OSC 5522` write therefore cannot
  * complete automatically there and must not pretend to: the protocol answers
- * `EPERM`, and the surface offers a **user-gesture** copy instead. That path is
- * the deprecated `document.execCommand('copy')` with a scoped `copy` listener —
- * it runs inside the click, carries the bytes only for the duration of the
- * event, and never touches `navigator.clipboard`.
+ * `EPERM`, and the surface offers a **user-gesture** copy instead.
+ *
+ * That user-gesture text path is delegated to the shared browser clipboard
+ * owner (`@/shared/lib/clipboard`, #2656), which integrates
+ * `copy-to-clipboard`; this adapter keeps only the protocol-specific MIME
+ * writes, capability detection and `EPERM`/`EIO` normalization.
  */
+import {
+  asyncClipboardWriteAvailable,
+  copyText,
+} from '@/shared/lib/clipboard';
 import {
   ClipboardEffectError,
   type ClipboardEffectPort,
@@ -36,55 +42,6 @@ function clipboardApi(): Clipboard | undefined {
   return typeof navigator === 'undefined' ? undefined : navigator.clipboard;
 }
 
-/**
- * Whether this origin can perform a programmatic (async) clipboard write.
- *
- * The API is absent on ordinary HTTP (#2614) and the answer is checked before
- * a user gesture is spent on a call that cannot run there. A browser that
- * exposes the API only to refuse it falls through to `EPERM` at call time.
- */
-export function asyncClipboardWriteAvailable(): boolean {
-  if (typeof navigator === 'undefined') {
-    return false;
-  }
-  if (typeof window !== 'undefined' && window.isSecureContext === false) {
-    return false;
-  }
-  return typeof navigator.clipboard?.writeText === 'function';
-}
-
-/**
- * Copy text from inside a user gesture, for origins without the async API.
- *
- * Must be called synchronously from the activating event (a click): the
- * transient activation is what lets the browser execute the command. The
- * payload lives only in the listener's `ClipboardEvent`, and the listener is
- * removed before returning — no lasting selection, focus or history.
- *
- * Returns whether the browser executed the copy with this text. `false` is
- * the truthful answer on browsers that no longer support the command; the
- * caller must then present a selectable surface rather than claim success.
- */
-export function copyTextFromUserGesture(text: string): boolean {
-  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') {
-    return false;
-  }
-  let delivered = false;
-  const onCopy = (event: ClipboardEvent) => {
-    event.clipboardData?.setData('text/plain', text);
-    event.preventDefault();
-    delivered = true;
-  };
-  document.addEventListener('copy', onCopy, true);
-  try {
-    return document.execCommand('copy') && delivered;
-  } catch {
-    return false;
-  } finally {
-    document.removeEventListener('copy', onCopy, true);
-  }
-}
-
 /** A BlobPart backed by a plain ArrayBuffer (never a shared one). */
 function blobPart(bytes: Uint8Array): BlobPart {
   const copy = new Uint8Array(bytes.byteLength);
@@ -100,9 +57,15 @@ export class BrowserClipboardEffects implements ClipboardEffectPort {
     return asyncClipboardWriteAvailable();
   }
 
-  /** The user-gesture fallback for origins without the async API (#2614). */
-  writeTextFromGesture(text: string): boolean {
-    return copyTextFromUserGesture(text);
+  /**
+   * The user-gesture text path (#2614), delegated to the shared owner (#2656).
+   *
+   * The returned Promise is the library's: its HTTP branch has already run the
+   * DOM copy during this call, while its secure-origin branch settles after
+   * the async write. Callers must invoke this inside the activating event.
+   */
+  writeTextFromGesture(text: string): Promise<boolean> {
+    return copyText(text);
   }
 
   /**

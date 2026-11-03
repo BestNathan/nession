@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EnvVariablesView } from '@/capabilities/env/components/EnvVariablesView';
@@ -13,6 +13,15 @@ import { toast } from 'sonner';
 function vars(...entries: [string, string][]): [string, string][] {
   return entries;
 }
+
+/** The shared clipboard owner takes the async branch only on secure origins. */
+function withSecureContext(value: boolean): void {
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value });
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'isSecureContext');
+});
 
 describe('EnvVariablesView', () => {
   it('renders key and value in mono rows', () => {
@@ -73,6 +82,7 @@ describe('EnvVariablesView', () => {
     const user = userEvent.setup();
     // userEvent.setup() installs its own clipboard stub, so the mock goes in
     // after it, not before.
+    withSecureContext(true);
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -87,6 +97,7 @@ describe('EnvVariablesView', () => {
   });
 
   it('a clipboard failure says so instead of pretending', async () => {
+    withSecureContext(true);
     const user = userEvent.setup();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
