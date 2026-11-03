@@ -49,7 +49,8 @@ export function attestRunStoreFixture(run, jobs, artifacts, targetSha, repo) {
   if (matches.length !== 1) throw Error('missing or ambiguous Run Store fixture artifact');
   const artifact = matches[0];
   if (!Number.isSafeInteger(artifact.id) || artifact.id <= 0 ||
-      artifact.expired !== false || !Number.isSafeInteger(artifact.size_in_bytes) ||
+      artifact.expired !== false || artifact.workflow_run?.id !== run.id ||
+      !Number.isSafeInteger(artifact.size_in_bytes) ||
       artifact.size_in_bytes <= 0 || !DIGEST.test(artifact.digest) ||
       (artifact.workflow_run?.head_sha && artifact.workflow_run.head_sha !== targetSha))
     throw Error('unverified or expired Run Store fixture artifact');
@@ -105,7 +106,7 @@ export function selfTestRunStoreFixtureEvidence() {
     steps: REQUIRED_STEPS.map(name => ({name, status: 'completed', conclusion: 'success'}))};
   const artifact = {id: 91, name: 'run-store-fixture-evidence-42-2',
     expired: false, size_in_bytes: 510, digest: 'sha256:' + 'b'.repeat(64),
-    workflow_run: {head_sha: sha}};
+    workflow_run: {id:42,head_sha: sha}};
   const verify = (r=run, j=job, a=artifact) =>
     attestRunStoreFixture(r, {jobs:[j]}, {artifacts:[a]}, sha, repo);
   assert.equal(verify().verdict, 'fixture_pass');
@@ -118,6 +119,7 @@ export function selfTestRunStoreFixtureEvidence() {
   assert.throws(() => verify(run,{...job,steps:job.steps.map(step =>
     step.name === REQUIRED_STEPS[2] ? {...step, conclusion:'skipped'} : step)}));
   assert.throws(() => verify(run,job,{...artifact,expired:true}));
+  assert.throws(() => verify(run,job,{...artifact,workflow_run:{id:99,head_sha:sha}}));
   assert.throws(() => verify(run,job,{...artifact,digest:'bad'}));
   assert.throws(() => verify(run,job,{...artifact,workflow_run:{head_sha:'c'.repeat(40)}}));
   return true;
