@@ -6,6 +6,9 @@ name: Metrics / Replay Request
 # Metrics / Repository Health workflow authenticates the completed run through
 # GitHub REST before initiating any privileged work.
 on:
+  # Disposable branch-only negative source; no secrets or write authority.
+  push:
+    branches: [test/1690-replay-source-denial-20261103]
   workflow_dispatch:
 
 permissions:
