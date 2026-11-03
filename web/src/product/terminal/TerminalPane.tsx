@@ -10,6 +10,10 @@ interface TerminalPaneProps {
   terminalState: TerminalStatus;
   viewportReady: boolean;
   onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  /** False while this client may not send input (observer/reconnect/switch). */
+  inputDisabled?: boolean;
+  /** The App shell's reserved edge band, supplied by the App layer. */
+  touchEdgeReservation?: (target: EventTarget | null, clientX: number) => boolean;
 }
 
 /**
@@ -22,6 +26,8 @@ export function TerminalPane({
   terminalState,
   viewportReady,
   onOpenWorkspaceFile,
+  inputDisabled = false,
+  touchEdgeReservation,
 }: TerminalPaneProps) {
   const showViewport = Boolean(controller) && viewportReady;
   const showBlockingLoader = !controller || !viewportReady;
@@ -33,6 +39,8 @@ export function TerminalPane({
           <TerminalViewport
             controller={controller}
             onOpenWorkspaceFile={onOpenWorkspaceFile}
+            inputDisabled={inputDisabled}
+            touchEdgeReservation={touchEdgeReservation}
           />
         ) : null}
         {showBlockingLoader ? (

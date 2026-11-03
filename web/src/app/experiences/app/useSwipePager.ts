@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type TouchEvent } from 'react';
+import { isTouchOwned } from '@/shared/lib/touchOwnership';
 import { edgeBandSide, edgeOwnsDrag, type EdgeSide, type ShellBounds } from './edgeBand';
 import { SWIPE_COMMIT_PX } from './gesture';
 import { isWorkSurface } from './workSurface';
@@ -173,6 +174,10 @@ export function useSwipePager({
       if (!touch) {
         return;
       }
+
+      // A surface may arm after this pager started; it claims the finger in
+      // the shared registry, and the shell stands down regardless of order.
+      if (isTouchOwned(touch.identifier)) { surrender(); return; }
 
       const dx = touch.clientX - startXRef.current;
       const dy = touch.clientY - startYRef.current;

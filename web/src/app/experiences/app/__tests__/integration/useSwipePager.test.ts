@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { TouchEvent } from 'react';
+import { claimTouchOwnership } from '@/shared/lib/touchOwnership';
 import type { ShellBounds } from '../../edgeBand';
 import { EDGE_BAND_PX, SWIPE_COMMIT_PX } from '../../gesture';
 import { useSwipePager } from '../../useSwipePager';
@@ -41,9 +42,10 @@ function touchEvent(
   clientX: number,
   clientY = 0,
   target: EventTarget | null = null,
+  identifier = 0,
 ): TouchEvent {
   return {
-    touches: [{ clientX, clientY } as Touch],
+    touches: [{ clientX, clientY, identifier } as Touch],
     target,
   } as unknown as TouchEvent;
 }
@@ -109,6 +111,25 @@ describe('useSwipePager', () => {
 
     expect(onIndexChange).not.toHaveBeenCalled();
     expect(result.current.dragOffset).toBe(0);
+  });
+
+  it('surrenders a started drag when the direction pad claims the finger', () => {
+    // Ordering is not authority: the pad arms after the pager has already
+    // started its gesture, so the pager must consult the shared ownership
+    // registry before following the finger further.
+    const { onIndexChange, result } = setup(1);
+    const release = claimTouchOwnership(9, 'terminal-direction-pad');
+
+    act(() => {
+      result.current.onTouchStart(touchEvent(width / 2, 300, chrome(), 9));
+      result.current.onTouchMove(touchEvent(width / 2 + SWIPE_COMMIT_PX + 10, 300, null, 9));
+      result.current.onTouchEnd();
+    });
+
+    expect(onIndexChange).not.toHaveBeenCalled();
+    expect(result.current.dragOffset).toBe(0);
+
+    release();
   });
 
   it('locks the axis on the first move and stays locked for the gesture', () => {

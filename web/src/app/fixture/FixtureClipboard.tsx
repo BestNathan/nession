@@ -9,9 +9,11 @@ import {
   type TerminalControllerEvents,
 } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
+import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import type { TerminalSession } from '@/product/terminal/state/session';
+import { cn } from '@/shared/lib/utils';
 import { fixtureInputDrop } from './fixtureInputDrop';
 import { fixtureStatusInputs } from './fixtureStatusNotices';
 
@@ -78,7 +80,11 @@ function createHarnessTransport() {
  */
 export function FixtureClipboard() {
   const search = useLocation().search;
-  const hostRef = useRef<HTMLDivElement>(null);
+  // #2657: the App experience owns a 28px edge band that the direction pad
+  // must respect. The shell attribute is what `appEdgeBandReservation` reads,
+  // so a Case can opt into the App shell here without rendering the whole
+  // spatial pager. Existing clipboard/scroll Cases keep the Web default.
+  const appShell = new URLSearchParams(search).get('experience') === 'app';
   // The route can hand the surface any one of the four status inputs (#2621).
   // They are *initial* states: a notice the fixture then receives from the real
   // controller replaces the clipboard one, and Dismiss really dismisses.
@@ -90,8 +96,6 @@ export function FixtureClipboard() {
   const takeControlRef = useRef(0);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) { return; }
     let sequence = 0;
     const { transport, sent } = createHarnessTransport();
     const events: TerminalControllerEvents = {
@@ -115,7 +119,8 @@ export function FixtureClipboard() {
       scrollbackMode: 'local-buffer',
       events,
     });
-    instance.attach(host);
+    // TerminalViewport owns attach/detach, exactly as it does in the product,
+    // so the touch gesture (#2657) is mounted over the real surface here too.
     setController(instance);
     window.clipboardHarness = {
       emit: transport.emit,
@@ -133,9 +138,13 @@ export function FixtureClipboard() {
   }, []);
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background" data-testid="fixture-clipboard">
+    <div
+      className="flex h-[100dvh] flex-col bg-background"
+      data-testid="fixture-clipboard"
+      data-experience={appShell ? 'app' : undefined}
+    >
       <TerminalSurface
-        experience="web"
+        experience={appShell ? 'app' : 'web'}
         inputDisabled={false}
         controller={controller}
         historyDegraded={historyDegraded}
@@ -146,7 +155,12 @@ export function FixtureClipboard() {
         clipboardNotice={notice}
         onDismissClipboardNotice={() => setNotice(null)}
       >
-        <div ref={hostRef} className="min-h-0 flex-1" data-testid="fixture-clipboard-host" />
+        <div
+          className={cn('min-h-0 flex-1', appShell && 'flex flex-col')}
+          data-testid="fixture-clipboard-host"
+        >
+          <TerminalViewport controller={controller} />
+        </div>
       </TerminalSurface>
     </div>
   );

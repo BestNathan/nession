@@ -87,6 +87,30 @@ export function edgeBandSide(
 }
 
 /**
+ * Whether a touch belongs to the shell's reserved edge band (#2657).
+ *
+ * The Terminal's long-press direction pad must not arm on a touch the App
+ * pager may claim; that band is shell navigation's, so the product leaf asks
+ * the App layer through a predicate instead of importing this module (the
+ * layer rule has no product → app edge). The predicate reads the same
+ * `edgeBandSide` rule the pager uses, measured from the nearest App experience
+ * root so an inset App keeps its band where the user sees it.
+ */
+export function appEdgeBandReservation(target: EventTarget | null, clientX: number): boolean {
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  const shell = element?.closest('[data-experience="app"]');
+  if (!(shell instanceof Element)) {
+    return false;
+  }
+  const rect = shell.getBoundingClientRect();
+  return edgeBandSide(clientX, { left: rect.left, right: rect.right }) !== null;
+}
+
+/**
  * Whether a horizontal drag of `deltaX` is the one `side`'s layer arrives on.
  *
  * `deltaX` is positive to the right, so the left band — which pulls Sessions in
