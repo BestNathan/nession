@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "69a8e6b9c4382cf23c93212fb8b7e9c4692e854d",
+  "run_id": 41601873707,
+  "run_attempt": 1,
+  "plan_digest": "c5f985cc860e805fb20df2be6ac3624f6ed58465582b84dab191e3ae3edef826",
+  "artifact_digest": "sha256:402a256a82e5a2916be9edbd334ab8494ee371f1a92ff2d5015195cf39ac0622",
+  "results": [
+    {
+      "id": "attach-critical-path",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 19
+    }
+  ]
+}
