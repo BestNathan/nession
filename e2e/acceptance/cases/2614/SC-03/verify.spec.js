@@ -44,6 +44,7 @@ test('SC-03: HTTP automatic writes are refused while user-triggered paths work',
     expect(insecure.secure).toBe(false);
     expect(insecure.hasAsyncClipboard).toBe(false);
     await emit(page, '\x1b]52;c;' + b64('http-refused') + '\x1b\\');
+    await page.getByTestId('terminal-notices-trigger').click();
     await expect(page.getByTestId('terminal-clipboard-notice'))
       .toHaveAttribute('data-clipboard-notice', 'copy-required');
     observed.push('HTTP origin: automatic OSC 52 write refused as copy-required');
