@@ -363,6 +363,18 @@ function selfTest(){
   // verified, and the bounded-limitation note stays out of the report.
   const readable=summarizeGovernance(migration,[shape({})],app,history);
   assert.equal(readable.protected_by_server_ruleset,true);
+  assert.equal(readable.stores.length,POLICY_REFS.length);
+  assert.equal(readable.stores.find(x=>x.ref===ACTIVE_AGENT_REF)
+    .configuration_verified,true);
+  // A three-ref Ruleset is no longer sufficient once the fourth orphan Store
+  // is active. Historical migration coverage still refers to the old three.
+  const missingAgent=summarizeGovernance(migration,[shape({conditions:{
+    ref_name:{include:GOVERNED_REFS.map(x=>'refs/heads/'+x),exclude:[]}}})],
+  app,history);
+  assert.equal(missingAgent.actual_history_checked_against_unanchored_baseline,true);
+  assert.equal(missingAgent.protected_by_server_ruleset,false);
+  assert.equal(missingAgent.stores.find(x=>x.ref===ACTIVE_AGENT_REF)
+    .configuration_verified,false);
   assert.equal(readable.policy_observability.verdict,'verified');
   assert.equal(readable.policy_observability
     .establishes_neither_presence_nor_absence,false);
