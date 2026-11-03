@@ -32,4 +32,6 @@
 
 | Public Knowledge Explorer / topic, article, evidence and global changelog | [#2664](https://github.com/BestNathan/nession/issues/2664) | [Interactive HTML](pages-knowledge-2664/index.html) · [Scenario & fidelity](pages-knowledge-2664/README.md) |
 
+| Claude Code Auto Memory / Session → Repository contextual reader | [#2689](https://github.com/BestNathan/nession/issues/2689) | [Interactive HTML](claude-memory-2689/index.html) · [Scenario & fidelity](claude-memory-2689/README.md) |
+
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
