@@ -25,6 +25,10 @@ run(({ evidence }) => {
   assertRan(refusal, [
     'relay_begin_refuses_an_unregistered_manual_endpoint_before_grant',
   ]);
+  const noDial = serverLibTests('relay_begin_refusal_never_dials');
+  assertRan(noDial, [
+    'relay_begin_refusal_never_dials_a_listening_foreign_target',
+  ]);
 
   const handler = readSource(
     'crates/nession-server/src/server/handler/server_session_relay_begin_v1.rs',

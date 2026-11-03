@@ -406,6 +406,46 @@ async fn relay_begin_refuses_an_unregistered_manual_endpoint_before_grant() {
 }
 
 #[tokio::test]
+async fn relay_begin_refusal_never_dials_a_listening_foreign_target() {
+    // The issue's runtime reproducer: a real local listener stands in for an
+    // attacker. Binding and then refusing the URL must not produce so much as
+    // a TCP connection to it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let forged = format!("ws://{addr}/ws");
+
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_relay_agent(&mut h).await;
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let (client_sender, _client_rx) = WsMessageSender::new();
+    h.set_client_sender(client_sender);
+
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.relay.begin",
+            json!({ "session_id": "a1:dev", "relay_url": forged }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["status"], "error");
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept())
+            .await
+            .is_err(),
+        "an unregistered relay target must never receive a dial"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "an unregistered relay target must never trigger a credential grant"
+    );
+}
+
+#[tokio::test]
 async fn relay_begin_accepts_a_manual_endpoint_registered_to_the_agent() {
     let mut h = test_handler("").await;
     h.authenticated_client = true;
