@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "50f8d547559face8902ae66c6c853340149081b18d9524636bf5e39664c763e0",
+  "run_id": 41681758261,
+  "run_attempt": 1,
+  "issue": 2654,
+  "criterion": "SC-05",
+  "criterion_text": "Real integration with #170 binds only the intended Session, recovers observed state after reconnect, and handles overlapping keys/removal without using client attach/unset ownership.",
+  "stage": "staging",
+  "target_sha": "e2bcd6ab45a2663b6f82c096f7e9368da46ec008",
+  "contract_sha256": "0df8a8113560859f5bb795f7d31a9903ebccc6452660423b6c548e85a189a6f8",
+  "case_revision": "e2bcd6ab45a2663b6f82c096f7e9368da46ec008",
+  "case_tree_sha": "ddd3d4fa4fc2bfa3a21aa3f01d1599777e1fab8b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T17:13:07.865Z",
+  "finished_at": "2026-11-03T17:14:02.193Z",
+  "duration_ms": 54328,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify-live.js",
+      "result": "Pass",
+      "summary": "Exact-SHA full stack bound only the intended Session, materialized the ordered selection last-wins, kept it across a fresh client connection, restored removed keys, and deferred profile edits to Reapply.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=e2bcd6ab45a2663b6f82c096f7e9368da46ec008 profile=full-stack-local"
+        },
+        {
+          "type": "protocol",
+          "value": "server.agent.list agent_id=e2e-test-node status=online"
+        },
+        {
+          "type": "protocol",
+          "value": "session sc05-unbound-3662-mw0y56q2 desired_revision=0 and no SC05_SHARED in tmux"
+        },
+        {
+          "type": "protocol",
+          "value": "binding.set desired_revision=1 order=sc05-a-3662-mw0y56q2.env,sc05-b-3662-mw0y56q2.env observed=pending_shell applied_revision=1"
+        },
+        {
+          "type": "protocol",
+          "value": "tmux sc05-bound-3662-mw0y56q2 SC05_SHARED=from-b (last profile wins), SC05_A=alpha"
+        },
+        {
+          "type": "protocol",
+          "value": "second client read desired order=sc05-a-3662-mw0y56q2.env,sc05-b-3662-mw0y56q2.env observed=pending_shell"
+        },
+        {
+          "type": "protocol",
+          "value": "binding.set [b] removed SC05_A/SC05_REMOVED and kept SC05_SHARED=from-b"
+        },
+        {
+          "type": "protocol",
+          "value": "profile save left tmux SC05_SHARED=from-b (no implicit mutation)"
+        },
+        {
+          "type": "protocol",
+          "value": "binding.reapply desired_revision=3 materialized SC05_SHARED=from-b2"
+        }
+      ],
+      "duration_ms": 9443,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-pinned-tests.js",
+      "result": "Pass",
+      "summary": "Exact-SHA #170 tests prove Agent reconnect re-reports the surviving binding and the Server owns replace/reapply/legacy translation for one Session.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=e2bcd6ab45a2663b6f82c096f7e9368da46ec008 profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "cargo test nession-agent: connection::a_reconnect_reports_the_surviving_binding"
+        },
+        {
+          "type": "test",
+          "value": "cargo test nession-server: binding_set_persists_the_whole_ordered_selection_and_reports_observed; binding_reapply_resolves_current_content_at_a_new_revision; legacy_unset_does_not_read_the_removed_profile; an_agent_binding_report_updates_only_known_sessions"
+        }
+      ],
+      "duration_ms": 38962,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41681758261,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e2bcd6ab45a2663b6f82c096f7e9368da46ec008",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41681758261",
+    "record_path": "runs/2026-11-03/41681758261-1/2654/SC-05.json",
+    "source_result_sha256": "2f2788709005e516d559729d8db7442b0aaaee2c933fecbe34b98294845fb316"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41681758261-1",
+    "sha256": "2f2788709005e516d559729d8db7442b0aaaee2c933fecbe34b98294845fb316",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41681758261",
+    "durability": "time-limited; object archival not configured"
+  }
+}
