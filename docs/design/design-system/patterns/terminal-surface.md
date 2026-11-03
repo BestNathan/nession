@@ -20,7 +20,7 @@ Terminal remains the current hero surface, but that does not make every surround
 
 ```text
 ┌─ Terminal well ───────────────────────────────────────────────┐
-│ optional continuity banner / state                           │
+│ xterm grid — no automatic notice overlay                     │
 │ ┌─ TerminalViewport ────────────────────────────────────────┐ │
 │ │ xterm.js / current terminal workload                     │ │
 │ │                                                          │ │
@@ -36,7 +36,7 @@ Terminal remains the current hero surface, but that does not make every surround
 |------|------|
 | Terminal well | Stable host for viewport + contextual floating layers |
 | TerminalViewport | xterm mount point and scrollback owner |
-| continuity/banner state | Local attach/reconnect/mode messaging when necessary |
+| contextual notices | History uncertainty, lost input, clipboard action and control transfer are reachable on demand from the Capsule, never painted over terminal cells |
 | TerminalCapsule | Conversational/contextual interaction surface; see its own pattern spec |
 | App scroll helpers | Touch-specific accelerators when required |
 
@@ -171,14 +171,16 @@ Do not duplicate capsule interaction rules here. See [terminal-capsule.md](termi
 
 ## Clipboard protocol states
 
-Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states appear only while they matter, as a compact, content-width **floating notice** at the Terminal's top end, outside the bottom capsule/occlusion region. They are accessible, do not steal focus, and dismiss on their own:
+Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states are **never mounted automatically** (#2658). While such a state exists, the Capsule gains one contextual notices action; the sentence and its action live in a disclosure that opens only on that user gesture. Clipboard text is absent from the DOM until the disclosure opens. The state remains transient and dismisses on its own:
 
 - A remote OSC 52 write the browser blocks offers an explicit **Copy** action for that text. That button is the user gesture the Clipboard API requires; the strip states the request, not a completed copy.
 - On an origin without the async Clipboard API (ordinary HTTP, #2614) the same Copy action completes through the DOM copy command inside the click. If the browser refuses that too, the notice states the copy was not automatic and offers a bounded read-only selectable surface for Ctrl/Cmd+C/⌘C; it is not a file, an upload or a path.
 - A refused OSC 5522 clipboard write states that the browser blocked it.
 - An image-only paste into a TUI that has not enabled OSC 5522 states `Image clipboard protocol not supported by this TUI`, sends nothing, creates no file and inserts no path.
 
-**No Terminal height reservation (#2621).** Clipboard, observer/controller, input-drop and degraded-history notices share one root-owned absolute overlay, **outside** `[data-terminal-capsule-host]` (to preserve #1307's earlier capsule-occlusion fix). The host remains the only flex-filling child, so a notice appearing or disappearing must not change xterm's viewport height or terminal row count. Use bounded content width, quiet typography and minimal buttons; the overlay may cover a small part of the upper-right screen temporarily, but never a full-width bottom band. The overlay wrapper passes through pointer events, except for its interactive notice contents. No placeholder is rendered in healthy states.
+**No automatic Terminal notice (#2658).** Clipboard, observer/controller, input-drop and degraded-history states share one explicit disclosure opened from the existing Capsule. The Terminal mounts no status overlay, banner, strip or reserved status row, so the capsule host remains the only flex-filling child and the xterm grid is identical in healthy, degraded, observer, input-drop and clipboard states. The disclosure is a Nession-owned dialog: it may cover the grid only after the user opens it, and it returns focus to its trigger on dismissal while the trigger still exists.
+
+Diagnostics stay observable without painting anything: `[data-terminal-stream-state]` carries the runtime's synchronized / degraded-live / unavailable answer, and `data-terminal-notices` on the Terminal surface names the notice kinds currently available (for example `input-drop observer`). Neither attribute contains clipboard text. No placeholder is rendered in healthy states.
 
 ## What this pattern must not do
 
@@ -191,7 +193,7 @@ Native text selection, copy and paste are the baseline; there is no paste/upload
 - Shrink the terminal grid with large fixed padding to reserve hypothetical UI.
 - Let extension-specific UI redefine the global Terminal shell.
 - Turn a transient clipboard/permission state into a permanent toolbar, or inject image data a TUI has not negotiated.
-- Reserve flex height for transient Terminal status strips, or move status overlays under the opaque bottom capsule.
+- Mount an automatic notice, strip, banner, badge or reserved status row inside or over the Terminal grid; those states exist only behind the Capsule's explicit notices disclosure.
 
 ## Executable-contract migration
 

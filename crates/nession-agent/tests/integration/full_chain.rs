@@ -169,6 +169,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+            handshake_policy: Default::default(),
         },
     )?;
     let (handle, addr) = server.start().await?;

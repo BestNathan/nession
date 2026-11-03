@@ -31,6 +31,72 @@ fn claude_binding_env(session_name: &str) -> Vec<(String, String)> {
     crate::claude_binding::env_for(session_name)
 }
 
+/// Resolve the shell a new Session will actually run.
+///
+/// tmux's own `default-shell` is the first authority: the adapter has to launch
+/// the same shell tmux would. The Agent process's `SHELL` is next, and the
+/// passwd login shell for this uid is the last fallback.
+///
+/// The last step is not cosmetic. The adapter is resolved *before* `new-session`
+/// starts a tmux server, so a container image that sets neither `SHELL` nor a
+/// tmux server yet makes the pre-session query answer empty even though tmux
+/// resolves the passwd shell a moment later. Without this fallback the Session
+/// runs bash while the binding reports `unsupported_shell` and Layer C is
+/// skipped.
+fn resolve_session_shell(
+    tmux_default: Option<String>,
+    shell_env: Option<String>,
+    passwd_shell: Option<String>,
+) -> Option<String> {
+    [tmux_default, shell_env, passwd_shell]
+        .into_iter()
+        .flatten()
+        .map(|shell| shell.trim().to_string())
+        .find(|shell| !shell.is_empty())
+}
+
+/// The login shell recorded for this process's uid in the passwd database.
+///
+/// Used only as a shell-resolution fallback. `None` when the database has no
+/// entry or records a non-interactive shell.
+#[cfg(unix)]
+fn passwd_login_shell() -> Option<String> {
+    // SAFETY: `pwd` and `buf` are valid for the whole call, and `getpwuid_r`
+    // writes the record and its strings into them. On success `pw_shell`
+    // points into `buf`, and the string is copied out before either is
+    // dropped. A non-zero return (including ERANGE) is "no answer".
+    unsafe {
+        let mut pwd: libc::passwd = std::mem::zeroed();
+        let mut buf = vec![0; 4096];
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        let rc = libc::getpwuid_r(
+            libc::getuid(),
+            &mut pwd,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut result,
+        );
+        if rc != 0 || result.is_null() || pwd.pw_shell.is_null() {
+            return None;
+        }
+
+        let shell = std::ffi::CStr::from_ptr(pwd.pw_shell)
+            .to_string_lossy()
+            .trim()
+            .to_string();
+        if shell.is_empty() || shell.ends_with("/nologin") || shell.ends_with("/false") {
+            None
+        } else {
+            Some(shell)
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_login_shell() -> Option<String> {
+    None
+}
+
 /// Width a session is created at, **before any client has attached**.
 ///
 /// A starting size, not a lock. tmux's `window-size` defaults to `latest` and
@@ -434,7 +500,11 @@ impl SessionManager {
         let adapter = match &binding {
             Some(_) => {
                 let tmux_default = self.tmux_dep().ops().default_shell().await.ok().flatten();
-                let shell = tmux_default.or_else(|| std::env::var("SHELL").ok());
+                let shell = resolve_session_shell(
+                    tmux_default,
+                    std::env::var("SHELL").ok(),
+                    passwd_login_shell(),
+                );
                 self.env.install_shell_adapter(name, shell.as_deref()).await
             }
             None => ShellAdapter::unsupported(None, "no Environment Binding"),
@@ -577,6 +647,79 @@ impl SessionManager {
 impl Default for SessionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod shell_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn tmux_default_wins_then_shell_then_passwd() {
+        let tmux = Some("/bin/bash".to_string());
+        let env = Some("/bin/zsh".to_string());
+        let passwd = Some("/bin/sh".to_string());
+        assert_eq!(
+            resolve_session_shell(tmux, env.clone(), passwd.clone()).as_deref(),
+            Some("/bin/bash"),
+            "tmux's own default-shell is the first authority"
+        );
+        assert_eq!(
+            resolve_session_shell(None, env, passwd.clone()).as_deref(),
+            Some("/bin/zsh"),
+            "the Agent's SHELL is the second authority"
+        );
+        assert_eq!(
+            resolve_session_shell(None, None, passwd).as_deref(),
+            Some("/bin/sh"),
+            "the passwd login shell is the fallback"
+        );
+        assert_eq!(resolve_session_shell(None, None, None), None);
+    }
+
+    #[test]
+    fn blank_values_are_not_answers() {
+        assert_eq!(
+            resolve_session_shell(
+                Some("   ".to_string()),
+                Some(String::new()),
+                Some("/bin/bash".to_string()),
+            )
+            .as_deref(),
+            Some("/bin/bash"),
+            "an empty tmux answer must fall through, not win as an empty shell"
+        );
+        assert_eq!(
+            resolve_session_shell(None, Some(" \t".to_string()), None),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_passwd_login_shell_is_read_for_this_user() {
+        let shell = passwd_login_shell().expect("the test user has a login shell");
+        assert!(shell.starts_with('/'), "{shell}");
+    }
+
+    /// The staging shape: no `SHELL`, no pre-existing tmux server. The passwd
+    /// fallback must resolve to a shell this Agent can adapt.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_container_without_shell_env_still_installs_an_adapter() {
+        let shell = resolve_session_shell(None, None, passwd_login_shell())
+            .expect("the test user has a login shell");
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SessionManager::new().with_env_state_dir(dir.path().join("state"));
+        let adapter = mgr
+            .env
+            .install_shell_adapter("nession-shell-fallback", Some(&shell))
+            .await;
+        assert!(
+            adapter.supported,
+            "resolved shell {shell:?} has no adapter: {:?}",
+            adapter.reason
+        );
     }
 }
 

@@ -93,7 +93,8 @@ test.describe('Attach bootstrap (#321)', () => {
       // activation, so it took the lease. This test drives the session from
       // the first client, so take it back with a real gesture on its terminal.
       await page.locator('.xterm').click();
-      await expect(page.getByTestId('terminal-observer-bar')).toBeHidden({ timeout: 20_000 });
+      await expect(page.locator('[data-terminal-notices~="observer"]'))
+        .toHaveCount(0, { timeout: 20_000 });
       await submitTerminalCommand(page, typedForm('a2'));
       await expect
         .poll(async () => countInBuffer(other, renderedForm('a2')), { timeout: 15_000 })

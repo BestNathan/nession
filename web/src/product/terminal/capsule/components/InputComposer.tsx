@@ -1,4 +1,4 @@
-import { forwardRef, type RefObject } from 'react';
+import { forwardRef, type ReactNode, type RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
@@ -26,6 +26,8 @@ interface InputComposerProps {
    */
   onFieldFocus?: () => void;
   fieldRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Contextual notices entry (#2658); present only while notices exist. */
+  statusAction?: ReactNode;
 }
 
 /**
@@ -37,7 +39,7 @@ interface InputComposerProps {
  * and the tools sit beneath it, `+` still leftmost and send still rightmost.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef }, ref) {
+  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef, statusAction }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -68,6 +70,18 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
         showTooltips={!isApp}
       />
     );
+
+    // The notices action is contextual: the slot draws exactly the same
+    // trailing controls at rest, and adds one secondary action only while the
+    // Terminal has something to disclose (#2658). It stays outside the
+    // `capsule-input-actions` contract, which counts the composer's own
+    // history/send actions.
+    const actions = statusAction ? (
+      <div className="flex items-center gap-[length:var(--nession-terminal-capsule-control-gap)]">
+        {statusAction}
+        {trailingActions}
+      </div>
+    ) : trailingActions;
 
     return (
       <div
@@ -121,7 +135,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
               data-flip-id="tools-actions"
               className="relative z-[1] ml-auto shrink-0"
             >
-              {trailingActions}
+              {actions}
             </div>
           </div>
         ) : (
@@ -141,7 +155,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
               data-flip-id="tools-actions"
               className="col-start-3 row-start-1 relative z-[1] shrink-0 justify-self-end"
             >
-              {trailingActions}
+              {actions}
             </div>
           </>
         )}
