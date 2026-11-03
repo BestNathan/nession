@@ -268,6 +268,27 @@ describe('Terminal notices stay off the grid', () => {
     }
   });
 
+  it('does not reopen a dismissed detail when a later notice appears', () => {
+    const view = (id: number | null) => (
+      <TerminalSurface
+        experience="web"
+        inputDisabled={false}
+        controller={null}
+        clipboardNotice={id === null ? null : { id, notice: { kind: 'write-denied' } }}
+      >
+        <div data-testid="terminal-viewport-slot" />
+      </TerminalSurface>
+    );
+    const rendered = render(view(1));
+    openNotices();
+    expect(screen.getByTestId('terminal-notice-details')).toBeInTheDocument();
+    rendered.rerender(view(null));
+    expect(screen.queryByTestId('terminal-notice-details')).toBeNull();
+    rendered.rerender(view(2));
+    expect(screen.queryByTestId('terminal-notice-details')).toBeNull();
+    expect(screen.getByTestId('terminal-notices-trigger')).toBeInTheDocument();
+  });
+
   it('retains observer takeover as an explicit action', async () => {
     const onTakeControl = vi.fn();
     const view = renderSurface('app', {
