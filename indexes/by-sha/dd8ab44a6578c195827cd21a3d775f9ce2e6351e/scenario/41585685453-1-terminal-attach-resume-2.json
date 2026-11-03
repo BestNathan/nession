@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41585685453,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2663-remove-work-ring",
+    "target_sha": "dd8ab44a6578c195827cd21a3d775f9ce2e6351e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41585685453",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3f8bbbf005dbe59e159cf56053e00542b46d1a801a6d30022e1474cf78e4bc05"
+  },
+  "record": "runs/2026-11-03/41585685453-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ef1ddf1b444d96bff6da25f86c95f1fcdb62a2a94e8e7873f73d230a9a3c635c"
+}
