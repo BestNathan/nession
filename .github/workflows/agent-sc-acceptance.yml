@@ -105,14 +105,12 @@ jobs:
           node scripts/lib/agent/default-routing-selftest.mjs
           node --input-type=module -e '
             import {readFileSync} from "node:fs";
-            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            import {resolveAgentDefault,qwenDefaultAgent} from "./scripts/lib/agent/default-routing.mjs";
             const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
             const given=process.env.ACCEPTOR_OVERRIDE;
             const legacy={cursor:"accept-cursor-01",qwen:"accept-qwen-01"};
-            if(given==="deepseek" || given==="cursor" ||
-                (!given && !process.env.ACCEPTOR_DEFAULT)) {
-              // Keep existing shared legacy Environments until an owner sets a
-              // registered Acceptor default in GitHub Repository Variables.
+            if(given==="deepseek" || given==="cursor") {
+              // Only an explicit trusted legacy override selects Cursor/DeepSeek.
               const provider=given==="deepseek"?"deepseek":"cursor";
               process.stdout.write("provider="+provider+"\n");
               process.stdout.write("environment="+provider+"\n");
@@ -121,7 +119,7 @@ jobs:
               const identity=resolveAgentDefault(registry,"acceptor",{
                 configured:process.env.ACCEPTOR_DEFAULT,
                 override:legacy[given] || given,
-                legacy:"accept-cursor-01"
+                legacy:qwenDefaultAgent("acceptor")
               });
               const provider=identity.provider==="cursor"?"cursor":
                 identity.agent_id==="accept-qwen-01"?"qwen":null;
