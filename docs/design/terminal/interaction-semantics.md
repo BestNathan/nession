@@ -59,4 +59,6 @@ A stationary single-finger hold inside the Terminal viewport arms a compact four
 
 The dial is transient and non-interactive (`pointer-events-none`); Terminal Keys remain the visible, keyboard-reachable fallback. The App's 28 px edge band stays shell navigation's: the App layer supplies the exclusion predicate, and the pad never arms inside it.
 
+**Prototype:** the interaction was approved from the pinned mobile mock at `6f5abbf02395390deb933c0a8478eb17d593a4c6` on the shared `prototype` branch (issue #2657, product review 2026-11-03). The production implementation preserves its decisive invariant — the initiating touch target stays connected for the whole gesture — while the mock itself is not production code.
+
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).
