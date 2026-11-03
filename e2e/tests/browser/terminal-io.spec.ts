@@ -1163,18 +1163,37 @@ test.describe('Terminal touch direction pad (#2657)', () => {
     const center = await terminalGridCenter(page);
     await startTerminalTouch(page, center);
     await page.waitForTimeout(450);
-    await moveTerminalTouch(page, { x: center.x, y: center.y + 40 });
+    await moveTerminalTouch(page, { x: center.x, y: center.y - 40 });
 
     await expect.poll(async () => countInBuffer(page, '^[OA'), { timeout: 5_000 })
       .toBeGreaterThanOrEqual(1);
     expect(await countInBuffer(page, '^[[A')).toBe(0);
 
-    await endTerminalTouch(page, { x: center.x, y: center.y + 40 });
+    await endTerminalTouch(page, { x: center.x, y: center.y - 40 });
     await stopPtyProbe(page);
   });
 
   test('a transport disconnect cancels the armed pad and stops its clock', async ({ page, context }, testInfo) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    // Track the real socket so the disconnect is deterministic rather than
+    // dependent on whether the browser tears an existing WebSocket down when
+    // the context goes offline.
+    await page.addInitScript(() => {
+      const Target = window.WebSocket;
+      const tracked: WebSocket[] = [];
+      (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
+        .__e2eDirectionSockets = tracked;
+      window.WebSocket = new Proxy(Target, {
+        construct(TargetClass, args) {
+          const socket = Reflect.construct(TargetClass, args) as WebSocket;
+          tracked.push(socket);
+          return socket;
+        },
+      });
+    });
+    await page.reload();
+    await waitForShell(page);
+
     const sessionName = `e2e-direction-offline-${testInfo.retry}-${Date.now()}`;
     await createSession(page, sessionName);
     await attachToSession(page, sessionName, 'Relay');
@@ -1192,6 +1211,15 @@ test.describe('Terminal touch direction pad (#2657)', () => {
 
     try {
       await context.setOffline(true);
+      await page.evaluate(() => {
+        const sockets = (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
+          .__e2eDirectionSockets ?? [];
+        for (const socket of sockets) {
+          if (socket.readyState === WebSocket.OPEN && socket.url.includes('/ws')) {
+            socket.close(4000, 'direction-pad disconnect');
+          }
+        }
+      });
       await expect(page.getByTestId('terminal-connecting')).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
 
