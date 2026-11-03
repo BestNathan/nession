@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41624555230,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2653-p2p-handshake-admission",
+    "target_sha": "3022c18f5b9ffce461abb6af6095a3020d606222",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41624555230",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "b4bf075b210a275ad50847c93f264c3e14894da754b092749cabb8ef0fff5e4c"
+  },
+  "record": "runs/2026-11-03/41624555230-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "3844f2d7a700bbc4faa1d85748c0c3aa3e3ca9e97e68d9b8b30a4b11249c4653"
+}
