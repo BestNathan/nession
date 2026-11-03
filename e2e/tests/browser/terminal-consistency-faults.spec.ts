@@ -1018,7 +1018,9 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   // announcement is the surface token, not an automatic notice).
   const recoveredState = await streamState();
   expect(['synchronized', 'degraded-live', 'unavailable']).toContain(recoveredState);
-  const recoveredNotices = await page.locator('[data-terminal-notices]')
+  // The surface always exists; the attribute is absent in the healthy state,
+  // so selecting by the attribute itself would miss and error here.
+  const recoveredNotices = await page.getByTestId('terminal-surface')
     .getAttribute('data-terminal-notices');
   if ((recoveredNotices ?? '').split(/\s+/).includes('history-degraded')) {
     expect(
@@ -1160,9 +1162,9 @@ for (const mode of ['Relay', 'P2P'] as const) {
     const rendererSurvived = await page
       .locator('.xterm[data-e2e-restart-instance="original"]')
       .count();
-    const degraded = await page.locator('[data-terminal-notices]')
-      .evaluate((node) => (node.getAttribute('data-terminal-notices') ?? '')
-        .split(/\s+/).includes('history-degraded'));
+    const degraded = ((await page.getByTestId('terminal-surface')
+      .getAttribute('data-terminal-notices')) ?? '')
+      .split(/\s+/).includes('history-degraded');
     const bootstraps = wire.received
       .filter((frame) => frame.msg_type === 'agent.terminal.output'
         && frame.payload?.bootstrap !== undefined)
