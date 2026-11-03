@@ -30,4 +30,6 @@
 
 | Mobile Terminal long-press arrow gesture | [#2657](https://github.com/BestNathan/nession/issues/2657) | [Interactive HTML](terminal-direction-2657/index.html) · [Scenario & fidelity](terminal-direction-2657/README.md) |
 
+| Public Knowledge Explorer / topic, article, evidence and global changelog | [#2664](https://github.com/BestNathan/nession/issues/2664) | [Interactive HTML](pages-knowledge-2664/index.html) · [Scenario & fidelity](pages-knowledge-2664/README.md) |
+
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
