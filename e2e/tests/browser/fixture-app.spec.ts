@@ -126,14 +126,17 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 });
 
 /**
- * #1307: a notice must not be obscured by the opaque bottom Capsule.
- * #2621: that notice may not reserve any terminal flex height either.
+ * #2658: the Terminal carries no automatic status chrome. This supersedes
+ * #2621's absolute overlay: the zero-row-height objective remains, but the
+ * notice now exists only inside the Capsule's explicit disclosure, after a
+ * user gesture.
  *
  * Use the actual 390×844 App fixture and measured boxes, because jsdom has
- * neither geometry nor elementFromPoint hit testing. The baseline and notice
- * views must allocate identical terminal dimensions and xterm DOM rows.
+ * neither geometry nor elementFromPoint hit testing. The baseline, notice and
+ * disclosure views must allocate identical terminal dimensions and xterm DOM
+ * rows.
  */
-test('a compact notice remains painted without reserving Terminal rows (#1307, #2621)', async ({ page }) => {
+test('no automatic notice covers the Terminal; its disclosure is opt-in (#2658)', async ({ page }) => {
   const readGeometry = async () => {
     await expect(page.getByTestId('fixture-terminal').locator('.xterm')).toBeVisible();
     await expect.poll(() => page.locator('.xterm-rows > div').count()).toBeGreaterThan(0);
@@ -155,44 +158,37 @@ test('a compact notice remains painted without reserving Terminal rows (#1307, #
   };
 
   await page.goto('/#/fixture/app');
-  const withoutNotice = await readGeometry();
-  expect(withoutNotice.rows).toBeGreaterThan(0);
+  const baseline = await readGeometry();
+  expect(baseline.rows).toBeGreaterThan(0);
   await expect(page.getByTestId('terminal-status-overlay')).toHaveCount(0);
+  await expect(page.getByTestId('terminal-notices-trigger')).toHaveCount(0);
 
   await page.goto('/#/fixture/app?drop=epoch');
   const withNotice = await readGeometry();
-  await expect(page.getByTestId('terminal-input-drop')).toBeVisible();
-  expect(await paintedCount(page, '[data-testid="terminal-input-drop"]')).toBe(1);
+  // Nothing is painted over the grid: the notice content is not even mounted.
+  await expect(page.getByTestId('terminal-input-drop')).toHaveCount(0);
+  await expect(page.getByTestId('terminal-status-overlay')).toHaveCount(0);
+  // Only the Capsule gains a contextual action, and it is painted.
+  await expect(page.getByTestId('terminal-notices-trigger')).toBeVisible();
+  expect(await paintedCount(page, '[data-testid="terminal-notices-trigger"]')).toBe(1);
+  expect(withNotice).toEqual(baseline);
 
-  // Status chrome is absolutely positioned beside, not inside or below, the
-  // flex-filling capsule host. All measured terminal dimensions stay the same.
-  expect(withNotice).toEqual(withoutNotice);
-  const boxes = await page.evaluate(() => {
-    const host = document.querySelector('[data-terminal-capsule-host]');
-    const notice = document.querySelector('[data-testid="terminal-input-drop"]');
-    const overlay = document.querySelector('[data-testid="terminal-status-overlay"]');
-    const dock = document.querySelector('[data-testid="terminal-capsule"]');
-    const rect = (el: Element | null) => el?.getBoundingClientRect() ?? null;
-    const noticeRect = rect(notice);
-    const dockRect = rect(dock);
-    return {
-      hostContainsNotice: !!host?.contains(notice),
-      hostContainsDock: !!host?.contains(dock),
-      overlayInsideSurface: overlay?.parentElement === document.querySelector('[data-testid="terminal-surface"]'),
-      overlayIsAbsolute: !!overlay && getComputedStyle(overlay).position === 'absolute',
-      noticeAboveDock: !!noticeRect && !!dockRect && noticeRect.bottom <= dockRect.top,
-    };
-  });
-  expect(boxes).toEqual({
-    hostContainsNotice: false,
-    hostContainsDock: true,
-    overlayInsideSurface: true,
-    overlayIsAbsolute: true,
-    noticeAboveDock: true,
-  });
+  // The disclosure is the one place the sentence appears, and opening it does
+  // not move the grid (it portals outside the Terminal layout).
+  await page.getByTestId('terminal-notices-trigger').click();
+  const details = page.getByTestId('terminal-notice-details');
+  await expect(details).toBeVisible();
+  await expect(page.getByTestId('terminal-input-drop'))
+    .toContainText('Some input may not have reached the session');
+  expect(await readGeometry()).toEqual(baseline);
+
+  await page.keyboard.press('Escape');
+  await expect(details).toHaveCount(0);
+  await expect(page.getByTestId('terminal-input-drop')).toHaveCount(0);
+  expect(await readGeometry()).toEqual(baseline);
 
   await page.goto('/#/fixture/app');
-  expect(await readGeometry()).toEqual(withoutNotice);
+  expect(await readGeometry()).toEqual(baseline);
 });
 
 /**

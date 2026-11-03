@@ -44,6 +44,8 @@ test('SC-03: HTTP automatic writes are refused while user-triggered paths work',
     expect(insecure.secure).toBe(false);
     expect(insecure.hasAsyncClipboard).toBe(false);
     await emit(page, '\x1b]52;c;' + b64('http-refused') + '\x1b\\');
+    await expect(page.getByTestId('terminal-clipboard-notice')).toHaveCount(0);
+    await page.getByTestId('terminal-notices-trigger').click();
     await expect(page.getByTestId('terminal-clipboard-notice'))
       .toHaveAttribute('data-clipboard-notice', 'copy-required');
     observed.push('HTTP origin: automatic OSC 52 write refused as copy-required');
@@ -52,6 +54,7 @@ test('SC-03: HTTP automatic writes are refused while user-triggered paths work',
     //    gets the minimal unsupported indication and the TUI gets no bytes.
     await page.evaluate(() => { window.clipboardHarness.sent.length = 0; });
     await dispatchPaste(page, { images: [{ mime: 'image/png', bytes: fixtureImage(512) }] });
+    // The disclosure is already open; the clipboard state replaced its row.
     await expect(page.getByTestId('terminal-clipboard-notice'))
       .toHaveAttribute('data-clipboard-notice', 'unsupported-image-paste');
     expect(await sentFrames(page)).toEqual([]);

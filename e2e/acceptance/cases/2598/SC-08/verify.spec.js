@@ -23,12 +23,15 @@ test('SC-08: unnegotiated image-only paste is refused truthfully; text paste sti
   expect(paste.delivered).toBe(true);
   expect(paste.defaultPrevented).toBe(true);
   await expect.poll(async () => sentFrames(page)).toEqual([]);
+  // #2658: the sentence exists only inside the explicit disclosure.
+  await page.getByTestId('terminal-notices-trigger').click();
   const notice = page.getByTestId('terminal-clipboard-notice');
   await expect(notice).toHaveAttribute('data-clipboard-notice', 'unsupported-image-paste');
   await expect(notice).toContainText('Image clipboard protocol not supported by this TUI');
   // No permanent control and no file input appeared.
   expect(await page.locator('input[type="file"]').count()).toBe(0);
   expect(await page.getByRole('button', { name: /upload|attach/i }).count()).toBe(0);
+  await page.keyboard.press('Escape');
 
   // Text paste is untouched by the refusal.
   await emit(page, '\x1b[?2004h');

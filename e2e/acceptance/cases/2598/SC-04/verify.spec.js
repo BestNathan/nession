@@ -26,6 +26,8 @@ test('SC-04: denied effects are truthful and an explicit gesture completes the c
     clipboard.writeText = async () => { throw new DOMException('denied', 'NotAllowedError'); };
   });
   await emit(page, '\x1b]52;c;' + b64('gesture payload') + '\x1b\\');
+  await expect(page.getByTestId('terminal-clipboard-notice')).toHaveCount(0);
+  await page.getByTestId('terminal-notices-trigger').click();
   const notice = page.getByTestId('terminal-clipboard-notice');
   await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
   await expect(notice).toContainText('The terminal wants to copy to your clipboard.');
@@ -47,6 +49,7 @@ test('SC-04: denied effects are truthful and an explicit gesture completes the c
   await emit(page, '\x1b]5522;type=wdata:mime=' + b64('text/plain') + ';' + b64('denied payload') + '\x1b\\');
   await emit(page, '\x1b]5522;type=wdata\x1b\\');
   await expect.poll(async () => (await sentFrames(page)).join('')).toContain('status=EPERM:id=denied');
+  await page.getByTestId('terminal-notices-trigger').click();
   await expect(page.getByTestId('terminal-clipboard-notice'))
     .toHaveAttribute('data-clipboard-notice', 'write-denied');
   await page.evaluate(() => { window.__restoreWrite(); });

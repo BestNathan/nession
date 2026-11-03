@@ -22,6 +22,9 @@ export interface ClipboardHarness {
     options?: { bootstrap?: TerminalBootstrap; position?: TerminalStreamPosition },
   ): void;
   setObserver(readOnly: boolean): void;
+  /** Record that the opt-in notice action was executed (#2658). */
+  takeControl(): void;
+  readonly takeControlCalls: number;
   sent: string[];
   focus(): void;
 }
@@ -84,6 +87,7 @@ export function FixtureClipboard() {
   const [inputDrop, setInputDrop] = useState<InputDrop | null>(() => fixtureInputDrop(search));
   const { historyDegraded, terminalControl } = initialStatus;
   const [controller, setController] = useState<TerminalController | null>(null);
+  const takeControlRef = useRef(0);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -117,6 +121,8 @@ export function FixtureClipboard() {
       emit: transport.emit,
       sent,
       setObserver: (readOnly) => instance.setObserverReadOnly(readOnly),
+      takeControl: () => { takeControlRef.current += 1; },
+      get takeControlCalls() { return takeControlRef.current; },
       focus: () => instance.focus(),
     };
     return () => {
@@ -136,6 +142,7 @@ export function FixtureClipboard() {
         inputDrop={inputDrop}
         onDismissInputDrop={() => setInputDrop(null)}
         terminalControl={terminalControl}
+        onTakeControl={() => window.clipboardHarness?.takeControl()}
         clipboardNotice={notice}
         onDismissClipboardNotice={() => setNotice(null)}
       >

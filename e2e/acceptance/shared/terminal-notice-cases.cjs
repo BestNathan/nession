@@ -80,8 +80,10 @@ async function settle(page) {
 }
 
 /**
- * The grid and the boxes that must not move when a status notice appears.
- * `overlay` is reported separately because its presence is the variable.
+ * The grid and the boxes that must not move when status availability changes.
+ * `overlay` must always be null (#2658: automatic Terminal status chrome is
+ * forbidden); the surface's notice token and the Capsule action are reported
+ * separately because their presence is the variable.
  */
 async function readGeometry(page, viewportTestId) {
   return page.evaluate((testId) => {
@@ -113,6 +115,9 @@ async function readGeometry(page, viewportTestId) {
       surface: box(surface),
       viewport: box(viewport),
       overlay: box(overlay),
+      notices: surface ? surface.getAttribute('data-terminal-notices') : null,
+      trigger: box(document.querySelector('[data-testid="terminal-notices-trigger"]')),
+      dialog: box(document.querySelector('[data-testid="terminal-notices-dialog"]')),
       domRows: document.querySelector('.xterm-rows')
         ? document.querySelector('.xterm-rows').children.length
         : 0,
@@ -122,9 +127,24 @@ async function readGeometry(page, viewportTestId) {
 
 /** The part of `readGeometry` that must be identical with and without notices. */
 function stablePart(geometry) {
-  const { overlay, ...rest } = geometry;
+  const { overlay, notices, trigger, dialog, ...rest } = geometry;
   void overlay;
+  void notices;
+  void trigger;
+  void dialog;
   return rest;
+}
+
+/** Open the Capsule's opt-in notices disclosure; the only place content mounts. */
+async function openNoticesDisclosure(page) {
+  await page.getByTestId('terminal-notices-trigger').click();
+  await page.getByTestId('terminal-notice-details').waitFor();
+}
+
+/** Close the disclosure the way a keyboard user does. */
+async function closeNoticesDisclosure(page) {
+  await page.keyboard.press('Escape');
+  await page.getByTestId('terminal-notice-details').waitFor({ state: 'detached' });
 }
 
 /** The four inputs, in one route, to prove they stack without reserving height. */
@@ -132,7 +152,9 @@ const ALL_FOUR = '?history=degraded&drop=epoch&role=observer&clipboard=write-den
 
 module.exports = {
   ALL_FOUR,
+  closeNoticesDisclosure,
   openAppNotices,
+  openNoticesDisclosure,
   openWebNotices,
   readGeometry,
   stablePart,
