@@ -583,9 +583,9 @@ fn session_summary_from_line(line: &str) -> Option<SessionSummary> {
     })
 }
 
-/// The `new-session` argv without environment injection.
+/// The `new-session` options, without environment injection or the command.
 fn new_session_args(request: &NewSession) -> Vec<String> {
-    let mut args = vec![
+    vec![
         "new-session".to_string(),
         "-d".to_string(),
         "-s".to_string(),
@@ -596,10 +596,14 @@ fn new_session_args(request: &NewSession) -> Vec<String> {
         request.height.to_string(),
         "-c".to_string(),
         request.working_dir.clone(),
-    ];
-    // tmux stops parsing its own flags at the first non-option argument, so a
-    // command starting with `bash` or `/bin/zsh` is safe here. The command is
-    // an argv, not a shell string: nothing re-parses it.
+    ]
+}
+
+/// The options followed by the caller's command argv.
+///
+/// The command is an argv, not a shell string: nothing re-parses it.
+fn new_session_command_args(request: &NewSession) -> Vec<String> {
+    let mut args = new_session_args(request);
     args.extend(request.command.iter().cloned());
     args
 }
@@ -1126,14 +1130,19 @@ impl TmuxOps {
     ///    releases did not guarantee it; the replay is best-effort and keeps
     ///    future panes correct on every supported version.
     pub async fn new_session(&self, request: &NewSession) -> Result<NewSessionOutcome> {
-        let args = new_session_args(request);
+        let options = new_session_args(request);
+        // `-e` is a `new-session` flag, so it must come before the command:
+        // anything after the command belongs to that process. A bash adapter
+        // command followed by `-e TERM=...` made bash read the flags itself and
+        // exit, which on a Session at creation looked like a resize failure.
         let output = tokio::time::timeout(
             self.create_timeout,
             self.command.output_with(|cmd| {
-                cmd.args(&args).stderr(std::process::Stdio::piped());
+                cmd.args(&options).stderr(std::process::Stdio::piped());
                 for (key, value) in &request.env {
                     cmd.arg("-e").arg(format!("{key}={value}"));
                 }
+                cmd.args(&request.command);
             }),
         )
         .await
@@ -1149,10 +1158,11 @@ impl TmuxOps {
             return Ok(NewSessionOutcome { used_e: true });
         }
 
+        let fallback_args = new_session_command_args(request);
         let output2 = tokio::time::timeout(
             self.create_timeout,
             self.command
-                .output(&args.iter().map(String::as_str).collect::<Vec<_>>()),
+                .output(&fallback_args.iter().map(String::as_str).collect::<Vec<_>>()),
         )
         .await
         .map_err(|_| {

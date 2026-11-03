@@ -176,3 +176,42 @@ async fn admin_creates_lists_and_kills_a_real_isolated_session() -> anyhow::Resu
     );
     Ok(())
 }
+
+/// `new-session -e` flags belong to tmux, not to the command it launches.
+///
+/// A bash Session adapter supplies an explicit argv. If the environment flags
+/// are appended after that argv, the shell receives `-e KEY=...` and exits;
+/// tmux still answers the create, and the loss only shows up later as a Session
+/// that cannot be resized. The session environment is the witness here.
+#[tokio::test]
+async fn env_flags_come_before_the_command() -> anyhow::Result<()> {
+    use nession_tmux::{NewSession, TmuxOps};
+
+    let dir = tempfile::tempdir()?;
+    let command = TmuxCommand::new("tmux", dir.path().join("tmux.sock"));
+    command.validate()?;
+    let ops = TmuxOps::new(command);
+    let name = unique_name("env-order");
+
+    ops.new_session(&NewSession {
+        name: name.clone(),
+        working_dir: "/tmp".to_string(),
+        width: 80,
+        height: 24,
+        env: vec![("NS_ENV_ORDER".to_string(), "before".to_string())],
+        command: vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 10".to_string(),
+        ],
+    })
+    .await?;
+
+    let value = ops.show_environment(&name, "NS_ENV_ORDER").await?;
+    anyhow::ensure!(
+        value.as_deref() == Some("before"),
+        "the environment flag did not reach tmux; it was passed to the command: {value:?}"
+    );
+    ops.kill_session(&name).await?;
+    Ok(())
+}
