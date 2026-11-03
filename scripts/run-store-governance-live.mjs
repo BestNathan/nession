@@ -8,7 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {auditLiveRunStores,AGENT_STORE_AUDIT_REFS} from './audit-live-run-stores.mjs';
-import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
+import {GOVERNED_REFS,POLICY_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
   validateMigrationBaseline,assertTrustedAuditContext,
   withRuleParameters} from './run-store-policy.mjs';
 import {makePolicyObservabilityReceipt,POLICY_OBSERVABILITY_LOG_PREFIX}
@@ -118,7 +118,7 @@ export function observeAgentStoreGovernance(branch,rulesets,agentHistory=null){
 export function summarizeGovernance(manifest,rulesets,appId,history){
   validateMigrationBaseline(manifest);
   if(!Array.isArray(rulesets))fail('unavailable GitHub Ruleset details');
-  const decisions=GOVERNED_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
+  const decisions=POLICY_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
   const records=history?.records??[];
   const coverage=records.length===GOVERNED_REFS.length&&
     new Set(records.map(x=>x.store)).size===GOVERNED_REFS.length&&
@@ -231,6 +231,17 @@ async function live(out){
   });
   report.provisioned_agent_store=observeAgentStoreGovernance(
     api('branches/'+ACTIVE_AGENT_REF),details,agentHistory);
+  // Separate historical baselines remain intact; populate the fourth Store's
+  // actual Git-ancestry evidence into its server-side policy observation.
+  const agentPolicy=report.stores.find(x=>x.ref===ACTIVE_AGENT_REF);
+  if(!agentPolicy)fail('missing fourth Store policy observation');
+  agentPolicy.branch_observed_sha=report.provisioned_agent_store.observed_head_sha;
+  agentPolicy.checked_commits=report.provisioned_agent_store.audited_commits;
+  agentPolicy.checked_changes=report.provisioned_agent_store.audited_changes;
+  report.provisioned_agent_store.app_only_ruleset_configuration_verified=
+    agentPolicy.configuration_verified;
+  report.provisioned_agent_store.app_only_ruleset_unobservable_capabilities=
+    agentPolicy.unobservable_capabilities;
   report.full_four_store_history_audit_proven=report.actual_history_checked_against_unanchored_baseline&&
     report.provisioned_agent_store.post_bootstrap_history_audited;
   report.four_store_audit_anchor_trust='repository_main_unanchored; NOT independent/WORM';
@@ -244,7 +255,7 @@ async function live(out){
     process.env.GITHUB_STEP_SUMMARY,
     '## Store Governance Live Read-only Audit\n\n'+
     '| Branch | Audited changes | App-only branch policy |\n|---|---:|---|\n'+
-    report.stores.map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
+    report.stores.filter(x=>x.ref!==ACTIVE_AGENT_REF).map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
       (x.configuration_verified?'configured'
         :x.unobservable_capabilities.length>0?'NOT OBSERVABLE HERE'
         :'NOT CONFIGURED')+' |').join('\n')+
@@ -341,7 +352,7 @@ function selfTest(){
   // render as the same line. Both stay fail-closed (policy false, alert
   // non-zero); only the reason differs, so a reader can choose Pending over
   // Fail without ever being able to read it as a Pass.
-  const refs=GOVERNED_REFS,app=77881;
+  const refs=POLICY_REFS,app=77881;
   const shape=over=>({id:25248129,name:'run-store',target:'branch',
     source_type:'Repository',source:REPO,enforcement:'active',
     conditions:{ref_name:{include:refs.map(r=>'refs/heads/'+r),exclude:[]}},
