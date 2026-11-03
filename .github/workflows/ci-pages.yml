@@ -7,8 +7,12 @@ on:
     branches: [main, staging]
     paths:
       - 'pages/**'
+      - '.github/workflows/ci-pages.yml'
       - 'e2e/tests/browser/pages-*.spec.ts'
+      - 'e2e/pages/**'
       - 'e2e/helpers/pagesStandalone.ts'
+      - 'e2e/playwright.pages.config.ts'
+      - 'e2e/package*.json'
       - 'e2e/runner/cli-selftest.mjs'
 
 permissions:
@@ -47,3 +51,37 @@ jobs:
           if(!fs.existsSync('pages/dist/index.html'))process.exit(1);
           console.log('Public Pages schema, offline state and static artifact verified');
           NODE
+
+  pages-browser:
+    name: Pages browser smoke (Chromium only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install isolated browser test dependencies
+        working-directory: e2e
+        run: npm ci
+      - name: Install headless Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run standalone Pages browser scenarios (no product runtime)
+        working-directory: e2e
+        run: npx playwright test --config playwright.pages.config.ts
+      - name: Preserve browser failure screenshots and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-browser-evidence
+          path: |
+            e2e/test-results-pages/
+            e2e/playwright-report-pages/
+          retention-days: 7
+          if-no-files-found: ignore
