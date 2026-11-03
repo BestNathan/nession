@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41623829174,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2658-on-demand-terminal-notices",
+    "target_sha": "a09ca324996114b22d1a359b3970ada341033472",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41623829174",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "aab072c08a45f6724ee630f84dd163456c41f309d29d3e547d59f636230f4501"
+  },
+  "record": "runs/2026-11-03/41623829174-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "80ebd0a699c379384dcaca951ec72d647046c00409f44b2e483a4531d56f1091"
+}
