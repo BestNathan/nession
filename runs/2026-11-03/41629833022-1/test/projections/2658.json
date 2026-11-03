@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2658,
+  "run_id": 41629833022,
+  "run_attempt": 1,
+  "target_sha": "37f27cb2a778328a00839a517e76761d557b5b3b",
+  "plan_digest": "5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf",
+  "artifact_digest": "sha256:ef9b5f2b0002e3d3f489db04774a5006202115e16b12578b563edef0065b9ab5",
+  "ingest_run_id": 41630692723,
+  "ingest_attempt": 1,
+  "declaration_digest": "662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264",
+  "before_body_sha256": "8a8cf62e7f9b5fa32be6b68bc36ce83af6be42372c73ff79e20a3d2d5f556957",
+  "body_sha256": "dbda96f9cf36e008bf2d81999daf9641858946884dbee6cae7ab38e03856932f",
+  "readback_body": "## Requirements: Keep Terminal free of automatic notices\n\nOwner request (2026-11-03): the Terminal status/prompt area is visually intrusive and must no longer cover any terminal content. This is a new *presentation* decision distinct from #2621's earlier fix (which moved bottom strips to a top absolute overlay). Preserve terminal runtime semantics rather than removing critical information.\n\n- No automatic floating notice strips or reserved status rows inside the Terminal grid, on Web or App.\n- History uncertainty, dropped input, clipboard manual Copy, and observer Take control remain available through the existing Capsule as an **explicit, context-only disclosure**, without a permanent toolbar.\n- Clipboard text is not exposed in the DOM until a deliberate disclosure. The user-gesture copy path on insecure HTTP must continue to work.\n- Keep stream state observable as a data attribute for diagnostics.\n- Related: #2621 (old overlay behavior, intentionally superseded), #2614, #2598, #2656.\n\n### Success Criteria\n- [ ] SC-01 Web/App Terminal shows no automatic status overlay and its host/grid size is identical in healthy, degraded, observer, input-drop and clipboard states.\n- [ ] SC-02 A user can explicitly open all relevant notices and execute Dismiss, Copy and Take control without losing their meaning or changing PTY state.\n- [ ] SC-03 Existing clipboard HTTP user-gesture copy, event expiry, focus/keyboard semantics remain correct.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: merged\n    branch: staging\n    method: case\n  SC-02:\n    when: merged\n    branch: staging\n    method: case\n  SC-03:\n    when: merged\n    branch: staging\n    method: case\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | PR browser fixture / unit evidence |\n| SC-02 | Pending | PR interaction and clipboard test evidence |\n| SC-03 | Pending | PR HTTP clipboard and focus regression |\n\n## E2E Verification\n### New\n- none: existing canonical Terminal fixture and clipboard E2E are the same screens/behavior\n### Regression\n- terminal-io\n- fixture-app\n- ui-contract-matrix\n- terminal-consistency-faults\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| fixture-app | Regression | Pass | run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/41629833022) |\n| terminal-attach-bootstrap | Regression | Pass | run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/41629833022) |\n| terminal-consistency-faults | Regression | Pass | run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 15/15 (https://github.com/BestNathan/nession/actions/runs/41629833022) |\n| terminal-io | Regression | Pass | run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 24/24 (https://github.com/BestNathan/nession/actions/runs/41629833022) |\n| ui-contract-matrix | Regression | Pass | run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 72/72 (https://github.com/BestNathan/nession/actions/runs/41629833022) |\n\n## Product alignment\n- [x] VISION.md: terminal as distraction-free primary work surface.\n- [x] PRINCIPLE.md: reduce persistent UI.\n- [x] Relevant Terminal Surface and Capsule design reviewed.\n- [x] Supersedes the specific #2621 overlay presentation, not its zero-row-height objective.\n\n---\n**Status:** Approved — implementation complete; staging acceptance pending.\n\n",
+  "patch_updated_at": "2026-11-03T11:50:19Z",
+  "readback_updated_at": "2026-11-03T11:50:19Z",
+  "rows": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "evidence": "run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/41629833022)"
+    },
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Pass",
+      "evidence": "run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/41629833022)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 15/15 (https://github.com/BestNathan/nession/actions/runs/41629833022)"
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "evidence": "run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 24/24 (https://github.com/BestNathan/nession/actions/runs/41629833022)"
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "evidence": "run 41629833022/1, SHA 37f27cb2a778328a00839a517e76761d557b5b3b, contract 662ff5ca7578a5eeb4ebddf913c356cd2b01f26af311c633363dc4b9af06e264, plan 5b6c65970393e39d3e3ff605ed18a0476a17e2e621c387dbe1ccf8b038a140bf, tests 72/72 (https://github.com/BestNathan/nession/actions/runs/41629833022)"
+    }
+  ]
+}
