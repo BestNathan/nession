@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {startDevelopment} from './outbox.mjs';
-import {resolveAgentDefault} from '../default-routing.mjs';
+import {resolveAgentDefault,qwenDefaultAgent} from '../default-routing.mjs';
 import {decodeResultZip} from './result-artifact.mjs';
 const REPO='BestNathan/nession',ISSUE=/^[1-9][0-9]*$/,SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
 const WORKFLOW='Acceptance / Agent Controller';
@@ -41,11 +41,11 @@ export function buildControllerRequest(input,run,registry,defaults={}) {
     fail('non-Cursor durable Developer requires #2274 production Worker proof');
   const reviewer=resolveAgentDefault(registry,'reviewer',{
     configured:defaults.reviewer??'',override:input.reviewer??'',
-    legacy:'review-cursor-01',
+    legacy:qwenDefaultAgent('reviewer'),
   });
   const acceptor=resolveAgentDefault(registry,'acceptor',{
     configured:defaults.acceptor??'',override:input.acceptor??'',
-    legacy:'accept-cursor-01',
+    legacy:qwenDefaultAgent('acceptor'),
   });
   const valid=request({...input,developer:developer.agent_id,
     reviewer:reviewer.agent_id,acceptor:acceptor.agent_id});
