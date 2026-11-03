@@ -143,6 +143,7 @@ jobs:
           file=pages/dist/data/site.json
           workflow_json=pages/dist/data/workflows.json
           workflow_html=pages/dist/workflows.html
+          knowledge_json=pages/dist/data/knowledge.json
           prototype_manifest=pages/dist/prototypes/manifest.json
           prototype_gallery=pages/dist/prototypes/index.html
           jq -e --arg sha "$(git -C prototype-store rev-parse HEAD)" '
@@ -150,6 +151,14 @@ jobs:
             .source.sha == $sha and (.entries | length) >= 1 and
             ([.entries[] | .source] | all(.[]; startswith("https://github.com/BestNathan/nession/blob/" + $sha + "/")))
           ' "$prototype_manifest" >/dev/null
+          jq -e --arg sha "$(git -C knowledge-store rev-parse HEAD)" '
+            .schema_version == 1 and .status == "available" and
+            .source.branch == "knowledge" and .source.sha == $sha and
+            (.articles | type == "array") and (.changes | type == "array")
+          ' "$knowledge_json" >/dev/null
+          echo "knowledge_sha=$(jq -r .source.sha "$knowledge_json")" >> "$GITHUB_OUTPUT"
+          echo "knowledge_json_sha256=$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "knowledge_articles=$(jq '.articles | length' "$knowledge_json")" >> "$GITHUB_OUTPUT"
           echo "prototype_sha=$(jq -r .source.sha "$prototype_manifest")" >> "$GITHUB_OUTPUT"
           echo "prototype_manifest_sha256=$(sha256sum "$prototype_manifest" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "prototype_gallery_sha256=$(sha256sum "$prototype_gallery" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
