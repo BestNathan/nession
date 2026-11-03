@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41658706391,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2657-terminal-direction-gesture-staging",
+    "target_sha": "5e81f16c9da5e26674777ef8a07627cee262c259",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41658706391",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ecb929f474be4ed68dc7c12a9bb39fdfca4f889b3dd955a8213f28b93013541c"
+  },
+  "record": "runs/2026-11-03/41658706391-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "0b456a431652da4cf64589bc56a97f64081d92bd980603f258fc63db0d89aeec"
+}
