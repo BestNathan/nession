@@ -44,7 +44,7 @@ This revision replaces those assumptions with the official current **Standard Se
 
 ## Verification requirements
 
-Static: `index.html`, `styles.css`, `app.js` and the catalog must exist at the same commit, have no missing assets, broken event targets or external runtime resources. Run `node --check app.js` and narrow mock checks when a local checkout is available.
+Static: `index.html`, `styles.css`, `app.js`, `smoke-test.mjs` and the catalog must exist at the same commit, have no missing assets, broken event targets or external runtime resources. With a checkout run `node --check app.js` then `node claude-memory-2689/smoke-test.mjs` (7 DOM-stub interaction scenarios, including Peek→Workspace, worktree sharing, cross-repo isolation and stale callbacks). This is **not** a real Chromium run.
 
 Browser: click the complete Terminal → `+` → Peek → Workspace → Memory → Terminal loop; check desktop and 375–390 px widths, keyboard Escape and App detail Back, context preservation and Session isolation. Verify JS console, scroll and layering. Source checks alone are **not browser verification**.
 
