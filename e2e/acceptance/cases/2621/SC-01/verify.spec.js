@@ -1,7 +1,7 @@
 'use strict';
 // #2621 SC-01: every Terminal status type is a zero-content overlay — the
 // xterm viewport, the capsule host and the grid (rows/cols) are identical with
-// the notice present, absent again, and after a real expiry. Measured in a real
+// the contextual action present, absent again, and after a real expiry. Measured in a real
 // browser on both experiences; jsdom cannot measure layout.
 const { test, expect } = require('@playwright/test');
 const { verifiedRuntime } = require('../../../shared/foreground-resume-browser.cjs');
@@ -31,7 +31,8 @@ test('SC-01: status notices leave the Terminal grid unchanged on App and Web', a
   for (const [name, params] of ROUTES) {
     await openAppNotices(page, params);
     const geometry = await readGeometry(page, 'fixture-terminal');
-    expect(geometry.overlay, name + ': the notice must be present').not.toBeNull();
+    expect(geometry.overlay, name + ': notices must never cover the grid').toBeNull();
+    await expect(page.getByTestId('terminal-notices-trigger')).toBeVisible();
     expect(stablePart(geometry), name + ': App grid must not move').toEqual(stablePart(appBaseline));
     measurements.push({ experience: 'app', notice: name, rows: geometry.rows, cols: geometry.cols });
   }
@@ -49,7 +50,8 @@ test('SC-01: status notices leave the Terminal grid unchanged on App and Web', a
   for (const [name, params] of ROUTES) {
     await openWebNotices(page, params);
     const geometry = await readGeometry(page, 'fixture-clipboard-host');
-    expect(geometry.overlay, name + ': the notice must be present').not.toBeNull();
+    expect(geometry.overlay, name + ': notices must never cover the grid').toBeNull();
+    await expect(page.getByTestId('terminal-notices-trigger')).toBeVisible();
     expect(stablePart(geometry), name + ': Web grid must not move').toEqual(stablePart(webBaseline));
     measurements.push({ experience: 'web', notice: name, rows: geometry.rows, cols: geometry.cols });
   }
@@ -58,9 +60,10 @@ test('SC-01: status notices leave the Terminal grid unchanged on App and Web', a
   // and the grid must return to the exact baseline, not merely to a safe value.
   await openWebNotices(page, '?clipboard=write-denied');
   const withNotice = await readGeometry(page, 'fixture-clipboard-host');
-  expect(withNotice.overlay).not.toBeNull();
+  expect(withNotice.overlay).toBeNull();
+  await expect(page.getByTestId('terminal-notices-trigger')).toBeVisible();
   expect(stablePart(withNotice)).toEqual(stablePart(webBaseline));
-  await expect(page.getByTestId('terminal-status-overlay')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('terminal-notices-trigger')).toHaveCount(0, { timeout: 15_000 });
   expect(stablePart(await readGeometry(page, 'fixture-clipboard-host')))
     .toEqual(stablePart(webBaseline));
 
@@ -70,7 +73,7 @@ test('SC-01: status notices leave the Terminal grid unchanged on App and Web', a
       appBaseline.rows + ' rows with host ' + appBaseline.host.height + 'px; Web 1280x800 baseline ' +
       webBaseline.cols + 'x' + webBaseline.rows + ' rows with host ' + webBaseline.host.height +
       'px; input-drop, history-degraded, observer, clipboard and all-four-together each left the ' +
-      'rows, cols, host, viewport and surface boxes identical; the Web clipboard notice expired ' +
+      'rows, cols, host, viewport and surface boxes identical without an overlay; the Web clipboard notice expired ' +
       'and the grid returned to the same baseline',
   });
 });
