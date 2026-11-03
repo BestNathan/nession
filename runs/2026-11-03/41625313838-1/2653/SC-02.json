@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "178dd5470ed4afe4eaee22295bcc971fb112f3f0e443d2dbd314fca555cdbee5",
+  "run_id": 41625313838,
+  "run_attempt": 1,
+  "issue": 2653,
+  "criterion": "SC-02",
+  "criterion_text": "Plain WebSocket and configured TLS handshake paths enforce a finite deadline for idle/partial upgrades and release their admission capacity on all completion/failure/shutdown paths.",
+  "stage": "staging",
+  "target_sha": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+  "contract_sha256": "c56bbb52dcf8cc638352180924a4d4a47b4c14aff562f4eccb6954d32a5ec253",
+  "case_revision": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+  "case_tree_sha": "ce09006e07b2dea57e18d36bdeaa6406749ad85f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T11:13:20.039Z",
+  "finished_at": "2026-11-03T11:13:21.405Z",
+  "duration_ms": 1366,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Plain and TLS handshakes enforce one finite deadline for idle/partial upgrades and release admission capacity on success, refusal, timeout and shutdown",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0: a 500 ms deadline closes a partial HTTP upgrade, a partial TLS record and a silent TLS peer; a credential refusal returns its slot without waiting for a 60 s deadline; a live authenticated plain/TLS connection leaves the slot free; shutdown aborts a pending handshake and closes the budget"
+        }
+      ],
+      "duration_ms": 1347,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41625313838,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41625313838",
+    "record_path": "runs/2026-11-03/41625313838-1/2653/SC-02.json",
+    "source_result_sha256": "78f35adb009d227e2f31e979b6e802545362f60b30fba3c78f1fb5b316512a4e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41625313838-1",
+    "sha256": "78f35adb009d227e2f31e979b6e802545362f60b30fba3c78f1fb5b316512a4e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41625313838",
+    "durability": "time-limited; object archival not configured"
+  }
+}

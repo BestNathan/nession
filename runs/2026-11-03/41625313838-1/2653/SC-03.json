@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "792975d0df13cb561b4cfa133c448cbdfbdf88c938672f7e8179a89397840e54",
+  "run_id": 41625313838,
+  "run_attempt": 1,
+  "issue": 2653,
+  "criterion": "SC-03",
+  "criterion_text": "Following saturation and timeout/rejection, a valid credential-bearing P2P attach can succeed and existing scoped authorization remains enforced; invalid/missing credentials still cannot upgrade.",
+  "stage": "staging",
+  "target_sha": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+  "contract_sha256": "c56bbb52dcf8cc638352180924a4d4a47b4c14aff562f4eccb6954d32a5ec253",
+  "case_revision": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+  "case_tree_sha": "4164ba910e24012413128d032ddfd0c8c4919532",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-03T11:13:21.406Z",
+  "finished_at": "2026-11-03T11:13:23.380Z",
+  "duration_ms": 1974,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A valid credential-bearing P2P attach succeeds after saturation/timeout/refusal while scoped authorization and fail-closed upgrades remain enforced",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0: a valid credential attaches and receives a pong after plain and TLS incomplete handshakes expire and after a refused upgrade; no-credential, invented, foreign-agent and out-of-scope peers remain refused"
+        }
+      ],
+      "duration_ms": 1956,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41625313838,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1a78ae2b90f2b6c4158f5f65ade790936aa0d3b0",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41625313838",
+    "record_path": "runs/2026-11-03/41625313838-1/2653/SC-03.json",
+    "source_result_sha256": "3d10c71113ae33afc3e9c504d4f60c7c776276579f66cd98b9e508b75742c905"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41625313838-1",
+    "sha256": "3d10c71113ae33afc3e9c504d4f60c7c776276579f66cd98b9e508b75742c905",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41625313838",
+    "durability": "time-limited; object archival not configured"
+  }
+}
