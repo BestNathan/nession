@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "09910342e85a567665981387926c9bf4f0ae9e6c",
+  "scenario_revision": "09910342e85a567665981387926c9bf4f0ae9e6c",
+  "run_id": 41586690269,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-03T05:57:35.535Z",
+  "finished_at": "2026-11-03T05:57:45.255Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-03T05:57:44.403Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 212,
+          "viewportY": 212
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3fdf22d9f4a4a262fad714412d1d39639caa03eb8cb53896974623f988841af2",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-11-03T05:57:44.689Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3fdf22d9f4a4a262fad714412d1d39639caa03eb8cb53896974623f988841af2",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-11-03T05:57:45.185Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 212,
+          "viewportY": 212
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "3fdf22d9f4a4a262fad714412d1d39639caa03eb8cb53896974623f988841af2",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41586690269,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2663-remove-work-ring",
+    "target_sha": "09910342e85a567665981387926c9bf4f0ae9e6c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41586690269",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "8d4e340ed2fcaa15105601e33c207941325ece69645cdbb958b176e3288950ab"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-41586690269-1",
+    "sha256": "8d4e340ed2fcaa15105601e33c207941325ece69645cdbb958b176e3288950ab",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41586690269",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "15099fd4ca8c80b57a1d352e2be21c072d7c98b3f6387eaa3f6f4a05bf7833ad"
+}
