@@ -13,10 +13,9 @@ run(({ evidence }) => {
   const sha = targetSha();
 
   const diagnostics = serverLibTests('relay_diagnostics_never');
-  assertRan(diagnostics, [
-    'relay_diagnostics_never_include_the_scoped_credential',
-    'relay_failure_reason_is_a_bounded_category',
-  ]);
+  assertRan(diagnostics, ['relay_diagnostics_never_include_the_scoped_credential']);
+  const reasons = serverLibTests('relay_failure_reason_is_a_bounded_category');
+  assertRan(reasons, ['relay_failure_reason_is_a_bounded_category']);
 
   const websocket = readSource('crates/nession-server/src/server/websocket.rs');
   const safeSites = websocket.match(/sanitized_endpoint\(url\)/g) ?? [];
