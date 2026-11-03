@@ -96,9 +96,9 @@ function stateMeta(){
  return {code,applied,...states[code]};
 }
 function bindingPanel(){
- const m=stateMeta(),count=Object.keys(effective(S.active).values).length;
+ const m=stateMeta(),count=new Set(S.active.flatMap(id=>Object.keys(byId(id)?.vars||{}))).size;
  let out='<section class="status-summary '+m.tone+'" data-status="'+m.code+'"><div class="status-message"><span class="status-dot" aria-hidden="true"></span><div><div class="status-title">'+escape(m.title)+'</div><p class="status-desc">'+escape(m.description)+'</p></div></div><button class="status-toggle" id="statusToggle" aria-expanded="'+S.detailsOpen+'">Details '+(S.detailsOpen?'⌃':'⌄')+'</button></section>';
- if(S.detailsOpen)out+='<dl class="status-details"><div><dt>Desired revision</dt><dd>'+S.revision+'</dd></div><div><dt>Applied revision</dt><dd>'+(m.code==='unavailable'?'Unavailable':m.applied)+'</dd></div><div><dt>Managed keys</dt><dd>'+count+'</dd></div></dl>';
+ if(S.detailsOpen)out+='<dl class="status-details"><div><dt>Desired revision</dt><dd>'+S.revision+'</dd></div><div><dt>Applied revision</dt><dd>'+(m.code==='unavailable'?'Unavailable':m.applied)+'</dd></div><div><dt>Managed keys</dt><dd>'+(m.code==='unavailable'?'Unavailable':count)+'</dd></div></dl>';
  if(m.reason&&S.detailsOpen)out+='<div class="status-note '+m.tone+'">'+escape(m.reason)+'</div>';
  return out;
 }
@@ -122,7 +122,7 @@ html+='<div class="callout">这里沿用 #1202 的 read-first Profile Details。
 function noSessionView(){return header('Environment profiles','No active Session','You can still browse, import and edit profiles. Mounting is available only after selecting a Session.','')+'<div class="empty">Select a profile in the navigator to inspect variables. No Session binding is invented here.</div>'}
 function renderNav(){
  el('profileCount').textContent='· '+profiles.length;
- const section=el('sessionNav'),m=stateMeta(),count=Object.keys(effective(S.active).values).length;
+ const section=el('sessionNav'),m=stateMeta(),count=new Set(S.active.flatMap(id=>Object.keys(byId(id)?.vars||{}))).size;
  section.innerHTML=S.hasSession?'<div class="section-title">Current Session</div><button class="session-summary '+(S.selected==='session'?'selected':'')+'" data-open="session"><span class="sname">dev-session</span><span class="smeta">'+S.active.length+' profiles · '+count+' keys</span><span class="sstate '+m.tone+'">'+escape(m.title)+'</span></button>':'';
  const q=el('search').value.toLowerCase();
  el('profileNav').innerHTML=profiles.filter(p=>(p.name+' '+p.source).toLowerCase().includes(q)).map(p=>'<button class="item '+(S.selected===p.id?'current':'')+'" data-open="'+escape(p.id)+'"><span><strong>'+escape(p.name)+'</strong><small>'+escape(p.source)+' · '+Object.keys(p.vars).length+' keys</small></span>'+(S.active.includes(p.id)&&S.hasSession?'<span class="mini">Included</span>':'')+'</button>').join('')||'<p class="muted" style="padding:10px">No matching profiles</p>';
