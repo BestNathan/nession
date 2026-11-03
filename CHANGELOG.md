@@ -148,3 +148,10 @@
 - Categories: agents, instructions, knowledge, skills
 - Reason: Cross-link the new durable GitHub Actions workflow architecture topic
 - Source: https://github.com/BestNathan/nession/issues/2683
+
+## 2026-11-03T10:00:48Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Install the exactly pinned read-only Knowledge change notification in the same atomic ledger transaction and record the merged trusted main consumer; live Pages proof remains pending
+- Source: https://github.com/BestNathan/nession/issues/2683

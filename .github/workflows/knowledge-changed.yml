@@ -1,0 +1,21 @@
+name: Knowledge / Change Signal
+
+# One immutable, read-only notification; trusted main validates all source data.
+# No checkout, third-party action, secrets, or write permission here.
+on:
+  push:
+    branches: [knowledge]
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Record Knowledge revision
+        shell: bash
+        run: |
+          echo "Knowledge source revision: $GITHUB_SHA"
+          echo "Only the trusted main workflow may validate and publish it."
