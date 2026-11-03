@@ -68,12 +68,12 @@ jobs:
           node scripts/lib/agent/default-routing-selftest.mjs
           node --input-type=module -e '
             import {readFileSync} from "node:fs";
-            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            import {resolveAgentDefault,qwenDefaultAgent} from "./scripts/lib/agent/default-routing.mjs";
             const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
             const identity=resolveAgentDefault(registry,"reviewer",{
               configured:process.env.DEFAULT_REVIEWER,
               override:process.env.REVIEWER_OVERRIDE,
-              legacy:"review-qwen-01"
+              legacy:qwenDefaultAgent("reviewer")
             });
             process.stdout.write("environment="+identity.environment+"\n");
             process.stdout.write("reviewer="+identity.agent_id+"\n");

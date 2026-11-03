@@ -73,7 +73,7 @@ jobs:
           # No ambient PR/Issue text may select a model or credential Environment.
           routing="$(node --input-type=module -e '
             import {readFileSync} from "node:fs";
-            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            import {resolveAgentDefault,qwenDefaultAgent} from "./scripts/lib/agent/default-routing.mjs";
             const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
             const override=process.env.EVENT_NAME==="workflow_dispatch"
               ? process.env.INPUT_PROVIDER : "";
@@ -82,14 +82,13 @@ jobs:
             const identity=resolveAgentDefault(registry,"auditor",{
               configured:process.env.DEFAULT_AUDITOR,
               override:aliases[override] || override,
-              legacy:"audit-cursor-01"
+              legacy:qwenDefaultAgent("auditor")
             });
             const backend=identity.provider==="cursor"?"cursor":
               identity.environment==="dev-claude-qwen"?"qwen":
               identity.environment==="deepseek"?"deepseek":null;
             if(!backend)throw Error("No verified Auditor backend for selected Environment");
-            const environment=backend==="cursor" && !process.env.DEFAULT_AUDITOR &&
-              (!override || override==="cursor") ? "cursor" : identity.environment;
+            const environment=identity.environment;
             console.log(JSON.stringify({provider:backend,environment}));
           ')"
           provider="$(jq -er .provider <<< "$routing")"
