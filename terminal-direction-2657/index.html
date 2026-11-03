@@ -13,7 +13,7 @@
 .speed-pips{position:absolute;bottom:-8px;left:46px;right:46px;height:21px;background:#192638eb;border:1px solid #4b6279;border-radius:14px;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:0 12px;box-shadow:0 6px 16px #0008}
 .speed-pip{flex:1;height:4px;border-radius:4px;background:#587087;transition:background .1s}.speed-pip.on{background:#a9e9d0;box-shadow:0 0 7px #7ddec3}
 .origin-dot{position:absolute;z-index:7;width:11px;height:11px;border-radius:50%;background:#caf9e2;border:2px solid #1b4539;box-shadow:0 0 0 4px #a4ead140;opacity:0;pointer-events:none;transform:translate(-50%,-50%)}.origin-dot.show{opacity:1}
-.guide-hint{position:absolute;bottom:-33px;left:-30px;right:-30px;text-align:center;white-space:nowrap;color:#b8cada;font-size:10px;font-weight:650;letter-spacing:.02em;text-shadow:0 2px 7px #000}
+.guide-hint{position:absolute;bottom:-33px;left:0;right:0;text-align:center;white-space:nowrap;color:#b8cada;font-size:10px;font-weight:650;letter-spacing:.02em;text-shadow:0 2px 7px #000}
 .tip{position:absolute;bottom:15px;left:15px;right:15px;background:#24364ddf;border:1px solid #35506d;border-radius:9px;padding:8px;text-align:center;color:#b6cadc;font-size:11px;pointer-events:none}.guide.show~.tip{opacity:0}
 @media(prefers-reduced-motion:reduce){.guide,.arrow,.speed-pip{transition:none}}
 .panel{border:1px solid #2e4054;background:#182332;border-radius:16px;padding:20px}.panel h2{margin:0 0 17px;font-size:18px}.step{color:#bbc8d6;margin:15px 0;font-size:13px;line-height:1.5}.step strong{color:#9fdac5;margin-right:9px}button{border:1px solid #4e6580;border-radius:9px;padding:9px 11px;color:#dce8f3;background:#293a4e;font-weight:600;cursor:pointer;margin:3px}button[aria-pressed=true]{background:#61452f;border-color:#ab8459}.readout{margin-top:22px;padding:15px;background:#0d1520;border-radius:12px;border:1px solid #2e4054;font:12px/1.7 ui-monospace,monospace}.row{display:flex;justify-content:space-between;gap:10px}.row span:last-child{color:#a4e3c8;font-weight:700}.label{color:#8aa4bd;text-transform:uppercase;font-size:10px;letter-spacing:.08em}.history{min-height:52px;max-height:110px;overflow:auto;color:#a9d9c4;font-size:15px;margin-top:8px;word-break:break-all}.footnote{font-size:11px;line-height:1.6;color:#91a0b1;margin-top:16px}a{color:#a5cce7}@media(max-width:750px){main{padding:16px 10px}.layout{grid-template-columns:1fr}.phone{width:100%;max-width:430px;margin:auto;height:min(73dvh,700px)}.panel{margin-top:3px}h1{font-size:27px}}
@@ -84,7 +84,7 @@ function begin(x,y){
   if(!gesture||gesture.phase!=='pending')return;
   gesture.phase='armed';
   var r=term.getBoundingClientRect(),x0=gesture.x-r.left,y0=gesture.y-r.top;
-  var visualX=Math.max(95,Math.min(r.width-95,x0)),visualY=Math.max(95,Math.min(r.height-95,y0));
+  var visualX=Math.max(95,Math.min(r.width-95,x0)),visualY=Math.max(95,Math.min(r.height-127,y0));
   guide.style.left=visualX+term.scrollLeft+'px';guide.style.top=visualY+term.scrollTop+'px';
   originDot.style.left=x0+term.scrollLeft+'px';originDot.style.top=y0+term.scrollTop+'px';
   gesture.markerOffset=Math.hypot(x0-visualX,y0-visualY)>11;
