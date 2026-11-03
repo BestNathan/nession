@@ -15,7 +15,7 @@ on:
     # release-qualification SCs Pending with no later re-evaluation. A second
     # trigger cannot authorize Pass by itself; the evaluator re-reads the
     # completed Full evidence under the same trusted rules.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "CI / Run Store Signed Checkpoint", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
     # Only successful main-push sources can authorize post-merge verification.
     # Filtering the event here prevents thousands of PR completion no-op runs,
     # rather than creating a downstream run solely to skip its select job.
@@ -83,6 +83,8 @@ jobs:
                .path == ".github/workflows/acceptance-orchestrator.yml") or
               (.name == "CI / Run Store Fixture Evidence" and
                .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
+              (.name == "CI / Run Store Signed Checkpoint" and
+               .path == ".github/workflows/ci-run-store-anchor.yml") or
               (.name == "E2E / Tests" and
                .path == ".github/workflows/e2e-tests.yml") or
               (.name == "E2E / Full Regression" and
