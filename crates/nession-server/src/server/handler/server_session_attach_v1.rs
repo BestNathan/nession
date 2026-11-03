@@ -2,8 +2,8 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    current_timestamp, info, json, warn, AddressStatus, AgentStatus, ConnectionHandler,
-    CredentialScope, EnvSnapshot, HandlerAction, Message, P2pGrantPayload, ProtocolMessage,
+    current_timestamp, info, json, warn, AgentStatus, ConnectionHandler, CredentialScope,
+    EnvSnapshot, HandlerAction, Message, P2pGrantPayload, ProtocolMessage,
 };
 
 impl ConnectionHandler {
@@ -176,55 +176,9 @@ impl ConnectionHandler {
                 );
             }
 
-            // Honour a manually-selected relay address from the browser.
-            let _manual_relay_url: Option<String> = msg
-                .payload
-                .get("relay_url")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-
-            // Build candidate URL list for the server to try when
-            // connecting to the agent.  If the browser specified a
-            // relay_url, use only that one.  Otherwise auto-select:
-            // Reachable > Unknown > Unreachable > legacy fallback.
-            let _relay_urls: Vec<String> = if let Some(ref url) = _manual_relay_url {
-                info!(
-                    "Relay mode: using manual URL {} for session {}",
-                    url, session_name
-                );
-                vec![url.clone()]
-            } else {
-                let mut urls: Vec<String> = agent
-                    .addresses
-                    .iter()
-                    .filter(|p| p.status == AddressStatus::Reachable)
-                    .map(|p| p.address.url.clone())
-                    .chain(
-                        agent
-                            .addresses
-                            .iter()
-                            .filter(|p| p.status == AddressStatus::Unknown)
-                            .map(|p| p.address.url.clone()),
-                    )
-                    .chain(
-                        agent
-                            .addresses
-                            .iter()
-                            .filter(|p| p.status == AddressStatus::Unreachable)
-                            .map(|p| p.address.url.clone()),
-                    )
-                    .collect();
-                if urls.is_empty() {
-                    urls.push(agent_ws_url.clone());
-                }
-                info!(
-                    "Relay mode: {} candidate URL(s) for agent {} (session {})",
-                    urls.len(),
-                    agent_id,
-                    session_name
-                );
-                urls
-            };
+            // Phase 1 only reports the relay route; the actual candidate set
+            // and the manual-selection trust boundary belong to
+            // `server.session.relay.begin` (#2652).
 
             let client_id = uuid::Uuid::new_v4().to_string();
             if let Some(ref sender) = self.client_sender {
