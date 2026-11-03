@@ -32,7 +32,6 @@ function info(overrides: Partial<AttachInfo> = {}): AttachInfo {
 const choice: PersistedAttachChoice = {
   mode: 'auto',
   renderer: 'webgl',
-  envRefs: [],
   selectedUrl: null,
 };
 

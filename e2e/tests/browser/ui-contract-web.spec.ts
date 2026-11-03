@@ -52,7 +52,7 @@ import {
   assertCapabilityRowCssStress,
   assertWebCapsuleOuterGeometry,
   assertDestinationSharesCapsuleMaterial,
-  assertWorkRingPerceptible,
+  assertCapabilityTriggerPlain,
   assertCapsuleControls
 } from '../../helpers/uiContractMatrix';
 
@@ -125,8 +125,12 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       );
     });
 
-    test('working state ring is quiet but perceptible (#1455)', async ({ page }) => {
-      await assertWorkRingPerceptible(page, '/#/fixture?pane=claude.exe');
+    test('+ is identical while the Claude CLI is open, with no Work Ring (#2663)', async ({ page }) => {
+      await assertCapabilityTriggerPlain(
+        page,
+        '/#/fixture?pane=claude.exe',
+        '/#/fixture',
+      );
     });
 
     test('workspace capability state does not fork its visual grammar (#1451)', async ({ page }) => {

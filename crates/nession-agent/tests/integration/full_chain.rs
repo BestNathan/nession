@@ -456,6 +456,8 @@ async fn test_session_lifecycle() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        binding_profiles: Vec::new(),
+        binding_revision: None,
         terminal_cols: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);

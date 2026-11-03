@@ -14,7 +14,6 @@ export {
   claudeCodeConversation,
   claudeCodeProjection,
   claudeCodeView,
-  claudeCodeWork,
   isClaudeCodeCommand,
   resolveClaudeCodeState,
 } from './contribution';

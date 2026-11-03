@@ -91,6 +91,14 @@ export interface AttachInfo {
   // For P2P mode:
   agent_address?: string; // Legacy single URL (first/tunnel-preferred address)
   connection_token?: string;
+  /**
+   * RFC 3339 deadline the Server states for `connection_token` (#2645).
+   *
+   * The token is opaque, so this is how the client knows a new physical
+   * connection needs a fresh credential. Absent on older Servers; the Agent's
+   * refusal remains authoritative either way.
+   */
+  connection_token_expires_at?: string;
   /** Full candidate list with probe status (issue #43). Empty for relay. */
   addresses?: ProbedAddress[];
   /**

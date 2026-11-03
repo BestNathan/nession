@@ -159,7 +159,7 @@ instead of inheriting the composer's text scale.
 - **quiet** — the ordinary catalog alone, in the same shell.
 - **working** — the work-sensed rows lead, with their reasons.
 - **context-only** — the context-sensed rows lead (App with a Session: Terminal
-  Keys), with no Work Ring anywhere: context is not work (SC-37).
+  Keys), with no work marker anywhere: context is not work (SC-37; the Work Ring itself was removed by #2663).
 - **deepened** — selecting a row puts that capability's Peek in the same slot,
   at the same width, with the same gap to the shell below. The surface's height
   follows whatever is in the slot, so the list and the Peek may differ in height;

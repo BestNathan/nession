@@ -83,6 +83,16 @@ export interface SessionRuntimeConfig {
    */
   createTransport: (opts: ConnectionOptions) => TerminalTransport;
   /**
+   * Reissue this Session's P2P credential through the authenticated Server
+   * attach operation (#2645).
+   *
+   * Injected by `product/terminal`: `platform` may not import the Sessions
+   * plugin, and the terminal concept owns the composition. Absent in contexts
+   * with no Server (unit fixtures), where a reconnect keeps its current
+   * credential.
+   */
+  requestFreshAttach?: (sessionId: string) => Promise<AttachInfo>;
+  /**
    * Told when input the user typed is lost rather than delivered (#1307
    * SC-09). The runtime routes the fact from the transport it built to the
    * product surface that states it; the runtime itself keeps no copy.
@@ -181,7 +191,12 @@ export type SessionRuntimeEvent =
   | { type: 'transport-exhausted'; manualRoute: boolean }
   | { type: 'route-intent-changed'; phase: AttachPhase }
   /** The Agent stated the live Session's authoritative fixed columns (#2487). */
-  | { type: 'session-terminal-cols'; cols: number };
+  | { type: 'session-terminal-cols'; cols: number }
+  /**
+   * A P2P credential was reissued before a dial, or the attempt to reissue it
+   * failed (#2645). Reason code only — never a credential or credential URL.
+   */
+  | { type: 'p2p-credential'; outcome: 'renewed' | 'failed' };
 
 /**
  * Value equality for the published snapshot.
@@ -232,6 +247,25 @@ const P2P_PROBE_INTERVAL_MS = 15_000;
 const P2P_PROBE_TIMEOUT_MS = 5_000;
 
 /**
+ * How early a stated credential deadline is treated as spent.
+ *
+ * A minute covers ordinary client/server clock skew without renewing a fresh
+ * 300s lease on every dial. A shorter test lease (the #2645 fixture) renews on
+ * every attempt, which is exactly what that fixture needs.
+ */
+const P2P_CREDENTIAL_RENEW_MARGIN_MS = 60_000;
+
+/** The attach reply's stated deadline in epoch milliseconds, if parseable. */
+function credentialExpiryMs(attachInfo: AttachInfo | null): number | null {
+  const stated = attachInfo?.connection_token_expires_at;
+  if (!stated) {
+    return null;
+  }
+  const parsed = Date.parse(stated);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
  * The identity handshake this socket presents before anything else is served
  * (#1429).
  *
@@ -279,6 +313,17 @@ export class SessionRuntime {
   private agentTerminalApi: TerminalAgentApi | null = null;
   /** Files capability of the live P2P transport — null outside it. */
   private filesApi: FilesPlugin | null = null;
+  /**
+   * A Server-issued P2P credential obtained after the attach-issued one
+   * (#2645). Session-scoped, never persisted, and kept beside the config so a
+   * React config sync carrying the older attach cannot overwrite it.
+   */
+  private p2pCredential: { token: string; expiresAtMs: number | null; sessionId: string } | null = null;
+  /** Fences a renewal whose attach/session context has since been replaced. */
+  private credentialEpoch = 0;
+  /** Single-flight renewal for the current credential epoch. */
+  private credentialRefresh: Promise<string | null> | null = null;
+  private credentialRefreshGeneration = 0;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -889,6 +934,7 @@ export class SessionRuntime {
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const previousServerConnection = this.config.serverConnection;
+    const previousAttachInfo = this.config.attachInfo;
     const previousRelay = this.effectiveForcedRelay;
     const routeChanged =
       next.routeIntentEpoch !== undefined
@@ -897,6 +943,16 @@ export class SessionRuntime {
       next.addressUrls !== undefined
       && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
     this.config = { ...this.config, ...next };
+    // A fresh attach (a new token, or a different Session) is the new
+    // authority; a steady-state sync carries the older attach and must leave a
+    // renewed credential alone (#2645).
+    if (
+      next.attachInfo !== undefined
+      && (next.attachInfo?.session_id !== previousAttachInfo?.session_id
+        || next.attachInfo?.connection_token !== previousAttachInfo?.connection_token)
+    ) {
+      this.invalidateP2PCredential();
+    }
     if (previousServerConnection !== this.config.serverConnection
       || routeChanged || planUrlsChanged || previousRelay !== this.effectiveForcedRelay) {
       this.revokeRelayProof();
@@ -1168,6 +1224,7 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.invalidateP2PCredential();
     this.revokeRelayProof();
     this.resetTerminalAppliedCursor();
     // End the server-side relay forwarding loop with the runtime that began
@@ -1607,6 +1664,117 @@ export class SessionRuntime {
     });
   }
 
+  /** The credential this runtime would present next, renewed or not. */
+  private currentP2PCredential(): { token: string | undefined; expiresAtMs: number | null } {
+    if (this.p2pCredential && this.p2pCredential.sessionId === this.config.sessionId) {
+      return {
+        token: this.p2pCredential.token,
+        expiresAtMs: this.p2pCredential.expiresAtMs,
+      };
+    }
+    return {
+      token: this.config.attachInfo?.connection_token,
+      expiresAtMs: credentialExpiryMs(this.config.attachInfo),
+    };
+  }
+
+  /**
+   * Drop a renewed credential and fence any renewal still in flight.
+   *
+   * Called when a **fresh attach** replaces the authority (new token or a
+   * different Session), never on a steady-state config sync: React re-renders
+   * carry the older attach and must not undo a renewal.
+   */
+  private invalidateP2PCredential(): void {
+    this.credentialEpoch += 1;
+    this.credentialRefreshGeneration += 1;
+    this.credentialRefresh = null;
+    this.p2pCredential = null;
+  }
+
+  /**
+   * Resolve the Agent URL for a dial, reissuing the P2P credential first when
+   * its lease is spent (#2645).
+   *
+   * Returns `null` when the URL the transport already holds is still
+   * authoritative. The renewal is single-flight and fenced by
+   * {@link credentialEpoch}: a reply that belongs to a replaced attach or
+   * Session is refused instead of installed. No credential or credential URL
+   * is ever logged; callers observe only the outcome reason code.
+   */
+  /**
+   * Whether the attempt about to dial needs a reissued credential.
+   *
+   * Synchronous by design: a fresh lease keeps the historical synchronous
+   * dial, so the runtime's first socket is still constructed inside the
+   * constructor. A token with no stated deadline is fresh for the first dial;
+   * an older Server cannot say when it expires, so a reconnect reissues it.
+   */
+  private p2pCredentialNeedsRenewal(attempt: number): boolean {
+    const info = this.config.attachInfo;
+    if (this.disposed || !info || info.mode !== 'p2p' || this.effectiveForcedRelay) {
+      return false;
+    }
+    const credential = this.currentP2PCredential();
+    if (!credential.token) {
+      return true;
+    }
+    const deadline = credential.expiresAtMs;
+    return deadline !== null
+      ? Date.now() >= deadline - P2P_CREDENTIAL_RENEW_MARGIN_MS
+      : attempt > 0;
+  }
+
+  private async resolveP2PUrl(attempt: number): Promise<string | null> {
+    if (!this.p2pCredentialNeedsRenewal(attempt)) {
+      return null;
+    }
+    const reissue = this.config.requestFreshAttach;
+    if (!reissue) {
+      return null;
+    }
+    if (this.credentialRefresh) {
+      return this.credentialRefresh;
+    }
+
+    const epoch = this.credentialEpoch;
+    const generation = ++this.credentialRefreshGeneration;
+    const refresh = (async (): Promise<string | null> => {
+      try {
+        const fresh = await reissue(this.config.sessionId);
+        if (
+          this.disposed
+          || epoch !== this.credentialEpoch
+          || fresh.mode !== 'p2p'
+          || fresh.session_id !== this.config.sessionId
+          || !fresh.connection_token
+        ) {
+          throw new Error('P2P credential renewal returned a stale or foreign authority');
+        }
+        this.p2pCredential = {
+          token: fresh.connection_token,
+          expiresAtMs: credentialExpiryMs(fresh),
+          sessionId: fresh.session_id,
+        };
+        this.emitRuntimeEvent({ type: 'p2p-credential', outcome: 'renewed' });
+        const activeUrl = this.addressPolicy.activeUrl;
+        if (!activeUrl) {
+          throw new Error('No active P2P candidate to renew');
+        }
+        return buildAgentWsUrl(activeUrl, fresh.connection_token);
+      } catch (error) {
+        this.emitRuntimeEvent({ type: 'p2p-credential', outcome: 'failed' });
+        throw error;
+      } finally {
+        if (this.credentialRefreshGeneration === generation) {
+          this.credentialRefresh = null;
+        }
+      }
+    })();
+    this.credentialRefresh = refresh;
+    return refresh;
+  }
+
   /**
    * Keep or rebuild the P2P agent WebSocket.
    *
@@ -1622,7 +1790,7 @@ export class SessionRuntime {
    */
   private syncAgentConnection(opts?: { forceReconnect?: boolean }): void {
     const url = this.addressPolicy.activeUrl;
-    const token = this.config.attachInfo?.connection_token;
+    const token = this.currentP2PCredential().token;
 
     if (!url || !this.config.attachInfo || this.effectiveForcedRelay) {
       const hadBinding = this.agentWs !== null || this.agentTerminalApi !== null;
@@ -1672,6 +1840,11 @@ export class SessionRuntime {
       // Bind the browser's stable identity before any frame this socket
       // depends on is served (#1429) — see `p2pClientAuthHandshake`.
       handshake: p2pClientAuthHandshake,
+      // A reconnect must not present a credential whose lease is spent: the
+      // credential is renewed through the authenticated Server before the new
+      // socket dials, while a healthy socket is never touched (#2645).
+      resolveUrl: (attempt) => this.resolveP2PUrl(attempt),
+      needsUrl: (attempt) => this.p2pCredentialNeedsRenewal(attempt),
     });
     this.agentWs = ws;
     this.filesApi = files;

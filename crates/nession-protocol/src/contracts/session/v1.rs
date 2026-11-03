@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::agent::v1::ProbedAddress;
-use crate::contracts::env::v1::{ActiveEnvFile, EnvFileRef, EnvSnapshot};
+use crate::contracts::env::v1::{
+    ActiveEnvFile, EnvFileRef, EnvSnapshot, SessionEnvBindingState, SessionEnvProfile,
+};
 
 // --- Server → Agent command payloads ---
 
@@ -22,6 +24,15 @@ pub struct ServerSessionCreatePayload {
     /// Empty (default) preserves the pre-env-feature behaviour exactly.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The ordered profile selection these snapshots materialize at create
+    /// time (#170). Absent for a caller that only knows snapshots; the Agent
+    /// then derives refs from the snapshots themselves.
+    #[serde(default)]
+    pub binding_profiles: Vec<SessionEnvProfile>,
+    /// The Server's desired binding revision for this creation. Absent means
+    /// the Agent starts a local revision at 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_revision: Option<u64>,
     /// The fixed column count this Session should be created at (#2487).
     ///
     /// In a central deployment the Server states its release-selected value;
@@ -103,6 +114,10 @@ pub struct ClientSessionCreateResponsePayload {
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Non-fatal warnings from resolving/materializing the initial Environment
+    /// Binding (reserved-key collisions, parse warnings). Empty on refusal.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -230,6 +245,13 @@ pub struct ClientSessionAttachResponsePayload {
     /// Spending the token on first use would break both, and single-use is
     /// therefore a client rewrite rather than a policy choice.
     ///
+    /// **Renewal:** the browser cannot parse the opaque token, so the Server
+    /// states the deadline beside it. Before a physical Agent socket is rebuilt
+    /// after expiry, the Session runtime re-attaches through the authenticated
+    /// `server.session.attach` operation and presents the fresh credential
+    /// (#2645). A healthy socket is never replaced just because the credential
+    /// expired; only a new upgrade needs one.
+    ///
     /// **Transport:** the `token` query parameter on the agent URL
     /// ([`super::super::p2p::CREDENTIAL_PARAM`]). A query parameter because a
     /// browser cannot set a header on `new WebSocket()`. **It therefore reaches
@@ -242,6 +264,15 @@ pub struct ClientSessionAttachResponsePayload {
     /// browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_token: Option<String>,
+    /// RFC 3339 deadline for [`Self::connection_token`], stated by its issuer.
+    ///
+    /// The browser cannot parse the opaque token, so this is the only way a
+    /// client can know a reconnect needs a *new* credential instead of the one
+    /// it already holds (#2645). Absent on older Servers and on the relay
+    /// arm; a client that sees it must still treat the Agent's refusal as
+    /// authoritative (fail closed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_token_expires_at: Option<String>,
     /// The Server's release-selected fixed column count (#2487).
     ///
     /// The browser renders this width when its embedded build value differs,
@@ -347,33 +378,55 @@ pub struct ClientSessionEnvResponsePayload {
     pub warnings: Vec<String>,
 }
 
-/// `server.session.env.apply` / `server.session.env.unset` — the server hands
-/// the agent already-resolved snapshots (so parsing/source resolution is done
-/// centrally) to apply or remove on a running session.
+// --- Session Environment Binding (#170) ---
+
+/// `server.session.env.binding.get` — read a Session's binding state.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerSessionEnvApplyPayload {
-    pub request_id: String,
-    pub name: String,
-    pub snapshots: Vec<EnvSnapshot>,
-    #[serde(default)]
-    pub client_id: Option<String>,
-    /// The env file refs being applied (for tracking purposes)
-    #[serde(default)]
-    pub env_files: Vec<EnvFileRef>,
+pub struct ClientSessionEnvBindingGetPayload {
+    pub session_id: String,
 }
 
+/// `server.session.env.binding.set` — replace a Session's whole binding.
+///
+/// This is the canonical mutation. Order is the profile order, and the set is
+/// the complete desired selection: an empty list clears the binding. There is
+/// deliberately no per-file apply/unset in this unit — a caller never
+/// constructs correctness from overlapping incremental operations.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerSessionEnvUnsetPayload {
-    pub request_id: String,
-    pub name: String,
-    /// The variable keys to remove via `tmux set-environment -u`.
-    pub keys: Vec<String>,
+pub struct ClientSessionEnvBindingSetPayload {
+    pub session_id: String,
     #[serde(default)]
-    pub client_id: Option<String>,
+    pub profiles: Vec<EnvFileRef>,
+}
+
+/// `server.session.env.binding.reapply` — re-resolve the currently desired
+/// profiles and materialize a new binding revision.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionEnvBindingReapplyPayload {
+    pub session_id: String,
+}
+
+/// The reply shared by the three binding units above.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientSessionEnvBindingResponsePayload {
+    pub success: bool,
+    /// The state after the operation. Present on success and on a failed
+    /// materialization, because the desired binding is still the truth the
+    /// caller needs to see.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<SessionEnvBindingState>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ============================================================================
@@ -644,6 +697,15 @@ pub struct SessionCreatePayload {
     /// that does not send it.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The ordered profile selection these snapshots materialize at create
+    /// time (#170). The same field the Server states on its own create
+    /// projection, so a direct and a relayed create are one binding model.
+    #[serde(default)]
+    pub binding_profiles: Vec<SessionEnvProfile>,
+    /// The caller's desired binding revision. Absent means the Agent starts a
+    /// local revision at 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_revision: Option<u64>,
     /// The fixed column count this Session should be created at (#2487).
     ///
     /// The Server's relayed create states its value; a direct caller omits it
@@ -978,6 +1040,9 @@ pub enum ServerSessionListReply {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreateResponse {
     pub name: String,
+    /// Non-fatal warnings from materializing the initial Environment Binding.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

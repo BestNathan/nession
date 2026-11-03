@@ -5,6 +5,7 @@ import {
   orderedUrlsAtom, sessionIdAtom, sessionNameAtom,
 } from '@/product/session/state';
 import { routeIntentEpochAtom } from '@/platform/attach/state';
+import { sessionsApi } from '@/product/session';
 import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
@@ -301,6 +302,10 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       // The runtime decides when a transport exists and which identity it
       // binds (#1309); the concrete I/O object stays the product layer's.
       createTransport: (opts) => new ConnectionManager(opts),
+      // The authenticated Server attach operation is the only credential
+      // issuer; the runtime injects the call at the P2P reconnect boundary so
+      // an expired lease never reaches an Agent upgrade (#2645).
+      requestFreshAttach: (targetSessionId) => sessionsApi.requestAttach(targetSessionId, 'p2p'),
       onInputDrop: (drop) => setInputDrop(drop),
       hasSessionOutput: options.hasSessionOutput,
       hasSessionHistory: options.hasSessionHistory,

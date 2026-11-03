@@ -1,5 +1,5 @@
 /** Viewport size shared by the agent (P2P) and server (relay) terminal APIs. */
-import type { AttachInfo, AddressLatency, EnvFileRef } from '@/types';
+import type { AttachInfo, AddressLatency } from '@/types';
 
 export interface TerminalSize {
   cols: number;
@@ -47,6 +47,4 @@ export interface AttachedSession {
   /** Manual relay endpoint URL from the attach dialog (null = auto). */
   relayUrl?: string | null;
   renderer?: 'webgl' | 'canvas';
-  /** Env files chosen in the attach dialog to source once the terminal is live. */
-  envRefs?: EnvFileRef[];
 }

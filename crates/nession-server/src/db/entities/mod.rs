@@ -3,4 +3,5 @@
 pub mod agents;
 pub mod env_files;
 pub mod quick_commands;
+pub mod session_env_bindings;
 pub mod sessions;

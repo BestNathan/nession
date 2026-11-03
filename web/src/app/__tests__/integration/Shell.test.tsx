@@ -56,7 +56,6 @@ const attachChoice = vi.hoisted(() => ({
   selectedUrl: null,
   relayUrl: null,
   renderer: 'canvas' as const,
-  envRefs: [],
 }));
 
 vi.mock('@/app/useDashboard', () => ({

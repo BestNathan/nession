@@ -22,6 +22,7 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type EnvSource = "server" | "agent";
+export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -31,6 +32,17 @@ vars: Array<[string, string]>,
  * Non-fatal parse warnings surfaced to the UI.
  */
 warnings: Array<string>, };
+export type SessionEnvProfile = { profile: EnvFileRef, 
+/**
+ * `"create"` or `"attach"` (provenance only).
+ */
+phase: string, 
+/**
+ * SHA-256 of the profile content captured when this revision was
+ * materialized. Absent on the Agent-facing wire: the Agent records the
+ * content it applied, not a Server-side identity.
+ */
+content_hash?: string | null, };
 export type SessionCreatePayload = { name: string, width: number, height: number, working_dir?: string | null, 
 /**
  * Resolved env-file snapshots to inject via `tmux new-session -e`.
@@ -47,6 +59,17 @@ export type SessionCreatePayload = { name: string, width: number, height: number
  */
 env_snapshots: Array<EnvSnapshot>, 
 /**
+ * The ordered profile selection these snapshots materialize at create
+ * time (#170). The same field the Server states on its own create
+ * projection, so a direct and a relayed create are one binding model.
+ */
+binding_profiles: Array<SessionEnvProfile>, 
+/**
+ * The caller's desired binding revision. Absent means the Agent starts a
+ * local revision at 1.
+ */
+binding_revision?: number | null, 
+/**
  * The fixed column count this Session should be created at (#2487).
  *
  * The Server's relayed create states its value; a direct caller omits it
@@ -54,7 +77,11 @@ env_snapshots: Array<EnvSnapshot>,
  * Session keeps its pane's width.
  */
 terminal_cols?: number | null, };
-export type SessionCreateResponse = { name: string, };
+export type SessionCreateResponse = { name: string, 
+/**
+ * Non-fatal warnings from materializing the initial Environment Binding.
+ */
+warnings: Array<string>, };
 
 // ── Operations ──
 
@@ -75,6 +102,17 @@ export type SessionCreateCall = { name: string, width: number, height: number, w
  */
 env_snapshots: Array<EnvSnapshot>, 
 /**
+ * The ordered profile selection these snapshots materialize at create
+ * time (#170). The same field the Server states on its own create
+ * projection, so a direct and a relayed create are one binding model.
+ */
+binding_profiles: Array<SessionEnvProfile>, 
+/**
+ * The caller's desired binding revision. Absent means the Agent starts a
+ * local revision at 1.
+ */
+binding_revision?: number | null, 
+/**
  * The fixed column count this Session should be created at (#2487).
  *
  * The Server's relayed create states its value; a direct caller omits it
@@ -84,5 +122,9 @@ env_snapshots: Array<EnvSnapshot>,
 terminal_cols?: number | null, };
 
 /** The payload the provider answers with. */
-export type SessionCreateReply = { name: string, };
+export type SessionCreateReply = { name: string, 
+/**
+ * Non-fatal warnings from materializing the initial Environment Binding.
+ */
+warnings: Array<string>, };
 

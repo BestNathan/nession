@@ -160,7 +160,6 @@ function seedProfile(overrides: {
     choice: {
       mode: overrides.mode ?? 'auto',
       renderer: 'canvas' as const,
-      envRefs: [],
       selectedUrl: overrides.selectedUrl ?? null,
     },
     optionsFingerprint: overrides.fingerprint ?? buildOptionsFingerprint(attachInfoResponse),
@@ -255,7 +254,7 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
       schemaVersion: 1,
       sessionId: sess.session_id,
       agentId: sess.agent_id,
-      choice: { mode: 'auto', renderer: 'canvas', envRefs: [], selectedUrl: null },
+      choice: { mode: 'auto', renderer: 'canvas', selectedUrl: null },
       optionsFingerprint: buildOptionsFingerprint(attachInfoResponse),
     });
   });

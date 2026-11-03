@@ -42,7 +42,6 @@ function makeProfile(session: Session): SessionAttachProfile {
     choice: {
       mode: 'auto',
       renderer: 'canvas',
-      envRefs: [],
       selectedUrl: null,
     },
     optionsFingerprint: 'fingerprint',
@@ -87,7 +86,6 @@ describe('useDeepLinkRestore', () => {
       selectedUrl: null,
       relayUrl: null,
       renderer: 'webgl' as const,
-      envRefs: [],
     };
     vi.mocked(resolveDeepLinkAttachChoice).mockResolvedValue(choice);
 
@@ -160,7 +158,6 @@ describe('useDeepLinkRestore', () => {
       selectedUrl: null,
       relayUrl: null,
       renderer: 'webgl' as const,
-      envRefs: [],
     };
     profileStore.current = profile;
     vi.mocked(resolveProfileAttach).mockResolvedValue({ kind: 'choice', choice });

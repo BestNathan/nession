@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   claudeCodeConversation,
   claudeCodeView,
-  claudeCodeWork,
   resolveClaudeCodeState,
 } from '../../contribution';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
@@ -55,42 +54,6 @@ describe('claude-code capability state from session facts', () => {
 
   it('falls back to available when the agent reports no foreground command', () => {
     expect(state({ sessionForegroundCommand: null })).toBe('available');
-  });
-});
-
-/**
- * The work contribution (#1347 SC-14/19): the capability owns what "working"
- * means for it — matcher, status and summary — and the shell's resolver only
- * aggregates. Quiet is the absence of a signal, never a `{status:'quiet'}`
- * entry, or the Work Overview would fill with non-work.
- */
-describe('claude-code work signal', () => {
-  it('reports working while the pane runs Claude Code', () => {
-    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'claude.exe' })).toEqual({
-      capabilityId: 'claude-code',
-      status: 'working',
-      summary: 'Working in this session',
-    });
-  });
-
-  it('matches the bare command name too', () => {
-    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'claude' })?.status).toBe(
-      'working',
-    );
-  });
-
-  it('emits nothing for an unrelated command', () => {
-    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'bash' })).toBeNull();
-  });
-
-  it('emits nothing without facts', () => {
-    expect(claudeCodeWork.sense(undefined)).toBeNull();
-  });
-
-  it('answers from the same matcher as the presence state', () => {
-    // One definition of "Claude is running" — the ring and the presence chip
-    // cannot disagree about the same pane.
-    expect(claudeCodeWork.sense({ sessionForegroundCommand: 'node' })).toBeNull();
   });
 });
 

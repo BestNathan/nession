@@ -14,7 +14,6 @@ const session = {
 const choice: PersistedAttachChoice = {
   mode: 'p2p',
   renderer: 'webgl',
-  envRefs: [{ name: 'prod.env', source: 'server' }],
   selectedUrl: null,
 };
 
@@ -96,40 +95,20 @@ describe('sessionAttachProfile storage', () => {
     expect(loadSessionProfile(renamed)).toBeNull();
   });
 
-  it('returns null when a profile entry has non-array envRefs', () => {
-    seedEntry({
-      ...validEntry,
-      choice: { ...validEntry.choice, envRefs: 'nope' },
-    });
-    expect(loadSessionProfile(session)).toBeNull();
-  });
-
-  it('drops malformed envRef members but keeps valid ones', () => {
+  it('ignores the legacy envRefs field instead of rejecting the profile', () => {
+    // Attach is environment-neutral (#170). A profile written by a build that
+    // still offered attach-time env selection must remain a valid profile; its
+    // old env list is simply not part of the choice any more.
     seedEntry({
       ...validEntry,
       choice: {
         ...validEntry.choice,
-        envRefs: [
-          { name: 'prod.env', source: 'server' },
-          { name: 5, source: 'server' },
-          { name: 'x.env', source: 'bogus' },
-        ],
+        envRefs: [{ name: 'prod.env', source: 'server' }],
       },
     });
-    expect(loadSessionProfile(session)?.choice.envRefs).toEqual([
-      { name: 'prod.env', source: 'server' },
-    ]);
-  });
-
-  it('drops an envRef member with a non-string agent_id', () => {
-    seedEntry({
-      ...validEntry,
-      choice: {
-        ...validEntry.choice,
-        envRefs: [{ name: 'prod.env', source: 'server', agent_id: 7 }],
-      },
-    });
-    expect(loadSessionProfile(session)?.choice.envRefs).toEqual([]);
+    const loaded = loadSessionProfile(session);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.choice).not.toHaveProperty('envRefs');
   });
 
   it('recovers when the stored blob is a JSON array', () => {

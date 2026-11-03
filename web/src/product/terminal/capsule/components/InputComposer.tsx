@@ -13,7 +13,6 @@ import {
   capsuleComposerRowGapYClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleContext';
-import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 interface InputComposerProps {
   /** Capabilities that earned no chip, reachable through the leading entry. */
@@ -27,11 +26,6 @@ interface InputComposerProps {
    */
   onFieldFocus?: () => void;
   fieldRef?: RefObject<HTMLTextAreaElement | null>;
-  /**
-   * Work-awareness context (#1347): passed down to the leading slot so the `+`
-   * button can show the work ring when working.
-   */
-  workContext?: ResolvedWorkContext;
 }
 
 /**
@@ -43,7 +37,7 @@ interface InputComposerProps {
  * and the tools sit beneath it, `+` still leftmost and send still rightmost.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef, workContext }, ref) {
+  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef }, ref) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -120,7 +114,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
               data-flip-id="tools-leading"
               className={cn('relative z-[1] min-w-0 shrink-0', !hasLeading && 'hidden')}
             >
-              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} workContext={workContext} />
+              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} />
             </div>
             <div
               data-testid="capsule-input-actions-slot"
@@ -140,7 +134,7 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
                 !hasLeading && 'hidden',
               )}
             >
-              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} workContext={workContext} />
+              <CapsuleInputLeading capabilityDisclosure={capabilityDisclosure} />
             </div>
             <div
               data-testid="capsule-input-actions-slot"

@@ -359,6 +359,7 @@ fn a_real_isolated_session_reports_its_pane_and_descendants() {
             width: 80,
             height: 24,
             env: Vec::new(),
+            command: Vec::new(),
         })
         .await
         .expect("create a real isolated session");

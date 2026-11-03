@@ -179,7 +179,7 @@ impl WebSocketServer {
                                     let removed =
                                         session_registry.remove_by_agent(&agent_id_clone).await;
                                     for session_id in &removed {
-                                        env_service.usage.clear_session(session_id);
+                                        env_service.clear_session_state(session_id).await;
                                     }
                                     if !removed.is_empty() {
                                         // Push the shrunken list so browsers stop
@@ -224,8 +224,9 @@ impl WebSocketServer {
                                     row.session_id, row.agent_id, row.last_activity
                                 );
                                 session_registry.remove(&row.session_id).await;
-                                // Release env usage locks held by this session.
-                                env_service.usage.clear_session(&row.session_id);
+                                // The Session is gone; its desired binding and
+                                // observed cache are no longer a live claim.
+                                env_service.clear_session_state(&row.session_id).await;
                             }
                             tracing::info!("Cleaned {} orphaned sessions", rows.len());
                         }
@@ -1041,6 +1042,54 @@ fn validate_relay_attach_reply(
     Ok(generation.is_some() && epoch.is_some())
 }
 
+/// Log-safe identity of a dialed Agent endpoint (#2652).
+///
+/// Every URL passed to the relay dial carries the scoped credential in its
+/// query. Logs keep only scheme, host, port and path; userinfo and the query
+/// are discarded rather than redacted in place, so a crafted credential URL
+/// has no spelling that can reach a log line. The dial itself still uses the
+/// credential-bearing URL — this function is for diagnostics only.
+fn sanitized_endpoint(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(parsed) => {
+            let mut safe = format!(
+                "{}://{}",
+                parsed.scheme(),
+                parsed.host_str().unwrap_or("unknown-host")
+            );
+            if let Some(port) = parsed.port() {
+                safe.push(':');
+                safe.push_str(&port.to_string());
+            }
+            safe.push_str(parsed.path());
+            safe
+        }
+        Err(_) => "invalid-endpoint".to_string(),
+    }
+}
+
+/// A bounded reason for a failed relay dial.
+///
+/// Tungstenite's `Display` can embed the URL (and therefore its credential),
+/// so the log carries this category instead of the raw error.
+fn relay_failure_reason(error: &tokio_tungstenite::tungstenite::Error) -> &'static str {
+    use tokio_tungstenite::tungstenite::Error as Ws;
+    match error {
+        Ws::ConnectionClosed => "connection-closed",
+        Ws::AlreadyClosed => "already-closed",
+        Ws::Io(_) => "io",
+        Ws::Tls(_) => "tls",
+        Ws::Capacity(_) => "capacity",
+        Ws::Protocol(_) => "protocol",
+        Ws::WriteBufferFull(_) => "write-buffer-full",
+        Ws::Utf8 => "utf8",
+        Ws::AttackAttempt => "attack-attempt",
+        Ws::Url(_) => "url",
+        Ws::Http(_) => "http",
+        Ws::HttpFormat(_) => "http-format",
+    }
+}
+
 /// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
@@ -1090,7 +1139,7 @@ where
     let mut agent_ws = None;
     let mut connected_url: Option<String> = None;
     for url in agent_ws_urls {
-        info!("Relay: trying {}", url);
+        info!("Relay: trying {}", sanitized_endpoint(url));
         match tokio::time::timeout(
             std::time::Duration::from_secs(2),
             tokio_tungstenite::connect_async(url),
@@ -1098,16 +1147,23 @@ where
         .await
         {
             Ok(Ok((ws, _))) => {
-                info!("Relay: connected to {}", url);
+                info!("Relay: connected to {}", sanitized_endpoint(url));
                 agent_ws = Some(ws);
                 connected_url = Some(url.clone());
                 break;
             }
             Ok(Err(ref e)) => {
-                warn!("Relay: connect to {} failed: {:#}", url, e);
+                warn!(
+                    "Relay: connect to {} failed ({})",
+                    sanitized_endpoint(url),
+                    relay_failure_reason(e)
+                );
             }
             Err(_) => {
-                warn!("Relay: connect to {} timed out (2s)", url);
+                warn!(
+                    "Relay: connect to {} timed out (2s)",
+                    sanitized_endpoint(url)
+                );
             }
         }
     }
@@ -2835,6 +2891,35 @@ mod tests {
         assert_eq!(
             classify_client_frame(&Message::Text(r#"{"msg_type":7}"#.to_string())),
             ClientFrame::Other
+        );
+    }
+
+    #[test]
+    fn relay_diagnostics_never_include_the_scoped_credential() {
+        let endpoint = "wss://user:pass@agent.example.com:19091/ws?token=scoped-secret";
+        let safe = sanitized_endpoint(endpoint);
+        assert_eq!(safe, "wss://agent.example.com:19091/ws");
+        assert!(!safe.contains("scoped-secret"));
+        assert!(!safe.contains("user"));
+
+        assert_eq!(
+            sanitized_endpoint("ws://agent.example.com/ws"),
+            "ws://agent.example.com/ws"
+        );
+        assert_eq!(sanitized_endpoint("not a url"), "invalid-endpoint");
+    }
+
+    #[test]
+    fn relay_failure_reason_is_a_bounded_category() {
+        use tokio_tungstenite::tungstenite::Error as Ws;
+        assert_eq!(
+            relay_failure_reason(&Ws::ConnectionClosed),
+            "connection-closed"
+        );
+        assert_eq!(relay_failure_reason(&Ws::AttackAttempt), "attack-attempt");
+        assert_eq!(
+            relay_failure_reason(&Ws::Io(std::io::Error::other("boom"))),
+            "io"
         );
     }
 

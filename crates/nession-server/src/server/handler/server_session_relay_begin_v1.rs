@@ -2,9 +2,9 @@
 //! Route identity, version and execution policy are owned by routes.rs.
 
 use super::{
-    agent_url_with_credential, current_timestamp, info, json, relay_begin_reply, AddressStatus,
-    AgentStatus, ClientRelayBeginPayload, ConnectionHandler, CredentialScope, HandlerAction,
-    Message, P2pGrantPayload, ProtocolMessage, SessionRefusal,
+    agent_url_with_credential, current_timestamp, info, json, relay_begin_reply, warn,
+    AddressStatus, AgentStatus, ClientRelayBeginPayload, ConnectionHandler, CredentialScope,
+    HandlerAction, Message, P2pGrantPayload, ProtocolMessage, SessionRefusal,
 };
 
 impl ConnectionHandler {
@@ -99,7 +99,29 @@ impl ConnectionHandler {
             .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
 
         let relay_urls: Vec<String> = if let Some(ref url) = manual_relay_url {
-            vec![url.clone()]
+            // A browser preference selects among endpoints this Agent
+            // registered; it never introduces one. Refuse before minting or
+            // decorating a credential, so a forged target sees neither a
+            // dial nor a token (#2652). The refusal and log carry no URL:
+            // the candidate is attacker-controlled and may embed a
+            // credential-looking query.
+            let Some(bound) = crate::registry::agent_bound_relay_url(&agent, &agent_ws_url, url)
+            else {
+                warn!(
+                    "Relay begin refused a URL not registered to agent '{}' (session '{}')",
+                    agent_id, session_name
+                );
+                return Ok(relay_begin_reply(
+                    &msg.id,
+                    SessionRefusal {
+                        status: "error".to_string(),
+                        message: format!(
+                            "Relay URL is not an address registered for Agent '{agent_id}'"
+                        ),
+                    },
+                ));
+            };
+            vec![bound]
         } else {
             let mut urls: Vec<String> = agent
                 .addresses
