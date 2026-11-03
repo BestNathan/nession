@@ -20,6 +20,19 @@ Before authoring:
 
 The repo has two complementary interaction patterns: [#2221](https://github.com/BestNathan/nession/issues/2221) explores System One AI Workspace Scene orchestration and [#2254](https://github.com/BestNathan/nession/issues/2254) explores System Two Text-to-Component AI Conversation. **Use them as examples, not as a universal UI shell or hardcoded design.**
 
+## 1a. Mandatory synchronization after a design decision changes
+
+A published prototype is a **versioned representation of a product decision**, not a permanent illustration. Whenever an existing Requirement, Success Criterion, user-approved interaction, design source, or navigation/state contract changes, **check all linked prototypes before considering the design change complete**.
+
+- **Impact assessment:** compare the revised decision against the prototype's entry/context, visibility, layout, interaction transitions, mobile behavior, negative states, and copy. An existing prototype that still depicts a superseded behavior is stale even if its HTML link continues to open.
+- **Affected prototype:** update the **same owning Issue's prototype directory** in the *same design-change workflow* (do not create a duplicate prototype for the new state). Synchronize `index.html`, scenario/fidelity `README.md`, shared branch-root gallery `index.html` and `README.md` when their description is affected, and any associated mock fixtures/tests. Preserve unrelated prototype directories and existing decision history.
+- **Verification:** repeat relevant mock smoke and real-browser desktop/mobile checks for the **new** behavior. Old screenshots, previous DOM tests, pinned SHAs, and Pages publication receipts **do not prove** a revised design.
+- **Issue links and delivery:** update the owning Issue's scenario/Success Criteria and prototype notes to describe the same revision. After publication, replace the immutable source pin with the exact new commit and verify the HTTPS preview against the `prototypes/manifest.json` SHA. A branch push is not proof that the public HTML is current.
+- **If immediate synchronization is blocked:** explicitly mark the linked artifact **STALE / superseded** in the Issue and prototype notes, identify the design revision and follow-up owner, and **do not present the old URL as current visual evidence**. For a user-requested design+prototype change, this is an incomplete deliverable, not a silent optional follow-up. Resolve it before claiming design/prototype completion.
+- **No prototype exists:** record the prototype decision using `nession-writing-requirements` (Required / Optional / Not needed). Do not manufacture a mock for a purely internal/protocol change.
+
+This is a bidirectional consistency obligation: revising a mock to settle a product decision also updates the Requirement/design contract; revising the Requirement/design contract also audits and updates the mock.
+
 ## 2. Define what the prototype needs to prove
 
 Write a small scenario/fidelity contract in the prototype `README.md` **before designing screens**:

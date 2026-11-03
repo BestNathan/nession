@@ -4,7 +4,10 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 
+// The 2026-10 migration baseline covers the original three refs only. Current
+// server-side branch authorization must cover all four live Store refs.
 export const GOVERNED_REFS=Object.freeze(['acceptance-results','task-results','metrics']);
+export const POLICY_REFS=Object.freeze([...GOVERNED_REFS,'agent-store']);
 const REPO='BestNathan/nession';
 const positive=x=>Number.isSafeInteger(x)&&x>0;
 const SHA=/^[a-f0-9]{40}$/;
@@ -13,7 +16,7 @@ function fail(message){throw Error('run-store-policy: '+message);}
 // Only accept exact named refs. A wildcard/include-empty ruleset is not
 // silently assumed to cover the protected ref; that needs a separate review.
 export function coversStoreRef(rule,ref){
-  if(!GOVERNED_REFS.includes(ref)||rule?.target!=='branch'||
+  if(!POLICY_REFS.includes(ref)||rule?.target!=='branch'||
      rule?.source_type!=='Repository'||rule?.source!==REPO)
     return false;
   const c=rule.conditions?.ref_name;
@@ -21,7 +24,7 @@ export function coversStoreRef(rule,ref){
   const name='refs/heads/'+ref;
   return c.include.length>0&&c.exclude.length===0&&
     c.include.includes(name)&&
-    c.include.every(x=>GOVERNED_REFS.some(ref=>'refs/heads/'+ref===x));
+    c.include.every(x=>POLICY_REFS.some(ref=>'refs/heads/'+ref===x));
 }
 
 // GitHub omits `bypass_actors` from a ruleset detail unless the requesting
@@ -59,7 +62,7 @@ function unobservableCapabilities(candidates){
 // bypass permits unrelated writes; 'pull_request' cannot append an orphan
 // branch, and 'exempt' is unauditable.
 export function evaluateStoreRules(ref,rulesets,approvedAppId){
-  if(!GOVERNED_REFS.includes(ref)||!Array.isArray(rulesets))
+  if(!POLICY_REFS.includes(ref)||!Array.isArray(rulesets))
     fail('invalid target or GitHub ruleset response');
   const applicable=rulesets.filter(r=>coversStoreRef(r,ref));
   const candidates=applicable.filter(r=>r.enforcement==='active');
@@ -151,6 +154,20 @@ export function runTests(){
     bypass_actors:[{actor_id:app,actor_type:'Integration',bypass_mode:'always'}]};
   assert.equal(evaluateStoreRules(ref,[rule],app).configuration_verified,true);
   assert.equal(evaluateStoreRules(ref,[rule],app).denied_write_test_verified,false);
+  // Real production Ruleset now contains all four exact refs; accepting only
+  // the old three would classify every valid Store as "unprotected".
+  const fourStoreRule={...rule,conditions:{ref_name:{
+    include:POLICY_REFS.map(x=>'refs/heads/'+x),exclude:[]}}};
+  for(const store of POLICY_REFS)
+    assert.equal(evaluateStoreRules(store,[fourStoreRule],app).configuration_verified,true);
+  assert.equal(evaluateStoreRules('agent-store',[rule],app).configuration_verified,false);
+  for(const unexpected of ['refs/heads/main','refs/heads/*',
+    'refs/heads/unknown-store']){
+    const widened={...fourStoreRule,conditions:{ref_name:{
+      include:[...fourStoreRule.conditions.ref_name.include,unexpected],exclude:[]}}};
+    for(const store of POLICY_REFS)
+      assert.equal(evaluateStoreRules(store,[widened],app).configuration_verified,false);
+  }
   for(const mutation of [
     {...rule,enforcement:'disabled'},
     {...rule,conditions:{ref_name:{include:['refs/heads/main'],exclude:[]}}},
