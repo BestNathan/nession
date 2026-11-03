@@ -47,6 +47,9 @@ jobs:
       workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
       public_agent_source: ${{ steps.public_data.outputs.source }}
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
+      knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
+      knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
+      knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
       prototype_sha: ${{ steps.public_data.outputs.prototype_sha }}
       prototype_manifest_sha256: ${{ steps.public_data.outputs.prototype_manifest_sha256 }}
       prototype_gallery_sha256: ${{ steps.public_data.outputs.prototype_gallery_sha256 }}
@@ -86,6 +89,13 @@ jobs:
         with:
           ref: prototype
           path: prototype-store
+          persist-credentials: false
+      - name: Checkout read-only Knowledge snapshot
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: knowledge
+          path: knowledge-store
           persist-credentials: false
       - name: Setup standalone Node toolchain
         if: steps.detect.outputs.active == 'true'
