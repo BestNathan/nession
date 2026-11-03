@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Knowledge Explorer — Nession Pages Prototype #2664</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap');
+:root{--paper:#f5f5f0;--surface:#fffefa;--ink:#183c36;--deep:#102c29;--text:#253b36;--muted:#74857c;--line:#d9e3da;--tint:#e8f3e9;--accent:#9fd8ba;--green:#2f785d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--text);font:14px/1.6 "DM Sans",system-ui,sans-serif}
+button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}a{color:inherit;text-decoration:none}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #43b49d;outline-offset:3px}
+.site{max-width:1500px;padding:0 44px;margin:auto;min-height:100vh}
+.top{height:92px;display:flex;gap:32px;align-items:center;border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:9px;font-size:27px;letter-spacing:-1.3px;font-weight:700;color:var(--ink);white-space:nowrap}
+.logo em{font-style:normal;font-weight:400}.logo b{background:var(--ink);color:#bcead4;display:grid;place-items:center;border-radius:8px;width:29px;height:29px;font:700 19px Georgia;transform:rotate(-9deg)}
+.logo small{letter-spacing:2px;color:var(--muted);font:10px "DM Mono",monospace;margin-left:8px}
+nav{display:flex;align-items:center;gap:23px;margin-left:auto;white-space:nowrap;overflow:auto}nav a{font-size:12px;font-weight:700;color:#79887f;padding:10px 0;border-bottom:2px solid transparent}
+nav a.active{color:var(--ink);border-bottom-color:var(--ink)}nav a:hover{color:var(--ink)}
+.top-source{flex:none;border:1px solid var(--line);border-radius:40px;padding:9px 14px;font-weight:700;font-size:12px}
+.eyebrow,.mono{font:10px/1.4 "DM Mono",monospace;letter-spacing:1.5px;text-transform:uppercase;color:#4c8069}
+.head{padding:54px 0 29px;display:flex;align-items:flex-end;justify-content:space-between;gap:22px}
+h1{font:400 clamp(42px,5.5vw,72px)/1.06 "Instrument Serif",Georgia,serif;color:var(--deep);letter-spacing:-1.7px;margin:12px 0 12px}
+.head p{font-size:15px;color:#718176;line-height:1.65;margin:0;max-width:610px}
+.snapshot{max-width:310px;min-width:246px;background:#ecf3eb;border:1px solid #cfdfd1;border-radius:15px;padding:15px 18px;color:#526b5a}
+.snapshot strong{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--ink);margin:3px 0 8px}.snapshot strong:before{content:"";width:7px;height:7px;border-radius:100%;background:#6fa98c}
+.snapshot small{display:block;font:11px/1.7 "DM Mono",monospace;overflow-wrap:anywhere}.snapshot .mock{color:#956e39}
+.bar{display:flex;gap:22px;align-items:end;justify-content:space-between;border-bottom:1px solid var(--line);margin-top:14px}
+.tabs{display:flex;gap:30px}.tab{border:0;background:none;color:#7c8b81;padding:14px 1px;font-size:13px;font-weight:700;border-bottom:2px solid transparent}
+.tab[aria-selected=true]{color:var(--ink);border-color:var(--ink)}
+.note{font:11px "DM Mono",monospace;color:#8a9a91;padding:12px 0}
+.workspace{display:grid;grid-template-columns:190px minmax(280px,340px) minmax(0,1fr);gap:18px;min-height:610px;padding:24px 0 48px}
+.side,.listbox,.reader{min-width:0}
+.side{padding:10px 15px 0 0;border-right:1px solid var(--line)}
+.section-label{color:#819288;text-transform:uppercase;letter-spacing:1.4px;font:10px "DM Mono",monospace;margin:0 0 11px}
+.filter{border:0;width:100%;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:9px;padding:9px 11px;margin:3px 0;text-align:left;color:#697e72;font-size:13px}
+.filter strong{font-size:11px;font-weight:600;color:#799084}.filter:hover{background:#e9f0e9}.filter.active{background:#dceee1;color:var(--ink);font-weight:700}.filter.active strong{color:#527964}
+.side hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+.tags{display:flex;gap:7px;flex-wrap:wrap}.chip{border:1px solid #d2e1d7;border-radius:999px;background:transparent;color:#637d6b;padding:5px 9px;font:10px "DM Mono",monospace}
+.chip:hover,.chip.active{background:var(--ink);border-color:var(--ink);color:white}
+.listbox{border:1px solid var(--line);border-radius:16px;background:var(--surface);align-self:start;overflow:hidden}
+.search-area{padding:17px;border-bottom:1px solid var(--line)}
+.search-wrap{position:relative}.search-wrap span{position:absolute;top:12px;left:13px;color:#87a092;font-size:14px}
+input[type=search]{outline:none;width:100%;padding:11px 12px 11px 38px;border:1px solid #d8e5dc;border-radius:10px;background:#f8faf6;color:var(--ink);font-size:12px}
+input[type=search]:focus{border-color:#6ab293;background:white}
+.list-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;background:#fafbf8;color:#86968a;font:10px "DM Mono",monospace;border-bottom:1px solid var(--line)}
+.article-list{max-height:665px;overflow:auto}
+.article-option{background:transparent;border:0;border-bottom:1px solid #e4eae3;display:block;text-align:left;padding:19px 17px 17px;width:100%;position:relative}
+.article-option:hover{background:#f2f7f1}.article-option.selected{background:#eaf5ed}
+.article-option.selected:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#48876c}
+.kicker{font:10px/1.5 "DM Mono",monospace;text-transform:uppercase;letter-spacing:1px;color:#588568}
+.article-option h3{color:#23483d;font-size:14px;line-height:1.42;margin:8px 0 7px;letter-spacing:-.1px;font-weight:700}
+.article-option p{font-size:12px;color:#75857a;line-height:1.5;margin:0 0 12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#87988c;font:10px "DM Mono",monospace}
+.status{border-radius:99px;background:#e0efdf;color:#487453;padding:2px 7px;font:10px "DM Mono",monospace}
+.status.candidate{background:#faf0d6;color:#8f6f37}
+.reader{border:1px solid var(--line);border-radius:16px;background:var(--surface);min-height:570px;padding:31px 34px 35px;align-self:start}
+.reader-top{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.reader .eyebrow{letter-spacing:1px}.reader h2{font:400 clamp(31px,3vw,46px)/1.14 "Instrument Serif",Georgia,serif;color:var(--deep);letter-spacing:-1px;margin:18px 0 14px}
+.reader-desc{font-size:14px;color:#738679;margin:0 0 18px;line-height:1.7}
+.pills{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.pill{font:10px "DM Mono",monospace;color:#66816b;padding:4px 9px;background:#eff4ec;border-radius:30px}
+.verified-note{background:#f2f7f0;border-left:2px solid #7daf90;padding:12px 14px;font-size:11px;color:#657d6d;line-height:1.5;margin:20px 0}
+.prose{margin-top:24px;color:#3b5045;font-size:13px;line-height:1.85}.prose h3{font-size:17px;color:#23483d;margin:24px 0 9px}.prose p{margin:9px 0 15px}.prose ul{padding-left:22px}
+.prose li{margin:5px 0}.prose strong{color:#214437}.prose code{padding:2px 5px;background:#f0f4ef;border:1px solid #e3ebe2;border-radius:4px;font:11px "DM Mono",monospace}
+.prose pre{background:#133b35;color:#d1ede1;padding:14px;border-radius:9px;overflow:auto;font:12px/1.6 "DM Mono",monospace}
+.prose a,.source-list a{color:#30765b;text-decoration:underline;text-underline-offset:3px}
+.block-head{border-top:1px solid #e3eae3;padding-top:20px;margin-top:25px}.block-head h3{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#466e57;margin:0 0 13px}
+.source-list{display:grid;gap:8px}.source-list a{font-size:12px;overflow-wrap:anywhere;line-height:1.5}
+.reader-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.action{border-radius:99px;border:1px solid #b4cfbd;padding:9px 15px;font-size:12px;font-weight:700;color:var(--ink);background:transparent}
+.action.primary{background:var(--ink);color:white}.action:hover{background:#e3f0e6}.action.primary:hover{background:#26584c}
+.back{display:none}
+.empty{color:#768b7c;padding:25px 18px;font-size:13px;line-height:1.6}
+.timeline{display:none;grid-template-columns:210px minmax(0,1fr);gap:24px;padding:28px 0 52px}
+.timeline-side{padding:15px 20px 0 0;border-right:1px solid var(--line);font-size:12px;color:#84968a}
+.timeline-side strong{display:block;color:var(--ink);font:400 35px "Instrument Serif",serif;margin:8px 0}
+.timeline-main{border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:0 28px}
+.event{padding:23px 2px;border-bottom:1px solid #e8eee7;display:grid;grid-template-columns:114px 1fr;gap:17px}
+.event:last-child{border:0}.event time{font:11px/1.6 "DM Mono",monospace;color:#8b9b8b}
+.event-head{display:flex;gap:11px;align-items:center;flex-wrap:wrap}
+.event-head h3{margin:0;color:#24463a;font-size:14px}.event p{font-size:12px;line-height:1.6;margin:9px 0;color:#697d6f}
+.event-links{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#397859}
+.event-links button{border:0;background:transparent;padding:0;color:#397859;font:inherit;text-decoration:underline}
+.event-links a{text-decoration:underline}
+.event-action{font:10px "DM Mono",monospace;color:#587967;background:#e6f1e8;padding:3px 8px;border-radius:99px}
+.testbar{display:flex;gap:14px;justify-content:space-between;align-items:center;color:#819288;font:11px "DM Mono",monospace;border-top:1px solid var(--line);padding:17px 0 42px;flex-wrap:wrap}
+.testbar button{color:#537b65;font:inherit;border:0;background:transparent;text-decoration:underline;padding:4px}
+.mobile-topic{display:none}.no-snapshot{background:#fffdf3;border:1px dashed #d9caa1;padding:28px;border-radius:15px;max-width:710px;margin:40px auto;color:#7d6c47}
+@media(max-width:1150px){.site{padding:0 25px}.top{gap:15px}.top-source{display:none}.workspace{grid-template-columns:160px minmax(240px,300px) minmax(0,1fr);gap:12px}.reader{padding:25px}.side{padding-right:8px}nav{gap:15px}}
+@media(max-width:860px){.top{height:auto;min-height:75px;flex-wrap:wrap;gap:8px;padding:14px 0}nav{order:3;width:100%;margin:0;gap:23px}.head{align-items:start;flex-direction:column;padding:36px 0 20px}.snapshot{max-width:none;width:100%}.note{display:none}.workspace{display:block;padding-top:16px;min-height:0}.side{border:0;padding:0;display:flex;align-items:center;gap:12px;overflow:auto;white-space:nowrap;margin:0 0 13px}.side hr,.side .section-label,.side .tags{display:none}.side .filter{width:auto;white-space:nowrap;margin:0;border:1px solid var(--line);padding:7px 13px}.side .filter strong{display:none}.listbox{width:100%}.article-list{max-height:none}.reader{display:none;min-height:0}.workspace.reading .listbox,.workspace.reading .side{display:none}.workspace.reading .reader{display:block}.back{display:inline-flex;margin-bottom:20px;background:transparent;border:0;padding:0;font-size:12px;font-weight:700;color:#35765d}.timeline{display:block}.timeline-side{border:0;padding:0 0 14px}.timeline-main{padding:0 17px}.event{grid-template-columns:1fr;gap:4px}}
+@media(max-width:580px){.site{padding:0 17px}.logo{font-size:24px}h1{font-size:49px}.head p{font-size:13px}.bar{margin-top:0}.tabs{gap:20px}.reader{padding:24px 20px}.reader h2{font-size:37px}.event{padding:20px 2px}.event-head{align-items:start}.testbar{padding-bottom:85px}}
+</style>
+</head>
+<body>
+<div class="site">
+<header class="top">
+<a class="logo" href="https://bestnathan.github.io/nession/#/"><b>n</b><span>ness<em>ion</em></span><small>/ LAB</small></a>
+<nav aria-label="Pages navigation">
+<a href="https://bestnathan.github.io/nession/#/">Overview</a>
+<a href="https://bestnathan.github.io/nession/#/agents">AI Agents</a>
+<a href="https://bestnathan.github.io/nession/#/work">Collaboration</a>
+<a href="https://bestnathan.github.io/nession/workflows.html">Workflows</a>
+<a class="active" aria-current="page" href="#/knowledge">Knowledge</a>
+<a href="https://bestnathan.github.io/nession/#/prototypes">Prototypes</a>
+</nav>
+<a class="top-source" href="https://github.com/BestNathan/nession/tree/knowledge" target="_blank" rel="noopener noreferrer">View repository ↗</a>
+</header>
+<div class="head">
+<div><div class="eyebrow">NESSION / OPEN ENGINEERING / KNOWLEDGE</div><h1>What we've learned, <i style="font-weight:400;color:#43856f">kept.</i></h1><p>Source-grounded decisions and engineering insights, collected as the project evolves. Discover the current understanding, then follow its evidence.</p></div>
+<div class="snapshot" id="snapshot"><div class="eyebrow">SOURCE SNAPSHOT</div><strong>Pinned public fixture</strong><small>knowledge @ 1547d2c</small><small>3 articles · 2 topics · all sourced</small><small class="mock">Prototype only — no live sync</small></div>
+</div>
+<div class="bar"><div class="tabs" role="tablist" aria-label="Knowledge views"><button class="tab" type="button" id="tab-browse" role="tab" aria-selected="true">Browse knowledge</button><button class="tab" type="button" id="tab-changes" role="tab" aria-selected="false">Changes <span style="color:#8c9d91;font-weight:400">↗</span></button></div><div class="note">CURRENT ARTICLES / GLOBAL CHANGELOG</div></div>
+<div class="workspace" id="workspace">
+<aside class="side" aria-label="Topic and category filters">
+<div style="width:100%"><p class="section-label">TOPICS</p><div id="topics"></div><hr><p class="section-label">CATEGORIES</p><div class="tags" id="tags"></div></div>
+</aside>
+<section class="listbox" aria-label="Knowledge articles">
+<div class="search-area"><label class="section-label" for="search">FIND KNOWLEDGE</label><div class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search decisions, concepts..." autocomplete="off" aria-label="Search knowledge"></div></div>
+<div class="list-meta"><span id="result-count">3 ARTICLES</span><span>SORTED BY UPDATE ↓</span></div>
+<div class="article-list" id="articles"></div>
+</section>
+<article class="reader" id="reader" aria-label="Selected knowledge article"></article>
+</div>
+<div class="timeline" id="timeline"><aside class="timeline-side"><div class="eyebrow">LEDGER / EVENTS</div><strong>Changes over time.</strong>One project-wide append-only history. Previous article contents remain in Git, not in separate revisions.</aside><section class="timeline-main" id="events" aria-label="Knowledge change log"></section></div>
+<div class="testbar"><span>DESIGN PROTOTYPE #2664 · 3 PUBLIC FIXTURE ARTICLES · NO LIVE API / NO WRITES</span><span><button type="button" id="simulate">Simulate unavailable source</button> · <button type="button" id="reset">Reset view</button></span></div>
+</div>
+<script>
+(function(){
+'use strict';
+var PREFIX='https://github.com/BestNathan/nession/blob/1547d2c4207a4cd5407fcc05a1e45c6ff082f556/';
+var A=[
+{path:'topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md',title:'Nession instruction architecture and knowledge ownership',description:'Root/scoped/Skill instructions and a separate sourced project knowledge ledger',topic:'engineering',tags:['agents','instructions','knowledge','skills'],updated:'2026-10-28T17:46:56Z',status:'verified',sections:[['Overview','Nession uses layered repository instructions: root AGENTS.md for always-on constraints, scoped AGENTS.md for path-local invariants, and task Skills for repeatable workflows. Executable rules remain owned by code and Gates.'],['Knowledge ownership','The knowledge orphan branch has one current article per complete title, grouped by primary topic and secondary category tags. Knowledge cannot override canonical docs, owner decisions or source code.'],['Maintenance','The global CHANGELOG records changes over time. Ingest, Query and Lint keep current articles, their sources, links and the derived index consistent.']],related:['topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md','topics/terminal/web-terminal-emulator-engine-and-component-ownership.md'],sources:['https://github.com/BestNathan/nession/blob/7d7b41ea9124425fb62c7ec22218526e8ec7ebd8/docs/engineering/instruction-architecture.md','https://github.com/BestNathan/nession/blob/7d4cd5bd6fea372244ca690d548e3321b5a00265/docs/engineering/knowledge-ledger.md']},
+{path:'topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md',title:'Karpathy LLM Wiki principles for Nession project knowledge',description:'How Nession adapts the LLM Wiki pattern into source-grounded, incrementally maintained project knowledge',topic:'engineering',tags:['agents','knowledge','provenance','research','skills'],updated:'2026-10-24T12:24:00Z',status:'verified',sections:[['Core idea','Build a persistent, interlinked collection of synthesized knowledge instead of reconstructing every decision from raw sources. It is an operating model for the existing Nession ledger, not a second storage system.'],['Three responsibilities','Immutable source evidence, one current synthesized Markdown article per concept, and the Skill plus schema that govern updates.'],['Ingest · Query · Lint','Ingest source-grounded knowledge atomically. Query from topic and category, then follow sources. Lint broken links, orphan pages, drift, and contradictions. AI maintains bookkeeping, not authority.']],related:['topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md'],sources:['https://github.com/BestNathan/nession/issues/2343','https://github.com/BestNathan/nession/blob/413b3cbe6a6bb1de6b64f6db796a488e6f469da0/.claude/skills/nession-knowledge/SKILL.md']},
+{path:'topics/terminal/web-terminal-emulator-engine-and-component-ownership.md',title:'Web terminal emulator engine and component ownership',description:'One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 parsing and non-reserving status overlay; Product/UI consumes a narrow emulator port',topic:'terminal',tags:['architecture','ownership','terminal','web'],updated:'2026-10-29T19:22:00Z',status:'verified',sections:[['Decision','XtermEmulator is the only production owner of the raw @xterm/xterm Terminal instance. The Product/UI layer consumes a narrow typed emulator port.'],['Boundaries','SessionRuntime owns session/transport synchronization, SerializedTerminalWriter orders writes, TerminalGeometry owns fixed columns and sizing, and TerminalInteractionController owns PTY-bound input.'],['Clipboard and status','OSC 52 and 5522 are handled inside the emulator boundary. Status notices are non-reserving overlays rather than content that changes the terminal grid.']],related:['topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md'],sources:['https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md','https://github.com/BestNathan/nession/issues/2598','https://github.com/BestNathan/nession/issues/2614']}
+];
+var E=[
+{date:'2026-10-29T19:22:00Z',action:'update',path:A[2].path,title:A[2].title,reason:'Refine terminal engine, clipboard and status overlay ownership',source:'https://github.com/BestNathan/nession/issues/2598'},
+{date:'2026-10-28T17:46:56Z',action:'update',path:A[0].path,title:A[0].title,reason:'Align current knowledge with the scoped instruction architecture',source:'https://github.com/BestNathan/nession/issues/2325'},
+{date:'2026-10-24T12:24:00Z',action:'update',path:A[1].path,title:A[1].title,reason:'Correct source provenance and verification evidence',source:'https://github.com/BestNathan/nession/issues/2343'},
+{date:'2026-10-24T05:34:00Z',action:'create',path:A[1].path,title:A[1].title,reason:'Record the source-grounded LLM Wiki maintenance model',source:'https://github.com/BestNathan/nession/issues/2343'},
+{date:'2026-10-24T04:03:25Z',action:'rename',path:A[0].path,title:A[0].title,reason:'Use full title-derived filename, removing abbreviated identity',source:'https://github.com/BestNathan/nession/issues/2325'}
+];
+var current=A[0].path,topic='all',tag='all',q='',unavailable=false,view='browse';
+var $=function(id){return document.getElementById(id)};
+function el(type,cls,text){var x=document.createElement(type);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x}
+function add(parent){for(var i=1;i<arguments.length;i++)if(arguments[i])parent.append(arguments[i]);return parent}
+function urlFor(path){return PREFIX+path}
+function sourceLink(text,url){var a=el('a','',text);a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a}
+function date(str){return new Date(str).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'})}
+function selectedArticle(){return A.find(function(x){return x.path===current})||A[0]}
+function updateHash(replace){
+var hash='#/knowledge'+(view==='changes'?'?view=changes':current?'?article='+encodeURIComponent(current):'');
+if(replace)history.replaceState(null,'',hash);else if(location.hash!==hash)location.hash=hash;
+}
+function readHash(){
+var hash=location.hash,raw=hash.split('?')[1]||'',p=new URLSearchParams(raw),path=p.get('article');
+view=p.get('view')==='changes'?'changes':'browse';
+if(path&&A.some(function(x){return x.path===path}))current=path;
+if(!hash.startsWith('#/knowledge'))updateHash(true);
+render();
+}
+function topics(){var holder=$('topics');holder.replaceChildren();[['all','All topics',3],['engineering','Engineering',2],['terminal','Terminal',1]].forEach(function(r){var b=el('button','filter'+(topic===r[0]?' active':''));b.type='button';b.setAttribute('aria-pressed',topic===r[0]?'true':'false');add(b,el('span','',r[1]),el('strong','',String(r[2])));b.onclick=function(){topic=r[0];render();};holder.append(b)});var tags=$('tags');tags.replaceChildren();['all','agents','architecture','instructions','knowledge','ownership','provenance','research','skills','terminal','web'].forEach(function(k){var b=el('button','chip'+(tag===k?' active':''),k==='all'?'All tags':k);b.type='button';b.setAttribute('aria-pressed',tag===k?'true':'false');b.onclick=function(){tag=k;render();};tags.append(b)})}
+function filtered(){var s=q.trim().toLowerCase();return A.filter(function(a){return(topic==='all'||a.topic===topic)&&(tag==='all'||a.tags.includes(tag))&&(!s||[a.title,a.description,a.topic,a.tags.join(' '),a.sections.map(function(x){return x.join(' ')}).join(' ')].join(' ').toLowerCase().includes(s))}).sort(function(a,b){return b.updated.localeCompare(a.updated)})}
+function list(){var arr=filtered(),box=$('articles');box.replaceChildren();$('result-count').textContent=arr.length+' '+(arr.length===1?'ARTICLE':'ARTICLES');if(!arr.length){var p=el('div','empty','No matching articles. Try another topic, category or search term.');box.append(p);return}arr.forEach(function(a){var b=el('button','article-option'+(current===a.path?' selected':''));b.type='button';b.setAttribute('aria-label','Read '+a.title);add(b,el('div','kicker',a.topic),el('h3','',a.title),el('p','',a.description));var m=el('div','row-meta');add(m,el('span','status'+(a.status==='candidate'?' candidate':''),a.status),el('span','',date(a.updated)));b.append(m);b.onclick=function(){current=a.path;view='browse';updateHash(false);render();window.scrollTo({top:0,behavior:'smooth'})};box.append(b)})}
+function read(){var a=selectedArticle(),box=$('reader');box.replaceChildren();var back=el('button','back','← Back to articles');back.type='button';back.onclick=function(){$('workspace').classList.remove('reading');current='';updateHash(true);render();};box.append(back);var top=el('div','reader-top');add(top,el('div','eyebrow',a.topic+' / CURRENT ARTICLE'),el('span','status',a.status));box.append(top);
+add(box,el('h2','',a.title),el('p','reader-desc',a.description));
+var ps=el('div','pills');a.tags.forEach(function(t){var b=el('button','pill','#'+t);b.type='button';b.onclick=function(){tag=t;topic='all';current='';updateHash(true);$('workspace').classList.remove('reading');render()};ps.append(b)});box.append(ps);
+box.append(el('div','verified-note','Verified: this article links to source evidence. It is a derived summary, not a substitute for current code, Gates or owner decisions.  ·  Updated '+date(a.updated)+' UTC'));
+var prose=el('div','prose');a.sections.forEach(function(section){add(prose,el('h3','',section[0]),el('p','',section[1]))});box.append(prose);
+var rel=el('div','block-head');rel.append(el('h3','','Related knowledge'));var related=el('div','source-list');a.related.forEach(function(path){var match=A.find(function(x){return x.path===path});if(!match)return;var b=el('button','action',match.title+' ↗');b.type='button';b.style.textAlign='left';b.style.border='0';b.style.padding='4px 0';b.style.color='#367455';b.onclick=function(){current=path;updateHash(false);render();window.scrollTo({top:0,behavior:'smooth'})};related.append(b)});rel.append(related);box.append(rel);
+var ev=el('div','block-head');ev.append(el('h3','','Evidence sources'));var sources=el('div','source-list');a.sources.forEach(function(link,i){sources.append(sourceLink('Source '+(i+1)+'  ·  '+link.replace(/^https:\/\/github.com\/BestNathan\/nession\//,'').slice(0,88)+' ↗',link))});ev.append(sources);box.append(ev);
+var actions=el('div','reader-actions');actions.append(sourceLink('View original ↗',urlFor(a.path)));actions.lastChild.className='action primary';actions.append(sourceLink('Git history ↗','https://github.com/BestNathan/nession/commits/knowledge/'+a.path));actions.lastChild.className='action';box.append(actions);
+$('workspace').classList.toggle('reading',Boolean(current));
+}
+function changes(){var wrap=$('events');wrap.replaceChildren();E.forEach(function(e){var row=el('div','event');var day=el('time','',date(e.date));day.dateTime=e.date;var right=el('div');var h=el('div','event-head');add(h,el('span','event-action',e.action),el('h3','',e.title));add(right,h,el('p','',e.reason));var links=el('div','event-links');var b=el('button','', 'Read current article ↗');b.type='button';b.onclick=function(){current=e.path;view='browse';updateHash(false);render()};add(links,b,sourceLink('Source Issue ↗',e.source));right.append(links);add(row,day,right);wrap.append(row)})}
+function render(){
+$('tab-browse').setAttribute('aria-selected',view==='browse');$('tab-changes').setAttribute('aria-selected',view==='changes');
+$('workspace').style.display=view==='browse'&&!unavailable?'':'none';
+$('timeline').style.display=view==='changes'&&!unavailable?'grid':'none';
+var old=$('unavailable');if(old)old.remove();
+if(unavailable){var p=el('div','no-snapshot');add(p,el('h2','', 'Knowledge snapshot unavailable'),el('p','','The pinned source could not be read or validated. This is not an empty knowledge base and no articles are claimed current.'),el('p','','Use “Reset view” to restore the public fixture.'));p.id='unavailable';$('workspace').before(p);return}
+topics();list();read();changes();
+}
+$('tab-browse').onclick=function(){view='browse';current=current||A[0].path;updateHash(false);render()};
+$('tab-changes').onclick=function(){view='changes';updateHash(false);render()};
+$('search').oninput=function(){q=this.value;render()};
+$('simulate').onclick=function(){unavailable=!unavailable;this.textContent=unavailable?'Restore snapshot':'Simulate unavailable source';render()};
+$('reset').onclick=function(){unavailable=false;current=A[0].path;topic='all';tag='all';q='';view='browse';$('search').value='';$('simulate').textContent='Simulate unavailable source';updateHash(true);render()};
+window.addEventListener('hashchange',readHash);
+readHash();
+})();
+</script>
+</body>
+</html>
