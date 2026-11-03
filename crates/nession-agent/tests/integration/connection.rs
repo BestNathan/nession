@@ -3,11 +3,23 @@
 //! These tests verify the agent's ability to connect to a mock server,
 //! send registration/heartbeat/session update messages, and handle responses.
 
+use super::{
+    browser_scope, connect, mint_credential, tmux_show_environment, TestSession, WsSink, WsStream,
+    TEST_AGENT_ID, TEST_CREDENTIAL,
+};
 use futures_util::{SinkExt, StreamExt};
+use nession_agent::config::AttachMode;
 use nession_agent::connection::{msg_types, ServerClient};
 use nession_agent::extension::ExtensionRegistry;
-use nession_agent::tmux::manager::SessionManager;
+use nession_agent::p2p_credentials::P2pCredentials;
+use nession_agent::server::websocket::{
+    msg_types as ws_msg_types, new_message as ws_message, AgentServer, AgentServerContext,
+    Message as ProtocolMessage, SessionCreatePayload, SessionCreateResponse,
+};
+use nession_agent::tmux::manager::{SessionBindingInput, SessionManager};
 use nession_protocol::contracts::agent::v1::{AgentMetadata, AgentStatus};
+use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource, SessionEnvProfile};
+use nession_protocol::contracts::session::v1::ServerSessionCreatePayload;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -442,4 +454,437 @@ async fn integration_reconnection_logic() {
     let handle = client_handle.await.expect("client task failed");
     handle.shutdown().await.ok();
     server_handle.abort();
+}
+
+// ── #170: the two create paths and the reconnect report ─────────────────────
+
+fn profile_ref(name: &str) -> SessionEnvProfile {
+    SessionEnvProfile {
+        profile: EnvFileRef {
+            name: name.to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        },
+        phase: "create".to_string(),
+        content_hash: None,
+    }
+}
+
+fn snapshot(name: &str, key: &str, value: &str) -> EnvSnapshot {
+    EnvSnapshot {
+        name: name.to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        vars: vec![(key.to_string(), value.to_string())],
+        warnings: Vec::new(),
+    }
+}
+
+fn metadata() -> AgentMetadata {
+    AgentMetadata {
+        tmux_version: "3.3".to_string(),
+        os_version: "Linux".to_string(),
+        nession_version: "0.1.0".to_string(),
+        image_tag: "test".to_string(),
+    }
+}
+
+/// Send one direct P2P request and wait for the reply with its id.
+async fn p2p_round_trip<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
+    sink: &mut WsSink,
+    stream: &mut WsStream,
+    req: &ProtocolMessage<Req>,
+) -> anyhow::Result<ProtocolMessage<Resp>> {
+    let request_id = req.id.clone();
+    sink.send(WsMessage::Text(serde_json::to_string(req)?))
+        .await?;
+    loop {
+        match stream.next().await {
+            Some(Ok(WsMessage::Text(text))) => {
+                let raw: serde_json::Value = serde_json::from_str(&text)?;
+                if raw.get("id").and_then(|v| v.as_str()) == Some(request_id.as_str()) {
+                    return Ok(serde_json::from_value(raw)?);
+                }
+            }
+            Some(Ok(_)) => {}
+            Some(Err(e)) => return Err(anyhow::Error::from(e)),
+            None => anyhow::bail!("the P2P stream ended before the reply"),
+        }
+    }
+}
+
+/// A mock Server that sends one create command after registration.
+async fn start_mock_server_sending_create(
+    payload: ServerSessionCreatePayload,
+) -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    mpsc::Receiver<String>,
+)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = mpsc::channel(100);
+
+    let handle = tokio::spawn(async move {
+        let Ok((stream, _)) = listener.accept().await else {
+            return;
+        };
+        let Ok(ws) = accept_async(stream).await else {
+            return;
+        };
+        let (mut sink, mut stream) = ws.split();
+        let response = serde_json::json!({
+            "msg_type": "server.agent.register",
+            "id": "register",
+            "timestamp": 1,
+            "payload": { "status": "accepted", "message": "ok" }
+        });
+        let _ = sink.send(WsMessage::Text(response.to_string())).await;
+        // Skip the agent's registration.
+        let _ = stream.next().await;
+
+        let Ok(payload) = serde_json::to_value(&payload) else {
+            return;
+        };
+        let create = serde_json::json!({
+            "msg_type": "agent.session.create",
+            "id": "create-parity",
+            "timestamp": 2,
+            "payload": payload,
+        });
+        let _ = sink.send(WsMessage::Text(create.to_string())).await;
+
+        while let Some(Ok(msg)) = stream.next().await {
+            if let WsMessage::Text(text) = msg {
+                let _ = tx.send(text).await;
+            }
+        }
+    });
+
+    Ok((addr, handle, rx))
+}
+
+/// #170 SC-03/SC-12: the direct and the Server-relayed create are one binding
+/// path.
+///
+/// Both paths receive the same ordered selection and the same snapshots. The
+/// environment that reaches tmux must be identical, including which profile
+/// wins; a path that built its own binding would drift here while each path's
+/// own test still passed.
+#[tokio::test]
+async fn p2p_and_server_create_materialize_the_same_binding() {
+    let snapshots = vec![
+        snapshot("base.env", "NS_PARITY", "base"),
+        snapshot("staging.env", "NS_PARITY", "staging"),
+    ];
+    let profiles = vec![profile_ref("base.env"), profile_ref("staging.env")];
+
+    // --- direct P2P create ---
+    let p2p_session = TestSession::new("parity-p2p");
+    let p2p_name = p2p_session.name().to_string();
+    let credentials = Arc::new(P2pCredentials::new());
+    mint_credential(
+        &credentials,
+        TEST_AGENT_ID,
+        TEST_CREDENTIAL,
+        browser_scope(),
+    )
+    .unwrap();
+    let tmp = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+    let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
+    let server = AgentServer::new(
+        "127.0.0.1:0",
+        TEST_AGENT_ID,
+        None,
+        "/tmp".to_string(),
+        tmp.path().to_string_lossy().as_ref(),
+        AttachMode::Plain,
+        AgentServerContext {
+            resize,
+            credentials: Arc::clone(&credentials),
+            mutations: nession_agent::execution::mutation_scheduler(),
+            tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+        },
+    )
+    .unwrap();
+    let (p2p_handle, addr) = server.start().await.unwrap();
+    let (mut sink, mut stream) = connect(&credentials, addr).await.unwrap();
+    let create = ws_message(
+        ws_msg_types::SESSION_CREATE,
+        SessionCreatePayload {
+            name: p2p_name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: snapshots.clone(),
+            binding_profiles: profiles.clone(),
+            binding_revision: Some(7),
+            terminal_cols: None,
+        },
+    );
+    let reply: ProtocolMessage<SessionCreateResponse> =
+        p2p_round_trip(&mut sink, &mut stream, &create)
+            .await
+            .unwrap();
+    assert_eq!(reply.msg_type, ws_msg_types::OK);
+    let direct = tmux_show_environment(&p2p_name, "NS_PARITY").await;
+    assert_eq!(
+        direct.as_deref(),
+        Some("staging"),
+        "the direct create did not materialize the later profile"
+    );
+
+    // --- Server-relayed create over the same binding fields ---
+    let server_session = TestSession::new("parity-server");
+    let server_name = server_session.name().to_string();
+    let (mock_addr, mock_handle, mut responses) =
+        start_mock_server_sending_create(ServerSessionCreatePayload {
+            request_id: "req-parity".to_string(),
+            name: server_name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: snapshots,
+            binding_profiles: profiles,
+            binding_revision: Some(7),
+            terminal_cols: None,
+        })
+        .await
+        .unwrap();
+    let client = ServerClient::new(
+        format!("ws://{mock_addr}"),
+        "test-token",
+        "parity-agent",
+        "parity-host",
+        "127.0.0.1",
+        8080,
+        None,
+        vec![],
+        None,
+        metadata(),
+        Arc::new(SessionManager::new()),
+        "/tmp".to_string(),
+        None,
+        Arc::new(P2pCredentials::new()),
+        nession_agent::execution::mutation_scheduler(),
+    );
+    let (client_handle, _) = client.connect_and_run().await.expect("connect failed");
+
+    let response = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(msg) = responses.recv().await {
+            let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+            if parsed["msg_type"] == "server.agent.command-response" {
+                return parsed;
+            }
+        }
+        panic!("the mock server closed before the create was answered");
+    })
+    .await
+    .expect("the relayed create was never answered");
+    assert_eq!(
+        response["payload"]["success"],
+        serde_json::json!(true),
+        "the relayed create failed: {response}"
+    );
+
+    let relayed = tmux_show_environment(&server_name, "NS_PARITY").await;
+    assert_eq!(
+        relayed.as_deref(),
+        Some("staging"),
+        "the relayed create did not materialize the later profile"
+    );
+    assert_eq!(
+        relayed, direct,
+        "the P2P and Server-relayed create paths drifted"
+    );
+
+    let tmux = SessionManager::new();
+    tmux.kill_session(&p2p_name).await.ok();
+    tmux.kill_session(&server_name).await.ok();
+    client_handle.shutdown().await.ok();
+    mock_handle.abort();
+    p2p_handle.shutdown().await.ok();
+}
+
+/// A mock Server that accepts two connections and forwards every frame.
+async fn start_mock_server_that_reconnects() -> anyhow::Result<(
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    mpsc::Receiver<String>,
+)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = mpsc::channel(100);
+
+    let handle = tokio::spawn(async move {
+        for connection in 0..2 {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let Ok(ws) = accept_async(stream).await else {
+                break;
+            };
+            let (mut sink, mut stream) = ws.split();
+            let response = serde_json::json!({
+                "msg_type": "server.agent.register",
+                "id": "register",
+                "timestamp": 1,
+                "payload": { "status": "accepted", "message": "ok" }
+            });
+            let _ = sink.send(WsMessage::Text(response.to_string())).await;
+            // Skip the agent's registration and forward the binding report
+            // that follows it. The first connection is then dropped to force
+            // the supervisor to reconnect; the second stays up.
+            let _ = stream.next().await;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let mut saw_report = false;
+            while !saw_report {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                match tokio::time::timeout(remaining, stream.next()).await {
+                    Ok(Some(Ok(WsMessage::Text(text)))) => {
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&text).unwrap_or_default();
+                        saw_report = parsed.get("msg_type").and_then(|v| v.as_str())
+                            == Some("server.agent.session-env-binding");
+                        let _ = tx.send(text).await;
+                    }
+                    _ => break,
+                }
+            }
+            if connection == 0 {
+                drop(sink);
+                drop(stream);
+            } else {
+                while let Some(Ok(msg)) = stream.next().await {
+                    if let WsMessage::Text(text) = msg {
+                        let _ = tx.send(text).await;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok((addr, handle, rx))
+}
+
+/// Wait for a binding report that names `session`.
+async fn wait_for_binding_report(
+    rx: &mut mpsc::Receiver<String>,
+    session: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "no Environment Binding report naming {session} arrived"
+        );
+        let msg = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .map_err(|_| anyhow::anyhow!("no frame arrived within the deadline"))?
+            .ok_or_else(|| anyhow::anyhow!("the mock server stopped forwarding frames"))?;
+        let parsed: serde_json::Value = serde_json::from_str(&msg)?;
+        if parsed.get("msg_type").and_then(|v| v.as_str())
+            != Some("server.agent.session-env-binding")
+        {
+            continue;
+        }
+        let found = parsed
+            .get("payload")
+            .and_then(|payload| payload.get("sessions"))
+            .and_then(|sessions| sessions.as_array())
+            .is_some_and(|sessions| {
+                sessions.iter().any(|entry| {
+                    entry.get("session_name").and_then(|v| v.as_str()) == Some(session)
+                })
+            });
+        if found {
+            return Ok(parsed);
+        }
+    }
+}
+
+/// The observed half of one Session's entry in a binding report.
+fn reported_observed<'a>(
+    report: &'a serde_json::Value,
+    session: &str,
+) -> Option<&'a serde_json::Value> {
+    report
+        .get("payload")?
+        .get("sessions")?
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get("session_name").and_then(|v| v.as_str()) == Some(session))?
+        .get("observed")
+}
+
+/// #170 SC-02/SC-11/SC-12: an Agent restart keeps the binding, and a reconnect
+/// reports it to the Server.
+#[tokio::test]
+async fn a_reconnect_reports_the_surviving_binding() {
+    let tmux = Arc::new(SessionManager::new());
+    let session = TestSession::new("reconnect-binding");
+    let name = session.name().to_string();
+    let snapshots = vec![snapshot("base.env", "NS_RECONNECT", "kept")];
+    let profiles = vec![profile_ref("base.env")];
+    tmux.create_session_with_binding(
+        &name,
+        nession_common::config::DEFAULT_TERMINAL_COLS,
+        24,
+        "/tmp",
+        SessionBindingInput {
+            revision: 5,
+            profiles: &profiles,
+            snapshots: &snapshots,
+        },
+    )
+    .await
+    .expect("the Session is created with a binding");
+
+    let (addr, mock_handle, mut reports) = start_mock_server_that_reconnects().await.unwrap();
+    let client = ServerClient::new(
+        format!("ws://{addr}"),
+        "test-token",
+        "reconnect-agent",
+        "reconnect-host",
+        "127.0.0.1",
+        8080,
+        None,
+        vec![],
+        None,
+        metadata(),
+        Arc::clone(&tmux),
+        "/tmp".to_string(),
+        None,
+        Arc::new(P2pCredentials::new()),
+        nession_agent::execution::mutation_scheduler(),
+    );
+    let (handle, _) = client.connect_and_run().await.expect("connect failed");
+
+    let first = wait_for_binding_report(&mut reports, &name)
+        .await
+        .expect("the first registration reports the binding");
+    assert_eq!(
+        reported_observed(&first, &name).expect("the report names the session")["applied_revision"],
+        5
+    );
+
+    // The mock drops the first connection; the supervisor reconnects and must
+    // report the same durable binding again.
+    let second = wait_for_binding_report(&mut reports, &name)
+        .await
+        .expect("the reconnect reports the binding again");
+    assert_eq!(
+        reported_observed(&second, &name).expect("the report names the session")
+            ["applied_revision"],
+        5
+    );
+
+    tmux.kill_session(&name).await.ok();
+    handle.shutdown().await.ok();
+    mock_handle.abort();
 }

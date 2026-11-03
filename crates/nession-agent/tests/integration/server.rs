@@ -19,6 +19,7 @@ use nession_agent::server::websocket::{
 };
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxDep;
+use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource, SessionEnvProfile};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -430,6 +431,153 @@ async fn integration_attach_keeps_session_columns_and_applies_rows() {
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
+}
+
+/// #170 SC-01/SC-12: attach/detach churn is environment-neutral.
+///
+/// The Session is created with one ordered binding, then two clients attach,
+/// detach and reattach in a different order than they arrived. The binding
+/// materialized at create must still be the one in tmux; attach must not inject
+/// or clear an environment of its own.
+#[tokio::test]
+async fn integration_attach_detach_churn_keeps_the_binding() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let session = TestSession::new("attach-churn");
+    let session_name = session.name().to_string();
+
+    let (mut sink, mut stream) = connect(&credentials, addr).await.unwrap();
+    let create = new_message(
+        msg_types::SESSION_CREATE,
+        SessionCreatePayload {
+            name: session_name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: vec![
+                env_snapshot("base.env", "NS_CHURN", "base"),
+                env_snapshot("staging.env", "NS_CHURN", "staging"),
+            ],
+            binding_profiles: vec![env_profile("base.env"), env_profile("staging.env")],
+            binding_revision: Some(3),
+            terminal_cols: None,
+        },
+    );
+    let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &create).await.unwrap();
+    assert_eq!(created.msg_type, msg_types::OK);
+    assert_eq!(
+        super::tmux_show_environment(&session_name, "NS_CHURN")
+            .await
+            .as_deref(),
+        Some("staging"),
+        "the later profile did not win at create"
+    );
+
+    let (mut a_sink, mut a_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut a_sink, &mut a_stream, "churn-a")
+        .await
+        .unwrap();
+    let (mut b_sink, mut b_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut b_sink, &mut b_stream, "churn-b")
+        .await
+        .unwrap();
+
+    // Two independent subscriptions, then a churn that does not match arrival
+    // order: A leaves, A returns while B is still attached, B leaves, A leaves.
+    let a_first: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a_sink,
+        &mut a_stream,
+        &attach_with_subscription(&session_name, Some("churn-tab-a")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a_first.msg_type, msg_types::OK);
+    let b_first: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &attach_with_subscription(&session_name, Some("churn-tab-b")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(b_first.msg_type, msg_types::OK);
+
+    detach_session(&mut a_sink, &mut a_stream, &session_name)
+        .await
+        .unwrap();
+    let a_second: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a_sink,
+        &mut a_stream,
+        &attach_with_subscription(&session_name, Some("churn-tab-a-again")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a_second.msg_type, msg_types::OK);
+    detach_session(&mut b_sink, &mut b_stream, &session_name)
+        .await
+        .unwrap();
+    detach_session(&mut a_sink, &mut a_stream, &session_name)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        super::tmux_show_environment(&session_name, "NS_CHURN")
+            .await
+            .as_deref(),
+        Some("staging"),
+        "attach/detach churn changed or cleared the Session binding"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// The detach frame plus its OK assertion, used by the churn test.
+async fn detach_session(
+    sink: &mut WsSink,
+    stream: &mut WsStream,
+    session_name: &str,
+) -> anyhow::Result<()> {
+    let req = new_message(
+        msg_types::CLIENT_DETACH,
+        ClientDetachPayload {
+            session_name: session_name.to_string(),
+        },
+    );
+    let reply: nession_agent::server::websocket::Message<ClientDetachResponse> =
+        round_trip(sink, stream, &req).await?;
+    anyhow::ensure!(
+        reply.msg_type == msg_types::OK,
+        "detach was refused: {}",
+        reply.msg_type
+    );
+    Ok(())
+}
+
+/// A snapshot for the binding tests: one key, one value.
+fn env_snapshot(name: &str, key: &str, value: &str) -> EnvSnapshot {
+    EnvSnapshot {
+        name: name.to_string(),
+        source: EnvSource::Server,
+        agent_id: None,
+        vars: vec![(key.to_string(), value.to_string())],
+        warnings: Vec::new(),
+    }
+}
+
+/// A server-owned profile reference for the binding tests.
+fn env_profile(name: &str) -> SessionEnvProfile {
+    SessionEnvProfile {
+        profile: EnvFileRef {
+            name: name.to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        },
+        phase: "create".to_string(),
+        content_hash: None,
+    }
 }
 
 /// #2487 SC-01/SC-09: a Session with no pane is created at the configured

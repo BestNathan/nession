@@ -327,6 +327,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_reopened_database_recovers_the_desired_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nession.db");
+        let path = path.to_string_lossy().into_owned();
+
+        let profiles = materialized_profiles(&[], &[reference("shared.env")], "create");
+        {
+            let db = Arc::new(Database::new(&path).await.unwrap());
+            let store = EnvBindingStore::new(db);
+            store
+                .put(&BindingRecord {
+                    session_id: "a1:s1".to_string(),
+                    agent_id: "a1".to_string(),
+                    desired_revision: 4,
+                    profiles: profiles.clone(),
+                    updated_at: 0,
+                })
+                .await
+                .unwrap();
+        }
+
+        // A Server restart opens the same file with no shared in-memory state.
+        let reopened = Arc::new(Database::new(&path).await.unwrap());
+        let store = EnvBindingStore::new(reopened);
+        let record = store
+            .get("a1:s1")
+            .await
+            .unwrap()
+            .expect("the desired binding is durable in the database file");
+        assert_eq!(record.desired_revision, 4);
+        assert_eq!(record.profiles.len(), profiles.len());
+        assert_eq!(
+            record.profiles.first().map(|p| &p.profile),
+            profiles.first().map(|p| &p.profile)
+        );
+        assert_eq!(
+            record.profiles.first().map(|p| p.phase.as_str()),
+            profiles.first().map(|p| p.phase.as_str())
+        );
+    }
+
+    #[tokio::test]
     async fn bindings_are_durable_and_the_usage_index_reads_intent() {
         let db = Arc::new(Database::new(":memory:").await.unwrap());
         let store = EnvBindingStore::new(Arc::clone(&db));
