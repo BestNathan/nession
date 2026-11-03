@@ -99,3 +99,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record the #2663 plain-+ decision: the ambient Work Ring is superseded, work state flows only through the generic binding seam into the disclosed Context Capsule, and CLI process presence is not a working signal
 - Source: https://github.com/BestNathan/nession/issues/2663
+
+## 2026-11-03T08:46:49Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the #2659 mobile touch-scroll ownership: the capsule host capture listener decides by xterm's tracked mode, scrolls local history with scrollLines, re-dispatches synthetic wheel events into xterm's mouse/alternate-screen path, accumulates sub-cell pixels, and never claims horizontal/multitouch/tap gestures
+- Source: https://github.com/BestNathan/nession/issues/2659

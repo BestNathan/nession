@@ -1,12 +1,12 @@
 ---
 title: "Web terminal emulator engine and component ownership"
-description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing and the non-reserving status overlay; Product/UI consumes a narrow emulator port"
+description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the non-reserving status overlay and mode-owned touch scrolling; Product/UI consumes a narrow emulator port"
 topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-11-03T07:14:25Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583"]
+updated_at: 2026-11-03T08:46:49Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -93,6 +93,21 @@ status or the former "Working in this session" copy. The 2026-11-03 owner
 decision supersedes #1347's static ambient Work Ring rule; the old ring
 acceptance and its screenshots remain historical evidence.
 
+Capsule **touch scrolling** is a mode question, not a second scroll
+implementation ([#2659](https://github.com/BestNathan/nession/issues/2659)).
+`CapsuleOcclusionScroll` listens on the capsule host in the capture phase — so
+a claimed gesture pre-empts xterm's own `Viewport` touch listeners, which bind
+on `.xterm` — decides the axis at an 8px slop, accumulates vertical travel in
+pixels and emits whole lines with the remainder carried. In the normal buffer
+the drag moves xterm's local viewport (`scrollLines`) and the PTY receives
+nothing; in a mouse-reporting TUI or the alternate screen it re-dispatches a
+synthetic `wheel` event on the terminal element, so xterm's existing wheel path
+answers (a standard wheel mouse report, or xterm's no-scrollback answer) and
+the handler never synthesises application-specific sequences. A horizontal
+drag (the edge pager and selection keep it, and the axis stays locked for the
+gesture), a second finger and a tap are not claimed, so their owners receive
+the gesture unchanged.
+
 ## Context and evidence
 
 - Requirement: [#2581](https://github.com/BestNathan/nession/issues/2581);
@@ -158,6 +173,19 @@ acceptance and its screenshots remain historical evidence.
   Pass at staging `276e046f1ba1b345b6e80635648febd43730658a` (run
   41592140794); SC-04 Pass at `589bdf51d7008d3f92351decff95ea4b83e1c36a`.
   The CLI-open disclosure baseline is `app-cli-open-context-disclosure.png`.
+- Touch scrolling merged at
+  `dab5685f536722069e3c6c62ff112d8abae3e1a5`; the canonical rule is the “Touch
+  scrolling” section in `docs/design/terminal/interaction-semantics.md`, and
+  the handler is
+  `web/src/platform/terminal-runtime/capsule/occlusionScroll.ts`. Proof: the
+  source-aligned Cases record Pass for SC-01..SC-04 at staging
+  `705d511b6db150ebd7a03bf9e113a88deb72237a` (run 41601652472) — one cell of
+  drag moved exactly one local line with no PTY bytes, a mouse-reporting TUI
+  received the SGR wheel report, the alternate screen received xterm's
+  no-scrollback wheel answer, and horizontal/multitouch/tap gestures produced
+  no input; 23 source tests cover the gesture state machine and the three
+  modes. Staging rolled out `ceee96d579c35fb7f66582142e38fc893d1cf144`, which
+  contains the merged fix.
 
 ## Related knowledge
 
@@ -182,6 +210,13 @@ acceptance and its screenshots remain historical evidence.
   future verified activity signal belongs to the `CapabilityWorkBinding` seam
   and enriches the disclosed Context Capsule; process presence is never proof
   of work, and the `+` must not reserve a slot for one.
+- Touch scrolling must keep deciding ownership from the mode xterm already
+  tracks; do not add a parallel buffer-scroll path for mouse-reporting or
+  alternate-screen modes, and do not claim horizontal, multitouch or tap
+  gestures. Sub-cell accumulation plus the slop/axis lock are what keep a
+  high-frequency touch stream from jumping lines or stealing the App edge
+  pager; the listener must stay in the capture phase on the capsule host so a
+  claimed gesture pre-empts xterm's own touch scroll instead of racing it.
 - Revisit if xterm's private render-service shape changes (the negative fixture
   and `XtermMetrics` are the compatibility point), if a second raw xterm
   consumer appears outside the engine, or if Addon/link ownership moves.
