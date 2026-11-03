@@ -27,7 +27,9 @@ const PROTOTYPE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]+$/;
 let prototypeCatalog = null;
 let prototypeCatalogStatus = 'loading';
 let snapshot = null;
+let siteSnapshotStatus = 'loading';
 let knowledgeSnapshot = null;
+let knowledgeSnapshotStatus = 'loading';
 
 function node(tag, className, content) {
   const item = document.createElement(tag);
@@ -557,13 +559,29 @@ function render(){
     else link.removeAttribute('aria-current');
   });
   root.replaceChildren();
+  // A hashchange may arrive while the independent site.json request is still
+  // pending. Only these routes need that snapshot; Prototypes and Knowledge
+  // have their own read-only manifests and remain independently navigable.
+  const needsSite=!!match||['/','/agents','/work','/repository','/evidence'].includes(route);
+  if(needsSite&&!snapshot){
+    const unavailable=siteSnapshotStatus==='unavailable';
+    root.append(node('p',unavailable?'failure':'loading',unavailable
+      ?'Engineering snapshot unavailable. Source data could not be loaded or validated; this does not imply zero activity.'
+      :'Loading public engineering snapshot…'));
+    document.title=(route==='/'?'Overview':route==='/work'?'Collaboration':
+      route.slice(1).replace(/^\w/,x=>x.toUpperCase()))+' — Nession';
+    return;
+  }
   try {
     if(match)renderWorkDetail(match[1],Number(match[2]));
     else if(detail) {
       root.append(local('← All recent work','/work'));
       root.append(empty('Invalid evidence reference',
         'This address does not identify a bounded public Issue or PR. No source has been verified.'));
-    }else if(route==='/knowledge')renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }else if(route==='/knowledge'){
+      if(knowledgeSnapshotStatus==='loading')root.append(node('p','loading','Loading public Knowledge snapshot…'));
+      else renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }
     else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
@@ -599,21 +617,44 @@ async function loadPrototypeCatalog() {
   }
   if(snapshot || location.hash==='#/prototypes')render();
 }
+// Knowledge is an independently pinned, public read-only snapshot. Its failure
+// must not abort the site snapshot loader or any unrelated Pages route.
+async function loadKnowledgeCatalog(){
+  try {
+    const response=await fetch(new URL('data/knowledge.json',document.baseURI),
+      {cache:'no-cache',signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw new Error('Knowledge snapshot unavailable');
+    const result=await response.json();
+    if(!validKnowledgeSnapshot(result))throw new Error('Invalid public Knowledge snapshot');
+    knowledgeSnapshot=result;
+    knowledgeSnapshotStatus=result.status==='available'?'available':'unavailable';
+  } catch(error){
+    console.warn('Pages Knowledge snapshot unavailable',error);
+    knowledgeSnapshot=null;
+    knowledgeSnapshotStatus='unavailable';
+  }
+  if(location.hash.startsWith('#/knowledge'))render();
+}
 async function init(){
   window.addEventListener('hashchange',render);
   void loadPrototypeCatalog();
   void loadKnowledgeCatalog();
+  // Keep deep links correct even if a user navigates before site.json resolves.
+  if(!location.hash.startsWith('#/knowledge')&&!location.hash.startsWith('#/prototypes'))render();
   try{
-    const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache'});
+    const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache',signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error('snapshot unavailable');
     const parsed=await response.json();
     if(parsed.schema_version!==1||!parsed.source)throw new Error('invalid schema');
     snapshot=parsed;
+    siteSnapshotStatus='available';
     freshness.textContent='Generated '+date(parsed.generated_at)+' · public snapshot, not live presence';
     render();
   } catch(error) {
-    root.replaceChildren(node('p','failure','Engineering data is temporarily unavailable. View the authoritative GitHub repository for current activity.'));
-    freshness.textContent='Snapshot unavailable';
+    console.warn('Pages public engineering snapshot unavailable',error);
+    siteSnapshotStatus='unavailable';
+    freshness.textContent='Engineering snapshot unavailable';
+    render();
   }
 }
 init();

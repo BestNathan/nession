@@ -36,4 +36,14 @@ The deployed staging origin is plain HTTP, where browsers do **not** expose the 
 
 So HTTPS is not a prerequisite for clipboard usability: it is a prerequisite only for **programmatic** clipboard access. The matrix is: on HTTP, native text paste, image ingress to a 5522-negotiated TUI and user-gesture text copy work; automatic remote OSC 52/5522 writes and OS image writes do not.
 
+## Touch scrolling (#2659)
+
+A single-finger vertical drag scrolls the terminal, and which answer that is comes from the mode xterm already tracks — the same question `shouldScrollLocally()` answers for a desktop wheel:
+
+- **Normal buffer with scrollback and no mouse tracking** — the drag moves xterm's local viewport. `CapsuleOcclusionScroll` takes it with `preventDefault` and calls `scrollLines`, so the PTY sees nothing and the follow/history layout mode moves with the viewport.
+- **Mouse-reporting TUI, or the alternate screen** — the drag is re-dispatched as a `wheel` event on the terminal element, which is xterm's own wheel path: a mouse-reporting application receives the standard wheel mouse report, and the alternate screen gets xterm's answer (there is no local history to take). The touch handler never synthesises application-specific sequences.
+- **Not claimed:** a horizontal drag (the App edge pager and terminal selection keep it — the axis is locked at the 8px slop and never re-opened mid-gesture), a second finger, and a tap. No `preventDefault` is called for those, so their owners receive the gesture unchanged.
+
+Vertical travel accumulates in pixels and emits whole lines (16px cell = one line in the fixtures), carrying the remainder: a high-frequency touch stream must not turn each 1px move into a line jump. Sub-slop movement before the axis is decided is absorbed.
+
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).
