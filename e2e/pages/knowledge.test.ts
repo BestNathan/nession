@@ -99,7 +99,7 @@ test.describe('standalone Pages Knowledge Explorer',()=>{
   await item.focus();
   await expect(item).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/article=topics%2Fterminal%2Fterminal-routing\\.md/);
+  await expect(page).toHaveURL(/article=topics%2Fterminal%2Fterminal-routing\.md/);
   await expect(page.locator('.knowledge-reader').getByRole('heading',{name:'Terminal routing'})).toBeVisible();
  });
 
