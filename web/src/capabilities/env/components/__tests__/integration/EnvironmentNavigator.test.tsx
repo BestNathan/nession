@@ -26,8 +26,7 @@ function props(overrides: Partial<EnvironmentNavigatorProps> = {}): EnvironmentN
   return {
     profiles: [],
     agents: [],
-    activeKeys: new Set(),
-    hasSession: false,
+    includedKeys: new Set(),
     loading: false,
     error: null,
     selectedKey: null,
@@ -54,32 +53,21 @@ describe('EnvironmentNavigator', () => {
     expect(row).toHaveTextContent('devbox-01 · 18 vars');
   });
 
-  it('marks the Session-active profiles quietly', () => {
+  it('marks profiles in the desired binding quietly, without claiming convergence', () => {
     render(
       <EnvironmentNavigator
         {...props({
           profiles: [info('a.env'), info('b.env')],
-          activeKeys: new Set(['server::a.env']),
-          hasSession: true,
+          includedKeys: new Set(['server::a.env']),
         })}
       />,
     );
-    expect(screen.getByTestId('env-profile-row-server::a.env')).toHaveTextContent('Active');
-    expect(screen.getByTestId('env-profile-row-server::b.env')).not.toHaveTextContent('Active');
-    expect(screen.getByTestId('env-session-summary')).toHaveTextContent(
-      'Current Session · a.env',
+    const included = screen.getByTestId('env-profile-row-server::a.env');
+    expect(included).toHaveTextContent('Included');
+    expect(included).not.toHaveTextContent('Active');
+    expect(screen.getByTestId('env-profile-row-server::b.env')).not.toHaveTextContent(
+      'Included',
     );
-  });
-
-  it('says when no environment is applied to the current Session', () => {
-    render(<EnvironmentNavigator {...props({ profiles: [info('a.env')], hasSession: true })} />);
-    expect(screen.getByTestId('env-session-summary')).toHaveTextContent(
-      'Current Session · no environment applied',
-    );
-  });
-
-  it('hides the Session summary when there is no Session', () => {
-    render(<EnvironmentNavigator {...props({ profiles: [info('a.env')] })} />);
     expect(screen.queryByTestId('env-session-summary')).not.toBeInTheDocument();
   });
 

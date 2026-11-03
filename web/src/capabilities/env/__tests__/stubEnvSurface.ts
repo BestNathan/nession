@@ -8,13 +8,17 @@ import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/serve
 import { WIRE as SESSION_ENV_APPLY_WIRE } from '@/generated/protocol/core/server-session-env-apply/v1';
 import { WIRE as SESSION_ENV_UNSET_WIRE } from '@/generated/protocol/core/server-session-env-unset/v1';
 import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
+import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
+import { WIRE as SESSION_ENV_BINDING_REAPPLY_WIRE } from '@/generated/protocol/core/server-session-env-binding-reapply/v1';
 import {
   envApi,
   type ActiveEnvFile,
   type EnvFileInfo,
+  type EnvFileRef,
   type EnvGetResponse,
   type EnvWriteResponse,
   type SessionEnvBindingResponse,
+  type SessionEnvBindingState,
 } from '@/capabilities/env';
 
 /**
@@ -71,6 +75,29 @@ export function stubEnvApi(): EnvStub {
     warnings: [],
   };
 
+  const simulate = (
+    refs: EnvFileRef[],
+    revision: number,
+  ): SessionEnvBindingState => ({
+    session_id: bindingResponse.binding?.session_id ?? 's1',
+    desired_revision: revision,
+    desired_profiles: refs.map((profile) => ({
+      profile,
+      phase: 'attach',
+      content_hash: null,
+      outdated: false,
+    })),
+    observed: {
+      applied_revision: revision,
+      status: refs.length === 0 ? 'in_sync' : 'pending_shell',
+      profiles: refs,
+      managed_keys: [],
+      shell: 'bash',
+      shell_revision: refs.length === 0 ? revision : null,
+      last_error: null,
+    },
+  });
+
   const surface: PluginSurface = {
     connectionState: 'connected',
     protocols: new ProtocolDirectory(),
@@ -92,6 +119,31 @@ export function stubEnvApi(): EnvStub {
         return Promise.resolve({ active } as T);
       }
       if (type === SESSION_ENV_BINDING_GET_WIRE) {
+        return Promise.resolve(bindingResponse as T);
+      }
+      if (type === SESSION_ENV_BINDING_SET_WIRE) {
+        const refs = (payload.profiles as EnvFileRef[] | undefined) ?? [];
+        const current = bindingResponse.binding?.desired_revision ?? 0;
+        bindingResponse = {
+          success: true,
+          binding: simulate(refs, refs.length === 0 ? 0 : current + 1),
+          warnings: [],
+        };
+        return Promise.resolve(bindingResponse as T);
+      }
+      if (type === SESSION_ENV_BINDING_REAPPLY_WIRE) {
+        const current = bindingResponse.binding;
+        const refs = (current?.desired_profiles ?? []).map(
+          (entry) => entry.profile,
+        );
+        bindingResponse = {
+          success: true,
+          binding: simulate(
+            refs,
+            (current?.desired_revision ?? 0) + 1,
+          ),
+          warnings: [],
+        };
         return Promise.resolve(bindingResponse as T);
       }
       if (type === SESSION_ENV_APPLY_WIRE || type === SESSION_ENV_UNSET_WIRE) {

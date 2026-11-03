@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { EnvFileInfo, EnvFileRef, EnvWriteResponse } from '@/types';
 import { envApi } from '@/capabilities/env';
@@ -19,21 +19,29 @@ import {
 
 export interface EnvironmentWorkspace {
   profiles: EnvironmentProfiles;
-  screen: EnvironmentScreen;
   /** The current Session's desired + observed Environment Binding. */
   binding: SessionEnvBinding;
+  screen: EnvironmentScreen;
+  /** `refKey`s in the desired selection — not proof of shell convergence. */
+  includedKeys: ReadonlySet<string>;
+  sessionId: string | null;
   /** The selected profile object, derived — robust across list refreshes. */
   selectedProfile: EnvFileInfo | null;
-  /** Apply/remove through the same refresh the binding status reads. */
-  applyToSession: (profile: EnvFileInfo) => Promise<boolean>;
-  removeFromSession: (profile: EnvFileInfo) => Promise<boolean>;
   importOpen: boolean;
   openImport: () => void;
   closeImport: () => void;
+  /** Open the ordered binding draft from the live desired selection. */
+  startBindingDraft: () => void;
+  /** Commit one replace-whole-binding request; closes on a Server answer. */
+  applyBinding: (refs: EnvFileRef[]) => Promise<boolean>;
+  /** Re-resolve the desired profiles at a new revision. */
+  reapplyBinding: () => Promise<boolean>;
+  /** Return to the Session Environment view (Web link / App depth). */
+  showSession: () => void;
   /**
    * One write attempt for the Edit depth. A successful attempt toasts,
-   * refreshes the list, and closes Edit onto the saved profile; a failed one
-   * is handed back for the editor's Replace/impact chain.
+   * refreshes the list and binding freshness, and closes Edit onto the saved
+   * profile; a failed one is handed back for the editor's Replace/impact chain.
    */
   save: (input: EnvProfileSaveInput) => Promise<EnvWriteResponse>;
   /** Delete behind the detail's AlertDialog; failure toasts and keeps the profile. */
@@ -43,46 +51,21 @@ export interface EnvironmentWorkspace {
 }
 
 /**
- * The Environment Workspace composition (#1202) shared by both experiences:
- * list + Session usage + the screen state machine + the save/delete/import
- * flows. The experiences own only how those pieces are laid out — a Web grid
- * and an App push — so the dirty-leave policy and the write chain each have
- * exactly one implementation.
+ * The Environment Workspace composition (#1202, Session-first in #2654):
+ * reusable profile list + the current Session binding + the shared screen
+ * state machine + save/delete/import.
+ *
+ * The binding is the only owner of "which profiles this Session has"; the
+ * profile list never marks a runtime state from a legacy apply/unset.
  */
 export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWorkspace {
-  const profiles = useEnvironmentProfiles(sessionId);
+  const profiles = useEnvironmentProfiles();
   const binding = useSessionEnvBinding(sessionId);
   const screen = useEnvironmentScreen();
   const [importOpen, setImportOpen] = useState(false);
 
-  // Apply/remove refresh the active list *and* the binding status; the two
-  // answer different questions and must not disagree after a mutation.
-  const refreshBinding = binding.refresh;
-  const applyProfile = profiles.applyToSession;
-  const removeProfile = profiles.removeFromSession;
-  const applyToSession = useCallback(
-    async (profile: EnvFileInfo) => {
-      const ok = await applyProfile(profile);
-      if (ok) {
-        await refreshBinding();
-      }
-      return ok;
-    },
-    [applyProfile, refreshBinding],
-  );
-  const removeFromSession = useCallback(
-    async (profile: EnvFileInfo) => {
-      const ok = await removeProfile(profile);
-      if (ok) {
-        await refreshBinding();
-      }
-      return ok;
-    },
-    [removeProfile, refreshBinding],
-  );
-
-  // A Session switch abandons the old Session's selection and any edit in
-  // flight — they name that Session's context and must not reappear.
+  // A Session switch abandons the old Session's selection and any edit/draft
+  // in flight — they name that Session's context and must not reappear.
   const reset = screen.reset;
   useEffect(() => {
     reset();
@@ -90,6 +73,57 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   const selectedProfile =
     profiles.profiles.find((p) => refKey(p) === screen.selectedKey) ?? null;
+
+  const includedKeys = useMemo(
+    () =>
+      new Set(
+        (binding.binding?.desired_profiles ?? []).map((entry) =>
+          refKey(entry.profile),
+        ),
+      ),
+    [binding.binding],
+  );
+
+  const refreshBinding = binding.refresh;
+
+  const startBindingDraft = useCallback(() => {
+    const refs = (binding.binding?.desired_profiles ?? []).map(
+      (entry) => entry.profile,
+    );
+    screen.startBindingDraft(refs);
+  }, [binding.binding, screen]);
+
+  const applyBinding = useCallback(
+    async (refs: EnvFileRef[]): Promise<boolean> => {
+      const resp = await binding.replace(refs);
+      resp.warnings.forEach((warning) => toast.warning(warning));
+      if (!resp.success) {
+        toast.error(resp.error ?? 'Failed to update the Session binding');
+      }
+      if (resp.binding) {
+        // The Server answered with the resulting desired state, even when the
+        // Agent failed to materialize it. The draft is spent; the Session view
+        // now shows the truthful outcome and offers Reapply.
+        screen.finishBindingDraft();
+      }
+      return resp.success;
+    },
+    [binding, screen],
+  );
+
+  const reapplyBinding = useCallback(async (): Promise<boolean> => {
+    const resp = await binding.reapply();
+    resp.warnings.forEach((warning) => toast.warning(warning));
+    if (!resp.success) {
+      toast.error(resp.error ?? 'Failed to reapply the Session binding');
+    }
+    return resp.success;
+  }, [binding]);
+
+  const showSession = useCallback(() => {
+    screen.showSession();
+    void refreshBinding();
+  }, [screen, refreshBinding]);
 
   const save = useCallback(
     async (input: EnvProfileSaveInput): Promise<EnvWriteResponse> => {
@@ -105,11 +139,11 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       toast.success(`Saved ${input.ref.name}`);
       resp.warnings?.forEach((w) => toast.warning(w));
       resp.re_source_errors?.forEach((e) => toast.warning(e));
-      await profiles.refresh();
+      await Promise.all([profiles.refresh(), refreshBinding()]);
       screen.finishEdit(refKey(input.ref));
       return resp;
     },
-    [profiles, screen],
+    [profiles, refreshBinding, screen],
   );
 
   const deleteProfile = useCallback(
@@ -121,9 +155,9 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
       }
       toast.success(`Deleted ${profile.name}`);
       screen.finishEdit(null);
-      await profiles.refresh();
+      await Promise.all([profiles.refresh(), refreshBinding()]);
     },
-    [profiles, screen],
+    [profiles, refreshBinding, screen],
   );
 
   const onImported = useCallback(
@@ -138,14 +172,18 @@ export function useEnvironmentWorkspace(sessionId: string | null): EnvironmentWo
 
   return {
     profiles,
-    screen,
     binding,
+    screen,
+    includedKeys,
+    sessionId,
     selectedProfile,
-    applyToSession,
-    removeFromSession,
     importOpen,
     openImport: () => setImportOpen(true),
     closeImport: () => setImportOpen(false),
+    startBindingDraft,
+    applyBinding,
+    reapplyBinding,
+    showSession,
     save,
     deleteProfile,
     onImported,

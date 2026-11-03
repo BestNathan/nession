@@ -19,10 +19,8 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 export interface EnvironmentNavigatorProps {
   profiles: EnvFileInfo[];
   agents: Agent[];
-  /** Profiles sourced into the current Session, by `refKey`. */
-  activeKeys: ReadonlySet<string>;
-  /** Whether a current Session exists at all — gates the usage summary. */
-  hasSession: boolean;
+  /** Profiles in the current Session's desired binding, by `refKey`. */
+  includedKeys: ReadonlySet<string>;
   loading: boolean;
   error: string | null;
   selectedKey: string | null;
@@ -42,13 +40,13 @@ export interface EnvironmentNavigatorProps {
 function EnvironmentRow({
   profile,
   agents,
-  active,
+  included,
   selected,
   onSelect,
 }: {
   profile: EnvFileInfo;
   agents: Agent[];
-  active: boolean;
+  included: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -56,7 +54,7 @@ function EnvironmentRow({
     <button
       type="button"
       data-testid={`env-profile-row-${refKey(profile)}`}
-      data-active={active || undefined}
+      data-included={included || undefined}
       onClick={onSelect}
       className={cn(
         'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/50',
@@ -69,15 +67,17 @@ function EnvironmentRow({
           {profileMetaLine(profile, agents)}
         </span>
       </span>
-      {active ? (
-        <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>Active</span>
+      {included ? (
+        <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>
+          Included
+        </span>
       ) : null}
     </button>
   );
 }
 
 function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
-  const { profiles, agents, activeKeys, loading, error, selectedKey, query } = props;
+  const { profiles, agents, includedKeys, loading, error, selectedKey, query } = props;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -153,7 +153,7 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
             key={key}
             profile={p}
             agents={agents}
-            active={activeKeys.has(key)}
+            included={includedKeys.has(key)}
             selected={selectedKey === key}
             onSelect={() => props.onSelect(p)}
           />
@@ -164,18 +164,15 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
 }
 
 /**
- * The Environment navigator (#1202): search, one resource-creation `+`, the
- * current Session's usage as a quiet summary, and profile rows that lead with
- * the name. No inline delete, no file size, no badges — secondary actions
- * live in the Profile Detail.
+ * The Environment navigator (#1202, Session-first in #2654): search, one
+ * resource-creation `+`, and profile rows that lead with the name. The
+ * Session's ordered binding lives in the Session Environment view, not as a
+ * comma-separated sidebar line. `Included` is the desired selection, not a
+ * claim that the running shell converged.
  */
 export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
   const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
-  const activeNames = props.profiles
-    .filter((p) => props.activeKeys.has(refKey(p)))
-    .map((p) => p.name);
-
   useEffect(() => {
     if (props.restoredScrollTop === undefined || props.loading) {
       return;
@@ -222,17 +219,6 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {props.hasSession ? (
-        <p
-          data-testid="env-session-summary"
-          className={cn('border-b px-3 py-1.5 text-muted-foreground', chromeSansRole('metadata'))}
-        >
-          {activeNames.length > 0
-            ? `Current Session · ${activeNames.join(', ')}`
-            : 'Current Session · no environment applied'}
-        </p>
-      ) : null}
 
       <div
         ref={listRef}
