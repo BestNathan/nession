@@ -50,9 +50,7 @@ impl ConnectionHandler {
         // set (caller accepts the risk and re-sources the file afterwards).
         if overwrite && !force {
             let in_use = self
-                .env_service
-                .bindings
-                .sessions_using(&name, source, agent_id.as_deref())
+                .sessions_using_file(&name, source, agent_id.as_deref())
                 .await;
             if !in_use.is_empty() {
                 return Ok(env_write_reply(

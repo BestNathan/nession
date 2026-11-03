@@ -635,6 +635,32 @@ impl ConnectionHandler {
         }
     }
 
+    /// Sessions whose *live* desired binding uses the file.
+    ///
+    /// A binding row can outlive its Session after an Agent crash. The lock and
+    /// visibility projections are about Sessions the Server still knows, so the
+    /// durable index is filtered through the registry here rather than deleted
+    /// eagerly on a reconnect that has not reported its live set yet.
+    async fn sessions_using_file(
+        &self,
+        name: &str,
+        source: EnvSource,
+        agent_id: Option<&str>,
+    ) -> Vec<String> {
+        let candidates = self
+            .env_service
+            .bindings
+            .sessions_using(name, source, agent_id)
+            .await;
+        let mut live = Vec::new();
+        for session_id in candidates {
+            if self.session_registry.get(&session_id).await.is_some() {
+                live.push(session_id);
+            }
+        }
+        live
+    }
+
     /// Split a wire session id into the Agent and the bare tmux name.
     fn session_agent_and_name(session_id: &str) -> Result<(String, String), String> {
         let Some((agent_id, session_name)) = session_id.split_once(':') else {

@@ -58,9 +58,7 @@ impl ConnectionHandler {
         }
 
         let in_use_by = self
-            .env_service
-            .bindings
-            .sessions_using(&name, source, agent_id.as_deref())
+            .sessions_using_file(&name, source, agent_id.as_deref())
             .await;
 
         let result = match source {

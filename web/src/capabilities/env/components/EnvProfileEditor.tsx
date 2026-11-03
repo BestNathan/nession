@@ -222,14 +222,15 @@ function SaveDialogs({
       <AlertDialog open={flow.impactOpen} onOpenChange={flow.setImpactOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Save and update running sessions?</AlertDialogTitle>
+            <AlertDialogTitle>Save while used by running sessions?</AlertDialogTitle>
             <AlertDialogDescription>
               This profile is used by{' '}
               {inUseBy.length === 1
                 ? '1 running session'
                 : `${inUseBy.length} running sessions`}
-              {inUseBy.length > 0 ? ` (${inUseBy.join(', ')})` : ''}. Saving may re-source
-              those sessions, which can interrupt work relying on the current values.
+              {inUseBy.length > 0 ? ` (${inUseBy.join(', ')})` : ''}. Saving changes the
+              profile only; each Session keeps the revision it materialized. Use Reapply on a
+              Session to apply the new content.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -239,7 +240,7 @@ function SaveDialogs({
               onClick={flow.confirmImpact}
               disabled={flow.saving}
             >
-              Save and update
+              Save anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -99,9 +99,18 @@ impl ConnectionHandler {
             })
             .collect();
         let binding_revision = if env_refs.is_empty() { 0 } else { 1 };
-        if !env_refs.is_empty() {
+        let session_id_for_binding = format!("{agent_id}:{name}");
+        if env_refs.is_empty() {
+            // A row can outlive its Session after an Agent crash. A new
+            // same-named Session starts with an empty binding, never with the
+            // previous one's desired profiles.
+            self.env_service
+                .bindings
+                .clear_session(&session_id_for_binding)
+                .await;
+        } else {
             let record = crate::env::BindingRecord {
-                session_id: format!("{agent_id}:{name}"),
+                session_id: session_id_for_binding.clone(),
                 agent_id: agent_id.to_string(),
                 desired_revision: binding_revision,
                 profiles: materialized,
@@ -202,7 +211,7 @@ impl ConnectionHandler {
                     if !env_refs.is_empty() {
                         self.env_service
                             .bindings
-                            .clear_session(&format!("{agent_id}:{name}"))
+                            .clear_session(&session_id_for_binding)
                             .await;
                     }
                     None

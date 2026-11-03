@@ -1635,17 +1635,32 @@ pub(super) async fn bind_for_test(
     session_id: &str,
     files: &[EnvFileRef],
 ) {
-    let agent_id = session_id
-        .split_once(':')
-        .map_or("", |(agent, _)| agent)
-        .to_string();
+    let (agent_id, session_name) = session_id.split_once(':').expect("agent:name");
+    let now = chrono::Utc::now();
+    // A bound Session is a live Session: the in-use lock is filtered through
+    // the registry, so the fixture has to say both halves.
+    handler
+        .session_registry
+        .insert_session_if_absent(crate::registry::session::SessionInfo {
+            session_id: session_id.to_string(),
+            agent_id: agent_id.to_string(),
+            session_name: session_name.to_string(),
+            status: crate::registry::session::SessionStatus::Detached,
+            window_count: 1,
+            attached_clients: 0,
+            foreground_command: None,
+            working_dir: None,
+            created_at: now,
+            last_activity: now,
+        })
+        .await;
     let profiles = crate::env::binding::materialized_profiles(&[], files, "create");
     handler
         .env_service
         .bindings
         .put(&crate::env::BindingRecord {
             session_id: session_id.to_string(),
-            agent_id,
+            agent_id: agent_id.to_string(),
             desired_revision: 1,
             profiles,
             updated_at: 0,

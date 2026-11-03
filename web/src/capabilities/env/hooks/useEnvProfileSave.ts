@@ -17,7 +17,7 @@ export interface EnvProfileSaveFlow {
   setOverwriteOpen: (open: boolean) => void;
   /** Entry point: an in-use existing profile explains its impact first. */
   save: () => void;
-  /** "Save and update" — overwrite + force after the impact was explained. */
+  /** "Save anyway" — overwrite + force after the impact was explained. */
   confirmImpact: () => void;
   /** "Replace" — overwrite after the existing profile was named. */
   confirmOverwrite: () => void;
