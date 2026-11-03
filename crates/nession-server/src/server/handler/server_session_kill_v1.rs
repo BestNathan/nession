@@ -137,10 +137,8 @@ impl ConnectionHandler {
 
                 if success {
                     self.session_registry.remove(session_id).await;
-                    // Session destroyed: create-time env vars are gone with it
-                    // (EC7) and any attach-time usage is now moot, so release
-                    // all locks this session held.
-                    self.env_service.usage.clear_session(session_id);
+                    // The Session is gone; its binding is no longer live state.
+                    self.env_service.clear_session_state(session_id).await;
                 }
 
                 Ok(session_kill_reply(

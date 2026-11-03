@@ -219,6 +219,8 @@ fn test_server_session_create_payload() {
         height: 40,
         working_dir: None,
         env_snapshots: Vec::new(),
+        binding_profiles: Vec::new(),
+        binding_revision: None,
         terminal_cols: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
@@ -327,6 +329,7 @@ fn test_client_session_create_response_payload() {
         success: true,
         session_id: Some("agent-1:new-sess".to_string()),
         error: None,
+        warnings: Vec::new(),
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();

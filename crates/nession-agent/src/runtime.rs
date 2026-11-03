@@ -191,6 +191,21 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
     let tmux_for_client = {
         let mut mgr = SessionManager::new();
+        // Binding state has to outlive this process: a tmux Session does, and
+        // the Agent must still know a managed key's base value after a
+        // restart. The directory is created here, where the Agent's state
+        // directories come into existence, and secured by the manager on first
+        // write.
+        if let Ok(state_dir) = nession_common::paths::agent_env_bindings_dir() {
+            if let Err(e) = std::fs::create_dir_all(&state_dir) {
+                tracing::warn!(
+                    "could not create env binding state dir {}: {e}",
+                    state_dir.display()
+                );
+            } else {
+                mgr = mgr.with_env_state_dir(state_dir);
+            }
+        }
         mgr.with_memory_threshold(Some(config.memory_threshold_percent));
         Arc::new(mgr)
     };

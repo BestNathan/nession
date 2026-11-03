@@ -1,4 +1,4 @@
-import type { AttachInfo, AttachMode, EnvFileRef, Session } from '@/types';
+import type { AttachInfo, AttachMode, Session } from '@/types';
 
 const STORAGE_KEY = 'nession_session_attach_profiles';
 export const ATTACH_PROFILE_SCHEMA_VERSION = 1 as const;
@@ -7,7 +7,6 @@ export const ATTACH_PROFILE_SCHEMA_VERSION = 1 as const;
 export interface PersistedAttachChoice {
   mode: AttachMode;
   renderer: 'webgl' | 'canvas';
-  envRefs: EnvFileRef[];
   /** Manual P2P path or manual relay endpoint; null = auto selection. */
   selectedUrl: string | null;
 }
@@ -27,18 +26,6 @@ function isAttachMode(v: unknown): v is AttachMode {
 
 function isRenderer(v: unknown): v is 'webgl' | 'canvas' {
   return v === 'webgl' || v === 'canvas';
-}
-
-function isEnvFileRef(v: unknown): v is EnvFileRef {
-  if (typeof v !== 'object' || v === null) {
-    return false;
-  }
-  const ref = v as Record<string, unknown>;
-  return (
-    typeof ref.name === 'string' &&
-    (ref.source === 'server' || ref.source === 'agent') &&
-    (ref.agent_id === undefined || typeof ref.agent_id === 'string')
-  );
 }
 
 /** Parse one raw entry; unknown entries are dropped, never thrown on. */
@@ -61,14 +48,12 @@ function parseProfile(entry: unknown): SessionAttachProfile | null {
   }
   const choice = c as Record<string, unknown>;
   if (
-    !Array.isArray(choice.envRefs) ||
     !isAttachMode(choice.mode) ||
     !isRenderer(choice.renderer) ||
     (choice.selectedUrl !== null && typeof choice.selectedUrl !== 'string')
   ) {
     return null;
   }
-  const envRefs = choice.envRefs.filter(isEnvFileRef);
   return {
     schemaVersion: ATTACH_PROFILE_SCHEMA_VERSION,
     sessionId: p.sessionId,
@@ -78,7 +63,6 @@ function parseProfile(entry: unknown): SessionAttachProfile | null {
     choice: {
       mode: choice.mode,
       renderer: choice.renderer,
-      envRefs,
       selectedUrl: choice.selectedUrl === null ? null : choice.selectedUrl,
     },
   };
@@ -158,7 +142,7 @@ export function saveSessionProfile(
  *  four persistable fields (e.g. the dialog's AttachChoice) is accepted. */
 export function persistConfirmedChoice(
   session: Pick<Session, 'session_id' | 'agent_id'>,
-  choice: Pick<PersistedAttachChoice, 'mode' | 'renderer' | 'envRefs' | 'selectedUrl'>,
+  choice: Pick<PersistedAttachChoice, 'mode' | 'renderer' | 'selectedUrl'>,
   info: AttachInfo,
 ): void {
   saveSessionProfile(session, choice, buildOptionsFingerprint(info));

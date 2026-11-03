@@ -83,7 +83,6 @@ function buildChoice(
     selectedUrl: choice.selectedUrl,
     relayUrl: choice.mode === 'relay' ? choice.selectedUrl : null,
     renderer: detectWebGLSupport() ? choice.renderer : 'canvas',
-    envRefs: choice.envRefs,
   };
 }
 
@@ -144,7 +143,6 @@ export async function resolveDeepLinkAttachChoice(
   const target: PersistedAttachChoice = {
     mode: prefs.mode === 'relay' ? 'auto' : prefs.mode,
     renderer: prefs.renderer,
-    envRefs: [],
     selectedUrl: null,
   };
   return resolveTargetChoice(session, target, probeResults);

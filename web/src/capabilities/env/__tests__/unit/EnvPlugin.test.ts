@@ -161,6 +161,36 @@ describe('EnvPlugin', () => {
       await expect(pending).resolves.toEqual({ success: true });
     });
 
+    it('setSessionEnvBinding sends the whole ordered selection', async () => {
+      const pending = plugin.setSessionEnvBinding('a1:work', [agentFile, serverFile]);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'server.session.env.binding.set',
+        payload: { session_id: 'a1:work', profiles: [agentFile, serverFile] },
+      });
+
+      surface.resolveNext('server.session.env.binding.set', {
+        success: true,
+        warnings: [],
+        binding: { session_id: 'a1:work', desired_revision: 1, desired_profiles: [] },
+      });
+      await expect(pending).resolves.toMatchObject({ success: true });
+    });
+
+    it('getSessionEnvBinding sends the session id', async () => {
+      const pending = plugin.getSessionEnvBinding('a1:work');
+      expect(surface.requests[0]).toMatchObject({
+        type: 'server.session.env.binding.get',
+        payload: { session_id: 'a1:work' },
+      });
+
+      surface.resolveNext('server.session.env.binding.get', {
+        success: true,
+        warnings: [],
+        binding: { session_id: 'a1:work', desired_revision: 0, desired_profiles: [] },
+      });
+      await expect(pending).resolves.toMatchObject({ success: true });
+    });
+
     it('getSessionEnvActive sends the session id', async () => {
       const pending = plugin.getSessionEnvActive('a1:work');
       expect(surface.requests[0]).toMatchObject({
@@ -196,6 +226,12 @@ describe('EnvPlugin', () => {
         'env feature is not connected',
       );
       await expect(plugin.unsetSessionEnv('a1:work', [])).rejects.toThrow(
+        'env feature is not connected',
+      );
+      await expect(plugin.setSessionEnvBinding('a1:work', [])).rejects.toThrow(
+        'env feature is not connected',
+      );
+      await expect(plugin.getSessionEnvBinding('a1:work')).rejects.toThrow(
         'env feature is not connected',
       );
       await expect(plugin.getSessionEnvActive('a1:work')).rejects.toThrow(

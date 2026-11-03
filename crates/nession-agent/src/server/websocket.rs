@@ -46,7 +46,8 @@ use crate::session::terminal::state::InputSequence;
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
-use crate::tmux::manager::SessionManager;
+use crate::tmux::env::profiles_from_snapshots;
+use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
@@ -944,16 +945,13 @@ pub struct AgentServer {
     credentials: Arc<P2pCredentials>,
 }
 
-/// Apply env snapshots to a tmux session via `set-environment`.
+/// Translate a legacy attach-time `env_snapshots` list into the binding model.
 ///
-/// **Required** (#991): these are variables a user asked for, so "the session
-/// has them" and "it does not" are different outcomes and only the caller can
-/// tell the user which happened. This used to return a `Vec<String>` of
-/// warnings that every caller logged before answering `ok` — a required
-/// mutation silently downgraded to a log line, which is the second half of
-/// #980 and the reason nothing noticed the first half. The failure travels as
-/// a `Result` now, and no caller is allowed to turn it back into success.
-async fn apply_env_snapshots(
+/// Attach is environment-neutral for every canonical client. This exists only
+/// for a client written before #170: it resolves profiles at attach time, so
+/// the honest translation is an explicit binding replacement, not a hidden
+/// attach-owned layer. New clients send no snapshots and take the no-op path.
+async fn apply_legacy_attach_env(
     tmux: &SessionManager,
     session_name: &str,
     snapshots: &[EnvSnapshot],
@@ -961,15 +959,15 @@ async fn apply_env_snapshots(
     if snapshots.is_empty() {
         return Ok(());
     }
-    // Collect all vars from all snapshots, deduplicating by key (last wins).
-    let mut seen = std::collections::HashMap::new();
-    for snap in snapshots {
-        for (k, v) in &snap.vars {
-            seen.insert(k.clone(), v.clone());
-        }
-    }
-    let deduped: Vec<(String, String)> = seen.into_iter().collect();
-    tmux.env().set_environment(session_name, &deduped).await
+    warn!(
+        "legacy attach-time env snapshots for session {session_name}; translating to a binding replacement"
+    );
+    let profiles = profiles_from_snapshots(snapshots, "attach");
+    let revision = tmux.env().next_local_revision(session_name).await;
+    tmux.env()
+        .apply_binding(session_name, revision, &profiles, snapshots)
+        .await
+        .map(|_| ())
 }
 
 /// The size an attach should give the session.
@@ -1509,41 +1507,43 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // states its configured value on the relayed create, and a
                 // direct/standalone caller falls back to this Agent's config.
                 let terminal_cols = payload.terminal_cols.unwrap_or(ctx.terminal_cols);
+                // A caller that only knows resolved snapshots still gets the
+                // same binding model: the refs are read from the snapshots, not
+                // invented. `binding_profiles` is the canonical field.
+                let profiles = if payload.binding_profiles.is_empty() {
+                    profiles_from_snapshots(&payload.env_snapshots, "create")
+                } else {
+                    payload.binding_profiles.clone()
+                };
+                if profiles.len() != payload.env_snapshots.len() {
+                    return ctx.err(
+                        "invalid_binding",
+                        "binding profiles and env snapshots must have the same length",
+                    );
+                }
+                let revision = payload
+                    .binding_revision
+                    .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
                 match ctx
                     .tmux
-                    .create_session(
+                    .create_session_with_binding(
                         &payload.name,
                         terminal_cols,
                         payload.height,
                         &working_dir,
-                        &[],
+                        SessionBindingInput {
+                            revision,
+                            profiles: &profiles,
+                            snapshots: &payload.env_snapshots,
+                        },
                     )
                     .await
                 {
-                    Ok(()) => {
-                        // Applied after creation rather than passed to
-                        // `new-session`, which is how the attach path injects
-                        // its snapshots too. The field is new here — this
-                        // projection had none — and accepting a parameter and
-                        // then dropping it is the failure mode the rest of this
-                        // change exists to remove.
-                        if let Err(e) =
-                            apply_env_snapshots(ctx.tmux, &payload.name, &payload.env_snapshots)
-                                .await
-                        {
-                            // A create whose environment did not land is not the
-                            // create that was asked for, so this cannot answer
-                            // `ok`. The session itself is left in place: this
-                            // reports the failure, it does not add a rollback
-                            // policy (no caller had one before, and choosing one
-                            // is #991's, not #980's).
-                            warn!(
-                                "env set-environment failed for session {}: {e:#}",
-                                payload.name
-                            );
-                            return ctx.err("env_apply_failed", &format!("{e:#}"));
-                        }
-                        let resp = SessionCreateResponse { name: payload.name };
+                    Ok(warnings) => {
+                        let resp = SessionCreateResponse {
+                            name: payload.name,
+                            warnings,
+                        };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
@@ -1650,7 +1650,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let already_attached = ctx.sessions.is_attached(&session_name);
 
                 if already_attached {
-                    if let Err(e) = apply_env_snapshots(
+                    // Canonical attaches carry no environment. A pre-#170
+                    // client's snapshots are translated into an explicit
+                    // binding replacement; they are not an attach-owned layer.
+                    if let Err(e) = apply_legacy_attach_env(
                         ctx.tmux, &session_name, &payload.env_snapshots,
                     ).await {
                         return ctx.err("env_apply_failed", &format!("{e:#}"));
@@ -1752,14 +1755,13 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                 if matches!(ctx.attach_mode, AttachMode::Plain) {
                     // ---- Plain PTY path (session-shared) ----
-                    // Apply env snapshots before PTY creation. Required: the
-                    // client asked for these variables, and an attach that
-                    // proceeds without them answers `ok` for a session that
-                    // does not have the environment it was told to have.
+                    // Canonical attaches carry no environment. A pre-#170
+                    // client's snapshots are translated into an explicit
+                    // binding replacement before the backend is created.
                     if let Err(e) =
-                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await
+                        apply_legacy_attach_env(ctx.tmux, &session_name, &payload.env_snapshots).await
                     {
-                        warn!("env set-environment failed for session {session_name}: {e:#}");
+                        warn!("legacy attach env could not be materialized for session {session_name}: {e:#}");
                         return ctx.err("env_apply_failed", &format!("{e:#}"));
                     }
 
@@ -1922,9 +1924,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                 } else {
                     // ---- Control mode path ----
 
-                    // Apply env snapshots before control-mode attach. Required,
-                    // for the same reason as the PTY path above.
-                    if let Err(e) = apply_env_snapshots(
+                    // Apply a pre-#170 client's snapshots as an explicit
+                    // binding replacement before control-mode attach.
+                    if let Err(e) = apply_legacy_attach_env(
                         ctx.tmux,
                         &payload.session_name,
                         &payload.env_snapshots,
@@ -3197,16 +3199,8 @@ impl AgentServer {
             }
         }
 
-        // Clean up any env scripts sourced by this client. The client id is
-        // taken under the lock and used outside it, for the same reason.
-        let client_id = {
-            let client_id_guard = connection.client_id.lock().await;
-            client_id_guard.clone()
-        };
-        if let Some(cid) = client_id {
-            connection.tmux.env().cleanup_client_scripts(&cid).await;
-            info!("Cleaned up env scripts for client {}", cid);
-        }
+        // Detach is environment-neutral (#170): the Session's binding is not a
+        // property of any client, so there is nothing to clean up here.
 
         info!("Client {} disconnected", addr);
         Ok(())
@@ -4688,6 +4682,8 @@ mod tests {
             height: 24,
             working_dir: None,
             env_snapshots: Vec::new(),
+            binding_profiles: Vec::new(),
+            binding_revision: None,
             terminal_cols: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);

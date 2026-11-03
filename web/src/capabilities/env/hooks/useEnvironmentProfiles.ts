@@ -36,7 +36,7 @@ export interface EnvironmentProfiles {
  * The Environment navigator's data (#1202): the profile list plus the current
  * Session's usage of it. Apply/remove stay contextual to the Session they
  * were handed — there is no cross-session bulk operation, and no Terminal
- * remount: the server re-sources, the view re-reads the active state.
+ * remount: the binding is replaced, the view re-reads the active state.
  */
 export function useEnvironmentProfiles(sessionId: string | null): EnvironmentProfiles {
   const [profiles, setProfiles] = useState<EnvFileInfo[]>([]);

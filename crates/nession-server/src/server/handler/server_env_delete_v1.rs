@@ -53,9 +53,8 @@ impl ConnectionHandler {
         // unless `force` is set (the file is gone, so no re-source is needed).
         if !force {
             let in_use = self
-                .env_service
-                .usage
-                .sessions_using(&name, source, agent_id.as_deref());
+                .sessions_using_file(&name, source, agent_id.as_deref())
+                .await;
             if !in_use.is_empty() {
                 return Ok(env_del_reply(
                     &msg.id,

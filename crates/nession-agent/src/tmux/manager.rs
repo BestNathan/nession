@@ -1,11 +1,13 @@
 //! tmux session lifecycle management: create, list, and kill sessions.
 
 use anyhow::{Context, Result};
+use nession_protocol::contracts::env::v1::{EnvSnapshot, SessionEnvProfile};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use super::cmd::{self, TmuxCmd};
-use super::env::EnvManager;
+use super::env::{EffectiveOverlay, EnvManager, ShellAdapter};
 use super::ops::{TmuxDep, TmuxOps};
 
 /// The environment that tells a Claude Code integration which Nession session it
@@ -91,11 +93,24 @@ fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
 // definitions of one contract kept in step by nothing.
 pub use nession_protocol::contracts::session::v1::SessionInfo;
 
+/// The binding a Session is created with (#170 Phase A).
+///
+/// Creation is the one time all three layers start together: the effective
+/// environment reaches the initial process through `new-session -e`, the same
+/// overlay is installed on the Session for future panes, and the shell adapter
+/// gets its runtime files. The Server and P2P create paths both go through
+/// [`SessionManager::create_session_with_binding`], so they cannot drift.
+pub struct SessionBindingInput<'a> {
+    pub revision: u64,
+    pub profiles: &'a [SessionEnvProfile],
+    pub snapshots: &'a [EnvSnapshot],
+}
+
 /// Manages the lifecycle of tmux sessions (create / list / kill).
 ///
-/// Holds an [`EnvManager`] so that killing a session can clean up any env
-/// scripts it left behind. Environment operations themselves are exposed
-/// through [`SessionManager::env`].
+/// Holds the [`EnvManager`] that owns Session Environment Bindings, so killing
+/// a Session can remove its durable binding state and a create can materialize
+/// one before the initial shell starts.
 pub struct SessionManager {
     env: EnvManager,
     /// tmux binary and socket. Every command this manager spawns is built here,
@@ -110,11 +125,19 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    /// Create a `SessionManager` whose env scripts live in the system temp
-    /// directory (`std::env::temp_dir()`).
+    /// Create a `SessionManager` whose env binding state defaults to a
+    /// process-local temporary directory unique to this manager. Production
+    /// replaces it with the Agent's durable directory through
+    /// [`Self::with_env_state_dir`]; tests get isolation without sharing one
+    /// directory across unrelated cases in the same process.
     pub fn new() -> Self {
+        static NEXT_STATE_DIR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = NEXT_STATE_DIR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
-            env: EnvManager::new(std::env::temp_dir()),
+            env: EnvManager::new(
+                std::env::temp_dir()
+                    .join(format!("nession-env-bindings-{}-{id}", std::process::id())),
+            ),
             cmd: cmd::global().clone(),
             list_timeout: TMUX_LIST_TIMEOUT,
             kill_timeout: TMUX_KILL_TIMEOUT,
@@ -123,14 +146,22 @@ impl SessionManager {
         }
     }
 
-    /// Create a `SessionManager` with a custom base directory for env scripts.
-    /// Useful for tests and containerized environments with a non-`/tmp`
-    /// temporary directory policy.
+    /// Create a `SessionManager` with a custom base directory for env binding
+    /// state. Used by tests to keep one run's state out of another's.
     pub fn with_script_dir(script_dir: PathBuf) -> Self {
         Self {
             env: EnvManager::new(script_dir),
             ..Self::new()
         }
+    }
+
+    /// Put the durable Session Environment Binding state under `state_dir`.
+    ///
+    /// The runtime calls this with `~/.nession/agent/env-bindings`; the state
+    /// has to outlive an Agent process, because tmux Sessions do.
+    pub fn with_env_state_dir(mut self, state_dir: PathBuf) -> Self {
+        self.env = self.env.with_state_dir(state_dir);
+        self
     }
 
     /// The tmux socket every command from this manager addresses.
@@ -296,6 +327,12 @@ impl SessionManager {
         Ok(trimmed.to_string())
     }
 
+    /// Create a Session with a flat environment and no Environment Binding.
+    ///
+    /// Kept for callers that only need a tmux Session (tests, internal
+    /// helpers). Every production create goes through
+    /// [`Self::create_session_with_binding`], which is the path that owns all
+    /// three binding layers.
     pub async fn create_session(
         &self,
         name: &str,
@@ -304,6 +341,39 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        self.create_session_inner(name, width, height, working_dir, env, None)
+            .await
+            .map(|_| ())
+    }
+
+    /// Create a Session whose initial process, future panes, and shell adapter
+    /// all receive one Environment Binding (#170, Layer A).
+    ///
+    /// Returns the non-fatal warnings produced by resolving the overlay
+    /// (reserved-key collisions, for example). The binding is recorded in the
+    /// Agent's durable state before this returns, so a later Agent restart can
+    /// still restore base values when the binding changes.
+    pub async fn create_session_with_binding(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        working_dir: &str,
+        binding: SessionBindingInput<'_>,
+    ) -> Result<Vec<String>> {
+        self.create_session_inner(name, width, height, working_dir, &[], Some(binding))
+            .await
+    }
+
+    async fn create_session_inner(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        working_dir: &str,
+        env: &[(String, String)],
+        binding: Option<SessionBindingInput<'_>>,
+    ) -> Result<Vec<String>> {
         // Check memory pressure before creating a new session. This prevents
         // container-level OOM by refusing new sessions when memory usage is too
         // high, rather than letting the entire container die.
@@ -311,7 +381,7 @@ impl SessionManager {
 
         match tokio::time::timeout(
             self.create_timeout,
-            self.create_session_impl(name, width, height, working_dir, env),
+            self.create_session_impl(name, width, height, working_dir, env, binding),
         )
         .await
         {
@@ -334,7 +404,8 @@ impl SessionManager {
         height: u16,
         working_dir: &str,
         env: &[(String, String)],
-    ) -> Result<()> {
+        binding: Option<SessionBindingInput<'_>>,
+    ) -> Result<Vec<String>> {
         nession_common::config::validate_terminal_cols(width).map_err(anyhow::Error::msg)?;
         // History depth needs nothing here: it travels as `-f` on every tmux
         // invocation this manager makes (`cmd.rs`), so whichever one starts the
@@ -342,11 +413,36 @@ impl SessionManager {
         //
         // Pass through the agent process environment (PATH, NODE_PATH, etc.) so
         // tools installed via an init container are available in sessions.
-        // `skip_env` withholds TERM/LANG/LC_ALL/TMUX/TMUX_TMPDIR and the
-        // caller-supplied keys; TERM and the locale are forced below regardless
-        // of what the container has.
-        let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
-        let has_ps1 = env.iter().any(|(key, _)| key == "PS1");
+        // Caller-supplied keys are withheld from the inherited copy and applied
+        // afterwards, so a profile's value is the one the process sees.
+        let mut warnings = Vec::new();
+        let overlay = match &binding {
+            Some(binding) => {
+                let overlay = EnvManager::merge_snapshots(binding.snapshots)?;
+                warnings.extend(overlay.warnings.clone());
+                overlay
+            }
+            None => EffectiveOverlay {
+                vars: env.to_vec(),
+                warnings: Vec::new(),
+            },
+        };
+
+        // A Session with a binding gets a Session-local shell adapter. The
+        // adapter is installed before the shell starts, because a zsh adapter
+        // is selected by ZDOTDIR and a bash adapter by the launch command.
+        let adapter = match &binding {
+            Some(_) => {
+                let tmux_default = self.tmux_dep().ops().default_shell().await.ok().flatten();
+                let shell = tmux_default.or_else(|| std::env::var("SHELL").ok());
+                self.env.install_shell_adapter(name, shell.as_deref()).await
+            }
+            None => ShellAdapter::unsupported(None, "no Environment Binding"),
+        };
+
+        let mut caller_keys: Vec<&str> = overlay.vars.iter().map(|(k, _)| k.as_str()).collect();
+        caller_keys.extend(adapter.env.iter().map(|(k, _)| k.as_str()));
+        let has_ps1 = overlay.vars.iter().any(|(key, _)| key == "PS1");
         let claude_env = claude_binding_env(name);
 
         // Force TERM and locale first so TUI apps render correctly. Containers
@@ -355,8 +451,9 @@ impl SessionManager {
             ("TERM".to_string(), "xterm-256color".to_string()),
             ("LANG".to_string(), "C.UTF-8".to_string()),
         ];
-        session_env.extend(std::env::vars().filter(|(key, _)| !skip_env(key, &caller_keys)));
-        session_env.extend(env.iter().cloned());
+        session_env
+            .extend(std::env::vars().filter(|(key, _)| !skip_env(key, caller_keys.as_slice())));
+        session_env.extend(overlay.vars.iter().cloned());
         if !has_ps1 {
             session_env.push(("NESSON_PS1".to_string(), DEFAULT_PS1.to_string()));
             session_env.push((
@@ -365,6 +462,9 @@ impl SessionManager {
             ));
         }
         session_env.extend(claude_env);
+        // Last, so the adapter's ZDOTDIR cannot be overwritten by the agent's
+        // inherited environment.
+        session_env.extend(adapter.env.iter().cloned());
 
         let outcome = self
             .sdk_ops()
@@ -374,6 +474,7 @@ impl SessionManager {
                 width,
                 height,
                 env: session_env,
+                command: adapter.command.clone(),
             })
             .await?;
 
@@ -428,7 +529,32 @@ impl SessionManager {
             tracing::warn!("best-effort `set-option mouse on` for session {name} failed: {e:#}");
         }
 
-        Ok(())
+        if let Some(binding) = binding {
+            // Baseline = what the Session would have had without the binding.
+            // Read from the Agent process environment *before* caller keys were
+            // withheld, so `MODE=default` can be restored later instead of
+            // being unset.
+            let inherited: HashMap<String, String> = std::env::vars()
+                .filter(|(key, _)| !NEVER_FORWARDED_ENV.contains(&key.as_str()))
+                .collect();
+            let baseline: BTreeMap<String, Option<String>> = overlay
+                .vars
+                .iter()
+                .map(|(key, _)| (key.clone(), inherited.get(key).cloned()))
+                .collect();
+            self.env
+                .record_created_binding(
+                    name,
+                    binding.revision,
+                    binding.profiles,
+                    &overlay,
+                    baseline,
+                    &adapter,
+                )
+                .await?;
+        }
+
+        Ok(warnings)
     }
 
     /// Apply the Agent's resolved size to a Session's pane.
@@ -439,11 +565,10 @@ impl SessionManager {
     pub async fn kill_session(&self, name: &str) -> Result<()> {
         self.sdk_ops().kill_session(name).await?;
 
-        // Clean up env source/unsource scripts for this session so they do not
-        // linger in the temp dir (sourced_env_files() scans it to report which
-        // env files are active — orphaned scripts cause stale "sourced" state
-        // after the session is gone).
-        self.env.cleanup_session_scripts(name).await;
+        // The Session is gone; a binding record left behind would describe a
+        // Session that no longer exists and could make a later same-named
+        // Session inherit a stale baseline.
+        self.env.clear_session_binding(name).await;
 
         Ok(())
     }
@@ -452,6 +577,105 @@ impl SessionManager {
 impl Default for SessionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod binding_create_tests {
+    use super::*;
+    use crate::test_support::TestSession;
+    use nession_protocol::contracts::env::v1::EnvSource;
+
+    fn profile(name: &str) -> SessionEnvProfile {
+        SessionEnvProfile {
+            profile: nession_protocol::contracts::env::v1::EnvFileRef {
+                name: name.to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            },
+            phase: "create".to_string(),
+            content_hash: None,
+        }
+    }
+
+    /// The initial shell — not only tmux's future-pane environment — receives
+    /// the binding (#170 Layer A).
+    ///
+    /// The test drives the shell with `send-keys` deliberately: that is the
+    /// *test's* instrument for asking the process what it sees, never the
+    /// Agent's mechanism for changing the binding. The implementation touched
+    /// no terminal input to get here.
+    #[tokio::test]
+    async fn create_with_binding_applies_the_environment_to_the_initial_shell() {
+        // Skip on machines without tmux; the Rust gates run where it exists.
+        if cmd::global().tokio().arg("-V").status().await.is_err() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SessionManager::new().with_env_state_dir(dir.path().join("state"));
+        let session = TestSession::new("binding-create");
+        let name = session.name();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let snapshots = vec![EnvSnapshot {
+            name: "create.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            vars: vec![("NS_CREATE_TEST".to_string(), "v".to_string())],
+            warnings: Vec::new(),
+        }];
+
+        let warnings = mgr
+            .create_session_with_binding(
+                name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                &cwd,
+                SessionBindingInput {
+                    revision: 1,
+                    profiles: &[profile("create.env")],
+                    snapshots: &snapshots,
+                },
+            )
+            .await
+            .expect("the binding is materialized at creation");
+        assert!(warnings.is_empty());
+
+        // Layer B: tmux's Session environment, which future panes inherit.
+        let layer_b = mgr
+            .tmux_dep()
+            .ops()
+            .show_environment(name, "NS_CREATE_TEST")
+            .await
+            .expect("tmux answers the query");
+        assert_eq!(layer_b.as_deref(), Some("v"));
+
+        // Layer A: the already-started initial shell. The shell executes the
+        // line asynchronously; poll the pane until it has answered rather than
+        // asserting against a fixed sleep (the shell's prompt is the event, and
+        // a coverage-instrumented run makes any fixed delay a guess).
+        mgr.tmux_dep()
+            .ops()
+            .send_keys(name, "echo \"INITIAL:$NS_CREATE_TEST\"")
+            .await
+            .expect("the test can ask the shell");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let mut last_text = String::new();
+        loop {
+            if let Ok(Some((captured, _, _))) =
+                crate::tmux::util::capture_scrollback(&mgr.tmux_dep(), name, 200).await
+            {
+                last_text = String::from_utf8_lossy(&captured).into_owned();
+                if last_text.contains("INITIAL:v") {
+                    break;
+                }
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the initial shell must have the binding, not only future panes: {last_text}"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }
 
@@ -1046,7 +1270,8 @@ mod injected_tmux_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
-            "case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
+            "case \"$*\" in *' -e '*) echo 'no -e support' >&2; exit 1;; esac; \
+             case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
              *) exit 0;; esac",
         );
         let mgr = crate::test_support::manager_with_fake(&fake);

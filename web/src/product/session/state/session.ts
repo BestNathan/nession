@@ -5,7 +5,7 @@
 // Phase 5 — "a Session atom belongs to the Session owner"; `atoms/` was a
 // directory named after a state-management technology, not an owner.
 import { atom } from 'jotai';
-import type { AttachInfo, EnvFileRef, Session, ProbedAddress } from '@/types';
+import type { AttachInfo, Session, ProbedAddress } from '@/types';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import { routeIntentEpochAtom } from '@/platform/attach/state/transport';
 
@@ -16,8 +16,6 @@ export const orderedUrlsAtom = atom<string[]>([]);
 export const manualOverrideAtom = atom<string | null>(null);
 /** The renderer this attachment was opened with, from its AttachChoice. */
 export const rendererAtom = atom<'webgl' | 'canvas'>('webgl');
-/** Env files this attachment was opened with, from its AttachChoice. */
-export const envRefsAtom = atom<EnvFileRef[]>([]);
 
 /** Currently open attach dialog session (the shell's attach flow). */
 export const attachDialogSessionAtom = atom<Session | null>(null);
@@ -70,7 +68,6 @@ export const attachToSessionAtom = atom(
     set(attachInfoAtom, choice.attachInfo);
     set(orderedUrlsAtom, choice.orderedUrls);
     set(rendererAtom, choice.renderer);
-    set(envRefsAtom, choice.envRefs ?? []);
     set(manualOverrideAtom, choice.selectedUrl ?? null);
     set(attachDialogSessionAtom, null);
     set(attachDialogIntentAtom, 'attach');
@@ -86,7 +83,6 @@ export const disconnectAtom = atom(
     set(attachInfoAtom, null);
     set(orderedUrlsAtom, []);
     set(manualOverrideAtom, null);
-    set(envRefsAtom, []);
     set(attachDialogSessionAtom, null);
     set(attachDialogIntentAtom, 'attach');
     navigate('/');

@@ -95,16 +95,17 @@ async fn env_delete_blocked_when_in_use() {
     ))
     .await
     .unwrap();
-    // Record usage
-    h.env_service.usage.record_create(
+    // Bind the Session to the file.
+    bind_for_test(
+        &h,
         "a1:s1",
         &[nession_protocol::contracts::env::v1::EnvFileRef {
             name: "used.env".to_string(),
             source: EnvSource::Server,
             agent_id: None,
         }],
-        None,
-    );
+    )
+    .await;
     // Try to delete — should fail
     let action = h
         .handle_message(proto_msg(
@@ -132,16 +133,17 @@ async fn env_delete_force_skips_lock() {
     ))
     .await
     .unwrap();
-    // Record usage
-    h.env_service.usage.record_create(
+    // Bind the Session to the file.
+    bind_for_test(
+        &h,
         "a1:s1",
         &[nession_protocol::contracts::env::v1::EnvFileRef {
             name: "used.env".to_string(),
             source: EnvSource::Server,
             agent_id: None,
         }],
-        None,
-    );
+    )
+    .await;
     // Delete with force — should succeed despite being in use
     let action = h
         .handle_message(proto_msg(

@@ -3,7 +3,7 @@
 
 use super::{
     env_write_reply, json, parse_env, ClientEnvWritePayload, ClientEnvWriteResponsePayload,
-    ConnectionHandler, EnvFileRef, EnvSource, HandlerAction, ProtocolMessage,
+    ConnectionHandler, EnvSource, HandlerAction, ProtocolMessage,
 };
 
 impl ConnectionHandler {
@@ -50,9 +50,8 @@ impl ConnectionHandler {
         // set (caller accepts the risk and re-sources the file afterwards).
         if overwrite && !force {
             let in_use = self
-                .env_service
-                .usage
-                .sessions_using(&name, source, agent_id.as_deref());
+                .sessions_using_file(&name, source, agent_id.as_deref())
+                .await;
             if !in_use.is_empty() {
                 return Ok(env_write_reply(
                     &msg.id,
@@ -96,32 +95,11 @@ impl ConnectionHandler {
 
         match outcome {
             Ok(true) => {
-                let mut re_sourced: Vec<String> = Vec::new();
-                let mut re_source_errors: Vec<String> = Vec::new();
-
-                if force {
-                    let sessions =
-                        self.env_service
-                            .usage
-                            .sessions_using(&name, source, agent_id.as_deref());
-                    for sid in &sessions {
-                        // Re-source through the same path the explicit
-                        // `server.session.env.apply` takes. This used to ask for
-                        // `agent.env.resource`, a wire no agent has ever
-                        // answered — so every forced write reported a re-source
-                        // failure and the running session kept the old values.
-                        let refs = [EnvFileRef {
-                            name: name.clone(),
-                            source,
-                            agent_id: agent_id.clone(),
-                        }];
-                        match self.source_env_into_session(sid, &refs).await {
-                            Ok(_) => re_sourced.push(sid.clone()),
-                            Err(e) => re_source_errors.push(format!("{sid}: {e}")),
-                        }
-                    }
-                }
-
+                // A profile save is not a Session mutation (#170). Bound
+                // Sessions keep the revision they materialized; the explicit
+                // `server.session.env.binding.reapply` is what advances one.
+                // The response keeps the old fields for the shipped Web client,
+                // always empty because nothing was re-sourced.
                 Ok(env_write_reply(
                     &msg.id,
                     ClientEnvWriteResponsePayload {
@@ -130,8 +108,8 @@ impl ConnectionHandler {
                         error: None,
                         warnings,
                         in_use_by: None,
-                        re_sourced: Some(re_sourced),
-                        re_source_errors: Some(re_source_errors),
+                        re_sourced: Some(Vec::new()),
+                        re_source_errors: Some(Vec::new()),
                     },
                 ))
             }

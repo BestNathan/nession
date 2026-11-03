@@ -106,7 +106,6 @@ const p2pSession: Session = {
 const p2pChoice: PersistedAttachChoice = {
   mode: 'p2p',
   renderer: 'webgl',
-  envRefs: [{ name: 'prod.env', source: 'server' }],
   selectedUrl: null,
 };
 
@@ -148,7 +147,6 @@ describe('resolveTargetChoice', () => {
     expect(sessionsApiMock.requestAttach).toHaveBeenCalledWith('agent-1:dev', 'p2p');
     expect(choice).toMatchObject({
       mode: 'p2p', selectedUrl: null, renderer: 'webgl',
-      envRefs: [{ name: 'prod.env', source: 'server' }],
     });
     expect(choice.attachInfo.connection_token).toBe('tok');
   });
