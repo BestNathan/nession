@@ -293,6 +293,14 @@ export function TerminalSurface({
   workContext,
 }: TerminalSurfaceProps) {
   const hasNotices = Boolean(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer');
+  const [statusOpen, setStatusOpen] = useState(false);
+
+  // A dismissed/expired last notice must also reset the dialog's open state.
+  // Otherwise the next notice could reopen the detail over xterm without a
+  // user gesture, even though its trigger was temporarily absent.
+  useEffect(() => {
+    if (!hasNotices) { setStatusOpen(false); }
+  }, [hasNotices]);
 
   // The original notice had a bounded lifetime. Keep that lifecycle even
   // when the user never opens its detail dialog.
@@ -345,7 +353,7 @@ export function TerminalSurface({
           )}
           {children}
         </div>
-        <Dialog>
+        <Dialog open={hasNotices && statusOpen} onOpenChange={setStatusOpen}>
           <TerminalCapsule
           experience={experience}
           sendText={capsuleSendText}
