@@ -120,3 +120,31 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Add a reciprocal link clarifying that Sandbox policy and execution isolation are outside xterm/terminal-engine ownership
 - Source: https://github.com/BestNathan/nession/issues/2681
+
+## 2026-11-03T09:34:15Z | create | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, ci, security, workflows
+- Reason: Curate workflow family ownership and event provenance from merged canonical contracts
+- Source: https://github.com/BestNathan/nession/issues/1649
+
+## 2026-11-03T09:34:15Z | create | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Distill source-aligned PR, staging, main regression and release evidence timing
+- Source: https://github.com/BestNathan/nession/issues/2323
+
+## 2026-11-03T09:34:15Z | create | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Document source-backed Pages deployment, the existing Prototype bridge and the pending Knowledge signal design
+- Source: https://github.com/BestNathan/nession/issues/2683
+
+## 2026-11-03T09:34:15Z | update | Nession instruction architecture and knowledge ownership
+- Path: topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md
+- Topic: engineering
+- Categories: agents, instructions, knowledge, skills
+- Reason: Cross-link the new durable GitHub Actions workflow architecture topic
+- Source: https://github.com/BestNathan/nession/issues/2683

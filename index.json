@@ -27,7 +27,7 @@
           "knowledge",
           "skills"
         ],
-        "updated_at": "2026-10-28T17:46:56Z"
+        "updated_at": "2026-11-03T09:34:15Z"
       },
       {
         "title": "Nession Sandbox policy and execution isolation architecture",
@@ -57,9 +57,53 @@
         ],
         "updated_at": "2026-11-03T08:46:49Z"
       }
+    ],
+    "workflows": [
+      {
+        "title": "Nession CI, E2E and acceptance qualification timing",
+        "description": "Stage-specific Quality, Acceptance, Full E2E and deployed qualification without unnecessary repeated gates",
+        "path": "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
+        "status": "verified",
+        "categories": [
+          "acceptance",
+          "ci",
+          "e2e",
+          "release"
+        ],
+        "updated_at": "2026-11-03T09:34:15Z"
+      },
+      {
+        "title": "Nession GitHub Actions workflow domains and trust boundaries",
+        "description": "Canonical workflow ownership, event routing, source identity and privilege boundaries",
+        "path": "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "ci",
+          "security",
+          "workflows"
+        ],
+        "updated_at": "2026-11-03T09:34:15Z"
+      },
+      {
+        "title": "Nession public Pages source publication and orphan-branch signals",
+        "description": "Current trusted Pages projection, existing Prototype event bridge and pending Knowledge push notification",
+        "path": "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md",
+        "status": "candidate",
+        "categories": [
+          "delivery",
+          "knowledge",
+          "pages",
+          "security"
+        ],
+        "updated_at": "2026-11-03T09:34:15Z"
+      }
     ]
   },
   "categories": {
+    "acceptance": [
+      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
+    ],
     "agent": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
@@ -69,20 +113,38 @@
     ],
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
-      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
+      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+    ],
+    "ci": [
+      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+    ],
+    "delivery": [
+      "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
+    ],
+    "e2e": [
+      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "knowledge": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
-      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
+      "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "ownership": [
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
+    "pages": [
+      "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
+    ],
     "provenance": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
+    "release": [
+      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
     "research": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
@@ -91,7 +153,9 @@
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
     "security": [
-      "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
+      "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+      "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "skills": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -102,6 +166,9 @@
     ],
     "web": [
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
+    ],
+    "workflows": [
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ]
   }
 }

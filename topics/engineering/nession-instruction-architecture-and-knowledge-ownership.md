@@ -5,7 +5,7 @@ topic: engineering
 categories: ["agents","instructions","knowledge","skills"]
 status: verified
 created_at: 2026-10-24T03:00:28.623Z
-updated_at: 2026-10-28T17:46:56Z
+updated_at: 2026-11-03T09:34:15Z
 sources: ["https://github.com/BestNathan/nession/blob/7d7b41ea9124425fb62c7ec22218526e8ec7ebd8/docs/engineering/instruction-architecture.md","https://github.com/BestNathan/nession/blob/7d4cd5bd6fea372244ca690d548e3321b5a00265/docs/engineering/knowledge-ledger.md"]
 ---
 
@@ -23,3 +23,4 @@ The `knowledge` orphan Git branch contains **one current article per complete ti
 ## Related knowledge
 
 - [Web terminal emulator engine and component ownership](../terminal/web-terminal-emulator-engine-and-component-ownership.md)
+- [Nession GitHub Actions workflow domains and trust boundaries](../workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md)
