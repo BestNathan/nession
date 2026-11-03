@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41629432180,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2700-shell-detection",
+    "target_sha": "c226a861d6b47bf9ed55c832776e42639bbace4f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41629432180",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "09b930667501d50f2511b698c8c7a6f162acdc2d303ddf5203cc25c67b88f613"
+  },
+  "record": "runs/2026-11-03/41629432180-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "77eaee056a63d588fde385b3643bb2ae6b731637c835e9f3c89997a43280d64b"
+}
