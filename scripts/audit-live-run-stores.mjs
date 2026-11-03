@@ -64,8 +64,37 @@ function validateRef(value,store){
   }
   return value.object.sha;
 }
+// GitHub Actions' Node fetch has repeatedly timed out in this runner while
+// the same trusted-main job successfully used the GitHub CLI to read Rulesets.
+// Use one bounded GET-only CLI transport for live refs; the canonical
+// API-ref-vs-fetched-Git-SHA check below remains unchanged. The test's injected
+// fetchFn continues to exercise malformed API/ref and ancestry failures.
+export async function githubRefRead(url,opts,{run=execFileSync}={}){
+  const match=/^https:\/\/api\.github\.com\/repos\/BestNathan\/nession\/git\/ref\/heads\/(acceptance-results|task-results|metrics|agent-store)$/.exec(url);
+  const auth=/^Bearer (.{8,})$/.exec(opts?.headers?.Authorization??'');
+  if(!match||opts?.method!=='GET'||opts?.redirect!=='error'||!auth||
+     typeof run!=='function')
+    deny('unsafe or unauthenticated GitHub ref GET');
+  const store=match[1];
+  let raw;
+  try{
+    raw=run('gh',['api','--method','GET',
+      'repos/'+REPO+'/git/ref/heads/'+store],{
+      encoding:'utf8',timeout:30000,maxBuffer:2*1024*1024,
+      stdio:['ignore','pipe','pipe'],
+      env:{...process.env,GH_TOKEN:auth[1]},
+    });
+  }catch{
+    deny('GitHub CLI read-only ref request failed for '+store);
+  }
+  let data;
+  try{data=JSON.parse(raw);}catch{deny('invalid GitHub ref JSON for '+store);}
+  // Validation of exact ref name and commit object belongs to validateRef.
+  return {ok:true,status:200,json:async()=>data};
+}
+
 export async function auditLiveRunStores({
-  checkout,sourceSha,anchors,token,fetchFn=fetch,gitRunner=git,
+  checkout,sourceSha,anchors,token,fetchFn=githubRefRead,gitRunner=git,
   anchorTrust='externally_supplied',baselineTrees=null,storeRefs=AUDITED_STORES,
 }){
   allowedAuditRefs(storeRefs);

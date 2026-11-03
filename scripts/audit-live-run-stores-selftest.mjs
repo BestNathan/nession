@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {AUDITED_STORES,AGENT_STORE_AUDIT_REFS,parseProtectedAnchors,auditLiveRunStores} from './audit-live-run-stores.mjs';
+import {AUDITED_STORES,AGENT_STORE_AUDIT_REFS,parseProtectedAnchors,auditLiveRunStores,githubRefRead} from './audit-live-run-stores.mjs';
 
 function git(root,...args) {
   return execFileSync('git',['-C',root,...args],{
@@ -23,6 +23,43 @@ assert.throws(()=>parseProtectedAnchors(JSON.stringify({
 })),/exact store/);
 assert.deepEqual(Object.keys(parseProtectedAnchors(JSON.stringify(Object.fromEntries(
   AUDITED_STORES.map(s=>[s,sha]))))),[...AUDITED_STORES]);
+
+// The live audit uses a strictly GET-only, exact-ref GitHub CLI read
+// transport. Exercise it with an injected process runner so CI never requires
+// writer credentials or server-side mutations to test this adapter.
+{
+  const store='agent-store';
+  const url='https://api.github.com/repos/BestNathan/nession/git/ref/heads/'+store;
+  const opts={method:'GET',redirect:'error',
+    headers:{Authorization:'Bearer fixture-readonly-token'}};
+  let seen=0;
+  const stub=(program,args,options)=>{
+    seen++;
+    assert.equal(program,'gh');
+    assert.deepEqual(args,['api','--method','GET',
+      'repos/BestNathan/nession/git/ref/heads/'+store]);
+    assert.equal(options.env.GH_TOKEN,'fixture-readonly-token');
+    assert.ok(!args.join(' ').includes('fixture-readonly-token'));
+    return JSON.stringify({ref:'refs/heads/'+store,object:{type:'commit',sha}});
+  };
+  const good=await githubRefRead(url,opts,{run:stub});
+  assert.equal(good.ok,true);
+  assert.equal((await good.json()).object.sha,sha);
+  assert.equal(seen,1);
+  for(const bad of [
+    ['https://api.github.com/repos/BestNathan/nession/git/ref/heads/main',opts],
+    ['https://evil.test/repos/BestNathan/nession/git/ref/heads/agent-store',opts],
+    [url,{...opts,method:'POST'}],
+    [url,{...opts,redirect:'follow'}],
+    [url,{...opts,headers:{Authorization:'Bearer short'}}],
+  ]) await assert.rejects(()=>githubRefRead(bad[0],bad[1],{run:stub}),
+    /unsafe or unauthenticated GitHub ref GET/);
+  assert.equal(seen,1,'negative requests must never reach the transport');
+  await assert.rejects(()=>githubRefRead(url,opts,{run:()=>{throw Error('network down');}}),
+    /GitHub CLI read-only ref request failed/);
+  await assert.rejects(()=>githubRefRead(url,opts,{run:()=>'{broken-json'}),
+    /invalid GitHub ref JSON/);
+}
 
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-live-audit-fixture-'));
 try {
