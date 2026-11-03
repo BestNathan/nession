@@ -55,6 +55,8 @@ describe('FileBrowser copy path', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // The shared clipboard owner takes the async branch only on secure origins.
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
       configurable: true,
@@ -62,6 +64,7 @@ describe('FileBrowser copy path', () => {
   });
 
   afterEach(() => {
+    Reflect.deleteProperty(window, 'isSecureContext');
     delete (navigator as { clipboard?: unknown }).clipboard;
   });
 

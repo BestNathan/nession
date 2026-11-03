@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
+import { copyToClipboard } from '@/shared/lib/clipboard';
 import {
   chromeLabelRole,
   chromeMonoRole,
@@ -88,7 +89,7 @@ function CommandSection({ process }: { process: DiscoveredProcess }) {
     try {
       // The sanitized display string is the only thing that may be copied;
       // there is no raw-argv value in the browser to copy instead.
-      await navigator.clipboard.writeText(process.command);
+      await copyToClipboard(process.command);
       toast.success('Sanitized command copied');
     } catch {
       toast.error('Copy failed — the browser denied clipboard access');

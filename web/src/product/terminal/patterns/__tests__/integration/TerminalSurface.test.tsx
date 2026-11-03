@@ -341,35 +341,18 @@ describe('transient clipboard state (#2598)', () => {
     expect(details).toHaveAttribute('data-testid', 'terminal-notice-details');
   });
 
-  it('completes a blocked copy through an explicit user gesture on a secure origin', async () => {
+  it('completes a blocked copy through one shared-owner gesture call', async () => {
+    // The click calls the gesture path exactly once; it never starts the
+    // automatic async write and then retries the legacy path in its
+    // continuation, which would depend on an activation already spent. The
+    // gesture call is invoked synchronously inside the click (#2614, #2656).
+    const copyClipboardTextFromGesture = vi.fn<(text: string) => Promise<boolean>>(
+      async () => true,
+    );
     const copyClipboardText = vi.fn<(text: string) => Promise<boolean>>(async () => true);
     const onDismissClipboardNotice = vi.fn();
     const view = renderSurface('web', {
       controller: {
-        canWriteClipboardProgrammatically: () => true,
-        copyClipboardText,
-        copyClipboardTextFromGesture: () => false,
-      } as unknown as TerminalSurfaceProps['controller'],
-      clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
-      onDismissClipboardNotice,
-    });
-    await openNotices(view);
-    await userEvent.click(view.getByRole('button', { name: 'Copy' }));
-    expect(copyClipboardText).toHaveBeenCalledWith('remote text');
-    await Promise.resolve();
-    expect(onDismissClipboardNotice).toHaveBeenCalled();
-  });
-
-  it('uses the synchronous DOM copy on an HTTP origin instead of the absent async API (#2614)', async () => {
-    // The capability is false exactly when the browser would expose no
-    // navigator.clipboard (plain HTTP): the click must not start an async call
-    // that can only fail after the user activation is spent.
-    const copyClipboardText = vi.fn<(text: string) => Promise<boolean>>(async () => false);
-    const copyClipboardTextFromGesture = vi.fn<(text: string) => boolean>(() => true);
-    const onDismissClipboardNotice = vi.fn();
-    const view = renderSurface('web', {
-      controller: {
-        canWriteClipboardProgrammatically: () => false,
         copyClipboardText,
         copyClipboardTextFromGesture,
       } as unknown as TerminalSurfaceProps['controller'],
@@ -378,9 +361,9 @@ describe('transient clipboard state (#2598)', () => {
     });
     await openNotices(view);
     fireEvent.click(view.getByRole('button', { name: 'Copy' }));
-    // Synchronous within the gesture: no await happened before the DOM copy.
     expect(copyClipboardTextFromGesture).toHaveBeenCalledWith('remote text');
     expect(copyClipboardText).not.toHaveBeenCalled();
+    await Promise.resolve();
     expect(onDismissClipboardNotice).toHaveBeenCalled();
   });
 
@@ -388,9 +371,7 @@ describe('transient clipboard state (#2598)', () => {
     const onDismissClipboardNotice = vi.fn();
     const view = renderSurface('web', {
       controller: {
-        canWriteClipboardProgrammatically: () => false,
-        copyClipboardText: async () => false,
-        copyClipboardTextFromGesture: () => false,
+        copyClipboardTextFromGesture: async () => false,
       } as unknown as TerminalSurfaceProps['controller'],
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
       onDismissClipboardNotice,
@@ -411,9 +392,7 @@ describe('transient clipboard state (#2598)', () => {
   it('never presents a truncated payload as copyable (#2614)', async () => {
     const view = renderSurface('web', {
       controller: {
-        canWriteClipboardProgrammatically: () => false,
-        copyClipboardText: async () => false,
-        copyClipboardTextFromGesture: () => false,
+        copyClipboardTextFromGesture: async () => false,
       } as unknown as TerminalSurfaceProps['controller'],
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'x'.repeat(64 * 1024 + 1) } },
     });
