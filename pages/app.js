@@ -29,6 +29,7 @@ let prototypeCatalogStatus = 'loading';
 let snapshot = null;
 let siteSnapshotStatus = 'loading';
 let knowledgeSnapshot = null;
+let knowledgeSnapshotStatus = 'loading';
 
 function node(tag, className, content) {
   const item = document.createElement(tag);
@@ -577,7 +578,10 @@ function render(){
       root.append(local('← All recent work','/work'));
       root.append(empty('Invalid evidence reference',
         'This address does not identify a bounded public Issue or PR. No source has been verified.'));
-    }else if(route==='/knowledge')renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }else if(route==='/knowledge'){
+      if(knowledgeSnapshotStatus==='loading')root.append(node('p','loading','Loading public Knowledge snapshot…'));
+      else renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }
     else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
@@ -612,6 +616,24 @@ async function loadPrototypeCatalog() {
     prototypeCatalogStatus='unavailable';
   }
   if(snapshot || location.hash==='#/prototypes')render();
+}
+// Knowledge is an independently pinned, public read-only snapshot. Its failure
+// must not abort the site snapshot loader or any unrelated Pages route.
+async function loadKnowledgeCatalog(){
+  try {
+    const response=await fetch(new URL('data/knowledge.json',document.baseURI),
+      {cache:'no-cache',signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw new Error('Knowledge snapshot unavailable');
+    const result=await response.json();
+    if(!validKnowledgeSnapshot(result))throw new Error('Invalid public Knowledge snapshot');
+    knowledgeSnapshot=result;
+    knowledgeSnapshotStatus=result.status==='available'?'available':'unavailable';
+  } catch(error){
+    console.warn('Pages Knowledge snapshot unavailable',error);
+    knowledgeSnapshot=null;
+    knowledgeSnapshotStatus='unavailable';
+  }
+  if(location.hash.startsWith('#/knowledge'))render();
 }
 async function init(){
   window.addEventListener('hashchange',render);
