@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0d121a"><title>Nession — Touch Direction Lab</title>
+<style>
+*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0c1119;color:#e4e9f0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1020px;padding:25px;margin:auto}.brand{color:#91b1d1;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}h1{font-size:32px;margin:12px 0;letter-spacing:-.04em}.sub{font-size:14px;line-height:1.6;color:#91a1b6;margin:0 0 23px}.layout{display:grid;grid-template-columns:minmax(290px,420px) 1fr;gap:22px}.phone{display:flex;flex-direction:column;height:min(76dvh,735px);min-height:530px;background:#0a111c;border:6px solid #304051;border-radius:27px;overflow:hidden;box-shadow:0 20px 65px #0008}.bar{flex:none;height:60px;padding:10px 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2c3b4c;font-size:13px}.bar small{display:block;color:#778da2;font-size:10px;margin-top:4px}.status{font-size:11px;color:#9cdbb8}.term{flex:1;min-height:0;position:relative;overflow:auto;background:#090f19;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}.content{min-height:100%;padding:20px 15px 100px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:none;-webkit-user-select:none}.prompt{color:#8eddb4}.muted{color:#71859d}.code{margin-top:18px}.line{display:flex;white-space:pre;min-height:22px}.line.on{background:#233b5566;border-radius:4px}.num{width:26px;text-align:right;margin-right:14px;color:#5b7189}.cursor{display:inline-block;width:2px;height:14px;background:#afebd3;vertical-align:middle}.footer{flex:none;height:57px;border-top:1px solid #2c3b4c;display:flex;align-items:center;gap:12px;padding:10px 15px;background:#131c29}.plus{font-size:22px;color:#97a9c0}.input{border:1px solid #3a4a60;background:#1d2938;color:#b7c8da;border-radius:13px;padding:10px 15px;font-size:12px;flex:1}.guide{position:absolute;z-index:4;width:160px;height:160px;transform:translate(-50%,-50%);pointer-events:none;opacity:0;transition:opacity .08s}.guide.show{opacity:1}.ring{position:absolute;inset:18px;border-radius:50%;background:#263447e8;border:1px solid #627995;box-shadow:0 9px 45px #000b,0 0 0 7px #789ab522}.arrow{position:absolute;width:39px;height:39px;border-radius:11px;display:grid;place-items:center;font-size:23px;font-weight:700;color:#a9bacf}.arrow[data-dir=up]{top:7px;left:60px}.arrow[data-dir=down]{bottom:7px;left:60px}.arrow[data-dir=left]{left:7px;top:60px}.arrow[data-dir=right]{right:7px;top:60px}.arrow.active{background:#a4e3c8;color:#173e34}.center{position:absolute;top:69px;left:56px;width:48px;text-align:center;font-size:11px;font-weight:700;color:#91aac2}.tip{position:absolute;bottom:15px;left:15px;right:15px;background:#24364ddf;border:1px solid #35506d;border-radius:9px;padding:8px;text-align:center;color:#b6cadc;font-size:11px;pointer-events:none}.guide.show~.tip{opacity:0}.panel{border:1px solid #2e4054;background:#182332;border-radius:16px;padding:20px}.panel h2{margin:0 0 17px;font-size:18px}.step{color:#bbc8d6;margin:15px 0;font-size:13px;line-height:1.5}.step strong{color:#9fdac5;margin-right:9px}button{border:1px solid #4e6580;border-radius:9px;padding:9px 11px;color:#dce8f3;background:#293a4e;font-weight:600;cursor:pointer;margin:3px}button[aria-pressed=true]{background:#61452f;border-color:#ab8459}.readout{margin-top:22px;padding:15px;background:#0d1520;border-radius:12px;border:1px solid #2e4054;font:12px/1.7 ui-monospace,monospace}.row{display:flex;justify-content:space-between;gap:10px}.row span:last-child{color:#a4e3c8;font-weight:700}.label{color:#8aa4bd;text-transform:uppercase;font-size:10px;letter-spacing:.08em}.history{min-height:52px;max-height:110px;overflow:auto;color:#a9d9c4;font-size:15px;margin-top:8px;word-break:break-all}.footnote{font-size:11px;line-height:1.6;color:#91a0b1;margin-top:16px}a{color:#a5cce7}@media(max-width:750px){main{padding:16px 10px}.layout{grid-template-columns:1fr}.phone{width:100%;max-width:430px;margin:auto;height:min(73dvh,700px)}.panel{margin-top:3px}h1{font-size:27px}}
+</style></head>
+<body><main><div class="brand">Nession · Terminal interaction · #2657</div><h1>Touch. Hold. Navigate.</h1><p class="sub">长按终端约 380ms，出现四方向浮层。继续拖动发送方向键；保持按住自动重复，拖得越远越快。下面是可操作的模拟终端。</p><div class="layout">
+<section class="phone"><div class="bar"><div><b>dev-session</b><small>Beijing Agent · Terminal</small></div><div class="status" id="conn">● Connected</div></div>
+<div class="term" id="term"><div class="content"><span class="prompt">nession@dev</span> <span class="muted">~/workspace $</span> vim agent.ts<div style="margin-top:10px" class="muted">agent.ts · mock editor · NORMAL</div><div class="code" id="lines"></div><div id="pos" class="muted" style="margin-top:16px">1:1</div><div style="height:210px;margin-top:40px" class="muted"># Quick swipe to scroll normally.<p># Long press and drag to navigate.</p></div></div>
+<div id="guide" class="guide"><div class="ring"></div><div class="arrow" data-dir="up">↑</div><div class="arrow" data-dir="down">↓</div><div class="arrow" data-dir="left">←</div><div class="arrow" data-dir="right">→</div><div class="center" id="center">READY</div></div><div class="tip" id="tip">按住终端 → 方向盘 → 拖动</div></div><div class="footer"><span class="plus">+</span><div class="input">✦ Ask, command, or describe...</div></div></section>
+<section class="panel"><h2>交互测试 · Gesture Lab</h2><p class="step"><strong>01</strong>普通点击、快速拖动、上下滚动，不触发方向键。</p><p class="step"><strong>02</strong>单指静止长按，激活四方向浮层。中心死区不输入。</p><p class="step"><strong>03</strong>滑向 ↑ ↓ ← → 发送语义方向键；保持方向连续输入，距离决定 4 / 9 / 16 keys/s。</p><p class="step"><strong>04</strong>回中心停止；松开、切换到只读、断线、页面切后台都会取消。</p>
+<button id="reset">重置</button><button id="observer" aria-pressed="false">只读观察者</button><button id="offline" aria-pressed="false">断开连接</button>
+<div class="readout"><div class="label">Live gesture states</div><div class="row"><span>Phase</span><span id="phase">IDLE</span></div><div class="row"><span>Direction</span><span id="dir">—</span></div><div class="row"><span>Repeat rate</span><span id="rate">—</span></div><div class="row"><span>Keys sent</span><span id="count">0</span></div><div class="label" style="margin-top:13px">PTY input (mock)</div><div class="history" id="log">No keys</div></div>
+<p class="footnote">桌面可用鼠标按住模拟。左/右 28px 边缘保留 App 导航。真正实现应通过现有 TerminalInteractionController.sendSemanticKey()，不能直接改动本地 xterm 光标。此原型无网络和真实 PTY。</p><p class="footnote"><a href="https://github.com/BestNathan/nession/issues/2657">Requirement #2657</a> · <a href="https://github.com/BestNathan/nession/tree/prototype/terminal-direction-2657">View source</a></p>
+</section></div></main>
+<script>
+(function(){
+'use strict';
+var term=document.getElementById('term'),guide=document.getElementById('guide'),center=document.getElementById('center');
+var code=['function greet(name) {','  const message = "hello";','  console.log(message);','  return message;','}','', 'export default greet;'];
+var row=1,col=1,count=0,log=[],gesture=null,touchId=null,hold=null,repeat=null,observer=false,offline=false,symbol={up:'↑',down:'↓',left:'←',right:'→'};
+function view(){
+ var lines=document.getElementById('lines');lines.replaceChildren();
+ code.forEach(function(line,i){var el=document.createElement('div');el.className='line'+(i===row-1?' on':'');var n=document.createElement('span');n.className='num';n.textContent=String(i+1);el.appendChild(n);var content=document.createElement('span');if(i===row-1){content.append(document.createTextNode(line.slice(0,col-1)));var caret=document.createElement('span');caret.className='cursor';content.appendChild(caret);content.append(document.createTextNode(line.slice(col-1)))}else{content.textContent=line}el.appendChild(content);lines.appendChild(el)});
+ document.getElementById('pos').textContent='NORMAL · '+row+':'+col+' (mock Vim caret)';
+}
+function display(){
+ document.getElementById('phase').textContent=gesture?gesture.phase.toUpperCase():'IDLE';
+ document.getElementById('dir').textContent=gesture&&gesture.dir?symbol[gesture.dir]:'—';
+ document.getElementById('rate').textContent=gesture&&gesture.dir?String(gesture.rate)+'/s':'—';
+ document.getElementById('count').textContent=String(count);document.getElementById('log').textContent=log.join(' ')||'No keys';
+ guide.classList.toggle('show',!!gesture&&gesture.phase!=='pending');
+ guide.querySelectorAll('.arrow').forEach(function(el){el.classList.toggle('active',!!gesture&&gesture.dir===el.dataset.dir)});
+ center.textContent=gesture&&gesture.dir?'×'+(gesture.gear+1):'READY';
+ document.getElementById('tip').textContent=observer?'Observer mode: input disabled':offline?'Offline: input disabled':'按住终端 → 方向盘 → 拖动';
+}
+function stop(){clearTimeout(hold);clearTimeout(repeat);hold=null;repeat=null;gesture=null;touchId=null;display()}
+function emit(dir){
+ if(!gesture||!gesture.dir||observer||offline)return;
+ count++;log.push(symbol[dir]);if(log.length>56)log.shift();
+ if(dir==='up')row=Math.max(1,row-1);if(dir==='down')row=Math.min(code.length,row+1);
+ if(dir==='left')col=Math.max(1,col-1);if(dir==='right')col=Math.min(code[row-1].length+1,col+1);
+ col=Math.min(col,code[row-1].length+1);view();display();
+}
+function schedule(){clearTimeout(repeat);if(!gesture||!gesture.dir)return;repeat=setTimeout(function(){if(!gesture||!gesture.dir)return;emit(gesture.dir);schedule()},Math.round(1000/gesture.rate))}
+function begin(x,y){
+ if(gesture||observer||offline)return;
+ var rect=term.getBoundingClientRect();if(x<rect.left+28||x>rect.right-28)return;
+ gesture={phase:'pending',x:x,y:y,dir:null,gear:-1,rate:0};display();
+ hold=setTimeout(function(){if(!gesture||gesture.phase!=='pending')return;gesture.phase='armed';guide.style.left=Math.max(81,Math.min(rect.width-81,gesture.x-rect.left))+'px';guide.style.top=Math.max(81,Math.min(rect.height-81,gesture.y-rect.top))+'px';if(navigator.vibrate)navigator.vibrate(12);display()},380);
+}
+function move(x,y){
+ if(!gesture)return false;
+ var dx=x-gesture.x,dy=y-gesture.y,dist=Math.hypot(dx,dy);
+ if(gesture.phase==='pending'){if(dist>12)stop();return false}
+ var dir=null;if(dist>=20){var ax=Math.abs(dx),ay=Math.abs(dy),previous=gesture.dir;
+ if(previous&&(previous==='up'||previous==='down')&&ay>ax*.85)dir=dy<0?'up':'down';
+ else if(previous&&(previous==='left'||previous==='right')&&ax>ay*.85)dir=dx<0?'left':'right';
+ else dir=ax>=ay?(dx<0?'left':'right'):(dy<0?'up':'down')}
+ var gear=dist<52?0:dist<108?1:2,rate=[4,9,16][gear],changed=dir!==gesture.dir||gear!==gesture.gear;
+ gesture.dir=dir;gesture.gear=dir?gear:-1;gesture.rate=dir?rate:0;gesture.phase=dir?'moving':'armed';
+ if(changed){clearTimeout(repeat);if(dir){emit(dir);schedule()}}display();return true;
+}
+term.addEventListener('touchstart',function(e){if(e.touches.length!==1){stop();return}if(gesture)return;var t=e.changedTouches[0];begin(t.clientX,t.clientY);if(gesture)touchId=t.identifier},{passive:true});
+term.addEventListener('touchmove',function(e){if(touchId===null||!gesture)return;if(e.touches.length!==1){stop();return}var t=Array.from(e.changedTouches).find(function(x){return x.identifier===touchId});if(!t)return;var active=gesture.phase!=='pending';move(t.clientX,t.clientY);if(active&&e.cancelable)e.preventDefault()},{passive:false});
+function end(e){if(touchId!==null&&Array.from(e.changedTouches).some(function(t){return t.identifier===touchId}))stop()}
+term.addEventListener('touchend',end,{passive:true});term.addEventListener('touchcancel',end,{passive:true});
+term.addEventListener('contextmenu',function(e){if(gesture&&gesture.phase!=='pending')e.preventDefault()});
+term.addEventListener('mousedown',function(e){if(e.button===0)begin(e.clientX,e.clientY)});
+document.addEventListener('mousemove',function(e){if(gesture&&touchId===null&&e.buttons===1)move(e.clientX,e.clientY)});
+document.addEventListener('mouseup',function(){if(gesture&&touchId===null)stop()});
+document.addEventListener('visibilitychange',function(){if(document.hidden)stop()});window.addEventListener('blur',stop);
+document.getElementById('reset').onclick=function(){stop();row=1;col=1;count=0;log=[];view();display()};
+document.getElementById('observer').onclick=function(){observer=!observer;this.setAttribute('aria-pressed',String(observer));stop()};
+document.getElementById('offline').onclick=function(){offline=!offline;this.setAttribute('aria-pressed',String(offline));document.getElementById('conn').textContent=offline?'○ Offline':'● Connected';stop()};
+window.__nessionMock={state:function(){return{phase:gesture?gesture.phase:'idle',dir:gesture?gesture.dir:null,count:count}},cancel:stop};
+view();display();
+})();
+</script></body></html>
