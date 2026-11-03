@@ -9,6 +9,10 @@ const CATEGORIES: &[(&str, &[&str], Option<&str>)] = &[
         &["settings.json", "keybindings.json"],
         Some("settings"),
     ),
+    // More specific than Instructions: a Markdown topic named CLAUDE.md in
+    // a memory directory is a memory file, not project instructions.
+    // Auto Memory lives under the global config root, not <cwd>/.claude/.
+    ("Memory", &["projects/*/memory/**/*.md"], Some("brain")),
     ("Instructions", &["CLAUDE.md"], Some("file-text")),
     ("Agents", &["agents/*.md"], Some("bot")),
     ("Skills", &["skills/**/*.md"], Some("puzzle")),
@@ -81,66 +85,46 @@ fn scan_dir(root: &Path, current: &Path, categories: &mut Vec<ConfigCategory>) {
     }
 }
 
+// Match the fixed set of Claude file-layout patterns by path component.
+// A single '*' cannot cross a directory boundary; '**' matches directories.
+// The component-aware match is necessary for projects/*/memory/**/*.md:
+// the project name must not accidentally consume the memory/ boundary.
 fn match_pattern(patterns: &[&str], rel_path: &str, filename: &str) -> bool {
     patterns.iter().any(|pattern| {
-        // Exact filename match
         if *pattern == filename {
             return true;
         }
-
-        if pattern.contains("**") {
-            // Recursive glob: split on "**"
-            // e.g., "skills/**/*.md" → prefix="skills/", suffix may contain "*"
-            if let Some((prefix, suffix)) = pattern.split_once("**") {
-                if !rel_path.starts_with(prefix) {
-                    return false;
-                }
-                let remaining = &rel_path[prefix.len()..];
-                // Handle the suffix after "**" (e.g., "/*.md")
-                return match_suffix_glob(suffix, remaining);
-            }
-        }
-
-        if pattern.contains('*') {
-            // Simple glob: split on "*"
-            // e.g., "agents/*.md" → prefix="agents/", suffix=".md"
-            // The `*` must not match across directory boundaries (no `/`)
-            if let Some((prefix, suffix)) = pattern.split_once('*') {
-                if !rel_path.starts_with(prefix) || !rel_path.ends_with(suffix) {
-                    return false;
-                }
-                let mid_start = prefix.len();
-                let mid_end = rel_path.len().saturating_sub(suffix.len());
-                if mid_end <= mid_start {
-                    return true;
-                }
-                let mid = &rel_path[mid_start..mid_end];
-                return !mid.contains('/');
-            }
-        }
-
-        false
+        let pattern_parts: Vec<_> = pattern.split('/').collect();
+        let path_parts: Vec<_> = rel_path.split('/').collect();
+        match_path_parts(&pattern_parts, &path_parts)
     })
 }
 
-/// Match a path component against a suffix pattern that may contain a `*`.
-/// e.g., suffix="/*.md", remaining="my-skill/skill.md" → true
-///       suffix="/*.md", remaining="skill.md" → true
-fn match_suffix_glob(suffix: &str, remaining: &str) -> bool {
-    if suffix.is_empty() {
-        return true;
+fn match_path_parts(pattern: &[&str], path: &[&str]) -> bool {
+    let Some((&head, tail)) = pattern.split_first() else {
+        return path.is_empty();
+    };
+
+    if head == "**" {
+        return match_path_parts(tail, path)
+            || (!path.is_empty() && match_path_parts(pattern, &path[1..]));
     }
-    if !suffix.contains('*') {
-        return remaining == suffix;
-    }
-    // Extract the fixed suffix tail (after the last `*`), e.g., ".md"
-    // and check that the remaining path ends with it.
-    // The `**` already handled recursive matching, so we only need
-    // to verify the file extension from the suffix pattern.
-    if let Some((_, suffix_tail)) = suffix.split_once('*') {
-        remaining.ends_with(suffix_tail)
-    } else {
-        remaining == suffix
+
+    let Some((&component, remaining)) = path.split_first() else {
+        return false;
+    };
+    match_path_component(head, component) && match_path_parts(tail, remaining)
+}
+
+fn match_path_component(pattern: &str, component: &str) -> bool {
+    match pattern.split_once('*') {
+        Some((prefix, suffix)) => {
+            !component.is_empty()
+                && component.starts_with(prefix)
+                && component.ends_with(suffix)
+                && component.len() >= prefix.len() + suffix.len()
+        }
+        None => pattern == component,
     }
 }
 
@@ -217,6 +201,47 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn auto_memory_paths_are_scoped_to_their_project_memory_directory() {
+        let pattern = &["projects/*/memory/**/*.md"];
+        assert!(match_pattern(
+            pattern,
+            "projects/-repo/memory/MEMORY.md",
+            "MEMORY.md"
+        ));
+        assert!(match_pattern(
+            pattern,
+            "projects/-repo/memory/CLAUDE.md",
+            "CLAUDE.md"
+        ));
+        assert!(match_pattern(
+            pattern,
+            "projects/-repo/memory/feedback.md",
+            "feedback.md"
+        ));
+        assert!(match_pattern(
+            pattern,
+            "projects/-repo/memory/topics/nested.md",
+            "nested.md"
+        ));
+        assert!(!match_pattern(
+            pattern,
+            "projects/-repo/notes.md",
+            "notes.md"
+        ));
+        assert!(!match_pattern(
+            pattern,
+            "projects/-repo/session/memory/MEMORY.md",
+            "MEMORY.md"
+        ));
+        assert!(!match_pattern(
+            pattern,
+            "projects/-repo/memory/secret.json",
+            "secret.json"
+        ));
+        assert!(!match_pattern(pattern, "projects/-repo/memory/", ""));
+    }
+
     // --- Inlined from tests/scanner_tests.rs ---
 
     use std::fs;
@@ -246,15 +271,22 @@ mod tests {
             ("agents/reviewer.md", "# Reviewer agent"),
             ("skills/my-skill/skill.md", "# My skill"),
             ("keybindings.json", "{}"),
+            ("projects/-first/memory/MEMORY.md", "# First project memory"),
+            ("projects/-first/memory/CLAUDE.md", "# Topic with an instruction-like name"),
+            ("projects/-first/memory/feedback.md", "# Feedback"),
+            ("projects/-first/memory/topics/nested.md", "# Nested"),
+            ("projects/-second/memory/MEMORY.md", "# Second project memory"),
             // These should be filtered out:
             ("credentials.json", "SECRET"),
             ("config.yaml", "yaml: true"),
             ("random.txt", "ignored"),
+            ("projects/-first/other.md", "not memory"),
+            ("projects/-first/memory/private.json", "not markdown"),
         ]);
 
         let categories = scan_claude_dir(dir.path());
 
-        assert_eq!(categories.len(), 4, "Should have 4 categories");
+        assert_eq!(categories.len(), 5, "Should have 5 categories");
 
         let settings = categories.iter().find(|c| c.name == "Settings").unwrap();
         assert_eq!(settings.files.len(), 2);
@@ -268,6 +300,22 @@ mod tests {
             .unwrap();
         assert_eq!(instructions.files.len(), 1);
         assert_eq!(instructions.files[0].path, "CLAUDE.md");
+
+        let memory = categories.iter().find(|c| c.name == "Memory").unwrap();
+        assert_eq!(memory.files.len(), 5);
+        let memory_paths: Vec<&str> = memory.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            memory_paths,
+            vec![
+                "projects/-first/memory/CLAUDE.md",
+                "projects/-first/memory/MEMORY.md",
+                "projects/-first/memory/feedback.md",
+                "projects/-first/memory/topics/nested.md",
+                "projects/-second/memory/MEMORY.md",
+            ]
+        );
+        assert!(memory.files.iter().all(|f| f.content_type == "markdown"));
+        assert!(memory.files.iter().all(|f| security::is_path_allowed(&f.path)));
 
         let agents = categories.iter().find(|c| c.name == "Agents").unwrap();
         assert_eq!(agents.files.len(), 2);
