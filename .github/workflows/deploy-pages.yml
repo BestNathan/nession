@@ -102,6 +102,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Validate Knowledge ledger at pinned checkout
+        if: steps.detect.outputs.active == 'true'
+        run: node scripts/knowledge-ledger-contract.mjs check knowledge-store
       - name: Validate independent public projection
         if: steps.detect.outputs.active == 'true'
         run: cd pages && npm run check
@@ -112,11 +115,13 @@ jobs:
           SOURCE_MAIN_SHA: ${{ github.sha }}
           METRICS_DIR: ${{ github.workspace }}/metrics-store
           ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
+          KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge-store
         shell: bash
         run: |
           set -euo pipefail
           export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
           export ACCEPTANCE_RESULTS_SHA="$(git -C acceptance-store rev-parse HEAD)"
+          export KNOWLEDGE_SHA="$(git -C knowledge-store rev-parse HEAD)"
           node pages/scripts/build.mjs
           prototype_sha="$(git -C prototype-store rev-parse HEAD)"
           node pages/scripts/publish-prototypes.mjs "$GITHUB_WORKSPACE/prototype-store" "$GITHUB_WORKSPACE/pages/dist/prototypes" "$prototype_sha"
@@ -127,6 +132,7 @@ jobs:
           test -s pages/dist/data/site.json
           test -s pages/dist/workflows.html
           test -s pages/dist/data/workflows.json
+          test -s pages/dist/data/knowledge.json
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
