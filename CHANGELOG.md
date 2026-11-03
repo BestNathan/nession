@@ -162,3 +162,10 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Record the successful real Knowledge push signal and fix the stale Terminal updated_at in the derived index using canonical article frontmatter; Pages publication still requires HTTPS proof
 - Source: https://github.com/BestNathan/nession/issues/2683
+
+## 2026-11-03T10:10:39Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Record the passed main Pages deployment and the merged dual-signal Pages regression test; publish a final authenticated Knowledge source-push witness for #2683
+- Source: https://github.com/BestNathan/nession/issues/2683

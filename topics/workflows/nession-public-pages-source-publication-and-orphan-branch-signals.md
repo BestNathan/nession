@@ -5,7 +5,7 @@ topic: workflows
 categories: ["delivery","knowledge","pages","security"]
 status: candidate
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-03T10:03:18Z
+updated_at: 2026-11-03T10:10:39Z
 sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/deploy-pages.yml","https://github.com/BestNathan/nession/issues/2519","https://github.com/BestNathan/nession/issues/2664","https://github.com/BestNathan/nession/issues/2683","https://github.com/BestNathan/nession/blob/c01bf9791ce1e5ed2da790f6689bc391c9180818/.github/workflows/deploy-pages.yml"]
 ---
 
@@ -34,6 +34,10 @@ Do not add another Pages writer, execute untrusted orphan content, introduce fre
 ## First live run and integrity correction
 
 The actual source push at [Knowledge commit 23326bb](https://github.com/BestNathan/nession/commit/23326bb990b50a178871ada07442400a6b6433f6) emitted [Knowledge / Change Signal run 41615705357](https://github.com/BestNathan/nession/actions/runs/41615705357), completed successfully. The main-owned Pages build independently exposed a pre-existing Terminal article timestamp drift in the derived `index.json` (the current Terminal article records `2026-11-03T08:52:21.743Z` but the index still recorded `08:46:49Z`). This follow-up Knowledge transaction regenerates the index from current article frontmatter; the notification run alone is not accepted as publication evidence.
+
+## Verified main Pages regression repair and final push witness
+
+The old Prototype-only test assertion was corrected in [PR #2691](https://github.com/BestNathan/nession/pull/2691), merged as [9a78cad](https://github.com/BestNathan/nession/commit/9a78cad805a51238ba088155a1af459dd991687c). Pages unit/security/Chromium checks passed, and [trusted main Pages deployment 41616863412](https://github.com/BestNathan/nession/actions/runs/41616863412) completed successfully after validating the corrected Knowledge ledger. The next Knowledge article update now provides an independent real **source-push witness** against that corrected publisher; the workflow_run result and anonymous SHA/digest remain separate acceptance evidence.
 
 ## Acceptance and follow-up
 
