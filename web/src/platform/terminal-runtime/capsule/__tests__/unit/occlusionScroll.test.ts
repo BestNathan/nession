@@ -238,23 +238,56 @@ describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
     expect(clearanceOffsetFor(48, 0, 16)).toBe(0);
   });
 
-  it('retains the screen offset when a swipe enters history under an open panel', () => {
+  it('reveals clipped top rows before entering xterm scrollback, and reverses to live bottom', () => {
     const screen = makeScreen();
-    const { port } = makePort({ screen });
+    const { port, buffer } = makePort({ screen });
     const { host } = makeHost({ panelClearance: '48px' });
     const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
 
     occlusion.scrollToMarginBottom();
-    expect(occlusion.mode()).toBe('following');
     expect(occlusion.clearanceOffset()).toBe(48);
     expect(screen.style.transform).toBe('translateY(-48px)');
 
-    // The first scroll gesture must not yank the screen down 48px.
+    // Downward finger drag: recover the top 3 rows before moving ydisp.
+    occlusion.scrollLines(-1);
+    expect(port.scrollLines).not.toHaveBeenCalled();
+    expect(occlusion.mode()).toBe('history');
+    expect(screen.style.transform).toBe('translateY(-32px)');
+    occlusion.scrollLines(-2);
+    expect(port.scrollLines).not.toHaveBeenCalled();
+    expect(occlusion.clearanceOffset()).toBe(0);
+    expect(screen.style.transform).toBe('');
+
+    // Only after the top of the screen is visible do further gestures browse.
     occlusion.scrollLines(-1);
     expect(port.scrollLines).toHaveBeenCalledWith(-1);
-    expect(occlusion.mode()).toBe('history');
+    expect(buffer.viewportY).toBe(15);
+
+    // Returning to live first restores xterm ydisp, then spends the panel pan.
+    occlusion.scrollLines(1);
+    expect(buffer.viewportY).toBe(16);
+    expect(occlusion.clearanceOffset()).toBe(0);
+    occlusion.scrollLines(3);
     expect(occlusion.clearanceOffset()).toBe(48);
     expect(screen.style.transform).toBe('translateY(-48px)');
+    expect(occlusion.mode()).toBe('following');
+  });
+
+  it('has a reversible scroll range even with no xterm history at all', () => {
+    const screen = makeScreen();
+    const { port } = makePort({ screen, viewportY: 0, length: 24 });
+    const { host } = makeHost({ panelClearance: '48px' });
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+
+    occlusion.scrollToMarginBottom();
+    expect(occlusion.clearanceOffset()).toBe(48);
+    occlusion.scrollLines(-3);
+    expect(occlusion.clearanceOffset()).toBe(0);
+    expect(screen.style.transform).toBe('');
+    expect(port.scrollLines).not.toHaveBeenCalled();
+    occlusion.scrollLines(3);
+    expect(occlusion.clearanceOffset()).toBe(48);
+    expect(occlusion.mode()).toBe('following');
   });
 
   it('does not shift a history reader merely because a panel opens', () => {
