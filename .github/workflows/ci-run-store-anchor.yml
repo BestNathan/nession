@@ -12,6 +12,7 @@ on:
       - scripts/run-store-sigstore-checkpoint.mjs
       - scripts/acceptance-run-store-checkpoint-evidence.mjs
       - scripts/acceptance-ci-evidence.mjs
+      - scripts/acceptance-metrics-replay-proof.mjs
       - .github/workflows/acceptance-postrun-waker.yml
       - docs/architecture/run-store-integrity-audit-runbook.md
   schedule:
