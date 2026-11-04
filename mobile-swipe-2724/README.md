@@ -40,6 +40,7 @@ The inspector displays current page, gesture phase, owner, destination, travel, 
 ## Verification
 - HTML is standalone with inline CSS/JS and no remote/CDN assets.
 - Repository readback: JS syntactically compiled in a JS runtime; no duplicate DOM IDs or missing `$('id')` DOM references.
+- **Mock interaction smoke:** 20/20 passed against the actual inline JS using a minimal fake DOM and deterministic timers (routes, edge/center/vertical cancel, short snapback, Peek, detail/dirty guard, no-Session root, hold-direction touch ownership). Reproduce with `node mobile-swipe-2724/smoke-test.mjs` from the prototype branch root; suite is dependency-free. This is *mock state-machine* proof only.
 - Real browser interaction and actual mobile Safari/PWA execution: **not independently verified**. Production Acceptance, device testing and Pages SHA readback are **Pending**.
 - Reproduce via direct pointer/touch interactions described above. A completed workflow must additionally inspect the browser console, screenshot 375/390/430 widths and landscape, and verify iOS Safari edge ownership.
 
