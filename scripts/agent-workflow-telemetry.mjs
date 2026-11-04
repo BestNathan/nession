@@ -369,13 +369,13 @@ function perAgentWindow(records) {
     schema_version: 1,
     coverage: 'observed',
     unattributed,
-    truncated: all.length > 40,
-    items: all.slice(0,40).map(group => ({
+    truncated: all.length > 24,
+    items: all.slice(0,24).map(group => ({
       ...group,
       recent: group.recent.sort((a,b) =>
         b.observed_at.localeCompare(a.observed_at) ||
         b.run_id-a.run_id || b.attempt-a.attempt || a.workflow.localeCompare(b.workflow))
-        .slice(0,16),
+        .slice(0,8),
     })),
   };
 }
