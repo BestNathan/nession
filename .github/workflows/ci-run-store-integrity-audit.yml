@@ -4,6 +4,17 @@ name: CI / Run Store Integrity Audit
 # Anchors are a separately governed secret, NEVER auto-learned from the refs.
 # This job is intentionally disabled until its external anchor control exists.
 on:
+  # A change in the trusted read-only auditor must run an immediate real
+  # main audit rather than waiting for the next schedule/manual trigger.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci-run-store-integrity-audit.yml
+      - scripts/run-store-sigstore-audit.mjs
+      - scripts/run-store-sigstore-checkpoint.mjs
+      - scripts/run-store-integrity.mjs
+      - scripts/run-store-integrity-drill.mjs
+      - scripts/acceptance-run-store-audit-evidence.mjs
   # repository_dispatch executes only the default-branch workflow source.
   # workflow_dispatch may run a malicious branch version with the anchor
   # secret; never expose that secret to arbitrary-ref selected code.
@@ -45,3 +56,76 @@ jobs:
         env:
           RUN_STORE_AUDIT_ANCHORS_JSON: ${{ secrets.RUN_STORE_AUDIT_ANCHORS_JSON }}
         run: node scripts/audit-live-run-stores.mjs
+
+  public-sigstore-audit:
+    name: Read-only original Rekor checkpoint + forensic drill
+    # No arbitrary-ref selected workflow_dispatch, App private key, writer
+    # Contents permission, or automatic repair of the production Store.
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       github.event_name == 'schedule' ||
+       github.event_name == 'repository_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      attestations: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact trusted main SHA without Git writer tokens
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify canonical immutable, source, receipt and writer negatives
+        run: ./gates/run run-store-inventory run-store-integrity
+      - name: Seed and detect illegal mutations in disposable Git only
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/read-only-integrity-audit"
+          node scripts/run-store-integrity-drill.mjs collect \
+            "${RUNNER_TEMP}/read-only-integrity-audit/seeded-violations.json"
+      - name: Verify original independent Rekor baseline against four live Git histories
+        run: |
+          set -euo pipefail
+          node scripts/run-store-sigstore-audit.mjs collect \
+            "${RUNNER_TEMP}/read-only-integrity-audit/audit.json"
+      - name: Append signed durable public audit report to Sigstore log
+        if: success()
+        id: witness
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/read-only-integrity-audit/audit.json
+          predicate-type: https://github.com/BestNathan/nession/attestation/run-store-audit/v1
+          predicate-path: ${{ runner.temp }}/read-only-integrity-audit/audit.json
+      - name: Retain read-only audit and incident case evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-original-rekor-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/read-only-integrity-audit/
+          retention-days: 90
+          if-no-files-found: warn
+      - name: Emit attributable audit result
+        if: success()
+        env:
+          ATTESTATION_URL: ${{ steps.witness.outputs.attestation-url }}
+        run: |
+          {
+            echo '## Independent Run Store integrity audit'
+            echo "- Main SHA: \`${GITHUB_SHA}\` / Run ${GITHUB_RUN_ID} attempt ${GITHUB_RUN_ATTEMPT}"
+            echo '- Verified original independently witnessed baseline: Rekor log index 3665505739'
+            echo '- Checked four live orphan Store histories read-only; no Store token or ref mutations'
+            echo "- Public signed audit report: ${ATTESTATION_URL}"
+            echo '- Failure is an attributable GitHub Actions error; isolated seeded incidents do not imply live tampering'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,13 +1,36 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {resolveAgentDefault,roleVariable} from './default-routing.mjs';
+import {resolveAgentDefault,roleVariable,qwenDefaultAgent} from './default-routing.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 assert.equal(roleVariable('developer'),'AGENT_DEFAULT_DEVELOPER');
 assert.equal(roleVariable('reviewer'),'AGENT_DEFAULT_REVIEWER');
 assert.equal(roleVariable('acceptor'),'AGENT_DEFAULT_ACCEPTOR');
 assert.equal(roleVariable('auditor'),'AGENT_DEFAULT_AUDITOR');
+// Missing Repository Variables must never silently select Cursor again.
+for(const [role,id] of Object.entries({
+  developer:'dev-qwen-01',reviewer:'review-qwen-01',
+  acceptor:'accept-qwen-01',auditor:'audit-qwen-01',
+})){
+  assert.equal(qwenDefaultAgent(role),id);
+  const selected=resolveAgentDefault(registry,role,{legacy:qwenDefaultAgent(role)});
+  assert.equal(selected.agent_id,id);
+  assert.equal(selected.provider,'claude-code');
+  assert.equal(selected.environment,'dev-claude-qwen');
+}
+assert.throws(()=>qwenDefaultAgent('invalid'),/unsupported role/);
+for(const [path,role] of [
+  ['.github/workflows/agent-issue-audit.yml','auditor'],
+  ['.github/workflows/agent-review.yml','reviewer'],
+  ['.github/workflows/agent-sc-acceptance.yml','acceptor'],
+]){
+  assert.ok(readFileSync(path,'utf8').includes('legacy:qwenDefaultAgent("'+role+'")'),
+    path+' must route unconfigured automatic Agents to Qwen');
+}
+assert.ok(!readFileSync('.github/workflows/agent-sc-acceptance.yml','utf8')
+  .includes('(!given && !process.env.ACCEPTOR_DEFAULT)'),
+  'Acceptor must not silently route an empty configuration to Cursor');
 assert.equal(resolveAgentDefault(registry,'reviewer',{legacy:'review-cursor-01'}).agent_id,
   'review-cursor-01');
 assert.deepEqual(resolveAgentDefault(registry,'reviewer',{

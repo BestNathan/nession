@@ -3,7 +3,7 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, issueAuditTools } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
@@ -112,6 +112,38 @@ await assert.rejects(
   /unauthorized fields/
 );
 await assert.rejects(applyIssueAuditProposal(issue, { result: 'not json' }, 'example/repo'), /not valid JSON/);
+// Provider --output-format json only protects the outer envelope; model text
+// may include fences or a short preamble. Neither should require another call.
+for(const raw of ['{}','```json\n{}\n```','Here is the proposal:\n```json\n{}\n```']){
+  let retries=0;
+  await applyIssueAuditProposal(issue,{result:raw},'example/repo',{
+    repair:async()=>{retries++;return '{"unauthorized":true}';},
+  });
+  assert.equal(retries,0,'valid embedded/fenced JSON must not incur a retry');
+}
+let repairAttempts=0;
+await applyIssueAuditProposal(issue,{result:'not valid json'},'example/repo',{
+  repair:async bounded=>{
+    repairAttempts++;
+    assert.equal(bounded,'not valid json');
+    return '```json\n{}\n```';
+  },
+});
+assert.equal(repairAttempts,1,'one formatting retry only');
+await assert.rejects(applyIssueAuditProposal(issue,{result:'not valid json'},'example/repo',{
+  repair:async()=>'{ "issue_number": 999 }',
+}),/unauthorized fields/);
+await assert.rejects(applyIssueAuditProposal(issue,{result:'not valid json'},'example/repo',{
+  repair:async()=> 'still not json',
+}),/not valid JSON/);
+repairAttempts=0;
+await assert.rejects(applyIssueAuditProposal(issue,{result:'x'.repeat(17*1024)},'example/repo',{
+  repair:async()=>{repairAttempts++;return '{}';},
+}),/oversized response/);
+assert.equal(repairAttempts,0,'oversized text must not be truncated into a repair');
+assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/FORMAT-ONLY/);
+assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/no repository or Issue tools/);
+assert.throws(()=>renderIssueAuditFormatRepairPrompt('x'.repeat(17*1024)),/at most 16 KiB/);
 let disposed = false;
 let capturedTools = null;
 const mockSdk = {

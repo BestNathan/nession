@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createIssueUpdateTool, enforceE2EReadOnly } from './update.mjs';
+import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal } from './update.mjs';
+import { applyIssueAuditProposal } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 
@@ -56,6 +57,47 @@ try {
   const after = JSON.parse(readFileSync(filename, 'utf8'));
   assert.equal(after.title, 'Requirement: fixed');
   assert.deepEqual(after.labels.map((item) => item.name).sort(), ['backend', 'in-progress', 'requirement']);
+
+  // Regression #2715 / live #41746058532: a valid labels-only Qwen
+  // proposal MUST NOT pass undefined title/body into the full-field tool.
+  // All mutations below go through the real Audit adapter and fake gh CLI.
+  const beforePartial = JSON.parse(readFileSync(filename, 'utf8'));
+  assert.deepEqual(completeIssueUpdateProposal(beforePartial, {labels:['requirement','ci']}),
+    {title:beforePartial.title,body:beforePartial.body,labels:['requirement','ci']});
+  assert.deepEqual(completeIssueUpdateProposal(beforePartial, {title:'Requirement: renamed'}),
+    {title:'Requirement: renamed',body:beforePartial.body,labels:['requirement','backend']});
+  await applyIssueAuditProposal(issue, {result:JSON.stringify({labels:['requirement','ci']})}, 'example/repo');
+  const labelsOnly = JSON.parse(readFileSync(filename, 'utf8'));
+  assert.equal(labelsOnly.title, beforePartial.title);
+  assert.equal(labelsOnly.body, beforePartial.body);
+  assert.deepEqual(labelsOnly.labels.map(x=>x.name).sort(),['ci','in-progress','requirement']);
+
+  await applyIssueAuditProposal(issue,
+    {result:JSON.stringify({title:'Requirement: renamed by audit'})},'example/repo');
+  const titleOnly = JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(titleOnly.title,'Requirement: renamed by audit');
+  assert.equal(titleOnly.body, beforePartial.body);
+  assert.deepEqual(titleOnly.labels,labelsOnly.labels);
+
+  const revisedBody=titleOnly.body+'\n\nAdditional rationale retained.';
+  await applyIssueAuditProposal(issue,
+    {result:JSON.stringify({body:revisedBody})},'example/repo');
+  const bodyOnly=JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(bodyOnly.title,titleOnly.title);
+  assert.equal(bodyOnly.body,revisedBody);
+  assert.deepEqual(bodyOnly.labels,labelsOnly.labels);
+
+  const beforeInvalid=readFileSync(filename,'utf8');
+  await assert.rejects(applyIssueAuditProposal(issue,
+    {result:JSON.stringify({labels:['requirement','noncanonical']})},'example/repo'),
+    /canonical kind\/area labels/);
+  await assert.rejects(applyIssueAuditProposal(issue,
+    {result:JSON.stringify({title:' '})},'example/repo'),/non-empty strings/);
+  await assert.rejects(applyIssueAuditProposal(issue,
+    {result:JSON.stringify({issue_number:18,labels:['requirement','ci']})},'example/repo'),
+    /unauthorized fields/);
+  assert.equal(readFileSync(filename,'utf8'),beforeInvalid,'rejected proposals cannot edit the Issue');
+
   await assert.rejects(comment.execute({ body: 'ok', issue_number: 18 }), /Unauthorized/);
   await comment.execute({ body: 'investigation trail' });
   assert.equal(readFileSync(filename + '.comment', 'utf8'), 'investigation trail');

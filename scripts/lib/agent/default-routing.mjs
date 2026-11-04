@@ -10,7 +10,23 @@ const ROLE_VARIABLES=Object.freeze({
   auditor:'AGENT_DEFAULT_AUDITOR',
 });
 
+// One canonical Qwen fallback for automatic Agent selection. Trusted
+// Repository Variables and explicit overrides continue to take precedence.
+// The production Cursor-native Developer worker remains a deliberate exception
+// until its independently authenticated Qwen native-resume migration.
+const QWEN_DEFAULT_AGENTS=Object.freeze({
+  developer:'dev-qwen-01',
+  reviewer:'review-qwen-01',
+  acceptor:'accept-qwen-01',
+  auditor:'audit-qwen-01',
+});
+
 function fail(message) { throw new Error('Agent defaults: '+message); }
+
+export function qwenDefaultAgent(role) {
+  if(!Object.hasOwn(QWEN_DEFAULT_AGENTS,role))fail('unsupported role: '+role);
+  return QWEN_DEFAULT_AGENTS[role];
+}
 
 export function resolveAgentDefault(registry,role,{configured='',override='',legacy=''}={}) {
   validateRegistry(registry);

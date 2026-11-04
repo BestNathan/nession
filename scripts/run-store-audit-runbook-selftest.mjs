@@ -22,4 +22,17 @@ for (const phrase of [
   'force-push','read-only restore drill','do not update the baseline',
   'not an independent durable alert channel','Pending under #1690'
 ]) assert.ok(doc.includes(phrase), 'activation runbook missing: '+phrase);
+const sigstoreJob=wf.split('  public-sigstore-audit:')[1];
+assert.ok(sigstoreJob,'independent public Sigstore audit must run alongside deferred legacy mode');
+assert.match(wf,/^  push:\n    branches: \[main\]/m);
+assert.match(sigstoreJob,/name: Read-only original Rekor checkpoint \+ forensic drill/);
+assert.match(sigstoreJob,/github.ref == 'refs\/heads\/main'/);
+assert.match(sigstoreJob,/actions\/attest@v4/);
+assert.match(sigstoreJob,/run-store-sigstore-audit\.mjs collect/);
+assert.match(sigstoreJob,/run-store-integrity-drill\.mjs collect/);
+assert.match(sigstoreJob,/\.\/gates\/run run-store-inventory run-store-integrity/);
+assert.match(sigstoreJob,/persist-credentials: false/);
+assert.match(sigstoreJob,/if: always\(\)/);
+assert.doesNotMatch(sigstoreJob,/contents: write|RUN_STORE_AUDIT_ANCHORS_JSON|RUN_STORE_WRITER_APP_PRIVATE_KEY|git push/);
+assert.match(doc,/Original Rekor checkpoint read-only audit/);
 console.log('Run Store audit activation/runbook safety contract passed');

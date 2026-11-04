@@ -86,7 +86,7 @@ const topology={
  edges:[{from:'ci-quality',to:'acceptance-orchestrator',kind:'workflow_run'}],
 };
 export async function startPagesFixture(){
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(fixture));return;}
