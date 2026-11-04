@@ -17,7 +17,16 @@ test('SC-11: + panel never traps the first rows, including zero-scrollback termi
     timeout: 20_000,
   }).toBeGreaterThan(80);
   const start = await terminalGeometry(page);
-  const paneBefore = paneSize(runtime, name);
+  // The initial attach may still be settling a debounced resize; measure only
+  // after the pane reports the same size twice, as the other #2710 cases do.
+  let paneReading = '';
+  await expect.poll(async () => {
+    const next = paneSize(runtime, name);
+    const settled = next === paneReading;
+    paneReading = next;
+    return settled;
+  }, { timeout: 20_000, intervals: [500] }).toBe(true);
+  const paneBefore = paneReading;
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
     timeout: 10_000,
