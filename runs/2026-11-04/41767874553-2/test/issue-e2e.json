@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "8726a4dd6301d14732b79fe4e9f40a9402fcec40",
+  "run_id": 41767874553,
+  "run_attempt": 2,
+  "plan_digest": "45e171edb82ed2c449ea4e97eeea96508738dcd9225abbae07de5a49b57a1d7e",
+  "artifact_digest": "sha256:7045c3eb7a06aa170da864c45ea384f4722350a67145461d421e633cb6ab60e1",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 88
+    },
+    {
+      "id": "fixture-env",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 130
+    },
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "discovered": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 88
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 126
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 27
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "discovered": 15,
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 589
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 29,
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 709
+    }
+  ]
+}
