@@ -327,3 +327,48 @@ test('bounded and partial PR review windows never imply exhaustive approval',()=
  unavailableProof.work.pulls[0].review.status='unavailable';
  assert.throws(()=>validateProjection(unavailableProof),/unavailable review source cannot certify an event/);
 });
+
+test('source-backed per-Agent outcomes and bounded Run/Attempt details',()=>{
+  const run={run_id:41750275349,attempt:1,workflow:'issue-audit',issue:2710,
+    outcome:'success',provider:'claude-code',observed_at:now,duration_ms:1200};
+  const outcomes={schema_version:1,coverage:'observed',unattributed:2,truncated:false,
+    items:[{id:'dev-qwen-01',role:'developer',total:3,
+      success:1,failure:1,cancelled:1,timed_out:0,unknown:0,
+      recent:[run,{...run,attempt:2,outcome:'failure'}]}]};
+  const p=validateProjection(makeProjection({...base,agent:{
+    schema_version:1,kind:'agent_metrics_aggregate',generated_at:now,
+    windows:{'7d':{runs:{total:5},per_agent:outcomes},
+      '30d':{runs:{total:7},per_agent:outcomes}},
+  }}));
+  assert.equal(p.agents.outcomes['7d'].status,'available');
+  assert.equal(p.agents.outcomes['7d'].unattributed,2);
+  const item=p.agents.outcomes['7d'].items[0];
+  assert.equal(item.total,3);
+  assert.equal(item.failure,1);
+  assert.equal(item.recent[0].url,'https://github.com/BestNathan/nession/actions/runs/41750275349');
+  assert.equal(item.recent[1].attempt,2,'rerun attempt is retained');
+  assert.equal(p.agents.outcomes['30d'].items[0].success,1);
+  assert.ok(!JSON.stringify(p).includes('raw/workflows'));
+  assert.ok(!Object.hasOwn(item,'model_requests'));
+  assert.ok(!Object.hasOwn(item.recent[0],'prompt'));
+
+  const invalid=(group)=>({...base,agent:{schema_version:1,kind:'agent_metrics_aggregate',
+    generated_at:now,windows:{'7d':{per_agent:{...outcomes,items:[group]}}}}});
+  assert.equal(makeProjection(invalid({...outcomes.items[0],total:1})).agents.outcomes['7d'].status,'unavailable');
+  assert.equal(makeProjection(invalid({...outcomes.items[0],id:'../secrets'})).agents.outcomes['7d'].status,'unavailable');
+  assert.equal(makeProjection(invalid({...outcomes.items[0],recent:[{...run,provider:'secret/path'}]}))
+    .agents.outcomes['7d'].status,'unavailable');
+  assert.equal(makeProjection(invalid({...outcomes.items[0],recent:[{...run,duration_ms:-1}]}))
+    .agents.outcomes['7d'].status,'unavailable');
+  assert.equal(makeProjection({...base,agent:{schema_version:1,kind:'agent_metrics_aggregate',
+    generated_at:now,windows:{'7d':{per_agent:{...outcomes,truncated:true}}}}})
+    .agents.outcomes['7d'].status,'truncated');
+  const malicious=makeProjection({...base,agent:{schema_version:1,
+    kind:'agent_metrics_aggregate',generated_at:now,
+    windows:{'7d':{per_agent:{...outcomes,items:[{...outcomes.items[0],recent:[
+      {...run,prompt:'private payload',url:'https://evil.com'}]}]}}}}});
+  assert.ok(!JSON.stringify(malicious).includes('private payload'));
+  assert.ok(!JSON.stringify(malicious).includes('evil.com'));
+  malicious.agents.outcomes['7d'].items[0].recent[0].url='https://evil.com/steal';
+  assert.throws(()=>validateProjection(malicious),/invalid public Agent Run|untrusted public URL/);
+});
