@@ -250,6 +250,17 @@ settle(commit);
 else {if(cancelled)record('pointercancel → nothing navigated');state.phase='idle';state.owner='free';notify();}
 gesture=null;
 }
+// Once a gesture has been claimed, do not forward ongoing native touchmove
+// to scroll/TUI/capsule owners. Candidate and surrendered drags stay native.
+phone.addEventListener('touchmove',function(e){
+  if(gesture&&(gesture.phase==='navigation'||gesture.phase==='direction')){
+    if(e.cancelable)e.preventDefault();
+    e.stopPropagation();
+  }
+},{passive:false,capture:true});
+phone.addEventListener('contextmenu',function(e){
+  if(gesture&&gesture.phase==='direction')e.preventDefault();
+});
 phone.addEventListener('pointerdown',down);
 phone.addEventListener('pointermove',move);
 phone.addEventListener('pointerup',e=>up(e,false));
