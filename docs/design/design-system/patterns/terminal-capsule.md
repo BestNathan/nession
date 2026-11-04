@@ -227,14 +227,11 @@ Those modes are implementation tools beneath the product interaction model. They
 > [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-scroll-clearance-2710).
 >
 > **Prototype (#2710).** The interaction was reviewed from the live preview
-> `https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html`, with its
-> source pinned at `bcb3e690d3f786f41cf477e99828654ca8e17519` on the shared orphan `prototype` branch
-> (the branch is not part of the product checkout). The prototype README at that commit records the
-> 390×844 browser pass (chords, modifier cancel, Insert/Run, following clearance and a preserved history
-> anchor) and the mock's limits: no PTY, xterm mode encoding, tmux sizing or alternate-screen/mouse TUI.
-> The published gallery adds a bottom navigation bar; the prototype reserves its height so the mock
-> dock stays operable. Those production behaviors are proved by this Repository's Acceptance Cases,
-> not by the mock.
+> `https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html`. Its
+> immutable source, the 390×844 browser pass, the gallery-navigation fix and the mock's explicit limits
+> (no PTY, xterm mode encoding, tmux sizing or alternate-screen/mouse TUI) are recorded in
+> [terminal-capsule-2710-prototype.md](terminal-capsule-2710-prototype.md). Production behavior is
+> proved by the Repository's Acceptance Cases, not by the mock.
 
 Preserve established terminal semantics where the user is explicitly sending terminal input:
 
