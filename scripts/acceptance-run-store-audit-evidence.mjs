@@ -123,14 +123,14 @@ export function validateSignedAudit(report,drill,verified,identity){
     drill.referential_source_integrity_verified!==false||
     drill.independent_anchor_verified!==false||
     drill.external_alert_channel_verified!==false||
-    !Array.isArray(drill.cases)||drill.cases.length!==4||
+    !Array.isArray(drill.cases)||drill.cases.length!==CASES.length||
     JSON.stringify(drill.cases.map(c=>c.id))!==JSON.stringify(CASES)||
     drill.cases.some(c=>c.status!=='Detected'||
       c.seed!=='disposable_local_git_only'||
       c.valid_append_preflight!=='Accepted'||
       !SHA.test(c.baseline_sha??'')||!SHA.test(c.observed_sha??'')||
       c.baseline_sha===c.observed_sha))
-    fail('missing exact-run four-class disposable tamper drill');
+    fail('missing exact-run seven-case disposable incident drill');
 
   const bytes=Buffer.from(JSON.stringify(report,null,2)+'\n','utf8');
   const sha256=crypto.createHash('sha256').update(bytes).digest('hex');
