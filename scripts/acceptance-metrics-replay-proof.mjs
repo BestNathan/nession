@@ -41,6 +41,17 @@ const validRun=(r,id)=>r?.id===id&&r?.status==='completed'&&
   Number.isSafeInteger(r.run_attempt)&&r.run_attempt>0&&
   r.repository?.full_name===REPO&&r.head_repository?.full_name===REPO&&
   SHA.test(r.head_sha??'');
+// A GitHub run's top-level `run_attempt` and `updated_at` change when
+// someone re-runs it. Historical evidence MUST fetch the ORIGINAL attempt
+// object, not the mutable latest-run locator. This matters for an actual
+// Owner replay source: Run 38946994222 was rerun on 2026-11-03 (Attempt 2),
+// while its authorized main consumer 38947016290 belongs to Attempt 1.
+export function pinnedHistoricalAttemptEndpoint(runId,attempt=1){
+  if(!Number.isSafeInteger(runId)||runId<=0||
+     !Number.isSafeInteger(attempt)||attempt<=0)
+    fail('untrusted historical GitHub run/attempt locator');
+  return '/repos/'+REPO+'/actions/runs/'+runId+'/attempts/'+attempt;
+}
 function originalJob(jobs,run,name){
   if(!Array.isArray(jobs?.jobs)||jobs.jobs.length!==5||
     new Set(jobs.jobs.map(j=>j.name)).size!==5||
@@ -125,7 +136,13 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
     stdio:['ignore','pipe','pipe']});
   if(git!=='' )fail('unexpected Git ancestry stdout');
   const prefix='/repos/'+REPO;
-  const getRun=id=>get(prefix+'/actions/runs/'+id);
+  const getRun=async id=>{
+    const attempt=1; // This fixed historical cohort is strictly Attempt 1.
+    const run=await get(pinnedHistoricalAttemptEndpoint(id,attempt));
+    if(!validRun(run,id)||run.run_attempt!==attempt)
+      fail('historic source/consumer attempt does not match pinned cohort');
+    return run;
+  };
   const getJobs=run=>get(prefix+'/actions/runs/'+run.id+
     '/attempts/'+run.run_attempt+'/jobs?per_page=100');
   const [source,recipient]=await Promise.all([getRun(positive.source),getRun(positive.consumer)]);
@@ -181,6 +198,12 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
   };
 }
 export function selfTestMetricsReplayLineage(){
+  assert.equal(pinnedHistoricalAttemptEndpoint(38946994222,1),
+    '/repos/BestNathan/nession/actions/runs/38946994222/attempts/1');
+  assert.notEqual(pinnedHistoricalAttemptEndpoint(38946994222,1),
+    '/repos/BestNathan/nession/actions/runs/38946994222');
+  assert.throws(()=>pinnedHistoricalAttemptEndpoint(38946994222,0));
+  assert.throws(()=>pinnedHistoricalAttemptEndpoint(0,1));
   const sha=positive.sha,identity={full_name:REPO};
   const source={id:positive.source,run_attempt:1,status:'completed',
     conclusion:'success',head_branch:'main',head_sha:sha,
