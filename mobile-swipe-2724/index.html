@@ -142,7 +142,7 @@ const state={page:'terminal',selected:true,tui:false,long:true,peek:false,showEd
 const phone=$('phone'), term=$('terminalScroll');
 const screens={sessions:$('sessions'),terminal:$('terminal'),workspace:$('workspace'),detail:$('detail')};
 const log=[];
-let gesture=null,holdTimer=null,activeDemo=0;
+let gesture=null,holdTimer=null,activeDemo=0,settling=false,settleSerial=0;
 function record(v){log.unshift(v);if(log.length>7)log.pop();$('trace').textContent=log.map((x,i)=>String(i+1).padStart(2,'0')+'  '+x).join('\n');}
 function routePage(){return state.detail?'detail':state.page;}
 function notify(){ $('sPage').textContent=routePage()+(state.selected?'':' · no Session');$('sPhase').textContent=state.phase;$('sOwner').textContent=state.owner;$('sTarget').textContent=state.target||'—';$('sDistance').textContent=Math.round(state.dx)+' px';$('sCommit').textContent=state.commit; }
@@ -158,13 +158,13 @@ $('dirtyStatus').textContent=state.dirty?'● 未保存更改：返回需要确�
 notify();
 }
 function resetDrag(){Object.values(screens).forEach(el=>{el.style.transform='';el.style.transition='';el.style.boxShadow='';});$('reveal').classList.remove('visible');$('previewTag').classList.remove('visible');$('direction').classList.remove('on');state.target=null;state.dx=0;}
-function setPage(page){state.detail=false;state.page=page;state.phase='idle';state.owner='free';resetDrag();paint();record('route → '+page);}
+function setPage(page){settleSerial++;settling=false;state.detail=false;state.page=page;state.phase='idle';state.owner='free';resetDrag();paint();record('route → '+page);}
 function openDetail(){if(!state.selected){record('detail unavailable · no Session');return;}state.page='workspace';state.detail=true;state.phase='idle';resetDrag();paint();record('Workspace → Files detail (owns Back)');}
 function back(){if(state.detail){if(state.dirty){$('dialog').classList.add('on');record('dirty draft → confirmation required');}else{state.detail=false;paint();record('detail → Workspace');}}else if(state.page!=='terminal'&&state.selected){setPage('terminal');}}
 function targetFor(x,at){
 let t=null;
 if(state.detail || !state.selected&&state.page==='sessions')return null;
-if(state.page==='terminal'){if(x>0&&at==='left')t='sessions';if(x<0&&at==='right'&&state.selected)t='workspace';}
+if(state.page==='terminal'){if(x>0&&(at==='left'||at===null))t='sessions';if(x<0&&(at==='right'||at===null)&&state.selected)t='workspace';}
 else if(state.page==='sessions'&&x<0&&(at==='right'||at===null))t='terminal';
 else if(state.page==='workspace'&&x>0&&(at==='left'||at===null))t='terminal';
 return t;
@@ -181,91 +181,198 @@ current.style.transition='none';
 current.style.transform='translate3d('+adjusted+'px,0,0)';
 current.style.boxShadow=dx>0?'8px 0 32px #0008':'-8px 0 32px #0008';
 const tag=$('previewTag');tag.classList.add('visible');
-tag.textContent=(dx>0?'→ ':'← ')+$('revealTitle').textContent+' · '+Math.min(100,Math.round(Math.abs(dx)/Math.max(64,width*.18)*100))+'%';
-tag.style[dx>0?'left':'right']='13px';tag.style[dx>0?'right':'left']='auto';
+tag.textContent=((dx>0||(dx===0&&(target==='sessions'||(target==='terminal'&&state.page==='workspace'))))?'→ ':'← ')+$('revealTitle').textContent+' · '+Math.min(100,Math.round(Math.abs(dx)/Math.max(64,width*.18)*100))+'%';
+const pullRight=dx>0||(dx===0&&(target==='sessions'||(target==='terminal'&&state.page==='workspace')));
+tag.style[pullRight?'left':'right']='13px';tag.style[pullRight?'right':'left']='auto';
 state.dx=dx;state.target=target;notify();
 }
-function settle(commit){
-const target=state.target;
-if(state.phase==='navigation'){
-const current=screens[routePage()];
-current.style.transition=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'none':'transform 175ms ease-out';
-current.style.transform=commit?'translateX('+(state.dx>0?'100%':'-100%')+')':'translateX(0)';
-const result=commit?'committed':'cancelled';
-state.commit=result;record(result+' · '+(target||'none')+' · '+Math.round(state.dx)+'px');
-setTimeout(()=>{resetDrag();if(commit&&target)setPage(target);else{state.phase='idle';state.owner='free';paint();}},190);
-}else{resetDrag();state.phase='idle';state.owner='free';paint();}
+
+/**
+ * A navigation has one contact owner for its entire lifetime.
+ * Touch Events own actual phone interactions (Touch.identifier is stable).
+ * Pointer Events are used only for mouse/pen desktop rehearsal.
+ * Touch-generated pointer events are deliberately ignored to avoid parallel
+ * pointercancel/lostpointercapture races with the native touch sequence.
+ */
+function settle(commit,reason='release'){
+  const target=state.target;
+  if(state.phase==='navigation'&&target){
+    settling=true;
+    const serial=++settleSerial;
+    const current=screens[routePage()];
+    current.style.transition=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'none':'transform 175ms ease-out';
+    current.style.transform=commit?'translateX('+(state.dx>0?'100%':'-100%')+')':'translateX(0)';
+    state.phase='settling';state.owner='App shell · settling';
+    state.commit=(commit?'committed':'cancelled')+' · '+reason;
+    record((commit?'commit':'snapback')+' · '+reason+' · '+target+' · '+Math.round(state.dx)+'px');
+    notify();
+    setTimeout(()=>{
+      if(serial!==settleSerial)return;
+      settling=false;
+      resetDrag();
+      if(commit)setPage(target);
+      else{state.phase='idle';state.owner='free';paint();}
+    },190);
+  }else{
+    resetDrag();state.phase='idle';state.owner='free';paint();
+  }
 }
 function clearHold(){if(holdTimer!==null){clearTimeout(holdTimer);holdTimer=null;}}
-function isWorkTarget(el){
-return !!el.closest('.terminal-body,.page-content,.bottom');
-}
+function isWorkTarget(el){return !!el.closest('.terminal-body,.page-content,.bottom');}
 function getStart(e){
-if(e.target.closest('button,input,textarea,.peek,.capsule,.dialog'))return null;
-if(state.detail)return {eligible:false,reason:'Workspace detail owns Back'};
-if(!state.selected&&state.page==='sessions')return {eligible:false,reason:'No Session · Sessions root'};
-const r=phone.getBoundingClientRect(),x=e.clientX-r.left;
-if(isWorkTarget(e.target)){
-return {eligible:x<=28||x>=r.width-28,side:x<=28?'left':x>=r.width-28?'right':null,reason:'work surface'};
+  if(e.target.closest('button,input,textarea,.peek,.capsule,.dialog'))return null;
+  if(state.detail)return {eligible:false,reason:'Workspace detail owns Back'};
+  if(!state.selected&&state.page==='sessions')return {eligible:false,reason:'No Session · Sessions root'};
+  const r=phone.getBoundingClientRect(),x=e.clientX-r.left;
+  if(isWorkTarget(e.target)){
+    return {eligible:x<=28||x>=r.width-28,side:x<=28?'left':x>=r.width-28?'right':null,reason:'work surface'};
+  }
+  return {eligible:true,side:null,reason:'shell chrome'};
 }
-return {eligible:true,side:null,reason:'shell chrome'};
-}
-function down(e){
-if(e.isPrimary===false||gesture||$('dialog').classList.contains('on'))return;
-const claim=getStart(e);if(!claim)return;
-gesture={id:e.pointerId,x:e.clientX,y:e.clientY,start:performance.now(),claim,phase:'candidate',at:e.target};
-state.phase='candidate';state.owner='undecided';state.commit='—';state.dx=0;notify();
-if(state.long&&state.page==='terminal'&&claim.reason==='work surface'&&!claim.eligible){
-holdTimer=setTimeout(()=>{if(!gesture||gesture.phase!=='candidate')return;gesture.phase='direction';state.phase='direction';state.owner='direction pad (exclusive)';const r=phone.getBoundingClientRect();$('direction').style.left=(gesture.x-r.left)+'px';$('direction').style.top=(gesture.y-r.top)+'px';$('direction').classList.add('on');$('directionText').innerHTML='方向盘独占<br>拖动选方向';record('long press 380ms → direction owns pointer');notify();},380);
-}
+function down(e,kind='pointer'){
+  if(e.isPrimary===false||gesture||settling||$('dialog').classList.contains('on'))return;
+  const claim=getStart(e);if(!claim)return;
+  gesture={id:e.pointerId,kind,x:e.clientX,y:e.clientY,start:performance.now(),claim,phase:'candidate',sign:0};
+  state.phase='candidate';state.owner='undecided';state.commit='—';state.dx=0;notify();
+  if(state.long&&state.page==='terminal'&&claim.reason==='work surface'&&!claim.eligible){
+    holdTimer=setTimeout(()=>{
+      if(!gesture||gesture.phase!=='candidate')return;
+      gesture.phase='direction';
+      state.phase='direction';state.owner='direction pad (exclusive)';
+      const r=phone.getBoundingClientRect();
+      $('direction').style.left=(gesture.x-r.left)+'px';
+      $('direction').style.top=(gesture.y-r.top)+'px';
+      $('direction').classList.add('on');
+      $('directionText').textContent='方向盘独占 · 拖动选方向';
+      record('long press 380ms → direction owns contact');
+      notify();
+    },380);
+  }
 }
 function move(e){
-if(!gesture||e.pointerId!==gesture.id)return;
-const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;
-if(gesture.phase==='direction'){$('directionText').innerHTML='方向盘独占<br>'+((Math.abs(dx)+Math.abs(dy)>28)?(Math.abs(dx)>Math.abs(dy)?(dx>0?'→ right':'← left'):(dy>0?'↓ down':'↑ up')):'center / no key');return;}
-if(gesture.phase==='surrendered')return;
-if(gesture.phase==='candidate'){
-if(Math.hypot(dx,dy)<12)return;
-clearHold();
-if(Math.abs(dy)>Math.abs(dx)*.85){gesture.phase='surrendered';state.phase='content';state.owner=state.page==='terminal'?(state.tui?'TUI mouse / wheel':'xterm scrollback'):'content scroll';record('vertical wins → no shell page');notify();return;}
-const direction=targetFor(dx,gesture.claim.side);
-if(!gesture.claim.eligible||!direction){gesture.phase='surrendered';state.phase='content';state.owner=gesture.claim.reason==='work surface'?'work surface':'no valid destination';record('not shell-owned → '+state.owner);notify();return;}
-gesture.phase='navigation';state.phase='navigation';state.owner='App shell';state.target=direction;record('horizontal lock → '+direction);
-try{phone.setPointerCapture(e.pointerId);}catch(_){}
+  if(!gesture||e.pointerId!==gesture.id)return;
+  const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;
+  if(gesture.phase==='direction'){
+    $('directionText').textContent='方向盘独占 · '+((Math.abs(dx)+Math.abs(dy)>28)?(Math.abs(dx)>Math.abs(dy)?(dx>0?'→ right':'← left'):(dy>0?'↓ down':'↑ up')):'center / no key');
+    return;
+  }
+  if(gesture.phase==='surrendered')return;
+  if(gesture.phase==='candidate'){
+    if(Math.hypot(dx,dy)<12)return;
+    clearHold();
+    if(Math.abs(dy)>Math.abs(dx)*.85){
+      gesture.phase='surrendered';state.phase='content';
+      state.owner=state.page==='terminal'?(state.tui?'TUI mouse / wheel':'xterm scrollback'):'content scroll';
+      record('vertical wins → content keeps contact');notify();return;
+    }
+    const destination=targetFor(dx,gesture.claim.side);
+    if(!gesture.claim.eligible||!destination){
+      gesture.phase='surrendered';state.phase='content';
+      state.owner=gesture.claim.reason==='work surface'?'work surface':'no valid destination';
+      record('not shell-owned → '+state.owner);notify();return;
+    }
+    gesture.phase='navigation';gesture.sign=Math.sign(dx);gesture.destination=destination;
+    state.phase='navigation';state.owner='App shell';state.target=destination;
+    record('horizontal lock → '+destination+' ('+gesture.kind+')');
+    // Mouse/pen pointer capture is permitted. Native touch uses identifier
+    // and capture-phase non-passive touch listeners instead.
+    if(gesture.kind==='pointer'){
+      try{phone.setPointerCapture(e.pointerId);}catch(_){}
+    }
+  }
+  if(gesture.phase==='navigation'){
+    if(e.cancelable)e.preventDefault();
+    // Do not cancel on direction reversal. Freeze the destination at lock,
+    // and clamp opposing travel to zero. Only release decides commit/snapback.
+    const allowed=Math.max(0,dx*gesture.sign);
+    showDrag(allowed*gesture.sign,gesture.destination);
+  }
 }
-if(gesture.phase==='navigation'){if(e.cancelable)e.preventDefault();const valid=targetFor(dx,gesture.claim.side);if(!valid){settle(false);gesture.phase='surrendered';return;}showDrag(dx,valid);}
+function up(e,cancelled=false,reason='release'){
+  if(!gesture||e&&e.pointerId!==gesture.id)return;
+  const held=gesture;
+  gesture=null;
+  clearHold();
+  if(held.phase==='navigation'){
+    const dx=e?e.clientX-held.x:state.dx;
+    const forward=Math.max(0,dx*held.sign);
+    const dur=Math.max(1,performance.now()-held.start);
+    const velocity=forward/dur,threshold=Math.max(64,phone.getBoundingClientRect().width*.18);
+    const commit=!cancelled&&(forward>=threshold||(forward>=40&&velocity>=.45));
+    const explanation=cancelled?reason:(commit?'distance/velocity':'below threshold');
+    settle(commit,explanation+' · '+velocity.toFixed(2)+'px/ms');
+  }else if(held.phase==='direction'){
+    $('direction').classList.remove('on');
+    state.phase='idle';state.owner='free';
+    record('direction '+(cancelled?'cancel: '+reason:'release')+' → owner cleared');notify();
+  }else{
+    if(cancelled)record('candidate/content cancel → '+reason);
+    state.phase='idle';state.owner='free';notify();
+  }
 }
-function up(e,cancelled){
-if(!gesture||e.pointerId!==gesture.id)return;
-clearHold();
-if(gesture.phase==='navigation'){
-const dx=e.clientX-gesture.x;
-const dur=Math.max(1,performance.now()-gesture.start);
-const velocity=Math.abs(dx)/dur,dist=Math.abs(dx);
-const threshold=Math.max(64,phone.getBoundingClientRect().width*.18);
-const commit=!cancelled&&!!targetFor(dx,gesture.claim.side)&&(dist>=threshold||(dist>=40&&velocity>=.45));
-state.commit=(cancelled?'pointercancel':commit?'distance/velocity':'below threshold')+' · '+velocity.toFixed(2)+'px/ms';
-settle(commit);
-}else if(gesture.phase==='direction'){record('direction release → ownership cleared');state.phase='idle';state.owner='free';$('direction').classList.remove('on');notify();}
-else {if(cancelled)record('pointercancel → nothing navigated');state.phase='idle';state.owner='free';notify();}
-gesture=null;
+function touchEventOf(t,e){
+  return {pointerId:t.identifier,isPrimary:true,clientX:t.clientX,clientY:t.clientY,target:e.target,
+    cancelable:e.cancelable,preventDefault:()=>{if(e.cancelable)e.preventDefault();}};
 }
-// Once a gesture has been claimed, do not forward ongoing native touchmove
-// to scroll/TUI/capsule owners. Candidate and surrendered drags stay native.
-phone.addEventListener('touchmove',function(e){
+function matchingTouch(list,id){
+  for(const t of list){if(t.identifier===id)return t;}
+  return null;
+}
+// Capture-phase prevents a claimed move from being delivered to nested
+// Terminal/TUI/Peek listeners. Unclaimed vertical moves remain entirely native.
+phone.addEventListener('touchstart',e=>{
+  if(e.touches.length!==1){
+    if(gesture&&gesture.kind==='touch')up(null,true,'multitouch');
+    return;
+  }
+  if(gesture||settling)return;
+  const t=e.changedTouches[0];
+  if(t)down(touchEventOf(t,e),'touch');
+},{passive:true,capture:true});
+phone.addEventListener('touchmove',e=>{
+  if(!gesture||gesture.kind!=='touch')return;
+  if(e.touches.length!==1){up(null,true,'multitouch');return;}
+  const t=matchingTouch(e.touches,gesture.id);
+  if(!t)return;
+  move(touchEventOf(t,e));
   if(gesture&&(gesture.phase==='navigation'||gesture.phase==='direction')){
     if(e.cancelable)e.preventDefault();
     e.stopPropagation();
   }
 },{passive:false,capture:true});
-phone.addEventListener('contextmenu',function(e){
+phone.addEventListener('touchend',e=>{
+  if(!gesture||gesture.kind!=='touch')return;
+  const t=matchingTouch(e.changedTouches,gesture.id);
+  if(t)up(touchEventOf(t,e),false,'touchend');
+},{passive:true,capture:true});
+phone.addEventListener('touchcancel',e=>{
+  if(!gesture||gesture.kind!=='touch')return;
+  const t=matchingTouch(e.changedTouches,gesture.id);
+  if(t||e.touches.length===0)up(t?touchEventOf(t,e):null,true,'native touchcancel');
+},{passive:true,capture:true});
+phone.addEventListener('contextmenu',e=>{
   if(gesture&&gesture.phase==='direction')e.preventDefault();
 });
-phone.addEventListener('pointerdown',down);
-phone.addEventListener('pointermove',move);
-phone.addEventListener('pointerup',e=>up(e,false));
-phone.addEventListener('pointercancel',e=>up(e,true));
-phone.addEventListener('lostpointercapture',e=>{if(gesture&&e.pointerId===gesture.id)up(e,true);});
+phone.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch')return;
+  down(e,'pointer');
+});
+phone.addEventListener('pointermove',e=>{
+  if(e.pointerType==='touch')return;
+  move(e);
+});
+phone.addEventListener('pointerup',e=>{
+  if(e.pointerType==='touch')return;
+  up(e,false,'pointerup');
+});
+phone.addEventListener('pointercancel',e=>{
+  if(e.pointerType==='touch')return;
+  up(e,true,'pointercancel');
+});
+phone.addEventListener('lostpointercapture',e=>{
+  if(e.pointerType==='touch')return;
+  if(gesture&&gesture.kind==='pointer'&&gesture.id===e.pointerId)up(e,true,'lost pointer capture');
+});
 $('toSessions').onclick=()=>setPage('sessions');$('toWorkspace').onclick=()=>{if(state.selected)setPage('workspace');};
 $('sessionsBack').onclick=()=>{if(state.selected)setPage('terminal');};
 $('workspaceBack').onclick=back;$('detailBack').onclick=back;
