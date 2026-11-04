@@ -29,6 +29,11 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, { timeout: 10_000 })
     .toBeGreaterThan(0);
+  // Let the panel-opening follow reconciliation settle before the gesture.
+  await expect.poll(async () => {
+    const view = await terminalGeometry(page);
+    return view?.mode === 'following' && view.viewportY === view.baseY;
+  }, { timeout: 10_000 }).toBe(true);
   const shifted = await terminalGeometry(page);
   expect(shifted.rows).toBe(before.rows);
   expect(shifted.occlusion).toBe(before.occlusion);
@@ -43,8 +48,10 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4]]);
   await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4 + Math.round(view.cellHeight)]]);
   await dispatchTouch(page, 'touchend', []);
-  await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
-    .toBe('history');
+  await expect.poll(async () => {
+    const view = await terminalGeometry(page);
+    return view ? view.baseY - view.viewportY : 0;
+  }, { timeout: 10_000, message: 'the touch drag did not move local history' }).toBeGreaterThan(0);
   const scrolled = await terminalGeometry(page);
   expect(scrolled.viewportY).toBeLessThan(scrolled.baseY);
   expect(scrolled.screenTransform, 'history is unshifted').toBe('none');
