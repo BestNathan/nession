@@ -165,8 +165,8 @@ function targetFor(x,at){
 let t=null;
 if(state.detail || !state.selected&&state.page==='sessions')return null;
 if(state.page==='terminal'){if(x>0&&at==='left')t='sessions';if(x<0&&at==='right'&&state.selected)t='workspace';}
-else if(state.page==='sessions'&&x<0)t='terminal';
-else if(state.page==='workspace'&&x>0)t='terminal';
+else if(state.page==='sessions'&&x<0&&(at==='right'||at===null))t='terminal';
+else if(state.page==='workspace'&&x>0&&(at==='left'||at===null))t='terminal';
 return t;
 }
 function showDrag(dx,target){
