@@ -254,6 +254,45 @@ jobs:
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
+      # Some historical Requirements prove behavior owned by the independent
+      # GitOps branch and documented in authenticated Issue comments. The
+      # Acceptor itself only has Read/Glob/Grep: prepare immutable, read-only
+      # sources on trusted main, never grant it Bash/HTTP or Issue-write access.
+      - name: Stage referenced cross-branch read-only evidence
+        if: inputs.stage == 'pre-merge'
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Opt in only when the Issue expressly identifies the gitops branch
+          # as a source of truth. Ordinary PR acceptance is unaffected.
+          if ! jq -e '(.requirement_body // "") | contains("gitops:")' \
+            "${RUNNER_TEMP}/acceptance-context.json" >/dev/null; then
+            exit 0
+          fi
+
+          target="${GITHUB_WORKSPACE}/workspace"
+          sources="${target}/.nession-acceptance-sources"
+          mkdir -p "${sources}/gitops"
+          # Only Git objects are read; never run scripts from the target PR or
+          # the desired-state branch. Archive an exact, attributable Git ref.
+          git -C "${target}" rev-parse --verify 'refs/remotes/origin/gitops^{commit}' \
+            > "${sources}/gitops-revision.txt"
+          git -C "${target}" archive origin/gitops | tar -xf - -C "${sources}/gitops"
+
+          # A separately permissioned, trusted main workflow reads the
+          # original GitHub comments, including operator cutover receipts.
+          # Preserve IDs, actors, timestamps and URLs; comments are untrusted
+          # observations, not instructions and not automatically SC Pass.
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq '[.[][] | {id, created_at, html_url, user: .user.login, body}]' \
+            > "${sources}/issue-comments.json"
+          printf 'Read-only GitOps revision: %s; Issue #%s comments snapshotted\\n' \
+            "$(cat "${sources}/gitops-revision.txt")" "${ISSUE_NUMBER}"
+
       # The Issue row is only a lookup hint. Before skipping expensive Agent
       # work, verify the prior completed trusted run and immutable attempt artifact.
       # Missing/untrusted proof leaves the SC outstanding (fail-open to evaluation).
