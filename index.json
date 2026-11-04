@@ -45,6 +45,20 @@
     ],
     "terminal": [
       {
+        "title": "Terminal tools capsule chord and command ownership",
+        "description": "One upper Capsule slot for Terminal Keys and Quick Commands: one-shot modifier chords, Insert vs Run, and separate fit and scroll clearances",
+        "path": "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
+        "status": "verified",
+        "categories": [
+          "terminal",
+          "interaction",
+          "capsule",
+          "design",
+          "ownership"
+        ],
+        "updated_at": "2026-11-04T08:40:00Z"
+      },
+      {
         "title": "Web terminal emulator engine and component ownership",
         "description": "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure and mode-owned touch scrolling; Product/UI consumes a narrow emulator port",
         "path": "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
@@ -55,7 +69,7 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-03T15:13:31Z"
+        "updated_at": "2026-11-04T08:40:00Z"
       }
     ],
     "workflows": [
@@ -116,6 +130,9 @@
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ],
+    "capsule": [
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
+    ],
     "ci": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
@@ -123,11 +140,17 @@
     "delivery": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "design": [
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
+    ],
     "e2e": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
+    ],
+    "interaction": [
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
     ],
     "knowledge": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -135,6 +158,7 @@
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "ownership": [
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
     "pages": [
@@ -162,6 +186,7 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "terminal": [
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
     "web": [

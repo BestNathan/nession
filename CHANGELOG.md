@@ -190,3 +190,17 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record #2656's canonical shared browser text-copy owner: copy-to-clipboard 4.0.2 (MIT, lockfile-pinned) is the single user-gesture implementation behind ordinary UI and the blocked-OSC notice, invoked inside the activating event with no post-await legacy retry; automatic remote OSC 52/5522 writes stay separately authorized with EPERM/EIO mapping, and staging SC-02..SC-04 Pass at the merged SHA
 - Source: https://github.com/BestNathan/nession/issues/2656
+
+## 2026-11-04T08:40:00Z | create | Terminal tools capsule chord and command ownership
+- Path: topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md
+- Topic: terminal
+- Categories: terminal, interaction, capsule, design, ownership
+- Reason: Record #2710's terminal-tools ownership after merge to staging f775b00e: one upper Capsule slot for Terminal Keys and Quick Commands, one-shot atomic chords owned by TerminalInteractionController, Insert vs Run over the existing server.commands owner, and the required separation between composer fit occlusion and upper-panel scroll clearance; exact-head Case Smoke and E2E evidence included
+- Source: https://github.com/BestNathan/nession/issues/2710
+
+## 2026-11-04T08:40:00Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Cross-link the new #2710 terminal-tools ownership article from the engine/component ownership article
+- Source: https://github.com/BestNathan/nession/issues/2710
