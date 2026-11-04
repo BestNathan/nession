@@ -29,6 +29,31 @@ Pages proof above remain evidence for the first design pass, not for this
 revised touch behavior. Production proof for the corrected
 following → history transition is SC-10 / PR #2739.
 
+## Revision for reversible scroll range (SC-11, 2026-11-04)
+
+The SC-11 correction supersedes the auto-push behavior: opening `+`/Keys/Commands
+does not move the terminal content. It only adds reversible scroll range so the
+user can scroll the newest output above the highest panel and fully reverse back
+to the original first visible line. Its source revision is
+[`c6c697f2c53485b955af6cadf6e7d8fab371c4b4/terminal-keys-commands-2710`](https://github.com/BestNathan/nession/tree/c6c697f2c53485b955af6cadf6e7d8fab371c4b4/terminal-keys-commands-2710).
+
+- The Pages `prototypes/manifest.json` was verified on 2026-11-04 to report that
+  source SHA; the preview is current for this revision.
+- The published preview was driven at 390×844 in Chromium (a mobile viewport,
+  not a physical device): opening `+` kept `scrollTop` at 900 while
+  `scrollHeight` grew 1686 → 1842; Keys grew it to 1951 and Commands to 2056
+  without moving the position. Scrolling to the new bottom placed the last line
+  above the panel (431 ≤ dock top 450 for Keys; 326 ≤ 345 for Commands);
+  scrolling back to 0 recovered the first login line. Switching Keys → Commands
+  at the top kept `scrollTop` 0. Closing Commands at the bottom clamped to the
+  new bottom (1270 → 900) without jumping to the top; closing Keys while reading
+  history preserved `scrollTop` 500.
+- The mock simulates this with native overflow scroll plus extra bottom scroll
+  room; the product uses `CapsuleOcclusionScroll`'s reversible pan range. Real
+  xterm/PTY, touch ownership and unchanged-grid proof remain SC-11 production
+  evidence, not a mock claim. Physical mobile-device touch remains unverified by
+  this mock.
+
 ## Question settled
 
 Can Nession make real modifier chords and saved-command actions reachable on
@@ -44,9 +69,11 @@ without resizing the PTY?
 3. Commands: Insert fills the expression composer without execution; Run adds
    an execution event.
 4. Composer tap returns to native typing without moving the composer.
-5. Opening `+`, Keys or Commands moves the live bottom above the topmost
-   surface; changing panel height while browsing history preserves the viewing
-   anchor; scrolling back to the live bottom resumes following.
+5. Opening `+`, Keys or Commands does not move the terminal content; it only
+   adds reversible scroll range. Scrolling up reveals the newest output above
+   the topmost surface, and scrolling back down recovers the original first
+   visible line. Changing panel height while browsing history preserves the
+   viewing anchor; scrolling back to the live bottom resumes following.
 
 ## Verified browser pass
 
@@ -70,14 +97,14 @@ The live preview was driven at 390×844 in a real browser:
 - **Mock**: terminal output, saved-command inventory, connection status, key
   serialization/readout and command actions. No PTY, shell execution, xterm
   instance, network or persistence.
-- The mock's clearance uses DOM scroll padding on a simulated terminal. It
-  demonstrates the interaction, not a validated method for xterm's virtual
-  buffer.
+- The mock's clearance is simulated with a native scroll container and extra
+  bottom scroll room. It demonstrates the interaction, not a validated method
+  for xterm's virtual buffer.
 - **Not proven by the mock**: real PTY bytes and mode-dependent encoding
   (DECCKM and friends), xterm row/PTY/tmux stability, alternate-screen and
   mouse-reporting TUIs, touch scrolling, the #2657 direction pad, IME and device
   safe areas. Those are proved by the production implementation and its
-  Acceptance Cases (SC-02/03/04/08/09/10 in issue #2710), not by this artifact.
+  Acceptance Cases (SC-02/03/04/08/09/10/11 in issue #2710), not by this artifact.
 - The mock is not an Acceptance receipt and must not be cited as production
   browser evidence.
 
@@ -89,4 +116,7 @@ is [interaction-semantics.md](../../terminal/interaction-semantics.md). Both wer
 updated in the same change as this record: one upper slot with a compact
 Keys/Commands switch, one-shot modifier chords owned by the interaction runtime,
 Insert vs Run on the existing saved-command owner, and a scroll-clearance value
-separate from the composer fit occlusion.
+separate from the composer fit occlusion. The SC-11 revision keeps the mock and
+this record aligned with that owner: opening a panel adds reversible scroll range
+instead of pushing the terminal, and reversing the gesture restores the first
+visible line.
