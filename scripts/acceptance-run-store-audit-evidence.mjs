@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {isDeepStrictEqual} from 'node:util';
+import {verifyReadOnly} from './run-store-sigstore-audit.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/ci-run-store-integrity-audit.yml';
@@ -189,20 +190,105 @@ export function validateSignedAudit(report,drill,verified,identity){
   });
 }
 
+// A signed ancestor audit remains attributable to its ORIGINAL source run.
+// Reuse its separately signed seeded incident drill, but independently
+// reverify the fixed original Rekor checkpoint against CURRENT live Git refs.
+// This avoids an expensive signer/audit job on every unrelated main merge.
+export function checkedAncestorComparison(compare,baseSha,headSha){
+  if(!SHA.test(baseSha)||!SHA.test(headSha)||
+     compare?.base_commit?.sha!==baseSha||
+     compare?.merge_base_commit?.sha!==baseSha||
+     !['ahead','identical'].includes(compare.status)||
+     !Number.isSafeInteger(compare.ahead_by)||compare.ahead_by<0||
+     compare.behind_by!==0)
+    fail('signed source/history commit not a verified ancestor of current main or Store ref');
+  return true;
+}
+export function bridgeOriginalRekorAudit(source,fresh,targetSha){
+  if(source?.kind!=='authenticated_run_store_integrity_audit'||
+     source.verdict!=='Verified'||
+     !SHA.test(source.target_sha??'')||!SHA.test(targetSha)||
+     source.target_sha===targetSha||
+     source.original_signed_baseline_verified!==true||
+     source.report_independently_sigstore_reverified!==true||
+     !Array.isArray(source.covered_stores)||source.covered_stores.length!==4||
+     fresh?.schema_version!==1||
+     fresh.kind!=='run_store_original_signed_baseline_history_audit'||
+     fresh.repository!==REPO||fresh.verdict!=='Verified'||
+     fresh.audited_main_sha!==targetSha||
+     fresh.baseline_source_main_sha!=='ccd0858b6bc06cf5c22e0efc1a9f2100974a568f'||
+     fresh.pinned_log_index!==3665505739||
+     fresh.pinned_attestation_id!==63042719||
+     fresh.external_subject_sha256!==
+       'd6579886c6150f34b373901b29ad2aecf9d624b91004e7f87675d6dc3062e690'||
+     fresh.independent_sigstore_witness_verified!==true||
+     fresh.no_production_ref_mutation!==true||
+     fresh.writer_authorization_verified!==false||
+     fresh.coverage!==4||fresh.total!==4||
+     !Array.isArray(fresh.verified_history)||fresh.verified_history.length!==4||
+     JSON.stringify(fresh.verified_history.map(x=>x.ref))!==JSON.stringify(REFS)||
+     JSON.stringify(source.covered_stores.map(x=>x.ref))!==JSON.stringify(REFS))
+    fail('missing fresh original-Rekor current-main verifier or signed ancestor audit');
+  for(let i=0;i<4;i++){
+    const current=fresh.verified_history[i],older=source.covered_stores[i];
+    if(!SHA.test(current.baseline_sha??'')||
+       !SHA.test(current.observed_sha??'')||
+       current.baseline_sha!==older.baseline_sha||
+       current.status!=='ReadOnlyRestoreVerified'||
+       !Number.isSafeInteger(current.checked_commits)||
+       current.checked_commits<older.checked_commits||
+       !Number.isSafeInteger(current.checked_changes)||
+       current.checked_changes<older.checked_changes)
+      fail('fresh Store history contradicts older externally signed observation');
+  }
+  return {
+    ...source,
+    target_sha:targetSha,
+    prior_signed_audit_source_sha:source.target_sha,
+    prior_signed_audit_run_id:source.audit_run_id,
+    prior_signed_audit_attestation_sha256:source.signed_audit_sha256,
+    current_rekor_independently_reverified:true,
+    current_live_store_heads_verified:true,
+    current_source_of_truth:'existing canonical original-Rekor read-only verifier',
+    covered_stores:fresh.verified_history.map(x=>({
+      ref:x.ref,baseline_sha:x.baseline_sha,observed_sha:x.observed_sha,
+      checked_commits:x.checked_commits,checked_changes:x.checked_changes,
+      status:x.status,
+    })),
+    signed_audit_and_disposable_alert_drill_at_prior_sha:true,
+    proof_scope:'prior signed ancestor audit and executed 7-case drill retained; original independently signed Rekor anchor and all four Git histories independently reverified now at target SHA; not a newly signed audit at this target',
+  };
+}
 export async function collectAuthenticatedAudit(scope,directRuns,get,{
   execute=execFileSync,
   temporary=()=>fs.mkdtempSync(path.join(os.tmpdir(),'nession-store-audit-acceptance-')),
+  reverifyCurrent=verifyReadOnly,
 }={}){
   const {repo,sha,issue,stage,githubSha,githubRef}=scope??{};
   if(repo!==REPO||issue!==1690||stage!=='post-merge'||
     !SHA.test(sha)||githubSha!==sha||githubRef!=='refs/heads/main')return null;
   if(!Array.isArray(directRuns)||typeof get!=='function')
     fail('untrusted original-Rekor audit source discovery');
-  const candidates=directRuns.filter(r=>r?.name===NAME&&
+  const exact=directRuns.filter(r=>r?.name===NAME&&
     workflowPath(r.path)&&['push','schedule','repository_dispatch'].includes(r.event)&&
     r.head_branch==='main'&&r.head_sha===sha&&
     r.status==='completed'&&r.conclusion==='success')
     .sort((a,b)=>b.id-a.id).slice(0,3);
+  let candidates=exact;
+  if(candidates.length===0){
+    const historical=await get('/repos/'+REPO+
+      '/actions/workflows/ci-run-store-integrity-audit.yml/runs?branch=main&status=success&per_page=30');
+    if(!Array.isArray(historical?.workflow_runs)||
+       historical.workflow_runs.length>30)
+      fail('untrusted bounded historical signed audit discovery');
+    // Treat listing as locator-only. Source Run/Attempt, all Job steps, signed
+    // report, seven seeded cases and original Rekor log are re-attested below.
+    candidates=historical.workflow_runs.filter(r=>r?.name===NAME&&
+      workflowPath(r.path)&&['push','schedule','repository_dispatch'].includes(r.event)&&
+      r.head_branch==='main'&&r.head_sha!==sha&&SHA.test(r.head_sha??'')&&
+      r.status==='completed'&&r.conclusion==='success')
+      .sort((a,b)=>b.id-a.id).slice(0,3);
+  }
   for(const candidate of candidates){
     const base='/repos/'+REPO+'/actions/runs/'+candidate.id;
     const run=await get(base);
@@ -212,7 +298,19 @@ export async function collectAuthenticatedAudit(scope,directRuns,get,{
       get(base+'/attempts/'+run.run_attempt+'/jobs?per_page=100'),
       get(base+'/artifacts?per_page=100'),
     ]);
-    const identity=authenticateAuditRun(run,jobs,artifacts,sha);
+    const sourceSha=run.head_sha;
+    const identity=authenticateAuditRun(run,jobs,artifacts,sourceSha);
+    if(sourceSha!==sha){
+      const cmp=await get('/repos/'+REPO+'/compare/'+sourceSha+'...'+sha);
+      checkedAncestorComparison(cmp,sourceSha,sha);
+      // A stale/missing source is not a permanent security proof. The weekly
+      // full/scheduled audit is still the independent producer; cap this
+      // bridge to a recent signed report rather than indefinite old evidence.
+      const date=Date.parse(run.updated_at??run.created_at);
+      if(!Number.isFinite(date)||date>Date.now()+300000||
+         Date.now()-date>48*60*60*1000)
+        fail('historical signed audit older than bounded freshness interval');
+    }
     const temp=temporary();
     try{
       if(!path.isAbsolute(temp)||fs.lstatSync(temp).isSymbolicLink())
@@ -239,7 +337,23 @@ export async function collectAuthenticatedAudit(scope,directRuns,get,{
         encoding:'utf8',stdio:['ignore','pipe','pipe'],
       });
       const verified=JSON.parse(out);
-      return validateSignedAudit(audit.data,drill.data,verified,identity);
+      const signed=validateSignedAudit(audit.data,drill.data,verified,identity);
+      if(sourceSha===sha)return signed;
+      const freshFile=path.join(temp,'fresh-original-rekor-check.json');
+      await reverifyCurrent(freshFile);
+      if(!fs.existsSync(freshFile)||fs.lstatSync(freshFile).isSymbolicLink()||
+         fs.statSync(freshFile).size<100||fs.statSync(freshFile).size>64*1024)
+        fail('missing bounded current-main original Rekor verification');
+      const fresh=JSON.parse(fs.readFileSync(freshFile,'utf8'));
+      const bridge=bridgeOriginalRekorAudit(signed,fresh,sha);
+      // An independently signed older observation MUST remain in the current
+      // Git lineage for each orphan Store. No re-root or append to a fork.
+      for(const [i,prior] of signed.covered_stores.entries()){
+        const current=bridge.covered_stores[i];
+        const cmp=await get('/repos/'+REPO+'/compare/'+prior.observed_sha+'...'+current.observed_sha);
+        checkedAncestorComparison(cmp,prior.observed_sha,current.observed_sha);
+      }
+      return bridge;
     }finally{fs.rmSync(temp,{force:true,recursive:true});}
   }
   return null;
@@ -329,5 +443,46 @@ export function selfTestAuthenticatedAudit(){
       statement:{...verified[0].verificationResult.statement,
         subject:[{digest:{sha256:'f'.repeat(64)}}]}}}]));
   assert.throws(()=>verify(report,drill,verified,{...identity,run_id:999}));
+  const later='c'.repeat(40);
+  const ancestor={status:'ahead',ahead_by:2,behind_by:0,
+    base_commit:{sha},merge_base_commit:{sha}};
+  assert.equal(checkedAncestorComparison(ancestor,sha,later),true);
+  assert.equal(checkedAncestorComparison({...ancestor,status:'identical',ahead_by:0},sha,later),true);
+  assert.throws(()=>checkedAncestorComparison({...ancestor,behind_by:1},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,status:'diverged'},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,merge_base_commit:{sha:later}},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,base_commit:{sha:later}},sha,later));
+  const signed=verify();
+  const fresh={schema_version:1,
+    kind:'run_store_original_signed_baseline_history_audit',
+    repository:REPO,verdict:'Verified',
+    baseline_source_main_sha:report.baseline_source_main_sha,
+    pinned_log_index:3665505739,pinned_attestation_id:63042719,
+    external_subject_sha256:report.external_subject_sha256,
+    independent_sigstore_witness_verified:true,no_production_ref_mutation:true,
+    writer_authorization_verified:false,
+    audited_main_sha:later,coverage:4,total:4,
+    verified_history:signed.covered_stores.map(x=>({
+      ...x,observed_sha:later,checked_commits:x.checked_commits+1,
+      checked_changes:x.checked_changes+1,
+    })),
+  };
+  const bridge=bridgeOriginalRekorAudit(signed,fresh,later);
+  assert.equal(bridge.verdict,'Verified');
+  assert.equal(bridge.target_sha,later);
+  assert.equal(bridge.prior_signed_audit_source_sha,sha);
+  assert.equal(bridge.current_rekor_independently_reverified,true);
+  assert.equal(bridge.covered_stores.length,4);
+  assert.equal(bridge.github_server_writer_authorization_verified,false);
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,audited_main_sha:sha},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,independent_sigstore_witness_verified:false},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,writer_authorization_verified:true},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,coverage:3},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,
+    verified_history:fresh.verified_history.map((x,i)=>i===0?{
+      ...x,checked_commits:0}:x)},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,
+    verified_history:fresh.verified_history.map((x,i)=>i===0?{
+      ...x,baseline_sha:later}:x)},later));
   return true;
 }
