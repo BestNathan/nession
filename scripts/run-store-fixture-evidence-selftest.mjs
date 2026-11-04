@@ -36,7 +36,7 @@ assert.match(waker,/\.event == "push" and \.head_branch == "main" and/,
 assert.match(waker,/github\.event\.workflow_run\.event == 'push'/);
 assert.match(waker,/github\.event\.workflow_run\.conclusion == 'success'/);
 assert.match(waker,/git merge-base --is-ancestor/);
-assert.match(waker,/Read-only original Rekor checkpoint \\+ forensic drill/);
+assert.match(waker,/Read-only original Rekor checkpoint \+ forensic drill/);
 assert.match(waker,/Original Rekor audit Job did not execute successfully; no acceptance wake/);
 
 assert.match(workflow,/^  repository_dispatch:\n    types: \[nession-run-store-fixture-evidence\]/m);
