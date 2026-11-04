@@ -15,7 +15,7 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
 .back{width:30px;height:30px;border:0;background:transparent;border-radius:50%;font-size:26px;line-height:1}
 .sess{min-width:0;flex:1}.sess strong{display:block;font-weight:620;font-size:14px;letter-spacing:-.02em}.sess small{display:block;color:#777b80;font-size:11px;margin-top:3px}
 .topdot{width:9px;height:9px;border-radius:50%;background:#76aa87}.source{font-size:10px;color:#7b8287;text-decoration:none;white-space:nowrap}.source:hover{text-decoration:underline}
-.terminal{position:absolute;inset:58px 0 0;padding:17px 17px 82px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow:auto;overscroll-behavior:contain;word-break:break-word}
+.terminal{position:absolute;inset:58px 0 0;padding:17px 17px 82px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;word-break:break-word}
 .terminal .faint{color:#8f949a}.terminal .prompt{color:#587364}.terminal .strong{color:#292d31}
 .terminal .entry{white-space:pre-wrap;margin:0 0 7px}.terminal .entry.blank{height:10px}
 .terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:-2px;background:#31363a;opacity:.8}
@@ -122,10 +122,25 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
   // A product-critical distinction: terminal scroll clearance may grow while
   // the panel is open, but terminal grid/PTY dimensions must not change.
   let following=true;
+  let userDragActive=false;
+  let activeClearancePx=-1;
   const FOLLOW_EPSILON=18;
   const SCROLL_CLEARANCE_GAP=12;
   function isAtBottom(){return term.scrollHeight-term.clientHeight-term.scrollTop<=FOLLOW_EPSILON;}
-  term.addEventListener("scroll",()=>{following=isAtBottom();});
+  // Panel opening may auto-reveal the live cursor once. A real user gesture
+  // immediately takes ownership; geometry/observer callbacks may NOT snap it
+  // back to the bottom while the user is trying to browse earlier output.
+  term.addEventListener("pointerdown",()=>{userDragActive=true;following=false;},{passive:true});
+  window.addEventListener("pointerup",()=>{userDragActive=false;following=isAtBottom();},{passive:true});
+  window.addEventListener("pointercancel",()=>{userDragActive=false;following=isAtBottom();},{passive:true});
+  term.addEventListener("touchstart",()=>{userDragActive=true;following=false;},{passive:true});
+  term.addEventListener("touchend",()=>{userDragActive=false;following=isAtBottom();},{passive:true});
+  term.addEventListener("touchcancel",()=>{userDragActive=false;following=isAtBottom();},{passive:true});
+  term.addEventListener("wheel",()=>{following=false;},{passive:true});
+  term.addEventListener("scroll",()=>{
+    following=!userDragActive && isAtBottom();
+    term.dataset.scrollMode=following?"following":"history";
+  },{passive:true});
   function syncTerminalScrollClearance(){
     // Dock is bottom anchored; its top is the uppermost opened layer's top,
     // or the composer top if the expanded layer is closed.
@@ -133,9 +148,12 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     const phoneBox=phone.getBoundingClientRect();
     const dockBox=dock.getBoundingClientRect();
     const newInset=Math.ceil(Math.max(0,phoneBox.bottom-dockBox.top+SCROLL_CLEARANCE_GAP));
-    if(newInset<=0)return;
+    if(newInset<=0 || newInset===activeClearancePx)return;
+    // Update once for *real* panel-height changes only, never per scroll frame.
+    // A stray ResizeObserver notification must never reset touch momentum.
     const oldTop=term.scrollTop;
-    const wasFollowing=following;
+    const wasFollowing=following && !userDragActive;
+    activeClearancePx=newInset;
     term.style.paddingBottom=newInset+"px";
     // Following mode keeps the cursor/output above the *highest* opened panel.
     // History mode preserves the browsing anchor, while extra bottom scrollroom
@@ -173,7 +191,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     {name:"Inspect recent logs",text:"journalctl -n 80 --no-pager"}
   ];
   function append(message){
-    const wasFollowing=following;
+    const wasFollowing=following && !userDragActive;
     const priorScrollTop=term.scrollTop;
     const last=term.lastElementChild;
     if(last && last.querySelector(".cursor"))last.remove();
