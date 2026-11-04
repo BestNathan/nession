@@ -211,7 +211,6 @@ export async function collectAuthenticatedAudit(scope,directRuns,get,{
       get(base+'/artifacts?per_page=100'),
     ]);
     const identity=authenticateAuditRun(run,jobs,artifacts,sha);
-    identity.event=run.event;
     const temp=temporary();
     try{
       if(!path.isAbsolute(temp)||fs.lstatSync(temp).isSymbolicLink())
