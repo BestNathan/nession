@@ -18,10 +18,13 @@ Implementing new runtime key APIs, general keyboard protocol negotiation, OSC/cl
 
 ## Verification
 - Source authored as standalone HTML, no third-party runtime dependency.
-- JavaScript syntax and static interaction/scroll-state paths checked; interactive browser test, mobile screenshots, IME/safe-area and publication manifest **not yet verified** in this environment; do not treat this prototype as an acceptance receipt.
-- Source revision and Pages preview must be pinned/verified before marking the prototype verified.
+- **Mock smoke / static**: JavaScript parses; all referenced assets are relative; the gallery and manifest entries resolve.
+- **Real browser, published HTTPS preview, 390×844**: the `+` menu opens Keys and Commands; Ctrl+C emitted the mock `0x03` chord; Ctrl → X emitted `0x18`; Cancel cleared the selection; Commands Insert filled the composer and returned focus; Run emitted `[mock] RUN: git status ↵`; following clearance measured 511px with the live line above the panel; a history position (scrollTop 949) survived switching to a panel 105px shorter (clearance 406px) with `scrollMode=history`.
+- **Publication fix**: the gallery injects a fixed bottom navigation bar, which at mobile width covered the mock's `+` and composer. The prototype now reserves that height only when the nav is present, so the published page is operable; this was found by the real-browser pass, not by static inspection.
+- **Not verified here**: a real PTY, xterm mode-dependent encoding, tmux pane size, mouse-reporting/alternate-screen applications, IME and device safe areas. Those belong to the production implementation and its Acceptance Cases (SC-02/03/04/08/09).
+- The prototype remains a mock, not an Acceptance receipt.
 
 ## Links
 - Owning issue: https://github.com/BestNathan/nession/issues/2710
-- Expected Pages preview (verify separately): https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html
+- Pages preview (verified live): https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html
 - Source: https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710
