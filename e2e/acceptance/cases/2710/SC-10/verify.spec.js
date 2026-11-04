@@ -1,9 +1,7 @@
 'use strict';
-// #2710 SC-10: with a Capsule panel open, scrolling from live-following into
-// history must not move the rendered screen back under the panel. Further
-// drags continue browsing both ways, opening the panel while already reading
-// history keeps the anchor, and TUI/mouse modes keep their unshifted screen
-// with unchanged xterm rows and tmux pane size.
+// #2710 SC-10: expanded Capsule navigation must remain continuous between
+// the unshifted first row, real xterm history and the manually revealed live
+// prompt above the panel. Alternate/mouse TUI screens and PTY size stay stable.
 const { test, expect } = require('@playwright/test');
 const { verifiedRuntime, command } = require('../../../shared/foreground-resume-browser.cjs');
 const {
@@ -39,64 +37,60 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
   const paneBefore = paneReading;
   const resting = await terminalGeometry(page);
 
-  // 1. Panel open while following: the live bottom shifts above the panel.
+  // 1. Opening + / Keys must preserve the Terminal's original top rows.
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
     timeout: 10_000,
   }).toBeGreaterThan(0);
-  await expect.poll(async () => {
-    const view = await terminalGeometry(page);
-    return view?.mode === 'following' && view.viewportY === view.baseY;
-  }, { timeout: 10_000 }).toBe(true);
-  const shifted = await terminalGeometry(page);
-  expect(shifted.screenTransform, 'following spends the panel clearance').not.toBe('none');
-  // Let the panel-open follow reconciliation run before the gesture starts.
   await settleTerminalFrames(page);
+  const opening = await terminalGeometry(page);
+  expect(opening.screenTransform, 'opening the panel must not automatically push the grid')
+    .toBe('none');
+  expect(opening.viewportY, 'opening the panel preserves the buffer position')
+    .toBe(opening.baseY);
 
-  // 2. The first drag into history must retain that shift, then keep browsing.
+  // 2. The first backward drag browses real history without clipping the top.
   await dragTerminalRows(page, 2);
   await expect.poll(async () => {
     const view = await terminalGeometry(page);
     return view ? view.mode === 'history' && view.viewportY < view.baseY : false;
   }, { timeout: 10_000 }).toBe(true);
   const first = await terminalGeometry(page);
-  expect(first.screenTransform, 'the first history step retains the live shift')
-    .toBe(shifted.screenTransform);
+  expect(first.screenTransform, 'history starts at the original grid origin').toBe('none');
 
   await dragTerminalRows(page, 3);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeLessThan(
     first.viewportY,
   );
   const deeper = await terminalGeometry(page);
-  expect(deeper.screenTransform, 'further drags keep the same shift')
-    .toBe(shifted.screenTransform);
+  expect(deeper.screenTransform).toBe('none');
 
   await dragTerminalRows(page, -2);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeGreaterThan(
     deeper.viewportY,
   );
   const back = await terminalGeometry(page);
-  expect(back.screenTransform, 'dragging back keeps the same shift')
-    .toBe(shifted.screenTransform);
+  expect(back.screenTransform).toBe('none');
 
-  // 3. The wheel path uses the same transition rules and returns to following.
+  // 3. The forward wheel path reaches the latest output above the panel.
   await moveOverTerminal(page);
   await page.mouse.wheel(0, 20000);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('following');
-  const live = await terminalGeometry(page);
-  expect(live.screenTransform, 'returning to following restores the live shift')
-    .toBe(shifted.screenTransform);
-  expect(live.cursorBottom, 'the latest output is above the open panel')
-    .toBeLessThanOrEqual(live.dockTop + 1);
+  const shifted = await terminalGeometry(page);
+  expect(shifted.screenTransform, 'the user can spend the extra scrollroom').not.toBe('none');
+  expect(shifted.cursorBottom, 'the latest output is above the open panel')
+    .toBeLessThanOrEqual(shifted.dockTop + 1);
 
+  // One reverse wheel step *reduces* the visual pan, rather than pinning
+  // a full-height shift that hides the first rows forever.
   await moveOverTerminal(page);
   await page.mouse.wheel(0, -320);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');
   const wheelHistory = await terminalGeometry(page);
-  expect(wheelHistory.screenTransform, 'a wheel step into history retains the shift')
-    .toBe(shifted.screenTransform);
+  expect(wheelHistory.screenTransform, 'a reverse step reclaims clipped top rows')
+    .not.toBe(shifted.screenTransform);
   await moveOverTerminal(page);
   await page.mouse.wheel(0, 20000);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
@@ -176,12 +170,11 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
 
   test.info().annotations.push({
     type: 'evidence',
-    description: 'exact SHA ' + sha + ': panel clearance ' + shifted.panelClearance +
-      'px retained through following->history at viewportY=' + first.viewportY +
-      ' (transform ' + first.screenTransform + '); further drags reached viewportY=' +
-      deeper.viewportY + ' and returned to ' + back.viewportY +
-      '; a panel opened over a history reader at viewportY=' + reader.viewportY +
-      ' left it unshifted; alternate/mouse transforms ' + alternate.screenTransform +
-      '/' + mouse.screenTransform + '; pane ' + paneBefore + ' unchanged; xterm node survived',
+    description: 'exact SHA ' + sha + ': + opened unshifted at viewportY=' +
+      opening.viewportY + ', touch history reached ' + deeper.viewportY +
+      ' and returned to ' + back.viewportY + '; manual wheel spent ' +
+      shifted.panelClearance + 'px of reversible scrollroom and recovered part of it (' +
+      wheelHistory.screenTransform + '); history anchor ' + reader.viewportY +
+      ', alternate/mouse unchanged, pane ' + paneBefore + ', xterm node retained',
   });
 });

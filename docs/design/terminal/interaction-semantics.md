@@ -73,31 +73,47 @@ keydown.
 
 ## Upper-panel scroll clearance (#2710)
 
-The capsule docks two clearances, and they are not interchangeable:
+The Capsule publishes two independent measures:
 
-- **fit occlusion** — `--nession-local-terminal-capsule-occlusion`, measured
-  from the composer shell. It becomes the terminal viewport's bottom inset and
-  therefore changes xterm rows and the PTY size. An upper surface must never
-  enter this value.
-- **scroll clearance** — `--nession-local-terminal-capsule-panel-clearance`,
-  measured from the *highest open surface* (the Context Capsule, Terminal Keys,
-  Quick Commands, or another Peek). `CapsuleOcclusionScroll` spends it as a
-  visual `translateY` of the rendered `.xterm-screen`: the live bottom moves
-  above the panel, while the grid, PTY, tmux pane and cursor coordinates stay
-  exactly what the composer-only fit decided.
+- **Fit occlusion** (`--nession-local-terminal-capsule-occlusion`) is measured
+  from the composer shell. It controls the viewport fit and must **never**
+  include the temporary upper panel, or opening a Peek will resize xterm rows
+  and the PTY/tmux pane.
+- **Panel scroll clearance** (`--nession-local-terminal-capsule-panel-clearance`)
+  measures how far the highest open surface rises above the composer. It adds
+  a **reversible local visual scroll range**; it is not an unconditional screen
+  translation or a change in the remote terminal buffer.
 
-The scroll owner applies the shift only in the normal local buffer with no
-mouse tracking. In following state it keeps the live bottom above the panel. A
-drag or wheel step that leaves the live bottom retains the current shift while
-browsing, so the first history step does not snap the rendered grid back under
-the panel (#2710 SC-10); the anchor is the buffer's viewport position, and
-scrolling back to the live bottom restores the current clearance without a
-second visual move. A panel opened while the user is already reading history
-does not invent a shift; its anchor stays where it was, and a panel height
-change likewise leaves the retained offset alone. An alternate-screen or
-mouse-reporting application owns its own screen geometry and is never shifted.
-Closing the panel returns the clearance to zero without moving a history
-position.
+**A panel opening must not automatically push xterm content upward.** The
+existing screen origin and any current history anchor remain where they were.
+The user can then swipe toward the live bottom to spend the panel scroll range
+and reveal the newest prompt above the panel. Swiping the other way first
+**recovers the original top rows**, then continues into real xterm history.
+Moving in the reverse direction first returns to the buffer's live bottom and
+then raises the screen into the expanded-panel clearance. Thus both boundaries
+remain reachable, even when xterm has **zero scrollback lines**. This replaces
+the old rule that held a full-height `translateY` offset while browsing
+history: that rule clipped the top rows with no way to recover them (#2710
+post-acceptance report).
+
+Only the **normal local buffer without mouse tracking** uses this visual range.
+In alternate-screen or mouse-reporting TUI modes the application owns its
+screen and wheel/mouse input, so it is never transformed. The visual scroll
+range must not change xterm rows, the PTY size, tmux pane size or cursor
+coordinates; touch gestures owned by the direction pad and App navigation
+keep their existing priority. A viewport or panel height change may clamp
+the visual pan to the new clearance, but must not invent an auto-follow jump
+while the user is browsing history.
+
+The implementation needs regression evidence for these boundaries:
+
+1. Panel opens over a live prompt **without immediately moving the screen**.
+2. A downward drag recovers the original first visible line before scrolling
+   history, including when the xterm buffer has no scrollback.
+3. An upward drag can reach the latest output above the panel; both directions
+   work continuously on the same gesture.
+4. Closing/switching panels, mouse-reporting/alternate-screen applications,
+   keyboard/IME, scroll-wheel and session continuity remain unaffected.
 
 ## Touch direction pad (#2657)
 

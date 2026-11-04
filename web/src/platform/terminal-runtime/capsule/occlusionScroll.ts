@@ -215,8 +215,7 @@ export class CapsuleOcclusionScroll {
     };
 
     const updateFollowingFromScroll = () => {
-      const following = this.isFollowingMarginBottom();
-      this.setMode(following ? 'following' : 'history');
+      this.syncModeFromViewport();
     };
 
     this.scrollDisposable = this.terminal.onScroll(updateFollowingFromScroll);
@@ -355,17 +354,19 @@ export class CapsuleOcclusionScroll {
     if (lines === 0) {
       return true;
     }
-    if (lines < 0) {
-      this.enterHistory();
-    }
     event.preventDefault();
     event.stopPropagation();
-    this.terminal.scrollLines(lines);
-    this.syncModeFromViewport();
+    this.scrollLines(lines);
     return false;
   }
 
   scrollPages(pages: number): void {
+    // Keep the native page path outside an expanded panel. With one open,
+    // a page of movement must account for the visual pan before xterm history.
+    if (this.targetClearanceOffset() > 0 || this.clearanceOffsetPx > 0) {
+      this.scrollLines(Math.trunc(pages * this.terminal.rows));
+      return;
+    }
     if (pages < 0) {
       this.enterHistory();
     }
@@ -373,11 +374,56 @@ export class CapsuleOcclusionScroll {
     this.syncModeFromViewport();
   }
 
+  /**
+   * The expanded panel's extra height is a two-way scrollable range, not a
+   * permanent translation of the rendered terminal.
+   *
+   * Older/negative: first bring the translated screen back down toward its
+   * original top (revealing previously clipped rows), then browse xterm
+   * scrollback. Newer/positive: first scroll xterm toward its live bottom,
+   * then spend remaining motion raising the newest rows above the panel.
+   * At buffer viewportY=0 the visual offset is always reachable at zero.
+   */
   scrollLines(lines: number): void {
-    if (lines < 0) {
-      this.enterHistory();
+    if (lines === 0) {
+      return;
     }
-    this.terminal.scrollLines(lines);
+    const target = this.targetClearanceOffset();
+    if (target <= 0) {
+      if (lines < 0) {
+        this.enterHistory();
+      }
+      this.terminal.scrollLines(lines);
+      this.syncModeFromViewport();
+      return;
+    }
+
+    const cell = this.getCellHeightForTouch();
+    if (lines < 0) {
+      // Move the visual screen DOWN first. Never throw away the ability to
+      // see the top lines merely because the xterm buffer reached viewportY=0.
+      this.enterHistory();
+      const panSteps = Math.min(-lines, Math.ceil(this.clearanceOffsetPx / cell));
+      if (panSteps > 0) {
+        this.applyClearanceOffset(Math.max(0, this.clearanceOffsetPx - panSteps * cell));
+      }
+      const bufferLines = lines + panSteps;
+      if (bufferLines < 0) {
+        this.terminal.scrollLines(bufferLines);
+      }
+    } else {
+      const buffer = this.terminal.readBuffer();
+      const bottom = Math.max(0, buffer.length - this.terminal.rows);
+      const remainingBufferLines = Math.max(0, bottom - buffer.viewportY);
+      const bufferLines = Math.min(lines, remainingBufferLines);
+      if (bufferLines > 0) {
+        this.terminal.scrollLines(bufferLines);
+      }
+      const panSteps = lines - bufferLines;
+      if (panSteps > 0) {
+        this.applyClearanceOffset(Math.min(target, this.clearanceOffsetPx + panSteps * cell));
+      }
+    }
     this.syncModeFromViewport();
   }
 
@@ -416,15 +462,22 @@ export class CapsuleOcclusionScroll {
     // offset is zero and its reading anchor stays put. Returning to following
     // adopts the latest panel height. Leaving the panel or entering a TUI
     // releases the shift. Neither path changes xterm rows or PTY dimensions.
+    const target = this.targetClearanceOffset();
     if (mode === 'following') {
-      this.applyClearanceOffset(this.targetClearanceOffset());
-    } else if (this.panelClearancePx <= 0 || !this.canShiftScreen()) {
-      this.applyClearanceOffset(0);
+      this.applyClearanceOffset(target);
+    } else if (target === 0 || this.clearanceOffsetPx > target) {
+      // A smaller/closed panel or a TUI must never leave an obsolete shift.
+      this.applyClearanceOffset(Math.min(this.clearanceOffsetPx, target));
     }
   }
 
   private syncModeFromViewport(): void {
-    this.setMode(this.isFollowingMarginBottom() ? 'following' : 'history');
+    // At the bottom of the xterm buffer but half-way through the panel pan,
+    // the user is *still browsing*. Buffer-only detection would snap the
+    // visual screen back to the top of the panel on every scroll notification.
+    const atVisualBottom = this.isFollowingMarginBottom()
+      && this.clearanceOffsetPx >= this.targetClearanceOffset();
+    this.setMode(atVisualBottom ? 'following' : 'history');
   }
 
   /**
@@ -561,11 +614,7 @@ export class CapsuleOcclusionScroll {
       // xterm's native touch scroll is pre-empted above, so this handler is
       // the only local scroller — no doubled movement, and the accumulated
       // pixel remainder is what keeps a high-frequency drag from jumping.
-      if (step.lines < 0) {
-        this.enterHistory();
-      }
-      this.terminal.scrollLines(step.lines);
-      this.syncModeFromViewport();
+      this.scrollLines(step.lines);
       return;
     }
     // Mouse-reporting and alternate-screen applications get the drag through
@@ -616,7 +665,9 @@ export class CapsuleOcclusionScroll {
 
   /** Snapshot follow state before write — xterm auto-scroll resets viewport. */
   snapshotFollowing(): boolean {
-    this.wasFollowing = this.currentMode === 'following' && this.isFollowingMarginBottom();
+    this.wasFollowing = this.currentMode === 'following'
+      && this.isFollowingMarginBottom()
+      && this.clearanceOffsetPx >= this.targetClearanceOffset();
     return this.wasFollowing;
   }
 
@@ -652,6 +703,12 @@ export class CapsuleOcclusionScroll {
       return false;
     }
     const buffer = this.terminal.readBuffer();
-    return buffer.type === 'normal' && buffer.length > this.terminal.rows;
+    // Even without historical buffer lines, the expanded panel introduces a
+    // reversible visual pan range. Swipes must be able to spend that range.
+    return buffer.type === 'normal' && (
+      buffer.length > this.terminal.rows
+      || this.clearanceOffsetPx > 0
+      || this.targetClearanceOffset() > 0
+    );
   }
 }

@@ -220,12 +220,12 @@ Those modes are implementation tools beneath the product interaction model. They
 > surface states why an action is unavailable instead of producing a local echo. Insert and Run are not
 > a new command registry.
 >
-> **Clearance is scroll, not fit.** An open upper surface gets its own scroll clearance so the live
-> Terminal bottom can reach just above it. The composer-only occlusion still owns xterm's rows and the
-> PTY size; the panel height never enters that value. A following → history scroll retains the
-> current shift instead of moving the grid back beneath the panel, while a panel opened over an
-> existing history reader adds no shift of its own. Closing the panel restores composer-only
-> clearance. See
+> **Clearance is scroll, not fit.** Opening + or another upper surface must not push the
+> Terminal upward or hide its first rows. The composer-only occlusion owns xterm rows and PTY size;
+> the upper surface adds a separate **two-way scroll range**. Scrolling toward the live bottom
+> reveals the newest prompt above the panel; reversing the gesture first restores the original
+> top rows and only then enters normal xterm history. Both limits must remain reachable even when
+> there is no scrollback. Closing the panel restores composer-only clearance. See
 > [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-scroll-clearance-2710).
 >
 > **Prototype (#2710).** The interaction was reviewed from the live preview
