@@ -72,7 +72,7 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   await assertClear('Keys');
   await page.getByTestId('capsule-view-quick-commands').click();
   await expect(page.getByTestId('quick-commands-body')).toBeVisible();
-  const live = await assertClear('Commands');
+  await assertClear('Commands');
 
   // A full reverse wheel travel recovers the original first rows and then
   // navigates real history; it never permanently clips the top of the grid.
@@ -121,10 +121,9 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
 
   test.info().annotations.push({
     type: 'evidence',
-    description: 'exact SHA ' + sha + ': +/Keys/Commands published clearance and kept cursorBottom <= ' +
-      'dockTop with unchanged xterm rows and tmux ' + paneBefore + '; the first history step retained ' +
-      'the live shift (viewportY=' + history.viewportY + ', ' + history.screenTransform +
-      ') and survived a view switch; close restored 0px clearance without moving ' +
-      'viewportY=' + closed.viewportY,
+    description: 'exact SHA ' + sha + ': + opened with no automatic shift, then manual wheel ' +
+      'reached the latest line above the panel for +/Keys/Commands; scroll back recovered ' +
+      'the original grid top (' + history.screenTransform + ', viewportY=' + history.viewportY +
+      '); panel switch and close preserved history anchor; unchanged xterm rows and tmux ' + paneBefore,
   });
 });
