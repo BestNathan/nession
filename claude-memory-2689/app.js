@@ -24,8 +24,18 @@ vol:[
 {id:"runtime.md",title:"Runtime 生命周期",desc:"Task / Session",parts:[["职责",["Task 表示一次明确目标的执行。","Session 表示持续的上下文与状态。"]]]}
 ]
 };
+/* #2742 linked Markdown fixture additions: mock-only, never filesystem data. */
+MEMORIES["nession"].find(x=>x.id==="MEMORY.md").markdown = "# Nession 项目记忆\n\n> 当前 Session 的 **Claude Code Auto Memory**。这是一组 Markdown 文件，不是另一个需要选择仓库的工作区。\n\n## Topics\n\n- [架构约束](architecture.md#session-boundary) — Session、tmux 与 Runtime 的边界\n- [交互原则](interaction.md#mobile-ux) — Web / App 如何阅读当前工作\n- [恢复记录](topics/recovery.md#retry-strategy) — 分块内容与标题定位示例\n- [验收上下文](verification.md) — 设计与实现证据的区别\n\n## 工作备忘\n\n- [x] 从 Session 自动关联当前 Repository\n- [x] Worktree 共享对应 Repository 的 Memory\n- [ ] 浏览索引中的主题文件与 Frontmatter\n\n### 链接安全示例\n\n不存在的文件：[missing.md](missing.md)（应提示而不离开阅读器）。\n相对根目录之外的链接：[外部文件](../private.md)（应被拒绝）。\n官方文档：[Claude Code Memory](https://code.claude.com/docs/en/memory)。\n\n这套内容只用于 **交互原型**，不读取真实 Claude 数据。";
+MEMORIES["nession"].find(x=>x.id==="architecture.md").markdown = "---\ntitle: Architecture constraints\nowner: nession\ntags: [session, tmux, capability]\nupdated: 2026-11-04\n---\n\n# 架构约束\n\n这是当前 Repository 的长期工程知识，Frontmatter 将作为**元数据**呈现，不混入标题正文。\n\n## Session boundary\n\n**Session** 承载当前工作的上下文，tmux 是终端执行后端，Claude Code Memory 隶属于 Session 解析出的 Repository。\n\n| 概念 | 所有者 |\n| --- | --- |\n| Repository identity | Session / Agent |\n| Terminal state | tmux runtime |\n| Memory rendering | Claude Code capability |\n\n### Rust 示例\n\n~~~rust\npub struct SessionContext {\n    pub repository: String,\n    pub cwd: String,\n}\n~~~\n\n- [x] 保留现有只读能力\n- [ ] 不额外创建 Memory 服务\n\n[返回 Memory 索引](MEMORY.md#topics)";
+MEMORIES["nession"].find(x=>x.id==="interaction.md").markdown = "+++\ntitle = \"Interaction principles\"\nscope = \"project\"\nstatus = \"approved\"\n+++\n\n# 交互原则\n\n## Work first\n\nSession Terminal 是默认表面，Claude Code 通过上下文胶囊展开到 Workspace。\n\n## Mobile UX\n\n- 手机端的 Memory 列表与阅读区采用 **push/detail**。\n- 返回文件索引无需离开 Workspace。\n- 底部 Capability Capsule 保留，并为正文预留滚动安全距离。\n\n> 不新增全局 Memory 导航、不再选择 Repository。\n\n[查看恢复记录](topics/recovery.md#retry-strategy) · [返回索引](MEMORY.md)";
+MEMORIES["nession"].find(x=>x.id==="verification.md").markdown = "# 验收上下文\n\n## Mock 与真实证据\n\n原型只验证交互，不表示完成 production Acceptance。\n\n1. 检查相对链接是否打开正确记忆文件。\n2. 验证 Frontmatter / GFM 和安全的 Markdown 内容。\n3. 在手机窄屏检验滚动与返回。\n\n~~~bash\nnode claude-memory-2689/smoke-test.mjs\n~~~\n\n[返回索引](MEMORY.md#topics)";
+MEMORIES["nession"].find(x=>x.id==="topics/recovery.md").markdown = "---\ntitle: Recovery playbook\nkind: note\n---\n\n# 恢复记录\n\n这个文件模拟已读取首个 chunk；需要继续读取才能定位到下面的章节。\n\n<!-- part-2 -->\n\n## Retry strategy\n\n当读取中断时保留先前的内容，用户可以选择继续加载，然后再定位到章节。\n\n- [x] 不自动抓取所有记忆文件\n- [ ] 继续读取时保留本文件上下文\n\n[返回架构文件](../architecture.md#session-boundary) · [返回索引](../MEMORY.md)";
+MEMORIES["vol"].find(x=>x.id==="MEMORY.md").markdown = "# Vol · Memory\n\n> 这是 **BestNathan/vol** 的独立记忆索引，不应显示 Nession 的主题内容。\n\n## Topics\n\n- [Tool Registry](tools.md#tool-ownership)\n- [Runtime 生命周期](runtime.md#runtime-state)";
+MEMORIES["vol"].find(x=>x.id==="tools.md").markdown = "# Tool Registry\n\n## Tool ownership\n\n工具注册表提供可用工具的元数据。\n[返回索引](MEMORY.md)";
+MEMORIES["vol"].find(x=>x.id==="runtime.md").markdown = "# Runtime 生命周期\n\n## Runtime state\n\nTask 表示明确目标，Session 表示持续上下文。\n[返回索引](MEMORY.md)";
+MEMORIES.nession.push({id:"topics/recovery.md",title:"恢复记录",desc:"分块读取与标题定位",markdown:"---\ntitle: Recovery playbook\nkind: note\n---\n\n# 恢复记录\n\n这个文件模拟已读取首个 chunk；需要继续读取才能定位到下面的章节。\n\n<!-- part-2 -->\n\n## Retry strategy\n\n当读取中断时保留先前的内容，用户可以选择继续加载，然后再定位到章节。\n\n- [x] 不自动抓取所有记忆文件\n- [ ] 继续读取时保留本文件上下文\n\n[返回架构文件](../architecture.md#session-boundary) · [返回索引](../MEMORY.md)",partial:true});
 const $=id=>document.getElementById(id);
-const state={session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,generation:0,reading:0,readingBusy:false,notice:""};
+const state={session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,generation:0,reading:0,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null};
 const S=()=>SESSIONS.find(x=>x.id===state.session),D=()=>MEMORIES[S().key]||[];
 function h(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function doc(){return D().find(x=>x.id===state.file)||D()[0];}
@@ -35,17 +45,151 @@ function toggleContext(){state.context=state.context==="closed"?"list":"closed";
 function switchSession(id){
  const next=SESSIONS.find(x=>x.id===id);if(!next)return;
  const prev=S();const shared=prev.key&&prev.key===next.key&&prev.kind==="ready"&&next.kind==="ready";
- state.generation++;state.reading++;state.session=id;state.page="terminal";state.context="closed";state.origin=false;state.detail=false;state.readingBusy=false;state.notice="";
+ state.generation++;state.reading++;state.session=id;state.page="terminal";state.context="closed";state.origin=false;state.detail=false;state.readingBusy=false;state.notice="";state.raw=false;state.loadedMore=false;state.pendingFragment=null;state.scrolledFragment=null;
  if(!shared||!MEMORIES[next.key]?.some(x=>x.id===state.file))state.file="MEMORY.md";
  state.phase="loading";render();
  const token=state.generation;setTimeout(()=>{if(token!==state.generation)return;state.phase=next.kind;renderWorkspace();renderContext();},350);
 }
-function openFile(id){
+function openFile(id,fragment=null){
  if(state.phase!=="ready"||!D().some(x=>x.id===id))return;
- state.file=id;state.detail=true;state.readingBusy=true;const token=++state.reading,gen=state.generation;
- renderWorkspace();setTimeout(()=>{if(gen!==state.generation||token!==state.reading)return;state.readingBusy=false;renderWorkspace();},180);
+ state.file=id;state.detail=true;state.notice="";state.raw=false;state.loadedMore=false;
+ state.pendingFragment=fragment;state.scrolledFragment=null;state.readingBusy=true;
+ const token=++state.reading,gen=state.generation;
+ renderWorkspace();
+ setTimeout(()=>{
+  if(gen!==state.generation||token!==state.reading)return;
+  state.readingBusy=false;renderWorkspace();scrollToPendingHeading();
+ },180);
 }
-function reset(){state.generation++;state.reading++;Object.assign(state,{session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,readingBusy:false,notice:""});render();}
+function slug(text){
+ return String(text).toLowerCase().normalize("NFKC").replace(/[*\`[\]()]/g,"")
+ .replace(/[^\p{L}\p{N}\s-]/gu,"").trim().replace(/\s+/g,"-");
+}
+function safeHref(source,target){
+ if(/^https?:\/\//i.test(target))return {kind:"external",href:target};
+ if(/^[a-z][a-z0-9+.-]*:/i.test(target)||/^\/|^\\/.test(target))return {kind:"blocked"};
+ let decoded;
+ try{decoded=decodeURIComponent(target);}catch{return {kind:"blocked"};}
+ if(/^[a-z][a-z0-9+.-]*:/i.test(decoded)||/^\/|^\\/.test(decoded)||decoded.includes("\\"))return {kind:"blocked"};
+ const hash=decoded.indexOf("#"),relative=hash<0?decoded:decoded.slice(0,hash);
+ const anchor=hash<0?null:slug(decoded.slice(hash+1));
+ const parts=source.split("/").slice(0,-1);
+ for(const seg of relative.split("/")){
+  if(!seg||seg===".")continue;
+  if(seg===".."){if(!parts.length)return {kind:"blocked"};parts.pop();continue;}
+  parts.push(seg);
+ }
+ const path=relative?parts.join("/"):source;
+ if(!/\.md$/i.test(path))return {kind:"blocked"};
+ if(!D().some(file=>file.id===path))return {kind:"missing",path};
+ return {kind:"internal",path,anchor};
+}
+function renderInline(source){
+ const pattern=/(\[([^\]]+)\]\(([^)\s]+)\)|\`([^\`]+)\`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
+ let out="",cursor=0,match;
+ while((match=pattern.exec(source))){
+  out+=h(source.slice(cursor,match.index));cursor=pattern.lastIndex;
+  if(match[2]!==undefined){
+   const label=h(match[2]),target=match[3],decision=safeHref(state.file,target);
+   if(decision.kind==="external")
+    out+='<a href="'+h(decision.href)+'" target="_blank" rel="noopener noreferrer">'+label+'</a>';
+   else if(decision.kind==="blocked")
+    out+='<span class="blocked-link" title="Untrusted path or scheme">'+label+'</span>';
+   else
+    out+='<a href="#" data-memory-href="'+h(target)+'" class="memory-inline-link">'+label+'</a>';
+  }else if(match[4]!==undefined)out+="<code>"+h(match[4])+"</code>";
+  else if(match[5]!==undefined)out+="<strong>"+h(match[5])+"</strong>";
+  else out+="<em>"+h(match[6])+"</em>";
+ }
+ return out+h(source.slice(cursor));
+}
+function frontmatterAndBody(text){
+ const lines=text.split(/\r?\n/),opener=lines[0];
+ if(opener!=="---"&&opener!=="+++")return {metadata:"",body:text};
+ const close=lines.indexOf(opener,1);
+ if(close<0)return {metadata:"",body:text}; // Malformed: preserve all source.
+ const rows=lines.slice(1,close).filter(line=>line.trim()&&!line.trim().startsWith("#"))
+  .map(line=>{
+   const match=opener==="---"?line.match(/^([A-Za-z0-9_.-]+):\s*(.*)$/):line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/);
+   return match?'<div class="meta-row"><dt>'+h(match[1])+'</dt><dd>'+h(match[2].replace(/^"|"$/g,""))+'</dd></div>':null;
+  }).filter(Boolean);
+ const metadata=rows.length?'<section class="frontmatter-card" aria-label="Frontmatter"><div class="frontmatter-caption">FRONTMATTER <span>'+(opener==="---"?"YAML":"TOML")+'</span></div><dl>'+rows.join("")+'</dl></section>':"";
+ return {metadata,body:lines.slice(close+1).join("\n")};
+}
+function renderMarkdown(text){
+ const parsed=frontmatterAndBody(text),lines=parsed.body.split(/\r?\n/),out=[parsed.metadata];
+ let i=0;
+ while(i<lines.length){
+  const line=lines[i];
+  if(!line.trim()){i++;continue;}
+  const fence=/^(\x60{3,}|~{3,})\s*([\w+-]*)\s*$/.exec(line);
+  if(fence){
+   const lang=fence[2]||"text",block=[];i++;
+   while(i<lines.length&&!lines[i].startsWith(fence[1]))block.push(lines[i++]);
+   if(i<lines.length)i++;
+   const escaped=h(block.join("\n")).replace(/\b(pub|struct|const|let|fn|use|return)\b/g,'<span class="code-keyword">$1</span>');
+   out.push('<div class="memory-code"><div class="code-label">'+h(lang)+'</div><pre><code>'+escaped+'</code></pre></div>');continue;
+  }
+  const heading=/^(#{1,6})\s+(.+)$/.exec(line);
+  if(heading){
+   const level=Math.min(heading[1].length+1,6),id=slug(heading[2]);
+   out.push('<h'+level+' id="'+h(id)+'" data-memory-heading="'+h(id)+'">'+renderInline(heading[2])+'</h'+level+'>');i++;continue;
+  }
+  if(/^\|.*\|\s*$/.test(line)&&i+1<lines.length&&/^\|?\s*:?-{2,}/.test(lines[i+1])){
+   const cells=row=>row.trim().replace(/^\||\|$/g,"").split("|");
+   const headers=cells(line);i+=2;const rows=[];
+   while(i<lines.length&&/^\|.*\|\s*$/.test(lines[i])){rows.push(cells(lines[i]));i++;}
+   out.push('<div class="memory-table-wrap"><table><thead><tr>'+headers.map(c=>'<th>'+renderInline(c.trim())+'</th>').join("")+'</tr></thead><tbody>'+
+    rows.map(row=>'<tr>'+row.map(c=>'<td>'+renderInline(c.trim())+'</td>').join("")+'</tr>').join("")+'</tbody></table></div>');continue;
+  }
+  if(/^>\s?/.test(line)){const q=[];while(i<lines.length&&/^>\s?/.test(lines[i]))q.push(lines[i++].replace(/^>\s?/,""));out.push('<blockquote>'+renderInline(q.join(" "))+'</blockquote>');continue;}
+  if(/^(-|\*|\d+\.)\s+/.test(line)){
+   const ordered=/^\d+\./.test(line),items=[],tag=ordered?"ol":"ul";
+   while(i<lines.length&&(/^(-|\*|\d+\.)\s+/.test(lines[i]))){
+    const entry=lines[i++].replace(/^(-|\*|\d+\.)\s+/,"");
+    const box=/^\[([ xX])\]\s+(.*)$/.exec(entry);
+    items.push('<li>'+(box?'<span class="check '+(box[1].toLowerCase()==="x"?"done":"")+'" aria-hidden="true">'+(box[1].toLowerCase()==="x"?"☑":"☐")+'</span>'+renderInline(box[2]):renderInline(entry))+'</li>');
+   }
+   out.push("<"+tag+">"+items.join("")+"</"+tag+">");continue;
+  }
+  if(/^(-{3,}|\*{3,})\s*$/.test(line)){out.push("<hr>");i++;continue;}
+  const paragraph=[];
+  while(i<lines.length&&lines[i].trim()&&!/^(#{1,6}\s|>|(-|\*|\d+\.)\s|~{3,}|\x60{3,})/.test(lines[i])){
+   paragraph.push(lines[i++]);
+  }
+  if(paragraph.length)out.push('<p>'+renderInline(paragraph.join(" "))+'</p>');
+  else i++;
+ }
+ return out.join("\n");
+}
+function currentMarkdown(d){
+ const text=d.markdown||("# "+d.title+"\n\n"+(d.intro||"")+"\n\n"+d.parts.map(([name,bullets])=>"## "+name+"\n"+bullets.map(x=>"- "+x).join("\n")).join("\n\n"));
+ return d.partial&&!state.loadedMore?text.split("<!-- part-2 -->")[0]:text.replace("<!-- part-2 -->","");
+}
+function readerNotice(message){state.notice=message;renderWorkspace();}
+function scrollToPendingHeading(){
+ if(!state.pendingFragment||state.readingBusy||state.raw)return;
+ const target=state.pendingFragment,root=$("workspace-inner");
+ const nodes=root.querySelectorAll?Array.from(root.querySelectorAll("[data-memory-heading]")):[];
+ const hit=nodes.find(node=>node.getAttribute("data-memory-heading")===target);
+ if(hit){hit.scrollIntoView?.({block:"start",behavior:"smooth"});state.scrolledFragment=target;state.pendingFragment=null;state.notice="";}
+ else if(doc()?.partial&&!state.loadedMore)readerNotice("目标章节尚未加载。点击「继续读取」后自动定位。");
+ else{state.pendingFragment=null;readerNotice("当前文件中没有找到章节 #"+target);}
+}
+function followMemoryLink(href){
+ const result=safeHref(state.file,href);
+ if(result.kind==="blocked"){readerNotice("已阻止不安全或超出 Memory 范围的链接。");return;}
+ if(result.kind==="missing"){readerNotice("文件 "+result.path+" 不在当前 Session 的 Memory 索引中。");return;}
+ if(result.kind==="external")return; // External links are native safe anchors.
+ if(result.path===state.file){
+  state.pendingFragment=result.anchor;
+  if(result.anchor)scrollToPendingHeading();
+  return;
+ }
+ openFile(result.path,result.anchor);
+}
+
+function reset(){state.generation++;state.reading++;Object.assign(state,{session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null});render();}
 function renderTerminal(){
  const s=S(),cmd=s.claude?"claude":"pwd";
  const lines=s.kind==="unavailable"?'<span class="term-muted"># Agent unreachable · last snapshot retained</span>\nConnection unavailable.\n':'<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cmd">git branch --show-current</span>\n'+h(s.branch)+'\n\n<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cmd">'+cmd+'</span>\n'+(s.claude?"Claude Code\n\n<span class='term-muted'>  Working directory available. Existing TUI remains mounted.</span>\n":h(s.cwd)+"\n")+'\n<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cursor"></span>';
@@ -98,17 +242,23 @@ function navFiles(){
 function fileRow(d){return '<button class="memory-file '+(state.file===d.id?"selected":"")+'" data-file="'+h(d.id)+'" type="button" aria-current="'+(state.file===d.id?"page":"false")+'">'+
  '<span class="file-glyph">▤</span><span class="file-copy"><strong>'+h(d.id)+'</strong><small>'+h(d.desc)+'</small></span></button>';}
 function article(d){
- const intro='<p>'+h(d.intro||"此文件包含与当前 Repository 相关的 Claude Code 记忆，仅作为模拟阅读内容。")+'</p>';
- const parts=d.parts.map(([name,bullets])=>'<h3>'+h(name)+'</h3><ul>'+bullets.map(v=>'<li>'+h(v)+'</li>').join("")+'</ul>').join("");
- const index=d.index?'<h3>主题文件</h3>'+D().filter(x=>!x.index).map(x=>'<button class="index-link" data-file="'+h(x.id)+'" type="button"><span><strong>'+h(x.id)+'</strong><small>'+h(x.desc)+'</small></span><span>›</span></button>').join(""):"";
- return '<div class="reader-body"><h2>'+h(d.title)+'</h2>'+intro+parts+index+'<p class="article-note">只读 · 模拟 Markdown 记忆文件 · 不代表真实 Claude Code 数据</p></div>';
+ const content=currentMarkdown(d);
+ return '<div class="reader-body memory-prose">'+
+ (state.raw?'<pre class="memory-raw">'+h(content)+'</pre>':renderMarkdown(content))+
+ (d.partial&&!state.loadedMore?'<div class="partial-notice"><span>当前仅显示首个文件片段。继续读取后可访问剩余章节。</span><button type="button" data-action="load-more">继续读取</button></div>':"")+
+ '<p class="article-note">只读 · 模拟 Markdown 记忆文件 · 不代表真实 Claude Code 数据</p></div>';
 }
 function reader(){
- const d=doc();
+ const d=doc(),index=state.file==="MEMORY.md";
  return '<article class="memory-reader" aria-label="Memory 文件详情"><div class="reader-head">'+
- '<div style="display:flex;align-items:center;min-width:0"><span class="reader-path">'+h(d?.id||"MEMORY.md")+'</span></div><span class="read-only">READ ONLY</span></div>'+
+ '<div class="reader-identity">'+
+ (!index?'<button class="reader-index" type="button" data-file="MEMORY.md" aria-label="返回 Memory 索引">‹ 索引</button>':"")+
+ '<span class="reader-path">'+h(d?.id||"MEMORY.md")+'</span></div>'+
+ '<button class="reader-mode" type="button" data-action="toggle-raw" aria-label="'+(state.raw?"查看渲染效果":"查看 Markdown 源码")+'">'+(state.raw?"预览":"源码")+'</button></div>'+
+ (state.notice?'<div class="reader-notice" role="status">'+h(state.notice)+'</div>':"")+
  (state.readingBusy?'<div class="state-view"><div><p>正在读取文件…</p></div></div>':d?article(d):'<div class="state-view"><p>没有可读取的文件</p></div>')+'</article>';
 }
+
 function emptyState(){
  const messages={
  loading:["◌","正在解析当前 Session","根据工作目录定位 Repo 与 Claude Code Memory。"],
@@ -186,12 +336,15 @@ $("context-surface").addEventListener("click",e=>{
 });
 $("capability-dock").addEventListener("click",e=>{const b=e.target.closest("[data-cap]");if(!b)return;state.capability=b.dataset.cap;state.tab="memory";state.detail=false;state.origin=false;renderWorkspace();});
 $("workspace-inner").addEventListener("click",e=>{
- const btn=e.target.closest("[data-tab],[data-file],[data-action],[data-cap]");if(!btn)return;
+ const btn=e.target.closest("[data-memory-href],[data-tab],[data-file],[data-action],[data-cap]");if(!btn)return;
+ if(btn.dataset.memoryHref){e.preventDefault?.();followMemoryLink(btn.dataset.memoryHref);return;}
  if(btn.dataset.tab){state.tab=btn.dataset.tab;state.detail=false;renderWorkspace();}
  else if(btn.dataset.file)openFile(btn.dataset.file);
  else if(btn.dataset.cap){state.capability=btn.dataset.cap;state.tab="memory";state.detail=false;renderWorkspace();}
  else if(btn.dataset.action==="origin"){state.origin=!state.origin;renderWorkspace();}
  else if(btn.dataset.action==="retry")retry();
+ else if(btn.dataset.action==="toggle-raw"){state.raw=!state.raw;state.notice="";renderWorkspace();}
+ else if(btn.dataset.action==="load-more"){state.loadedMore=true;state.notice="";renderWorkspace();scrollToPendingHeading();}
 });
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(state.context!=="closed"){state.context="closed";renderContext();}else if(state.page!=="terminal")returnOneDepth();});
 let x0=0,y0=0,edge=false;
@@ -210,6 +363,6 @@ $("app").addEventListener("touchend",e=>{
  else if(state.page==="terminal"&&dx<0&&x0>window.innerWidth-28)toWorkspace("claude","memory");
  else if(state.page==="workspace"&&!state.detail&&dx>0&&x0<28)showPage("terminal");
 },{passive:true});
-window.__nessionMemoryMock={state:()=>({session:state.session,repo:S().repo,phase:state.phase,page:state.page,context:state.context,tab:state.tab,file:state.file,detail:state.detail,generation:state.generation}),setSession:switchSession,openFile,openWorkspace:()=>toWorkspace("claude","memory"),reset};
+window.__nessionMemoryMock={state:()=>({session:state.session,repo:S().repo,phase:state.phase,page:state.page,context:state.context,tab:state.tab,file:state.file,detail:state.detail,generation:state.generation,raw:state.raw,loadedMore:state.loadedMore,pendingFragment:state.pendingFragment,scrolledFragment:state.scrolledFragment,notice:state.notice}),setSession:switchSession,openFile,followMemoryLink,openWorkspace:()=>toWorkspace("claude","memory"),reset};
 render();
 })();
