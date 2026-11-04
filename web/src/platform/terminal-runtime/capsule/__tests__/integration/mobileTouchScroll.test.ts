@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CapsuleOcclusionScroll,
+  TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
   type CapsuleScrollTerminalPort,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
 import type { TerminalMouseTrackingMode } from '@/platform/terminal-runtime/emulator';
@@ -75,7 +76,7 @@ function makeHarness(options: HarnessOptions = {}) {
   occlusion.bind();
   const wheels: WheelEvent[] = [];
   element.addEventListener('wheel', (event) => { wheels.push(event as WheelEvent); });
-  return { occlusion, port, element, screen, wheels };
+  return { occlusion, port, host, element, screen, wheels };
 }
 
 function touchEvent(
@@ -108,6 +109,31 @@ afterEach(() => {
 });
 
 describe('mobile touch scroll ownership (#2659)', () => {
+  it('does not automatically push the terminal upward when the + panel opens', () => {
+    const harness = makeHarness();
+    harnesses.push(harness.occlusion);
+    const { occlusion, host, screen, port } = harness;
+
+    occlusion.scrollToMarginBottom();
+    expect(screen.style.transform).toBe('');
+    host.style.setProperty('--nession-local-terminal-capsule-panel-clearance', '96px');
+    host.dispatchEvent(new Event(TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT));
+    // Opening the panel only creates optional scroll range: the user can
+    // still see the original first row without having to recover it.
+    expect(screen.style.transform).toBe('');
+    expect(occlusion.mode()).toBe('history');
+
+    // Manual forward scroll can bring the live prompt above the panel, and
+    // manual reverse scroll restores the full original visible screen.
+    occlusion.scrollLines(6);
+    expect(screen.style.transform).toBe('translateY(-96px)');
+    expect(occlusion.mode()).toBe('following');
+    occlusion.scrollLines(-6);
+    expect(screen.style.transform).toBe('');
+    expect(port.scrollLines).not.toHaveBeenCalled();
+  });
+
+
   it('can drag the shifted terminal back DOWN to reveal every top row, then browse history', () => {
     const harness = makeHarness({ panelClearance: '96px' });
     harnesses.push(harness.occlusion);
