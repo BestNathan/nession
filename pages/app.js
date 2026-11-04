@@ -244,8 +244,8 @@ function agentPeriodLinks(path,period){
   }
   return wrap;
 }
-function agentOutcomeSummary(a){
-  if(!a)return 'Not observed';
+function agentOutcomeSummary(a, legacyCount=null){
+  if(!a)return legacyCount===null?'Not observed':fmt(legacyCount)+' runs · outcome unavailable';
   return fmt(a.total)+' runs · '+fmt(a.success)+' succeeded · '+fmt(a.failure)+' failed';
 }
 function renderAgentDetail(role,id){
@@ -350,9 +350,10 @@ function renderAgents(){
     attach(main,local(x.id,'/agents/'+x.role+'/'+x.id+
       (period==='30d'?'?window=30d':''),'entry-title'),
       node('small','',x.role+' · '+x.provider));
-    attach(right,node('strong','',agentOutcomeSummary(stats)),
+    const legacyCount=period==='7d'?x.observed_7d??null:null;
+    attach(right,node('strong','',agentOutcomeSummary(stats,legacyCount)),
       node('span','',stats?'Other / unknown: '+fmt(stats.cancelled+stats.timed_out+stats.unknown):
-        'No observed identity in this window'));
+        legacyCount===null?'No observed identity in this window':'Outcome breakdown unavailable for this source'));
     return attach(item,main,right);
   });
   roster.append(rows.length?attach(node('div','list'),...rows):
