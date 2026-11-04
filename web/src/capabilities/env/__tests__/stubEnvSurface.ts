@@ -7,12 +7,18 @@ import { WIRE as ENV_DELETE_WIRE } from '@/generated/protocol/core/server-env-de
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
 import { WIRE as SESSION_ENV_APPLY_WIRE } from '@/generated/protocol/core/server-session-env-apply/v1';
 import { WIRE as SESSION_ENV_UNSET_WIRE } from '@/generated/protocol/core/server-session-env-unset/v1';
+import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
+import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
+import { WIRE as SESSION_ENV_BINDING_REAPPLY_WIRE } from '@/generated/protocol/core/server-session-env-binding-reapply/v1';
 import {
   envApi,
   type ActiveEnvFile,
   type EnvFileInfo,
+  type EnvFileRef,
   type EnvGetResponse,
   type EnvWriteResponse,
+  type SessionEnvBindingResponse,
+  type SessionEnvBindingState,
 } from '@/capabilities/env';
 
 /**
@@ -48,6 +54,7 @@ export interface EnvStub {
   setFile(response: EnvGetResponse): void;
   setWrite(response: EnvWriteResponse): void;
   setActiveSessionFiles(active: ActiveEnvFile[]): void;
+  setBinding(response: SessionEnvBindingResponse): void;
   /** Detach the stub — call in `afterEach` so the singleton goes back to unbound. */
   teardown(): void;
 }
@@ -58,6 +65,38 @@ export function stubEnvApi(): EnvStub {
   let getResponse: EnvGetResponse = { success: true, content: '', in_use_by: [] };
   let writeResponse: EnvWriteResponse = { success: true };
   let active: ActiveEnvFile[] = [];
+  let bindingResponse: SessionEnvBindingResponse = {
+    success: true,
+    binding: {
+      session_id: 's1',
+      desired_revision: 0,
+      desired_profiles: [],
+    },
+    warnings: [],
+  };
+
+  const simulate = (
+    refs: EnvFileRef[],
+    revision: number,
+  ): SessionEnvBindingState => ({
+    session_id: bindingResponse.binding?.session_id ?? 's1',
+    desired_revision: revision,
+    desired_profiles: refs.map((profile) => ({
+      profile,
+      phase: 'attach',
+      content_hash: null,
+      outdated: false,
+    })),
+    observed: {
+      applied_revision: revision,
+      status: refs.length === 0 ? 'in_sync' : 'pending_shell',
+      profiles: refs,
+      managed_keys: [],
+      shell: 'bash',
+      shell_revision: refs.length === 0 ? revision : null,
+      last_error: null,
+    },
+  });
 
   const surface: PluginSurface = {
     connectionState: 'connected',
@@ -78,6 +117,34 @@ export function stubEnvApi(): EnvStub {
       }
       if (type === SESSION_ENV_ACTIVE_WIRE) {
         return Promise.resolve({ active } as T);
+      }
+      if (type === SESSION_ENV_BINDING_GET_WIRE) {
+        return Promise.resolve(bindingResponse as T);
+      }
+      if (type === SESSION_ENV_BINDING_SET_WIRE) {
+        const refs = (payload.profiles as EnvFileRef[] | undefined) ?? [];
+        const current = bindingResponse.binding?.desired_revision ?? 0;
+        bindingResponse = {
+          success: true,
+          binding: simulate(refs, refs.length === 0 ? 0 : current + 1),
+          warnings: [],
+        };
+        return Promise.resolve(bindingResponse as T);
+      }
+      if (type === SESSION_ENV_BINDING_REAPPLY_WIRE) {
+        const current = bindingResponse.binding;
+        const refs = (current?.desired_profiles ?? []).map(
+          (entry) => entry.profile,
+        );
+        bindingResponse = {
+          success: true,
+          binding: simulate(
+            refs,
+            (current?.desired_revision ?? 0) + 1,
+          ),
+          warnings: [],
+        };
+        return Promise.resolve(bindingResponse as T);
       }
       if (type === SESSION_ENV_APPLY_WIRE || type === SESSION_ENV_UNSET_WIRE) {
         return Promise.resolve({ success: true } as T);
@@ -113,6 +180,9 @@ export function stubEnvApi(): EnvStub {
     },
     setActiveSessionFiles(next) {
       active = next;
+    },
+    setBinding(next) {
+      bindingResponse = next;
     },
     teardown: release,
   };

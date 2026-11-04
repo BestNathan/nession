@@ -198,6 +198,17 @@ explanation is the same dead end one step earlier.
   in this repository can see that: the band is exercised at the DOM level only.
   If a platform does consume an edge, the visible control is the fallback — the
   gesture is not widened back across the surface to compensate.
+- **Inside the Terminal, a stationary long-press is the terminal's own input
+  gesture** (#2657). After roughly 380 ms the viewport shows a small translucent
+  direction dial; dragging along an axis sends that semantic arrow key, and
+  holding repeats at 1/2/4/8 keys per second, farther from the centre being
+  faster. Returning to the centre or releasing stops it. Before the hold ends
+  nothing is consumed, so a tap, a quick swipe and scrolling behave as before,
+  and the gesture never starts inside the shell's `EDGE_BAND_PX` — the edge
+  stays navigation's. The dial is an accelerator, not a persistent control;
+  Terminal Keys remain the visible, accessible fallback. The terminal-owned
+  contract (ownership, key encoding, cancellation) is in
+  [interaction-semantics.md](../terminal/interaction-semantics.md#touch-direction-pad-2657).
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 

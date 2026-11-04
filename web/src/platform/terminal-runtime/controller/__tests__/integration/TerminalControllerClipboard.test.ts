@@ -219,21 +219,21 @@ describe('TerminalController HTTP copy capability (#2614)', () => {
     return { controller, port };
   }
 
-  it('reports the origin capability and delegates the synchronous gesture write', () => {
-    const fromGesture = vi.fn<(text: string) => boolean>(() => true);
+  it('reports the origin capability and delegates the gesture write', async () => {
+    const fromGesture = vi.fn<(text: string) => Promise<boolean>>(async () => true);
     const { controller } = harness({
       writeTextIsProgrammatic: () => false,
       writeTextFromGesture: fromGesture,
     });
     expect(controller.canWriteClipboardProgrammatically()).toBe(false);
-    expect(controller.copyClipboardTextFromGesture('http text')).toBe(true);
+    await expect(controller.copyClipboardTextFromGesture('http text')).resolves.toBe(true);
     expect(fromGesture).toHaveBeenCalledWith('http text');
   });
 
   it('never claims a gesture copy that the port does not support', async () => {
     const { controller, port } = harness({});
     expect(controller.canWriteClipboardProgrammatically()).toBe(false);
-    expect(controller.copyClipboardTextFromGesture('http text')).toBe(false);
+    await expect(controller.copyClipboardTextFromGesture('http text')).resolves.toBe(false);
     expect(await controller.copyClipboardText('http text')).toBe(true);
     expect(port.writeText).toHaveBeenCalledWith('http text');
   });

@@ -1,10 +1,15 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
 
+const { viewportProps } = vi.hoisted(() => ({ viewportProps: vi.fn() }));
+
 vi.mock('@/product/terminal/components/TerminalViewport', () => ({
-  TerminalViewport: () => <div data-testid="terminal-viewport" />,
+  TerminalViewport: (props: Record<string, unknown>) => {
+    viewportProps(props);
+    return <div data-testid="terminal-viewport" />;
+  },
 }));
 
 vi.mock('@/product/terminal/components/input/TerminalInputOverlay', () => ({
@@ -16,6 +21,10 @@ function makeController(): TerminalController {
 }
 
 describe('TerminalPane', () => {
+  beforeEach(() => {
+    viewportProps.mockClear();
+  });
+
   it('does not mount xterm before the transport viewport is ready', () => {
     render(
       <TerminalPane
@@ -42,5 +51,24 @@ describe('TerminalPane', () => {
 
     expect(screen.getByTestId('terminal-viewport')).toBeInTheDocument();
     expect(screen.queryByTestId('terminal-loading')).not.toBeInTheDocument();
+  });
+
+  it('forwards the input gate and the shell edge reservation to the viewport', () => {
+    const touchEdgeReservation = () => true;
+    render(
+      <TerminalPane
+        sessionId="agent:sess"
+        controller={makeController()}
+        terminalState="attached"
+        viewportReady
+        inputDisabled
+        touchEdgeReservation={touchEdgeReservation}
+      />,
+    );
+
+    expect(viewportProps).toHaveBeenLastCalledWith(expect.objectContaining({
+      inputDisabled: true,
+      touchEdgeReservation,
+    }));
   });
 });

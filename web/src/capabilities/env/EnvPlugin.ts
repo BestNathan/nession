@@ -5,6 +5,7 @@ import { WIRE as ENV_WRITE_WIRE } from '@/generated/protocol/core/server-env-wri
 import { WIRE as SESSION_ENV_ACTIVE_WIRE } from '@/generated/protocol/core/server-session-env-active/v1';
 import { WIRE as SESSION_ENV_APPLY_WIRE } from '@/generated/protocol/core/server-session-env-apply/v1';
 import { WIRE as SESSION_ENV_BINDING_GET_WIRE } from '@/generated/protocol/core/server-session-env-binding-get/v1';
+import { WIRE as SESSION_ENV_BINDING_REAPPLY_WIRE } from '@/generated/protocol/core/server-session-env-binding-reapply/v1';
 import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
 import { WIRE as SESSION_ENV_QUERY_WIRE } from '@/generated/protocol/core/server-session-env-query/v1';
 import { WIRE as SESSION_ENV_UNSET_WIRE } from '@/generated/protocol/core/server-session-env-unset/v1';
@@ -136,6 +137,17 @@ export class EnvPlugin implements TransportPlugin {
   async getSessionEnvBinding(sessionId: string): Promise<SessionEnvBindingResponse> {
     return this.requireConnection().request<SessionEnvBindingResponse>(
       SESSION_ENV_BINDING_GET_WIRE,
+      { session_id: sessionId },
+    );
+  }
+
+  /**
+   * Re-resolve the currently desired profiles at a new revision. This is the
+   * only ordinary path that applies a profile edit to an existing Session.
+   */
+  async reapplySessionEnvBinding(sessionId: string): Promise<SessionEnvBindingResponse> {
+    return this.requireConnection().request<SessionEnvBindingResponse>(
+      SESSION_ENV_BINDING_REAPPLY_WIRE,
       { session_id: sessionId },
     );
   }

@@ -1,4 +1,5 @@
 import {
+  BindingDraftView,
   editorTargetKey,
   EnvironmentGuardDialog,
   EnvironmentNavigator,
@@ -6,6 +7,8 @@ import {
   EnvProfileDetail,
   EnvProfileEditor,
   refKey,
+  SessionEnvironmentView,
+  bindingStatus,
   useEnvironmentWorkspace,
 } from '@/capabilities/env';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -13,16 +16,19 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 /**
- * Web layout (#1202): navigator ‖ Profile Detail on the same grid the Files
- * view uses — a fixed navigation column carrying `workspace.navigation` and a
- * fluid detail on the canvas, so the background shift is the separator and
- * each pane owns its own scroll.
+ * Web layout (#1202, Session-first in #2654): a bounded Profile navigator and
+ * a flexible main surface. With a Session, the main surface opens on the
+ * Session Environment overview; the read-first Profile Detail and the ordered
+ * binding draft replace it without adding a third pane.
  */
 export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
   const env = useEnvironmentWorkspace(ctx.session?.session_id ?? null);
-  const { profiles, screen, selectedProfile } = env;
+  const { profiles, screen, selectedProfile, binding } = env;
+  const sessionId = ctx.session?.session_id ?? null;
+  const sessionName = ctx.session?.session_name ?? null;
+  const status = bindingStatus(binding.binding, binding.error);
 
-  const detail = () => {
+  const main = () => {
     if (screen.editor) {
       return (
         <EnvProfileEditor
@@ -36,20 +42,48 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
         />
       );
     }
+    if (screen.view === 'draft' && screen.draft) {
+      return (
+        <BindingDraftView
+          baseline={screen.draftBaseline ?? []}
+          draft={screen.draft}
+          profiles={profiles.profiles}
+          agents={ctx.agents}
+          dirty={screen.dirty}
+          pending={binding.pending}
+          error={binding.error}
+          onChange={screen.setDraftRefs}
+          onCancel={screen.cancelBindingDraft}
+          onApply={env.applyBinding}
+        />
+      );
+    }
     if (selectedProfile) {
       return (
         <EnvProfileDetail
           profile={selectedProfile}
           agents={ctx.agents}
-          active={profiles.activeKeys.has(refKey(selectedProfile))}
-          sourcedAtCreate={profiles.createKeys.has(refKey(selectedProfile))}
-          hasSession={profiles.sessionId !== null}
-          sessionActionPending={profiles.sessionActionPending}
-          onApply={() => void profiles.applyToSession(selectedProfile)}
-          onRemove={() => void profiles.removeFromSession(selectedProfile)}
+          includedInBinding={env.includedKeys.has(refKey(selectedProfile))}
+          sessionLabel={sessionId ? status.title : null}
+          onShowSession={env.showSession}
           onEdit={screen.startEdit}
           onDuplicate={() => screen.startDuplicate(selectedProfile)}
           onDelete={() => env.deleteProfile(selectedProfile)}
+        />
+      );
+    }
+    if (sessionId) {
+      return (
+        <SessionEnvironmentView
+          sessionId={sessionId}
+          sessionName={sessionName}
+          binding={binding}
+          profiles={profiles.profiles}
+          agents={ctx.agents}
+          pending={binding.pending}
+          onManage={env.startBindingDraft}
+          onReapply={env.reapplyBinding}
+          onRetry={() => void binding.refresh()}
         />
       );
     }
@@ -73,8 +107,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           <EnvironmentNavigator
             profiles={profiles.profiles}
             agents={ctx.agents}
-            activeKeys={profiles.activeKeys}
-            hasSession={profiles.sessionId !== null}
+            includedKeys={env.includedKeys}
             loading={profiles.loading}
             error={profiles.error}
             selectedKey={screen.selectedKey}
@@ -84,7 +117,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
             onRetry={() => void profiles.refresh()}
           />
         </div>
-        <div className="min-h-0 overflow-hidden">{detail()}</div>
+        <div className="min-h-0 overflow-hidden">{main()}</div>
       </div>
 
       <EnvironmentGuardDialog

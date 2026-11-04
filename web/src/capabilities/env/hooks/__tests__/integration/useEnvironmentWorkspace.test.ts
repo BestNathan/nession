@@ -4,10 +4,15 @@ import type { EnvFileInfo, EnvWriteResponse } from '@/types';
 
 const envApi = vi.hoisted(() => ({
   listEnvFiles: vi.fn(),
-  getSessionEnvActive: vi.fn(),
   writeEnvFile: vi.fn(),
   deleteEnvFile: vi.fn(),
 }));
+
+const bindingHook = vi.hoisted(() => ({
+  useSessionEnvBinding: vi.fn(),
+}));
+
+vi.mock('@/capabilities/env/hooks/useSessionEnvBinding', () => bindingHook);
 
 vi.mock('@/capabilities/env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/capabilities/env')>()),
@@ -25,12 +30,56 @@ function info(name: string, overrides: Partial<EnvFileInfo> = {}): EnvFileInfo {
   return { name, source: 'server', size: 5, modified: 0, var_count: 2, ...overrides };
 }
 
+const A_REF = { name: 'a.env', source: 'server' as const };
+
+function bindingResponse(
+  overrides: {
+    success?: boolean;
+    revision?: number;
+    profileNames?: string[];
+    status?: string;
+    error?: string;
+  } = {},
+) {
+  const refs = (overrides.profileNames ?? ['a.env']).map((name) => ({
+    name,
+    source: 'server' as const,
+  }));
+  return {
+    success: overrides.success ?? true,
+    binding: {
+      session_id: 's1',
+      desired_revision: overrides.revision ?? 1,
+      desired_profiles: refs.map((profile) => ({
+        profile,
+        phase: 'attach',
+        outdated: false,
+      })),
+      observed: {
+        applied_revision: overrides.revision ?? 1,
+        status: overrides.status ?? 'in_sync',
+        profiles: refs,
+        managed_keys: ['A'],
+      },
+    },
+    warnings: [],
+    error: overrides.error,
+  };
+}
+
 describe('useEnvironmentWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     envApi.listEnvFiles.mockResolvedValue({ files: [info('a.env'), info('b.env')] });
-    envApi.getSessionEnvActive.mockResolvedValue({ active: [] });
     envApi.writeEnvFile.mockResolvedValue({ success: true } as EnvWriteResponse);
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh: vi.fn(),
+      replace: vi.fn(async () => bindingResponse()),
+      reapply: vi.fn(async () => bindingResponse()),
+    });
     envApi.deleteEnvFile.mockResolvedValue({ success: true });
   });
 
@@ -172,5 +221,67 @@ describe('useEnvironmentWorkspace', () => {
     });
     await waitFor(() => expect(result.current.screen.selectedKey).toBe('server::imported.env'));
     expect(toast.success).toHaveBeenCalledWith('Imported imported.env');
+  });
+
+  it('opens the draft from the live ordered binding', async () => {
+    const { result } = renderHook(() => useEnvironmentWorkspace('s1'));
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => result.current.startBindingDraft());
+    expect(result.current.screen.view).toBe('draft');
+    expect(result.current.screen.draft).toEqual([A_REF]);
+    expect(result.current.screen.draftBaseline).toEqual([A_REF]);
+  });
+
+  it('applies one replace-whole request and returns to the Session view', async () => {
+    const replace = vi.fn(async () =>
+      bindingResponse({
+        revision: 2,
+        profileNames: ['b.env', 'a.env'],
+        status: 'pending_shell',
+      }),
+    );
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh: vi.fn(),
+      replace,
+      reapply: vi.fn(async () => bindingResponse()),
+    });
+    const { result } = renderHook(() => useEnvironmentWorkspace('s1'));
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+    act(() => result.current.startBindingDraft());
+
+    const next = [
+      { name: 'b.env', source: 'server' as const },
+      A_REF,
+    ];
+    await act(async () => {
+      await result.current.applyBinding(next);
+    });
+
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledWith(next);
+    expect(result.current.screen.view).toBe('session');
+    expect(result.current.screen.draft).toBeNull();
+  });
+
+  it('reapplies the desired profiles explicitly', async () => {
+    const reapply = vi.fn(async () => bindingResponse());
+    bindingHook.useSessionEnvBinding.mockReturnValue({
+      ...bindingResponse(),
+      loading: false,
+      pending: false,
+      refresh: vi.fn(),
+      replace: vi.fn(async () => bindingResponse()),
+      reapply,
+    });
+    const { result } = renderHook(() => useEnvironmentWorkspace('s1'));
+    await waitFor(() => expect(result.current.profiles.profiles).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.reapplyBinding();
+    });
+    expect(reapply).toHaveBeenCalledTimes(1);
   });
 });

@@ -224,6 +224,8 @@ describe('Agent Processes workspace', () => {
   });
 
   it('copies only the sanitized display string', async () => {
+    // The shared clipboard owner takes the async branch only on secure origins.
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -237,6 +239,8 @@ describe('Agent Processes workspace', () => {
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith('bash -l --token [REDACTED]'),
     );
+    Reflect.deleteProperty(window, 'isSecureContext');
+    delete (navigator as { clipboard?: unknown }).clipboard;
   });
 
   it('never labels another Session with the previous snapshot', async () => {

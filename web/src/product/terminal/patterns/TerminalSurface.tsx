@@ -184,17 +184,17 @@ const terminalNoticeRowClass =
  * host, so this notice neither reserves a Terminal row nor hides behind the
  * bottom composer. A repeated notice re-arms through `state.id`.
  *
- * ## The action has to work on ordinary HTTP too (#2614)
+ * ## The action has to work on ordinary HTTP too (#2614, #2656)
  *
- * The deployed staging origin is plain HTTP, where browsers do **not** expose
- * the async Clipboard API. The notice's Copy action therefore reads the
- * origin's capability *synchronously*: a secure origin keeps the async write,
- * while an insecure one spends the click on the DOM copy command
- * (`execCommand('copy')` with a scoped listener). Awaiting a call that cannot
- * exist would burn the user activation the DOM path needs, which is exactly
- * how the previous action became a dead end. If neither path can act, the
- * notice presents a bounded selectable surface and says so — it never claims
- * a copy that did not happen.
+ * The deployed staging origin is plain HTTP, where browsers do not expose the
+ * async Clipboard API. The notice's Copy action calls the shared browser
+ * clipboard owner directly inside the click; that owner integrates
+ * `copy-to-clipboard`, whose HTTP branch runs the DOM copy before its Promise
+ * settles, while a secure origin uses the library's async branch. There is no
+ * post-await legacy retry: once a promise has been awaited the transient
+ * activation may be gone, so a refusal asks for a fresh click and, when the
+ * browser cannot copy at all, presents the bounded selectable surface. It
+ * never claims a copy that did not happen.
  */
 const MAX_SELECTABLE_COPY_TEXT = 64 * 1024;
 
@@ -215,21 +215,20 @@ function TerminalClipboardNoticeStrip({
   const copy = () => {
     if (notice.kind !== 'copy-required') { return; }
     const active = controller;
-    if (active?.canWriteClipboardProgrammatically()) {
-      void active.copyClipboardText(notice.text).then((copied) => {
-        if (copied || active.copyClipboardTextFromGesture(notice.text)) {
-          onDismiss?.();
-          return;
-        }
-        setManualCopy(true);
-      });
+    if (!active) {
+      setManualCopy(true);
       return;
     }
-    if (active?.copyClipboardTextFromGesture(notice.text)) {
-      onDismiss?.();
-      return;
-    }
-    setManualCopy(true);
+    // One shared-owner invocation, inside the click (#2656): its HTTP branch
+    // runs the DOM copy before this Promise settles. Awaiting it and then
+    // retrying the legacy path would spend an activation that is already gone.
+    void active.copyClipboardTextFromGesture(notice.text).then((copied) => {
+      if (copied) {
+        onDismiss?.();
+        return;
+      }
+      setManualCopy(true);
+    });
   };
   const exactText = notice.kind === 'copy-required' ? notice.text : '';
   const tooLarge = exactText.length > MAX_SELECTABLE_COPY_TEXT;

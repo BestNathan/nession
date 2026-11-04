@@ -27,14 +27,17 @@ Text paste stays exactly as above: it enters through `terminal.paste`, and xterm
 - **Authority is the Controller lease, not attach.** Only an authorized, foreground (visible) client may perform an effect; an observer performs none and sends no protocol replies. A read requires the one-time password minted by that client's own user paste.
 - **No upload fallback.** Image bytes travel only as OSC 5522 MIME data through the PTY. A TUI that has not enabled 5522 gets no image data; an image-only paste is not sent, and the surface states that the protocol is unsupported.
 
-### Ordinary HTTP is not a secure context (#2614)
+### Ordinary HTTP is not a secure context (#2614, #2656)
 
-The deployed staging origin is plain HTTP, where browsers do **not** expose the async Clipboard API. The protocol stays truthful there: an automatic OSC 52 or OSC 5522 **write** cannot complete, and the protocol answers `EPERM` rather than pretending an effect happened (an OSC 52 frame produces the actionable copy state instead of a silent write). The supported paths on HTTP are the user's own gestures:
+The deployed staging origin is plain HTTP, where browsers do **not** expose the async Clipboard API. Clipboard writes still enter the one shared browser owner (`shared/lib/clipboard`, which integrates `copy-to-clipboard`):
 
-- The copy notice's action runs `document.execCommand('copy')` with a scoped `copy` listener **inside the click**. It must not await `navigator.clipboard` first: on HTTP that call cannot exist, and on a secure origin the await would spend the activation the DOM copy needs. If the browser refuses the command, the notice presents a bounded, read-only, selectable surface and states that the copy was not automatic — never a false success.
-- Text paste and OSC 5522 image ingress enter through the browser's native `paste` event and `ClipboardEvent.clipboardData` (`DataTransfer.items`, `File.arrayBuffer()`), which are not secure-context gated. `navigator.clipboard.read()` is never used.
+- **Automatic OSC 52 text** invokes the shared library's synchronous legacy `execCommand('copy')` path without requiring a user click. Chromium may permit it; the browser's actual result decides. A completed write is silent (no notice); a refusal produces the existing actionable Copy notice. A remote emission cannot manufacture user activation, so Firefox/Safari policy may still refuse.
+- **OSC 5522 binary/MIME writes** are explicitly refused on HTTP (`EPERM`) because the text fallback cannot carry arbitrary representations; the protocol's existing notice/behavior is preserved.
+- **User-gesture text copy** — ordinary UI and the copy notice's action — invokes the same shared owner inside the click. On HTTP the library's hidden-selection command runs before its Promise settles; on a secure origin it uses the async API. A caller must not await unrelated work first, and a refusal shows the bounded selectable surface rather than a false success.
 
-So HTTPS is not a prerequisite for clipboard usability: it is a prerequisite only for **programmatic** clipboard access. The matrix is: on HTTP, native text paste, image ingress to a 5522-negotiated TUI and user-gesture text copy work; automatic remote OSC 52/5522 writes and OS image writes do not.
+Text paste and OSC 5522 image ingress still enter through the browser's native `paste` event and `ClipboardEvent.clipboardData` (`DataTransfer.items`, `File.arrayBuffer()`), which are not secure-context gated. `navigator.clipboard.read()` is never used.
+
+HTTPS is required for the async Clipboard API and binary OSC 5522 writes. It is not required for user-gesture text copy, native paste/image ingress, or the automatic OSC 52 legacy attempt: on HTTP those work when the browser permits, and every result is reported truthfully.
 
 ## Touch scrolling (#2659)
 
@@ -45,5 +48,20 @@ A single-finger vertical drag scrolls the terminal, and which answer that is com
 - **Not claimed:** a horizontal drag (the App edge pager and terminal selection keep it — the axis is locked at the 8px slop and never re-opened mid-gesture), a second finger, and a tap. No `preventDefault` is called for those, so their owners receive the gesture unchanged.
 
 Vertical travel accumulates in pixels and emits whole lines (16px cell = one line in the fixtures), carrying the remainder: a high-frequency touch stream must not turn each 1px move into a line jump. Sub-slop movement before the axis is decided is absorbed.
+
+## Touch direction pad (#2657)
+
+A stationary single-finger hold inside the Terminal viewport arms a compact four-direction dial. The gesture is a **terminal input accelerator**, not cursor repositioning: each direction is forwarded as the semantic key a physical arrow would produce, through `TerminalInteractionController.sendSemanticKey` (via `TerminalController.sendPhysKey`). The pad never writes ANSI bytes, fakes a `KeyboardEvent`, moves the local xterm cursor, or bypasses the input lease, so application cursor-key mode (DECCKM), `onData`, the observer gate and the existing Terminal Keys path all apply unchanged.
+
+- **Before arming** (≈380 ms): nothing is prevented or stopped. A tap, a quick swipe, native scrolling, the App's edge pager and text selection keep their gestures. A pending touch that travels past ~12 px is surrendered to whichever native gesture won.
+- **After arming**: the pad claims the tracked `Touch.identifier` in the shared ownership registry and consumes every move, end and cancel for that finger. It registers a non-passive capture-phase move listener, calls `preventDefault()` and `stopImmediatePropagation()`, suppresses the compatibility click, and locks the terminal scrollback offset for the gesture. `useSwipePager` and `CapsuleOcclusionScroll` consult the registry rather than relying on listener registration order, so a shell or scroll owner that started earlier stands down.
+- **Direction**: a ~24 px enter / ~17 px exit centre dead zone and a 1.28 axis preference stop diagonal chatter. Returning to the centre stops repetition; leaving it again emits one new key.
+- **Repeat**: the clock is anchored to the last **emitted key**, not the last touchmove, at 1/2/4/8 keys per second across ~48/76/108 px with ±5 px band hysteresis. A speed change re-anchors the next tick and never emits an immediate extra key; a late timer emits at most one key, so a suspended tab or a frame stall cannot produce a burst.
+- **Release/cancel**: end, cancel, a lost input lease (observer/reconnect/route switch), visibility loss, `pagehide`, a second finger or unmount stops the clock, drops the claim and removes the guide. The browser's long-press callout is suppressed only while the pad owns the finger; ordinary long-press semantics and pinch are not disabled globally.
+- **Target lifetime**: a native touch keeps targeting the element that received `touchstart`. Production touches land on xterm's canvas/screen node, which persists across buffer updates; the adapter also watches the initiating target and cancels if it leaves the document (for example a renderer swap), rather than leaving a gesture with a lost end.
+
+The dial is transient and non-interactive (`pointer-events-none`); Terminal Keys remain the visible, keyboard-reachable fallback. The App's 28 px edge band stays shell navigation's: the App layer supplies the exclusion predicate, and the pad never arms inside it.
+
+**Prototype:** the interaction was approved from the pinned mobile mock at `6f5abbf02395390deb933c0a8478eb17d593a4c6` on the shared `prototype` branch (issue #2657, product review 2026-11-03). The production implementation preserves its decisive invariant — the initiating touch target stays connected for the whole gesture — while the mock itself is not production code.
 
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).

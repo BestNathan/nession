@@ -1,3 +1,4 @@
+import { isTouchOwned } from '@/shared/lib/touchOwnership';
 import type {
   TerminalBufferSnapshot,
   TerminalDisposable,
@@ -375,6 +376,13 @@ export class CapsuleOcclusionScroll {
     }
     const touch = event.touches[0];
     if (!touch) {
+      return;
+    }
+    // A long-press surface may claim this finger after the drag started (the
+    // Terminal direction pad, #2657). Ownership is authoritative even when
+    // this capture listener was registered first.
+    if (isTouchOwned(touch.identifier)) {
+      this.touchGesture = null;
       return;
     }
     if (!this.touchGesture) {

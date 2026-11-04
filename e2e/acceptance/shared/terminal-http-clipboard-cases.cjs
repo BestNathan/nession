@@ -116,16 +116,23 @@ async function originCapability(page) {
 async function armCopyProbe(page) {
   await page.evaluate(() => {
     const original = document.execCommand.bind(document);
-    window.__copyProbe = { commands: 0, texts: [], executed: null };
+    window.__copyProbe = { commands: 0, texts: [], selected: [], executed: null };
     document.execCommand = (command, ...rest) => {
       if (command !== 'copy') {
         return original(command, ...rest);
       }
       window.__copyProbe.commands += 1;
       const snoop = (event) => {
-        window.__copyProbe.texts.push(
-          event.clipboardData ? event.clipboardData.getData('text/plain') : null,
-        );
+        const selected = document.getSelection()?.toString() ?? '';
+        const data = event.clipboardData
+          ? event.clipboardData.getData('text/plain')
+          : null;
+        // Two supported implementations by target SHA: a scoped listener sets
+        // clipboardData explicitly, while copy-to-clipboard (#2656) selects a
+        // hidden span and lets the default action carry it. The selection is
+        // the exact text on that path; prefer explicit data when present.
+        window.__copyProbe.texts.push(data || selected);
+        window.__copyProbe.selected.push(selected);
       };
       document.addEventListener('copy', snoop, true);
       try {
@@ -143,6 +150,7 @@ async function copyProbe(page) {
   return page.evaluate(() => ({
     commands: window.__copyProbe.commands,
     texts: window.__copyProbe.texts.slice(),
+    selected: window.__copyProbe.selected.slice(),
     executed: window.__copyProbe.executed,
   }));
 }

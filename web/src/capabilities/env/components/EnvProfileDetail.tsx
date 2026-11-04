@@ -32,96 +32,41 @@ import { EnvVariablesView } from '@/capabilities/env/components/EnvVariablesView
 export interface EnvProfileDetailProps {
   profile: EnvFileInfo;
   agents: Agent[];
-  /** Sourced into the current Session. */
-  active: boolean;
   /**
-   * The Session was *created* with this profile. Create-phase usage is
-   * tracked for the Session's lifetime and the unset wire spares it, so
-   * Remove is not offered — only an explanation (#1202: Apply/Remove only
-   * "when runtime semantics safely permit it").
+   * Included in the current Session's *desired* ordered binding. This is a
+   * selection, not proof that the running shell converged.
    */
-  sourcedAtCreate: boolean;
-  /** Apply/Remove exist only against a current Session. */
-  hasSession: boolean;
-  sessionActionPending: boolean;
-  onApply: () => void;
-  onRemove: () => void;
+  includedInBinding: boolean;
+  /** The current Session's observed status, when a Session exists. */
+  sessionLabel: string | null;
+  /** Return to the Session Environment view through the shared screen owner. */
+  onShowSession: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   /** Performs the delete; the detail owns the confirmation dialog. */
   onDelete: () => Promise<void>;
 }
 
-function UsageLine({ inUseBy, active }: { inUseBy: string[]; active: boolean }) {
+function UsageLine({ inUseBy }: { inUseBy: string[] }) {
   if (inUseBy.length === 0) {
     return null;
   }
   return (
     <p data-testid="env-profile-usage" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-      Used by {inUseBy.length === 1 ? '1 session' : `${inUseBy.length} sessions`}
+      Included in {inUseBy.length === 1 ? '1 session binding' : `${inUseBy.length} session bindings`}
       {' · '}
       {inUseBy.join(', ')}
-      {active ? ' — including this Session' : ''}
     </p>
-  );
-}
-
-function SessionAction({
-  active,
-  sourcedAtCreate,
-  pending,
-  onApply,
-  onRemove,
-}: {
-  active: boolean;
-  sourcedAtCreate: boolean;
-  pending: boolean;
-  onApply: () => void;
-  onRemove: () => void;
-}) {
-  if (active && sourcedAtCreate) {
-    return (
-      <span data-testid="env-sourced-at-create" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-        Sourced at session creation
-      </span>
-    );
-  }
-  if (active) {
-    return (
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid="env-remove-from-session"
-        disabled={pending}
-        onClick={onRemove}
-      >
-        Remove from Session
-      </Button>
-    );
-  }
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      data-testid="env-apply-to-session"
-      disabled={pending}
-      onClick={onApply}
-    >
-      Apply to Session
-    </Button>
   );
 }
 
 function DetailHeader({
   profile,
   agents,
-  active,
-  sourcedAtCreate,
-  hasSession,
-  sessionActionPending,
+  includedInBinding,
+  sessionLabel,
+  onShowSession,
   inUseBy,
-  onApply,
-  onRemove,
   onEdit,
   onDuplicate,
   onDeleteRequest,
@@ -136,29 +81,30 @@ function DetailHeader({
           <h2 className={cn('truncate', chromeSansRole('title'))}>
             {profile.name}
           </h2>
-          {active ? (
+          {includedInBinding ? (
             <span
-              data-testid="env-profile-active"
+              data-testid="env-profile-included"
               className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}
             >
-              Active in current Session
+              Included in binding
             </span>
           ) : null}
         </div>
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {profileSourceLine(profile, agents)} · {variablesLabel(profile.var_count)}
         </p>
-        <UsageLine inUseBy={inUseBy} active={active} />
+        <UsageLine inUseBy={inUseBy} />
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {hasSession ? (
-          <SessionAction
-            active={active}
-            sourcedAtCreate={sourcedAtCreate}
-            pending={sessionActionPending}
-            onApply={onApply}
-            onRemove={onRemove}
-          />
+        {sessionLabel ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="env-profile-session-link"
+            onClick={onShowSession}
+          >
+            Current Session · {sessionLabel}
+          </Button>
         ) : null}
         <Button size="sm" variant="outline" data-testid="env-edit" onClick={onEdit}>
           <Pencil className="size-3.5" />
@@ -228,7 +174,7 @@ function DeleteDialog({
           <AlertDialogDescription>
             This deletes the environment profile at {profileSourceLine(profile, agents)}.
             {inUseBy.length > 0
-              ? ` It is currently used by ${inUseBy.length === 1 ? '1 session' : `${inUseBy.length} sessions`} (${inUseBy.join(', ')}).`
+              ? ` It is included in ${inUseBy.length === 1 ? '1 session binding' : `${inUseBy.length} session bindings`} (${inUseBy.join(', ')}).`
               : ''}{' '}
             This cannot be undone.
           </AlertDialogDescription>

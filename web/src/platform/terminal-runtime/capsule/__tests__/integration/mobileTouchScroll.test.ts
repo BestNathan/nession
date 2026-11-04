@@ -5,6 +5,7 @@ import {
   type CapsuleScrollTerminalPort,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
 import type { TerminalMouseTrackingMode } from '@/platform/terminal-runtime/emulator';
+import { claimTouchOwnership } from '@/shared/lib/touchOwnership';
 
 /**
  * #2659 — a single-finger vertical drag must scroll *the terminal*, and which
@@ -69,10 +70,14 @@ function makeHarness(options: HarnessOptions = {}) {
   return { occlusion, port, element, wheels };
 }
 
-function touchEvent(type: 'touchstart' | 'touchmove', points: [number, number][]): Event {
+function touchEvent(
+  type: 'touchstart' | 'touchmove',
+  points: [number, number][],
+  identifier = 0,
+): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'touches', {
-    value: points.map(([clientX, clientY]) => ({ clientX, clientY })),
+    value: points.map(([clientX, clientY]) => ({ clientX, clientY, identifier })),
   });
   return event;
 }
@@ -134,6 +139,22 @@ describe('mobile touch scroll ownership (#2659)', () => {
     // not eight lines for eight moves.
     expect(port.scrollLines).toHaveBeenCalledTimes(1);
     expect(port.scrollLines).toHaveBeenCalledWith(-1);
+  });
+
+  it('stands down for a drag the direction pad has claimed (#2657)', () => {
+    const harness = makeHarness();
+    harnesses.push(harness.occlusion);
+    const { element, port } = harness;
+
+    element.dispatchEvent(touchEvent('touchstart', [[100, 300]], 5));
+    const release = claimTouchOwnership(5, 'terminal-direction-pad');
+    const move = touchEvent('touchmove', [[100, 324]], 5);
+    element.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(false);
+    expect(port.scrollLines).not.toHaveBeenCalled();
+
+    release();
   });
 
   it('hands a mouse-reporting TUI drag to xterm’s wheel path', () => {

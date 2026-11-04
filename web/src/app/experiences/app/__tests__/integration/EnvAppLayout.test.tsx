@@ -7,6 +7,8 @@ import type {
   WorkspacePush,
 } from '@/app/workspace/workspaceContext';
 import { stubEnvApi, type EnvStub } from '@/capabilities/env/__tests__/stubEnvSurface';
+import type { SessionEnvBindingResponse } from '@/capabilities/env';
+import { WIRE as SESSION_ENV_BINDING_SET_WIRE } from '@/generated/protocol/core/server-session-env-binding-set/v1';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -16,6 +18,27 @@ import { EnvAppLayout } from '@/app/experiences/app/EnvAppLayout';
 
 function info(name: string, overrides: Partial<EnvFileInfo> = {}): EnvFileInfo {
   return { name, source: 'server', size: 5, modified: 0, var_count: 2, ...overrides };
+}
+
+const SESSION = { session_id: 's1', session_name: 'api' } as Session;
+const STAGING = { name: 'staging.env', source: 'server' as const };
+
+function binding(status = 'in_sync'): SessionEnvBindingResponse {
+  return {
+    success: true,
+    binding: {
+      session_id: 's1',
+      desired_revision: 2,
+      desired_profiles: [{ profile: STAGING, phase: 'attach', outdated: false }],
+      observed: {
+        applied_revision: 2,
+        status,
+        profiles: [STAGING],
+        managed_keys: ['A'],
+      },
+    },
+    warnings: [],
+  };
 }
 
 function renderLayout(opts: { session?: Session | null } = {}) {
@@ -135,5 +158,64 @@ describe('EnvAppLayout', () => {
     await user.click(await screen.findByTestId('env-new-profile'));
     await waitFor(() => expect(pushed.current?.title).toBe('New environment'));
     expect(screen.getByTestId('env-profile-editor')).toBeInTheDocument();
+  });
+
+  it('the root carries the current Session and pushes its overview', async () => {
+    const user = userEvent.setup();
+    stub.setBinding(binding('pending_shell'));
+    const { pushed } = renderLayout({ session: SESSION });
+
+    const summary = await screen.findByTestId('env-session-summary');
+    expect(summary).toHaveTextContent('api');
+    expect(summary).toHaveTextContent('Waiting for the next shell prompt');
+    expect(pushed.current).toBeNull();
+
+    await user.click(summary);
+    await waitFor(() => expect(pushed.current?.title).toBe('Session environment'));
+    expect(screen.getByTestId('env-session-environment')).toHaveAttribute(
+      'data-status',
+      'pending_shell',
+    );
+    expect(screen.queryByTestId('env-session-summary')).not.toBeInTheDocument();
+  });
+
+  it('a dirty binding draft confirms before Back returns to the Session view', async () => {
+    const user = userEvent.setup();
+    stub.setBinding(binding());
+    const { pushed } = renderLayout({ session: SESSION });
+
+    await user.click(await screen.findByTestId('env-session-summary'));
+    await waitFor(() => expect(pushed.current?.title).toBe('Session environment'));
+    await user.click(screen.getByTestId('env-manage-binding'));
+    await waitFor(() => expect(pushed.current?.title).toBe('Manage binding'));
+
+    await user.click(screen.getByTestId('env-draft-add-server::prod.env'));
+    await act(async () => {});
+
+    pushed.current?.onLeave();
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Discard unsaved changes?');
+    await user.click(screen.getByTestId('env-guard-confirm'));
+
+    await waitFor(() => expect(pushed.current?.title).toBe('Session environment'));
+    expect(screen.getByTestId('env-session-environment')).toBeInTheDocument();
+    expect(
+      stub.requests.filter((request) => request.type === SESSION_ENV_BINDING_SET_WIRE),
+    ).toHaveLength(0);
+  });
+
+  it('a profile detail links back to the current Session view', async () => {
+    const user = userEvent.setup();
+    stub.setBinding(binding());
+    const { pushed } = renderLayout({ session: SESSION });
+    await waitFor(() =>
+      expect(screen.getByTestId('env-profile-row-server::staging.env')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('env-profile-row-server::staging.env'));
+    await waitFor(() => expect(pushed.current?.title).toBe('staging.env'));
+    await user.click(screen.getByTestId('env-profile-session-link'));
+    await waitFor(() => expect(pushed.current?.title).toBe('Session environment'));
+    expect(screen.getByTestId('env-session-environment')).toBeInTheDocument();
   });
 });

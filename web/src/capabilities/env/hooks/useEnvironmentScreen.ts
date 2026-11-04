@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import type { EnvFileInfo } from '@/types';
+import { useCallback, useReducer, useRef, type Dispatch, type MutableRefObject } from 'react';
+import type { EnvFileInfo, EnvFileRef } from '@/types';
 import { refKey } from '@/capabilities/env/model/envRef';
 
 /** What the Edit depth is editing. */
@@ -7,6 +7,21 @@ export type EditorTarget =
   | { kind: 'existing' }
   | { kind: 'new' }
   | { kind: 'duplicate'; source: EnvFileInfo };
+
+/**
+ * Where the Environment capability is:
+ *
+ * - `root` — Web's default Session overview (when a Session exists) or the
+ *   profile-first list; App's list with the compact Session summary;
+ * - `session` — the pushed Session Environment view (App), and the target of
+ *   Web's "Current Session" link;
+ * - `profile` — the read-first Profile Detail;
+ * - `draft` — the ordered binding draft.
+ *
+ * The Edit depth is an overlay on `profile` / `root` and is tracked by
+ * `editor`, not a view of its own.
+ */
+export type EnvironmentView = 'root' | 'session' | 'profile' | 'draft';
 
 /**
  * Remount key for the Edit depth: one target, one draft. Both experiences key
@@ -22,176 +37,337 @@ export function editorTargetKey(editor: EditorTarget, selectedKey: string | null
   return `existing:${selectedKey ?? ''}`;
 }
 
-export interface EnvironmentScreen {
-  /** `refKey` of the selected profile; null shows the empty detail (Web) / the list (App). */
+function sameRefs(a: EnvFileRef[], b: EnvFileRef[]): boolean {
+  return a.length === b.length && a.every((ref, i) => refKey(ref) === refKey(b[i]));
+}
+
+interface ScreenState {
+  view: EnvironmentView;
   selectedKey: string | null;
-  /** Non-null while the Edit depth is open. */
   editor: EditorTarget | null;
+  draft: EnvFileRef[] | null;
+  draftBaseline: EnvFileRef[] | null;
   dirty: boolean;
-  /** A guarded action is waiting on the discard confirmation. */
+  pending: (() => void) | null;
+}
+
+type Action =
+  | { type: 'navigate'; view: 'root' | 'profile' | 'session'; key?: string | null }
+  | { type: 'start-draft'; refs: EnvFileRef[] }
+  | { type: 'set-draft'; refs: EnvFileRef[]; dirty: boolean }
+  | { type: 'close-draft' }
+  | { type: 'open-editor'; target: EditorTarget; clearSelection?: boolean }
+  | { type: 'close-editor' }
+  | { type: 'finish-edit'; key?: string | null }
+  | { type: 'set-dirty'; value: boolean }
+  | { type: 'set-view'; view: EnvironmentView }
+  | { type: 'guard'; action: () => void }
+  | { type: 'close-guard'; confirm: boolean }
+  | { type: 'reset' };
+
+const INITIAL: ScreenState = {
+  view: 'root',
+  selectedKey: null,
+  editor: null,
+  draft: null,
+  draftBaseline: null,
+  dirty: false,
+  pending: null,
+};
+
+function afterEdit(
+  state: ScreenState,
+  action: Extract<Action, { type: 'finish-edit' }>,
+): ScreenState {
+  const changed = 'key' in action;
+  const selectedKey = changed ? (action.key ?? null) : state.selectedKey;
+  return {
+    ...state,
+    editor: null,
+    dirty: false,
+    selectedKey,
+    view: changed ? (selectedKey === null ? 'root' : 'profile') : state.view,
+  };
+}
+
+function reducer(state: ScreenState, action: Action): ScreenState {
+  switch (action.type) {
+    case 'navigate':
+      return {
+        ...state,
+        view: action.view,
+        selectedKey: action.key ?? null,
+        editor: null,
+        draft: null,
+        draftBaseline: null,
+        dirty: false,
+      };
+    case 'start-draft':
+      return {
+        ...state,
+        view: 'draft',
+        selectedKey: null,
+        editor: null,
+        draft: action.refs,
+        draftBaseline: action.refs,
+        dirty: false,
+      };
+    case 'set-draft':
+      return { ...state, draft: action.refs, dirty: action.dirty };
+    case 'close-draft':
+      return {
+        ...state,
+        view: 'session',
+        draft: null,
+        draftBaseline: null,
+        dirty: false,
+      };
+    case 'open-editor':
+      return {
+        ...state,
+        view: action.clearSelection ? 'root' : state.view,
+        selectedKey: action.clearSelection ? null : state.selectedKey,
+        editor: action.target,
+        dirty: false,
+      };
+    case 'close-editor':
+      return { ...state, editor: null, dirty: false };
+    case 'finish-edit':
+      return afterEdit(state, action);
+    case 'set-dirty':
+      return { ...state, dirty: action.value };
+    case 'set-view':
+      return { ...state, view: action.view };
+    case 'guard':
+      return { ...state, pending: action.action };
+    case 'close-guard':
+      return { ...state, pending: null, dirty: action.confirm ? false : state.dirty };
+    case 'reset':
+      return INITIAL;
+    default:
+      return state;
+  }
+}
+
+function useEditorActions(
+  dispatch: Dispatch<Action>,
+  guarded: (action: () => void) => void,
+  dirtyRef: MutableRefObject<boolean>,
+) {
+  const startEdit = useCallback(() => {
+    guarded(() => {
+      dirtyRef.current = false;
+      dispatch({ type: 'open-editor', target: { kind: 'existing' } });
+    });
+  }, [dispatch, guarded, dirtyRef]);
+
+  const startNew = useCallback(() => {
+    guarded(() => {
+      dirtyRef.current = false;
+      dispatch({
+        type: 'open-editor',
+        target: { kind: 'new' },
+        clearSelection: true,
+      });
+    });
+  }, [dispatch, guarded, dirtyRef]);
+
+  const startDuplicate = useCallback(
+    (source: EnvFileInfo) => {
+      guarded(() => {
+        dirtyRef.current = false;
+        dispatch({ type: 'open-editor', target: { kind: 'duplicate', source } });
+      });
+    },
+    [dispatch, guarded, dirtyRef],
+  );
+
+  const cancelEdit = useCallback(() => {
+    guarded(() => {
+      dirtyRef.current = false;
+      dispatch({ type: 'close-editor' });
+    });
+  }, [dispatch, guarded, dirtyRef]);
+
+  const finishEdit = useCallback(
+    (selectKey?: string | null) => {
+      dirtyRef.current = false;
+      dispatch(
+        selectKey === undefined
+          ? { type: 'finish-edit' }
+          : { type: 'finish-edit', key: selectKey },
+      );
+    },
+    [dispatch, dirtyRef],
+  );
+
+  return { startEdit, startNew, startDuplicate, cancelEdit, finishEdit };
+}
+
+function useDraftActions(
+  dispatch: Dispatch<Action>,
+  guarded: (action: () => void) => void,
+  dirtyRef: MutableRefObject<boolean>,
+  draftBaseline: EnvFileRef[] | null,
+) {
+  const startBindingDraft = useCallback(
+    (refs: EnvFileRef[]) => {
+      guarded(() => {
+        dirtyRef.current = false;
+        dispatch({ type: 'start-draft', refs });
+      });
+    },
+    [dispatch, guarded, dirtyRef],
+  );
+
+  const setDraftRefs = useCallback(
+    (refs: EnvFileRef[]) => {
+      const dirty = !sameRefs(refs, draftBaseline ?? []);
+      dirtyRef.current = dirty;
+      dispatch({ type: 'set-draft', refs, dirty });
+    },
+    [dispatch, dirtyRef, draftBaseline],
+  );
+
+  const cancelBindingDraft = useCallback(() => {
+    dirtyRef.current = false;
+    dispatch({ type: 'close-draft' });
+  }, [dispatch, dirtyRef]);
+
+  const finishBindingDraft = useCallback(() => {
+    dirtyRef.current = false;
+    dispatch({ type: 'close-draft' });
+  }, [dispatch, dirtyRef]);
+
+  return { startBindingDraft, setDraftRefs, cancelBindingDraft, finishBindingDraft };
+}
+
+export interface EnvironmentScreen {
+  view: EnvironmentView;
+  selectedKey: string | null;
+  editor: EditorTarget | null;
+  draft: EnvFileRef[] | null;
+  draftBaseline: EnvFileRef[] | null;
+  dirty: boolean;
   guardOpen: boolean;
-  /** Select a profile (or clear with null); a dirty edit guards the switch. */
   selectProfile: (profile: EnvFileInfo | null) => void;
+  showSession: () => void;
+  startBindingDraft: (refs: EnvFileRef[]) => void;
+  setDraftRefs: (refs: EnvFileRef[]) => void;
+  cancelBindingDraft: () => void;
+  finishBindingDraft: () => void;
   startEdit: () => void;
   startNew: () => void;
   startDuplicate: (source: EnvFileInfo) => void;
-  /** Cancel out of Edit back to the same Profile Detail; dirty guards it. */
   cancelEdit: () => void;
-  /**
-   * After a successful save or import: close Edit, clear dirty, and select the
-   * saved profile unguarded — saving is what made the state safe to leave.
-   * Passing `null` explicitly clears the selection (the deleted profile's
-   * detail must not linger); omitting the argument keeps it.
-   */
   finishEdit: (selectKey?: string | null) => void;
   setDirty: (dirty: boolean) => void;
-  /**
-   * The App's Back policy (#1051): a dirty edit confirms through the guard, a
-   * clean edit returns to the same Profile Detail, and reading pops to the
-   * list. The capability owns the guard; the shell owns the Back control.
-   */
   leaveDepth: () => void;
   confirmGuard: () => void;
   cancelGuard: () => void;
-  /**
-   * Unconditional reset for a Session switch: the old Session's selection and
-   * any edit in flight belong to that Session and must not reappear (#1202).
-   */
   reset: () => void;
 }
 
 /**
- * The Environment screen state machine (#1202), shared by both experiences so
- * the dirty-leave policy has exactly one implementation: any navigation that
- * would abandon a dirty edit — another profile, New, Cancel, the App's Back —
- * confirms first. The guard is state, not a browser `window.confirm`.
+ * The Environment screen state machine (#1202, extended by #2654).
+ *
+ * One dirty flag covers the profile editor and the binding draft, so every
+ * navigation that would abandon either confirms first. Transitions live in a
+ * pure reducer; the dirty ref is the synchronous guard input.
  */
 export function useEnvironmentScreen(): EnvironmentScreen {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [editor, setEditor] = useState<EditorTarget | null>(null);
-  const [dirty, setDirtyState] = useState(false);
-  const [pending, setPending] = useState<(() => void) | null>(null);
-
-  /**
-   * The guard decision reads a ref, not a render closure: the editor reports
-   * dirty from a passive effect, so a `leaveDepth` captured one render ago —
-   * the one the shell is still holding between the dirty commit and the
-   * effect that re-publishes the pushed entry — would otherwise observe a
-   * stale `false` and pop a dirty edit without confirming. Every writer goes
-   * through `setDirty`, which updates the ref synchronously.
-   */
+  const [state, dispatch] = useReducer(reducer, INITIAL);
   const dirtyRef = useRef(false);
-  const setDirty = useCallback((next: boolean) => {
-    dirtyRef.current = next;
-    setDirtyState(next);
-  }, []);
 
-  const openEditor = useCallback(
-    (target: EditorTarget | null) => {
-      setEditor(target);
-      setDirty(false);
-    },
-    [setDirty],
-  );
+  const setDirty = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty;
+    dispatch({ type: 'set-dirty', value: dirty });
+  }, []);
 
   const guarded = useCallback((action: () => void) => {
     if (dirtyRef.current) {
-      setPending(() => action);
+      dispatch({ type: 'guard', action });
     } else {
       action();
     }
   }, []);
 
   const confirmGuard = useCallback(() => {
-    const action = pending;
-    setPending(null);
-    setDirty(false);
+    const action = state.pending;
+    dirtyRef.current = false;
+    dispatch({ type: 'close-guard', confirm: true });
     action?.();
-  }, [pending, setDirty]);
+  }, [state.pending]);
 
   const cancelGuard = useCallback(() => {
-    setPending(null);
+    dispatch({ type: 'close-guard', confirm: false });
   }, []);
 
   const selectProfile = useCallback(
     (profile: EnvFileInfo | null) => {
-      guarded(() => {
-        setSelectedKey(profile === null ? null : refKey(profile));
-        setEditor(null);
-      });
+      guarded(() =>
+        dispatch({
+          type: 'navigate',
+          view: profile === null ? 'root' : 'profile',
+          key: profile === null ? null : refKey(profile),
+        }),
+      );
     },
     [guarded],
   );
 
-  const startEdit = useCallback(() => {
-    openEditor({ kind: 'existing' });
-  }, [openEditor]);
+  const showSession = useCallback(() => {
+    guarded(() => dispatch({ type: 'navigate', view: 'session' }));
+  }, [guarded]);
 
-  const startNew = useCallback(() => {
-    guarded(() => {
-      setSelectedKey(null);
-      openEditor({ kind: 'new' });
-    });
-  }, [guarded, openEditor]);
-
-  const startDuplicate = useCallback(
-    (source: EnvFileInfo) => {
-      guarded(() => {
-        openEditor({ kind: 'duplicate', source });
-      });
-    },
-    [guarded, openEditor],
-  );
-
-  const cancelEdit = useCallback(() => {
-    guarded(() => {
-      openEditor(null);
-    });
-  }, [guarded, openEditor]);
-
-  const finishEdit = useCallback(
-    (selectKey?: string | null) => {
-      setEditor(null);
-      setDirty(false);
-      if (selectKey !== undefined) {
-        setSelectedKey(selectKey);
-      }
-    },
-    [setDirty],
-  );
+  const editorActions = useEditorActions(dispatch, guarded, dirtyRef);
+  const draftActions = useDraftActions(dispatch, guarded, dirtyRef, state.draftBaseline);
 
   const leaveDepth = useCallback(() => {
-    if (!editor) {
-      setSelectedKey(null);
+    if (state.editor) {
+      guarded(() => {
+        dirtyRef.current = false;
+        dispatch({ type: 'close-editor' });
+      });
       return;
     }
-    guarded(() => {
-      openEditor(null);
-    });
-  }, [editor, guarded, openEditor]);
+    if (state.view === 'draft') {
+      guarded(() => {
+        dirtyRef.current = false;
+        dispatch({ type: 'close-draft' });
+      });
+      return;
+    }
+    if (state.view === 'profile') {
+      guarded(() => dispatch({ type: 'navigate', view: 'root' }));
+      return;
+    }
+    if (state.view === 'session') {
+      dispatch({ type: 'set-view', view: 'root' });
+    }
+  }, [state.editor, state.view, guarded]);
 
   const reset = useCallback(() => {
-    setSelectedKey(null);
-    setEditor(null);
-    setDirty(false);
-    setPending(null);
-  }, [setDirty]);
+    dirtyRef.current = false;
+    dispatch({ type: 'reset' });
+  }, []);
 
   return {
-    selectedKey,
-    editor,
-    dirty,
-    guardOpen: pending !== null,
+    view: state.view,
+    selectedKey: state.selectedKey,
+    editor: state.editor,
+    draft: state.draft,
+    draftBaseline: state.draftBaseline,
+    dirty: state.dirty,
+    guardOpen: state.pending !== null,
     selectProfile,
-    startEdit,
-    startNew,
-    startDuplicate,
-    cancelEdit,
-    finishEdit,
+    showSession,
     setDirty,
     leaveDepth,
     confirmGuard,
     cancelGuard,
     reset,
+    ...editorActions,
+    ...draftActions,
   };
 }
