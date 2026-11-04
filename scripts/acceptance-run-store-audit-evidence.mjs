@@ -20,6 +20,8 @@ const REFS=Object.freeze(['acceptance-results','task-results','metrics','agent-s
 const CASES=Object.freeze([
   'immutable_record_overwrite','immutable_record_omission',
   'sha_index_repoint','non_ancestor_ref_replacement',
+  'forged_receipt_digest','missing_receipt_source',
+  'unexpected_ingester_workflow',
 ]);
 const STEPS=Object.freeze([
   'Checkout exact trusted main SHA without Git writer tokens',
@@ -114,21 +116,21 @@ export function validateSignedAudit(report,drill,verified,identity){
     drill.observed_main_sha!==identity.main_sha||
     Number(drill.github_run_id)!==identity.run_id||
     Number(drill.github_run_attempt)!==identity.attempt||
-    drill.coverage!==4||drill.total!==4||
+    drill.coverage!==CASES.length||drill.total!==CASES.length||
     drill.production_ref_mutated!==false||
     drill.server_side_denials_verified!==false||
     drill.unexpected_writer_identity_verified!==false||
     drill.referential_source_integrity_verified!==false||
     drill.independent_anchor_verified!==false||
     drill.external_alert_channel_verified!==false||
-    !Array.isArray(drill.cases)||drill.cases.length!==4||
+    !Array.isArray(drill.cases)||drill.cases.length!==CASES.length||
     JSON.stringify(drill.cases.map(c=>c.id))!==JSON.stringify(CASES)||
     drill.cases.some(c=>c.status!=='Detected'||
       c.seed!=='disposable_local_git_only'||
       c.valid_append_preflight!=='Accepted'||
       !SHA.test(c.baseline_sha??'')||!SHA.test(c.observed_sha??'')||
       c.baseline_sha===c.observed_sha))
-    fail('missing exact-run four-class disposable tamper drill');
+    fail('missing exact-run seven-case disposable incident drill');
 
   const bytes=Buffer.from(JSON.stringify(report,null,2)+'\n','utf8');
   const sha256=crypto.createHash('sha256').update(bytes).digest('hex');
@@ -291,7 +293,7 @@ export function selfTestAuthenticatedAudit(){
   const drill={schema_version:1,kind:'isolated_run_store_integrity_incident_drill',
     verdict:'FixtureDetectionPassed',execution_mode:'isolated_disposable_local_git',
     repository:REPO,observed_main_sha:sha,github_run_id:'123',
-    github_run_attempt:'2',coverage:4,total:4,
+    github_run_attempt:'2',coverage:CASES.length,total:CASES.length,
     production_ref_mutated:false,server_side_denials_verified:false,
     unexpected_writer_identity_verified:false,
     referential_source_integrity_verified:false,independent_anchor_verified:false,
