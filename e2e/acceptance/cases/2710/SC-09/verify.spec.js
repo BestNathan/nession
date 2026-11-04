@@ -42,21 +42,19 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, { timeout: 10_000 })
     .toBeGreaterThan(0);
-  // Let the panel-opening follow reconciliation settle before the gesture.
-  await expect.poll(async () => {
-    const view = await terminalGeometry(page);
-    return view?.mode === 'following' && view.viewportY === view.baseY;
-  }, { timeout: 10_000 }).toBe(true);
+  // Expanding the panel must not auto-push the grid; the user owns the
+  // reversible scrollroom and the original top row remains reachable.
+  await settleTerminalFrames(page);
   const shifted = await terminalGeometry(page);
+  expect(shifted.screenTransform, 'opening a panel preserves the original top')
+    .toBe('none');
   expect(shifted.rows).toBe(before.rows);
   expect(shifted.occlusion).toBe(before.occlusion);
   expect(paneSize(runtime, name)).toBe(paneBefore);
 
-  // Touch scrolling is still terminal-owned while the panel is open. Aim at
-  // the terminal well's top: the shifted grid is tall and the panel covers its
-  // middle at App width. Let the panel-open follow reconciliation settle
-  // first, then drag several cells so a fractional cell height cannot round
-  // the gesture to zero lines.
+  // Touch scrolling is still terminal-owned while the panel is open. Since
+  // the screen was not shifted automatically, the first backward drag
+  // enters genuine history without hiding any top rows.
   await settleTerminalFrames(page);
   await dragTerminalRows(page, 1);
   await expect.poll(async () => {
@@ -65,8 +63,8 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   }, { timeout: 10_000, message: 'the touch drag did not move local history' }).toBeGreaterThan(0);
   const scrolled = await terminalGeometry(page);
   expect(scrolled.viewportY).toBeLessThan(scrolled.baseY);
-  expect(scrolled.screenTransform, 'the drag retains the live panel shift')
-    .toBe(shifted.screenTransform);
+  expect(scrolled.screenTransform, 'ordinary history browsing stays unshifted')
+    .toBe('none');
 
   // Alternate-screen application: no shift, no resize, no changed rows.
   await page.getByTestId('capsule-capability-dismiss').click();
