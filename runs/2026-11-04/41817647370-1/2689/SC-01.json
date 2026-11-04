@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e5e4f3a9947ffcd116caa50b4b7317c407fe6b78faf5c9faf5510648ab242960",
+  "run_id": 41817647370,
+  "run_attempt": 1,
+  "issue": 2689,
+  "criterion": "SC-01",
+  "criterion_text": "Opening Claude Code Memory from a Session resolves its containing repository automatically, without global project selection or a manual picker. Nested directories resolve to the same repository as its root.",
+  "stage": "staging",
+  "target_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "contract_sha256": "598885c3bc17edd81f7a6a340819c19121e1c0f908a40fc6f6ec397505ffcfc8",
+  "case_revision": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "case_tree_sha": "499398ccacd90565db242370299d77f4620d154a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-04T10:59:25.090Z",
+  "finished_at": "2026-11-04T10:59:35.816Z",
+  "duration_ms": 10726,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A Session in a nested repository directory resolves to the repository root with no project input; the Workspace opens that repository's Memory.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=6075410c03e9e75549d19e59f87b3c263735bf38 profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "cargo test -p nession-claude-code --lib memory: memory::tests::a_nested_directory_resolves_to_the_repository_root; memory::tests::the_project_key_matches_claudes_sanitization; agent::tests::memory_resolves_the_session_repository_without_a_picker"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/ClaudeCodeWorkspace.test.tsx: opens the Session repository memory with no repository picker"
+        }
+      ],
+      "duration_ms": 10691,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41817647370,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "record_path": "runs/2026-11-04/41817647370-1/2689/SC-01.json",
+    "source_result_sha256": "3a14c3b191a468486e2fea39a3d1d0774c149449f86c26dfefb05aaaa48248b9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41817647370-1",
+    "sha256": "3a14c3b191a468486e2fea39a3d1d0774c149449f86c26dfefb05aaaa48248b9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "durability": "time-limited; object archival not configured"
+  }
+}

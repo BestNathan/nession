@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "61f8ff1bbad77793beb419f4e2c34538dc916eb8fc695c592dae9ff1558f8025",
+  "run_id": 41817647370,
+  "run_attempt": 1,
+  "issue": 2689,
+  "criterion": "SC-03",
+  "criterion_text": "The selected Session's `MEMORY.md` and topic Markdown files are readable in its Claude Code Capability using existing safe, bounded read behavior. Files from unrelated projects/config directories are not enumerable.",
+  "stage": "staging",
+  "target_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "contract_sha256": "598885c3bc17edd81f7a6a340819c19121e1c0f908a40fc6f6ec397505ffcfc8",
+  "case_revision": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "case_tree_sha": "f1ae049cc733c2869b01564caadc18aafd58712a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-04T10:59:36.073Z",
+  "finished_at": "2026-11-04T10:59:38.216Z",
+  "duration_ms": 2143,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The selected repository's MEMORY.md and topic Markdown are listed and read with canonical-root containment, Markdown-only validation and bounded pages; unrelated or escaping paths are refused.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=6075410c03e9e75549d19e59f87b3c263735bf38 profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "cargo test -p nession-claude-code --lib memory: memory::tests::the_index_is_listed_first_and_only_markdown_is_listed; memory::tests::a_symlink_is_never_listed; security::tests::memory_reads_are_markdown_only; agent::tests::memory_reads_are_bounded_and_cannot_escape_the_memory_directory"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/MemoryView.test.tsx: shows the resolved source and opens the selected file"
+        }
+      ],
+      "duration_ms": 2122,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41817647370,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "record_path": "runs/2026-11-04/41817647370-1/2689/SC-03.json",
+    "source_result_sha256": "dce004d8d51ee8be8a9b30b63d168a7f6ef3a1b5baa4e30c61768a2f8da22fb0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41817647370-1",
+    "sha256": "dce004d8d51ee8be8a9b30b63d168a7f6ef3a1b5baa4e30c61768a2f8da22fb0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "durability": "time-limited; object archival not configured"
+  }
+}

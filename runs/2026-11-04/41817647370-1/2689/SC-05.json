@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1276f83c51e3fab38c25d9657b44fe2482d91fab10a5e708eb80ca0163dff60c",
+  "run_id": 41817647370,
+  "run_attempt": 1,
+  "issue": 2689,
+  "criterion": "SC-05",
+  "criterion_text": "Switching Sessions or changing the Session's repository during pending list/read operations cannot display stale or cross-Session Memory. Existing Conversations, Configuration and other Claude Code data remain unaffected.",
+  "stage": "staging",
+  "target_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "contract_sha256": "598885c3bc17edd81f7a6a340819c19121e1c0f908a40fc6f6ec397505ffcfc8",
+  "case_revision": "6075410c03e9e75549d19e59f87b3c263735bf38",
+  "case_tree_sha": "d5acf61b9d7898f4d50ef13cae7ac7e163fbf7fb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-04T10:59:43.109Z",
+  "finished_at": "2026-11-04T10:59:48.079Z",
+  "duration_ms": 4970,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A read carrying the previous snapshot's directory is refused as stale_memory, and the Workspace drops pending snapshot/read answers across Session and repository changes.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=6075410c03e9e75549d19e59f87b3c263735bf38 profile=full-stack-local"
+        },
+        {
+          "type": "test",
+          "value": "cargo test -p nession-claude-code --lib memory: agent::tests::a_read_from_a_moved_repository_is_stale_memory"
+        },
+        {
+          "type": "test",
+          "value": "npm test src/capabilities/claude-code/components/__tests__/integration/ClaudeCodeWorkspace.test.tsx: re-lists when the provider reports the repository moved; drops a pending memory answer from the previous Session; drops a pending file read when the memory directory changes"
+        }
+      ],
+      "duration_ms": 4949,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 41817647370,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6075410c03e9e75549d19e59f87b3c263735bf38",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "record_path": "runs/2026-11-04/41817647370-1/2689/SC-05.json",
+    "source_result_sha256": "ff017fa1fd1e1b287aa8401ca7c3202a4e68fcb31785ddfa4eea7061e0451956"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-41817647370-1",
+    "sha256": "ff017fa1fd1e1b287aa8401ca7c3202a4e68fcb31785ddfa4eea7061e0451956",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/41817647370",
+    "durability": "time-limited; object archival not configured"
+  }
+}
