@@ -55,6 +55,7 @@ import {collectDevelopmentReadback} from './acceptance-development-readback.mjs'
 import {collectRunStoreFixtureEvidence,selfTestRunStoreFixtureEvidence} from './acceptance-run-store-fixture-evidence.mjs';
 import {collectCasMatrixEvidence,selfTestCasMatrixEvidence} from './acceptance-run-store-cas-evidence.mjs';
 import {collectAuthenticatedCheckpoint,selfTestAuthenticatedCheckpoint} from './acceptance-run-store-checkpoint-evidence.mjs';
+import {collectAuthenticatedAudit,selfTestAuthenticatedAudit} from './acceptance-run-store-audit-evidence.mjs';
 import {collectFiveModeAcceptanceEvidence,selfTestFiveModeAcceptanceEvidence} from './acceptance-run-store-five-mode-evidence.mjs';
 import {selfTestDevelopmentReadback} from './acceptance-development-readback-selftest.mjs';
 import os from 'node:os';
@@ -178,7 +179,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], verifiedRunStoreFixtureEvidence = [], authenticatedRunStoreCasMatrix = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], verifiedRunStoreFixtureEvidence = [], authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -217,6 +218,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_development_checkpoint_readbacks: developmentReadback,
     verified_run_store_fixture_evidence: verifiedRunStoreFixtureEvidence,
     authenticated_run_store_cas_matrix: authenticatedRunStoreCasMatrix,
+    authenticated_run_store_integrity_audit: authenticatedRunStoreIntegrityAudit,
     authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
     authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
@@ -1559,6 +1561,13 @@ async function collectCommand(workspace, outFile) {
     stage:process.env.ACCEPTANCE_STAGE,
     githubSha:process.env.GITHUB_SHA,githubRef:process.env.GITHUB_REF,
   },directRuns,githubGet);
+  // SC-07: a read-only scheduled/main audit must be authenticated by an
+  // independent Acceptor consumer, not inferred from a successful workflow.
+  const authenticatedRunStoreIntegrityAudit=await collectAuthenticatedAudit({
+    repo,sha,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,
+    githubSha:process.env.GITHUB_SHA,githubRef:process.env.GITHUB_REF,
+  },directRuns,githubGet);
   // SC-06: a current green Workflow summary is NOT evidence of five-mode
   // coverage, and an earlier Pass may expire. Re-run the canonical bounded
   // read-only verifier at the exact trusted main SHA instead of duplicating
@@ -1841,7 +1850,7 @@ async function collectCommand(workspace, outFile) {
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
     authenticatedMetricsReplayLineage, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedRunStoreCasMatrix,
-    verifiedRunStoreExternalCheckpoint,
+    authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
     authenticatedRunStoreFiveModeReadback,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
     stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts });
@@ -3114,6 +3123,10 @@ async function selfTest() {
     authenticatedRunStoreCasMatrix:{kind:'authenticated_run_store_cas_matrix',verdict:'Verified'}})
     .authenticated_run_store_cas_matrix.verdict,'Verified');
   selfTestAuthenticatedCheckpoint();
+  selfTestAuthenticatedAudit();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedRunStoreIntegrityAudit:{kind:'authenticated_run_store_integrity_audit',verdict:'Verified'}})
+    .authenticated_run_store_integrity_audit.verdict,'Verified');
   assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
     verifiedRunStoreExternalCheckpoint:{kind:'authenticated_run_store_external_checkpoint',verdict:'Verified'}})
     .authenticated_run_store_external_checkpoint.verdict,'Verified');

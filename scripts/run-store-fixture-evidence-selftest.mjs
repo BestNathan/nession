@@ -12,12 +12,13 @@ assert.ok(pushArea,'missing main push event');
 assert.doesNotMatch(pushArea,/^    paths(?:-ignore)?:/m,
   'path-filtered fixture evidence strands unrelated new main SHAs as Pending');
 const waker=fs.readFileSync('.github/workflows/acceptance-postrun-waker.yml','utf8');
-assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/,
+assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "CI \/ Run Store Integrity Audit", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/,
   'postmerge acceptance must be awakened after exact-main-SHA fixture success');
 for(const [name,source] of [
   ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
   ['CI / Run Store Fixture Evidence','.github/workflows/ci-run-store-fixture-evidence.yml'],
   ['CI / Run Store Signed Checkpoint','.github/workflows/ci-run-store-anchor.yml'],
+  ['CI / Run Store Integrity Audit','.github/workflows/ci-run-store-integrity-audit.yml'],
   ['E2E / Tests','.github/workflows/e2e-tests.yml'],
   ['E2E / Full Regression','.github/workflows/e2e-full-regression.yml'],
   ['Deploy / Public Pages','.github/workflows/deploy-pages.yml'],
@@ -35,6 +36,8 @@ assert.match(waker,/\.event == "push" and \.head_branch == "main" and/,
 assert.match(waker,/github\.event\.workflow_run\.event == 'push'/);
 assert.match(waker,/github\.event\.workflow_run\.conclusion == 'success'/);
 assert.match(waker,/git merge-base --is-ancestor/);
+assert.match(waker,/Read-only original Rekor checkpoint \+ forensic drill/);
+assert.match(waker,/Original Rekor audit Job did not execute successfully; no acceptance wake/);
 
 assert.match(workflow,/^  repository_dispatch:\n    types: \[nession-run-store-fixture-evidence\]/m);
 assert.doesNotMatch(workflow,/^  workflow_dispatch:/m);
