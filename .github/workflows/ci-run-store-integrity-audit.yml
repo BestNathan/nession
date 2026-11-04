@@ -15,6 +15,7 @@ on:
       - scripts/run-store-integrity.mjs
       - scripts/run-store-integrity-drill.mjs
       - scripts/acceptance-run-store-audit-evidence.mjs
+      - scripts/acceptance-metrics-replay-proof.mjs
   # repository_dispatch executes only the default-branch workflow source.
   # workflow_dispatch may run a malicious branch version with the anchor
   # secret; never expose that secret to arbitrary-ref selected code.

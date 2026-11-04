@@ -15,9 +15,12 @@ const positive=Object.freeze({
   source_workflow_id:385795701,
 });
 const negatives=Object.freeze([
+  // Live GET /actions/runs/41612523346/attempts/1 is completed/skipped:
+  // the off-main request's own job is skipped, while trusted-main Authorizer
+  // later rejects this push source and the privileged Publisher remains skipped.
   Object.freeze({source:41612523346,consumer:41612550381,
     case:'off_main_canonical_path_unexpected_push',
-    event:'push',conclusion:'success',reason:'unexpected_source_event'}),
+    event:'push',conclusion:'skipped',reason:'unexpected_source_event'}),
   Object.freeze({source:41617665993,consumer:41617692764,
     case:'off_main_spoofed_display_name_wrong_workflow_id_and_path',
     event:'push',conclusion:'success',reason:'unexpected_source_event'}),
@@ -198,6 +201,16 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
   };
 }
 export function selfTestMetricsReplayLineage(){
+  // Independent authenticated GitHub Run/Attempt metadata retrieved
+  // 2026-11-04: this off-main source completed with conclusion=skipped.
+  // The previous hardcoded "success" made the canonical evidence collector
+  // reject genuine proof and blocked the entire #1690 Issue updater.
+  assert.deepEqual(negatives.map(x=>[x.source,x.event,x.conclusion]),[
+    [41612523346,'push','skipped'],
+    [41617665993,'push','success'],
+    [38946898151,'workflow_dispatch','skipped'],
+    [38932756286,'workflow_dispatch','skipped'],
+  ]);
   assert.equal(pinnedHistoricalAttemptEndpoint(38946994222,1),
     '/repos/BestNathan/nession/actions/runs/38946994222/attempts/1');
   assert.notEqual(pinnedHistoricalAttemptEndpoint(38946994222,1),

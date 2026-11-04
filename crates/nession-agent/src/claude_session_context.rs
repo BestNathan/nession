@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use nession_claude_code::binding::Binding;
-use nession_claude_code::session_context::SessionContext;
+use nession_claude_code::session_context::{SessionClaudeConfig, SessionContext};
 
 use crate::server::websocket::extract_session_name;
 use crate::tmux::manager::SessionManager;
@@ -30,6 +30,26 @@ pub struct TmuxSessionContext {
 impl TmuxSessionContext {
     pub fn new(tmux: Arc<SessionManager>) -> Self {
         Self { tmux }
+    }
+
+    /// One observed variable, or `None` when the question could not be asked.
+    ///
+    /// A missing variable is `Some(None)`: that is an observation. An error is
+    /// the host having no answer at all, which the memory resolver reports as
+    /// an unsupported override rather than reading defaults.
+    async fn session_var(&self, session: &str, name: &str) -> Option<Option<String>> {
+        match self.tmux.get_session_env(session, name).await {
+            Ok(value) => Some(value),
+            Err(err) => {
+                tracing::debug!(
+                    session = %session,
+                    variable = %name,
+                    error = %err,
+                    "claude-code: session environment unavailable"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -63,6 +83,35 @@ impl SessionContext for TmuxSessionContext {
                 None
             }
         }
+    }
+
+    /// The Session's Claude Code environment, observed through tmux (#2689).
+    ///
+    /// The values come from the Session's own tmux environment, not from this
+    /// agent process: an agent started under one `CLAUDE_CONFIG_DIR` may serve
+    /// sessions that set another, and reading the process environment would
+    /// resolve the wrong Memory directory. All five queries must succeed to
+    /// return `Some`; one unanswerable variable makes the effective location
+    /// unverifiable, which is a distinct answer rather than "unset".
+    async fn session_claude_config(&self, session_id: &str) -> Option<SessionClaudeConfig> {
+        let name = extract_session_name(session_id);
+        if name.is_empty() {
+            return None;
+        }
+
+        Some(SessionClaudeConfig {
+            home: self.session_var(&name, "HOME").await?,
+            config_dir: self.session_var(&name, "CLAUDE_CONFIG_DIR").await?,
+            project_dir_name: self
+                .session_var(&name, "CLAUDE_CODE_PROJECT_DIR_NAME")
+                .await?,
+            memory_path_override: self
+                .session_var(&name, "CLAUDE_COWORK_MEMORY_PATH_OVERRIDE")
+                .await?,
+            remote_memory_dir: self
+                .session_var(&name, "CLAUDE_CODE_REMOTE_MEMORY_DIR")
+                .await?,
+        })
     }
 
     /// Whether Claude Code is the pane's foreground command right now.
@@ -140,5 +189,15 @@ mod tests {
         let context = TmuxSessionContext::new(Arc::new(SessionManager::new()));
         assert_eq!(context.session_cwd("").await, None);
         assert_eq!(context.session_claude_active("").await, None);
+        assert_eq!(context.session_claude_config("").await, None);
+    }
+
+    #[tokio::test]
+    async fn an_unanswerable_session_environment_is_none_rather_than_all_unset() {
+        // The memory resolver must be able to tell "this Session's variables
+        // are unset" from "tmux would not answer" (#2689). A session this
+        // manager does not have is the second case.
+        let context = TmuxSessionContext::new(Arc::new(SessionManager::new()));
+        assert_eq!(context.session_claude_config("agent:missing").await, None);
     }
 }

@@ -370,6 +370,54 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "claude-code",
+            id: "claude-code.memory",
+            version: 1,
+            wires: &["claude-code.memory"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::memory::v1::MemoryRequestV1>(cfg),
+                decl_of::<nession_claude_code::protocol::memory::v1::MemoryResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::memory::v1::MemoryStateV1>(cfg),
+                decl_of::<nession_claude_code::protocol::memory::v1::MemoryRepositoryKindV1>(cfg),
+                decl_of::<nession_claude_code::protocol::memory::v1::MemoryFileV1>(cfg),
+            ],
+            request: Some((
+                "MemoryRequest",
+                nession_claude_code::protocol::memory::v1::MemoryRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::memory::v1::MemoryRequestV1>,
+            )),
+            response: Some((
+                "MemoryResponse",
+                nession_claude_code::protocol::memory::v1::MemoryResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::memory::v1::MemoryResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
+            id: "claude-code.memory-read",
+            version: 1,
+            wires: &["claude-code.memory-read"],
+            decls: vec![
+                decl_of::<nession_claude_code::protocol::memory_read::v1::MemoryReadRequestV1>(cfg),
+                // Owned by `claude-code.read` and reused here as both halves of
+                // the response — the Scope precedent across list/read: generated
+                // files duplicate rather than import.
+                decl_of::<nession_claude_code::protocol::read::v1::ReadResponseV1>(cfg),
+                decl_of::<nession_claude_code::protocol::read::v1::ReadOkV1>(cfg),
+                decl_of::<nession_claude_code::protocol::read::v1::ReadFailureV1>(cfg),
+            ],
+            request: Some((
+                "MemoryReadRequest",
+                nession_claude_code::protocol::memory_read::v1::MemoryReadRequestV1::inline,
+                schema_of::<nession_claude_code::protocol::memory_read::v1::MemoryReadRequestV1>,
+            )),
+            response: Some((
+                "MemoryReadResponse",
+                nession_claude_code::protocol::read::v1::ReadResponseV1::inline,
+                schema_of::<nession_claude_code::protocol::read::v1::ReadResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "claude-code",
             id: "claude-code.conversations",
             version: 1,
             wires: &["claude-code.conversations"],

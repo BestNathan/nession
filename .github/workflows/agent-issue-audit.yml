@@ -43,6 +43,7 @@ jobs:
       needs_agent: ${{ steps.tier.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
+      agent_id: ${{ steps.target.outputs.agent_id }}
       environment: ${{ steps.target.outputs.environment }}
       mode: ${{ steps.target.outputs.mode }}
     steps:
@@ -89,10 +90,14 @@ jobs:
               identity.environment==="deepseek"?"deepseek":null;
             if(!backend)throw Error("No verified Auditor backend for selected Environment");
             const environment=identity.environment;
-            console.log(JSON.stringify({provider:backend,environment}));
+            console.log(JSON.stringify({provider:backend,environment,agent_id:identity.agent_id}));
           ')"
           provider="$(jq -er .provider <<< "$routing")"
           environment="$(jq -er .environment <<< "$routing")"
+          agent_id="$(jq -er .agent_id <<< "$routing")"
+          # The model provider is not an Agent identity; only the registry
+          # selector may attest which Auditor executed.
+          echo "agent_id=${agent_id}" >> "$GITHUB_OUTPUT"
           if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
             # The trusted main-owned command parser validates exact body,
             # author association, sender identity and non-PR, open Issue.
@@ -243,6 +248,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ needs.contract.outputs.issue_number }}
       ISSUE_AUDIT_PROVIDER: ${{ needs.contract.outputs.provider }}
+      ISSUE_AUDIT_AGENT_ID: ${{ needs.contract.outputs.agent_id }}
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
       ISSUE_AUDIT_MODE: ${{ needs.contract.outputs.mode || 'single' }}

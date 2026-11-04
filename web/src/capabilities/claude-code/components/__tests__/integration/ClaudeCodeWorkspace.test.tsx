@@ -7,6 +7,7 @@ import { claudeCodeApi } from '../../../ClaudeCodePlugin';
 import type {
   ClaudeCodeConversationsResponse,
   ClaudeCodeListResponse,
+  ClaudeCodeMemoryResponse,
   ClaudeCodeReadResponse,
 } from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -19,6 +20,8 @@ vi.mock('../../../ClaudeCodePlugin', () => ({
     claudeCodeRead: vi.fn(),
     claudeCodeConversations: vi.fn(),
     claudeCodeMessages: vi.fn(),
+    claudeCodeMemory: vi.fn(),
+    claudeCodeMemoryRead: vi.fn(),
   },
 }));
 
@@ -174,6 +177,8 @@ describe('ClaudeCodeWorkspace', () => {
     vi.mocked(claudeCodeApi.claudeCodeConversations).mockReset();
     vi.mocked(claudeCodeApi.claudeCodeConversations).mockResolvedValue(noConversations);
     vi.mocked(claudeCodeApi.claudeCodeMessages).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockReset();
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead).mockReset();
   });
 
   it('opens on the conversation, and keeps configuration one section away', async () => {
@@ -620,5 +625,192 @@ describe('ClaudeCodeWorkspace', () => {
     mockLists();
     renderConfig(<ClaudeCodeWorkspace ctx={makeContext({ experience: 'app' })} />);
     expect(screen.queryByRole('heading', { name: 'Claude Code' })).not.toBeInTheDocument();
+  });
+
+  // ---- Auto Memory (#2689) ------------------------------------------------
+
+  const memoryResponse: ClaudeCodeMemoryResponse = {
+    state: 'ready',
+    repository_root: '/work/repo',
+    repository_kind: 'git',
+    memory_directory: '/home/u/.claude/projects/-work-repo/memory',
+    files: [
+      { path: 'MEMORY.md', size: 7, content_type: 'markdown' },
+      { path: 'feedback.md', size: 9, content_type: 'markdown' },
+    ],
+    truncated: false,
+  };
+
+  it('opens the Session repository memory with no repository picker', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockResolvedValue(memoryResponse);
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead).mockResolvedValue({
+      content: '# Index',
+      content_type: 'markdown',
+      total_size: 7,
+      offset: 0,
+      has_more: false,
+    });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('tab', { name: 'Memory' }));
+
+    expect(await screen.findByText('# Index')).toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeMemory).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session_id: 'agent-1:work',
+    });
+    expect(claudeCodeApi.claudeCodeMemoryRead).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session_id: 'agent-1:work',
+      memory_directory: '/home/u/.claude/projects/-work-repo/memory',
+      path: 'MEMORY.md',
+      offset: 0,
+    });
+    expect(screen.getByTestId('claude-code-memory-source')).toHaveTextContent('/work/repo');
+    // No repository selector: the Session is the only input.
+    expect(within(screen.getByTestId('claude-code-memory')).queryByRole('combobox')).toBeNull();
+  });
+
+  it('renders an unverifiable memory location as its own state, not a default list', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockResolvedValue({
+      state: 'unsupported_override',
+      error: 'autoMemoryDirectory is set in .claude/settings.json',
+      files: [],
+      truncated: false,
+    });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('tab', { name: 'Memory' }));
+
+    const view = await screen.findByTestId('claude-code-memory');
+    expect(view).toHaveAttribute('data-state', 'unsupported_override');
+    expect(screen.getByText(/cannot verify/)).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-code-memory-list')).toBeNull();
+    expect(claudeCodeApi.claudeCodeMemoryRead).not.toHaveBeenCalled();
+  });
+
+  it('drops a pending memory answer from the previous Session', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    const firstSnapshot = deferred<ClaudeCodeMemoryResponse>();
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockReturnValueOnce(firstSnapshot.promise);
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead).mockResolvedValue({
+      content: 'stale',
+      content_type: 'markdown',
+      total_size: 5,
+      offset: 0,
+      has_more: false,
+    });
+    const { rerender } = render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    await user.click(await screen.findByRole('tab', { name: 'Memory' }));
+    expect(claudeCodeApi.claudeCodeMemory).toHaveBeenCalledTimes(1);
+
+    const otherSession: Session = {
+      ...session,
+      session_id: 'agent-1:other',
+      session_name: 'other',
+    };
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockResolvedValue({
+      ...memoryResponse,
+      memory_directory: '/home/u/.claude/projects/-work-other/memory',
+      files: [{ path: 'MEMORY.md', size: 11, content_type: 'markdown' }],
+    });
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead).mockResolvedValue({
+      content: '# Other',
+      content_type: 'markdown',
+      total_size: 7,
+      offset: 0,
+      has_more: false,
+    });
+    mockLists();
+    rerender(<ClaudeCodeWorkspace ctx={makeContext({ session: otherSession })} />);
+
+    expect(await screen.findByText('# Other')).toBeInTheDocument();
+    firstSnapshot.resolve(memoryResponse);
+
+    await waitFor(() => expect(screen.queryByText('stale')).not.toBeInTheDocument());
+    expect(screen.getByText('# Other')).toBeInTheDocument();
+  });
+
+  it('re-lists when the provider reports the repository moved', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    vi.mocked(claudeCodeApi.claudeCodeMemory)
+      .mockResolvedValueOnce(memoryResponse)
+      .mockResolvedValueOnce({
+        ...memoryResponse,
+        repository_root: '/work/moved',
+        memory_directory: '/home/u/.claude/projects/-work-moved/memory',
+        files: [{ path: 'MEMORY.md', size: 8, content_type: 'markdown' }],
+      });
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead)
+      .mockResolvedValueOnce({ error: 'stale_memory' })
+      .mockResolvedValueOnce({
+        content: '# Moved',
+        content_type: 'markdown',
+        total_size: 8,
+        offset: 0,
+        has_more: false,
+      });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+
+    await user.click(await screen.findByRole('tab', { name: 'Memory' }));
+
+    expect(await screen.findByText('# Moved')).toBeInTheDocument();
+    expect(screen.queryByText('stale_memory')).not.toBeInTheDocument();
+    expect(claudeCodeApi.claudeCodeMemory).toHaveBeenCalledTimes(2);
+    expect(
+      vi.mocked(claudeCodeApi.claudeCodeMemoryRead).mock.calls[1][0],
+    ).toMatchObject({
+      memory_directory: '/home/u/.claude/projects/-work-moved/memory',
+      path: 'MEMORY.md',
+    });
+  });
+
+  it('drops a pending file read when the memory directory changes', async () => {
+    const user = userEvent.setup();
+    mockLists();
+    const firstRead = deferred<ClaudeCodeReadResponse>();
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockResolvedValueOnce(memoryResponse);
+    vi.mocked(claudeCodeApi.claudeCodeMemoryRead)
+      .mockReturnValueOnce(firstRead.promise)
+      .mockResolvedValueOnce({
+        content: '# New repository',
+        content_type: 'markdown',
+        total_size: 16,
+        offset: 0,
+        has_more: false,
+      });
+    render(<ClaudeCodeWorkspace ctx={makeContext()} />);
+    await user.click(await screen.findByRole('tab', { name: 'Memory' }));
+    await waitFor(() => expect(claudeCodeApi.claudeCodeMemoryRead).toHaveBeenCalledTimes(1));
+
+    // Leaving and re-entering the Memory view re-reads the snapshot; this one
+    // reports another repository, which must invalidate the pending read.
+    await user.click(screen.getByRole('tab', { name: 'Conversations' }));
+    vi.mocked(claudeCodeApi.claudeCodeMemory).mockResolvedValueOnce({
+      ...memoryResponse,
+      repository_root: '/work/moved',
+      memory_directory: '/home/u/.claude/projects/-work-moved/memory',
+    });
+    await user.click(screen.getByRole('tab', { name: 'Memory' }));
+
+    expect(await screen.findByText('# New repository')).toBeInTheDocument();
+    firstRead.resolve({
+      content: 'stale repository content',
+      content_type: 'markdown',
+      total_size: 24,
+      offset: 0,
+      has_more: false,
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText('stale repository content')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('# New repository')).toBeInTheDocument();
   });
 });

@@ -21,6 +21,17 @@ import type {
   ConversationsResponse,
 } from '@/generated/protocol/claude-code/conversations/v1';
 import type {
+  MemoryFileV1,
+  MemoryRepositoryKindV1,
+  MemoryRequest,
+  MemoryResponse,
+  MemoryStateV1,
+} from '@/generated/protocol/claude-code/memory/v1';
+import type {
+  MemoryReadRequest,
+  MemoryReadResponse,
+} from '@/generated/protocol/claude-code/memory-read/v1';
+import type {
   MessagesRequest,
   MessagesResponse,
 } from '@/generated/protocol/claude-code/messages/v1';
@@ -51,6 +62,8 @@ import type {
  */
 export type ClaudeCodeListRequest = ListRequest & { agent_id: string };
 export type ClaudeCodeReadRequest = ReadRequest & { agent_id: string };
+export type ClaudeCodeMemoryRequest = MemoryRequest & { agent_id: string };
+export type ClaudeCodeMemoryReadRequest = MemoryReadRequest & { agent_id: string };
 export type ClaudeCodeConversationsRequest = ConversationsRequest & { agent_id: string };
 export type ClaudeCodeMessagesRequest = MessagesRequest & { agent_id: string };
 export type ClaudeCodeTranscriptsRequest = TranscriptsRequest & { agent_id: string };
@@ -59,6 +72,8 @@ export type ClaudeCodeTranscriptItemsRequest = TranscriptItemsRequest & { agent_
 /** The capability's names for the responses. */
 export type ClaudeCodeListResponse = ListResponse;
 export type ClaudeCodeReadResponse = ReadResponse;
+export type ClaudeCodeMemoryResponse = MemoryResponse;
+export type ClaudeCodeMemoryReadResponse = MemoryReadResponse;
 export type ClaudeCodeConversationsResponse = ConversationsResponse;
 export type ClaudeCodeMessagesResponse = MessagesResponse;
 export type ClaudeCodeTranscriptsResponse = TranscriptsResponse;
@@ -74,6 +89,17 @@ export type ClaudeCodeTranscriptItemsResponse = TranscriptItemsResponse;
  */
 export type ClaudeCodeConversationsState = ConversationsResponse['state'];
 export type ClaudeCodeMessagesState = MessagesResponse['state'];
+
+/**
+ * The memory unit's closed state vocabulary and file shape (#2689).
+ *
+ * Re-exported for the same reason the conversation states are: a hand-kept
+ * copy of a union is a copy that drifts, and the view switches on every arm of
+ * this one.
+ */
+export type ClaudeCodeMemoryState = MemoryStateV1;
+export type ClaudeCodeMemoryRepositoryKind = MemoryRepositoryKindV1;
+export type ClaudeCodeMemoryFile = MemoryFileV1;
 
 /** The conversation shape both units speak, and its liveness. */
 export type ClaudeCodeConversationItem = ConversationItemV1;

@@ -316,6 +316,70 @@ function countBy(records, getter) {
   return Object.fromEntries(Object.entries(result).sort(([a], [b]) => a.localeCompare(b)));
 }
 
+// Public-safe outcome classification concerns Agent EXECUTION only. It is not
+// a GitHub workflow conclusion or an Acceptance Success Criterion verdict.
+export function agentExecutionOutcome(record) {
+  const status = String(record?.result?.status ?? '').toLowerCase();
+  if (record?.agent?.status === 'error' ||
+      ['error','agent-error','contract-fail','failed','failure','invalid-result'].includes(status))
+    return 'failure';
+  if (['success','succeeded','completed','repaired','passed'].includes(status))
+    return 'success';
+  if (['cancelled','canceled'].includes(status)) return 'cancelled';
+  if (['timed_out','timeout','timed-out'].includes(status)) return 'timed_out';
+  return 'unknown'; // queued, running, unrecognized and missing all remain unknown
+}
+
+// A small public-safe projection from canonical *validated* run summaries.
+// Aggregate counts cover every observed record in the window; the recent list
+// is intentionally sampled. Never copy a raw model response or checkpoint.
+function perAgentWindow(records) {
+  const groups = new Map();
+  let unattributed = 0;
+  for (const record of records) {
+    const id = record.agent?.id, role = record.agent?.role;
+    if (!id || !['developer','reviewer','acceptor','auditor'].includes(role)) {
+      unattributed++; continue;
+    }
+    const key = role + ':' + id;
+    let group = groups.get(key);
+    if (!group) {
+      group = { id, role, total: 0, success: 0, failure: 0,
+        cancelled: 0, timed_out: 0, unknown: 0, recent: [] };
+      groups.set(key, group);
+    }
+    const outcome = agentExecutionOutcome(record);
+    group.total++;
+    group[outcome]++;
+    group.recent.push({
+      run_id: record.identity.github_run_id,
+      attempt: record.identity.github_run_attempt,
+      workflow: record.identity.workflow_id,
+      issue: Number.isSafeInteger(record.task?.issue) && record.task.issue > 0
+        ? record.task.issue : null,
+      outcome,
+      provider: record.agent.provider,
+      observed_at: record.timing.finished_at ?? record.timing.started_at,
+      duration_ms: record.timing.agent_duration_ms,
+    });
+  }
+  const all = [...groups.values()].sort((a,b) =>
+    b.total-a.total || a.role.localeCompare(b.role) || a.id.localeCompare(b.id));
+  return {
+    schema_version: 1,
+    coverage: 'observed',
+    unattributed,
+    truncated: all.length > 24,
+    items: all.slice(0,24).map(group => ({
+      ...group,
+      recent: group.recent.sort((a,b) =>
+        b.observed_at.localeCompare(a.observed_at) ||
+        b.run_id-a.run_id || b.attempt-a.attempt || a.workflow.localeCompare(b.workflow))
+        .slice(0,8),
+    })),
+  };
+}
+
 function aggregateWindow(records) {
   const toolObserved = records.filter((record) => record.execution.tools.observed);
   const toolByName = {};
@@ -337,6 +401,7 @@ function aggregateWindow(records) {
       by_harness: countBy(records, (record) => record.agent.harness_sha256),
       by_result: countBy(records, (record) => record.result?.status),
     },
+    per_agent: perAgentWindow(records),
     turns: numericStats(records, (record) => record.execution.turns),
     model_requests: numericStats(records, (record) => record.execution.model_requests),
     tools: {
@@ -362,6 +427,17 @@ function aggregateWindow(records) {
 
 export function aggregateAgentWorkflowTelemetry(records, now = new Date()) {
   const nowMs = now.getTime();
+  // The canonical storage key includes the job/task discriminator; a GitHub
+  // rerun attempt is distinct but the same persisted record cannot count twice.
+  const identities = new Set();
+  for (const record of records) {
+    validateAgentWorkflowTelemetry(record);
+    const key = [record.identity.repository,record.identity.workflow_id,
+      record.identity.github_run_id,record.identity.github_run_attempt,
+      record.identity.unique_run_name].join(':');
+    if (identities.has(key)) fail('duplicate canonical Agent run: ' + key);
+    identities.add(key);
+  }
   const within = (days) => records.filter((record) => {
     const started = Date.parse(record.timing.started_at);
     return started <= nowMs && started >= nowMs - days * 24 * 60 * 60 * 1000;
@@ -548,6 +624,32 @@ function selfTest() {
   const metrics = aggregateAgentWorkflowTelemetry([fixture], new Date('2026-10-08T00:00:00Z'));
   assert.equal(metrics.windows['7d'].runs.total, 1);
   assert.equal(metrics.windows['30d'].tools.total, 3);
+  // #2720: known Agent outcomes are not GitHub job outcomes or SC verdicts.
+  const success = {...correlated, result: {status:'completed'}};
+  const failed = {...correlated,identity:{...correlated.identity,
+    github_run_attempt:2,unique_run_name:'321-2-issue-1664'},
+    result:{status:'agent-error'},agent:{...correlated.agent,status:'error'}};
+  const unknown = {...correlated,identity:{...correlated.identity,
+    github_run_attempt:3,unique_run_name:'321-3-issue-1664'},
+    result:{status:'not-observed'}};
+  const cancelled = {...correlated,identity:{...correlated.identity,
+    github_run_attempt:4,unique_run_name:'321-4-issue-1664'},
+    result:{status:'cancelled'}};
+  const observed=aggregateAgentWorkflowTelemetry([success,failed,unknown,cancelled],
+    new Date());
+  const stats=observed.windows['7d'].per_agent.items[0];
+  assert.equal(stats.total,4);
+  assert.equal(stats.success,1);
+  assert.equal(stats.failure,1);
+  assert.equal(stats.unknown,1);
+  assert.equal(stats.cancelled,1);
+  assert.equal(stats.recent.length,4);
+  assert.equal(stats.recent.find(x=>x.attempt===2).outcome,'failure');
+  assert.throws(()=>aggregateAgentWorkflowTelemetry([success,success],new Date()),
+    /duplicate canonical Agent run/);
+  const noIdentity={...success,agent:{...success.agent,id:null}};
+  assert.equal(aggregateAgentWorkflowTelemetry([noIdentity],new Date())
+    .windows['7d'].per_agent.unattributed,1);
   assert.match(renderAgentMetricsSvg(metrics, 'dark'), /Agent Workflow Telemetry/);
   const retried = buildAgentWorkflowTelemetry({
     workflow_id: 'requirement-acceptance', github_run_id: 40174627551, github_run_attempt: 1,
