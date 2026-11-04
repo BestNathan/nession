@@ -222,8 +222,10 @@ Those modes are implementation tools beneath the product interaction model. They
 >
 > **Clearance is scroll, not fit.** An open upper surface gets its own scroll clearance so the live
 > Terminal bottom can reach just above it. The composer-only occlusion still owns xterm's rows and the
-> PTY size; the panel height never enters that value. History keeps its viewing anchor, and closing the
-> panel restores composer-only clearance. See
+> PTY size; the panel height never enters that value. A following → history scroll retains the
+> current shift instead of moving the grid back beneath the panel, while a panel opened over an
+> existing history reader adds no shift of its own. Closing the panel restores composer-only
+> clearance. See
 > [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-scroll-clearance-2710).
 >
 > **Prototype (#2710).** The interaction was reviewed from the live preview

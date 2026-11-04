@@ -238,7 +238,7 @@ describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
     expect(clearanceOffsetFor(48, 0, 16)).toBe(0);
   });
 
-  it('shifts the rendered screen in the following state only', () => {
+  it('retains the screen offset when a swipe enters history under an open panel', () => {
     const screen = makeScreen();
     const { port } = makePort({ screen });
     const { host } = makeHost({ panelClearance: '48px' });
@@ -248,6 +248,20 @@ describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
     expect(occlusion.mode()).toBe('following');
     expect(occlusion.clearanceOffset()).toBe(48);
     expect(screen.style.transform).toBe('translateY(-48px)');
+
+    // The first scroll gesture must not yank the screen down 48px.
+    occlusion.scrollLines(-1);
+    expect(port.scrollLines).toHaveBeenCalledWith(-1);
+    expect(occlusion.mode()).toBe('history');
+    expect(occlusion.clearanceOffset()).toBe(48);
+    expect(screen.style.transform).toBe('translateY(-48px)');
+  });
+
+  it('does not shift a history reader merely because a panel opens', () => {
+    const screen = makeScreen();
+    const { port } = makePort({ screen });
+    const { host } = makeHost({ panelClearance: '48px' });
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
 
     occlusion.enterHistory();
     expect(occlusion.mode()).toBe('history');

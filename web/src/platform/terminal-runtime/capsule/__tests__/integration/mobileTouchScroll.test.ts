@@ -28,11 +28,18 @@ class FakeResizeObserver {
 interface HarnessOptions {
   type?: 'normal' | 'alternate';
   mouseTrackingMode?: TerminalMouseTrackingMode;
+  panelClearance?: string;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
   const element = document.createElement('div');
+  const screen = document.createElement('div');
+  screen.className = 'xterm-screen';
+  element.appendChild(screen);
   const host = document.createElement('div');
+  if (options.panelClearance) {
+    host.style.setProperty('--nession-local-terminal-capsule-panel-clearance', options.panelClearance);
+  }
   // The terminal lives inside the capsule host, exactly like the product; the
   // handler binds on the host in the capture phase (#2659).
   host.appendChild(element);
@@ -68,7 +75,7 @@ function makeHarness(options: HarnessOptions = {}) {
   occlusion.bind();
   const wheels: WheelEvent[] = [];
   element.addEventListener('wheel', (event) => { wheels.push(event as WheelEvent); });
-  return { occlusion, port, element, wheels };
+  return { occlusion, port, element, screen, wheels };
 }
 
 function touchEvent(
@@ -101,6 +108,22 @@ afterEach(() => {
 });
 
 describe('mobile touch scroll ownership (#2659)', () => {
+  it('does not snap the translated screen back on the first expanded-panel swipe', () => {
+    const harness = makeHarness({ panelClearance: '96px' });
+    harnesses.push(harness.occlusion);
+    const { occlusion, port, element, screen } = harness;
+    occlusion.scrollToMarginBottom();
+    expect(screen.style.transform).toBe('translateY(-96px)');
+
+    element.dispatchEvent(touchEvent('touchstart', [[100, 300]]));
+    const drag = touchEvent('touchmove', [[100, 332]]);
+    element.dispatchEvent(drag);
+    expect(drag.defaultPrevented).toBe(true);
+    expect(port.scrollLines).toHaveBeenCalledWith(-2);
+    expect(occlusion.mode()).toBe('history');
+    expect(screen.style.transform).toBe('translateY(-96px)');
+  });
+
   it('scrolls local history with a single-finger vertical drag, without PTY input', () => {
     const harness = makeHarness();
     harnesses.push(harness.occlusion);

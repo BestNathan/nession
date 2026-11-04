@@ -60,15 +60,18 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   await assertClear('Keys');
   await page.getByTestId('capsule-view-quick-commands').click();
   await expect(page.getByTestId('quick-commands-body')).toBeVisible();
-  await assertClear('Commands');
+  const live = await assertClear('Commands');
 
-  // History: scrolling up keeps the anchor across a panel height change.
+  // History: the first wheel step keeps the live shift (#2710 SC-10), and
+  // scrolling up keeps the anchor across a panel height change.
   await moveOverTerminal(page);
   await page.mouse.wheel(0, -320);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');
   const history = await terminalGeometry(page);
-  expect(history.screenTransform, 'history applies no shift').toBe('none');
+  expect(history.screenTransform, 'the first history step retains the live shift')
+    .toBe(live.screenTransform);
+  expect(history.screenTransform, 'history is shifted by the open panel').not.toBe('none');
   expect(history.viewportY).toBeLessThan(history.baseY);
 
   await page.getByTestId('capsule-view-terminal-keys').click();
@@ -76,7 +79,8 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   const afterResize = await terminalGeometry(page);
   expect(afterResize.viewportY, 'history anchor survives a panel height change')
     .toBe(history.viewportY);
-  expect(afterResize.screenTransform, 'history still applies no shift').toBe('none');
+  expect(afterResize.screenTransform, 'a panel height change does not move a history reader')
+    .toBe(history.screenTransform);
 
   // Scroll to the live bottom: following returns and the clearance reapplies.
   // Re-aim after the view switch moved the screen under the pointer.
@@ -107,8 +111,9 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   test.info().annotations.push({
     type: 'evidence',
     description: 'exact SHA ' + sha + ': +/Keys/Commands published clearance and kept cursorBottom <= ' +
-      'dockTop with unchanged xterm rows and tmux ' + paneBefore + '; history anchor viewportY=' +
-      history.viewportY + ' survived a view switch; close restored 0px clearance without moving ' +
+      'dockTop with unchanged xterm rows and tmux ' + paneBefore + '; the first history step retained ' +
+      'the live shift (viewportY=' + history.viewportY + ', ' + history.screenTransform +
+      ') and survived a view switch; close restored 0px clearance without moving ' +
       'viewportY=' + closed.viewportY,
   });
 });

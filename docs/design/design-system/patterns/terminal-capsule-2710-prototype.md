@@ -15,6 +15,20 @@ proves, where its immutable source is, and what it does not prove.
   SHA. The published page adds a gallery navigation bar and a CSP; the mock's
   own bytes are otherwise the pinned revision.
 
+## Revision for touch-scroll continuity (2026-11-04)
+
+The first browser pass above covers the initial design. A follow-up correction
+keeps a vertical drag owning the mock terminal while an upper panel is open and
+prevents the clearance observer from resetting the gesture mid-drag; its source
+revision is
+[`0f8b80e5eecb75699a3815cab3d94e0457263cf0/terminal-keys-commands-2710`](https://github.com/BestNathan/nession/tree/0f8b80e5eecb75699a3815cab3d94e0457263cf0/terminal-keys-commands-2710)
+(the code change landed in `2ea079815`, the documentation in `0f8b80e5`). That
+revision was statically checked only — it was **not** re-verified against the
+Pages manifest and has no new real-browser receipt. The 390×844 browser pass and
+Pages proof above remain evidence for the first design pass, not for this
+revised touch behavior. Production proof for the corrected
+following → history transition is SC-10 / PR #2739.
+
 ## Question settled
 
 Can Nession make real modifier chords and saved-command actions reachable on
@@ -63,7 +77,7 @@ The live preview was driven at 390×844 in a real browser:
   (DECCKM and friends), xterm row/PTY/tmux stability, alternate-screen and
   mouse-reporting TUIs, touch scrolling, the #2657 direction pad, IME and device
   safe areas. Those are proved by the production implementation and its
-  Acceptance Cases (SC-02/03/04/08/09 in issue #2710), not by this artifact.
+  Acceptance Cases (SC-02/03/04/08/09/10 in issue #2710), not by this artifact.
 - The mock is not an Acceptance receipt and must not be cited as production
   browser evidence.
 

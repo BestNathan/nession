@@ -6,9 +6,10 @@ const { test, expect } = require('@playwright/test');
 const { verifiedRuntime, command, readBuffer } = require('../../../shared/foreground-resume-browser.cjs');
 const {
   markTerminal, openCapability, openSession, paneSize, stopPtyProbe, terminalGeometry,
-  terminalPoint,
 } = require('../../../shared/terminal-tools-browser.cjs');
-const { dispatchTouch, terminalView } = require('../../../shared/terminal-touch-scroll-cases.cjs');
+const {
+  dragTerminalRows, settleTerminalFrames,
+} = require('../../../shared/terminal-touch-scroll-cases.cjs');
 const {
   touchStart, touchMove, touchEnd,
 } = require('../../../shared/terminal-direction-pad-cases.cjs');
@@ -53,20 +54,19 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
 
   // Touch scrolling is still terminal-owned while the panel is open. Aim at
   // the terminal well's top: the shifted grid is tall and the panel covers its
-  // middle at App width.
-  const view = await terminalView(page);
-  const point = await terminalPoint(page);
-  await dispatchTouch(page, 'touchstart', [[point.x, point.y]]);
-  await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4]]);
-  await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4 + Math.round(view.cellHeight)]]);
-  await dispatchTouch(page, 'touchend', []);
+  // middle at App width. Let the panel-open follow reconciliation settle
+  // first, then drag several cells so a fractional cell height cannot round
+  // the gesture to zero lines.
+  await settleTerminalFrames(page);
+  await dragTerminalRows(page, 1);
   await expect.poll(async () => {
     const view = await terminalGeometry(page);
     return view ? view.baseY - view.viewportY : 0;
   }, { timeout: 10_000, message: 'the touch drag did not move local history' }).toBeGreaterThan(0);
   const scrolled = await terminalGeometry(page);
   expect(scrolled.viewportY).toBeLessThan(scrolled.baseY);
-  expect(scrolled.screenTransform, 'history is unshifted').toBe('none');
+  expect(scrolled.screenTransform, 'the drag retains the live panel shift')
+    .toBe(shifted.screenTransform);
 
   // Alternate-screen application: no shift, no resize, no changed rows.
   await page.getByTestId('capsule-capability-dismiss').click();
