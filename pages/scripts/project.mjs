@@ -192,7 +192,7 @@ function agentOutcomeWindow(window) {
   const raw = window?.per_agent;
   const unavailable = {status:'unavailable',unattributed:null,items:[]};
   if(raw?.schema_version!==1 || raw.coverage!=='observed' ||
-    !Array.isArray(raw.items)||raw.items.length>40 ||
+    !Array.isArray(raw.items)||raw.items.length>24 ||
     !validCount(raw.unattributed)||typeof raw.truncated!=='boolean')return unavailable;
   const seen=new Set();
   const items=[];
@@ -200,7 +200,7 @@ function agentOutcomeWindow(window) {
     if(!PUBLIC_AGENT_ID.test(group?.id)||!PUBLIC_ROLE.test(group?.role)||
       !['total','success','failure','cancelled','timed_out','unknown'].every(k=>validCount(group[k]))||
       group.total!==group.success+group.failure+group.cancelled+group.timed_out+group.unknown||
-      !Array.isArray(group.recent)||group.recent.length>16)return unavailable;
+      !Array.isArray(group.recent)||group.recent.length>8)return unavailable;
     const key=group.role+':'+group.id;
     if(seen.has(key))return unavailable;
     seen.add(key);
@@ -400,7 +400,7 @@ export function validateProjection(p) {
     const window=p.agents.outcomes[period];
     allowedFields(window,['status','unattributed','items'],'Agent outcome window');
     if(!['available','truncated','unavailable'].includes(window.status) ||
-       !Array.isArray(window.items)||window.items.length>40 ||
+       !Array.isArray(window.items)||window.items.length>24 ||
        (window.status==='unavailable' && (window.items.length||window.unattributed!==null)) ||
        (window.status!=='unavailable'&&!validCount(window.unattributed)))
       throw Error('invalid per-Agent public coverage');
@@ -411,7 +411,7 @@ export function validateProjection(p) {
       if(!PUBLIC_ROLE.test(a.role)||!PUBLIC_AGENT_ID.test(a.id)||ids.has(key)||
          !['total','success','failure','cancelled','timed_out','unknown'].every(k=>validCount(a[k]))||
          a.total!==a.success+a.failure+a.cancelled+a.timed_out+a.unknown ||
-         !Array.isArray(a.recent)||a.recent.length>16)throw Error('invalid per-Agent counts');
+         !Array.isArray(a.recent)||a.recent.length>8)throw Error('invalid per-Agent counts');
       ids.add(key);
       for(const run of a.recent) {
         allowedFields(run,['run_id','attempt','workflow','issue','outcome','provider','observed_at','duration_ms','url'],'Agent Run');
