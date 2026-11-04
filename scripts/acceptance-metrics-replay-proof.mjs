@@ -16,9 +16,23 @@ const positive=Object.freeze({
 });
 const negatives=Object.freeze([
   Object.freeze({source:41612523346,consumer:41612550381,
-    case:'off_main_canonical_path_unexpected_push'}),
+    case:'off_main_canonical_path_unexpected_push',
+    event:'push',conclusion:'success',reason:'unexpected_source_event'}),
   Object.freeze({source:41617665993,consumer:41617692764,
-    case:'off_main_spoofed_display_name_wrong_workflow_id_and_path'}),
+    case:'off_main_spoofed_display_name_wrong_workflow_id_and_path',
+    event:'push',conclusion:'success',reason:'unexpected_source_event'}),
+  // Both were real owner-triggered GitHub workflow_dispatch requests
+  // selecting an off-main ref of the ORIGINAL canonical workflow, which was
+  // skipped by its own trust check. In both cases the *trusted main consumer*
+  // nevertheless received workflow_run and denied before its App Publisher.
+  // They demonstrate actual off-main dispatch denial, NOT a wrong-ID
+  // workflow_dispatch attack or a fabricated attempt/digest.
+  Object.freeze({source:38946898151,consumer:38946907594,
+    case:'off_main_owner_manual_dispatch_same_source_sha',
+    event:'workflow_dispatch',conclusion:'skipped',reason:'untrusted_source'}),
+  Object.freeze({source:38932756286,consumer:38932765400,
+    case:'off_main_owner_manual_dispatch_foreign_source_sha',
+    event:'workflow_dispatch',conclusion:'skipped',reason:'untrusted_source'}),
 ]);
 const allowedNames=['authorize-replay','rust-health','web-health','e2e-health','publish'];
 const fail=x=>{throw Error('authenticated Metrics replay: '+x);};
@@ -134,26 +148,35 @@ export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,g
     if(!receipt)fail('missing actual denial receipt for '+pin.case);
     const workflow=await get(prefix+'/actions/workflows/'+badSource.workflow_id);
     const proof=attestReplayDenial(receipt,badSource,badRecipient,attemptJobs,workflow);
-    if(proof.reason_code!=='unexpected_source_event'||
+    if(proof.reason_code!==pin.reason||
        proof.privileged_publisher_job!=='skipped'||
-       badSource.event!=='push'||
+       badSource.event!==pin.event||
+       badSource.conclusion!==pin.conclusion||
        badSource.head_branch==='main'||
        (pin.case.includes('spoofed')&&
          (badSource.name!=='Metrics / Replay Request'||
-          normalized(badSource)===SOURCE_WORKFLOW)))
+          normalized(badSource)===SOURCE_WORKFLOW))||
+       (pin.event==='workflow_dispatch'&&
+         (badSource.workflow_id!==positive.source_workflow_id||
+          normalized(badSource)!==SOURCE_WORKFLOW||
+          badSource.actor?.login!=='BestNathan'||
+          badSource.triggering_actor?.login!=='BestNathan')))
       fail('historical denied source did not match deliberate hostile-case scope');
     denied.push({...proof,case:pin.case,source_workflow_path:normalized(badSource)});
   }
-  if(denied.length!==2)fail('incomplete real negative-source matrix');
+  if(denied.length!==negatives.length)fail('incomplete real negative-source matrix');
   return {
     schema_version:1,kind:'authenticated_metrics_replay_provenance_matrix',
     repository:REPO,authenticated_target_sha:targetSha,
     verdict:'HistoricalSourceEvidenceVerified',
     authorized_owner_main_replay:yes,
     denied_untrusted_producers:denied,
-    positive_coverage:1,negative_coverage:2,
+    positive_coverage:1,negative_coverage:negatives.length,
+    real_manual_off_main_dispatch_denials:denied.filter(x=>
+      x.source_event==='workflow_dispatch'&&
+      x.reason_code==='untrusted_source').length,
     additional_policy_fixtures_owner:'scripts/metrics-replay-source.mjs:attestReplay',
-    not_yet_live_tested:'wrong workflow ID/path with a separately successfully dispatched workflow_dispatch, forged attempt/digest and fresh owner manual replay are not proven by these two unexpected-event denials',
+    not_yet_live_tested:'wrong workflow ID/path under workflow_dispatch, forged attempt/digest and newly replayed owner-main manual action are not proved by historical pushed or off-main dispatch denial cases',
     github_server_ref_write_denials_verified:false,
   };
 }
