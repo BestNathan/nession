@@ -8,31 +8,13 @@ const { test, expect } = require('@playwright/test');
 const { verifiedRuntime, command } = require('../../../shared/foreground-resume-browser.cjs');
 const {
   dismissCapability, markTerminal, moveOverTerminal, openCapability, openSession, paneSize,
-  startPtyProbe, stopPtyProbe, terminalGeometry, terminalPoint,
+  startPtyProbe, stopPtyProbe, terminalGeometry,
 } = require('../../../shared/terminal-tools-browser.cjs');
-const { dispatchTouch, terminalView } = require('../../../shared/terminal-touch-scroll-cases.cjs');
+const {
+  dragTerminalRows, settleTerminalFrames,
+} = require('../../../shared/terminal-touch-scroll-cases.cjs');
 
 const SCROLL = 'seq 1 400';
-
-/**
- * One real-gesture drag. Positive rows move the finger down and browse older
- * output; negative rows move it up and return toward the live bottom. The
- * initial 4px stays inside the axis slop, mirroring SC-09.
- */
-async function dragRows(page, rows) {
-  const view = await terminalView(page);
-  const point = await terminalPoint(page);
-  // Cell height is fractional; round up and add a small buffer so the gesture
-  // always crosses at least `rows` whole lines on either direction.
-  const distance = Math.ceil(view.cellHeight * Math.abs(rows)) + 2;
-  const direction = rows > 0 ? 1 : -1;
-  // Upward drags start lower so the whole gesture stays on the visible screen.
-  const startY = direction > 0 ? point.y : point.y + 4 + distance;
-  await dispatchTouch(page, 'touchstart', [[point.x, startY]]);
-  await dispatchTouch(page, 'touchmove', [[point.x, startY + direction * 4]]);
-  await dispatchTouch(page, 'touchmove', [[point.x, startY + direction * (4 + distance)]]);
-  await dispatchTouch(page, 'touchend', []);
-}
 
 test('SC-10: continuous scrollback browsing under an expanded panel', async ({ page }) => {
   test.setTimeout(300_000);
@@ -68,17 +50,20 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
   }, { timeout: 10_000 }).toBe(true);
   const shifted = await terminalGeometry(page);
   expect(shifted.screenTransform, 'following spends the panel clearance').not.toBe('none');
+  // Let the panel-open follow reconciliation run before the gesture starts.
+  await settleTerminalFrames(page);
 
   // 2. The first drag into history must retain that shift, then keep browsing.
-  await dragRows(page, 2);
-  await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
-    .toBe('history');
+  await dragTerminalRows(page, 2);
+  await expect.poll(async () => {
+    const view = await terminalGeometry(page);
+    return view ? view.mode === 'history' && view.viewportY < view.baseY : false;
+  }, { timeout: 10_000 }).toBe(true);
   const first = await terminalGeometry(page);
-  expect(first.viewportY, 'the first drag left the live bottom').toBeLessThan(first.baseY);
   expect(first.screenTransform, 'the first history step retains the live shift')
     .toBe(shifted.screenTransform);
 
-  await dragRows(page, 3);
+  await dragTerminalRows(page, 3);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeLessThan(
     first.viewportY,
   );
@@ -86,7 +71,7 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
   expect(deeper.screenTransform, 'further drags keep the same shift')
     .toBe(shifted.screenTransform);
 
-  await dragRows(page, -2);
+  await dragTerminalRows(page, -2);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeGreaterThan(
     deeper.viewportY,
   );
@@ -95,8 +80,7 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
     .toBe(shifted.screenTransform);
 
   // 3. The wheel path uses the same transition rules and returns to following.
-  const point = await terminalPoint(page);
-  await page.mouse.move(point.x, point.y);
+  await moveOverTerminal(page);
   await page.mouse.wheel(0, 20000);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('following');
@@ -140,13 +124,14 @@ test('SC-10: continuous scrollback browsing under an expanded panel', async ({ p
     .toBe(reader.viewportY);
   expect(readerPanel.screenTransform, 'a pre-existing history reader is not shifted')
     .toBe('none');
+  await settleTerminalFrames(page);
 
-  await dragRows(page, 1);
+  await dragTerminalRows(page, 1);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeLessThan(
     readerPanel.viewportY,
   );
   const readerDeeper = await terminalGeometry(page);
-  await dragRows(page, -1);
+  await dragTerminalRows(page, -1);
   await expect.poll(async () => (await terminalGeometry(page))?.viewportY).toBeGreaterThan(
     readerDeeper.viewportY,
   );
