@@ -290,6 +290,27 @@ describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
     expect(occlusion.mode()).toBe('following');
   });
 
+  it('routes wheel in both directions through panel scrollroom with no buffer history', () => {
+    const screen = makeScreen();
+    const { port } = makePort({ screen, viewportY: 0, length: 24 });
+    const { host } = makeHost({ panelClearance: '48px' });
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+
+    // A shell with no scrollback must still be able to bring the live bottom
+    // above the panel and recover the original first row with the wheel.
+    const wheel = (deltaY: number) => ({
+      deltaY,
+      deltaMode: 0,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    }) as unknown as WheelEvent;
+    expect(occlusion.handleWheel(wheel(48))).toBe(false);
+    expect(screen.style.transform).toBe('translateY(-48px)');
+    expect(occlusion.handleWheel(wheel(-48))).toBe(false);
+    expect(screen.style.transform).toBe('');
+    expect(port.scrollLines).not.toHaveBeenCalled();
+  });
+
   it('does not shift a history reader merely because a panel opens', () => {
     const screen = makeScreen();
     const { port } = makePort({ screen });
