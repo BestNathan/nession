@@ -19,6 +19,12 @@ const HEX40=/^[a-f0-9]{40}$/;
 const positive=v=>Number.isSafeInteger(v)&&v>0;
 const no=m=>{throw Error('Metrics Replay refused: '+m);};
 const pathOf=s=>String(s??'').replace(/@refs\/heads\/main$/,'');
+// A source Run's latest attempt changes after a rerun. Authenticate the exact
+// attempt named by the workflow_run wake, never the mutable latest Run view.
+export function replaySourceAttemptPath(id,attempt){
+  if(!positive(id)||!positive(attempt))no('invalid source run/attempt identity');
+  return '/actions/runs/'+id+'/attempts/'+attempt;
+}
 export function attestReplay({ctx,event,source,workflow,main}){
   if(ctx?.repository!==REPO||ctx?.event!=='workflow_run'||
      ctx?.ref!=='refs/heads/main'||!HEX40.test(ctx.sha??''))
@@ -87,9 +93,12 @@ async function authorize(){
     if(!file||fs.lstatSync(file).size>512*1024)no('missing/oversized GitHub event');
     const event=JSON.parse(fs.readFileSync(file,'utf8'));
     const id=event?.workflow_run?.id;
-    if(!positive(id))no('missing GitHub upstream run ID');
+    const attempt=event?.workflow_run?.run_attempt;
+    if(!positive(id)||!positive(attempt))
+      no('missing GitHub upstream run/attempt identity');
     const [source,main]=await Promise.all([
-      getJson('/actions/runs/'+id,token),getJson('/git/ref/heads/main',token)]);
+      getJson(replaySourceAttemptPath(id,attempt),token),
+      getJson('/git/ref/heads/main',token)]);
     if(!positive(source.workflow_id))no('upstream workflow ID invalid');
     const workflow=await getJson('/actions/workflows/'+source.workflow_id,token);
     statement=attestReplay({ctx,event,source,workflow,main});
@@ -119,6 +128,13 @@ function selfTest(){
       head_branch:'main',head_repository:repo,repository:repo,event:'workflow_dispatch'}};
   const main={object:{sha}};
   const valid={ctx,event,source,workflow,main};
+  assert.equal(replaySourceAttemptPath(38946994222,1),
+    '/actions/runs/38946994222/attempts/1');
+  assert.equal(replaySourceAttemptPath(38946994222,2),
+    '/actions/runs/38946994222/attempts/2');
+  for(const [runId,runAttempt] of [[0,1],[id,0],[id,-1],[id,1.5],[id,'2']])
+    assert.throws(()=>replaySourceAttemptPath(runId,runAttempt),
+      /invalid source run\/attempt identity/);
   assert.equal(attestReplay(valid).status,'authorized');
   assert.equal(requireSchedule({...ctx,event:'schedule'}).status,'authorized');
   const bad=patch=>assert.throws(()=>attestReplay({...valid,...patch}),/Metrics Replay refused/);
