@@ -15,7 +15,7 @@ on:
     # release-qualification SCs Pending with no later re-evaluation. A second
     # trigger cannot authorize Pass by itself; the evaluator re-reads the
     # completed Full evidence under the same trusted rules.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "CI / Run Store Signed Checkpoint", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "CI / Run Store Signed Checkpoint", "CI / Run Store Integrity Audit", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
     # Only successful main-push sources can authorize post-merge verification.
     # Filtering the event here prevents thousands of PR completion no-op runs,
     # rather than creating a downstream run solely to skip its select job.
@@ -85,6 +85,8 @@ jobs:
                .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
               (.name == "CI / Run Store Signed Checkpoint" and
                .path == ".github/workflows/ci-run-store-anchor.yml") or
+              (.name == "CI / Run Store Integrity Audit" and
+               .path == ".github/workflows/ci-run-store-integrity-audit.yml") or
               (.name == "E2E / Tests" and
                .path == ".github/workflows/e2e-tests.yml") or
               (.name == "E2E / Full Regression" and
@@ -106,6 +108,17 @@ jobs:
             if ! jq -e '[.jobs[] | select(.name == "full" and .conclusion == "success")] | length == 1' \
                  "$RUNNER_TEMP/source-jobs.json" > /dev/null; then
               echo "Full Regression did not execute the Full browser job; no acceptance wake"
+              wake=false
+            fi
+          fi
+          # The existing audit Workflow also contains a deliberately disabled
+          # legacy administrator-secret job. Only the *successful, main-owned*
+          # public Rekor forensic Job may wake SC-07 evaluation; a skipped
+          # legacy-only workflow never supplies audit proof.
+          if [[ "$(jq -r .name "$RUNNER_TEMP/source.json")" == 'CI / Run Store Integrity Audit' ]]; then
+            gh api               "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/attempts/$SOURCE_ATTEMPT/jobs?per_page=100"               > "$RUNNER_TEMP/source-jobs.json"
+            if ! jq -e               '[.jobs[] | select(.name == "Read-only original Rekor checkpoint + forensic drill" and .conclusion == "success")] | length == 1'               "$RUNNER_TEMP/source-jobs.json" > /dev/null; then
+              echo "Original Rekor audit Job did not execute successfully; no acceptance wake"
               wake=false
             fi
           fi

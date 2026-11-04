@@ -554,10 +554,6 @@ function render(){
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
   const route=match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
-  document.querySelectorAll('[data-route]').forEach(link=>{
-    if(link.dataset.route===route)link.setAttribute('aria-current','page');
-    else link.removeAttribute('aria-current');
-  });
   root.replaceChildren();
   // A hashchange may arrive while the independent site.json request is still
   // pending. Only these routes need that snapshot; Prototypes and Knowledge

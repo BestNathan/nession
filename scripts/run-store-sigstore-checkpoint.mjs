@@ -36,7 +36,7 @@ function exactMain(env){
      !/^[1-9]\d*$/.test(String(env.GITHUB_RUN_ATTEMPT??'')))
     deny('trusted exact-main source/run/attempt required');
 }
-function temporaryGit(callback){
+export function temporaryGit(callback){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-store-checkpoint-'));
   try{
     command('git',['init','-q',dir]);
@@ -237,10 +237,14 @@ function selfTest(){
   assert.equal(REFS.length,4);
   console.log('run-store Sigstore checkpoint: canonical roots, witnessed signature and hostile fixtures passed');
 }
-try{
-  const mode=process.argv[2];
-  if(mode==='self-test')selfTest();
-  else if(mode==='collect')collect(process.argv[3]);
-  else if(mode==='verify-restore')verifyAndRestore(process.argv[3],process.argv[4]);
-  else deny('usage: self-test | collect OUT | verify-restore CHECKPOINT OUT');
-}catch(e){console.error('::error::'+String(e.message));process.exitCode=1;}
+// Importing the canonical verifier for a trusted, separately scheduled
+// observer must not invoke its CLI or claim an SC verdict as a side effect.
+if(process.argv[1]===fileURLToPath(import.meta.url)){
+  try{
+    const mode=process.argv[2];
+    if(mode==='self-test')selfTest();
+    else if(mode==='collect')collect(process.argv[3]);
+    else if(mode==='verify-restore')verifyAndRestore(process.argv[3],process.argv[4]);
+    else deny('usage: self-test | collect OUT | verify-restore CHECKPOINT OUT');
+  }catch(e){console.error('::error::'+String(e.message));process.exitCode=1;}
+}

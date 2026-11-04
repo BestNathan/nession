@@ -9,6 +9,19 @@ export function issueLabelNames(issue) {
   return (issue.labels ?? []).map((item) => typeof item === 'string' ? item : item?.name).filter(Boolean);
 }
 
+// A model may propose only the structural fields it needs to change, while
+// the Issue mutation tool deliberately accepts a COMPLETE and validated
+// snapshot. Fill omitted fields from the freshly-read fixed target here,
+// never from prompt text or guessed model defaults. Noncontract labels remain
+// owned/preserved by candidateIssue at the downstream tool boundary.
+export function completeIssueUpdateProposal(current, proposal) {
+  return {
+    title: proposal.title ?? current.title,
+    body: proposal.body ?? current.body,
+    labels: proposal.labels ?? issueLabelNames(current).filter(name => CONTRACT_LABELS.has(name)),
+  };
+}
+
 export function candidateIssue(issue, title, body, contractLabels) {
   const preserved = issueLabelNames(issue).filter((name) => !CONTRACT_LABELS.has(name));
   const labels = [...new Set([...preserved, ...contractLabels])];

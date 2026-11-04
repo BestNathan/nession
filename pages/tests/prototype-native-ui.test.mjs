@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import {NAV_ITEMS} from '../navigation.js';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { approvedExternalWorkflowRunSource } from '../../scripts/workflow-conventions.mjs';
@@ -26,7 +27,8 @@ const catalog=(entries)=>({
 });
 
 test('native Pages navigation owns the Prototypes route and homepage discovery',()=>{
-  assert.match(index,/href="#\/prototypes" data-route="\/prototypes"/);
+  assert.match(index, /<script src="navigation\.js" type="module"><\/script>/);
+  assert.ok(NAV_ITEMS.some(item=>item.route==='/prototypes'));
   assert.doesNotMatch(index,/href="prototypes\/"/);
   assert.match(app,/function renderPrototypes\(/);
   assert.match(app,/\x27\/prototypes\x27:renderPrototypes/);

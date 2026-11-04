@@ -24,6 +24,13 @@ const routed=buildControllerRequest({...inputs,reviewer:'',acceptor:''},
 assert.equal(routed.request.reviewer,'review-qwen-01');
 assert.equal(routed.request.acceptor,'accept-qwen-01');
 assert.equal(routed.request.developer,'dev-cursor-01');
+// Production Developer is pinned to Cursor native state pending migration;
+// Controller's unset Reviewer/Acceptor choices must now use Qwen.
+const defaulted=buildControllerRequest({...inputs,reviewer:'',acceptor:''},
+  context,registry);
+assert.equal(defaulted.request.reviewer,'review-qwen-01');
+assert.equal(defaulted.request.acceptor,'accept-qwen-01');
+assert.equal(defaulted.request.developer,'dev-cursor-01');
 assert.equal(buildControllerRequest({...inputs,reviewer:'review-cursor-01'},context,registry,
   {reviewer:'review-qwen-01'}).request.reviewer,'review-cursor-01');
 assert.throws(()=>buildControllerRequest({...inputs,reviewer:''},context,registry,

@@ -8,7 +8,7 @@ import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal } from './lib/agent/tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
@@ -20,12 +20,28 @@ function envNumber(name) {
   return value;
 }
 
-function extractUsage(result) {
-  const usage = normalizeClaudeUsage(result);
+function extractUsage(result, repairResult = null) {
+  const first = normalizeClaudeUsage(result);
+  const second = repairResult ? normalizeClaudeUsage(repairResult) : null;
+  const sum = (key) => (first[key] ?? 0) + (second?.[key] ?? 0);
   return {
-    input_tokens: usage.input, output_tokens: usage.output,
-    cache_read_tokens: usage.cache_read, cache_write_tokens: usage.cache_write,
+    input_tokens: sum('input'), output_tokens: sum('output'),
+    cache_read_tokens: sum('cache_read'), cache_write_tokens: sum('cache_write'),
   };
+}
+
+function combinedCounter(result, repairResult, name, alias) {
+  const counts=[result,repairResult].filter(Boolean)
+    .map(item=>item?.[name] ?? item?.[alias])
+    .filter(item=>Number.isFinite(Number(item)));
+  return counts.length?counts.reduce((sum,value)=>sum+Number(value),0):null;
+}
+
+function combinedReportedCost(result, repairResult) {
+  const costs=[result,repairResult].filter(Boolean)
+    .map(item=>item?.total_cost_usd)
+    .filter(value=>value!=null && Number.isFinite(Number(value)));
+  return costs.length?costs.reduce((sum,value)=>sum+Number(value),0):null;
 }
 
 function estimateCost(usage) {
@@ -139,7 +155,7 @@ function writeRecord(outDir, record) {
         },
         execution: {
           turns: agent.num_turns ?? null,
-          model_requests: null,
+          model_requests: agent.model_requests ?? null,
           tool_calls: null,
           tools_observed: false,
         },
@@ -166,6 +182,22 @@ function claudeRequestModel() {
   return claudeGatewayModel(
     process.env.ISSUE_AUDIT_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL,
     {provider: auditBackend(), variable: 'ISSUE_AUDIT_CLAUDE_MODEL or ANTHROPIC_MODEL'});
+}
+
+// When Qwen returns invalid JSON, make at most one unprivileged formatting
+// request to the same selected Gateway. No tools, no issue mutation, no fallback.
+function runFormatRepair(raw) {
+  const options={
+    prompt:renderIssueAuditFormatRepairPrompt(raw),
+    model:claudeRequestModel(),maxTurns:1,
+    allowedTools:'',
+    disallowedTools:'Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
+    tools:'',
+  };
+  const {proc,parsed}=runClaudeCli(options);
+  if(proc.status!==0 || typeof parsed?.result!=='string')
+    throw Error('Issue Audit formatting-only Qwen call did not return model text');
+  return parsed;
 }
 
 function runAgent(issue) {
@@ -197,6 +229,9 @@ async function selfTest() {
     total_cost_usd: 0.01, session_id: 's1', num_turns: 2, duration_ms: 100,
   };
   assert.deepEqual(extractUsage(sample), { input_tokens: 10, output_tokens: 4, cache_read_tokens: 20, cache_write_tokens: 3 });
+  assert.deepEqual(extractUsage(sample,{usage:{input_tokens:2,output_tokens:1}}),
+    {input_tokens:12,output_tokens:5,cache_read_tokens:20,cache_write_tokens:3});
+  assert.ok(Math.abs(combinedReportedCost(sample,{total_cost_usd:0.02})-0.03)<1e-10);
   const modelUsage = { modelUsage: { deepseek: { inputTokens: 7, outputTokens: 2, cacheReadInputTokens: 5, cacheCreationInputTokens: 1 } } };
   assert.deepEqual(extractUsage(modelUsage), { input_tokens: 7, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 1 });
   const oldRepo = process.env.GITHUB_REPOSITORY;
@@ -213,6 +248,15 @@ async function selfTest() {
   assert.equal(claudeRequestModel(),'qwen3-coder-plus');
   assert.equal(telemetryProvider(),'claude-code');
   assert.equal(backendMapping(),'qwen-configured-gateway');
+  const repairArgs=buildClaudeCliArgs({
+    prompt:renderIssueAuditFormatRepairPrompt('not-json'),
+    model:claudeRequestModel(),maxTurns:1,
+    allowedTools:'',disallowedTools:'Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
+    tools:'',
+  });
+  assert.equal(repairArgs[repairArgs.indexOf('--max-turns')+1],'1');
+  assert.equal(repairArgs[repairArgs.indexOf('--tools')+1],'');
+  assert.equal(repairArgs[repairArgs.indexOf('--allowedTools')+1],'');
   process.env.ISSUE_AUDIT_CLAUDE_MODEL='claude-sonnet-5';
   assert.throws(()=>claudeRequestModel(),/Qwen model/);
   const previousGateway=process.env.ANTHROPIC_MODEL;
@@ -260,16 +304,22 @@ async function main() {
   }
 
   let claude;
+  let repairEnvelope=null;
+  let repairAttempted=false;
   const agentStartedAt = new Date();
   try {
     claude = runAgent(issue);
-    await applyIssueAuditProposal(issue, claude);
+    await applyIssueAuditProposal(issue, claude, undefined, {repair: async raw=>{
+      repairAttempted=true;
+      repairEnvelope=runFormatRepair(raw);
+      return repairEnvelope.result;
+    }});
   } catch (error) {
     const afterIssue = fetchIssue(issueNumber);
     const after = auditIssue(afterIssue);
     const message = error instanceof Error ? error.message : String(error);
     const failed = claude ?? (error && typeof error === 'object' ? error.claudeResult ?? null : null);
-    const usage = failed ? extractUsage(failed) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+    const usage = failed ? extractUsage(failed,repairEnvelope) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     const estimated = estimateCost(usage);
     writeRecord(outDir, {
       schema_version: 1,
@@ -283,12 +333,14 @@ async function main() {
         claude_request_model: claudeRequestModel(),
         backend_mapping: backendMapping(),
         session_id: failed?.session_id ?? failed?.sessionId ?? null,
-        num_turns: failed?.num_turns ?? failed?.numTurns ?? null,
+        num_turns: combinedCounter(failed,repairEnvelope,'num_turns','numTurns'),
+        model_requests: repairAttempted ? 2 : 1,
+        format_repair_attempted: repairAttempted,
         started_at: agentStartedAt.toISOString(),
         finished_at: new Date().toISOString(),
-        duration_ms: failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime()),
+        duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime())),
         usage,
-        reported_cost_usd: failed?.total_cost_usd != null && Number.isFinite(Number(failed.total_cost_usd)) ? Number(failed.total_cost_usd) : null,
+        reported_cost_usd: combinedReportedCost(failed,repairEnvelope),
         reported_cost_basis: providerCostBasis(),
         estimated_cost_usd: estimated.usd,
         pricing_usd_per_mtok: estimated.rates,
@@ -300,7 +352,7 @@ async function main() {
     throw error;
   }
 
-  const usage = extractUsage(claude);
+  const usage = extractUsage(claude,repairEnvelope);
   const estimated = estimateCost(usage);
   const afterIssue = fetchIssue(issueNumber);
   const after = auditIssue(afterIssue);
@@ -316,12 +368,14 @@ async function main() {
       claude_request_model: claudeRequestModel(),
       backend_mapping: backendMapping(),
       session_id: claude.session_id ?? claude.sessionId ?? null,
-      num_turns: claude.num_turns ?? claude.numTurns ?? null,
+      num_turns: combinedCounter(claude,repairEnvelope,'num_turns','numTurns'),
+      model_requests: repairAttempted ? 2 : 1,
+      format_repair_attempted: repairAttempted,
       started_at: agentStartedAt.toISOString(),
       finished_at: new Date().toISOString(),
-      duration_ms: claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime()),
+      duration_ms: repairAttempted ? Date.now()-agentStartedAt.getTime() : (claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime())),
       usage,
-      reported_cost_usd: claude.total_cost_usd != null && Number.isFinite(Number(claude.total_cost_usd)) ? Number(claude.total_cost_usd) : null,
+      reported_cost_usd: combinedReportedCost(claude,repairEnvelope),
       reported_cost_basis: providerCostBasis(),
       estimated_cost_usd: estimated.usd,
       pricing_usd_per_mtok: estimated.rates,

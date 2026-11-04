@@ -13,6 +13,7 @@ import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import {collectMetricsReplayLineage,selfTestMetricsReplayLineage} from './acceptance-metrics-replay-proof.mjs';
 import {parseDeferredReplayLog,attestDeferredReplayReceipt,makeDeferredReplayReceipt,
   DEFERRED_REPLAY_WORKFLOW,DEFERRED_REPLAY_WORKFLOW_NAME,DEFERRED_REPLAY_JOB,
   DEFERRED_REPLAY_JOBS,DEFERRED_REPLAY_EVENTS,
@@ -52,7 +53,9 @@ import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shou
 import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
 import {collectRunStoreFixtureEvidence,selfTestRunStoreFixtureEvidence} from './acceptance-run-store-fixture-evidence.mjs';
+import {collectCasMatrixEvidence,selfTestCasMatrixEvidence} from './acceptance-run-store-cas-evidence.mjs';
 import {collectAuthenticatedCheckpoint,selfTestAuthenticatedCheckpoint} from './acceptance-run-store-checkpoint-evidence.mjs';
+import {collectAuthenticatedAudit,selfTestAuthenticatedAudit} from './acceptance-run-store-audit-evidence.mjs';
 import {collectFiveModeAcceptanceEvidence,selfTestFiveModeAcceptanceEvidence} from './acceptance-run-store-five-mode-evidence.mjs';
 import {selfTestDevelopmentReadback} from './acceptance-development-readback-selftest.mjs';
 import os from 'node:os';
@@ -176,7 +179,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], verifiedRunStoreFixtureEvidence = [], verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], verifiedRunStoreFixtureEvidence = [], authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -214,6 +217,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
       ? { verified_agent_telemetry_records: verifiedAgentTelemetryRecords } : {}),
     verified_development_checkpoint_readbacks: developmentReadback,
     verified_run_store_fixture_evidence: verifiedRunStoreFixtureEvidence,
+    authenticated_run_store_cas_matrix: authenticatedRunStoreCasMatrix,
+    authenticated_run_store_integrity_audit: authenticatedRunStoreIntegrityAudit,
     authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
     authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
@@ -221,6 +226,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
     verified_public_pages_workflow_publications: publicWorkflowPublications,
     verified_metrics_replay_denials: replayDenials,
+    authenticated_metrics_replay_lineage: authenticatedMetricsReplayLineage,
     verified_deferred_acceptance_replays: deferredAcceptanceReplays,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
@@ -1542,10 +1548,22 @@ async function collectCommand(workspace, outFile) {
   const directRuns = await workflowRunsForSha(repo, sha);
   const verifiedRunStoreFixtureEvidence = process.env.ACCEPTANCE_STAGE === 'post-merge' && String(process.env.ISSUE_NUMBER ?? '') === '1690'
     ? await collectRunStoreFixtureEvidence(repo, sha, directRuns, githubGet) : [];
+  // SC-04: independently re-read the actual concurrent bare-Git CAS matrix
+  // retained by the same exact-main Gate Job as SC-10. No new publisher run.
+  const authenticatedRunStoreCasMatrix = process.env.ACCEPTANCE_STAGE === 'post-merge' &&
+    String(process.env.ISSUE_NUMBER ?? '') === '1690'
+    ? await collectCasMatrixEvidence(repo, sha, directRuns, githubGet) : null;
   // SC-08: independent Sigstore signer proof and read-only restore. The prior
   // source run is only a locator; re-authenticate exact GitHub Job/Artifact,
   // then run the canonical signature/Rekor/four-Store verifier ourselves.
   const verifiedRunStoreExternalCheckpoint = await collectAuthenticatedCheckpoint({
+    repo,sha,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,
+    githubSha:process.env.GITHUB_SHA,githubRef:process.env.GITHUB_REF,
+  },directRuns,githubGet);
+  // SC-07: a read-only scheduled/main audit must be authenticated by an
+  // independent Acceptor consumer, not inferred from a successful workflow.
+  const authenticatedRunStoreIntegrityAudit=await collectAuthenticatedAudit({
     repo,sha,issue:Number(process.env.ISSUE_NUMBER??0),
     stage:process.env.ACCEPTANCE_STAGE,
     githubSha:process.env.GITHUB_SHA,githubRef:process.env.GITHUB_REF,
@@ -1577,6 +1595,13 @@ async function collectCommand(workspace, outFile) {
   const replayDenials=process.env.ACCEPTANCE_STAGE==='post-merge'&&
     ['1690','1853'].includes(String(process.env.ISSUE_NUMBER??''))
     ?await collectAuthenticatedReplayDenials(repo,sha,directRuns):[];
+  // #1690 SC-09: independently authenticate historical successful owner-main
+  // replay and real untrusted-producer denials, preserving original SHAs.
+  const authenticatedMetricsReplayLineage =
+    process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    String(process.env.ISSUE_NUMBER??'')==='1690'
+      ?await collectMetricsReplayLineage(repo,sha,workspace,githubGet,githubJobLog)
+      :null;
   // General, not issue-gated: any post-merge criterion about the governed refs
   // needs to be able to tell "unobservable here" from "absent".
   const storePolicyObservability=process.env.ACCEPTANCE_STAGE==='post-merge'
@@ -1822,8 +1847,10 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays,
-    verifiedRunStoreFixtureEvidence, verifiedRunStoreExternalCheckpoint,
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
+    authenticatedMetricsReplayLineage, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays,
+    verifiedRunStoreFixtureEvidence, authenticatedRunStoreCasMatrix,
+    authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
     authenticatedRunStoreFiveModeReadback,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
     stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts });
@@ -3085,8 +3112,21 @@ async function selfTest() {
     async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
       {jobs:[{...fnrScope,steps:[fnrScope.steps[0]]},fnrFullSkipped]},
     async()=>fnrLog),[],'missing scope steps are not a trusted decision');
+  selfTestMetricsReplayLineage();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedMetricsReplayLineage:{kind:'authenticated_metrics_replay_provenance_matrix',
+      positive_coverage:1,negative_coverage:2}})
+    .authenticated_metrics_replay_lineage.positive_coverage,1);
   selfTestRunStoreFixtureEvidence();
+  selfTestCasMatrixEvidence();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedRunStoreCasMatrix:{kind:'authenticated_run_store_cas_matrix',verdict:'Verified'}})
+    .authenticated_run_store_cas_matrix.verdict,'Verified');
   selfTestAuthenticatedCheckpoint();
+  selfTestAuthenticatedAudit();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    authenticatedRunStoreIntegrityAudit:{kind:'authenticated_run_store_integrity_audit',verdict:'Verified'}})
+    .authenticated_run_store_integrity_audit.verdict,'Verified');
   assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
     verifiedRunStoreExternalCheckpoint:{kind:'authenticated_run_store_external_checkpoint',verdict:'Verified'}})
     .authenticated_run_store_external_checkpoint.verdict,'Verified');
