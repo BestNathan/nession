@@ -2,6 +2,9 @@
 # Rust
 # ================================
 /target/
+# Transient worktree target seed and its explicit --replace backup.
+/.target-seed.*
+/.target-seed-backup.*
 **/*.rs.bk
 Cargo.lock.bak
 

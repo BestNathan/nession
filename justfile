@@ -58,9 +58,17 @@ check-build-cache-verify:
 
 # Best-effort warm-start for a newly-created worktree. On APFS/reflink-capable
 # filesystems this clone-shares dependency artifacts while keeping a private
-# target directory and then removes all workspace-member artifacts.
+# target directory and then removes all workspace-member artifacts. Prints a
+# machine-readable seeded/skipped/failed outcome; a skip or failure is not an
+# error and never publishes a partial target.
 seed-worktree-target:
     bash ./scripts/seed-worktree-target.sh
+
+# Reseed a worktree that already has a target. The existing target is renamed
+# to a .target-seed-backup.* sibling (never deleted) before the new seed is
+# published, so the worktree's own build state stays recoverable.
+seed-worktree-target-replace:
+    bash ./scripts/seed-worktree-target.sh --replace
 
 # Show the active local compiler-cache/worktree seed state.
 build-cache-status:

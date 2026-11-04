@@ -32,6 +32,66 @@ The seed is best-effort and **never falls back to a full copy**. It is skipped w
 source and destination are not on the same CoW-capable volume, when `Cargo.lock` or
 `rust-toolchain.toml` differ, or when the destination already has a `target/`.
 
+### Seed outcomes
+
+The seed reports one machine-readable outcome on stdout (`seed_status=...`) and keeps
+human diagnostics on stderr. Worktree creation treats all three as non-fatal:
+
+| Outcome | Meaning | WorktreeCreate |
+|---|---|---|
+| `seeded` | A private CoW-backed dependency target was actually published | continue; report success |
+| `skipped` | An expected safe condition (incompatible inputs, existing target, busy/uncertain source, unsupported filesystem) | continue; report the reason and retry path |
+| `failed` | Unexpected classification, clone or cleanup failure | continue with an empty target; report the error and repair |
+
+`skipped` and `failed` publish nothing and leave the existing target (if any) untouched.
+
+### macOS APFS classification
+
+Current macOS does not resolve an arbitrary subdirectory such as `target/` through
+`diskutil info`; it returns an error plist with no `FilesystemType`. The seed therefore
+resolves the backing BSD device first (`stat -f '%Sd'` → `disk3s5`) and asks `diskutil`
+about that device. It requires **positive APFS classification and the same device**
+before cloning. A missing `diskutil`/`plutil`/`stat`, or a failed extraction, is an
+unexpected `failed` outcome, not a false "not APFS" skip; different devices and real
+non-APFS volumes are expected `skipped` outcomes.
+
+### CoW proof, not a copy
+
+APFS support alone does not prove that `cp -c` cloned every file: `cp -c` falls back to
+`copyfile(2)` when cloning is unavailable. On Darwin the seed measures the destination
+volume's free space around the copy and compares the allocated growth with the source's
+logical size. A fallback that consumes more than `max(64 MiB, 10% of the source)` is
+discarded as `failed`; the volume allocation is the evidence that the published target
+shares blocks. The real-APFS end-to-end receipt for #2735 records the same measurement
+in the Issue report.
+
+On Linux `cp -a --reflink=always` is already strict — it fails instead of copying — so
+the Darwin allocation check is not used there.
+
+### Source quiescence
+
+Cargo holds `target/<profile>/.cargo-lock` open for the duration of a build. The seed
+checks every existing lock with `fuser` before cloning; a busy lock, an unreadable
+`fuser` result, or missing `fuser` tooling all skip rather than risk a mixed target.
+It then creates a timestamp and, after the copy, refuses a snapshot if any source file
+or directory (deletions update directory mtimes too) is newer than that timestamp. This
+is a consistency rule, not a seed-only lock: ordinary Cargo builds keep respecting their
+own lock.
+
+### Existing target and safe retry
+
+An existing `target/` is never replaced or deleted automatically.
+`just seed-worktree-target` skips with the retry path. For an explicit reseed:
+
+```bash
+just seed-worktree-target-replace
+```
+
+That renames the existing target to a `.target-seed-backup.<timestamp>` sibling (a
+rename, not a copy or deletion), publishes the new seed, and prints the backup path. An
+interrupted attempt restores the backup. Remove the backup only after verifying the
+seeded target; it exists precisely so the worktree's own build state is recoverable.
+
 ## When sccache does NOT hit
 
 sccache keys on the compiler invocation. Anything that changes that invocation is a
@@ -72,6 +132,7 @@ never starts sccache. This preserves the decision made in #126 (`c135bc0`).
 just build-cache-status    # current state: private target, seed source, sccache stats
 just build-cache-verify    # measures behaviour, incl. cross-checkout hit/miss
 just seed-worktree-target  # seed this worktree's target by hand (creation does it)
+just seed-worktree-target-replace  # reseed when target/ exists; keeps a backup
 ```
 
 `build-cache-status` shows what is configured. **`build-cache-verify` shows what
