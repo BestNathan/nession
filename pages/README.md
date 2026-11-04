@@ -69,6 +69,26 @@ security boundary is governed separately by #2358.
 
 The build-only `agent-metrics.json` source supplies rolling 7-day and 30-day `runs.by_provider` and `runs.by_workflow` counts, and 7-day `runs.by_issue` counts. The versioned public projection includes only bounded, safe category names, observed nonnegative integer counts and source metadata. Missing observations remain `null` / N/A (not an inferred zero). It does **not** establish causal PR↔Agent linkage, exact-SHA Acceptance verdicts, live presence, per-Agent cost or orphan integrity. The independent Pages layout and UI do not depend on product `web/`.
 
+## Per-Agent observed executions (Issue #2720)
+
+The canonical `agent-metrics.json` producer classifies **Agent execution**
+`result.status` values into success, failure, cancelled, timed out and unknown.
+A workflow-only contract check is not an Agent invocation. One persisted Agent
+execution record is counted per canonical Run/Attempt/unique execution identity;
+re-runs are separate attempts, not extra internal model requests. Unknown Agent
+IDs/roles are counted as **unattributed**, never guessed by Workflow or Provider.
+
+For each source-observed identity, rolling 7d/30d windows include exact
+success/failure/other totals and a bounded recent Run/Attempt sample. The public
+`#/agents` roster now links to `#/agents/<role>/<agent-id>` details and safe
+GitHub Actions Run links. GitHub workflow success, Agent execution success and
+SC Acceptance are distinct facts: the public view shows only the second. Source
+coverage, stale/unavailable data, historical source schema, missing IDs, bounded
+sample size, and a zero-classified-outcome denominator remain explicit. No raw
+Metrics records, private model output, token, checkpoint or session identities
+enter `data/site.json`. Data is generated from the pinned Metrics source at
+Pages build time, not fetched with browser credentials.
+
 ## Phase 2-B1 — public PR HEAD evidence
 
 Recent GitHub Actions Run metadata is fetched **only during the independent Pages build** and validated against exact, same-repository PR HEAD SHA, canonical workflow path/event, positive Run/attempt identity and bounded listing. The Collaboration view reports each canonical CI/E2E **workflow outcome**, never a Success Criterion / Acceptance verdict or an Issue↔PR/Agent causal join. No observed run means Not observed within a 100-run snapshot, not a claim about all history.
