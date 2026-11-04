@@ -2,6 +2,47 @@
 
 [Issue #2689](https://github.com/BestNathan/nession/issues/2689) · [Interactive HTML](index.html) · [Prototype library](../index.html)
 
+
+## Reader enhancement — #2742 (2026-11-04)
+
+[Requirement #2742: Rich Claude Code Memory Markdown rendering and index-linked navigation](https://github.com/BestNathan/nession/issues/2742)
+
+This is a **revision of the same Claude Code Memory prototype**, not a new Session, Memory product, or separate mock directory. The existing #2689 contextual Terminal → Context Capsule → Peek → Workspace path remains authoritative.
+
+### Product question / acceptance scenario
+
+Can users browse Claude Code Markdown memory **as readable documents**, while keeping all navigation within the current Session's repository and avoiding a second file-browser shell?
+
+1. From Session Terminal, click **+ → Claude Code → 在 Workspace 查看 Memory**. The Session-derived Repository appears above the Memory document, and **MEMORY.md** is initially selected.
+2. Read rendered Markdown: headings, prose, blockquote, inline emphasis/code, lists/checklists and Markdown links. Click **架构约束** in the **Topics** Markdown section, not the left filename list. The reader opens **architecture.md**, shows YAML Frontmatter as restrained metadata and finds **#session-boundary** after the mocked read.
+3. Use **‹ 索引** or left **MEMORY.md** to go back; open **interaction.md** and inspect its TOML Frontmatter.
+4. Click **恢复记录** (nested relative target \`topics/recovery.md#retry-strategy\`). The first chunk does not yet contain that heading; a truthful notice explains this. Click **继续读取**; the remaining content appears and the deferred fragment scrolls into view. Use its \`../architecture.md#session-boundary\` backlink to navigate safely within the Memory root.
+5. Click **不存在的文件** in the index: it remains in the reader and displays a non-destructive missing-file notice. Click the \`../private.md\` escape example: it is blocked. \`javascript:\` and other schemes are also blocked by the isolated mock link policy. The normal Claude Code docs HTTPS link opens an external tab.
+6. Use **源码 / 预览** to compare the same file's Markdown source with the rendered document. This toggle is *prototype exploration*, not an approved new persistent product control.
+7. In a ~390 px App viewport, the file list and document are push/detail states. The top Back or index button returns to the list/index; the bottom Capability Capsule remains available. Confirm long code/table overflow belongs to the document scroller rather than the whole Workspace.
+8. Switch to the **review worktree** (same repository) and **Vol** (another repository); no old document or in-flight fragment should leak into the new Session's Memory. Existing missing, denied and unavailable scenarios remain available.
+
+### Fidelity boundaries
+
+- **Files/Markdown/frontmatter/navigation:** synthetic mock fixtures, parsed by a deliberately **small, dependency-free, safe-subset renderer** in \`app.js\`. This is NOT the production Markdown parser and does not purport to implement full GFM or real YAML/TOML parsing. Production must reuse \`web/src/shared/markdown\`, including its sanitization/frontmatter pipeline.
+- **Relative links/fragments:** a deterministic in-memory approximation that only selects files listed in the current fixture; **not** a proof of Agent canonicalized-root security, symlink enforcement, protocol versioning or real Session CWD resolution.
+- **Chunk loading:** \`topics/recovery.md\` uses a fixture-only \`<!-- part-2 -->\` separator to simulate incomplete content, continuation and delayed anchor selection. No filesystem read happens.
+- **No APIs / mutations / downloads:** no real Claude installation, Session attach, server, websocket, provider configuration, model, private memory contents, or external runtime dependency.
+- **Design ownership:** #2689's existing Session-first shell stays in place; #2742 owns only the reader behavior. No global Memory navigation or Repo selector.
+
+### Verification
+
+- Static / syntax: \`node --check claude-memory-2689/app.js\`, \`node claude-memory-2689/smoke-test.mjs\` from the prototype checkout.
+- Mock interaction assertions: rich Markdown elements and Frontmatter, index/topic link selection, #fragment, missing and blocked links, partial continuation, Session/repo switch and reset. DOM stub tests cannot prove actual scroll position or visual geometry.
+- Real-browser check required independently at desktop and ~390px App: click index → architecture → back → interaction → recovery → load more → back; scroll code/table; inspect focus, console and bottom capsule clearance. **Do not claim browser verification from source checks alone.**
+- After commit, confirm that the direct HTML preview and \`prototypes/manifest.json\` contain the new exact pinned prototype SHA. A source push does not prove Pages has deployed.
+
+**Canonical browser route (live revision must be checked separately):** https://bestnathan.github.io/nession/prototypes/claude-memory-2689/index.html
+
+**Source directory:** https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689
+
+---
+
 ## Design review — revised after product IA audit (2026-11-03)
 
 The **first mock was incorrect**: it used Terminal and Claude Workspace side-by-side by default, hardcoded a persistent Claude button below Terminal, put an extension-owned shell/header above Workspace, and used the desktop structure as the App shell. This violated the current repository product sources, even though the Session→Repo Memory association was right.
