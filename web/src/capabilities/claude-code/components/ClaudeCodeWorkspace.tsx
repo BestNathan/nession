@@ -16,7 +16,10 @@ import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
 import { claudeCodeConversationAdapter } from '../conversation/adapter';
 import { useTranscripts } from '../hooks/useTranscripts';
 import { useTranscriptItems } from '../hooks/useTranscriptItems';
+import { useMemory } from '../hooks/useMemory';
 import { TranscriptView } from './TranscriptView';
+import { MemoryView } from './MemoryView';
+import { formatSize } from '../format';
 
 type Scope = 'global' | 'project';
 
@@ -34,8 +37,12 @@ type Scope = 'global' | 'project';
  * decision 3 makes the current work the entry point and configuration the thing
  * you go looking for. Both remain reachable; neither is a fallback for the
  * other.
+ *
+ * `memory` is a sibling of `configuration`, not a scope inside it (#2689): its
+ * subject is the current Session's repository, resolved agent-side, so it has
+ * no Global/Project axis and no repository picker.
  */
-type View = 'conversations' | 'transcripts' | 'configuration';
+type View = 'conversations' | 'transcripts' | 'memory' | 'configuration';
 type ConfigCategory = ClaudeCodeListResponse['categories'][number];
 type ConfigFile = ConfigCategory['files'][number];
 
@@ -92,16 +99,6 @@ function updateScope(
     ...current,
     [scope]: update(current[scope]),
   }));
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function errorMessage(error: unknown): string {
@@ -565,6 +562,10 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     sessionId,
     transcriptId: openTranscript,
   });
+  // Memory is fetched only while its view is active, so a Session that never
+  // opens it pays nothing. `active` is also the refresh trigger: entering the
+  // tab re-resolves the Session's repository before any file is shown (#2689).
+  const memory = useMemory({ agentId, sessionId, active: activeView === 'memory' });
 
   const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
     agentId,
@@ -605,11 +606,11 @@ function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
     transcriptItems,
     openTranscript,
     setOpenTranscript,
+    memory,
   };
 }
 
-export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
-  const {
+export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const {
     agentId,
     sessionId,
     activeScope,
@@ -625,6 +626,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     transcriptItems,
     openTranscript,
     setOpenTranscript,
+    memory,
   } = useClaudeCodeWorkspace(ctx);
 
   if (!agentId || !sessionId) {
@@ -646,14 +648,24 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
             <h1 className={chromeSansRole('title')}>Claude Code</h1>
           </div>
         ) : null}
-        <Tabs value={activeView} onValueChange={(value) => setActiveView(value as View)}>
+        <Tabs
+          value={activeView}
+          onValueChange={(value) => setActiveView(value as View)}
+          className="min-w-0"
+        >
           {/* Named so the visual gate can assert this strip as a *region*
               (#1332). A change here — this strip gained its third tab — is a
               large fraction of this element and a negligible fraction of the
-              frame, which is why the whole-frame budget did not see it. */}
-          <TabsList data-testid="claude-code-view-tabs">
+              frame, which is why the whole-frame budget did not see it.
+              The strip wraps rather than clipping its last tab: App hides the
+              heading but not the padding, and four tabs no longer fit 390 px. */}
+          <TabsList
+            data-testid="claude-code-view-tabs"
+            className="max-w-full flex-wrap justify-end max-sm:h-auto!"
+          >
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="transcripts">Transcripts</TabsTrigger>
+            <TabsTrigger value="memory">Memory</TabsTrigger>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -691,6 +703,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           onBack={() => setOpenTranscript(null)}
         />
       </main>
+      <MemoryPane active={activeView === 'memory'} memory={memory} />
       <div className={activeView === 'configuration' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
@@ -723,5 +736,30 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           </div>
         </div>
     </div>
+  );
+}
+
+function MemoryPane({
+  active,
+  memory,
+}: {
+  active: boolean;
+  memory: ReturnType<typeof useMemory>;
+}) {
+  return (
+    <main className={active ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+      <MemoryView
+        memory={memory.memory}
+        onOpenFile={(path) => void memory.openFile(path)}
+        onLoadMore={() => memory.loadMore()}
+        onRetry={() => memory.retry()}
+        onRetryRead={() => {
+          const path = memory.memory.selectedPath;
+          if (path) {
+            void memory.openFile(path);
+          }
+        }}
+      />
+    </main>
   );
 }

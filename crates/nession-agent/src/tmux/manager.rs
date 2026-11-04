@@ -352,6 +352,19 @@ impl SessionManager {
             .await
     }
 
+    /// One variable from a tmux session's environment.
+    ///
+    /// `Ok(None)` is "the session holds no such variable"; an error is "the
+    /// question could not be asked". The Claude Code memory resolver needs that
+    /// distinction to avoid reading its defaults when the Session's overrides
+    /// exist but are unobservable (#2689).
+    ///
+    /// Like every other tmux query here, this goes through the manager's own
+    /// `sdk_ops`, so it addresses the socket this manager was built for.
+    pub async fn get_session_env(&self, session_name: &str, name: &str) -> Result<Option<String>> {
+        self.sdk_ops().show_environment(session_name, name).await
+    }
+
     async fn display_message(&self, session_name: &str, format: &str) -> Result<String> {
         self.sdk_ops().display_message(session_name, format).await
     }

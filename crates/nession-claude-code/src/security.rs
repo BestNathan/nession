@@ -41,6 +41,19 @@ pub fn is_path_allowed(relative_path: &str) -> bool {
     matches!(path.extension().and_then(|e| e.to_str()), Some(ext) if ALLOWED_EXTENSIONS.contains(&ext))
 }
 
+/// Check whether a relative memory path is safe to expose.
+///
+/// Auto Memory contains Markdown only: `MEMORY.md` and topic files. The general
+/// allow-list would also admit `.json`/`.jsonl`, which no memory view lists and
+/// which this unit has no reason to make readable.
+pub fn is_memory_path_allowed(relative_path: &str) -> bool {
+    is_path_allowed(relative_path)
+        && Path::new(relative_path)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            == Some("md")
+}
+
 /// Extract just the filename from a relative path.
 pub fn filename(relative_path: &str) -> &str {
     Path::new(relative_path)
@@ -85,6 +98,18 @@ mod tests {
         assert!(!is_path_allowed("config.yaml"));
         assert!(!is_path_allowed("secret.env"));
         assert!(!is_path_allowed("data.toml"));
+    }
+
+    #[test]
+    fn memory_reads_are_markdown_only() {
+        assert!(is_memory_path_allowed("MEMORY.md"));
+        assert!(is_memory_path_allowed("topics/feedback.md"));
+        assert!(!is_memory_path_allowed("settings.json"));
+        assert!(!is_memory_path_allowed("data.jsonl"));
+        assert!(!is_memory_path_allowed("notes.txt"));
+        assert!(!is_memory_path_allowed("../escape.md"));
+        assert!(!is_memory_path_allowed("credentials.json"));
+        assert!(!is_memory_path_allowed("UPPER.MD"));
     }
 
     #[test]

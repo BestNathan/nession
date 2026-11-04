@@ -1,6 +1,14 @@
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import type { PluginSurface } from '@/platform/socket/types';
 import {
+  PROTOCOL as MEMORY_PROTOCOL,
+  type MemoryResponse,
+} from '@/generated/protocol/claude-code/memory/v1';
+import {
+  PROTOCOL as MEMORY_READ_PROTOCOL,
+  type ReadResponseV1,
+} from '@/generated/protocol/claude-code/memory-read/v1';
+import {
   PROTOCOL,
   type TranscriptItemV1,
   type TranscriptsResponse,
@@ -297,6 +305,95 @@ function timelineForScenario(
   };
 }
 
+const MEMORY_FILES = [
+  { path: 'MEMORY.md', size: 84, content_type: 'markdown' },
+  { path: 'feedback_testing.md', size: 72, content_type: 'markdown' },
+];
+
+/**
+ * The fixture's Auto Memory, by scenario (#2689).
+ *
+ * `?memory=` names the provider state, never the screen: `ready` is the richest
+ * answer, and every other arm is a state the resolver can really produce. The
+ * disclosure fields are present wherever the provider has them — a `no_memory`
+ * answer that hid where it looked would render the same as one that never
+ * resolved.
+ */
+function memoryForScenario(scenario: string): MemoryResponse {
+  switch (scenario) {
+    case 'unavailable':
+      return { state: 'unavailable', files: [], truncated: false };
+    case 'no_memory':
+      return {
+        state: 'no_memory',
+        repository_root: '/work/scratch',
+        repository_kind: 'project_root',
+        memory_directory: '/home/fixture/.claude/projects/-work-scratch/memory',
+        files: [],
+        truncated: false,
+      };
+    case 'disabled':
+      return {
+        state: 'disabled',
+        repository_root: '/work/nession',
+        repository_kind: 'git',
+        files: [],
+        truncated: false,
+      };
+    case 'unsupported_override':
+      return {
+        state: 'unsupported_override',
+        repository_root: '/work/nession',
+        repository_kind: 'git',
+        error: 'autoMemoryDirectory is set in .claude/settings.json',
+        files: [],
+        truncated: false,
+      };
+    case 'error':
+      return {
+        state: 'error',
+        repository_root: '/work/nession',
+        repository_kind: 'git',
+        error: 'the memory path is not a directory',
+        files: [],
+        truncated: false,
+      };
+    default:
+      return {
+        state: 'ready',
+        repository_root: '/work/nession',
+        repository_kind: 'git',
+        memory_directory: '/home/fixture/.claude/projects/-work-nession/memory',
+        files: MEMORY_FILES,
+        truncated: false,
+      };
+  }
+}
+
+function memoryContent(path: unknown): ReadResponseV1 {
+  if (path === 'MEMORY.md') {
+    const content = '# Memory\n\n- [Testing feedback](feedback_testing.md) — tests must fail on the defect first.';
+    return {
+      content,
+      content_type: 'markdown',
+      total_size: content.length,
+      offset: 0,
+      has_more: false,
+    };
+  }
+  if (path === 'feedback_testing.md') {
+    const content = '# Testing feedback\n\nA green test can assert nothing; check that the witness can fail.';
+    return {
+      content,
+      content_type: 'markdown',
+      total_size: content.length,
+      offset: 0,
+      has_more: false,
+    };
+  }
+  return { error: 'not_found' };
+}
+
 /**
  * The fixture's Claude Code surface: the transcript units, over the
  * conversation ones.
@@ -315,6 +412,7 @@ function timelineForScenario(
 export function fixtureTranscriptsSurface(search: string): PluginSurface {
   const conversation = fixtureConversationSurface(search);
   const scenario = new URLSearchParams(search).get('transcripts') ?? 'ready';
+  const memoryScenario = new URLSearchParams(search).get('memory') ?? 'ready';
 
   // The same directory the conversation and git surfaces publish, built from the
   // same `manifestsOf`, so this route cannot present a capability directory the
@@ -351,6 +449,12 @@ export function fixtureTranscriptsSurface(search: string): PluginSurface {
           );
         }
         return Promise.resolve(response as T);
+      }
+      if (type === MEMORY_PROTOCOL) {
+        return Promise.resolve(memoryForScenario(memoryScenario) as T);
+      }
+      if (type === MEMORY_READ_PROTOCOL) {
+        return Promise.resolve(memoryContent(payload.path) as T);
       }
       // Everything else belongs to the conversation surface — delegation
       // rather than rejection, so one install answers the whole capability.

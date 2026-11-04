@@ -2,6 +2,7 @@ pub mod agent;
 pub mod binding;
 pub mod canonical;
 pub mod conversation;
+pub mod memory;
 pub mod messages;
 pub(crate) mod payload;
 pub mod plugin;

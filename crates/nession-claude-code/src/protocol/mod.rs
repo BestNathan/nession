@@ -4,6 +4,8 @@
 //! protocol/
 //!   conversations/v1
 //!   list/v1
+//!   memory/v1
+//!   memory_read/v1
 //!   messages/v1
 //!   read/v1
 //!   transcript_items/v1
@@ -70,6 +72,8 @@
 
 pub mod conversations;
 pub mod list;
+pub mod memory;
+pub mod memory_read;
 pub mod messages;
 pub mod read;
 pub mod transcript_items;
@@ -93,6 +97,8 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         messages::descriptor()?,
         transcripts::descriptor()?,
         transcript_items::descriptor()?,
+        memory::descriptor()?,
+        memory_read::descriptor()?,
     ])
 }
 
@@ -108,13 +114,15 @@ pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, 
 mod tests {
     use super::*;
 
-    const EXPECTED_IDS: [&str; 6] = [
+    const EXPECTED_IDS: [&str; 8] = [
         "claude-code.list",
         "claude-code.read",
         "claude-code.conversations",
         "claude-code.messages",
         "claude-code.transcripts",
         "claude-code.transcript-items",
+        "claude-code.memory",
+        "claude-code.memory-read",
     ];
 
     #[test]

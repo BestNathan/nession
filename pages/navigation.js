@@ -15,6 +15,7 @@ const isStandalone=pathname=>pathname.endsWith('/workflows.html');
 export function currentNavRoute(pathname,hash){
   if(isStandalone(pathname))return '/workflows';
   const raw=hash.replace(/^#/,'')||'/';
+  if(raw.startsWith('/agents/')||raw.startsWith('/agents?'))return '/agents';
   if(raw.startsWith('/work/'))return '/work';
   if(raw==='/knowledge'||raw.startsWith('/knowledge?'))return '/knowledge';
   return raw;

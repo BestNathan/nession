@@ -24,6 +24,32 @@ use async_trait::async_trait;
 
 use crate::binding::Binding;
 
+/// The Claude Code environment the host observed for one Session (#2689).
+///
+/// Every field is a **fact about the Session's own tmux environment**, not
+/// about the agent process: `None` means the variable was observed to be unset.
+/// The host returns this whole struct only when it could ask; a host that
+/// cannot observe the Session answers `None` from
+/// [`SessionContext::session_claude_config`], and the memory resolver reports
+/// an unsupported override rather than assuming these are unset.
+///
+/// `autoMemoryDirectory` is deliberately absent. It lives in settings files
+/// whose precedence and trust the agent cannot verify, so the resolver reads
+/// those files itself and reports the setting as unsupported.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionClaudeConfig {
+    /// The Session's `HOME`, used to expand `~/`.
+    pub home: Option<String>,
+    /// `CLAUDE_CONFIG_DIR`; the default is `<home>/.claude`.
+    pub config_dir: Option<String>,
+    /// `CLAUDE_CODE_PROJECT_DIR_NAME`; honoured only with a custom config dir.
+    pub project_dir_name: Option<String>,
+    /// `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`; an absolute memory directory.
+    pub memory_path_override: Option<String>,
+    /// `CLAUDE_CODE_REMOTE_MEMORY_DIR`; replaces the projects root.
+    pub remote_memory_dir: Option<String>,
+}
+
 /// The host's view of Nession sessions.
 ///
 /// Implemented by the agent host, which is the only thing that owns session
@@ -38,6 +64,14 @@ pub trait SessionContext: Send + Sync {
     /// knew. Every one of those means "cannot say", which is what `#1005`'s
     /// first constraint requires to be reported rather than guessed at.
     async fn session_cwd(&self, session_id: &str) -> Option<String>;
+
+    /// The Claude Code environment observed for `session_id`.
+    ///
+    /// `None` means the host could not ask (the session is gone, or tmux would
+    /// not answer) — **not** that every variable is unset. The memory resolver
+    /// turns that into an explicit unsupported state; treating it as "defaults
+    /// apply" would read a directory Claude Code may not be using.
+    async fn session_claude_config(&self, session_id: &str) -> Option<SessionClaudeConfig>;
 
     /// Whether Claude Code is the foreground command in `session_id` right now.
     ///
@@ -85,6 +119,10 @@ impl SessionContext for NoSessionContext {
         None
     }
 
+    async fn session_claude_config(&self, _session_id: &str) -> Option<SessionClaudeConfig> {
+        None
+    }
+
     async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
         None
     }
@@ -103,6 +141,10 @@ mod tests {
         assert_eq!(NoSessionContext.session_cwd("anything").await, None);
         assert_eq!(
             NoSessionContext.session_claude_binding("anything").await,
+            None
+        );
+        assert_eq!(
+            NoSessionContext.session_claude_config("anything").await,
             None
         );
     }

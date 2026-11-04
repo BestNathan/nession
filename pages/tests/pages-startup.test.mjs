@@ -44,7 +44,7 @@ function harness(hash='#/work',fetcher=async()=>{throw Error('fixture offline');
   };
   const context=vm.createContext({
     document:doc,location:{hash},window:{addEventListener(){}},
-    URL,AbortSignal,Date,Intl,fetch:fetcher,
+    URL,URLSearchParams,AbortSignal,Date,Intl,fetch:fetcher,
     renderKnowledge(root){root.append(new TestElement('section'));root.append(new TestElement('p'));root.nodes.at(-1).textContent='Knowledge independent';},
     validKnowledgeSnapshot:()=>true,
     console:{error:(...args)=>errors.push(args),warn(){}},
@@ -135,4 +135,38 @@ test('source fetch is bounded and app schedules a rerender after success or fail
   assert.match(app,/async function loadKnowledgeCatalog\(\)/);
   assert.match(app,/data\/knowledge\.json/);
   assert.match(app,/window\.addEventListener\('hashchange',render\)/);
+});
+
+test('Agent roster and deep links render source-only outcome and Run/Attempt details',()=>{
+  const sample={schema_version:1,coverage:'observed',unattributed:1,truncated:false,
+    items:[{id:'dev-qwen-01',role:'developer',total:3,success:1,failure:1,
+      cancelled:1,timed_out:0,unknown:0,recent:[
+        {run_id:41750275349,attempt:2,workflow:'issue-audit',issue:2710,
+          outcome:'failure',provider:'claude-code',observed_at:now,duration_ms:2500},
+        {run_id:41750275349,attempt:1,workflow:'issue-audit',issue:2710,
+          outcome:'success',provider:'claude-code',observed_at:now,duration_ms:1900},
+      ]}]};
+  const site=makeProjection({meta:{generated_at:now,main_sha:'a'.repeat(40),
+      metrics_sha:'b'.repeat(40)},
+    registry:{instances:{'dev-qwen-01':{role:'developer',provider:'claude-code'},
+      'review-01':{role:'reviewer',provider:'cursor'}}},
+    agent:{schema_version:1,kind:'agent_metrics_aggregate',generated_at:now,
+      windows:{'7d':{runs:{total:5},per_agent:sample},
+        '30d':{runs:{total:9},per_agent:sample}}}});
+  const h=harness('#/agents');
+  h.run('snapshot='+JSON.stringify(site)+"; siteSnapshotStatus='available'; render()");
+  assert.match(h.main.textContent,/Execution by Agent/);
+  assert.match(h.main.textContent,/3 runs · 1 succeeded · 1 failed/);
+  assert.match(h.main.textContent,/review-01/);
+  assert.match(h.main.textContent,/Not observed/);
+  assert.match(h.main.textContent,/unattributed executions: 1/);
+  h.run("location.hash='#/agents/developer/dev-qwen-01?window=30d&outcome=failure'; render()");
+  assert.match(h.main.textContent,/Recent executions/);
+  assert.match(h.main.textContent,/Run 41750275349 \/ attempt 2/);
+  assert.doesNotMatch(h.main.textContent,/Run 41750275349 \/ attempt 1/);
+  assert.match(h.main.textContent,/Success rate/);
+  assert.doesNotMatch(h.main.textContent,/could not be rendered/);
+  h.run("location.hash='#/agents/developer/invalid-source'; render()");
+  assert.match(h.main.textContent,/Agent identity not observed/);
+  assert.equal(h.errors.length,0);
 });

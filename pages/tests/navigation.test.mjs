@@ -55,6 +55,8 @@ test('home and workflow page share the menu, but use correct cross-page hrefs',(
 
 test('active route stays correct across nested and hash routes',()=>{
   assert.equal(currentNavRoute('/nession/','#/work/issue/42'),'/work');
+  assert.equal(currentNavRoute('/nession/','#/agents/developer/dev-qwen-01?window=30d'),'/agents');
+  assert.equal(currentNavRoute('/nession/','#/agents?window=30d'),'/agents');
   assert.equal(currentNavRoute('/nession/','#/knowledge?article=topic'),'/knowledge');
   assert.equal(currentNavRoute('/nession/workflows.html','#/prototypes'),'/workflows');
   const h=harness('/nession/','#/agents');
