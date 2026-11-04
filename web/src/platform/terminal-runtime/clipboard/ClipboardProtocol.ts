@@ -5,10 +5,11 @@
  * React-free and xterm-free: {@link XtermEmulator} feeds it parsed OSC and
  * private-mode sequences together with the ordered writer's provenance, and
  * this class owns the protocol state machine, bounds and replies. Clipboard
- * *effects* are delegated to {@link ClipboardEffectPort}. The browser adapter
- * owns automatic/binary `navigator.clipboard` writes; user-gesture text copy is
- * delegated to the shared browser clipboard owner (#2656), which integrates the
- * `copy-to-clipboard` library.
+ * *effects* are delegated to {@link ClipboardEffectPort}. The one shared
+ * browser clipboard owner (`@/shared/lib/clipboard`, #2656) performs every
+ * write — user-gesture text, automatic OSC 52 text (including the library's
+ * HTTP legacy attempt), and the OSC 5522 item — while this protocol keeps the
+ * authorization, bounds and truthful `EPERM`/`EIO` reply mapping.
  *
  * Security rules this module owns:
  *
@@ -67,6 +68,7 @@ export type ClipboardNotice =
  * surface asks them through `TerminalController`, never directly.
  */
 export interface ClipboardEffectPort {
+  /** Automatic text write; the shared owner attempts the HTTP legacy path. */
   writeText(text: string): Promise<void>;
   writeClipboard(variants: ReadonlyMap<string, Uint8Array>): Promise<void>;
   /** Whether `writeText` can act on this origin without a user gesture. */

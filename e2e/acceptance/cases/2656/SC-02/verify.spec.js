@@ -27,6 +27,15 @@ test('SC-02: HTTP-origin UI and Terminal gesture copy carry the exact text', asy
     expect(capability.secure, 'this Case must run on a non-secure origin').toBe(false);
     expect(capability.hasAsyncClipboard, 'plain HTTP has no async Clipboard API').toBe(false);
 
+    // Force the automatic legacy attempt to fail so the truthful user-click
+    // notice path is exercised; SC-06 separately covers the permit branch.
+    await page.evaluate(() => {
+      const real = document.execCommand.bind(document);
+      window.__sc02RealExecCommand = real;
+      document.execCommand = (command, ...rest) => (
+        command === 'copy' ? false : real(command, ...rest)
+      );
+    });
     await page.evaluate((payload) => {
       window.clipboardHarness.emit('\x1b]52;c;' + payload + '\x1b\\');
     }, b64(TERMINAL_TEXT));
@@ -38,6 +47,9 @@ test('SC-02: HTTP-origin UI and Terminal gesture copy carry the exact text', asy
     await page.getByTestId('terminal-notices-trigger').click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
+    await page.evaluate(() => {
+      document.execCommand = window.__sc02RealExecCommand;
+    });
     await armCopyProbe(page);
     await notice.getByRole('button', { name: 'Copy' }).click();
     await expect.poll(async () => (await copyProbe(page)).texts).toEqual([TERMINAL_TEXT]);
