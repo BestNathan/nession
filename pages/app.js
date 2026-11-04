@@ -219,6 +219,89 @@ function renderPrototypes() {
   ],'three'));
   root.append(note);
 }
+// Per-Agent details use the existing static snapshot; no browser GitHub API.
+function agentSelection(){
+  const raw=location.hash.replace(/^#/,'');
+  const qs=raw.split('?')[1]||'';
+  const params=new URLSearchParams(qs);
+  return {period:params.get('window')==='30d'?'30d':'7d',
+    outcome:['success','failure','cancelled','timed_out','unknown']
+      .includes(params.get('outcome'))?params.get('outcome'):null};
+}
+function agentDetailPath(role,id,period,outcome=null){
+  const qs=new URLSearchParams();
+  if(period==='30d')qs.set('window','30d');
+  if(outcome)qs.set('outcome',outcome);
+  return '/agents/'+role+'/'+id+(qs.toString()?'?'+qs.toString():'');
+}
+function agentPeriodLinks(path,period){
+  const wrap=node('div','agent-periods');
+  for(const p of ['7d','30d']){
+    const a=local(p==='7d'?'Last 7 days':'Last 30 days',
+      path(p),'agent-period'+(p===period?' active':''));
+    if(p===period)a.setAttribute('aria-current','true');
+    wrap.append(a);
+  }
+  return wrap;
+}
+function agentOutcomeSummary(a){
+  if(!a)return 'Not observed';
+  return fmt(a.total)+' runs · '+fmt(a.success)+' succeeded · '+fmt(a.failure)+' failed';
+}
+function renderAgentDetail(role,id){
+  const selection=agentSelection(),period=selection.period;
+  const w=snapshot.agents||{},window=w.outcomes?.[period];
+  const registered=(w.roster||[]).find(x=>x.id===id&&x.role===role);
+  const actual=window?.items?.find(x=>x.id===id&&x.role===role);
+  root.append(local('← AI Agents','/agents'+(period==='30d'?'?window=30d':''),'back-link'));
+  if(!registered&&!actual){
+    root.append(empty('Agent identity not observed','No matching registered or source-attested Agent exists in this public snapshot.'));
+    return;
+  }
+  root.append(pageHead('AGENT EXECUTION',id,
+    'Role: '+role+' · Registered provider: '+(registered?.provider||'Unregistered')+
+    ' · GitHub Workflow Agent; not a Nession runtime node.'));
+  root.append(node('p','hint','Source: '+(w.freshness?.state||'unavailable')+
+    ' · measured '+date(w.generated_at)+' · metrics revision '+
+    (snapshot.source?.metrics_sha?.slice(0,12)||'unavailable')+
+    ' · coverage '+(window?.status||'unavailable')));
+  root.append(agentPeriodLinks(p=>agentDetailPath(role,id,p),period));
+  const stats=section('EXECUTION OUTCOMES','Observed '+period+' runs',
+    'Agent execution results, not GitHub workflow/Acceptance verdicts.');
+  stats.append(grid([
+    metric('Runs',fmt(actual?.total??null),'Source-observed attempts'),
+    metric('Succeeded',fmt(actual?.success??null),'Completed execution'),
+    metric('Failed',fmt(actual?.failure??null),'Agent execution failure'),
+    metric('Success rate',actual&&actual.success+actual.failure>0
+      ?pct(actual.success/(actual.success+actual.failure)):'N/A',
+      'Succeeded / (succeeded + failed)'),
+  ],'two'));
+  root.append(stats);
+  const list=section('RUN HISTORY','Recent executions',
+    'A bounded sample of at most 16 source-attested attempts; open GitHub Actions for details.');
+  const controls=node('div','agent-periods');
+  for(const result of [null,'success','failure','cancelled','timed_out','unknown']){
+    const a=local(result||'All',agentDetailPath(role,id,period,result),
+      'agent-period'+(selection.outcome===result?' active':''));
+    if(selection.outcome===result)a.setAttribute('aria-current','true');
+    controls.append(a);
+  }
+  list.append(controls);
+  const records=(actual?.recent||[]).filter(x=>!selection.outcome||x.outcome===selection.outcome);
+  list.append(records.length
+    ?attach(node('div','list'),...records.map(run=>lineItem(
+      'Run '+run.run_id+' / attempt '+run.attempt,
+      run.workflow+' · '+run.outcome+' · '+run.provider+
+        (run.issue?' · Issue #'+run.issue:' · Issue unlinked'),
+      duration(run.duration_ms),run.url,date(run.observed_at))))
+    :empty(actual?'No matching observed attempts':'Run source unavailable',
+      actual?'No matching Run in this bounded recent sample.':
+      'A registered Agent without source records is not an observed zero.'));
+  root.append(list);
+  root.append(node('p','hint','Other outcomes: '+fmt(actual?.cancelled??null)+
+    ' cancelled · '+fmt(actual?.timed_out??null)+' timed out · '+
+    fmt(actual?.unknown??null)+' unknown. The recent list is sampled; totals cover the observed '+period+' window.'));
+}
 function renderAgents(){
   root.append(pageHead('THE AI TEAM','The agents behind the work.','Registered workflow Agents are not the Nession runtime node Agents. A role can exist without a successful run; usage is shown only where actually observed.'));
   const w=snapshot.agents||{}, s=w.summary||{};
@@ -252,12 +335,33 @@ function renderAgents(){
   };
   breakdown.append(grid([panelFor('Providers','providers'),panelFor('Workflows','workflows')],'two'));
   root.append(breakdown);
-  const roster=section('ROLE REGISTRY','Who can do what','Registered instances · per-agent counts require observed identities.');
-  const rows=(w.roster||[]).map(x=>lineItem(x.id,'Role: '+x.role+'  /  Provider: '+x.provider,
-    x.observed_7d===null?'Not observed':fmt(x.observed_7d)+' runs',null,'7d source'));
-  roster.append(rows.length?attach(node('div','list'),...rows):empty('No registry snapshot','Agent roles are unavailable; this does not indicate that Agents are offline.'));
+  const period=agentSelection().period;
+  const roster=section('PER-AGENT EXECUTIONS','Execution by Agent',
+    'Observed '+period+' · counts reflect Agent outcomes, not Workflow or SC verdicts.');
+  roster.append(agentPeriodLinks(p=>'/agents'+(p==='30d'?'?window=30d':''),period));
+  const outcome=w.outcomes?.[period]||{status:'unavailable',items:[],unattributed:null};
+  const known=new Set((w.roster||[]).map(x=>x.role+':'+x.id));
+  const agents=[...(w.roster||[]),...(outcome.items||[])
+    .filter(x=>!known.has(x.role+':'+x.id))
+    .map(x=>({role:x.role,id:x.id,provider:'Source-attested'}))];
+  const rows=agents.map(x=>{
+    const stats=outcome.items?.find(a=>a.id===x.id&&a.role===x.role);
+    const item=node('article','entry'),main=node('div','entry-main'),right=node('div','entry-right');
+    attach(main,local(x.id,'/agents/'+x.role+'/'+x.id+
+      (period==='30d'?'?window=30d':''),'entry-title'),
+      node('small','',x.role+' · '+x.provider));
+    attach(right,node('strong','',agentOutcomeSummary(stats)),
+      node('span','',stats?'Other / unknown: '+fmt(stats.cancelled+stats.timed_out+stats.unknown):
+        'No observed identity in this window'));
+    return attach(item,main,right);
+  });
+  roster.append(rows.length?attach(node('div','list'),...rows):
+    empty('No Agent registry','There are no registered or source-attested Agents in this snapshot.'));
   root.append(roster);
-  const note=node('div','callout','Important: aggregate token and cost metrics cannot be allocated to individual Agents without authenticated per-Agent evidence. Workflow runs are not real-time presence.');
+  root.append(node('p','hint','Per-Agent coverage: '+(outcome.status||'unavailable')+
+    ' · unattributed executions: '+fmt(outcome.unattributed)+
+    '. Missing identities are never assigned to a role by Workflow name; missing measurements are not zero.'));
+  const note=node('div','callout','Execution success is not a GitHub Workflow success or an Acceptance SC Pass. Recent Runs are bounded observations; raw prompts, failures and Provider sessions remain private.');
   root.append(note);
 }
 function renderWork(){
@@ -551,8 +655,10 @@ function renderEvidence(){
 function render(){
   const raw=location.hash.replace(/^#/,'')||'/';
   const match=raw.match(/^\/work\/(issue|pr)\/([1-9][0-9]{0,8})$/);
+  const agentMatch=raw.match(/^\/agents\/(developer|reviewer|acceptor|auditor)\/([a-z][a-z0-9-]{0,62})(?:\?(?:window=(?:7d|30d)|outcome=[a-z_]+|[a-z_]+=[a-z0-9_-]+)(?:&[a-z_]+=[a-z0-9_-]+)*)?$/);
+  const agentPath=raw.startsWith('/agents/')||raw.startsWith('/agents?');
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
-  const route=match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':routes.has(raw)?raw:detail?'/work':raw==='/'
+  const route=agentPath?'/agents':match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
   root.replaceChildren();
   // A hashchange may arrive while the independent site.json request is still
@@ -569,7 +675,12 @@ function render(){
     return;
   }
   try {
-    if(match)renderWorkDetail(match[1],Number(match[2]));
+    if(agentMatch)renderAgentDetail(agentMatch[1],agentMatch[2]);
+    else if(agentPath && raw.startsWith('/agents/')) {
+      root.append(local('← AI Agents','/agents'));
+      root.append(empty('Invalid Agent reference','This is not a valid source-backed Agent identity.'));
+    }
+    else if(match)renderWorkDetail(match[1],Number(match[2]));
     else if(detail) {
       root.append(local('← All recent work','/work'));
       root.append(empty('Invalid evidence reference',
