@@ -20,6 +20,12 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
 .terminal .entry{white-space:pre-wrap;margin:0 0 7px}.terminal .entry.blank{height:10px}
 .terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:-2px;background:#31363a;opacity:.8}
 .dock{position:absolute;inset-inline:12px;bottom:max(14px,env(safe-area-inset-bottom));z-index:3;display:flex;flex-direction:column;gap:9px}
+/* The published gallery injects a fixed bottom navigation bar ("View source"
+   and the gallery link). Reserve its height so the mock's + and composer stay
+   operable on the published page; the local/source-only page has no nav and
+   keeps the original bottom. */
+body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bottom) + 58px))}
+@media(max-width:580px){body:has(.nession-preview-nav) .dock{bottom:64px}}
 .surface{background:rgba(246,248,250,.98);box-shadow:0 0 0 1px #30353a12,0 5px 18px #222c3414,0 18px 38px #2b303716;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:23px;color:#232528}
 .composer{height:56px;padding:6px 7px;display:flex;align-items:center;gap:5px}
 .tap{min-width:44px;min-height:44px;display:grid;place-items:center;border:0;background:transparent;border-radius:12px;color:#4d5257}
