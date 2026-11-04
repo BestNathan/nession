@@ -37,7 +37,9 @@ function makeHarness(options: HarnessOptions = {}) {
   screen.className = 'xterm-screen';
   element.appendChild(screen);
   const host = document.createElement('div');
-  if (options.panelClearance) host.style.setProperty('--nession-local-terminal-capsule-panel-clearance', options.panelClearance);
+  if (options.panelClearance) {
+    host.style.setProperty('--nession-local-terminal-capsule-panel-clearance', options.panelClearance);
+  }
   // The terminal lives inside the capsule host, exactly like the product; the
   // handler binds on the host in the capture phase (#2659).
   host.appendChild(element);

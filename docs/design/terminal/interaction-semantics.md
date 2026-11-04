@@ -87,12 +87,17 @@ The capsule docks two clearances, and they are not interchangeable:
   exactly what the composer-only fit decided.
 
 The scroll owner applies the shift only in the normal local buffer with no
-mouse tracking. In following state it keeps the live bottom above the panel; in
-history it applies no shift, so the browsing anchor survives a panel height
-change, and scrolling back to the live bottom restores the clearance. An
-alternate-screen or mouse-reporting application owns its own screen geometry and
-is never shifted. Closing the panel returns the clearance to zero without moving
-a history position.
+mouse tracking. In following state it keeps the live bottom above the panel. A
+drag or wheel step that leaves the live bottom retains the current shift while
+browsing, so the first history step does not snap the rendered grid back under
+the panel (#2710 SC-10); the anchor is the buffer's viewport position, and
+scrolling back to the live bottom restores the current clearance without a
+second visual move. A panel opened while the user is already reading history
+does not invent a shift; its anchor stays where it was, and a panel height
+change likewise leaves the retained offset alone. An alternate-screen or
+mouse-reporting application owns its own screen geometry and is never shifted.
+Closing the panel returns the clearance to zero without moving a history
+position.
 
 ## Touch direction pad (#2657)
 

@@ -66,7 +66,8 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   }, { timeout: 10_000, message: 'the touch drag did not move local history' }).toBeGreaterThan(0);
   const scrolled = await terminalGeometry(page);
   expect(scrolled.viewportY).toBeLessThan(scrolled.baseY);
-  expect(scrolled.screenTransform, 'history is unshifted').toBe('none');
+  expect(scrolled.screenTransform, 'the drag retains the live panel shift')
+    .toBe(shifted.screenTransform);
 
   // Alternate-screen application: no shift, no resize, no changed rows.
   await page.getByTestId('capsule-capability-dismiss').click();
