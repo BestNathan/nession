@@ -25,12 +25,25 @@ test('SC-05: the deployed HTTP origin copy matrix at the exact SHA', async ({ pa
     expect(capability.secure, 'the deployed matrix must run on an insecure origin').toBe(false);
     expect(capability.hasAsyncClipboard, 'plain HTTP has no async Clipboard API').toBe(false);
 
+    // Force the automatic legacy attempt to fail so the truthful user-click
+    // notice path is exercised on the deployed revision; SC-06 covers the
+    // browser-permitted automatic branch separately.
+    await page.evaluate(() => {
+      const real = document.execCommand.bind(document);
+      window.__sc05RealExecCommand = real;
+      document.execCommand = (command, ...rest) => (
+        command === 'copy' ? false : real(command, ...rest)
+      );
+    });
     await page.evaluate((payload) => {
       window.clipboardHarness.emit('\x1b]52;c;' + payload + '\x1b\\');
     }, b64(TERMINAL_TEXT));
     await page.getByTestId('terminal-notices-trigger').click();
     const notice = page.getByTestId('terminal-clipboard-notice');
     await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
+    await page.evaluate(() => {
+      document.execCommand = window.__sc05RealExecCommand;
+    });
     await armCopyProbe(page);
     await notice.getByRole('button', { name: 'Copy' }).click();
     await expect.poll(async () => (await copyProbe(page)).texts).toEqual([TERMINAL_TEXT]);

@@ -409,12 +409,14 @@ export class TerminalController {
   }
 
   /**
-   * Write text through the automatic (`navigator.clipboard`) path. Returns
-   * whether the browser accepted it.
+   * Write text through the automatic (non-gesture) path. Returns whether the
+   * shared owner completed it.
    *
-   * A remote OSC 52 emission cannot manufacture user activation, so this is
-   * not the blocked-copy action's path; the surface's explicit Copy gesture
-   * uses {@link copyClipboardTextFromGesture}, which owns the HTTP fallback.
+   * On a secure origin the shared owner uses the async Clipboard API; on plain
+   * HTTP it attempts the library's synchronous legacy copy (#2656 SC-06). A
+   * remote OSC 52 emission cannot manufacture user activation, so this is not
+   * the blocked-copy action's path; the surface's explicit Copy gesture uses
+   * {@link copyClipboardTextFromGesture}.
    */
   async copyClipboardText(text: string): Promise<boolean> {
     const effects = this.clipboardEffects;
@@ -428,8 +430,9 @@ export class TerminalController {
   }
 
   /**
-   * Whether this origin can write the clipboard without a user gesture
-   * (#2614). `false` on plain HTTP, where the async Clipboard API is absent.
+   * Whether this origin exposes the **async** Clipboard API for a
+   * non-gesture write (#2614). `false` on plain HTTP; automatic OSC 52 writes
+   * still attempt the shared owner's library-backed legacy path (#2656).
    */
   canWriteClipboardProgrammatically(): boolean {
     return this.clipboardEffects?.writeTextIsProgrammatic?.() ?? false;

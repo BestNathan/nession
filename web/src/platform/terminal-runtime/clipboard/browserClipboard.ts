@@ -1,26 +1,30 @@
 /**
- * Browser Clipboard API adapter for the terminal clipboard protocols (#2598).
+ * Browser Clipboard effect adapter for the terminal clipboard protocols (#2598).
  *
- * This is the only module that touches `navigator.clipboard`. It reports
- * permission refusal as `EPERM` (the protocol's truthful reply) and any other
- * failure as `EIO`, so the protocol never claims a write that did not happen.
+ * This adapter owns only protocol-specific work: OSC 52/5522 notices and
+ * mapping the shared owner's `EPERM`/`EIO` result to the protocol reply. Every
+ * browser clipboard write enters the one shared owner
+ * (`@/shared/lib/clipboard`, #2656): user-gesture text copy, automatic OSC 52
+ * text (including its library-backed HTTP legacy attempt), and OSC 5522's
+ * multi-MIME/binary item. The adapter never calls `navigator.clipboard` or
+ * `document.execCommand` itself.
  *
  * ## Ordinary HTTP is not a secure context (#2614)
  *
  * Browsers expose the async Clipboard API only on secure origins, so a page
  * served over plain HTTP (the deployed staging origin is one) has no
- * `navigator.clipboard`. A remote `OSC 52`/`OSC 5522` write therefore cannot
- * complete automatically there and must not pretend to: the protocol answers
- * `EPERM`, and the surface offers a **user-gesture** copy instead.
- *
- * That user-gesture text path is delegated to the shared browser clipboard
- * owner (`@/shared/lib/clipboard`, #2656), which integrates
- * `copy-to-clipboard`; this adapter keeps only the protocol-specific MIME
- * writes, capability detection and `EPERM`/`EIO` normalization.
+ * `navigator.clipboard`. Automatic OSC 52 writes still attempt the shared
+ * library's synchronous legacy path (#2656 SC-06); the browser's actual result
+ * decides whether the write succeeds silently or the surface offers the
+ * user-gesture Copy notice. Binary OSC 5522 representations are explicitly
+ * refused on HTTP because the text fallback cannot carry them.
  */
 import {
+  ClipboardWriteError,
   asyncClipboardWriteAvailable,
   copyText,
+  writeClipboardItem,
+  writeTextProgrammatic,
 } from '@/shared/lib/clipboard';
 import {
   ClipboardEffectError,
@@ -33,32 +37,23 @@ export interface BrowserClipboardOptions {
   notice?: (notice: ClipboardNotice) => void;
 }
 
-function isPermissionError(error: unknown): boolean {
-  const name = (error as { name?: unknown } | null)?.name;
-  return name === 'NotAllowedError' || name === 'SecurityError';
-}
-
-function clipboardApi(): Clipboard | undefined {
-  return typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-}
-
-/** A BlobPart backed by a plain ArrayBuffer (never a shared one). */
-function blobPart(bytes: Uint8Array): BlobPart {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy;
+/** Map the shared owner's truthful failure to the protocol's reply class. */
+function effectError(error: unknown): ClipboardEffectError {
+  return error instanceof ClipboardWriteError
+    ? new ClipboardEffectError(error.code)
+    : new ClipboardEffectError('EIO');
 }
 
 export class BrowserClipboardEffects implements ClipboardEffectPort {
   constructor(private readonly options: BrowserClipboardOptions = {}) {}
 
-  /** Whether `writeText` can act on this origin (#2614). */
+  /** Whether the async (non-gesture) API is available on this origin. */
   writeTextIsProgrammatic(): boolean {
     return asyncClipboardWriteAvailable();
   }
 
   /**
-   * The user-gesture text path (#2614), delegated to the shared owner (#2656).
+   * The user-gesture text path, delegated to the shared owner.
    *
    * The returned Promise is the library's: its HTTP branch has already run the
    * DOM copy during this call, while its secure-origin branch settles after
@@ -68,43 +63,24 @@ export class BrowserClipboardEffects implements ClipboardEffectPort {
     return copyText(text);
   }
 
-  /**
-   * Write text. The Clipboard API prompts or refuses depending on permission,
-   * secure context and user activation; both outcomes reach the caller here.
-   */
+  /** Automatic OSC 52 text write; the shared owner attempts HTTP legacy. */
   async writeText(text: string): Promise<void> {
-    const clipboard = clipboardApi();
-    if (!clipboard?.writeText) {
-      throw new ClipboardEffectError('EPERM');
-    }
     try {
-      await clipboard.writeText(text);
+      await writeTextProgrammatic(text);
     } catch (error) {
-      throw new ClipboardEffectError(isPermissionError(error) ? 'EPERM' : 'EIO');
+      throw effectError(error);
     }
   }
 
   /**
-   * Write one clipboard item carrying every requested MIME (and alias) as its
-   * own representation. Browsers expose only the types they support; an
-   * unsupported item surfaces as EIO rather than a false success.
+   * OSC 5522 multi-MIME/binary write, delegated to the one shared owner. Every
+   * requested representation belongs to one clipboard item.
    */
   async writeClipboard(variants: ReadonlyMap<string, Uint8Array>): Promise<void> {
-    const clipboard = clipboardApi();
-    const ClipboardItemCtor = (globalThis as Record<string, unknown>)['ClipboardItem'] as
-      | typeof ClipboardItem
-      | undefined;
-    if (!clipboard?.write || !ClipboardItemCtor || variants.size === 0) {
-      throw new ClipboardEffectError('EPERM');
-    }
-    const record: Record<string, Blob> = {};
-    for (const [type, bytes] of variants) {
-      record[type] = new Blob([blobPart(bytes)], { type });
-    }
     try {
-      await clipboard.write([new ClipboardItemCtor(record)]);
+      await writeClipboardItem(variants);
     } catch (error) {
-      throw new ClipboardEffectError(isPermissionError(error) ? 'EPERM' : 'EIO');
+      throw effectError(error);
     }
   }
 
