@@ -385,10 +385,14 @@ export class CapsuleOcclusionScroll {
    * At buffer viewportY=0 the visual offset is always reachable at zero.
    */
   scrollLines(lines: number): void {
-    if (lines === 0) return;
+    if (lines === 0) {
+      return;
+    }
     const target = this.targetClearanceOffset();
     if (target <= 0) {
-      if (lines < 0) this.enterHistory();
+      if (lines < 0) {
+        this.enterHistory();
+      }
       this.terminal.scrollLines(lines);
       this.syncModeFromViewport();
       return;
@@ -404,13 +408,17 @@ export class CapsuleOcclusionScroll {
         this.applyClearanceOffset(Math.max(0, this.clearanceOffsetPx - panSteps * cell));
       }
       const bufferLines = lines + panSteps;
-      if (bufferLines < 0) this.terminal.scrollLines(bufferLines);
+      if (bufferLines < 0) {
+        this.terminal.scrollLines(bufferLines);
+      }
     } else {
       const buffer = this.terminal.readBuffer();
       const bottom = Math.max(0, buffer.length - this.terminal.rows);
       const remainingBufferLines = Math.max(0, bottom - buffer.viewportY);
       const bufferLines = Math.min(lines, remainingBufferLines);
-      if (bufferLines > 0) this.terminal.scrollLines(bufferLines);
+      if (bufferLines > 0) {
+        this.terminal.scrollLines(bufferLines);
+      }
       const panSteps = lines - bufferLines;
       if (panSteps > 0) {
         this.applyClearanceOffset(Math.min(target, this.clearanceOffsetPx + panSteps * cell));
