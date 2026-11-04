@@ -153,7 +153,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     // A stray ResizeObserver notification must never reset touch momentum.
     const oldTop=term.scrollTop;
     const wasFollowing=following && !userDragActive;
-    const panelGrew=!!view && activeClearancePx>=0 && newInset>activeClearancePx;
+    const panelGrew=!!view && (activeClearancePx<0 || newInset>activeClearancePx);
     activeClearancePx=newInset;
     term.style.paddingBottom=newInset+"px";
     // Opening + does NOT automatically push the whole screen upward.
