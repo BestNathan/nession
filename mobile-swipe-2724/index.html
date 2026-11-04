@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b121c">
+<title>Nession · Mobile Swipe Lab · #2724</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8eef6;background:#0b111a}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh}
+button{font:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #91e0c6;outline-offset:3px}
+main{max-width:1070px;margin:auto;padding:25px 20px 42px}
+.eyebrow{color:#8fa8c1;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.15em}
+h1{font-size:clamp(25px,3vw,38px);line-height:1.12;letter-spacing:-.035em;margin:10px 0}
+.intro{color:#94a6b9;line-height:1.6;font-size:14px;max-width:770px;margin-bottom:22px}
+.layout{display:grid;grid-template-columns:minmax(320px,420px) minmax(310px,1fr);gap:22px;align-items:start}
+.phone{position:relative;isolation:isolate;height:min(78dvh,760px);min-height:540px;max-height:810px;border-radius:31px;border:5px solid #33445a;overflow:hidden;background:#0b1420;box-shadow:0 22px 70px #0008;touch-action:pan-y;overscroll-behavior:contain;-webkit-user-select:none;user-select:none}
+.phone:before{position:absolute;content:"";top:0;left:50%;transform:translateX(-50%);height:13px;width:104px;background:#33445a;border-radius:0 0 12px 12px;z-index:20;pointer-events:none}
+.screen{position:absolute;inset:0;display:none;background:#0d1724;overflow:hidden}
+.screen.active{display:flex;flex-direction:column;z-index:2;will-change:transform}
+#terminal{background:#0a121c}
+.header{height:68px;flex:none;padding:19px 16px 9px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#101c2a;border-bottom:1px solid #293b4e;touch-action:pan-y}
+.header-left{min-width:0}.header .kicker{color:#8399ae;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.header strong{display:block;font-size:15px;letter-spacing:-.01em;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-buttons{display:flex;align-items:center;gap:7px}
+.icon-btn{height:39px;min-width:39px;padding:0 11px;border-radius:12px;color:#c2d4e4;border:1px solid #31475b;background:#19293b;font-size:18px}
+.icon-btn[disabled]{opacity:.3;cursor:not-allowed}
+.header .status{color:#83d9b3;font-size:10px}
+.terminal-body{position:relative;flex:1;overflow:auto;min-height:0;touch-action:pan-y;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.term-lines{padding:14px 15px 120px;white-space:pre;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;color:#b6c9d8;min-height:100%}
+.term-line{height:20px}.term-line .number{color:#5b7388;display:inline-block;width:28px}.term-line .cmd{color:#95e1bf}.term-line .dim{color:#7e91a5}
+.bottom{position:absolute;bottom:max(11px,env(safe-area-inset-bottom));left:12px;right:12px;z-index:7;display:flex;flex-direction:column;gap:8px}
+.peek{display:none;border-radius:16px;background:#192a3d;border:1px solid #344b60;padding:10px;max-height:185px;overflow:auto;box-shadow:0 6px 25px #0006;touch-action:pan-y}
+.peek.on{display:block}
+.peek-title{font-size:12px;color:#a9bdd0;font-weight:750;margin:5px 4px 10px}
+.peek-item{padding:11px 10px;font-size:13px;background:#23384d;border-radius:10px;margin:5px 0;color:#d6e3ee}
+.capsule{min-height:56px;border:1px solid #435369;border-radius:19px;background:#233347ed;display:flex;gap:8px;padding:7px 9px;align-items:center;box-shadow:0 8px 30px #0009}
+.plus{height:40px;width:40px;background:none;border:0;color:#d5e2ee;font-size:22px}
+.composer{flex:1;min-width:0;color:#a2b4c7;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.send{height:35px;min-width:35px;border-radius:50%;background:#c3edda;border:0;color:#1c4d3c;font-size:16px}
+.page-content{flex:1;overflow:auto;padding:19px 17px 70px;touch-action:pan-y}
+.section-caption{color:#7e96aa;font-weight:750;font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin:15px 0 9px}
+.search{padding:12px 14px;border:1px solid #34485d;border-radius:13px;color:#8da5b9;font-size:12px;margin-top:8px}
+.session-row,.workspace-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #2f455a;border-radius:13px;padding:14px 13px;margin:9px 0;background:#172638;color:#dbe9f4;text-align:left}
+.session-row b,.workspace-row b{display:block;font-size:13px}.session-row small,.workspace-row small{display:block;font-size:11px;color:#8ea6b9;margin-top:4px}
+.chevron{font-size:18px;color:#90aabe}
+.empty{border:1px dashed #42566b;padding:20px;border-radius:15px;color:#a2b9ca;font-size:13px;line-height:1.6}
+.empty button{margin-top:10px}
+.mini-action{background:#bce9d5;color:#174b38;border:0;border-radius:10px;padding:10px 13px;font-size:12px;font-weight:750}
+#reveal{position:absolute;inset:0;z-index:1;display:none;overflow:hidden;background:#15263a}
+#reveal.visible{display:block}
+.reveal-header{padding:58px 19px 17px;color:#bdd6ed;font-weight:800;font-size:22px;letter-spacing:-.03em}
+.reveal-item{margin:9px 18px;padding:15px;background:#20364c;border-radius:11px;color:#96b4ca;font-size:13px}
+.reveal-foot{position:absolute;bottom:35px;left:18px;color:#9adcc3;font-size:11px}
+#previewTag{position:absolute;top:82px;z-index:10;pointer-events:none;display:none;background:#bce9d5;color:#173c31;border-radius:11px;padding:9px 13px;font-size:12px;font-weight:800;box-shadow:0 10px 30px #0007}
+#previewTag.visible{display:block}
+#edgeLeft,#edgeRight{position:absolute;top:80px;bottom:80px;width:28px;z-index:6;pointer-events:none;opacity:0}
+#edgeLeft{left:0;background:linear-gradient(90deg,#b6e5ca25,transparent)}
+#edgeRight{right:0;background:linear-gradient(270deg,#b6e5ca25,transparent)}
+.phone.show-edges #edgeLeft,.phone.show-edges #edgeRight{opacity:1}
+#direction{position:absolute;z-index:12;pointer-events:none;display:none;width:150px;height:150px;border:1px solid #9fd9c6;border-radius:50%;background:#1c3047ec;box-shadow:0 18px 36px #000a;transform:translate(-50%,-50%);align-items:center;justify-content:center;color:#c6eadc;text-align:center;font-size:12px;line-height:1.7}
+#direction.on{display:flex}
+.dialog{position:absolute;inset:0;z-index:30;display:none;align-items:center;justify-content:center;padding:20px;background:#050b11b0}
+.dialog.on{display:flex}
+.dialog-box{border-radius:17px;border:1px solid #557086;background:#22364a;padding:18px;box-shadow:0 20px 55px #0009}
+.dialog-box b{display:block;margin-bottom:8px}.dialog-box p{font-size:12px;line-height:1.5;color:#b8ccd9}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px}.dialog-actions button{border-radius:10px;padding:10px 13px;background:#304a61;color:#dbe7ee;border:1px solid #637e95}
+.dialog-actions button:last-child{color:#183c2e;background:#bce9d5;border-color:#bce9d5}
+.controls{background:#142131;border:1px solid #293b4e;border-radius:20px;padding:20px}
+.controls h2{font-size:17px;letter-spacing:-.02em;margin:0 0 13px}
+.controls p{color:#9db0c1;font-size:12px;line-height:1.6}
+.group{padding:15px 0;border-top:1px solid #2b4055}
+.group-title{font-size:10px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;color:#91aec5;margin-bottom:10px}
+.btn-set{display:flex;gap:7px;flex-wrap:wrap}
+.chip{padding:9px 11px;border-radius:9px;border:1px solid #476078;background:#213448;color:#d1e0ec;font-size:12px;font-weight:650}
+.chip[aria-pressed=true]{border-color:#96ddc2;background:#31594e;color:#d3fbe9}
+.state{display:grid;grid-template-columns:105px 1fr;gap:9px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.state dt{color:#829bb1}.state dd{margin:0;color:#addfc9;word-break:break-word}
+.trace{min-height:92px;max-height:145px;overflow:auto;background:#0b1724;border-radius:11px;padding:12px;color:#b8cddd;font:11px/1.75 ui-monospace,monospace;white-space:pre-wrap}
+.note{color:#8298a9;font-size:11px;line-height:1.6}
+a{color:#9ed6c7}
+@media(max-width:750px){main{padding:16px 10px 32px}.layout{grid-template-columns:1fr;gap:15px}.phone{width:100%;max-width:430px;margin:auto;height:min(73dvh,720px)}.controls{padding:15px}h1{font-size:27px}}
+@media(prefers-reduced-motion:reduce){.screen,.phone,#previewTag{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Nession / Interaction Lab · Requirement #2724</div>
+<h1>让滑动有方向，也有边界。</h1>
+<p class="intro">在下面的手机界面直接拖动：从终端左侧边缘向右拉出 Sessions；从右侧边缘向左拉出 Workspace。未达到阈值松手会回弹。终端中央区域仍保留滚动和长按。右侧实验面板可以切换冲突场景。</p>
+<div class="layout">
+<section class="phone" id="phone" aria-label="可交互移动端手势模拟器">
+<div id="reveal" aria-hidden="true"><div class="reveal-header" id="revealTitle">Sessions</div><div class="reveal-item" id="revealItemA">dev-session</div><div class="reveal-item" id="revealItemB">Workspace</div><div class="reveal-foot">轻拉预览，松手提交</div></div>
+<div class="screen" id="sessions">
+<header class="header"><div class="header-left"><span class="kicker">Navigation</span><strong>Sessions</strong></div><div class="header-buttons"><button class="icon-btn" id="sessionsBack" aria-label="返回终端">→</button></div></header>
+<div class="page-content" id="sessionContent"><div class="search">⌕　Search sessions</div><div class="section-caption">Today</div>
+<button class="session-row" id="sessionSelect"><span><b>dev-session</b><small>macbook · bash · connected</small></span><span class="chevron">›</span></button>
+<button class="session-row" id="sessionOther"><span><b>review-agent</b><small>beijing-agent · coding</small></span><span class="chevron">›</span></button>
+<div class="section-caption">Agents · 2 online</div><div class="session-row"><span><b>macbook</b><small>Current work</small></span><span class="chevron">·</span></div>
+</div></div>
+<div class="screen" id="terminal">
+<header class="header"><div class="header-left"><div class="kicker">macbook · <span class="status">● Connected</span></div><strong>dev-session · Terminal</strong></div><div class="header-buttons"><button class="icon-btn" id="toSessions" aria-label="打开 Sessions">☰</button><button class="icon-btn" id="toWorkspace" aria-label="打开 Workspace">◫</button></div></header>
+<div class="terminal-body" id="terminalScroll"><div class="term-lines" id="termLines"></div></div>
+<div class="bottom"><div class="peek" id="peek"><div class="peek-title">Context Capsule · Terminal Keys</div><div class="peek-item">Esc　 Tab　 Enter　↑　↓　←　→</div><div class="peek-item">Ctrl+C　 Ctrl+L　 Ctrl+R</div><div class="peek-item">Quick commands　·　Insert / Run</div></div><div class="capsule" id="capsule"><button class="plus" id="plus" aria-label="展开能力">+</button><span class="composer">✦　Ask, command, or describe...</span><button class="send" id="send" aria-label="发送">↑</button></div></div>
+</div>
+<div class="screen" id="workspace">
+<header class="header"><div class="header-left"><div class="kicker">Contextual depth</div><strong id="workspaceHeader">Workspace</strong></div><button class="icon-btn" id="workspaceBack" aria-label="返回">←</button></header>
+<div class="page-content"><div class="section-caption">Current Session</div><div class="workspace-row"><span><b>dev-session</b><small>macbook · shell</small></span><span class="chevron">●</span></div><div class="section-caption">Relevant to this work</div>
+<button class="workspace-row" id="openFile"><span><b>Files</b><small>~/workspace/nession</small></span><span class="chevron">›</span></button>
+<button class="workspace-row" id="openGit"><span><b>Git</b><small>main · working tree clean</small></span><span class="chevron">›</span></button>
+<div class="section-caption">Other capabilities</div><div class="workspace-row"><span><b>Environment</b><small>Session bindings</small></span><span class="chevron">›</span></div>
+</div></div>
+<div class="screen" id="detail">
+<header class="header"><div class="header-left"><span class="kicker">Workspace / Files</span><strong>config.ts</strong></div><button class="icon-btn" id="detailBack" aria-label="返回 Workspace">←</button></header><div class="page-content"><div class="section-caption">Read / Edit mock</div><div class="empty">export const agent = "macbook";<br><br>本层由文件编辑器拥有返回语义。<br>边缘滑动不会越过本层，也不会绕过未保存确认。</div><button class="mini-action" id="makeDirty">模拟编辑（产生未保存变更）</button><p id="dirtyStatus" style="color:#94bea9;font-size:12px">无未保存更改</p></div>
+</div>
+<div id="previewTag" aria-live="polite"></div>
+<div id="edgeLeft"></div><div id="edgeRight"></div>
+<div id="direction"><span id="directionText">方向盘已接管<br>移动手指模拟方向</span></div>
+<div class="dialog" id="dialog"><div class="dialog-box" role="dialog" aria-modal="true" aria-label="未保存更改"><b>放弃未保存更改？</b><p>此处的文件修改仅为原型状态。Swipe 不能绕过确认。</p><div class="dialog-actions"><button id="keepEditing">继续编辑</button><button id="discard">放弃并返回</button></div></div></div>
+</section>
+<section class="controls" aria-label="场景和状态面板">
+<h2>Gesture Lab</h2>
+<p>从屏幕边缘开始横向滑动，页面会跟手移开；距离不足则回弹。也可以用按钮打开目标页，测试返回路径。所有数据和终端输出均为模拟。</p>
+<div class="group"><div class="group-title">Scenarios / 场景</div><div class="btn-set">
+<button class="chip" id="modeNormal" aria-pressed="true">普通 Shell</button><button class="chip" id="modeTui" aria-pressed="false">鼠标 TUI</button><button class="chip" id="modeLong" aria-pressed="true">长按方向盘 On</button><button class="chip" id="modePeek" aria-pressed="false">胶囊展开</button><button class="chip" id="modeNoSession" aria-pressed="false">无 Session</button><button class="chip" id="modeEdge" aria-pressed="false">显示边缘范围</button></div></div>
+<div class="group"><div class="group-title">Quick paths / 快捷验证</div><div class="btn-set">
+<button class="chip" id="simLeft">→ Sessions</button><button class="chip" id="simRight">→ Workspace</button><button class="chip" id="simDetail">Workspace 详情</button><button class="chip" id="simReset">重置</button></div></div>
+<div class="group"><div class="group-title">Live ownership / 状态</div><dl class="state"><dt>Surface</dt><dd id="sPage">Terminal</dd><dt>Phase</dt><dd id="sPhase">idle</dd><dt>Owner</dt><dd id="sOwner">free</dd><dt>Destination</dt><dd id="sTarget">—</dd><dt>Distance</dt><dd id="sDistance">0 px</dd><dt>Commit</dt><dd id="sCommit">—</dd></dl></div>
+<div class="group"><div class="group-title">Event trace / 事件记录</div><div class="trace" id="trace" aria-live="polite"></div></div>
+<p class="note"><b>手势规则（待手机验收）：</b>工作区内只在 App 左右 28px 起始区域尝试接管；移动 12px 后判定主轴；距离达到 max(64px, 宽度的 18%) 提交，或移动至少 40px 且平均速度 ≥0.45px/ms 的快速滑动提交。竖向滑动、反方向、中心选择、长按、Peek、Detail 和多指均不触发 App 导航。</p>
+<p class="note"><a href="https://github.com/BestNathan/nession/issues/2724">Requirement #2724</a> · <a id="source" href="https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724">View source</a>. 浏览器/OS 是否占用边缘、xterm/PT﻿Y、真实 TUI 和触觉反馈不由此 mock 证明。</p>
+</section>
+</div>
+</main>
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const state={page:'terminal',selected:true,tui:false,long:true,peek:false,showEdges:false,detail:false,dirty:false,phase:'idle',owner:'free',target:null,dx:0,commit:'—'};
+const phone=$('phone'), term=$('terminalScroll');
+const screens={sessions:$('sessions'),terminal:$('terminal'),workspace:$('workspace'),detail:$('detail')};
+const log=[];
+let gesture=null,holdTimer=null,activeDemo=0;
+function record(v){log.unshift(v);if(log.length>7)log.pop();$('trace').textContent=log.map((x,i)=>String(i+1).padStart(2,'0')+'  '+x).join('\n');}
+function routePage(){return state.detail?'detail':state.page;}
+function notify(){ $('sPage').textContent=routePage()+(state.selected?'':' · no Session');$('sPhase').textContent=state.phase;$('sOwner').textContent=state.owner;$('sTarget').textContent=state.target||'—';$('sDistance').textContent=Math.round(state.dx)+' px';$('sCommit').textContent=state.commit; }
+function paint(){
+const current=routePage();
+Object.entries(screens).forEach(([name,el])=>{el.classList.toggle('active',name===current);if(state.phase!=='navigation'||name!==current){el.style.transition='';el.style.transform='';el.style.boxShadow='';}});
+$('peek').classList.toggle('on',state.peek && current==='terminal');
+$('toWorkspace').disabled=!state.selected;
+$('sessionsBack').disabled=!state.selected;
+$('modeNormal').setAttribute('aria-pressed',String(!state.tui));$('modeTui').setAttribute('aria-pressed',String(state.tui));$('modeLong').setAttribute('aria-pressed',String(state.long));$('modePeek').setAttribute('aria-pressed',String(state.peek));$('modeNoSession').setAttribute('aria-pressed',String(!state.selected));$('modeEdge').setAttribute('aria-pressed',String(state.showEdges));
+phone.classList.toggle('show-edges',state.showEdges);
+$('dirtyStatus').textContent=state.dirty?'● 未保存更改：返回需要确认':'无未保存更改';
+notify();
+}
+function resetDrag(){Object.values(screens).forEach(el=>{el.style.transform='';el.style.transition='';el.style.boxShadow='';});$('reveal').classList.remove('visible');$('previewTag').classList.remove('visible');$('direction').classList.remove('on');state.target=null;state.dx=0;}
+function setPage(page){state.detail=false;state.page=page;state.phase='idle';state.owner='free';resetDrag();paint();record('route → '+page);}
+function openDetail(){if(!state.selected){record('detail unavailable · no Session');return;}state.page='workspace';state.detail=true;state.phase='idle';resetDrag();paint();record('Workspace → Files detail (owns Back)');}
+function back(){if(state.detail){if(state.dirty){$('dialog').classList.add('on');record('dirty draft → confirmation required');}else{state.detail=false;paint();record('detail → Workspace');}}else if(state.page!=='terminal'&&state.selected){setPage('terminal');}}
+function targetFor(x,at){
+let t=null;
+if(state.detail || !state.selected&&state.page==='sessions')return null;
+if(state.page==='terminal'){if(x>0&&at==='left')t='sessions';if(x<0&&at==='right'&&state.selected)t='workspace';}
+else if(state.page==='sessions'&&x<0)t='terminal';
+else if(state.page==='workspace'&&x>0)t='terminal';
+return t;
+}
+function showDrag(dx,target){
+const width=phone.getBoundingClientRect().width;
+const adjusted=Math.sign(dx)*Math.min(Math.abs(dx),width*.80);
+const current=screens[routePage()];
+$('reveal').classList.add('visible');
+$('revealTitle').textContent=target==='terminal'?'Terminal':target==='sessions'?'Sessions':'Workspace';
+$('revealItemA').textContent=target==='sessions'?'dev-session · macbook':target==='workspace'?'Files · ~/workspace/nession':'dev-session · bash';
+$('revealItemB').textContent=target==='sessions'?'review-agent · beijing-agent':target==='workspace'?'Git · main':'Terminal session remains attached';
+current.style.transition='none';
+current.style.transform='translate3d('+adjusted+'px,0,0)';
+current.style.boxShadow=dx>0?'8px 0 32px #0008':'-8px 0 32px #0008';
+const tag=$('previewTag');tag.classList.add('visible');
+tag.textContent=(dx>0?'→ ':'← ')+$('revealTitle').textContent+' · '+Math.min(100,Math.round(Math.abs(dx)/Math.max(64,width*.18)*100))+'%';
+tag.style[dx>0?'left':'right']='13px';tag.style[dx>0?'right':'left']='auto';
+state.dx=dx;state.target=target;notify();
+}
+function settle(commit){
+const target=state.target;
+if(state.phase==='navigation'){
+const current=screens[routePage()];
+current.style.transition=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'none':'transform 175ms ease-out';
+current.style.transform=commit?'translateX('+(state.dx>0?'100%':'-100%')+')':'translateX(0)';
+const result=commit?'committed':'cancelled';
+state.commit=result;record(result+' · '+(target||'none')+' · '+Math.round(state.dx)+'px');
+setTimeout(()=>{resetDrag();if(commit&&target)setPage(target);else{state.phase='idle';state.owner='free';paint();}},190);
+}else{resetDrag();state.phase='idle';state.owner='free';paint();}
+}
+function clearHold(){if(holdTimer!==null){clearTimeout(holdTimer);holdTimer=null;}}
+function isWorkTarget(el){
+return !!el.closest('.terminal-body,.page-content,.bottom');
+}
+function getStart(e){
+if(e.target.closest('button,input,textarea,.peek,.capsule,.dialog'))return null;
+if(state.detail)return {eligible:false,reason:'Workspace detail owns Back'};
+if(!state.selected&&state.page==='sessions')return {eligible:false,reason:'No Session · Sessions root'};
+const r=phone.getBoundingClientRect(),x=e.clientX-r.left;
+if(isWorkTarget(e.target)){
+return {eligible:x<=28||x>=r.width-28,side:x<=28?'left':x>=r.width-28?'right':null,reason:'work surface'};
+}
+return {eligible:true,side:null,reason:'shell chrome'};
+}
+function down(e){
+if(e.isPrimary===false||gesture||$('dialog').classList.contains('on'))return;
+const claim=getStart(e);if(!claim)return;
+gesture={id:e.pointerId,x:e.clientX,y:e.clientY,start:performance.now(),claim,phase:'candidate',at:e.target};
+state.phase='candidate';state.owner='undecided';state.commit='—';state.dx=0;notify();
+if(state.long&&state.page==='terminal'&&claim.reason==='work surface'&&!claim.eligible){
+holdTimer=setTimeout(()=>{if(!gesture||gesture.phase!=='candidate')return;gesture.phase='direction';state.phase='direction';state.owner='direction pad (exclusive)';const r=phone.getBoundingClientRect();$('direction').style.left=(gesture.x-r.left)+'px';$('direction').style.top=(gesture.y-r.top)+'px';$('direction').classList.add('on');$('directionText').innerHTML='方向盘独占<br>拖动选方向';record('long press 380ms → direction owns pointer');notify();},380);
+}
+}
+function move(e){
+if(!gesture||e.pointerId!==gesture.id)return;
+const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;
+if(gesture.phase==='direction'){$('directionText').innerHTML='方向盘独占<br>'+((Math.abs(dx)+Math.abs(dy)>28)?(Math.abs(dx)>Math.abs(dy)?(dx>0?'→ right':'← left'):(dy>0?'↓ down':'↑ up')):'center / no key');return;}
+if(gesture.phase==='surrendered')return;
+if(gesture.phase==='candidate'){
+if(Math.hypot(dx,dy)<12)return;
+clearHold();
+if(Math.abs(dy)>Math.abs(dx)*.85){gesture.phase='surrendered';state.phase='content';state.owner=state.page==='terminal'?(state.tui?'TUI mouse / wheel':'xterm scrollback'):'content scroll';record('vertical wins → no shell page');notify();return;}
+const direction=targetFor(dx,gesture.claim.side);
+if(!gesture.claim.eligible||!direction){gesture.phase='surrendered';state.phase='content';state.owner=gesture.claim.reason==='work surface'?'work surface':'no valid destination';record('not shell-owned → '+state.owner);notify();return;}
+gesture.phase='navigation';state.phase='navigation';state.owner='App shell';state.target=direction;record('horizontal lock → '+direction);
+try{phone.setPointerCapture(e.pointerId);}catch(_){}
+}
+if(gesture.phase==='navigation'){if(e.cancelable)e.preventDefault();const valid=targetFor(dx,gesture.claim.side);if(!valid){settle(false);gesture.phase='surrendered';return;}showDrag(dx,valid);}
+}
+function up(e,cancelled){
+if(!gesture||e.pointerId!==gesture.id)return;
+clearHold();
+if(gesture.phase==='navigation'){
+const dx=e.clientX-gesture.x;
+const dur=Math.max(1,performance.now()-gesture.start);
+const velocity=Math.abs(dx)/dur,dist=Math.abs(dx);
+const threshold=Math.max(64,phone.getBoundingClientRect().width*.18);
+const commit=!cancelled&&!!targetFor(dx,gesture.claim.side)&&(dist>=threshold||(dist>=40&&velocity>=.45));
+state.commit=(cancelled?'pointercancel':commit?'distance/velocity':'below threshold')+' · '+velocity.toFixed(2)+'px/ms';
+settle(commit);
+}else if(gesture.phase==='direction'){record('direction release → ownership cleared');state.phase='idle';state.owner='free';$('direction').classList.remove('on');notify();}
+else {if(cancelled)record('pointercancel → nothing navigated');state.phase='idle';state.owner='free';notify();}
+gesture=null;
+}
+phone.addEventListener('pointerdown',down);
+phone.addEventListener('pointermove',move);
+phone.addEventListener('pointerup',e=>up(e,false));
+phone.addEventListener('pointercancel',e=>up(e,true));
+phone.addEventListener('lostpointercapture',e=>{if(gesture&&e.pointerId===gesture.id)up(e,true);});
+$('toSessions').onclick=()=>setPage('sessions');$('toWorkspace').onclick=()=>{if(state.selected)setPage('workspace');};
+$('sessionsBack').onclick=()=>{if(state.selected)setPage('terminal');};
+$('workspaceBack').onclick=back;$('detailBack').onclick=back;
+$('sessionSelect').onclick=()=>{state.selected=true;setPage('terminal');};
+$('sessionOther').onclick=()=>{state.selected=true;setPage('terminal');};
+$('openFile').onclick=openDetail;$('openGit').onclick=openDetail;
+$('makeDirty').onclick=()=>{state.dirty=true;paint();record('editor draft dirty');};
+$('keepEditing').onclick=()=>{$('dialog').classList.remove('on');record('retain draft / no leave');};
+$('discard').onclick=()=>{$('dialog').classList.remove('on');state.dirty=false;state.detail=false;paint();record('discard draft → Workspace root');};
+$('plus').onclick=()=>{state.peek=!state.peek;paint();record('capsule '+(state.peek?'opened':'closed'));};
+$('send').onclick=()=>record('composer send mock only');
+$('modeNormal').onclick=()=>{state.tui=false;paint();record('normal shell / local scrollback');};
+$('modeTui').onclick=()=>{state.tui=true;paint();record('TUI mouse-reporting mode / wheel path');};
+$('modeLong').onclick=()=>{state.long=!state.long;clearHold();paint();record('direction gesture '+(state.long?'on':'off'));};
+$('modePeek').onclick=()=>{state.peek=!state.peek;paint();record('capsule '+(state.peek?'open':'closed'));};
+$('modeNoSession').onclick=()=>{state.selected=!state.selected;state.peek=false;state.detail=false;setPage(state.selected?'terminal':'sessions');record(state.selected?'Session attached':'No Session root');};
+$('modeEdge').onclick=()=>{state.showEdges=!state.showEdges;paint();};
+$('simDetail').onclick=openDetail;
+$('simReset').onclick=()=>{activeDemo++;clearHold();gesture=null;state.selected=true;state.tui=false;state.long=true;state.peek=false;state.detail=false;state.dirty=false;state.showEdges=false;state.commit='—';state.phase='idle';state.owner='free';setPage('terminal');record('reset');};
+function simulate(destination){
+activeDemo++;
+if(!state.selected){record('navigation unavailable without Session');return;}
+state.detail=false;state.page='terminal';state.phase='navigation';state.owner='App shell · simulated';state.target=destination;paint();
+const dx=(destination==='sessions'?1:-1)*Math.max(75,phone.clientWidth*.23);
+showDrag(dx,destination);record('simulated '+(dx>0?'right':'left')+' edge swipe');
+const token=activeDemo;
+setTimeout(()=>{if(token!==activeDemo)return;settle(true);},360);
+}
+$('simLeft').onclick=()=>simulate('sessions');$('simRight').onclick=()=>simulate('workspace');
+const lines=[];for(let i=1;i<=55;i++){
+const n=String(i).padStart(2,'0');
+const v=i%13===0?'<span class="cmd">nession@dev</span> $ cargo test --workspace':i%8===0?'  <span class="dim">✓</span> test terminal::attach::recovery ... ok':i%5===0?'  compiling nession-agent v0.8.0':i===55?'<span class="cmd">nession@dev</span> ~/nession $ <span class="cmd">▍</span>':'  '+['agent/relay     ready','session active  attached','tmux control    connected','stream  healthy'][i%4];
+lines.push('<div class="term-line"><span class="number">'+n+'</span>'+v+'</div>');
+}
+$('termLines').innerHTML=lines.join('');
+term.scrollTop=term.scrollHeight;
+record('ready · edge drag left/right · center stays content');
+paint();
+})();
+</script>
+</body>
+</html>
