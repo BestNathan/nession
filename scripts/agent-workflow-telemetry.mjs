@@ -338,7 +338,9 @@ function perAgentWindow(records) {
   let unattributed = 0;
   for (const record of records) {
     const id = record.agent?.id, role = record.agent?.role;
-    if (!id || !role) { unattributed++; continue; }
+    if (!id || !['developer','reviewer','acceptor','auditor'].includes(role)) {
+      unattributed++; continue;
+    }
     const key = role + ':' + id;
     let group = groups.get(key);
     if (!group) {
