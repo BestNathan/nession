@@ -162,7 +162,7 @@ async function getOriginalBundle(){
   const bundle=JSON.parse(bytes.toString('utf8'));
   return unpackOriginalEnvelope(bundle);
 }
-function verifyReadOnly(reportFile){
+export function verifyReadOnly(reportFile){
   if(!path.isAbsolute(reportFile)||fs.existsSync(reportFile))
     fail('fresh absolute audit report path required');
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-first-anchor-'));
