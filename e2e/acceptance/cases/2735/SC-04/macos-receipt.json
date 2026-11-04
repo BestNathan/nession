@@ -2,8 +2,30 @@
   "schema_version": 1,
   "issue": 2735,
   "criterion": "SC-04",
-  "tested_revision": "21d3ed779b40705f6e5f6679bdda865c8256510b",
-  "verified_at": "2026-11-04T13:56:46Z",
+  "tested_revision": "73c4a86131dd00e0aadeebc9381a8cf775e35282",
+  "source_paths": [
+    "scripts/seed-worktree-target.sh",
+    "scripts/seed-worktree-target-selftest.sh",
+    "scripts/seed-worktree-target-macos-e2e.sh",
+    ".claude/hooks/create-worktree.sh",
+    "gates/checks/worktree-target-seed.sh",
+    "justfile",
+    "e2e/acceptance/cases/2735/SC-04/case.yaml",
+    "e2e/acceptance/cases/2735/SC-04/verify.cjs",
+    "e2e/acceptance/shared/worktree-seed-cases.cjs"
+  ],
+  "source_tree": [
+    "100755 blob 90a5a1e17e020cee632edc4d1beb85d2e576338c\t.claude/hooks/create-worktree.sh",
+    "100644 blob 37949476e39f399601f54a823fb45c5e546b1b41\te2e/acceptance/cases/2735/SC-04/case.yaml",
+    "100644 blob 813ab0d19a6c23b699f0e5ec3fde8fd2a34a0dd8\te2e/acceptance/cases/2735/SC-04/verify.cjs",
+    "100644 blob 0c2570836cb24069611bbc4e9276fa93400928b9\te2e/acceptance/shared/worktree-seed-cases.cjs",
+    "100755 blob 87dea5e95b0c1f19a4c8afcfd24d0633c83d3a91\tgates/checks/worktree-target-seed.sh",
+    "100644 blob 7682a7126ba859f2271e873da1323a374c57ea28\tjustfile",
+    "100755 blob 86139a9bd6941943d5da37b93dc44b38c2f35eed\tscripts/seed-worktree-target-macos-e2e.sh",
+    "100755 blob be6fe787b4b5333ade101f36f575dc9a82f18ff0\tscripts/seed-worktree-target-selftest.sh",
+    "100755 blob bf9fdd8cc2b9693c4eff9b36bd594505d10460ab\tscripts/seed-worktree-target.sh"
+  ],
+  "verified_at": "2026-11-04T14:03:49Z",
   "platform": {
     "os": "Darwin",
     "kernel": "25.4.0",
@@ -28,11 +50,11 @@
   "seed": {
     "outcome": "seeded",
     "strategy": "APFS clonefile",
-    "logical_kib": 265284,
-    "allocated_kib": 472,
+    "logical_kib": 265348,
+    "allocated_kib": 848,
     "allocation_limit_kib": 65536,
-    "reported_allocated_kib": 620,
-    "reported_logical_kib": 265284,
+    "reported_allocated_kib": 888,
+    "reported_logical_kib": 265348,
     "duration_ms": 1
   },
   "source_unchanged": true,
