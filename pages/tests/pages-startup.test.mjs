@@ -44,7 +44,7 @@ function harness(hash='#/work',fetcher=async()=>{throw Error('fixture offline');
   };
   const context=vm.createContext({
     document:doc,location:{hash},window:{addEventListener(){}},
-    URL,AbortSignal,Date,Intl,fetch:fetcher,
+    URL,URLSearchParams,AbortSignal,Date,Intl,fetch:fetcher,
     renderKnowledge(root){root.append(new TestElement('section'));root.append(new TestElement('p'));root.nodes.at(-1).textContent='Knowledge independent';},
     validKnowledgeSnapshot:()=>true,
     console:{error:(...args)=>errors.push(args),warn(){}},
