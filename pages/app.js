@@ -278,7 +278,7 @@ function renderAgentDetail(role,id){
   ],'two'));
   root.append(stats);
   const list=section('RUN HISTORY','Recent executions',
-    'A bounded sample of at most 16 source-attested attempts; open GitHub Actions for details.');
+    'A bounded sample of at most 8 source-attested attempts; open GitHub Actions for details.');
   const controls=node('div','agent-periods');
   for(const result of [null,'success','failure','cancelled','timed_out','unknown']){
     const a=local(result||'All',agentDetailPath(role,id,period,result),
