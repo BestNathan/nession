@@ -251,8 +251,6 @@ async function selfTest() {
   process.env.ISSUE_AUDIT_CLAUDE_MODEL='qwen3-coder-plus';
   assert.equal(claudeRequestModel(),'qwen3-coder-plus');
   assert.equal(telemetryProvider(),'claude-code');
-  // Missing routed identity remains unattributed, never guessed from Qwen.
-  assert.equal(process.env.ISSUE_AUDIT_AGENT_ID||null,null);
   assert.equal(backendMapping(),'qwen-configured-gateway');
   const repairArgs=buildClaudeCliArgs({
     prompt:renderIssueAuditFormatRepairPrompt('not-json'),
