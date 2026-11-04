@@ -1,7 +1,7 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
-import { createIssueReadTool } from '../tools/gh/issue/read.mjs';
-import { createIssueUpdateTool } from '../tools/gh/issue/update.mjs';
+import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
+import { createIssueUpdateTool, completeIssueUpdateProposal } from '../tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
 import { createVerificationTierTool } from '../tools/gh/issue/verification-tier.mjs';
 import { createTreeAuditTools } from '../issue-audit-tree.mjs';
@@ -76,9 +76,13 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   }
   const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
   if (hasIssueRepair) {
-    await createIssueUpdateTool(issue, repository).execute({
-      title: proposal.title, body: proposal.body, labels: proposal.labels,
-    });
+    // The prompt explicitly allows partial proposals. Read the fixed target
+    // again after the model completes; avoid overwriting omitted fields with
+    // undefined, while retaining the full-field downstream validation.
+    const current = fetchGitHubIssue(issue.number, repository);
+    await createIssueUpdateTool(issue, repository).execute(
+      completeIssueUpdateProposal(current, proposal),
+    );
   }
   if (proposal.verification_tier != null) {
     await createVerificationTierTool(issue, repository).execute({
