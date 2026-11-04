@@ -30,27 +30,39 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
 
   const assertClear = async (label) => {
     await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
-      timeout: 10_000,
-      message: label + ' clearance did not publish',
+      timeout: 10_000, message: label + ' clearance did not publish',
     }).toBeGreaterThan(0);
+    const beforePan = await terminalGeometry(page);
+    expect(beforePan.occlusion, label + ': fit occlusion unchanged').toBe(occlusion);
+    expect(beforePan.rows, label + ': grid unchanged').toBe(before.rows);
+    expect(paneSize(runtime, name), label + ': pane size unchanged').toBe(paneBefore);
+    expect(beforePan.shellBox, label + ': composer unchanged').toEqual(shell);
+
+    // Opening a surface adds reversible scrollroom, not a forced translation.
+    // Explicitly scroll toward the live output to clear the expanded panel.
+    await moveOverTerminal(page);
+    await page.mouse.wheel(0, 20000);
+    await expect.poll(async () => {
+      const view = await terminalGeometry(page);
+      return view?.mode === 'following' && view.viewportY === view.baseY;
+    }, { timeout: 10_000 }).toBe(true);
     const view = await terminalGeometry(page);
-    expect(view.mode, label + ' stays following').toBe('following');
-    expect(view.viewportY, label + ' stays at the live bottom').toBe(view.baseY);
-    expect(view.screenTransform, label + ' shifts the rendered screen').not.toBe('none');
+    expect(view.screenTransform, label + ' can spend the scrollroom').not.toBe('none');
     expect(view.cursorBottom, label + ': latest output above the panel')
       .toBeLessThanOrEqual(view.dockTop + 1);
-    expect(view.cursorLine.length, label + ': the cursor line is real output').toBeGreaterThan(0);
-    // The fit contract and the dimensions are untouched.
-    expect(view.occlusion, label + ': fit occlusion unchanged').toBe(occlusion);
-    expect(view.rows, label + ': xterm rows unchanged').toBe(before.rows);
-    expect(paneSize(runtime, name), label + ': pane size unchanged').toBe(paneBefore);
-    expect(view.shellBox, label + ': composer unchanged').toEqual(shell);
+    expect(view.cursorLine.length, label + ': cursor line is real output').toBeGreaterThan(0);
     return view;
   };
 
   // `+` itself is an upper surface; Keys and Commands change its height.
   await page.getByTestId('capsule-capability-more').click();
   await expect(page.getByTestId('capsule-context-disclosure')).toBeVisible();
+  await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, {
+    timeout: 10_000,
+  }).toBeGreaterThan(0);
+  const onOpen = await terminalGeometry(page);
+  expect(onOpen.screenTransform, 'opening + must not push the original first rows up')
+    .toBe('none');
   await assertClear('+');
   // The list is already open; selecting a row deepens the same slot (clicking
   // `+` again would close it).
@@ -62,16 +74,15 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   await expect(page.getByTestId('quick-commands-body')).toBeVisible();
   const live = await assertClear('Commands');
 
-  // History: the first wheel step keeps the live shift (#2710 SC-10), and
-  // scrolling up keeps the anchor across a panel height change.
+  // A full reverse wheel travel recovers the original first rows and then
+  // navigates real history; it never permanently clips the top of the grid.
   await moveOverTerminal(page);
-  await page.mouse.wheel(0, -320);
+  await page.mouse.wheel(0, -20000);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');
   const history = await terminalGeometry(page);
-  expect(history.screenTransform, 'the first history step retains the live shift')
-    .toBe(live.screenTransform);
-  expect(history.screenTransform, 'history is shifted by the open panel').not.toBe('none');
+  expect(history.screenTransform, 'a full reverse scroll reveals the original top')
+    .toBe('none');
   expect(history.viewportY).toBeLessThan(history.baseY);
 
   await page.getByTestId('capsule-view-terminal-keys').click();
@@ -79,8 +90,8 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   const afterResize = await terminalGeometry(page);
   expect(afterResize.viewportY, 'history anchor survives a panel height change')
     .toBe(history.viewportY);
-  expect(afterResize.screenTransform, 'a panel height change does not move a history reader')
-    .toBe(history.screenTransform);
+  expect(afterResize.screenTransform, 'a panel change does not move a history reader')
+    .toBe('none');
 
   // Scroll to the live bottom: following returns and the clearance reapplies.
   // Re-aim after the view switch moved the screen under the pointer.
