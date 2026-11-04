@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nession · Files Workspace · Interactive Prototype #2751</title>
+<style>
+:root {color-scheme:dark;--bg:#0e1013;--panel:#15181c;--surface:#1b1f24;--hover:#242a31;--muted:#929ba8;--ink:#e8edf4;--line:#2c3239;--accent:#8fb6f5;--sel:#2a394a;--warn:#f1bc71;--red:#fa9699;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:14px}
+button,input,textarea,select{font:inherit}button{cursor:pointer;color:inherit}button:disabled{opacity:.35;cursor:not-allowed}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--accent)}
+.top{max-width:1490px;margin:0 auto;padding:22px 30px 14px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:12px;font-size:15px;font-weight:680;letter-spacing:-.03em}
+.mark{display:grid;place-items:center;background:#eceff4;color:#14171b;border-radius:11px;height:35px;width:35px;font-size:19px;font-weight:850}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:#87919d;font-weight:740}
+.meta{color:var(--muted);font-size:12px;margin-top:3px;font-weight:400}
+.top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pill,.iconbtn,.btn{border:1px solid var(--line);background:#1b2026;color:var(--ink);border-radius:9px;padding:9px 12px;transition:background .15s,border-color .15s}
+.pill:hover,.iconbtn:hover,.btn:hover{background:var(--hover);border-color:#46515d}
+.pill.active,.btn.primary{background:#e5eaf0;color:#101318;border-color:#e5eaf0}
+.btn.primary:hover{background:#fff}
+.iconbtn{padding:0;display:inline-grid;place-items:center;height:33px;min-width:33px;font-size:17px}
+.btn{font-size:12px;font-weight:640}
+.frame{max-width:1490px;margin:0 auto;padding:0 30px 22px}
+.workspace{height:min(78vh,820px);min-height:570px;border:1px solid var(--line);border-radius:15px;overflow:hidden;background:var(--panel);display:flex;flex-direction:column;box-shadow:0 22px 80px #0004}
+.workspace-header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:18px;min-height:75px}
+.workspace-title{font-size:22px;letter-spacing:-.045em;font-weight:680}
+.sub{color:var(--muted);font-size:12px;margin-top:6px}
+.header-ops{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.select-source{background:#1c2127;color:#dfe5eb;border:1px solid var(--line);padding:8px 10px;border-radius:9px;max-width:220px;font-size:12px}
+.status{display:flex;align-items:center;gap:7px;color:#9faab7;font-size:12px}
+.dot{height:6px;width:6px;border-radius:50%;background:#7ed6ae;display:inline-block}.dot.off{background:var(--red)}
+.content{display:grid;grid-template-columns:minmax(245px,300px) minmax(0,1fr);min-height:0;flex:1}
+.browser{display:flex;flex-direction:column;border-right:1px solid var(--line);min-width:0;min-height:0}
+.browser-head{padding:13px 13px 10px;border-bottom:1px solid var(--line)}
+.pathline{font-size:12px;color:#acb5c1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:13px}
+.toolrow{display:flex;align-items:center;gap:5px}
+.toolrow .spacer{flex:1}
+.explorer{overflow:auto;flex:1;padding:10px 6px}
+.tree-row{display:flex;align-items:center;gap:5px;padding:3px 8px 3px 3px;border-radius:7px;min-width:0;min-height:33px;margin:1px 4px}
+.tree-row:hover{background:var(--hover)}.tree-row.selected{background:var(--sel)}
+.chevron,.tree-main,.more{border:0;background:transparent;color:inherit}
+.chevron{width:19px;min-width:19px;height:25px;color:#929aa4;padding:0;font-size:13px}
+.tree-main{display:flex;align-items:center;gap:8px;text-align:left;flex:1;min-width:0;font-size:12px;padding:4px 0}
+.tree-main span:last-child{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.file-icon{font-size:16px;flex:none;color:#b4c8e1}.folder-icon{color:#e1bf82}
+.more{width:23px;height:23px;border-radius:6px;color:var(--muted);opacity:0}
+.tree-row:hover .more,.tree-row.selected .more,.more:focus-visible{opacity:1}
+.more:hover{background:#ffffff12}
+.browser-foot{border-top:1px solid var(--line);padding:12px 14px;font-size:11px;color:var(--muted);line-height:1.6}
+.detail{display:flex;flex-direction:column;min-width:0;min-height:0}
+.detail-head{min-height:62px;padding:13px 19px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.filename{font-weight:680;font-size:14px}.detail-path{font-size:11px;color:var(--muted);margin-top:4px}
+.detail-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tag{border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:10px;padding:4px 6px}
+.tag.dirty{color:var(--warn);border-color:#a67a4844}
+.viewer{overflow:auto;flex:1;min-height:0;background:#111418}
+.lines{margin:0;padding:23px 22px 36px 66px;counter-reset:lineno;color:#c9d4e0;font-size:12.5px;line-height:1.85;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;tab-size:2}
+.code-line{display:block;min-height:1.85em;position:relative}
+.code-line:before{counter-increment:lineno;content:counter(lineno);position:absolute;right:calc(100% + 21px);width:26px;text-align:right;color:#697582}
+.editarea{width:100%;height:100%;min-height:270px;resize:none;border:0;outline:0!important;background:#111418;color:#d7e1ec;padding:23px 26px;line-height:1.75;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.detail-foot{border-top:1px solid var(--line);padding:9px 19px;display:flex;gap:15px;color:var(--muted);font-size:11px;align-items:center}
+.detail-foot span:last-child{margin-left:auto}
+.empty{display:flex;align-items:center;justify-content:center;flex:1;padding:38px;text-align:center;color:var(--muted)}
+.empty strong{color:var(--ink);display:block;margin-bottom:8px;font-size:15px}
+.empty .symbol{font-size:37px;margin-bottom:16px}
+.offline{padding:42px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;text-align:center}
+.offline h3{margin:9px 0;font-size:18px}.offline p{max-width:460px;color:var(--muted);line-height:1.65}
+.hint{margin:13px auto 0;max-width:1490px;padding:0 30px;display:flex;align-items:center;justify-content:space-between;gap:18px;font-size:12px;color:#89939e;line-height:1.6}
+.hint a{color:#b5c9e3}
+.notice{border-left:2px solid var(--accent);padding:8px 12px;color:#c8d7e8;background:#202832;max-width:600px;margin:0 22px 12px;border-radius:0 7px 7px 0;font-size:12px}
+.notice.error{border-left-color:var(--red);background:#352125;color:#ffd1d2}
+.overlay{position:fixed;inset:0;background:#07090bbd;display:grid;place-items:center;z-index:20;padding:16px}
+.dialog{background:#1d2228;border:1px solid #49515c;box-shadow:0 35px 100px #000a;border-radius:14px;padding:24px;width:min(100%,480px)}
+.dialog h2{font-size:19px;letter-spacing:-.035em;margin:0 0 8px}
+.dialog p{font-size:13px;line-height:1.65;color:#aab4c0;margin:0 0 18px}
+.destination{background:#13171c;border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:17px}
+.destination small{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.11em;margin-bottom:6px}
+.destination code{color:#d6e6ff;font-size:12px;word-break:break-all}
+.field-label{font-size:12px;color:#cbd5df;display:block;margin:12px 0 7px}
+.field{width:100%;background:#111519;color:#e5edf4;border:1px solid #3b4550;border-radius:8px;padding:11px 12px}
+.errorline{color:var(--red);min-height:18px;font-size:12px;margin:8px 0}
+.dialog-foot{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:17px}
+.context-menu{position:fixed;background:#232931;border:1px solid #4e5864;border-radius:10px;z-index:10;box-shadow:0 16px 40px #0008;min-width:190px;padding:6px}
+.context-menu button{display:block;width:100%;border:0;background:none;text-align:left;padding:10px 12px;border-radius:6px;font-size:12px}
+.context-menu button:hover{background:#36404b}.context-menu small{display:block;border-bottom:1px solid var(--line);color:var(--muted);padding:9px 12px;font-size:11px}
+.mobile-wrap{flex:1;display:flex;align-items:flex-start;justify-content:center;background:#101317;overflow:auto;padding:14px}
+.phone{width:min(100%,440px);min-height:530px;max-height:100%;display:flex;flex-direction:column;border-radius:27px;background:#181c21;border:1px solid #3e4751;overflow:hidden;box-shadow:0 22px 55px #0006}
+.phone-top{padding:20px 17px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.phone-top .title{font-size:17px;font-weight:700}.phone-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.phone-content{overflow:auto;min-height:300px;flex:1;padding:8px 10px}
+.phone-row{display:flex;align-items:center;gap:12px;border:0;background:none;color:var(--ink);padding:13px 10px;width:100%;text-align:left;border-bottom:1px solid #ffffff0a;border-radius:6px}
+.phone-row:hover{background:var(--hover)}.phone-row .name{font-weight:580;font-size:13px}.phone-row .desc{font-size:10px;margin-top:4px;color:var(--muted)}
+.phone-row .fill{flex:1;min-width:0}.phone-row .fill div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone-footer{padding:13px 17px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.sheet{position:absolute;bottom:0;left:0;right:0;padding:22px;background:#252c34;border-top:1px solid #59636e;border-radius:19px 19px 0 0;z-index:5;box-shadow:0 -22px 40px #0009}
+.sheet strong{display:block;margin-bottom:8px}.sheet button{display:block;width:100%;text-align:left;border:0;background:none;padding:13px 8px;border-radius:8px}
+.sheet button:hover{background:#ffffff16}
+.mobile-mock{position:relative;display:flex;flex-direction:column;flex:1;min-height:0}
+.desktop-mobile{display:none}
+@media(max-width:720px){.top{padding:14px 15px;align-items:flex-start}.brand .eyebrow{font-size:9px}.top-actions{justify-content:flex-end}.top-actions a{display:none}.frame{padding:0 9px 15px}.workspace{height:calc(100dvh - 154px);min-height:530px}.workspace-header{padding:12px;min-height:65px}.workspace-title{font-size:18px}.header-ops .btn{display:none}.select-source{max-width:150px;font-size:11px}.content{grid-template-columns:1fr}.content .browser{max-height:49%;border-right:0;border-bottom:1px solid var(--line)}.content .detail{min-height:0}.detail-head{padding:9px 13px}.hint{padding:0 12px;flex-direction:column;align-items:flex-start;gap:4px}.mobile-wrap{padding:0}.phone{border:0;border-radius:0;width:100%;max-height:100%}.phone-top{padding-top:14px}.dialog{padding:19px}.status{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+"use strict";
+var files0=[
+["src","dir"],["src/components","dir"],
+["src/components/Terminal.tsx","file","export function Terminal() {\n  return <div className=\"terminal\">session ready</div>;\n}\n"],
+["src/components/Workspace.tsx","file","export function Workspace() {\n  return <main>Continuous work, one context.</main>;\n}\n"],
+["src/App.tsx","file","import { Workspace } from './components/Workspace';\n\nexport function App() {\n  // Your work continues across devices.\n  return <Workspace />;\n}\n"],
+["docs","dir"],["docs/architecture.md","file","# File Workspace\n\nThe active Session supplies a default Location.\nA FileRef identifies one source + relative path.\n"],
+["README.md","file","# Nession sample workspace\n\nExplore files, create a new document, and edit safely.\n"],
+["package.json","file","{\n  \"name\": \"nession-sample\",\n  \"private\": true\n}\n"]
+];
+var files1=[
+["src","dir"],["src/components","dir"],
+["src/components/SandboxView.tsx","file","export const SandboxView = () => <p>Isolated execution view (mock)</p>;\n"],
+["src/index.ts","file","// This is a separate mock source.\n// It never falls back to Host paths.\n"],
+["README.md","file","# Sandbox sample view\n\nThese file entries are independent fixtures, not OS mounts.\n"]
+];
+function makeStore(entries){var out={};entries.forEach(function(e){out[e[0]]={path:e[0],kind:e[1],content:e[2]||"",version:1};});return out;}
+var initialStores=function(){return {host:makeStore(files0),sandbox:makeStore(files1)};};
+var state={mode:"web",source:"host",offline:false,stores:initialStores(),selected:null,currentDir:"src",expanded:{"src":true},open:"src/App.tsx",docs:{},editing:false,stack:[""],mobileView:"browser",form:null,dialog:null,pending:null,context:null,sheet:null,notice:"",noticeError:false,remoteConflict:false};
+function esc(v){return String(v===null||v===undefined?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function slash(p){return p?p+"/":"/";}
+function parent(p){return p.indexOf("/")<0?"":p.slice(0,p.lastIndexOf("/"));}
+function base(p){return p.split("/").pop()||"Workspace";}
+function key(src,path){return src+"::"+path;}
+function repo(){return state.stores[state.source];}
+function node(path,src){return state.stores[src||state.source][path];}
+function children(dir){return Object.keys(repo()).filter(function(p){return parent(p)===dir;}).map(function(p){return repo()[p];}).sort(function(a,b){return (a.kind===b.kind?0:a.kind==="dir"?-1:1)||a.path.localeCompare(b.path);});}
+function sourceText(){return state.source==="host"?"Beijing Agent · Host":"dev-session · Sandbox mock";}
+function sourceShort(){return state.source==="host"?"Beijing / Host":"dev-session / Sandbox";}
+function doc(path){var k=key(state.source,path);var n=node(path);if(!n||n.kind!=="file")return null;if(!state.docs[k])state.docs[k]={baseline:n.content,draft:n.content,version:n.version};return state.docs[k];}
+function dirty(path){var d=doc(path);return !!(d&&d.baseline!==d.draft);}
+function isAnyDirty(){return state.open&&dirty(state.open);}
+function selectionTarget(){var s=state.selected&&node(state.selected);return s?(s.kind==="dir"?s.path:parent(s.path)):state.currentDir;}
+function isValidName(name){return !!name&&name!=="."&&name!==".."&&name.indexOf("/")<0&&name.indexOf("\\")<0&&name.indexOf("\0")<0;}
+function icon(n){return n.kind==="dir"?"📁":(/\.(tsx|ts|js)$/.test(n.path)?"⌘":/\.(md)$/.test(n.path)?"≡":"◫");}
+function button(action,label,cls,extra){return '<button type="button" class="'+(cls||"btn")+'" data-action="'+action+'" '+(extra||"")+'>'+label+'</button>';}
+function header(){return '<header class="top"><div class="brand"><div class="mark">n</div><div><div>Nession <span class="eyebrow" style="margin-left:8px">Interactive prototype · #2751</span></div><div class="meta">Files capability / source-aware workspace</div></div></div><div class="top-actions">'+button("web","Web",state.mode==="web"?"pill active":"pill")+button("app-mode","App",state.mode==="app"?"pill active":"pill")+button("reset","↺ Reset fixture","pill")+'<a href="https://bestnathan.github.io/nession/#/prototypes" target="_blank" rel="noopener" style="font-size:12px">Prototype library</a></div></header>';}
+function workspaceHeader(){return '<div class="workspace-header"><div><div class="workspace-title">Files</div><div class="sub">Workspace / '+esc(sourceShort())+' <span style="color:#687686">·</span> Session context: dev-session</div></div><div class="header-ops"><span class="status"><span class="dot'+(state.offline?" off":"")+'"></span>'+(state.offline?"Source unavailable":"Connected · mock")+'</span><select class="select-source" id="source-picker" aria-label="File source"><option value="host"'+(state.source==="host"?" selected":"")+'>Beijing Agent · Host</option><option value="sandbox"'+(state.source==="sandbox"?" selected":"")+'>dev-session · Sandbox (mock)</option></select>'+button("offline",state.offline?"Restore source":"Simulate offline","btn")+'</div></div>';}
+function row(n,depth){var isFolder=n.kind==="dir",expanded=!!state.expanded[n.path],chosen=state.selected===n.path;
+var out='<div class="tree-row'+(chosen?" selected":"")+'" style="padding-left:'+(depth*13+3)+'px" data-path="'+esc(n.path)+'"><button class="chevron" data-action="toggle" data-path="'+esc(n.path)+'" aria-label="'+(isFolder?(expanded?"Collapse ":"Expand "):"File ") +esc(base(n.path))+'">'+(isFolder?(expanded?"⌄":"›"):"")+'</button><button class="tree-main" data-action="pick" data-path="'+esc(n.path)+'" aria-pressed="'+chosen+'" title="'+esc(n.path)+'"><span class="file-icon'+(isFolder?" folder-icon":"")+'">'+icon(n)+'</span><span>'+esc(base(n.path))+'</span></button><button class="more" data-action="menu" data-path="'+esc(n.path)+'" title="File actions" aria-label="Actions for '+esc(base(n.path))+'">···</button></div>';
+if(isFolder&&expanded){children(n.path).forEach(function(c){out+=row(c,depth+1);});}return out;}
+function browser(){return '<aside class="browser"><div class="browser-head"><div class="pathline">Workspace / '+esc(slash(state.currentDir))+'</div><div class="toolrow">'+button("new-file","+ File","btn")+button("new-dir","+ Folder","btn")+button("upload","↑ Upload","btn")+'<span class="spacer"></span>'+button("unselect","×","iconbtn",'aria-label="Clear selection" title="Clear selection"')+'</div></div><div class="explorer" aria-label="File explorer">'+children("").map(function(n){return row(n,0);}).join("")+'</div><div class="browser-foot"><div>Browse directory: <strong>'+esc(slash(state.currentDir))+'</strong></div><div>'+(state.selected?"Selected: "+esc(state.selected):"No selection · creates in the browsed directory")+'</div><div style="margin-top:5px">Expand ▸ and select are independent. Right-click or ··· for folder-specific actions.</div></div></aside>';}
+function readable(path){var n=node(path);if(!n)return "";return n.content;}
+function codeLines(txt){return txt.split("\n").map(function(s){return '<span class="code-line">'+(s?esc(s):" ")+'</span>';}).join("");}
+function viewerBody(){if(!state.open||!node(state.open))return '<div class="empty"><div><div class="symbol">◇</div><strong>Select a file to begin</strong>Choose a file from the tree. A folder selection does not replace the open editor.</div></div>';
+var n=node(state.open),d=doc(state.open),isDirty=dirty(state.open);return '<div class="detail-head"><div style="min-width:0"><div class="filename">'+esc(base(n.path))+(isDirty?' <span style="color:var(--warn)">●</span>':"")+'</div><div class="detail-path">'+esc(sourceShort())+' / '+esc(n.path)+'</div></div><div class="detail-actions"><span class="tag'+(isDirty?" dirty":"")+'">'+(isDirty?"Unsaved":"v"+n.version)+'</span>'+(state.editing?button("remote-update","Simulate external edit","btn")+button("save","Save","btn primary")+button("cancel-edit","Cancel","btn"):button("edit","Edit","btn"))+'</div></div><div class="viewer">'+(state.editing?'<textarea class="editarea" id="editor" spellcheck="false" aria-label="File editor">'+esc(d.draft)+'</textarea>':'<pre class="lines">'+codeLines(d.draft)+'</pre>')+'</div><div class="detail-foot"><span>UTF-8 · TypeScript / text</span><span>'+(state.editing?"Editing local draft · explicit Save":"Read-first preview")+'</span><span>Source-scoped FileRef</span></div>';}
+function notice(){return state.notice?'<div class="notice'+(state.noticeError?" error":"")+'" role="status">'+esc(state.notice)+'</div>':"";}
+function offlineView(){return '<div class="offline"><div style="font-size:40px">⌁</div><h3>Source unavailable</h3><p>'+esc(sourceText())+' cannot be reached in this mock. Files will not silently switch to the Agent Host or reveal files from another source.</p>'+button("offline","Reconnect source","btn primary")+'</div>';}
+function desktop(){return '<div class="content">'+(state.offline?offlineView():browser()+'<section class="detail">'+viewerBody()+notice()+'</section>')+'</div>';}
+function mobileRoot(){return state.stack[state.stack.length-1]||"";}
+function mobileBrowser(){var dir=mobileRoot();var list=children(dir);return '<div class="mobile-mock"><div class="phone-top"><div><div class="title">'+esc(dir?base(dir):"Files")+'</div><div class="phone-sub">'+esc(sourceShort())+' · '+esc(slash(dir))+'</div></div><div style="display:flex;gap:5px">'+(state.stack.length>1?button("up","‹","iconbtn",'aria-label="Back to parent"'):"")+button("mobile-add","+","iconbtn",'aria-label="New file or folder"')+'</div></div><div class="phone-content">'+(list.length?list.map(function(n){return '<div style="display:flex;align-items:center"><button class="phone-row" data-action="'+(n.kind==="dir"?"enter":"mobile-open")+'" data-path="'+esc(n.path)+'"><span class="file-icon'+(n.kind==="dir"?" folder-icon":"")+'">'+icon(n)+'</span><span class="fill"><div class="name">'+esc(base(n.path))+'</div><div class="desc">'+(n.kind==="dir"?"Folder":"Text file · v"+n.version)+'</div></span><span style="color:#81909f">'+(n.kind==="dir"?"›":"")+'</span></button><button class="more" style="opacity:1;width:30px" data-action="mobile-menu" data-path="'+esc(n.path)+'" aria-label="Actions for '+esc(base(n.path))+'">···</button></div>';}).join(""):'<div class="empty" style="min-height:270px"><div><div class="symbol">◇</div><strong>Empty folder</strong>Create a file here using +.</div></div>')+'</div><div class="phone-footer">Current folder: '+esc(slash(dir))+' · Tap a folder to enter</div>'+(state.sheet?mobileSheet():"")+'</div>';}
+function mobileViewer(){var n=node(state.open),d=n?doc(n.path):null;if(!n)return mobileBrowser();return '<div class="mobile-mock"><div class="phone-top"><div><div class="title">'+esc(base(n.path))+(dirty(n.path)?" ●":"")+'</div><div class="phone-sub">'+esc(n.path)+'</div></div><div style="display:flex;gap:5px">'+button("mobile-back","‹","iconbtn",'aria-label="Back to Files"')+(state.editing?button("save","Save","btn primary"):button("edit","Edit","btn"))+'</div></div><div class="phone-content" style="padding:0">'+(state.editing?'<textarea class="editarea" id="editor" spellcheck="false" aria-label="Mobile file editor" style="min-height:100%">'+esc(d.draft)+'</textarea>':'<pre class="lines" style="font-size:11px;padding-left:53px">'+codeLines(d.draft)+'</pre>')+'</div><div class="phone-footer">'+(state.editing?"Editable draft · Back prompts if unsaved":"Read first · Edit explicitly")+' · '+esc(sourceShort())+'</div>'+'</div>';}
+function mobileSheet(){var path=state.sheet.path,kind=state.sheet.kind;return '<div class="sheet" role="dialog" aria-label="Folder actions"><div class="eyebrow">Actions · '+esc(slash(path))+'</div><strong>'+(kind==="folder"?"Folder":"Current directory")+'</strong>'+button("sheet-file","+ New file here","sheetbtn")+button("sheet-dir","+ New folder here","sheetbtn")+button("sheet-upload","↑ Upload here (mock)","sheetbtn")+button("sheet-close","Cancel","sheetbtn")+'</div>';}
+function mobile(){return '<div class="mobile-wrap">'+(state.offline?offlineView():'<div class="phone">'+(state.mobileView==="viewer"?mobileViewer():mobileBrowser())+'</div>')+'</div>';}
+function menu(){if(!state.context)return "";var c=state.context,n=node(c.path);if(!n)return "";var dir=n.kind==="dir"?n.path:parent(n.path);return '<div class="context-menu" role="menu" style="left:'+Math.max(6,Math.min(window.innerWidth-214,c.x))+'px;top:'+Math.max(6,Math.min(window.innerHeight-190,c.y))+'px"><small>'+esc(c.path)+'</small>'+button("context-file","＋ New file here","")+button("context-dir","＋ New folder here","")+button("context-browse","Browse this folder","") +button("context-cancel","Close","")+'</div>';}
+function form(){if(!state.form)return "";var f=state.form;return '<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="form-title"><h2 id="form-title">New '+(f.kind==="file"?"file":"folder")+'</h2><p>The destination is captured when you open this form. Another selection cannot redirect it.</p><div class="destination"><small>Destination · '+esc(f.source==="host"?"Beijing Agent / Host":"dev-session / Sandbox mock")+'</small><code>'+esc(slash(f.target))+'</code></div><label class="field-label" for="filename">Name</label><input class="field" id="filename" autocomplete="off" value="'+esc(f.name)+'" placeholder="'+(f.kind==="file"?"Button.tsx":"new-folder")+'"><div class="errorline" id="form-error" role="alert">'+esc(f.error||"")+'</div><div class="dialog-foot">'+button("close-form","Cancel","btn")+button("submit-form","Create "+(f.kind==="file"?"file":"folder"),"btn primary")+'</div></div></div>';}
+function dialog(){if(!state.dialog)return "";var d=state.dialog;var title=d.type==="unsaved"?"Unsaved changes":d.type==="conflict"?"The file changed elsewhere":d.type==="overwrite"?"Confirm overwriting remote changes":"Notice";
+var desc=d.type==="unsaved"?"You have unsaved edits in "+state.open+". Choose whether to keep editing or discard the draft before leaving.":d.type==="conflict"?"An Agent or another editor updated this file after your local draft was opened. Saving will not silently overwrite it.":d.type==="overwrite"?"This explicit action replaces the latest remote version with your local draft. Use only after reviewing the conflict.":"";
+var buttons=d.type==="unsaved"?button("guard-stay","Keep editing","btn")+button("guard-discard","Discard and continue","btn primary"):d.type==="conflict"?button("conflict-cancel","Continue editing","btn")+button("conflict-reload","Reload remote","btn")+button("conflict-overwrite","Review overwrite…","btn primary"):button("overwrite-back","Cancel","btn")+button("overwrite-confirm","Overwrite remote","btn primary");
+return '<div class="overlay"><div class="dialog" role="alertdialog" aria-modal="true" aria-label="'+esc(title)+'"><h2>'+esc(title)+'</h2><p>'+esc(desc)+'</p><div class="dialog-foot">'+buttons+'</div></div></div>';}
+function render(){document.getElementById("app").innerHTML=header()+'<div class="frame"><main class="workspace">'+workspaceHeader()+(state.mode==="web"?desktop():mobile())+'</main></div><div class="hint"><span>Design mock · No filesystem writes, real agent permissions, or sandbox enforcement.</span><span><a id="source-link" href="https://github.com/BestNathan/nession/tree/prototype/files-workspace-2751" target="_blank" rel="noopener">View source ↗</a> · <a href="https://github.com/BestNathan/nession/issues/2751" target="_blank" rel="noopener">Requirement #2751</a></span></div>'+menu()+form()+dialog();if(state.form){var inp=document.getElementById("filename");if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}}if(state.editing){var ed=document.getElementById("editor");if(ed){ed.focus();}}}
+function notify(msg,error){state.notice=msg;state.noticeError=!!error;}
+function getDraft(){var el=document.getElementById("editor");if(el&&state.open){var d=doc(state.open);if(d)d.draft=el.value;}}
+function guard(callback){getDraft();if(isAnyDirty()){state.dialog={type:"unsaved"};state.pending=callback;render();return;}callback();}
+function select(path){var n=node(path);if(!n)return;state.selected=path;state.context=null;if(n.kind==="file"){guard(function(){state.open=path;state.editing=false;render();});}else{render();}}
+function toggle(path){state.expanded[path]=!state.expanded[path];render();}
+function openForm(kind,explicit){var target=explicit===undefined?state.mode==="app"?mobileRoot():selectionTarget():explicit;state.form={kind:kind,target:target,source:state.source,name:"",error:""};state.sheet=null;state.context=null;render();}
+function submitForm(){var f=state.form;if(!f)return;var nm=(document.getElementById("filename")||{}).value||f.name;f.name=nm;var name=nm.trim();if(!isValidName(name)){f.error="Use a single filename, not a path. '/' , '\\' , '.' and '..' are not valid.";render();return;}if(f.source!==state.source||state.offline){f.error="The selected source is unavailable or has changed. Cancel and try again.";render();return;}var path=f.target?f.target+"/"+name:name;if(node(path)){f.error="Already exists: "+path+". Nothing was overwritten.";render();return;}if(f.target&&(!node(f.target)||node(f.target).kind!=="dir")){f.error="Destination no longer exists.";render();return;}repo()[path]={path:path,kind:f.kind==="file"?"file":"dir",content:"",version:1};state.form=null;state.selected=path;var p=f.target;while(p){state.expanded[p]=true;p=parent(p);}if(f.kind==="file"){state.open=path;state.editing=false;doc(path);if(state.mode==="app")state.mobileView="viewer";}else if(state.mode==="app"){state.stack.push(path);}notify("Created "+path+" in "+sourceShort()+" · no overwrite");render();}
+function save(){getDraft();if(!state.open)return;var n=node(state.open),d=doc(state.open);if(!n||!d)return;if(n.version!==d.version){state.dialog={type:"conflict"};render();return;}n.content=d.draft;n.version++;d.baseline=d.draft;d.version=n.version;state.editing=false;notify("Saved "+n.path+" at version "+n.version);render();}
+function externalUpdate(){getDraft();var n=node(state.open);if(!n)return;n.content=n.content+"\n// Simulated external Agent edit (version "+(n.version+1)+")\n";n.version++;notify("Remote file advanced to v"+n.version+". Try Save to inspect conflict.");render();}
+function reset(){state.stores=initialStores();state.source="host";state.offline=false;state.selected=null;state.currentDir="src";state.expanded={"src":true};state.open="src/App.tsx";state.docs={};state.editing=false;state.stack=[""];state.mobileView="browser";state.form=null;state.dialog=null;state.pending=null;state.context=null;state.sheet=null;notify("Mock fixture reset to initial state");render();}
+function click(action,path,el,event){switch(action){
+case "reset":reset();break;
+case "web":getDraft();state.mode="web";state.sheet=null;render();break;
+case "app-mode":getDraft();state.mode="app";state.sheet=null;render();break;
+case "offline":state.offline=!state.offline;state.form=null;state.sheet=null;notify(state.offline?"Source unreachable. No host fallback.":"Mock source restored.");render();break;
+case "unselect":state.selected=null;notify("Selection cleared · default destination is "+slash(state.currentDir));render();break;
+case "new-file":openForm("file");break;case "new-dir":openForm("dir");break;
+case "upload":notify("Upload is not connected in this design mock. Its target would be "+slash(selectionTarget())+".");render();break;
+case "toggle":toggle(path);break;case "pick":select(path);break;
+case "menu":case "mobile-menu":{var r=el.getBoundingClientRect();if(action==="mobile-menu"){state.sheet={path:node(path).kind==="dir"?path:parent(path),kind:"folder"};render();}else{state.context={path:path,x:r.right-10,y:r.bottom+4};render();}break;}
+case "context-file":openForm("file",node(state.context.path).kind==="dir"?state.context.path:parent(state.context.path));break;
+case "context-dir":openForm("dir",node(state.context.path).kind==="dir"?state.context.path:parent(state.context.path));break;
+case "context-browse":{var x=node(state.context.path);state.currentDir=x.kind==="dir"?x.path:parent(x.path);state.context=null;notify("Browsing "+slash(state.currentDir)+"; selection stays independent.");render();break;}
+case "context-cancel":state.context=null;render();break;
+case "submit-form":submitForm();break;case "close-form":state.form=null;render();break;
+case "edit":state.editing=true;render();break;
+case "cancel-edit":guard(function(){state.editing=false;render();});break;
+case "save":save();break;
+case "remote-update":externalUpdate();break;
+case "guard-stay":state.dialog=null;state.pending=null;render();break;
+case "guard-discard":{var d=doc(state.open);if(d)d.draft=d.baseline;state.editing=false;state.dialog=null;var p=state.pending;state.pending=null;if(p)p();else render();break;}
+case "conflict-cancel":state.dialog=null;render();break;
+case "conflict-reload":{var remote=node(state.open),d1=doc(state.open);d1.draft=remote.content;d1.baseline=remote.content;d1.version=remote.version;state.dialog=null;state.editing=false;notify("Reloaded remote version v"+remote.version+"; previous local draft discarded.");render();break;}
+case "conflict-overwrite":state.dialog={type:"overwrite"};render();break;
+case "overwrite-back":state.dialog={type:"conflict"};render();break;
+case "overwrite-confirm":{var n2=node(state.open),d2=doc(state.open);n2.content=d2.draft;n2.version++;d2.baseline=d2.draft;d2.version=n2.version;state.editing=false;state.dialog=null;notify("Explicit overwrite completed at v"+n2.version);render();break;}
+case "enter":state.stack.push(path);state.sheet=null;render();break;
+case "up":state.stack.pop();render();break;
+case "mobile-open":guard(function(){state.open=path;state.editing=false;state.mobileView="viewer";render();});break;
+case "mobile-back":guard(function(){state.mobileView="browser";state.editing=false;render();});break;
+case "mobile-add":state.sheet={path:mobileRoot(),kind:"directory"};render();break;
+case "sheet-file":openForm("file",state.sheet.path);break;
+case "sheet-dir":openForm("dir",state.sheet.path);break;
+case "sheet-upload":notify("Upload is unavailable in mock. Destination: "+slash(state.sheet.path));state.sheet=null;render();break;
+case "sheet-close":state.sheet=null;render();break;
+}}
+document.getElementById("app").addEventListener("click",function(e){var b=e.target.closest("[data-action]");if(!b)return;click(b.dataset.action,b.dataset.path,b,e);});
+document.getElementById("app").addEventListener("contextmenu",function(e){var row=e.target.closest(".tree-row");if(row&&state.mode==="web"){e.preventDefault();state.context={path:row.dataset.path,x:e.clientX,y:e.clientY};render();}});
+document.getElementById("app").addEventListener("input",function(e){if(e.target.id==="editor"){var d=doc(state.open);if(d)d.draft=e.target.value;var tag=document.querySelector(".detail .tag");if(tag){tag.textContent=dirty(state.open)?"Unsaved":"v"+node(state.open).version;tag.classList.toggle("dirty",dirty(state.open));}}if(e.target.id==="filename"&&state.form){state.form.name=e.target.value;state.form.error="";var er=document.getElementById("form-error");if(er)er.textContent="";}});
+document.getElementById("app").addEventListener("change",function(e){if(e.target.id==="source-picker"){getDraft();state.source=e.target.value;state.selected=null;state.currentDir="src";state.open=null;state.expanded={"src":true};state.stack=[""];state.mobileView="browser";state.editing=false;state.form=null;state.sheet=null;state.context=null;state.offline=false;notify("Switched source. FileRefs and selection were not retargeted.");render();}});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(state.dialog){state.dialog=null;state.pending=null;render();}else if(state.form){state.form=null;render();}else if(state.context){state.context=null;render();}else if(state.sheet){state.sheet=null;render();}}if(e.key==="Enter"&&e.target&&e.target.id==="filename"){e.preventDefault();submitForm();}});
+render();
+var link=document.getElementById("source-link");
+fetch("../manifest.json",{cache:"no-store"}).then(function(r){if(!r.ok)throw Error("no manifest");return r.json();}).then(function(m){var sha=m.source_sha||m.prototype_sha||m.sha||m.commit_sha;if(/^[0-9a-f]{40}$/.test(sha)){var a=document.getElementById("source-link");if(a)a.href="https://github.com/BestNathan/nession/blob/"+sha+"/files-workspace-2751/index.html";}}).catch(function(){});
+})();
+</script>
+</body>
+</html>
