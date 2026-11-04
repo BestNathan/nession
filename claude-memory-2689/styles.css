@@ -117,3 +117,8 @@ button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visib
  .partial-notice{align-items:flex-start;flex-direction:column}
  .memory-table-wrap table{min-width:350px}
 }
+
+/* Keep prototype-only source/issue links out of the App content width. */
+.prototype-meta>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prototype-links{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex:none}
+@media(max-width:700px){.prototype-meta>span:first-child{max-width:37%}.prototype-links{gap:3px;font-size:9px}}
