@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe('mobile touch scroll ownership (#2659)', () => {
-  it('does not snap the translated screen back on the first expanded-panel swipe', () => {
+  it('can drag the shifted terminal back DOWN to reveal every top row, then browse history', () => {
     const harness = makeHarness({ panelClearance: '96px' });
     harnesses.push(harness.occlusion);
     const { occlusion, port, element, screen } = harness;
@@ -116,11 +116,26 @@ describe('mobile touch scroll ownership (#2659)', () => {
     expect(screen.style.transform).toBe('translateY(-96px)');
 
     element.dispatchEvent(touchEvent('touchstart', [[100, 300]]));
-    const drag = touchEvent('touchmove', [[100, 332]]);
-    element.dispatchEvent(drag);
-    expect(drag.defaultPrevented).toBe(true);
+    const first = touchEvent('touchmove', [[100, 332]]);
+    element.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    expect(port.scrollLines).not.toHaveBeenCalled();
+    expect(screen.style.transform).toBe('translateY(-64px)');
+
+    // 4 further row steps completely expose the original top of the grid.
+    element.dispatchEvent(touchEvent('touchmove', [[100, 396]]));
+    expect(screen.style.transform).toBe('');
+    expect(port.scrollLines).not.toHaveBeenCalled();
+
+    // After revealing the screen top, the same drag reaches real scrollback.
+    element.dispatchEvent(touchEvent('touchmove', [[100, 428]]));
     expect(port.scrollLines).toHaveBeenCalledWith(-2);
     expect(occlusion.mode()).toBe('history');
+
+    // Reversing the drag first reaches live ydisp, then restores panel clearance.
+    element.dispatchEvent(touchEvent('touchmove', [[100, 396]]));
+    element.dispatchEvent(touchEvent('touchmove', [[100, 300]]));
+    expect(occlusion.mode()).toBe('following');
     expect(screen.style.transform).toBe('translateY(-96px)');
   });
 
