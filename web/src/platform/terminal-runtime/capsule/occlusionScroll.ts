@@ -406,11 +406,21 @@ export class CapsuleOcclusionScroll {
       : '0px';
     this.host.style.setProperty('--nession-local-terminal-content-bottom-inset', inset);
     this.host.dataset.terminalScrollMode = mode;
-    // Following keeps the live bottom above the *highest* open surface; history
-    // preserves the browsing anchor and applies no shift at all (#2710 SC-08).
-    this.applyClearanceOffset(
-      mode === 'following' ? this.targetClearanceOffset() : 0,
-    );
+    // A user drag from live-following into history must NOT unshift the screen.
+    // Doing so moves every rendered row downward by the panel height on the
+    // first scroll step, so the gesture appears frozen or jumps underneath the
+    // open panel. Retain the existing visual offset while browsing; buffer
+    // viewportY remains under xterm's scroll control.
+    //
+    // If the user was already in history when a panel opened, its existing
+    // offset is zero and its reading anchor stays put. Returning to following
+    // adopts the latest panel height. Leaving the panel or entering a TUI
+    // releases the shift. Neither path changes xterm rows or PTY dimensions.
+    if (mode === 'following') {
+      this.applyClearanceOffset(this.targetClearanceOffset());
+    } else if (this.panelClearancePx <= 0 || !this.canShiftScreen()) {
+      this.applyClearanceOffset(0);
+    }
   }
 
   private syncModeFromViewport(): void {
