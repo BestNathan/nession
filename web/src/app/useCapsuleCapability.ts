@@ -101,6 +101,39 @@ export function useCapsuleCapability(
   const stateOf = (id: CapabilityId) =>
     resolution.snapshots.find((snapshot) => snapshot.id === id)?.state ?? 'available';
 
+  /**
+   * Peer views the shown capability shares its upper slot with (#2710).
+   *
+   * The peers are declared by the binding and resolved here, where the
+   * capability titles live; the capsule receives labels and a selection
+   * callback, never ids it would have to interpret. Only peers that are
+   * actually listed for this Session are offered, so a switch can never move
+   * the user to a view the `+` entry would not have offered.
+   */
+  const peerIds = binding?.companions ?? [];
+  const listedIds = new Set(resolution.entries.map((entry) => entry.id));
+  const listingOrder = new Map(resolution.entries.map((entry, index) => [entry.id, index]));
+  const switchableIds = shown
+    ? [shown, ...peerIds.filter((id) => id !== shown && listedIds.has(id))]
+        // One stable order regardless of which peer is showing: a switch whose
+        // options move under the finger is a second way to get lost. The
+        // capability registry's registration order is the tie-break.
+        .sort((a, b) => (listingOrder.get(a) ?? 0) - (listingOrder.get(b) ?? 0))
+    : [];
+  const viewSwitch = shown && switchableIds.length > 1
+    ? {
+        options: switchableIds.map((id) => {
+          const snapshot = resolution.snapshots.find((candidate) => candidate.id === id);
+          return {
+            id,
+            label: snapshot?.shortTitle ?? snapshot?.title ?? id,
+            selected: id === shown,
+          };
+        }),
+        onSelect: choose,
+      }
+    : undefined;
+
   return {
     facts,
     capabilities:
@@ -127,6 +160,7 @@ export function useCapsuleCapability(
             // The capability's own answer to "does this take the keyboard while
             // it is up", copied through untouched.
             ownsInputFocus: binding.ownsInputFocus,
+            viewSwitch,
             onDismiss,
             // The Workspace destination's presence is Nession's answer
             // (#1347 SC-21), read from the Workspace view registry rather than

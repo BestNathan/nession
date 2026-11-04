@@ -69,7 +69,7 @@ const actualSnapshotPaths = fs.readdirSync(snapshotRoot, { withFileTypes: true }
   .flatMap(entry => fs.readdirSync(path.join(snapshotRoot, entry.name))
     .filter(name => name.endsWith('.png')).map(name => path.join(snapshotRoot, entry.name, name))).sort();
 assert.deepEqual(actualSnapshotPaths, expectedSnapshotPaths, 'visual snapshot set changed after semantic split');
-assert.equal(actualSnapshotPaths.length, 43, 'all 43 snapshot PNG blobs are retained');
+assert.equal(actualSnapshotPaths.length, 45, 'all 45 snapshot PNG blobs are retained');
 for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blobs)) {
   const filename = path.resolve(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative));
   assert.ok(filename.startsWith(snapshotRoot + path.sep), 'snapshot path escaped browser tree');

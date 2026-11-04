@@ -3,12 +3,78 @@ import {
   CapsuleOcclusionScroll,
   advanceTouchScrollGesture,
   beginTouchScrollGesture,
+  clearanceOffsetFor,
   isFollowingMarginBottom,
   marginLinesFromOcclusion,
   targetViewportY,
   type CapsuleScrollTerminalPort,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
 import type { TerminalMouseTrackingMode } from '@/platform/terminal-runtime/emulator';
+
+/** The only part of `.xterm-screen` the offset writer touches. */
+function makeScreen(): HTMLElement {
+  return { style: { transform: '' } } as unknown as HTMLElement;
+}
+
+/** The emulator port the occlusion needs (#2581), over a live buffer. */
+function makePort(options: {
+  type?: 'normal' | 'alternate';
+  viewportY?: number;
+  length?: number;
+  mouseTrackingMode?: TerminalMouseTrackingMode;
+  screen?: HTMLElement;
+} = {}): { port: CapsuleScrollTerminalPort; buffer: { viewportY: number } } {
+  const buffer = {
+    type: options.type ?? 'normal',
+    viewportY: options.viewportY ?? 16,
+    length: options.length ?? 40,
+  };
+  const port: CapsuleScrollTerminalPort = {
+    element: options.screen
+      ? ({
+          querySelector: (selector: string) => (selector === '.xterm-screen' ? options.screen : null),
+        } as unknown as HTMLElement)
+      : null,
+    rows: 24,
+    readBuffer: () => ({ ...buffer, cursorX: 0, cursorY: 0 }),
+    readModes: () => ({
+      applicationCursorKeysMode: false,
+      bracketedPasteMode: false,
+      mouseTrackingMode: options.mouseTrackingMode ?? 'none',
+      alternateBuffer: buffer.type === 'alternate',
+    }),
+    onScroll: () => ({ dispose: () => {} }),
+    onBufferChange: () => ({ dispose: () => {} }),
+    onResize: () => ({ dispose: () => {} }),
+    attachCustomWheelHandler: vi.fn(),
+    scrollToBottom: vi.fn(),
+    scrollLines: vi.fn((lines: number) => {
+      buffer.viewportY = Math.max(0, buffer.viewportY + lines);
+    }),
+    scrollPages: vi.fn((pages: number) => {
+      buffer.viewportY = Math.max(0, buffer.viewportY + pages * 24);
+    }),
+  };
+  return { port, buffer };
+}
+
+function makeHost(
+  values: { occlusion?: string; panelClearance?: string } = {},
+): { host: HTMLElement } {
+  const styleValues = new Map<string, string>([
+    ['--nession-local-terminal-capsule-occlusion', values.occlusion ?? '48px'],
+    ['--nession-local-terminal-capsule-panel-clearance', values.panelClearance ?? '0px'],
+  ]);
+  const host = {
+    style: {
+      getPropertyValue: (name: string) => styleValues.get(name) ?? '',
+      setProperty: (name: string, value: string) => styleValues.set(name, value),
+    },
+    dataset: {} as DOMStringMap,
+  } as unknown as HTMLElement;
+  return { host };
+}
+
 
 describe('occlusionScroll helpers', () => {
   it('converts occlusion px to whole-line margin', () => {
@@ -35,54 +101,6 @@ describe('occlusionScroll helpers', () => {
     expect(isFollowingMarginBottom(15, 40, 24, 0)).toBe(false);
   });
 
-  /** The emulator port the occlusion needs (#2581), over a live buffer. */
-  function makePort(options: {
-    type?: 'normal' | 'alternate';
-    viewportY?: number;
-    length?: number;
-    mouseTrackingMode?: TerminalMouseTrackingMode;
-  } = {}): { port: CapsuleScrollTerminalPort; buffer: { viewportY: number } } {
-    const buffer = {
-      type: options.type ?? 'normal',
-      viewportY: options.viewportY ?? 16,
-      length: options.length ?? 40,
-    };
-    const port: CapsuleScrollTerminalPort = {
-      element: null,
-      rows: 24,
-      readBuffer: () => ({ ...buffer, cursorX: 0, cursorY: 0 }),
-      readModes: () => ({
-        applicationCursorKeysMode: false,
-        bracketedPasteMode: false,
-        mouseTrackingMode: options.mouseTrackingMode ?? 'none',
-        alternateBuffer: buffer.type === 'alternate',
-      }),
-      onScroll: () => ({ dispose: () => {} }),
-      onResize: () => ({ dispose: () => {} }),
-      attachCustomWheelHandler: vi.fn(),
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn((lines: number) => {
-        buffer.viewportY = Math.max(0, buffer.viewportY + lines);
-      }),
-      scrollPages: vi.fn((pages: number) => {
-        buffer.viewportY = Math.max(0, buffer.viewportY + pages * 24);
-      }),
-    };
-    return { port, buffer };
-  }
-
-  function makeHost(): { host: HTMLElement; styleValues: Map<string, string> } {
-    const styleValues = new Map<string, string>();
-    const host = {
-      style: {
-        getPropertyValue: (name: string) => styleValues.get(name) ?? '48px',
-        setProperty: (name: string, value: string) => styleValues.set(name, value),
-      },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    return { host, styleValues };
-  }
-
   it('returns to the real xterm bottom when layout already reserves capsule space', () => {
     const { port } = makePort();
     const { host } = makeHost();
@@ -96,19 +114,19 @@ describe('occlusionScroll helpers', () => {
 
   it('switches the local terminal between following and history layout modes', () => {
     const { port } = makePort();
-    const { host, styleValues } = makeHost();
+    const { host } = makeHost();
 
     const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
 
     expect(occlusion.mode()).toBe('following');
     occlusion.enterHistory();
     expect(occlusion.mode()).toBe('history');
-    expect(styleValues.get('--nession-local-terminal-content-bottom-inset')).toBe('0px');
+    expect(host.style.getPropertyValue('--nession-local-terminal-content-bottom-inset')).toBe('0px');
     expect(host.dataset.terminalScrollMode).toBe('history');
 
     occlusion.scrollToMarginBottom();
     expect(occlusion.mode()).toBe('following');
-    expect(styleValues.get('--nession-local-terminal-content-bottom-inset'))
+    expect(host.style.getPropertyValue('--nession-local-terminal-content-bottom-inset'))
       .toBe('var(--nession-local-terminal-capsule-occlusion, 0px)');
     expect(host.dataset.terminalScrollMode).toBe('following');
   });
@@ -208,6 +226,65 @@ describe('occlusionScroll helpers', () => {
     occlusion.enterHistory();
 
     expect(occlusion.snapshotFollowing()).toBe(false);
+  });
+});
+
+describe('upper panel scroll clearance (#2710 SC-08/SC-09)', () => {
+  it('clamps the panel clearance to keep at least one row visible', () => {
+    expect(clearanceOffsetFor(0, 24, 16)).toBe(0);
+    expect(clearanceOffsetFor(48, 24, 16)).toBe(48);
+    // 24 rows × 16px = 384px; the last row must stay on screen.
+    expect(clearanceOffsetFor(1000, 24, 16)).toBe(368);
+    expect(clearanceOffsetFor(48, 0, 16)).toBe(0);
+  });
+
+  it('shifts the rendered screen in the following state only', () => {
+    const screen = makeScreen();
+    const { port } = makePort({ screen });
+    const { host } = makeHost({ panelClearance: '48px' });
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+
+    occlusion.scrollToMarginBottom();
+    expect(occlusion.mode()).toBe('following');
+    expect(occlusion.clearanceOffset()).toBe(48);
+    expect(screen.style.transform).toBe('translateY(-48px)');
+
+    occlusion.enterHistory();
+    expect(occlusion.mode()).toBe('history');
+    expect(occlusion.clearanceOffset()).toBe(0);
+    expect(screen.style.transform).toBe('');
+  });
+
+  it('never shifts an alternate-screen or mouse-reporting application', () => {
+    for (const options of [
+      { type: 'alternate' as const },
+      { mouseTrackingMode: 'vt200' as const },
+    ]) {
+      const screen = makeScreen();
+      const { port } = makePort({ ...options, screen });
+      const { host } = makeHost({ panelClearance: '48px' });
+      const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+
+      occlusion.scrollToMarginBottom();
+
+      // The application owns its screen; the panel overlays it, and no row,
+      // mouse coordinate or buffer position moves.
+      expect(occlusion.clearanceOffset()).toBe(0);
+      expect(screen.style.transform).toBe('');
+    }
+  });
+
+  it('clamps a panel taller than the terminal instead of hiding the grid', () => {
+    const screen = makeScreen();
+    const { port } = makePort({ screen });
+    const { host } = makeHost({ panelClearance: '1000px' });
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+
+    occlusion.scrollToMarginBottom();
+
+    // 24 rows x 16px; the last row stays visible.
+    expect(occlusion.clearanceOffset()).toBe(368);
+    expect(screen.style.transform).toBe('translateY(-368px)');
   });
 });
 

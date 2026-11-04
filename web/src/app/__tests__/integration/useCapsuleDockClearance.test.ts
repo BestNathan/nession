@@ -53,7 +53,7 @@ function capsuleDom({ withProjection }: { withProjection: boolean }) {
     vi.spyOn(projection, 'getBoundingClientRect').mockReturnValue(rect(220, 120));
   }
 
-  return { host, shell };
+  return { host, shell, dock };
 }
 
 describe('useCapsuleDockClearance', () => {
@@ -82,15 +82,18 @@ describe('useCapsuleDockClearance', () => {
   });
 
   it('publishes clearance on the capsule host from the shell geometry', () => {
-    const { host, shell } = capsuleDom({ withProjection: false });
+    const { host, shell, dock } = capsuleDom({ withProjection: false });
 
     const listener = vi.fn();
     host.addEventListener('terminal-capsule-occlusion', listener);
-    renderHook(() => useCapsuleDockClearance({ current: shell }));
+    renderHook(() => useCapsuleDockClearance({ current: shell }, { current: dock }));
 
     expect(host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion')).toBe('60px');
+    // No upper surface: the dock's top is the shell's top.
+    expect(host.style.getPropertyValue('--nession-local-terminal-capsule-panel-clearance')).toBe('0px');
     expect(observe).toHaveBeenCalledWith(shell);
     expect(observe).toHaveBeenCalledWith(host);
+    expect(observe).toHaveBeenCalledWith(dock);
     expect(listener).toHaveBeenCalled();
   });
 
@@ -102,15 +105,29 @@ describe('useCapsuleDockClearance', () => {
     // — every time a Signal appeared and went away, which is a temporary
     // surface reflowing the work surface.
     const without = capsuleDom({ withProjection: false });
-    renderHook(() => useCapsuleDockClearance({ current: without.shell }));
+    renderHook(() => useCapsuleDockClearance({ current: without.shell }, { current: without.dock }));
     const dormant = without.host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
 
     const withProjection = capsuleDom({ withProjection: true });
-    renderHook(() => useCapsuleDockClearance({ current: withProjection.shell }));
+    renderHook(() => useCapsuleDockClearance({ current: withProjection.shell }, { current: withProjection.dock }));
     const emerged = withProjection.host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion');
 
     expect(dormant).toBe('60px');
-    // The dock's top moved 120px up; the clearance must not have noticed.
+    // The dock's top moved 120px up; the fit clearance must not have noticed.
     expect(emerged).toBe(dormant);
+  });
+
+  it('publishes the upper panel as scroll clearance, separate from the fit value', () => {
+    // #2710 SC-08/SC-09: the panel's height must reach the scroll owner and
+    // must *not* reach the value xterm fits rows from.
+    const { host, shell, dock } = capsuleDom({ withProjection: true });
+    const listener = vi.fn();
+    host.addEventListener('terminal-capsule-panel-clearance', listener);
+
+    renderHook(() => useCapsuleDockClearance({ current: shell }, { current: dock }));
+
+    expect(host.style.getPropertyValue('--nession-local-terminal-capsule-occlusion')).toBe('60px');
+    expect(host.style.getPropertyValue('--nession-local-terminal-capsule-panel-clearance')).toBe('120px');
+    expect(listener).toHaveBeenCalled();
   });
 });

@@ -161,6 +161,9 @@ test.describe('App 390×844', () => {
     await expect(sensed).toBeVisible();
     await expect(sensed).toContainText('Touch controls for Terminal');
     await expect(page.getByTestId('capsule-capability-picker-claude-code')).toBeVisible();
+    // #2710: Quick Commands is the second view of the terminal-tools slot and
+    // is reachable from the same one-list entry.
+    await expect(page.getByTestId('capsule-capability-picker-quick-commands')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-capability-entry.png', {
       fullPage: true,
@@ -245,8 +248,49 @@ test.describe('App 390×844', () => {
     const projection = page.getByTestId('capsule-capability-projection');
     await expect(projection).toBeVisible();
     await expect(page.getByTestId('capsule-ghost-input')).toBeVisible();
+    // #2710: the slot is now one of two explicit views, with a stable switch
+    // instead of a title above a second tab-like title.
+    await expect(page.getByTestId('capsule-view-switch')).toBeVisible();
+    await expect(page.getByTestId('capsule-capability-title')).toHaveCount(0);
+    expect(await page.getByTestId('capsule-view-switch').getByRole('button').allTextContents())
+      .toEqual(['Keys', 'Commands']);
+    await expect(page.getByTestId('quick-chord-Ctrl+C')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-terminal-keys.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Terminal Keys with a one-shot modifier selected (#2710 SC-03/SC-06)', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await waitForFixtureTerminal(page);
+
+    await openCapsuleCapability(page, 'terminal-keys');
+    const ctrl = page.getByTestId('terminal-modifier-ctrl');
+    await ctrl.click();
+    await expect(ctrl).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('terminal-chord-letters')).toBeVisible();
+    await expect(page.getByTestId('terminal-chord-cancel')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-terminal-keys-ctrl.png', {
+      fullPage: true,
+      ...FIXTURE_SCREENSHOT,
+    });
+  });
+
+  test('Quick Commands Peek (#2710 SC-05/SC-06)', async ({ page }) => {
+    await gotoFixtureApp(page);
+    await waitForFixtureTerminal(page);
+
+    await openCapsuleCapability(page, 'quick-commands');
+    await expect(page.getByTestId('quick-commands-list')).toBeVisible();
+    await expect(page.getByTestId('quick-command-insert-fixture-git-status')).toBeVisible();
+    await expect(page.getByTestId('quick-command-run-fixture-git-status')).toBeVisible();
+    // One slot, one composer: the same surface switching views, not a mode.
+    await expect(page.getByTestId('capsule-ghost-input')).toBeVisible();
+
+    await expect(page).toHaveScreenshot('app-quick-commands.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });

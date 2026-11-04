@@ -201,6 +201,37 @@ Those modes are implementation tools beneath the product interaction model. They
 > and the mode that owned it were the same switch), so what the change removed was not a live surface but
 > the last way to reach one — and, in the same pass, the code that would have drawn it. Terminal Keys is
 > the surface for those keys and always was.
+>
+> **Decision update (2026-11-04): the terminal-tools slot (#2710).** Terminal Keys and Quick Commands
+> are two explicit views the `+` entry can select, and they replace each other inside the **same** upper
+> Capsule slot. While a view is open a compact header switch changes views; it takes the title's place
+> rather than sitting under it, so the surface never reads as a title plus a second title, and the close
+> control remains the one dismissal owner. The lower composer is unchanged by the switch.
+>
+> Terminal Keys is one-shot, not a chain: Esc/Tab/Space/Enter/Delete and arrows remain direct taps, the
+> common shortcuts (Ctrl+C/L/R) are one tap, and Ctrl/Alt/Shift are panel state that produces one atomic
+> chord with the next key. The bytes belong to `TerminalInteractionController`; the capsule owns neither
+> an escape table nor a sequential-write fallback. See
+> [interaction-semantics.md](../../terminal/interaction-semantics.md#terminal-keys-chords-2710).
+>
+> Quick Commands reads the existing saved-command owner (`server.commands.list` / `server.commands.changed`)
+> and offers two separate row actions: **Insert** puts the command in the composer without Return, **Run**
+> sends the command plus Return. Expanding the view executes nothing; a disconnected or uncontrollable
+> surface states why an action is unavailable instead of producing a local echo. Insert and Run are not
+> a new command registry.
+>
+> **Clearance is scroll, not fit.** An open upper surface gets its own scroll clearance so the live
+> Terminal bottom can reach just above it. The composer-only occlusion still owns xterm's rows and the
+> PTY size; the panel height never enters that value. History keeps its viewing anchor, and closing the
+> panel restores composer-only clearance. See
+> [interaction-semantics.md](../../terminal/interaction-semantics.md#upper-panel-scroll-clearance-2710).
+>
+> **Prototype (#2710).** The interaction was reviewed from the live preview
+> `https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html`. Its
+> immutable source, the 390×844 browser pass, the gallery-navigation fix and the mock's explicit limits
+> (no PTY, xterm mode encoding, tmux sizing or alternate-screen/mouse TUI) are recorded in
+> [terminal-capsule-2710-prototype.md](terminal-capsule-2710-prototype.md). Production behavior is
+> proved by the Repository's Acceptance Cases, not by the mock.
 
 Preserve established terminal semantics where the user is explicitly sending terminal input:
 

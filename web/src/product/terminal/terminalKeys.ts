@@ -26,8 +26,9 @@ import type { CapabilityState } from '@/product/capability';
 import type { CapabilityContextBinding } from '@/app/contextSignals';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import { TerminalKeysProjection } from '@/product/terminal/TerminalKeysProjection';
+import { QUICK_COMMANDS_ID, TERMINAL_KEYS_ID } from '@/product/terminal/terminalToolIds';
 
-export const TERMINAL_KEYS_ID = 'terminal-keys';
+export { TERMINAL_KEYS_ID };
 export const TERMINAL_KEYS_TITLE = 'Terminal Keys';
 export const TERMINAL_KEYS_SHORT_TITLE = 'Keys';
 
@@ -100,22 +101,20 @@ export const terminalKeysProjection: CapsuleProjectionBinding = {
   // the keyboard from it would be a regression, not a consistency fix. Nothing
   // here names the capsule; nothing in the capsule names this.
   ownsInputFocus: true,
+  // The other half of the terminal-tools slot (#2710): the compact header
+  // switch moves between Keys and Commands inside the same upper Capsule slot.
+  companions: [QUICK_COMMANDS_ID],
   // Nothing to add at Peek and no Workspace view to open: the key row is the
   // capability in full, which is the lower bound `capability-emergence.md`
   // allows a Terminal-local capability to stop at.
-  body: ({ sendText, sendPhysKey, disabled }) =>
+  body: ({ sendPhysKey, sendChord, disabled }) =>
     createElement(TerminalKeysProjection, {
-      sendSeq: sendText,
+      // The fallback exists only for a host that cannot send semantic keys at
+      // all; the shipped capsule always supplies it.
       sendPhysKey: (key) => {
-        // `seq` is absent on a semantic key by construction, so the two arms
-        // cannot both apply — and the fallback exists only for a host that
-        // cannot send semantic keys at all.
-        if (key.semanticKey && sendPhysKey) {
-          sendPhysKey(key);
-        } else if (key.seq) {
-          sendText(key.seq);
-        }
+        sendPhysKey?.(key);
       },
+      sendChord,
       disabled,
     }),
 };

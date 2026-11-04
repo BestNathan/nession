@@ -10,6 +10,8 @@ import {
 } from '@/platform/terminal-runtime/controller/TerminalController';
 import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import { TerminalViewport } from '@/product/terminal/components/TerminalViewport';
+import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
+import { projectionBindingFor } from '@/app/capsuleProjections';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import type { TerminalSession } from '@/product/terminal/state/session';
@@ -95,6 +97,43 @@ export function FixtureClipboard() {
   const [controller, setController] = useState<TerminalController | null>(null);
   const takeControlRef = useRef(0);
 
+  /**
+   * Opt-in Terminal Keys projection for byte-level browser Cases (#2710).
+   *
+   * The clipboard route already mounts the production controller. With
+   * `?capability=terminal-keys` it also mounts the real capability body over
+   * that controller, so a Case can click a key and read the harness bytes
+   * without provisioning the App shell. The projection is the capability's own
+   * binding; no key logic is reimplemented here.
+   */
+  const capabilityId = new URLSearchParams(search).get('capability');
+  const [capabilityProjection, setCapabilityProjection] =
+    useState<CapsuleCapabilityProjection | null>(null);
+  useEffect(() => {
+    if (capabilityId !== 'terminal-keys') {
+      setCapabilityProjection(null);
+      return;
+    }
+    const binding = projectionBindingFor('terminal-keys');
+    if (!binding) {
+      return;
+    }
+    setCapabilityProjection({
+      id: 'terminal-keys',
+      title: 'Terminal Keys',
+      ownsInputFocus: true,
+      onDismiss: () => setCapabilityProjection(null),
+      body: (_focus, setFocus, actions) =>
+        binding.body({
+          ...actions,
+          agentId: undefined,
+          sessionId: 'fixture:clipboard',
+          state: 'relevant',
+          onFocusChange: setFocus,
+        }),
+    });
+  }, [capabilityId]);
+
   useEffect(() => {
     let sequence = 0;
     const { transport, sent } = createHarnessTransport();
@@ -154,6 +193,7 @@ export function FixtureClipboard() {
         onTakeControl={() => window.clipboardHarness?.takeControl()}
         clipboardNotice={notice}
         onDismissClipboardNotice={() => setNotice(null)}
+        capsuleProjection={capabilityProjection ?? undefined}
       >
         <div
           className={cn('min-h-0 flex-1', appShell && 'flex flex-col')}
