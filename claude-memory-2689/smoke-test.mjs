@@ -127,5 +127,74 @@ check(()=>{
   assert.equal(state().phase,'ready');
 });
 
-console.log('Memory #2689 mock: ' + checks + ' state/interaction cases passed; static assets and DOM targets checked.');
+
+check(()=>{
+  api.openWorkspace();
+  const rendered=nodes['workspace-inner'].innerHTML;
+  assert.ok(rendered.includes('memory-prose'));
+  assert.ok(rendered.includes('data-memory-href="architecture.md#session-boundary"'));
+  assert.ok(rendered.includes('☑'));
+  fakeClick(nodes['workspace-inner'],'memoryHref','architecture.md#session-boundary');
+  assert.equal(state().file,'architecture.md');
+  let scrolled=false;
+  nodes['workspace-inner'].querySelectorAll=()=>[{
+    getAttribute(name){return name==='data-memory-heading'?'session-boundary':null;},
+    scrollIntoView(){scrolled=true;}
+  }];
+  flush();
+  assert.equal(scrolled,true);
+  assert.equal(state().scrolledFragment,'session-boundary');
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('FRONTMATTER'));
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('YAML'));
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('<table>'));
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('memory-code'));
+  fakeClick(nodes['workspace-inner'],'action','toggle-raw');
+  assert.equal(state().raw,true);
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('memory-raw'));
+  fakeClick(nodes['workspace-inner'],'action','toggle-raw');
+  assert.equal(state().raw,false);
+});
+
+check(()=>{
+  const previous=state().file;
+  api.followMemoryLink('missing.md');
+  assert.equal(state().file,previous);
+  assert.match(state().notice,/不在当前 Session/);
+  api.followMemoryLink('../../private.md');
+  assert.equal(state().file,previous);
+  assert.match(state().notice,/阻止/);
+  api.followMemoryLink('javascript:alert(1)');
+  assert.equal(state().file,previous);
+  assert.match(state().notice,/阻止/);
+  api.followMemoryLink('MEMORY.md#topics');
+  nodes['workspace-inner'].querySelectorAll=()=>[{
+    getAttribute(){return 'topics';},
+    scrollIntoView(){}
+  }];
+  flush();
+  assert.equal(state().file,'MEMORY.md');
+  assert.equal(state().scrolledFragment,'topics');
+});
+
+check(()=>{
+  api.followMemoryLink('topics/recovery.md#retry-strategy');
+  nodes['workspace-inner'].querySelectorAll=()=>state().loadedMore?[{
+    getAttribute(){return 'retry-strategy';},
+    scrollIntoView(){}
+  }]:[];
+  flush();
+  assert.equal(state().file,'topics/recovery.md');
+  assert.equal(state().loadedMore,false);
+  assert.match(state().notice,/尚未加载/);
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('继续读取'));
+  fakeClick(nodes['workspace-inner'],'action','load-more');
+  assert.equal(state().loadedMore,true);
+  assert.equal(state().scrolledFragment,'retry-strategy');
+  assert.ok(nodes['workspace-inner'].innerHTML.includes('Retry strategy'));
+  api.followMemoryLink('../architecture.md#session-boundary');
+  flush();
+  assert.equal(state().file,'architecture.md');
+});
+
+console.log('Memory #2689 + #2742 mock: ' + checks + ' state/interaction cases passed; static assets and DOM targets checked.');
 console.log('Not a browser/visual verification, provider integration, or production Acceptance result.');
