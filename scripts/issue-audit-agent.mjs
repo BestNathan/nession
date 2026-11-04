@@ -143,6 +143,10 @@ function writeRecord(outDir, record) {
         },
         agent: {
           provider: agent.provider || telemetryProvider(),
+          // Trusted workflow routing resolves the registry ID once.
+          // Never guess identity from provider or Issue text.
+          id: process.env.ISSUE_AUDIT_AGENT_ID || null,
+          role: process.env.ISSUE_AUDIT_AGENT_ID ? 'auditor' : null,
           prompt: promptTelemetry(renderIssueAuditPrompt({ number: record.issue.number, url: '', labels: [], body: '' }, { errors: [] }, 'deepseek')),
           model: {
             id: agent.model ?? null,
@@ -247,6 +251,8 @@ async function selfTest() {
   process.env.ISSUE_AUDIT_CLAUDE_MODEL='qwen3-coder-plus';
   assert.equal(claudeRequestModel(),'qwen3-coder-plus');
   assert.equal(telemetryProvider(),'claude-code');
+  // Missing routed identity remains unattributed, never guessed from Qwen.
+  assert.equal(process.env.ISSUE_AUDIT_AGENT_ID||null,null);
   assert.equal(backendMapping(),'qwen-configured-gateway');
   const repairArgs=buildClaudeCliArgs({
     prompt:renderIssueAuditFormatRepairPrompt('not-json'),
