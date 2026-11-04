@@ -443,5 +443,46 @@ export function selfTestAuthenticatedAudit(){
       statement:{...verified[0].verificationResult.statement,
         subject:[{digest:{sha256:'f'.repeat(64)}}]}}}]));
   assert.throws(()=>verify(report,drill,verified,{...identity,run_id:999}));
+  const later='c'.repeat(40);
+  const ancestor={status:'ahead',ahead_by:2,behind_by:0,
+    base_commit:{sha},merge_base_commit:{sha}};
+  assert.equal(checkedAncestorComparison(ancestor,sha,later),true);
+  assert.equal(checkedAncestorComparison({...ancestor,status:'identical',ahead_by:0},sha,later),true);
+  assert.throws(()=>checkedAncestorComparison({...ancestor,behind_by:1},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,status:'diverged'},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,merge_base_commit:{sha:later}},sha,later));
+  assert.throws(()=>checkedAncestorComparison({...ancestor,base_commit:{sha:later}},sha,later));
+  const signed=verify();
+  const fresh={schema_version:1,
+    kind:'run_store_original_signed_baseline_history_audit',
+    repository:REPO,verdict:'Verified',
+    baseline_source_main_sha:report.baseline_source_main_sha,
+    pinned_log_index:3665505739,pinned_attestation_id:63042719,
+    external_subject_sha256:report.external_subject_sha256,
+    independent_sigstore_witness_verified:true,no_production_ref_mutation:true,
+    writer_authorization_verified:false,
+    audited_main_sha:later,coverage:4,total:4,
+    verified_history:signed.covered_stores.map(x=>({
+      ...x,observed_sha:later,checked_commits:x.checked_commits+1,
+      checked_changes:x.checked_changes+1,
+    })),
+  };
+  const bridge=bridgeOriginalRekorAudit(signed,fresh,later);
+  assert.equal(bridge.verdict,'Verified');
+  assert.equal(bridge.target_sha,later);
+  assert.equal(bridge.prior_signed_audit_source_sha,sha);
+  assert.equal(bridge.current_rekor_independently_reverified,true);
+  assert.equal(bridge.covered_stores.length,4);
+  assert.equal(bridge.github_server_writer_authorization_verified,false);
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,audited_main_sha:sha},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,independent_sigstore_witness_verified:false},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,writer_authorization_verified:true},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,coverage:3},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,
+    verified_history:fresh.verified_history.map((x,i)=>i===0?{
+      ...x,checked_commits:0}:x)},later));
+  assert.throws(()=>bridgeOriginalRekorAudit(signed,{...fresh,
+    verified_history:fresh.verified_history.map((x,i)=>i===0?{
+      ...x,baseline_sha:later}:x)},later));
   return true;
 }
