@@ -1,135 +1,46 @@
-import { useRef, useCallback } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
-  capsulePhysKeyGridGapClass,
   capsuleArrowKeyAppButtonClass,
   capsulePhysKeyButtonClass,
+  capsulePhysKeyGridGapClass,
   capsulePhysKeyIconClass,
   capsulePhysKeyRowClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import {
   ARROW_KEYS,
-  CHAIN_LONG_PRESS_MS,
-  LEFT_KEYS,
+  COMMON_KEYS,
   type PhysKey,
 } from '@/product/terminal/capsule/physKeys';
 import { cn } from '@/shared/lib/utils';
 
-interface KeyButtonProps {
-  keyDef: PhysKey;
-  isArrow?: boolean;
-  disabled: boolean;
-  isChaining: boolean;
-  onKey: (key: PhysKey) => void;
-  onChainStart: (key: PhysKey) => void;
-  onChainAdd: (key: PhysKey) => void;
-  onChainComplete: (key: PhysKey) => void;
-}
+const ARROW_ICONS = {
+  '←': ArrowLeft,
+  '↑': ArrowUp,
+  '↓': ArrowDown,
+  '→': ArrowRight,
+} as const;
 
 /**
- * One key in the row.
+ * One directly tappable terminal key.
  *
- * **At module scope, and that is load-bearing.** It used to be declared inside
- * `PhysKeyRow`, which makes a new component *type* on every render, so React
- * remounted the whole row on every state change — and opening a chain is a
- * state change. The press that opened one therefore lost the refs describing
- * it, and the release that followed was read as a fresh tap: holding a key to
- * open a chain added that key to it twice, and holding one to send a chain sent
- * the key again after the chain.
- *
- * Nothing here decides what a key *is*; it reports the gesture and hands over
- * the key. Encoding belongs to the interaction layer (#1096 criterion 4).
+ * At module scope, and that is still load-bearing: declaring it inside the row
+ * makes a new component type on every render, which remounts every key and
+ * drops press state. The old chain needed that note for a subtler reason; the
+ * row is simpler now, but a key is still a stable identity (#2710).
  */
-function KeyButton({
+function PhysKeyButton({
   keyDef,
   isArrow = false,
   disabled,
-  isChaining,
   onKey,
-  onChainStart,
-  onChainAdd,
-  onChainComplete,
-}: KeyButtonProps) {
-  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tapHandledByPointerRef = useRef(false);
-  /**
-   * Whether the press in flight already became a long press, so the release
-   * that follows it is not also treated as a tap.
-   */
-  const longPressFiredRef = useRef(false);
-
-  const iconEl =
-    keyDef.label === '←' ? <ArrowLeft className={capsulePhysKeyIconClass} /> :
-    keyDef.label === '↑' ? <ArrowUp className={capsulePhysKeyIconClass} /> :
-    keyDef.label === '↓' ? <ArrowDown className={capsulePhysKeyIconClass} /> :
-    keyDef.label === '→' ? <ArrowRight className={capsulePhysKeyIconClass} /> :
-    null;
-
-  const handlePointerDown = () => {
-    if (disabled) {
-      return;
-    }
-    longPressFiredRef.current = false;
-    pressTimerRef.current = setTimeout(() => {
-      longPressFiredRef.current = true;
-      // This press is spent — and the click the browser sends on release must
-      // not be read as a tap on top of it.
-      tapHandledByPointerRef.current = true;
-      pressTimerRef.current = null;
-      if (isChaining) {
-        // The chain is the hook's to close; the row only reports the gesture.
-        onChainComplete(keyDef);
-      } else {
-        onChainStart(keyDef);
-      }
-    }, CHAIN_LONG_PRESS_MS);
-  };
-
-  const handlePointerUp = () => {
-    if (disabled) {
-      return;
-    }
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-    if (longPressFiredRef.current) {
-      longPressFiredRef.current = false;
-      return;
-    }
-    tapHandledByPointerRef.current = true;
-    if (isChaining) {
-      onChainAdd(keyDef);
-    } else {
-      onKey(keyDef);
-    }
-  };
-
-  const handleClick = () => {
-    if (disabled || pressTimerRef.current) {
-      return;
-    }
-    // A press already handled this — either the release above, or a long press.
-    // What is left is keyboard activation, which sends no pointer events.
-    if (tapHandledByPointerRef.current) {
-      tapHandledByPointerRef.current = false;
-      return;
-    }
-    if (isChaining) {
-      onChainAdd(keyDef);
-    } else {
-      onKey(keyDef);
-    }
-  };
-
-  const handlePointerLeave = useCallback(() => {
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-  }, []);
-
+}: {
+  keyDef: PhysKey;
+  isArrow?: boolean;
+  disabled: boolean;
+  onKey: (key: PhysKey) => void;
+}) {
+  const ArrowIcon = ARROW_ICONS[keyDef.label as keyof typeof ARROW_ICONS];
   return (
     <Button
       variant="ghost"
@@ -137,66 +48,67 @@ function KeyButton({
       className={isArrow ? capsuleArrowKeyAppButtonClass : capsulePhysKeyButtonClass}
       disabled={disabled}
       data-testid={`phys-key-${keyDef.label}`}
-      onPointerDown={handlePointerDown}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerLeave}
-      onClick={handleClick}
+      onClick={() => onKey(keyDef)}
       onContextMenu={(event) => event.preventDefault()}
-      aria-label={keyDef.label}
+      aria-label={keyDef.label === 'Del' ? 'Delete' : keyDef.label}
     >
-      {iconEl ?? keyDef.label}
+      {ArrowIcon ? <ArrowIcon className={capsulePhysKeyIconClass} /> : keyDef.label}
     </Button>
   );
 }
 
-interface PhysKeyRowProps {
-  onKey: (key: PhysKey) => void;
-  disabled: boolean;
-  isChaining: boolean;
-  onChainStart: (key: PhysKey) => void;
-  onChainAdd: (key: PhysKey) => void;
-  /** The chain is open and this key completed it — the "hold to send" path. */
-  onChainComplete: (key: PhysKey) => void;
-}
-
+/**
+ * The common terminal actions: one tap each, repeatable, and never a chain
+ * (#2710 SC-04).
+ *
+ * The old long-press chain was the only way this row could reach `Ctrl+C`, and
+ * it did so by sending several keys one after another. A modifier is now
+ * one-shot state in the panel and a chord is one atomic write through the
+ * interaction runtime, so the gesture it existed for is gone.
+ */
 export function PhysKeyRow({
   onKey,
   disabled,
-  isChaining,
-  onChainStart,
-  onChainAdd,
-  onChainComplete,
-}: PhysKeyRowProps) {
-  const buttonProps = {
-    disabled,
-    isChaining,
-    onKey,
-    onChainStart,
-    onChainAdd,
-    onChainComplete,
-  };
-
+}: {
+  onKey: (key: PhysKey) => void;
+  disabled: boolean;
+}) {
   return (
     <div data-testid="phys-key-row" className={capsulePhysKeyRowClass}>
       <div
         data-testid="phys-key-grid"
         className={cn('grid min-w-0 flex-1 grid-cols-5', capsulePhysKeyGridGapClass)}
       >
-        {LEFT_KEYS.map((keyDef) => (
-          <KeyButton key={keyDef.label} keyDef={keyDef} {...buttonProps} />
+        {COMMON_KEYS.map((keyDef) => (
+          <PhysKeyButton key={keyDef.label} keyDef={keyDef} disabled={disabled} onKey={onKey} />
         ))}
       </div>
-      <div
-        data-testid="arrow-key-grid"
-        className={cn('grid shrink-0 grid-cols-3 grid-rows-2', capsulePhysKeyGridGapClass)}
-      >
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[0]} isArrow {...buttonProps} />
-        <div />
-        <KeyButton keyDef={ARROW_KEYS[1]} isArrow {...buttonProps} />
-        <KeyButton keyDef={ARROW_KEYS[2]} isArrow {...buttonProps} />
-        <KeyButton keyDef={ARROW_KEYS[3]} isArrow {...buttonProps} />
-      </div>
+    </div>
+  );
+}
+
+/** The directional cluster, kept together as its own group (#2710 SC-04). */
+export function ArrowKeyRow({
+  onKey,
+  disabled,
+}: {
+  onKey: (key: PhysKey) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      data-testid="arrow-key-grid"
+      className={cn('grid shrink-0 grid-cols-4', capsulePhysKeyGridGapClass)}
+    >
+      {ARROW_KEYS.map((keyDef) => (
+        <PhysKeyButton
+          key={keyDef.label}
+          keyDef={keyDef}
+          isArrow
+          disabled={disabled}
+          onKey={onKey}
+        />
+      ))}
     </div>
   );
 }

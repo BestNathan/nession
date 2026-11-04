@@ -44,6 +44,17 @@ export interface CapsuleState {
   contextTriggerRef: React.RefObject<HTMLButtonElement | null>;
   disabled: boolean;
   send: () => void;
+  /**
+   * Put saved command text in the composer without executing it (#2710
+   * SC-05). The caller that has the field ref takes focus back.
+   */
+  insertText: (text: string) => void;
+  /**
+   * Send a saved command with Return as one terminal action (#2710 SC-05).
+   * Recorded in the same history the composer writes to, so a command run
+   * from Commands is not missing from the next ghost completion.
+   */
+  runCommand: (text: string) => void;
   copyInput: () => Promise<void>;
 }
 
@@ -99,6 +110,23 @@ export function useCapsuleState({
     setHistoryOpen(false);
   }, [addEntry, inputValue, sendText, setComposerLayout, setHistoryOpen]);
 
+  const insertText = useCallback((text: string) => {
+    setInputValue(text);
+  }, []);
+
+  const runCommand = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+      sendText(`${trimmed}\r`);
+      addEntry(trimmed);
+      setComposerLayout('flat');
+    },
+    [addEntry, sendText, setComposerLayout],
+  );
+
   const copyInput = useCallback(async () => {
     try {
       await copyToClipboard(inputValue);
@@ -122,6 +150,8 @@ export function useCapsuleState({
       contextTriggerRef,
       disabled,
       send,
+      insertText,
+      runCommand,
       copyInput,
     }),
     [
@@ -131,7 +161,9 @@ export function useCapsuleState({
       copyInput,
       disabled,
       inputValue,
+      insertText,
       openPopover,
+      runCommand,
       send,
       setComposerLayout,
       setContextOpen,

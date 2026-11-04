@@ -222,6 +222,10 @@ export function scanVisualUtilitySource(
  */
 export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
   '--nession-local-terminal-capsule-occlusion': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
+  // The upper panel's scroll clearance (#2710) is a second value from the same
+  // producer. It is deliberately not folded into the fit occlusion above:
+  // that one changes xterm rows, this one only scrolls the rendered screen.
+  '--nession-local-terminal-capsule-panel-clearance': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
   '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
   '--nession-local-terminal-content-width': [
     'web/src/index.css',
@@ -239,6 +243,9 @@ export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
 export const LOCAL_CSS_VARIABLE_SURFACES = Object.freeze({
   '--nession-local-terminal-capsule-occlusion': [
     'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
+  ],
+  '--nession-local-terminal-capsule-panel-clearance': [
+    'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
   ],
   '--nession-local-terminal-content-bottom-inset': [
     'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',

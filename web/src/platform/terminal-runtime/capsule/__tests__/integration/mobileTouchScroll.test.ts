@@ -55,6 +55,7 @@ function makeHarness(options: HarnessOptions = {}) {
       alternateBuffer: buffer.type === 'alternate',
     }),
     onScroll: () => ({ dispose: () => {} }),
+    onBufferChange: () => ({ dispose: () => {} }),
     onResize: () => ({ dispose: () => {} }),
     attachCustomWheelHandler: vi.fn(),
     scrollToBottom: vi.fn(),

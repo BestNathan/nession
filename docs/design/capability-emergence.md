@@ -350,17 +350,20 @@ Terminal Keys
 
 Its full useful interaction is already local to Terminal.
 
-On touch devices, Terminal Keys should preserve a stable left/right structure:
+On touch devices, Terminal Keys keeps direct keys, directional keys and one-shot
+modifiers visible at once; a selected modifier combines with the next key into
+one atomic chord (#2710):
 
 ```text
 ┌─ Terminal Keys ─────────────────────────────┐
-│ Esc  Tab  Ctrl             ↑               │
-│ Cmd  Shift Alt          ←  ↓  →            │
+│ ⌃C   ⌃R   ⌃L          common shortcuts      │
+│ Esc  Tab  Space  Enter  Del                 │
+│ Ctrl Alt  ⇧                ←  ↑  ↓  →        │
 └─────────────────────────────────────────────┘
-     function / combo       directional
+     one-shot modifiers       directional
 ```
 
-Opening Terminal Keys does not replace the intent composer and does not imply a Workspace transition.
+Opening Terminal Keys does not replace the intent composer and does not imply a Workspace transition. Quick Commands is the second view of the same upper slot; it adds no composer mode and no second command store.
 
 ## Anti-patterns
 

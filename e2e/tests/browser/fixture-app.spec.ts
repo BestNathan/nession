@@ -336,3 +336,150 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await expect(page.getByTestId('app-page-header')).toContainText('Files');
   await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
 });
+
+/**
+ * #2710: the terminal-tools slot is two explicit views behind one `+`.
+ *
+ * These run against the real fixture DOM, which is what proves the interaction
+ * the unit tests cannot: the header switch, the composer staying in place, and
+ * the upper-panel clearance the capsule publishes for the terminal runtime.
+ * Byte-level chord proof needs a PTY and lives in the acceptance cases.
+ */
+test('Terminal Keys holds one-shot modifiers instead of a chain (#2710 SC-02/SC-03)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+
+  await openCapsuleCapability(page, 'terminal-keys');
+  const keys = page.getByTestId('terminal-keys-body');
+  await expect(keys).toBeVisible();
+
+  // First-class chords are one tap; the old chain strip and its Send are gone.
+  for (const chord of ['Ctrl+C', 'Ctrl+R', 'Ctrl+L']) {
+    await expect(page.getByTestId(`quick-chord-${chord}`)).toBeVisible();
+  }
+  await expect(page.getByTestId('capsule-chain-bar')).toHaveCount(0);
+
+  // Selecting a modifier sends nothing; it opens the letter selector and marks
+  // the control as pressed.
+  const ctrl = page.getByTestId('terminal-modifier-ctrl');
+  await ctrl.click();
+  await expect(ctrl).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('terminal-chord-letters')).toBeVisible();
+  await expect(page.getByTestId('terminal-quick-chords')).toHaveCount(0);
+
+  // A letter completes the one-shot chord and clears the selection.
+  await page.getByTestId('chord-letter-X').click();
+  await expect(page.getByTestId('terminal-chord-letters')).toHaveCount(0);
+
+  // Cancel is an explicit exit from modifier state.
+  await page.getByTestId('terminal-modifier-shift').click();
+  await expect(page.getByTestId('terminal-chord-cancel')).toBeVisible();
+  await page.getByTestId('terminal-chord-cancel').click();
+  await expect(page.getByTestId('terminal-quick-chords')).toBeVisible();
+
+  // Direct keys and arrows remain repeatable taps.
+  await page.getByTestId('phys-key-Esc').click();
+  await page.getByTestId('phys-key-↑').click();
+  await expect(keys).toBeVisible();
+});
+
+test('Quick Commands separates Insert from Run (#2710 SC-05)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+
+  await openCapsuleCapability(page, 'quick-commands');
+  await expect(page.getByTestId('quick-commands-list')).toBeVisible();
+
+  // Insert edits the composer and returns to typing; nothing executes.
+  await page.getByTestId('quick-command-insert-fixture-git-status').click();
+  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('git status --short');
+  await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
+
+  // Run is a separate action on the same row and does not insert text.
+  await openCapsuleCapability(page, 'quick-commands');
+  await page.getByTestId('quick-command-run-fixture-tests').click();
+  await expect(page.getByTestId('quick-commands-list')).toBeVisible();
+  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('');
+});
+
+test('Quick Commands states unavailable actions instead of faking success (#2710 SC-05)', async ({ page }) => {
+  await page.goto('/#/fixture/app?commands=disconnected');
+  await openCapsuleCapability(page, 'quick-commands');
+
+  // Insert is local text and still works; Run cannot reach a terminal.
+  await expect(page.getByTestId('quick-command-insert-fixture-git-status')).toBeEnabled();
+  await expect(page.getByTestId('quick-command-run-fixture-git-status')).toBeDisabled();
+  await expect(page.getByTestId('quick-commands-unavailable')).toContainText('Run is unavailable');
+
+  await page.goto('/#/fixture/app?commands=error');
+  await openCapsuleCapability(page, 'quick-commands');
+  await expect(page.getByTestId('quick-commands-error')).toBeVisible();
+  await expect(page.getByTestId('quick-commands-retry')).toBeVisible();
+
+  await page.goto('/#/fixture/app?commands=none');
+  await openCapsuleCapability(page, 'quick-commands');
+  await expect(page.getByTestId('quick-commands-empty')).toBeVisible();
+  await expect(page.getByTestId('quick-commands-list')).toHaveCount(0);
+});
+
+test('Keys and Commands share one stable slot without moving the composer (#2710 SC-01)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await openCapsuleCapability(page, 'terminal-keys');
+
+  const shellBox = async () => {
+    const box = await page.getByTestId('capsule-shell').boundingBox();
+    if (!box) throw new Error('capsule shell has no box');
+    return box;
+  };
+  const columns = async () => page.getByTestId('capsule-view-switch').getByRole('button').allTextContents();
+
+  const restingShell = await shellBox();
+  // Stable order: the selected view does not move under the finger.
+  expect(await columns()).toEqual(['Keys', 'Commands']);
+
+  await page.getByTestId('capsule-view-quick-commands').click();
+  await expect(page.getByTestId('quick-commands-list')).toBeVisible();
+  expect(await columns()).toEqual(['Keys', 'Commands']);
+  expect(await shellBox()).toEqual(restingShell);
+
+  await page.getByTestId('capsule-view-terminal-keys').click();
+  await expect(page.getByTestId('terminal-keys-body')).toBeVisible();
+  expect(await columns()).toEqual(['Keys', 'Commands']);
+  expect(await shellBox()).toEqual(restingShell);
+
+  // The composer is still the same surface, not a replaced mode.
+  await expect(page.getByTestId('capsule-ghost-input')).toBeVisible();
+});
+
+test('an expanded upper surface publishes scroll clearance, not fit occlusion (#2710 SC-08)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
+
+  const read = () => page.evaluate(() => {
+    const host = document.querySelector('[data-terminal-capsule-host]');
+    if (!(host instanceof HTMLElement)) return null;
+    const style = getComputedStyle(host);
+    return {
+      occlusion: style.getPropertyValue('--nession-local-terminal-capsule-occlusion').trim(),
+      panel: style.getPropertyValue('--nession-local-terminal-capsule-panel-clearance').trim(),
+    };
+  });
+
+  await expect.poll(async () => (await read())?.panel).toBe('0px');
+  const dormant = await read();
+
+  await openCapsuleCapability(page, 'terminal-keys');
+  await expect.poll(async () => {
+    const value = await read();
+    return value ? Number.parseFloat(value.panel) : 0;
+  }).toBeGreaterThan(0);
+
+  // The composer-only fit value is untouched by the upper panel; that is what
+  // keeps xterm rows and the PTY size stable while the screen scrolls.
+  const emerged = await read();
+  expect(emerged?.occlusion).toBe(dormant?.occlusion);
+
+  await page.getByTestId('capsule-capability-dismiss').click();
+  await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
+  await expect.poll(async () => (await read())?.panel).toBe('0px');
+});

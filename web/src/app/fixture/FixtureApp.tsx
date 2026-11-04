@@ -11,9 +11,11 @@ import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
+import { commandsApi } from '@/capabilities/commands';
 import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
+import { fixtureCommandsSurface } from './fixtureCommands';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
@@ -76,6 +78,11 @@ export function FixtureApp() {
   // open the capability at all. No mount-time gate is needed — the App reaches
   // the capability through the tool strip after mount, not in the first frame.
   useEffect(() => envApi.install(fixtureEnvSurface(search)), [search]);
+
+  // The saved-command stub (#2710): the Commands view reads the same
+  // `server.commands.list` owner the product does, so the fixture answers that
+  // wire rather than injecting a list into the component.
+  useEffect(() => commandsApi.install(fixtureCommandsSurface(search)), [search]);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');

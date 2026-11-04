@@ -8,6 +8,15 @@ import type {
 export const TERMINAL_CAPSULE_OCCLUSION_EVENT = 'terminal-capsule-occlusion';
 
 /**
+ * The upper panel's top changed (#2710 SC-08).
+ *
+ * Deliberately a *different* event and variable from the composer occlusion
+ * above: that value feeds xterm's viewport fit, so spending the panel's height
+ * there would change rows and reflow the PTY. This one is scroll-only.
+ */
+export const TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT = 'terminal-capsule-panel-clearance';
+
+/**
  * The read/scroll surface the capsule occlusion needs, as a structural subset
  * of {@link import('../emulator').TerminalEmulator} (#2581).
  */
@@ -17,6 +26,7 @@ export interface CapsuleScrollTerminalPort {
   readBuffer(): TerminalBufferSnapshot;
   readModes(): TerminalModeSnapshot;
   onScroll(listener: () => void): TerminalDisposable;
+  onBufferChange(listener: () => void): TerminalDisposable;
   onResize(listener: () => void): TerminalDisposable;
   attachCustomWheelHandler(handler: (event: WheelEvent) => boolean): void;
   scrollLines(lines: number): void;
@@ -104,6 +114,32 @@ export function readOcclusionPx(host: HTMLElement): number {
   return Number.parseFloat(raw) || 0;
 }
 
+/** Read the upper-panel scroll clearance published by the capsule (#2710). */
+export function readPanelClearancePx(host: HTMLElement): number {
+  const inline = host.style.getPropertyValue('--nession-local-terminal-capsule-panel-clearance');
+  const raw = inline || getComputedStyle(host).getPropertyValue('--nession-local-terminal-capsule-panel-clearance');
+  return Number.parseFloat(raw) || 0;
+}
+
+/**
+ * Clamp the panel clearance to the terminal's own rendered height, keeping at
+ * least one row visible.
+ *
+ * A panel can be taller than a short App viewport's terminal. Shifting by its
+ * full height would put the whole grid above the visible area; clamping leaves
+ * the last row readable, which is the part the clearance exists to show.
+ */
+export function clearanceOffsetFor(
+  clearancePx: number,
+  rows: number,
+  cellHeightPx: number,
+): number {
+  if (clearancePx <= 0 || rows <= 0 || cellHeightPx <= 0) {
+    return 0;
+  }
+  return Math.min(clearancePx, Math.max(0, rows * cellHeightPx - cellHeightPx));
+}
+
 /** Occlusion pixels → whole-line scroll margin for xterm. */
 export function marginLinesFromOcclusion(occlusionPx: number, cellHeightPx: number): number {
   if (occlusionPx <= 0 || cellHeightPx <= 0) {
@@ -141,8 +177,14 @@ export class CapsuleOcclusionScroll {
   private resizeObserver: ResizeObserver | null = null;
   private mutationObserver: MutationObserver | null = null;
   private scrollDisposable: { dispose(): void } | null = null;
+  private bufferChangeDisposable: { dispose(): void } | null = null;
   private resizeDisposable: { dispose(): void } | null = null;
   private occlusionListener: (() => void) | null = null;
+  private panelClearanceListener: (() => void) | null = null;
+  /** Upper-panel height above the composer, from the capsule's own measure. */
+  private panelClearancePx = 0;
+  /** Current visual offset applied to the xterm screen (never to the grid). */
+  private clearanceOffsetPx = 0;
   private touchStartListener: ((event: TouchEvent) => void) | null = null;
   private touchMoveListener: ((event: TouchEvent) => void) | null = null;
   private touchGesture: TouchScrollGesture | null = null;
@@ -158,11 +200,15 @@ export class CapsuleOcclusionScroll {
     this.terminal = terminal;
     this.host = host;
     this.getCellHeight = getCellHeight;
+    // Read once so a surface that opens before `bind()` already knows the
+    // clearance; the event keeps it current afterwards.
+    this.panelClearancePx = readPanelClearancePx(host);
   }
 
   bind(): void {
     const onOcclusionGeometryChange = () => {
       this.ensureDockObserved();
+      this.syncPanelClearance();
       if (this.wasFollowing) {
         this.scheduleScrollToMarginBottom();
       }
@@ -174,6 +220,12 @@ export class CapsuleOcclusionScroll {
     };
 
     this.scrollDisposable = this.terminal.onScroll(updateFollowingFromScroll);
+    this.bufferChangeDisposable = this.terminal.onBufferChange(() => {
+      // An application took (or left) the alternate buffer. Recompute the mode
+      // so an offset applied for a normal-buffer screen does not clip a TUI's
+      // top rows; no row, PTY or tmux dimension changes either way.
+      this.syncModeFromViewport();
+    });
     this.resizeDisposable = this.terminal.onResize(() => {
       if (this.wasFollowing) {
         this.scheduleScrollToMarginBottom();
@@ -193,6 +245,14 @@ export class CapsuleOcclusionScroll {
 
     this.occlusionListener = onOcclusionGeometryChange;
     this.host.addEventListener(TERMINAL_CAPSULE_OCCLUSION_EVENT, this.occlusionListener);
+
+    // Separate event, separate value (#2710 SC-08): refresh the cached upper
+    // clearance and let the current mode decide whether it is spent.
+    this.panelClearanceListener = () => this.syncPanelClearance();
+    this.host.addEventListener(
+      TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
+      this.panelClearanceListener,
+    );
 
     const element = this.terminal.element;
     if (element) {
@@ -237,6 +297,14 @@ export class CapsuleOcclusionScroll {
       this.host.removeEventListener(TERMINAL_CAPSULE_OCCLUSION_EVENT, this.occlusionListener);
       this.occlusionListener = null;
     }
+    if (this.panelClearanceListener) {
+      this.host.removeEventListener(
+        TERMINAL_CAPSULE_PANEL_CLEARANCE_EVENT,
+        this.panelClearanceListener,
+      );
+      this.panelClearanceListener = null;
+    }
+    this.applyClearanceOffset(0);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.mutationObserver?.disconnect();
@@ -244,6 +312,8 @@ export class CapsuleOcclusionScroll {
     this.observedDock = null;
     this.scrollDisposable?.dispose();
     this.scrollDisposable = null;
+    this.bufferChangeDisposable?.dispose();
+    this.bufferChangeDisposable = null;
     this.resizeDisposable?.dispose();
     this.resizeDisposable = null;
     this.terminal.attachCustomWheelHandler(() => true);
@@ -266,6 +336,11 @@ export class CapsuleOcclusionScroll {
 
   mode(): ScrollMode {
     return this.currentMode;
+  }
+
+  /** The current visual screen offset, in CSS pixels (#2710 SC-08). */
+  clearanceOffset(): number {
+    return this.clearanceOffsetPx;
   }
 
   enterHistory(): void {
@@ -331,10 +406,82 @@ export class CapsuleOcclusionScroll {
       : '0px';
     this.host.style.setProperty('--nession-local-terminal-content-bottom-inset', inset);
     this.host.dataset.terminalScrollMode = mode;
+    // Following keeps the live bottom above the *highest* open surface; history
+    // preserves the browsing anchor and applies no shift at all (#2710 SC-08).
+    this.applyClearanceOffset(
+      mode === 'following' ? this.targetClearanceOffset() : 0,
+    );
   }
 
   private syncModeFromViewport(): void {
     this.setMode(this.isFollowingMarginBottom() ? 'following' : 'history');
+  }
+
+  /**
+   * Refresh the upper-panel clearance the capsule measured.
+   *
+   * A change in panel height, a view switch, or closing the panel must update
+   * the offset without forcing follow in history. When the panel closes the
+   * clearance is zero and the transform is removed, so the composer-only
+   * geometry — the fit contract — is all that remains.
+   */
+  private syncPanelClearance(): void {
+    this.panelClearancePx = readPanelClearancePx(this.host);
+    this.syncModeFromViewport();
+  }
+
+  /**
+   * The offset the live bottom needs to clear the upper panel.
+   *
+   * Only the normal local buffer is eligible. An alternate-screen or
+   * mouse-reporting application owns its own screen geometry; shifting it
+   * would move the application's rows (and its mouse coordinates) without the
+   * application asking, which is the breakage SC-09 forbids. Those views keep
+   * the panel overlaid and are not resized.
+   */
+  private targetClearanceOffset(): number {
+    if (!this.canShiftScreen()) {
+      return 0;
+    }
+    return clearanceOffsetFor(
+      this.panelClearancePx,
+      this.terminal.rows,
+      this.getCellHeight(),
+    );
+  }
+
+  private canShiftScreen(): boolean {
+    if (this.terminal.readModes().mouseTrackingMode !== 'none') {
+      return false;
+    }
+    return this.terminal.readBuffer().type === 'normal';
+  }
+
+  /**
+   * Move the rendered screen up, never the buffer.
+   *
+   * `.xterm-screen` holds the canvas, the selection layer and the IME helper;
+   * translating it keeps xterm's own coordinates (they come from the element's
+   * `getBoundingClientRect`) and its scroll position (`ydisp`) untouched. The
+   * `overflow: hidden` on `.xterm` clips the top the same number of pixels, so
+   * the visible grid is the bottom `rows - offset/cell` rows: the latest
+   * output, exactly what the panel made unreachable.
+   */
+  private applyClearanceOffset(offsetPx: number): void {
+    this.clearanceOffsetPx = offsetPx;
+    const screen = this.terminal.element?.querySelector('.xterm-screen');
+    // Duck-typed rather than `instanceof HTMLElement`: this module runs in the
+    // React-free runtime, and its unit suite has no DOM global to test against.
+    if (!screen || !('style' in screen)) {
+      return;
+    }
+    const screenStyle = (screen as HTMLElement).style;
+    const next = offsetPx > 0 ? `translateY(-${offsetPx}px)` : '';
+    // Guard against the MutationObserver seeing this write and re-entering.
+    if (screenStyle.transform === next) {
+      return;
+    }
+    screenStyle.transform = next;
   }
 
   private wheelLines(deltaY: number, deltaMode: number): number {

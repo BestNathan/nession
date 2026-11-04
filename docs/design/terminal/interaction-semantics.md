@@ -49,6 +49,51 @@ A single-finger vertical drag scrolls the terminal, and which answer that is com
 
 Vertical travel accumulates in pixels and emits whole lines (16px cell = one line in the fixtures), carrying the remainder: a high-frequency touch stream must not turn each 1px move into a line jump. Sub-slop movement before the axis is decided is absorbed.
 
+## Terminal Keys chords (#2710)
+
+Terminal Keys is a key surface, not a second interaction model. A direct key
+(Esc/Tab/Space/Enter/Delete/arrows) is a semantic key: the interaction runtime
+encodes it from the terminal's current modes, so DECCKM still decides an
+unmodified arrow's bytes.
+
+A **one-shot modifier** (Ctrl/Alt/Shift) is panel state, not a terminal keypress.
+Selecting one sends nothing and opens the A–Z selector; the next compatible key
+produces **one atomic chord** through `TerminalInteractionController.sendChord`
+and clears the modifier. Cancel clears it without a write. The mapping mirrors
+xterm's own keyboard evaluator for the exposed set: Ctrl+letter is the C0
+control byte, Alt+letter the ESC-prefixed meta form, Shift+Tab `CSI Z`, and a
+modified cursor/Delete key the mode-independent `CSI 1;<modifier>` form. The UI
+holds no escape table.
+
+There is no key chain. The old long-press chain accumulated keys and sent them
+one after another, which is not a chord; it is retired, and ordinary taps keep
+their existing path. Chords are owned by the interaction runtime, so a UI
+adapter cannot invent an escape string, a sequential write, or an IME-dependent
+keydown.
+
+## Upper-panel scroll clearance (#2710)
+
+The capsule docks two clearances, and they are not interchangeable:
+
+- **fit occlusion** — `--nession-local-terminal-capsule-occlusion`, measured
+  from the composer shell. It becomes the terminal viewport's bottom inset and
+  therefore changes xterm rows and the PTY size. An upper surface must never
+  enter this value.
+- **scroll clearance** — `--nession-local-terminal-capsule-panel-clearance`,
+  measured from the *highest open surface* (the Context Capsule, Terminal Keys,
+  Quick Commands, or another Peek). `CapsuleOcclusionScroll` spends it as a
+  visual `translateY` of the rendered `.xterm-screen`: the live bottom moves
+  above the panel, while the grid, PTY, tmux pane and cursor coordinates stay
+  exactly what the composer-only fit decided.
+
+The scroll owner applies the shift only in the normal local buffer with no
+mouse tracking. In following state it keeps the live bottom above the panel; in
+history it applies no shift, so the browsing anchor survives a panel height
+change, and scrolling back to the live bottom restores the clearance. An
+alternate-screen or mouse-reporting application owns its own screen geometry and
+is never shifted. Closing the panel returns the clearance to zero without moving
+a history position.
+
 ## Touch direction pad (#2657)
 
 A stationary single-finger hold inside the Terminal viewport arms a compact four-direction dial. The gesture is a **terminal input accelerator**, not cursor repositioning: each direction is forwarded as the semantic key a physical arrow would produce, through `TerminalInteractionController.sendSemanticKey` (via `TerminalController.sendPhysKey`). The pad never writes ANSI bytes, fakes a `KeyboardEvent`, moves the local xterm cursor, or bypasses the input lease, so application cursor-key mode (DECCKM), `onData`, the observer gate and the existing Terminal Keys path all apply unchanged.
