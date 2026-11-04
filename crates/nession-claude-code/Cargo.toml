@@ -14,6 +14,9 @@ anyhow.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 dirs = "5"
+# Claude Code project-directory keys are NFC-normalised upstream; a decomposed
+# macOS path would otherwise key a different directory than Claude uses.
+unicode-normalization = "0.1"
 # Codegen only — see nession-protocol/Cargo.toml.
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true, features = ["derive"] }

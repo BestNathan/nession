@@ -30,12 +30,15 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::conversation;
+use crate::memory;
 use crate::messages;
 use crate::protocol::conversations::v1::{
     ConversationActivityV1, ConversationBindingV1, ConversationItemV1, ConversationsRequestV1,
     ConversationsResponseV1, ConversationsStateV1,
 };
 use crate::protocol::list::{ListRequestV1, ListResponseV1};
+use crate::protocol::memory::v1::{MemoryRequestV1, MemoryResponseV1, MemoryStateV1};
+use crate::protocol::memory_read::v1::MemoryReadRequestV1;
 use crate::protocol::messages::v1::{MessagesRequestV1, MessagesResponseV1, MessagesStateV1};
 use crate::protocol::read::{ReadFailureV1, ReadOkV1, ReadRequestV1, ReadResponseV1, Scope};
 use crate::protocol::transcript_items::v1::{
@@ -47,7 +50,8 @@ use crate::protocol::transcripts::v1::{
     TranscriptsResponseV1, TranscriptsStateV1,
 };
 use crate::protocol::{
-    conversations, list, messages as messages_protocol, read, transcript_items, transcripts,
+    conversations, list, memory as memory_protocol, memory_read, messages as messages_protocol,
+    read, transcript_items, transcripts,
 };
 use crate::scanner;
 use crate::security;
@@ -142,49 +146,133 @@ impl ClaudeCodeAgentExtension {
             return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
         };
 
-        let Ok(full_path) = root.join(&request.path).canonicalize() else {
-            return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+        read_within(&root, &request.path, request.offset, request.limit)
+    }
+
+    /// Answer `claude-code.memory` (#2689).
+    ///
+    /// The repository is derived from the Session's own working directory. A
+    /// Session that is not in a Git repository follows Claude Code's documented
+    /// project-root fallback; there is no machine-wide scan and no project
+    /// picker to fall back to.
+    async fn handle_memory(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: MemoryRequestV1 = match decode(payload) {
+            Ok(request) => request,
+            Err(failure) => {
+                return Ok(serde_json::to_value(MemoryResponseV1::with_error(
+                    MemoryStateV1::Error,
+                    format!("bad_request: {}", failure.error),
+                ))?)
+            }
         };
 
-        // The canonicalised path is checked against the canonicalised root, so a
-        // symlink out of the tree is refused after resolution rather than before
-        // it — checking the un-resolved join would miss exactly that case.
-        let Ok(canonical_root) = root.canonicalize() else {
-            return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+        Ok(serde_json::to_value(self.memory(request).await)?)
+    }
+
+    async fn memory(&self, request: MemoryRequestV1) -> MemoryResponseV1 {
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return MemoryResponseV1::bare(MemoryStateV1::Unavailable);
         };
-        if !full_path.starts_with(&canonical_root) {
+        let config = self
+            .context
+            .session_claude_config(&request.session_id)
+            .await;
+
+        match memory::resolve(&cwd, config.as_ref()) {
+            memory::Resolution::Ready {
+                repository,
+                memory_directory,
+            } => {
+                let (root, kind) = repository.describe();
+                let at = memory_directory.to_string_lossy().into_owned();
+                match memory::scan(&memory_directory) {
+                    memory::Scan::Missing => MemoryResponseV1::bare(MemoryStateV1::NoMemory)
+                        .describing(root, kind)
+                        .at(at),
+                    memory::Scan::Error(error) => {
+                        MemoryResponseV1::with_error(MemoryStateV1::Error, error)
+                            .describing(root, kind)
+                            .at(at)
+                    }
+                    memory::Scan::Files { files, truncated } => MemoryResponseV1 {
+                        state: MemoryStateV1::Ready,
+                        files,
+                        truncated,
+                        ..MemoryResponseV1::bare(MemoryStateV1::Ready)
+                            .describing(root, kind)
+                            .at(at)
+                    },
+                }
+            }
+            memory::Resolution::Unavailable => MemoryResponseV1::bare(MemoryStateV1::Unavailable),
+            memory::Resolution::Disabled => MemoryResponseV1::bare(MemoryStateV1::Disabled),
+            memory::Resolution::UnsupportedOverride(reason) => {
+                MemoryResponseV1::with_error(MemoryStateV1::UnsupportedOverride, reason)
+            }
+            memory::Resolution::Error(reason) => {
+                MemoryResponseV1::with_error(MemoryStateV1::Error, reason)
+            }
+        }
+    }
+
+    /// Answer `claude-code.memory-read` (#2689).
+    ///
+    /// The root is re-resolved from the Session on every call: a client may
+    /// name a relative file path, never a directory. The rest of the read is
+    /// [`read_within`], the same bounded, canonicalised path `claude-code.read`
+    /// uses.
+    async fn handle_memory_read(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: MemoryReadRequestV1 = match decode(payload) {
+            Ok(request) => request,
+            Err(failure) => return Ok(serde_json::to_value(failure)?),
+        };
+
+        Ok(serde_json::to_value(self.memory_read(request).await)?)
+    }
+
+    async fn memory_read(&self, request: MemoryReadRequestV1) -> ReadResponseV1 {
+        if !security::is_memory_path_allowed(&request.path) {
             return ReadResponseV1::Failed(ReadFailureV1::new("access_denied"));
         }
 
-        let Ok(metadata) = std::fs::metadata(&full_path) else {
-            return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+            return ReadResponseV1::Failed(ReadFailureV1::new("unavailable"));
         };
+        let config = self
+            .context
+            .session_claude_config(&request.session_id)
+            .await;
 
-        let total_size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
-        if total_size > security::MAX_FILE_SIZE {
-            return ReadResponseV1::Failed(ReadFailureV1::file_too_large(total_size));
+        match memory::resolve(&cwd, config.as_ref()) {
+            memory::Resolution::Ready {
+                memory_directory, ..
+            } => {
+                let resolved = memory_directory.to_string_lossy();
+                if resolved != request.memory_directory {
+                    // The Session's repository (or its effective Claude
+                    // configuration) moved between the snapshot and this read.
+                    // Opening the new directory under the old list would show
+                    // another repository's memory; the caller re-lists instead.
+                    return ReadResponseV1::Failed(ReadFailureV1::new("stale_memory"));
+                }
+                read_within(
+                    &memory_directory,
+                    &request.path,
+                    request.offset,
+                    request.limit,
+                )
+            }
+            memory::Resolution::Unavailable => {
+                ReadResponseV1::Failed(ReadFailureV1::new("unavailable"))
+            }
+            memory::Resolution::Disabled => ReadResponseV1::Failed(ReadFailureV1::new("disabled")),
+            memory::Resolution::UnsupportedOverride(_) => {
+                ReadResponseV1::Failed(ReadFailureV1::new("unsupported_override"))
+            }
+            memory::Resolution::Error(_) => {
+                ReadResponseV1::Failed(ReadFailureV1::new("resolution_error"))
+            }
         }
-
-        let Ok(content) = std::fs::read_to_string(&full_path) else {
-            return ReadResponseV1::Failed(ReadFailureV1::new("binary_or_unreadable"));
-        };
-
-        // The bounds come from `chunk`, which clamps and saturates. The version
-        // this replaced did `min(offset + limit, len)` on two client-supplied
-        // numbers, which overflowed — see that function for what a
-        // `limit: u64::MAX` used to do.
-        let (start, end, has_more) = read::chunk(content.len(), request.offset, request.limit);
-
-        ReadResponseV1::Ok(ReadOkV1 {
-            // `get` rather than `[start..end]`: the range is proven ordered by
-            // `chunk`, and stating it as a lookup keeps this free of the one
-            // panic path a later edit could reintroduce.
-            content: content.get(start..end).unwrap_or_default().to_string(),
-            content_type: content_type_for(&request.path).to_string(),
-            total_size,
-            offset: start,
-            has_more,
-        })
     }
 
     /// Resolve the project-level `.claude/` directory from a session_id.
@@ -739,6 +827,65 @@ fn content_type_for(path: &str) -> &'static str {
     }
 }
 
+/// Read one file under `root`, with the caller's path already allow-listed.
+///
+/// This is the single bounded read both `claude-code.read` and
+/// `claude-code.memory-read` use. The security decisions are the important
+/// part and must not be duplicated per unit:
+///
+/// - the joined path is canonicalised **before** the containment check, so a
+///   symlink that leaves the tree is refused;
+/// - the canonical root is what it is compared against, for the same reason;
+/// - the file ceiling is checked before anything is read into memory;
+/// - the byte range comes from [`read::chunk`], which clamps and saturates.
+fn read_within(
+    root: &std::path::Path,
+    relative: &str,
+    offset: u64,
+    limit: Option<u64>,
+) -> ReadResponseV1 {
+    let Ok(full_path) = root.join(relative).canonicalize() else {
+        return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+    };
+
+    let Ok(canonical_root) = root.canonicalize() else {
+        return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+    };
+    if !full_path.starts_with(&canonical_root) {
+        return ReadResponseV1::Failed(ReadFailureV1::new("access_denied"));
+    }
+
+    let Ok(metadata) = std::fs::metadata(&full_path) else {
+        return ReadResponseV1::Failed(ReadFailureV1::new("not_found"));
+    };
+
+    let total_size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+    if total_size > security::MAX_FILE_SIZE {
+        return ReadResponseV1::Failed(ReadFailureV1::file_too_large(total_size));
+    }
+
+    let Ok(content) = std::fs::read_to_string(&full_path) else {
+        return ReadResponseV1::Failed(ReadFailureV1::new("binary_or_unreadable"));
+    };
+
+    // The bounds come from `chunk`, which clamps and saturates. The version
+    // this replaced did `min(offset + limit, len)` on two client-supplied
+    // numbers, which overflowed — see that function for what a
+    // `limit: u64::MAX` used to do.
+    let (start, end, has_more) = read::chunk(content.len(), offset, limit);
+
+    ReadResponseV1::Ok(ReadOkV1 {
+        // `get` rather than `[start..end]`: the range is proven ordered by
+        // `chunk`, and stating it as a lookup keeps this free of the one
+        // panic path a later edit could reintroduce.
+        content: content.get(start..end).unwrap_or_default().to_string(),
+        content_type: content_type_for(relative).to_string(),
+        total_size,
+        offset: start,
+        has_more,
+    })
+}
+
 #[async_trait]
 impl AgentExtension for ClaudeCodeAgentExtension {
     fn name(&self) -> &'static str {
@@ -770,6 +917,8 @@ impl AgentExtension for ClaudeCodeAgentExtension {
             messages_protocol::COMMAND => self.handle_messages(payload).await,
             transcripts::COMMAND => self.handle_transcripts(payload).await,
             transcript_items::COMMAND => self.handle_transcript_items(payload).await,
+            memory_protocol::COMMAND => self.handle_memory(payload).await,
+            memory_read::COMMAND => self.handle_memory_read(payload).await,
             other => anyhow::bail!("unknown claude_code command: {other}"),
         }
     }
@@ -780,7 +929,7 @@ mod tests {
     use super::*;
     use crate::binding::Binding;
     use crate::security::MAX_CHUNK_SIZE;
-    use crate::session_context::NoSessionContext;
+    use crate::session_context::{NoSessionContext, SessionClaudeConfig};
 
     #[test]
     fn the_command_the_wire_and_the_id_are_one_string() {
@@ -803,6 +952,12 @@ mod tests {
                 messages_protocol::COMMAND,
                 messages_protocol::ID,
             ),
+            (
+                memory_protocol::v1::WIRE,
+                memory_protocol::COMMAND,
+                memory_protocol::ID,
+            ),
+            (memory_read::v1::WIRE, memory_read::COMMAND, memory_read::ID),
         ] {
             assert_eq!(wire, command, "the dispatch key is the wire");
             assert_eq!(wire, id, "and the wire is the protocol id");
@@ -828,6 +983,8 @@ mod tests {
                 messages_protocol::v1::WIRE.to_string(),
                 transcripts::v1::WIRE.to_string(),
                 transcript_items::v1::WIRE.to_string(),
+                memory_protocol::v1::WIRE.to_string(),
+                memory_read::v1::WIRE.to_string(),
             ]
         );
     }
@@ -842,6 +999,8 @@ mod tests {
         assert_eq!(read::COMMAND, "claude-code.read");
         assert_eq!(conversations::ID, "claude-code.conversations");
         assert_eq!(messages_protocol::ID, "claude-code.messages");
+        assert_eq!(memory_protocol::ID, "claude-code.memory");
+        assert_eq!(memory_read::ID, "claude-code.memory-read");
     }
 
     #[test]
@@ -879,6 +1038,7 @@ mod tests {
     /// A host that answers from a fixed table.
     struct FixedContext {
         cwd: Option<String>,
+        config: Option<SessionClaudeConfig>,
         active: Option<bool>,
         binding: Option<Binding>,
     }
@@ -889,9 +1049,16 @@ mod tests {
         fn at(cwd: Option<&str>) -> Self {
             Self {
                 cwd: cwd.map(str::to_string),
+                config: None,
                 active: None,
                 binding: None,
             }
+        }
+
+        /// The same host, with an observed Claude Code environment.
+        fn with_config(mut self, config: SessionClaudeConfig) -> Self {
+            self.config = Some(config);
+            self
         }
 
         /// The same host, with Claude having reported a binding to `transcript`.
@@ -924,6 +1091,9 @@ mod tests {
     impl SessionContext for FixedContext {
         async fn session_cwd(&self, _session_id: &str) -> Option<String> {
             self.cwd.clone()
+        }
+        async fn session_claude_config(&self, _session_id: &str) -> Option<SessionClaudeConfig> {
+            self.config.clone()
         }
         async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
             self.active
@@ -970,6 +1140,7 @@ mod tests {
     fn extension_with(cwd: Option<&str>, active: Option<bool>) -> ClaudeCodeAgentExtension {
         ClaudeCodeAgentExtension::new(Arc::new(FixedContext {
             cwd: cwd.map(str::to_string),
+            config: None,
             active,
             binding: None,
         }))
@@ -1947,6 +2118,318 @@ mod tests {
                 Some("access_denied") | Some("not_found")
             ),
             "got {value}"
+        );
+    }
+
+    // ---- Auto Memory (#2689) ------------------------------------------------
+
+    /// A temporary home/config directory and an optional Git repository.
+    struct MemoryFixture {
+        _temp: tempfile::TempDir,
+        repo: std::path::PathBuf,
+        config: SessionClaudeConfig,
+        config_dir: std::path::PathBuf,
+    }
+
+    fn memory_fixture(git: bool) -> MemoryFixture {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("repository");
+        if git {
+            std::fs::create_dir_all(repo.join(".git")).expect("git directory");
+        }
+        let config_dir = temp.path().join("config");
+        let config = SessionClaudeConfig {
+            home: Some(temp.path().to_string_lossy().into_owned()),
+            config_dir: Some(config_dir.to_string_lossy().into_owned()),
+            ..SessionClaudeConfig::default()
+        };
+        MemoryFixture {
+            _temp: temp,
+            repo,
+            config,
+            config_dir,
+        }
+    }
+
+    impl MemoryFixture {
+        fn memory_dir(&self) -> std::path::PathBuf {
+            self.config_dir
+                .join("projects")
+                .join(memory::sanitized_project_key(&self.repo))
+                .join("memory")
+        }
+
+        fn write_memory(&self, files: &[(&str, &str)]) {
+            let root = self.memory_dir();
+            std::fs::create_dir_all(&root).expect("memory directory");
+            for (path, content) in files {
+                let full = root.join(path);
+                if let Some(parent) = full.parent() {
+                    std::fs::create_dir_all(parent).expect("memory topic directory");
+                }
+                std::fs::write(&full, content).expect("memory file");
+            }
+        }
+
+        fn extension_at(&self, cwd: &std::path::Path) -> ClaudeCodeAgentExtension {
+            ClaudeCodeAgentExtension::new(Arc::new(
+                FixedContext::at(Some(&cwd.to_string_lossy())).with_config(self.config.clone()),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_resolves_the_session_repository_without_a_picker() {
+        // SC-01/SC-03: a nested session directory resolves to the repository,
+        // and the answer is this repository's index and topic files.
+        let fixture = memory_fixture(true);
+        let nested = fixture.repo.join("crates/thing/src");
+        std::fs::create_dir_all(&nested).expect("nested directory");
+        fixture.write_memory(&[
+            ("MEMORY.md", "# Index\n- topic"),
+            ("feedback.md", "# Feedback"),
+        ]);
+        let extension = fixture.extension_at(&nested);
+
+        let value = extension
+            .handle_memory(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        assert_eq!(
+            value["repository_root"],
+            fixture.repo.to_string_lossy().as_ref(),
+            "the repository root, not the nesting directory: {value}"
+        );
+        assert_eq!(value["repository_kind"], "git", "{value}");
+        assert_eq!(
+            value["memory_directory"],
+            fixture.memory_dir().to_string_lossy().as_ref(),
+            "{value}"
+        );
+        let paths: Vec<&str> = value["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .filter_map(|file| file["path"].as_str())
+            .collect();
+        assert_eq!(paths, ["MEMORY.md", "feedback.md"], "{value}");
+        assert_eq!(value["truncated"], false, "{value}");
+    }
+
+    #[tokio::test]
+    async fn worktrees_share_memory_and_another_repository_cannot_see_it() {
+        // SC-02: the linked worktree resolves to the main working copy's key;
+        // a different repository does not see the main repository's files.
+        let fixture = memory_fixture(true);
+        let worktree = fixture._temp.path().join("worktree");
+        let worktree_git_dir = fixture.repo.join(".git/worktrees/wt");
+        std::fs::create_dir_all(&worktree_git_dir).expect("worktree git dir");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        std::fs::write(worktree_git_dir.join("commondir"), "../..\n").expect("commondir");
+        let back_pointer = worktree.join(".git").to_string_lossy().into_owned();
+        std::fs::write(worktree_git_dir.join("gitdir"), back_pointer).expect("back pointer");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_git_dir.display()),
+        )
+        .expect("worktree .git");
+        fixture.write_memory(&[("MEMORY.md", "# Main repository memory")]);
+
+        let worktree_extension = fixture.extension_at(&worktree);
+        let shared = worktree_extension
+            .handle_memory(serde_json::json!({"session_id": "agent:wt"}))
+            .await
+            .unwrap();
+        assert_eq!(shared["state"], "ready", "{shared}");
+        assert_eq!(
+            shared["memory_directory"],
+            fixture.memory_dir().to_string_lossy().as_ref(),
+            "a worktree must share the main working copy's memory: {shared}"
+        );
+
+        let other_repo = fixture._temp.path().join("other");
+        std::fs::create_dir_all(other_repo.join(".git")).expect("other repository");
+        let other_extension = fixture.extension_at(&other_repo);
+        let other = other_extension
+            .handle_memory(serde_json::json!({"session_id": "agent:other"}))
+            .await
+            .unwrap();
+        assert_eq!(other["state"], "no_memory", "{other}");
+        assert!(
+            !other.to_string().contains("Main repository memory"),
+            "another repository must not expose the first repository's memory: {other}"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_states_stay_distinct() {
+        let no_host = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+        let unavailable = no_host
+            .handle_memory(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(unavailable["state"], "unavailable", "{unavailable}");
+
+        let fixture = memory_fixture(true);
+        // The cwd is known, but the host cannot observe the Session's Claude
+        // configuration: the default directory must not be assumed.
+        let unobserved = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(
+            &fixture.repo.to_string_lossy(),
+        ))));
+        let value = unobserved
+            .handle_memory(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(value["state"], "unsupported_override", "{value}");
+        assert!(
+            value["memory_directory"].is_null(),
+            "an unverifiable location must not be rendered as a default: {value}"
+        );
+
+        let missing = fixture
+            .extension_at(&fixture.repo)
+            .handle_memory(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(missing["state"], "no_memory", "{missing}");
+        assert!(
+            missing["memory_directory"].is_string(),
+            "no_memory still discloses where it looked: {missing}"
+        );
+
+        std::fs::create_dir_all(fixture.repo.join(".claude")).expect("settings directory");
+        std::fs::write(
+            fixture.repo.join(".claude/settings.json"),
+            r#"{"autoMemoryEnabled":false}"#,
+        )
+        .expect("settings");
+        let disabled = fixture
+            .extension_at(&fixture.repo)
+            .handle_memory(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(disabled["state"], "disabled", "{disabled}");
+    }
+
+    #[tokio::test]
+    async fn memory_reads_are_bounded_and_cannot_escape_the_memory_directory() {
+        let fixture = memory_fixture(true);
+        fixture.write_memory(&[("MEMORY.md", "# Index\n- one\n- two\n")]);
+
+        let memory_directory = fixture.memory_dir().to_string_lossy().into_owned();
+        let read = |path: &str, offset: u64, limit: Option<u64>| {
+            let extension = fixture.extension_at(&fixture.repo);
+            let path = path.to_string();
+            let memory_directory = memory_directory.clone();
+            async move {
+                extension
+                    .handle_memory_read(serde_json::json!({
+                        "session_id": "agent:s",
+                        "memory_directory": memory_directory,
+                        "path": path,
+                        "offset": offset,
+                        "limit": limit,
+                    }))
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let first = read("MEMORY.md", 0, Some(7)).await;
+        assert_eq!(first["content"], "# Index", "{first}");
+        assert_eq!(first["content_type"], "markdown", "{first}");
+        assert_eq!(first["has_more"], true, "{first}");
+
+        let second = read("MEMORY.md", 7, Some(7)).await;
+        assert_eq!(second["content"], "\n- one\n", "{second}");
+
+        for refused in ["../outside.md", "/etc/passwd", "notes.json"] {
+            let value = read(refused, 0, None).await;
+            assert_eq!(
+                value["error"], "access_denied",
+                "{refused} was not refused: {value}"
+            );
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let outside = fixture._temp.path().join("outside.md");
+            std::fs::write(&outside, "secret").expect("outside file");
+            symlink(&outside, fixture.memory_dir().join("link.md")).expect("symlink");
+            let value = read("link.md", 0, None).await;
+            assert_eq!(
+                value["error"], "access_denied",
+                "a symlink out of the memory root was followed: {value}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_from_a_moved_repository_is_stale_memory() {
+        // SC-05: the Session's repository can change between the snapshot and
+        // a read. A read that named the old directory must not open the new
+        // repository's file under the old list.
+        let fixture = memory_fixture(true);
+        fixture.write_memory(&[("MEMORY.md", "# Repository A")]);
+        let extension = fixture.extension_at(&fixture.repo);
+        let moved = fixture._temp.path().join("somewhere-else/memory");
+
+        let stale = extension
+            .handle_memory_read(serde_json::json!({
+                "session_id": "agent:s",
+                "memory_directory": moved.to_string_lossy(),
+                "path": "MEMORY.md",
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stale["error"], "stale_memory", "{stale}");
+        assert!(
+            !stale.to_string().contains("Repository A"),
+            "a stale read returned content: {stale}"
+        );
+
+        let current = extension
+            .handle_memory_read(serde_json::json!({
+                "session_id": "agent:s",
+                "memory_directory": fixture.memory_dir().to_string_lossy(),
+                "path": "MEMORY.md",
+            }))
+            .await
+            .unwrap();
+        assert_eq!(current["content"], "# Repository A", "{current}");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_memory_request_is_answered_rather_than_dropped() {
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(NoSessionContext));
+
+        let discovery = extension
+            .handle_memory(serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(discovery["state"], "error", "{discovery}");
+        assert!(
+            discovery["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("bad_request"),
+            "{discovery}"
+        );
+
+        let read = extension
+            .handle_memory_read(serde_json::json!({"path": "MEMORY.md"}))
+            .await
+            .unwrap();
+        assert!(
+            read["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("bad_request"),
+            "{read}"
         );
     }
 }

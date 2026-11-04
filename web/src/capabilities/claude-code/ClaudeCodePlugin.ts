@@ -4,6 +4,16 @@ import {
   WIRE as LIST_WIRE,
 } from '@/generated/protocol/claude-code/list/v1';
 import {
+  PROTOCOL as MEMORY_PROTOCOL,
+  VERSION as MEMORY_VERSION,
+  WIRE as MEMORY_WIRE,
+} from '@/generated/protocol/claude-code/memory/v1';
+import {
+  PROTOCOL as MEMORY_READ_PROTOCOL,
+  VERSION as MEMORY_READ_VERSION,
+  WIRE as MEMORY_READ_WIRE,
+} from '@/generated/protocol/claude-code/memory-read/v1';
+import {
   PROTOCOL as READ_PROTOCOL,
   VERSION as READ_VERSION,
   WIRE as READ_WIRE,
@@ -40,6 +50,10 @@ import type {
   ClaudeCodeConversationsResponse,
   ClaudeCodeListRequest,
   ClaudeCodeListResponse,
+  ClaudeCodeMemoryReadRequest,
+  ClaudeCodeMemoryReadResponse,
+  ClaudeCodeMemoryRequest,
+  ClaudeCodeMemoryResponse,
   ClaudeCodeMessagesRequest,
   ClaudeCodeMessagesResponse,
   ClaudeCodeReadRequest,
@@ -66,6 +80,8 @@ const CONSUMER_REQUIREMENTS = {
   [MESSAGES_PROTOCOL]: [MESSAGES_VERSION],
   [TRANSCRIPTS_PROTOCOL]: [TRANSCRIPTS_VERSION],
   [TRANSCRIPT_ITEMS_PROTOCOL]: [TRANSCRIPT_ITEMS_VERSION],
+  [MEMORY_PROTOCOL]: [MEMORY_VERSION],
+  [MEMORY_READ_PROTOCOL]: [MEMORY_READ_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type ClaudeCodeUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -115,6 +131,37 @@ export class ClaudeCodePlugin implements TransportPlugin {
     return this.requireConnection().request<ClaudeCodeReadResponse>(
       READ_WIRE,
       this.addressed(READ_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * The Auto Memory of the repository this Session is in (#2689).
+   *
+   * The request names a Session and nothing else. The repository, its project
+   * key and Claude Code's effective memory directory are resolved agent-side
+   * from the Session's own working directory — there is no project argument to
+   * pass and no picker to populate.
+   */
+  async claudeCodeMemory(req: ClaudeCodeMemoryRequest): Promise<ClaudeCodeMemoryResponse> {
+    return this.requireConnection().request<ClaudeCodeMemoryResponse>(
+      MEMORY_WIRE,
+      this.addressed(MEMORY_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * One Markdown file out of that memory directory, paginated (#2689).
+   *
+   * `path` is relative to the directory the `memory` unit reported; the unit
+   * re-resolves the root from the Session on every call, so this cannot be
+   * pointed at another repository.
+   */
+  async claudeCodeMemoryRead(
+    req: ClaudeCodeMemoryReadRequest,
+  ): Promise<ClaudeCodeMemoryReadResponse> {
+    return this.requireConnection().request<ClaudeCodeMemoryReadResponse>(
+      MEMORY_READ_WIRE,
+      this.addressed(MEMORY_READ_PROTOCOL, req.agent_id, req),
     );
   }
 
