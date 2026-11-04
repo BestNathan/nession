@@ -181,6 +181,55 @@ function observedIssueCount(window, issueNumber) {
   const key=String(issueNumber);
   return Object.hasOwn(counts,key) ? observedCount(counts[key]) : null;
 }
+// Public per-Agent totals and Run details are a strictly bounded allowlist from
+// canonical agent-metrics.json, not raw telemetry and not a live workflow API.
+const PUBLIC_AGENT_ID = /^[a-z][a-z0-9-]{0,62}$/;
+const PUBLIC_ROLE = /^(developer|reviewer|acceptor|auditor)$/;
+const PUBLIC_TOKEN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const validCount = v => Number.isSafeInteger(v) && v >= 0;
+const validRun = v => Number.isSafeInteger(v) && v > 0;
+function agentOutcomeWindow(window) {
+  const raw = window?.per_agent;
+  const unavailable = {status:'unavailable',unattributed:null,items:[]};
+  if(raw?.schema_version!==1 || raw.coverage!=='observed' ||
+    !Array.isArray(raw.items)||raw.items.length>40 ||
+    !validCount(raw.unattributed)||typeof raw.truncated!=='boolean')return unavailable;
+  const seen=new Set();
+  const items=[];
+  for(const group of raw.items) {
+    if(!PUBLIC_AGENT_ID.test(group?.id)||!PUBLIC_ROLE.test(group?.role)||
+      !['total','success','failure','cancelled','timed_out','unknown'].every(k=>validCount(group[k]))||
+      group.total!==group.success+group.failure+group.cancelled+group.timed_out+group.unknown||
+      !Array.isArray(group.recent)||group.recent.length>16)return unavailable;
+    const key=group.role+':'+group.id;
+    if(seen.has(key))return unavailable;
+    seen.add(key);
+    const runs=[];
+    for(const r of group.recent) {
+      if(!validRun(r?.run_id)||!validRun(r.attempt) ||
+        !PUBLIC_TOKEN.test(r.workflow) ||
+        !['success','failure','cancelled','timed_out','unknown'].includes(r.outcome) ||
+        (r.issue!==null&&!validRun(r.issue))||
+        !PUBLIC_TOKEN.test(r.provider)||
+        !safeDate(r.observed_at)||
+        (r.duration_ms!==null&&!validCount(r.duration_ms)))return unavailable;
+      runs.push({
+        run_id:r.run_id,attempt:r.attempt,workflow:r.workflow,
+        issue:r.issue,outcome:r.outcome,provider:r.provider,
+        observed_at:safeDate(r.observed_at),duration_ms:r.duration_ms,
+        url:GH+'/actions/runs/'+r.run_id,
+      });
+    }
+    items.push({
+      id:group.id,role:group.role,
+      total:group.total,success:group.success,failure:group.failure,
+      cancelled:group.cancelled,timed_out:group.timed_out,unknown:group.unknown,
+      recent:runs,
+    });
+  }
+  return {status:raw.truncated?'truncated':'available',
+    unattributed:raw.unattributed,items};
+}
 function rosterFrom(registry, agentWindow) {
   const known = registry && typeof registry.instances === 'object' && registry.instances || {};
   const usage = agentWindow?.runs?.by_agent_id || {};
@@ -256,6 +305,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       generated_at:safeDate(a?.generated_at),
       freshness:sourceFreshness(a?.generated_at,meta.generated_at),
       roster:rosterFrom(registry,aw),
+      outcomes: { '7d':agentOutcomeWindow(aw), '30d':agentOutcomeWindow(aw30) },
       distribution: {
         '7d': {providers:observedSegments(aw,'by_provider'), workflows:observedSegments(aw,'by_workflow')},
         '30d': {providers:observedSegments(aw30,'by_provider'), workflows:observedSegments(aw30,'by_workflow')},
@@ -320,7 +370,7 @@ export function validateProjection(p) {
   allowedFields(p,['schema_version','generated_at','source','repository','agents','work','evidence'],'root');
   allowedFields(p.source,['repository','main_sha','metrics_sha','acceptance_results_sha','issues_status','pulls_status','workflow_runs_status'],'source');
   allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
-  allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
+  allowedFields(p.agents,['available','generated_at','freshness','roster','outcomes','distribution','summary'],'agents');
   allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','agent_store_readiness','issues','pulls'],'work');
   validateLineageProjection(p.work.lineage);
   validateAgentStoreReadiness(p.work.agent_store_readiness);
@@ -343,6 +393,37 @@ export function validateProjection(p) {
       allowedFields(segment,['available','items'],'distribution segment');
       if(!Array.isArray(segment.items)||segment.items.length>12)throw Error('unbounded public distribution');
       segment.items.forEach(x=>allowedFields(x,['name','count'],'distribution entry'));
+    }
+  }
+  allowedFields(p.agents.outcomes,['7d','30d'],'Agent outcome windows');
+  for(const period of ['7d','30d']) {
+    const window=p.agents.outcomes[period];
+    allowedFields(window,['status','unattributed','items'],'Agent outcome window');
+    if(!['available','truncated','unavailable'].includes(window.status) ||
+       !Array.isArray(window.items)||window.items.length>40 ||
+       (window.status==='unavailable' && (window.items.length||window.unattributed!==null)) ||
+       (window.status!=='unavailable'&&!validCount(window.unattributed)))
+      throw Error('invalid per-Agent public coverage');
+    const ids=new Set();
+    for(const a of window.items) {
+      allowedFields(a,['id','role','total','success','failure','cancelled','timed_out','unknown','recent'],'Agent outcome');
+      const key=a.role+':'+a.id;
+      if(!PUBLIC_ROLE.test(a.role)||!PUBLIC_AGENT_ID.test(a.id)||ids.has(key)||
+         !['total','success','failure','cancelled','timed_out','unknown'].every(k=>validCount(a[k]))||
+         a.total!==a.success+a.failure+a.cancelled+a.timed_out+a.unknown ||
+         !Array.isArray(a.recent)||a.recent.length>16)throw Error('invalid per-Agent counts');
+      ids.add(key);
+      for(const run of a.recent) {
+        allowedFields(run,['run_id','attempt','workflow','issue','outcome','provider','observed_at','duration_ms','url'],'Agent Run');
+        if(!validRun(run.run_id)||!validRun(run.attempt)||
+           !PUBLIC_TOKEN.test(run.workflow)||!PUBLIC_TOKEN.test(run.provider)||
+           !['success','failure','cancelled','timed_out','unknown'].includes(run.outcome)||
+           (run.issue!==null&&!validRun(run.issue))||
+           !safeDate(run.observed_at)||
+           (run.duration_ms!==null&&!validCount(run.duration_ms))||
+           run.url!==GH+'/actions/runs/'+run.run_id)
+          throw Error('invalid public Agent Run');
+      }
     }
   }
   p.agents.roster.forEach(x=>allowedFields(x,['id','role','provider','observed_7d'],'Agent roster'));
