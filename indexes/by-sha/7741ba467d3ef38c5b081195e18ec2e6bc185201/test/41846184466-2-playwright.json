@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "mode": "test",
+  "suite": "playwright",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 41846184466,
+    "run_attempt": 2,
+    "head_sha": "7741ba467d3ef38c5b081195e18ec2e6bc185201",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "record": "runs/2026-11-04/41846184466-2/test/playwright.json",
+  "target_sha": "7741ba467d3ef38c5b081195e18ec2e6bc185201",
+  "source_tree_sha": "60090ff7d826a1f48e8e7b0aea12103268de1a52",
+  "execution_id": "cafc3a7faa543fb0037845202c56680ea44a92a5003a61acee85dfb52bfe182f",
+  "record_sha256": "c8369484c33dba2aabc1059f9395738928f50c2c0e96840a9af4615cdbba01e2",
+  "artifact_sha256": "6d154ed54db808f508b653e50e00b1b983eff589e9cb2473219553ac2427cbdf",
+  "artifact_expires_at": "2026-11-18T15:20:13Z"
+}
