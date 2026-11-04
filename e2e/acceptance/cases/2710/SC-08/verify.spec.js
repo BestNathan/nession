@@ -5,10 +5,12 @@
 const { test, expect } = require('@playwright/test');
 const { verifiedRuntime, command } = require('../../../shared/foreground-resume-browser.cjs');
 const {
-  dismissCapability, openSession, paneSize, terminalGeometry,
+  dismissCapability, moveOverTerminal, openSession, paneSize, terminalGeometry,
 } = require('../../../shared/terminal-tools-browser.cjs');
 
-const SCROLL = 'seq 1 200';
+// App fits 96 fixed columns, so the grid is tall and a smaller line count would
+// not produce scrollback at all.
+const SCROLL = 'seq 1 400';
 
 test('SC-08: live clearance, history anchor and composer-only restore', async ({ page }) => {
   test.setTimeout(240_000);
@@ -61,9 +63,7 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   await assertClear('Commands');
 
   // History: scrolling up keeps the anchor across a panel height change.
-  const screen = await page.locator('.xterm-screen').boundingBox();
-  if (!screen) throw new Error('xterm screen has no box');
-  await page.mouse.move(screen.x + screen.width / 2, screen.y + screen.height / 2);
+  await moveOverTerminal(page);
   await page.mouse.wheel(0, -320);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');
@@ -79,13 +79,16 @@ test('SC-08: live clearance, history anchor and composer-only restore', async ({
   expect(afterResize.screenTransform, 'history still applies no shift').toBe('none');
 
   // Scroll to the live bottom: following returns and the clearance reapplies.
-  await page.mouse.wheel(0, 5000);
+  // Re-aim after the view switch moved the screen under the pointer.
+  await moveOverTerminal(page);
+  await page.mouse.wheel(0, 20000);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('following');
   const restored = await terminalGeometry(page);
   expect(restored.cursorBottom).toBeLessThanOrEqual(restored.dockTop + 1);
 
   // Closing from history restores composer-only clearance without a scroll.
+  await moveOverTerminal(page);
   await page.mouse.wheel(0, -320);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');

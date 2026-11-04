@@ -21,10 +21,12 @@ test('SC-04: direct keys are repeatable and follow the terminal mode', async ({ 
     }).toBe(true);
   };
 
-  // Two Tabs prove repeatability; Enter and an arrow prove the other direct
-  // actions still produce their own bytes.
+  // Two Tabs prove repeatability. `cat -v` only renders them as `^I` once the
+  // canonical-mode line is flushed, so Enter is part of the observation; the
+  // tty's own echo of a Tab is a tab stop, not `^I`.
   await page.getByTestId('phys-key-Tab').click();
   await page.getByTestId('phys-key-Tab').click();
+  await page.getByTestId('phys-key-Enter').click();
   await waitFor('^I^I', 'two Tabs');
   await page.getByTestId('phys-key-↑').click();
   await waitFor('^[[A', 'plain ArrowUp');

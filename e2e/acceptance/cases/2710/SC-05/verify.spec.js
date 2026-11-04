@@ -35,7 +35,9 @@ test('SC-05: Insert edits, Run executes, and disabled states explain themselves'
   await expect.poll(async () => (await readBuffer(page)).includes('COMMAND-RUN-2710'), {
     timeout: 20_000,
   }).toBe(true);
-  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('');
+  // Run is a terminal action, not a composer edit: the text Insert put there
+  // remains, so the two actions are visibly independent.
+  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue(COMMAND);
 
   // The fixture route names the disconnected input; the surface must state it.
   await openFixtureRoute(page, '/#/fixture/app?commands=disconnected');

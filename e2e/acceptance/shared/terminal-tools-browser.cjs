@@ -117,6 +117,36 @@ async function terminalGeometry(page) {
   });
 }
 
+/**
+ * A point the Terminal owns, above the floating dock.
+ *
+ * At App widths the fit is 96 fixed columns, so the grid is tall and the
+ * expanded panel can cover its middle. Wheel/touch gestures in these Cases are
+ * meant for the terminal, not the panel's internal scroll, so aim near the
+ * terminal well's top.
+ */
+async function terminalPoint(page) {
+  const point = await page.evaluate(() => {
+    const host = document.querySelector('[data-terminal-capsule-host]');
+    const screen = document.querySelector('.xterm-screen');
+    if (!(host instanceof HTMLElement) || !(screen instanceof HTMLElement)) return null;
+    const hostBox = host.getBoundingClientRect();
+    const screenBox = screen.getBoundingClientRect();
+    return {
+      x: Math.round(screenBox.left + screenBox.width / 2),
+      y: Math.round(Math.max(hostBox.top + 24, screenBox.top + 24)),
+    };
+  });
+  if (!point) throw new Error('terminal point unavailable');
+  return point;
+}
+
+async function moveOverTerminal(page) {
+  const point = await terminalPoint(page);
+  await page.mouse.move(point.x, point.y);
+  return point;
+}
+
 /** The tmux pane the Session owns; nession never uses tmux's default socket. */
 function paneSize(runtime, sessionName) {
   const socket = String(runtime.tmux_socket || process.env.NESSION_TMUX_SOCKET || '');
@@ -242,6 +272,7 @@ module.exports = {
   command,
   dismissCapability,
   markTerminal,
+  moveOverTerminal,
   openCapability,
   openSession,
   paneSize,
@@ -251,4 +282,5 @@ module.exports = {
   stopPtyProbe,
   terminalGeometry,
   terminalIdentityCount,
+  terminalPoint,
 };

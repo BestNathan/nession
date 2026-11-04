@@ -47,8 +47,11 @@ test('SC-03: one-shot modifiers encode one chord, clear, and cancel inertly', as
   await page.waitForTimeout(300);
   expect(await readBuffer(page), 'Cancel must not send bytes').toBe(beforeCancel);
 
-  // A common key with no modifier is still a direct key, not a chord.
+  // A common key with no modifier is still a direct key, not a chord. Enter
+  // flushes `cat`'s canonical-mode line so its `-v` form of the tab is
+  // rendered; the tty's own echo of Tab is a tab stop, not `^I`.
   await page.getByTestId('phys-key-Tab').click();
+  await page.getByTestId('phys-key-Enter').click();
   await waitFor('^I', 'plain Tab');
   await stopPtyProbe(page);
 

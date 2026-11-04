@@ -395,11 +395,12 @@ test('Quick Commands separates Insert from Run (#2710 SC-05)', async ({ page }) 
   await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('git status --short');
   await expect(page.getByTestId('capsule-capability-projection')).toHaveCount(0);
 
-  // Run is a separate action on the same row and does not insert text.
+  // Run is a separate action on the same row: it neither executes by expanding
+  // nor edits the composer text Insert left behind.
   await openCapsuleCapability(page, 'quick-commands');
   await page.getByTestId('quick-command-run-fixture-tests').click();
   await expect(page.getByTestId('quick-commands-list')).toBeVisible();
-  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('');
+  await expect(page.getByTestId('capsule-ghost-input')).toHaveValue('git status --short');
 });
 
 test('Quick Commands states unavailable actions instead of faking success (#2710 SC-05)', async ({ page }) => {

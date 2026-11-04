@@ -6,6 +6,7 @@ const { test, expect } = require('@playwright/test');
 const { verifiedRuntime, command, readBuffer } = require('../../../shared/foreground-resume-browser.cjs');
 const {
   markTerminal, openCapability, openSession, paneSize, stopPtyProbe, terminalGeometry,
+  terminalPoint,
 } = require('../../../shared/terminal-tools-browser.cjs');
 const { dispatchTouch, terminalView } = require('../../../shared/terminal-touch-scroll-cases.cjs');
 const {
@@ -19,7 +20,9 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   await markTerminal(page);
   const paneBefore = paneSize(runtime, name);
 
-  await command(page, 'seq 1 120');
+  // App fits 96 fixed columns, so the grid is tall; a short `seq` would leave
+  // no scrollback at 390px.
+  await command(page, 'seq 1 300');
   await expect.poll(async () => (await terminalGeometry(page))?.baseY ?? 0, { timeout: 20_000 })
     .toBeGreaterThan(50);
   const before = await terminalGeometry(page);
@@ -31,11 +34,14 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   expect(shifted.occlusion).toBe(before.occlusion);
   expect(paneSize(runtime, name)).toBe(paneBefore);
 
-  // Touch scrolling is still terminal-owned while the panel is open.
+  // Touch scrolling is still terminal-owned while the panel is open. Aim at
+  // the terminal well's top: the shifted grid is tall and the panel covers its
+  // middle at App width.
   const view = await terminalView(page);
-  await dispatchTouch(page, 'touchstart', [[view.centerX, view.centerY]]);
-  await dispatchTouch(page, 'touchmove', [[view.centerX, view.centerY + 4]]);
-  await dispatchTouch(page, 'touchmove', [[view.centerX, view.centerY + 4 + Math.round(view.cellHeight)]]);
+  const point = await terminalPoint(page);
+  await dispatchTouch(page, 'touchstart', [[point.x, point.y]]);
+  await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4]]);
+  await dispatchTouch(page, 'touchmove', [[point.x, point.y + 4 + Math.round(view.cellHeight)]]);
   await dispatchTouch(page, 'touchend', []);
   await expect.poll(async () => (await terminalGeometry(page))?.mode, { timeout: 10_000 })
     .toBe('history');
@@ -81,14 +87,30 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, { timeout: 10_000 })
     .toBeGreaterThan(0);
-  const padView = await terminalView(page);
+  // A stationary hold needs room above the start point for an "up" direction,
+  // so sit lower than `terminalPoint` while staying above the panel.
+  const padPoint = await page.evaluate(() => {
+    const host = document.querySelector('[data-terminal-capsule-host]');
+    const dock = document.querySelector('[data-testid="terminal-capsule"]');
+    const screen = document.querySelector('.xterm-screen');
+    if (!(host instanceof HTMLElement) || !(dock instanceof HTMLElement) ||
+        !(screen instanceof HTMLElement)) return null;
+    const hostBox = host.getBoundingClientRect();
+    const dockBox = dock.getBoundingClientRect();
+    const screenBox = screen.getBoundingClientRect();
+    return {
+      x: Math.round(screenBox.left + screenBox.width / 2),
+      y: Math.round(Math.min(dockBox.top - 80, Math.max(hostBox.top + 120, screenBox.top + 120))),
+    };
+  });
+  if (!padPoint) throw new Error('direction-pad point unavailable');
   const beforePad = await readBuffer(page);
-  await touchStart(page, { x: padView.centerX, y: padView.centerY });
+  await touchStart(page, padPoint);
   await page.waitForTimeout(500);
-  await touchMove(page, { x: padView.centerX, y: padView.centerY - 40 });
+  await touchMove(page, { x: padPoint.x, y: padPoint.y - 40 });
   await expect.poll(async () => (await readBuffer(page)).includes('^[[A'), { timeout: 10_000 })
     .toBe(true);
-  await touchEnd(page, { x: padView.centerX, y: padView.centerY - 40 });
+  await touchEnd(page, { x: padPoint.x, y: padPoint.y - 40 });
   expect(beforePad.includes('^[[A')).toBe(false);
 
   // The Session is still attached and the xterm node is the one we marked.
