@@ -105,7 +105,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     </div>
   </div>
 </div>
-<div class="status"><span>Try <strong>Ctrl+C</strong>, then <strong>Ctrl → X</strong>, or select <strong>Commands</strong>.</span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
+<div class="status"><span>Open +, swipe terminal <strong>up</strong> for newest output, then <strong>down</strong> to return to the top.</span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
 </div>
 <script>
 (function(){
@@ -153,14 +153,16 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     // A stray ResizeObserver notification must never reset touch momentum.
     const oldTop=term.scrollTop;
     const wasFollowing=following && !userDragActive;
+    const panelGrew=!!view && activeClearancePx>=0 && newInset>activeClearancePx;
     activeClearancePx=newInset;
     term.style.paddingBottom=newInset+"px";
-    // Following mode keeps the cursor/output above the *highest* opened panel.
-    // History mode preserves the browsing anchor, while extra bottom scrollroom
-    // remains available if the user decides to scroll all the way down.
-    if(wasFollowing){term.scrollTop=term.scrollHeight;}
+    // Opening + does NOT automatically push the whole screen upward.
+    // It only adds scrollroom below the last line. The user may scroll up
+    // to reveal the live prompt above the panel, and drag back down to see
+    // the original first line; both endpoints remain reachable.
+    if(wasFollowing && !panelGrew){term.scrollTop=term.scrollHeight;}
     else {term.scrollTop=oldTop;}
-    following=wasFollowing;
+    following=wasFollowing && !panelGrew;
     term.dataset.scrollMode=following?"following":"history";
     term.dataset.clearancePx=String(newInset);
   }
@@ -234,7 +236,8 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     if(view==="menu"){
       upper.innerHTML='<div class="surface chooser"><div class="chooser-title">Terminal tools</div>'+
       '<button class="choose" type="button" data-act="keys"><span class="sym">⌘</span><span class="cname">Terminal Keys</span><span class="sub">Keys & chords</span></button>'+
-      '<button class="choose" type="button" data-act="commands"><span class="sym">›_</span><span class="cname">Quick Commands</span><span class="sub">Saved commands</span></button></div>';
+      '<button class="choose" type="button" data-act="commands"><span class="sym">›_</span><span class="cname">Quick Commands</span><span class="sub">Saved commands</span></button>'+
+      '<div class="hint">Swipe terminal ↑ to reveal latest output · ↓ to see earlier lines</div></div>';
       scheduleClearance();
       return;
     }
