@@ -33,3 +33,37 @@ Proof records must be independently verified by the canonical owner before expor
 
 Gate: ./gates/run agent-workflow-telemetry
 Self-test: node scripts/agent-experiment-report.mjs self-test
+
+## Observed per-Agent execution outcome semantics (#2720)
+
+`agent_workflow_run` is the canonical source. The metrics generator reports
+one execution per unique repository / workflow / GitHub Run / Run Attempt /
+unique execution name; a rerun Attempt counts independently, and multiple model
+requests/retries within that execution do not. Duplicate source identities
+must be rejected before aggregating. Workflow-only contract checks that never
+invoked an Agent do not generate execution records.
+
+For public per-Agent analytics, the source must attest both `agent.role`
+(developer/reviewer/acceptor/auditor) and `agent.id`. Missing identities
+are **unattributed**, not assigned by Workflow, provider, actor or Issue.
+`result.status` is mapped to these execution outcomes:
+- **success:** `success`, `succeeded`, `completed`, `repaired`, `passed`
+- **failure:** `error`, `agent-error`, `contract-fail`, `failed`,
+  `failure`, `invalid-result`, or `agent.status=error`
+- **cancelled:** `cancelled`, `canceled`
+- **timed_out:** `timed_out`, `timeout`, `timed-out`
+- **unknown:** all other, missing, pending or unrecognized results.
+
+An Agent execution marked `completed` may still carry failed/pending
+Acceptance SCs: execution success is **not** Review approval, SC Pass, or
+GitHub workflow success. Per-Agent outcome totals cover each observed 7/30-day
+window. Success rate is `success/(success+failure)` only when denominator is
+positive; cancelled/timed-out/unknown are separate buckets. Historical and
+partial source coverage stays explicitly unavailable or truncated.
+
+The Pages producer publishes only a capped per-Agent recent Run/Attempt sample
+with canonical GitHub Actions links, workflow, observed Issue, provider, time,
+and optional duration. The aggregate totals need not equal the sample size.
+A pinned read-only `metrics` checkout and a bounded allowlisted Pages
+projection preserve data lineage without a second ingestion service, browser
+credentials or raw Agent records.

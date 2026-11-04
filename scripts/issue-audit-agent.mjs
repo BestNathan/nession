@@ -143,6 +143,10 @@ function writeRecord(outDir, record) {
         },
         agent: {
           provider: agent.provider || telemetryProvider(),
+          // Trusted workflow routing resolves the registry ID once.
+          // Never guess identity from provider or Issue text.
+          id: process.env.ISSUE_AUDIT_AGENT_ID || null,
+          role: process.env.ISSUE_AUDIT_AGENT_ID ? 'auditor' : null,
           prompt: promptTelemetry(renderIssueAuditPrompt({ number: record.issue.number, url: '', labels: [], body: '' }, { errors: [] }, 'deepseek')),
           model: {
             id: agent.model ?? null,

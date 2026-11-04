@@ -8,7 +8,27 @@ const fixture={
  schema_version:1,generated_at:'2026-10-14T12:00:00Z',
  source:{repository:'BestNathan/nession',main_sha:'a'.repeat(40),metrics_sha:'b'.repeat(40),acceptance_results_sha:'c'.repeat(40)},
  repository:{available:true,sha:'a'.repeat(40),generated_at:'2026-10-14T12:00:00Z',freshness:{state:'stale',age_hours:10},current:{loc:250000,files:1200,tests:3000,rust_coverage:.85,web_coverage:.9,protocol_units:70,unit_pass:1},efficiency:{commits_7d:20,additions_7d:50,deletions_7d:12,merged_7d:5,open_issues:2,open_prs:1}},
- agents:{available:true,generated_at:'2026-10-14T12:00:00Z',freshness:{state:'unavailable',age_hours:null},distribution:{
+ agents:{available:true,generated_at:'2026-10-14T12:00:00Z',freshness:{state:'unavailable',age_hours:null},outcomes:{
+    '7d':{status:'available',unattributed:2,items:[{
+      id:'dev-qwen-01',role:'developer',total:3,success:1,failure:1,
+      cancelled:1,timed_out:0,unknown:0,recent:[
+        {run_id:12345,attempt:2,workflow:'agent-develop',issue:2720,
+          outcome:'failure',provider:'claude-code',observed_at:'2026-10-14T12:00:00Z',
+          duration_ms:4200,url:'https://github.com/BestNathan/nession/actions/runs/12345'},
+        {run_id:12345,attempt:1,workflow:'agent-develop',issue:2720,
+          outcome:'success',provider:'claude-code',observed_at:'2026-10-14T11:00:00Z',
+          duration_ms:2500,url:'https://github.com/BestNathan/nession/actions/runs/12345'},
+      ],
+    }]},
+    '30d':{status:'available',unattributed:3,items:[{
+      id:'dev-qwen-01',role:'developer',total:3,success:1,failure:1,
+      cancelled:1,timed_out:0,unknown:0,recent:[
+        {run_id:12345,attempt:2,workflow:'agent-develop',issue:2720,
+          outcome:'failure',provider:'claude-code',observed_at:'2026-10-14T12:00:00Z',
+          duration_ms:4200,url:'https://github.com/BestNathan/nession/actions/runs/12345'},
+      ],
+    }]},
+  },distribution:{
     '7d':{providers:{available:true,items:[{name:'cursor',count:2},{name:'claude-code',count:1}]},workflows:{available:true,items:[{name:'issue-audit',count:3}]}},
     '30d':{providers:{available:true,items:[{name:'cursor',count:10},{name:'claude-code',count:4}]},workflows:{available:true,items:[{name:'issue-audit',count:14}]}}
   },roster:[{id:'dev-qwen-01',role:'developer',provider:'claude-code',observed_7d:3},{id:'review-cursor-01',role:'reviewer',provider:'cursor',observed_7d:null}],summary:{runs_7d:3,runs_30d:14,tokens_7d:45000,tokens_observed_runs:2,duration_7d:5100,duration_observed_runs:2,duration_avg_7d:2550,tools_7d:20,tools_observed_runs:3,cost_7d:null,cost_observed_runs:0}},

@@ -18,6 +18,31 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.getByText('issue-audit', {exact:true})).toBeVisible();
   await expect(page.getByText('14', {exact:true})).toBeVisible();
  });
+ test('per-Agent outcome detail remains navigable, filtered and source-linked on mobile',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(site.origin+'/#/agents');
+  await expect(page.getByRole('heading',{name:'Execution by Agent'})).toBeVisible();
+  await expect(page.getByText('3 runs · 1 succeeded · 1 failed')).toBeVisible();
+  await expect(page.getByText('unattributed executions: 2',{exact:false})).toBeVisible();
+  await page.getByRole('link',{name:'dev-qwen-01'}).click();
+  await expect(page.getByRole('heading',{name:'dev-qwen-01'})).toBeVisible();
+  await expect(page.getByText('50%',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Run 12345 / attempt 2'}))
+    .toHaveAttribute('href','https://github.com/BestNathan/nession/actions/runs/12345');
+  await expect(page.getByRole('link',{name:'Run 12345 / attempt 1'})).toBeVisible();
+  await page.getByRole('link',{name:'failure',exact:true}).click();
+  await expect(page.getByRole('link',{name:'Run 12345 / attempt 2'})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Run 12345 / attempt 1'})).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('link',{name:'Run 12345 / attempt 2'})).toBeVisible();
+  await page.getByRole('link',{name:'Last 30 days'}).click();
+  await expect(page.getByText('unattributed executions: 3',{exact:false})).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'Observed 30d runs'})).toBeVisible();
+  await page.getByRole('link',{name:'← AI Agents'}).click();
+  await expect(page.getByRole('heading',{name:'Execution by Agent'})).toBeVisible();
+  await page.goto(site.origin+'/#/agents/developer/forged-id');
+  await expect(page.getByText('Agent identity not observed')).toBeVisible();
+ });
  test('mobile direct deep link and untrusted Issue text do not execute markup',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.goto(site.origin+'/#/work');
