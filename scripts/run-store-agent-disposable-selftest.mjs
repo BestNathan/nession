@@ -75,6 +75,53 @@ function noPlaintext(repo){
   const gitConfig=git(repo,'config','--get','remote.origin.url');
   assert.ok(!gitConfig.includes(secret));
 }
+// Emit a report only after ALL live isolated agent-store assertions pass.
+// No change to fixture semantics, no production ref and no plaintext in JSON.
+export function writeAgentStoreFixtureEvidence(proof,output,env=process.env){
+  if(!output)return null;
+  const isSha=/^[0-9a-f]{40}$/;
+  const valid=env.GITHUB_REPOSITORY==='BestNathan/nession'&&
+    env.GITHUB_REF==='refs/heads/main'&&isSha.test(env.GITHUB_SHA??'')&&
+    /^[1-9][0-9]*$/.test(String(env.GITHUB_RUN_ID??''))&&
+    /^[1-9][0-9]*$/.test(String(env.GITHUB_RUN_ATTEMPT??''))&&
+    path.isAbsolute(output)&&
+    path.isAbsolute(env.RUNNER_TEMP??'')&&
+    path.dirname(output)===path.join(env.RUNNER_TEMP,'store-fixture-evidence')&&
+    path.basename(output)==='agent-store.json'&&!fs.existsSync(output)&&
+    proof?.store==='agent-store'&&
+    isSha.test(proof.baseline_sha??'')&&isSha.test(proof.first_sha??'')&&
+    isSha.test(proof.second_sha??'')&&
+    proof.first_sha!==proof.second_sha&&
+    proof.audited_commits===2&&proof.audited_changes===4;
+  if(!valid)throw Error('agent-store disposable report: expected trusted exact-main fixture and executed CAS proof');
+  const report={
+    schema_version:1,kind:'agent_store_disposable_cas_fixture_evidence',
+    repository:env.GITHUB_REPOSITORY,target_sha:env.GITHUB_SHA,
+    workflow_run_id:Number(env.GITHUB_RUN_ID),
+    workflow_run_attempt:Number(env.GITHUB_RUN_ATTEMPT),
+    store:'agent-store',execution:'disposable_bare_git',
+    encrypted_immutable_checkpoint:'aes_256_gcm_ciphertext_authenticated_and_roundtripped',
+    public_git_secret_bytes:'absent_in_all_tracked_blobs',
+    immutable_checkpoint_edit:'rejected_by_staged_integrity_and_publisher',
+    immutable_checkpoint_delete:'rejected_by_staged_integrity_and_publisher',
+    pointer_cas_sequence:'v1_to_v2_to_v3_authorized',
+    stale_pointer_cas:'rejected_before_refresh',
+    refreshed_pointer_cas:'authorized_success',
+    deleted_remote_ref:'rejected_without_reinitialization',
+    audit_checked_commits:proof.audited_commits,
+    audit_checked_changes:proof.audited_changes,
+    baseline_sha:proof.baseline_sha,first_advance_sha:proof.first_sha,
+    second_advance_sha:proof.second_sha,
+    verdict:'FixturePassed',
+    real_agent_store:'not_tested',
+    github_ruleset_enforcement:'not_tested',
+    real_writer_authorization:'not_tested',
+    external_anchor:'not_provisioned',
+    plaintext_or_secret_material_retained:false,
+  };
+  fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n',{flag:'wx',mode:0o600});
+  return report;
+}
 function protectAgainstOverwrites(remote){
   const edit=clone(remote,'illegal-edit');
   write(edit,checkpoint(1),sealedRecord(17));
@@ -136,6 +183,12 @@ try{
   commit(missing,'must not recreate a deleted public ref');
   git(remote,'update-ref','-d','refs/heads/'+store);
   assert.throws(()=>publish(store,missing),/remote ref missing/);
+  if(process.env.RUN_STORE_AGENT_FIXTURE_EVIDENCE_OUTPUT)
+    writeAgentStoreFixtureEvidence({
+      store,baseline_sha:baseline,first_sha:first.commit_sha,
+      second_sha:second.commit_sha,audited_commits:audited.checked_commits,
+      audited_changes:audited.checked_changes,
+    },process.env.RUN_STORE_AGENT_FIXTURE_EVIDENCE_OUTPUT);
   console.log('agent-store disposable CAS: AES-GCM sealed refs, authorized pointer v1->v2->v3, stale CAS rejection, immutable update/deletion refusal, Git plaintext absence and deleted ref fail-closed passed');
 }finally{
   key.fill(0);
