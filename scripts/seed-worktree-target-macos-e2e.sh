@@ -189,6 +189,25 @@ dependencies_fresh_json=$(as_json_array "$dependencies_fresh")
 dependencies_compiled_json=$(as_json_array "$dependencies_compiled")
 workspace_compiled_json=$(as_json_array "$workspace_compiled")
 
+# Bind the receipt to the exact seed surface at the tested revision. The CI
+# checkout is shallow, so the verifier compares these Git blob entries and the
+# receipt commit's parent SHA rather than requiring the parent object.
+source_paths=(
+  scripts/seed-worktree-target.sh
+  scripts/seed-worktree-target-selftest.sh
+  scripts/seed-worktree-target-macos-e2e.sh
+  .claude/hooks/create-worktree.sh
+  gates/checks/worktree-target-seed.sh
+  justfile
+  e2e/acceptance/cases/2735/SC-04/case.yaml
+  e2e/acceptance/cases/2735/SC-04/verify.cjs
+  e2e/acceptance/shared/worktree-seed-cases.cjs
+)
+source_tree=$(git -C "$root" ls-tree HEAD -- "${source_paths[@]}")
+[[ -n "$source_tree" ]] || die "could not read the seed source tree at $tested_revision"
+source_paths_json=$(printf '%s\n' "${source_paths[@]}" | jq -R -s 'split("\n") | map(select(length > 0))')
+source_tree_json=$(printf '%s' "$source_tree" | jq -R -s 'split("\n") | map(select(length > 0))')
+
 receipt=$(jq -n \
   --arg tested_revision "$tested_revision" \
   --arg verified_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -211,11 +230,15 @@ receipt=$(jq -n \
   --argjson dependencies_fresh "$dependencies_fresh_json" \
   --argjson dependencies_compiled "$dependencies_compiled_json" \
   --argjson workspace_compiled "$workspace_compiled_json" \
+  --argjson source_paths "$source_paths_json" \
+  --argjson source_tree "$source_tree_json" \
   '{
     schema_version: 1,
     issue: 2735,
     criterion: "SC-04",
     tested_revision: $tested_revision,
+    source_paths: $source_paths,
+    source_tree: $source_tree,
     verified_at: $verified_at,
     platform: { os: "Darwin", kernel: $kernel, arch: $arch },
     filesystem: { device: $device, type: $filesystem },

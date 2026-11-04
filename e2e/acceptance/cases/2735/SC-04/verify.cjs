@@ -5,6 +5,7 @@
 // receipt is produced by scripts/seed-worktree-target-macos-e2e.sh on Darwin.
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const {
   run, targetSha, root,
@@ -58,13 +59,41 @@ run(({ evidence }) => {
     throw new Error('the receipt does not show workspace members rebuilding from cleaned artifacts');
   }
 
-  git(['merge-base', '--is-ancestor', receipt.tested_revision, sha]);
-  const changed = git(['diff', '--name-only', receipt.tested_revision + '..' + sha])
+  // The CI checkout is shallow: the tested revision object may be absent.
+  // Bind first through the receipt commit's parent SHA and the recorded seed
+  // surface blobs, then use the full diff when history is available.
+  if (!Array.isArray(receipt.source_paths) || receipt.source_paths.length === 0 ||
+      !Array.isArray(receipt.source_tree) || receipt.source_tree.length === 0) {
+    throw new Error('the receipt does not record the tested seed source surface');
+  }
+  const parentLine = String(git(['cat-file', '-p', 'HEAD']))
+    .split('\n').find((line) => line.startsWith('parent '));
+  const headParent = parentLine ? parentLine.slice('parent '.length).trim() : '';
+  if (headParent !== receipt.tested_revision) {
+    throw new Error('the receipt is not the commit directly after the tested revision');
+  }
+  const actualTree = String(git(['ls-tree', 'HEAD', '--', ...receipt.source_paths]))
     .split('\n').filter(Boolean);
-  const receiptRelative = path.relative(root, receiptPath);
-  const unexpected = changed.filter((file) => file !== receiptRelative);
-  if (unexpected.length > 0) {
-    throw new Error('source changed after the receipt revision: ' + unexpected.join(', '));
+  if (JSON.stringify(actualTree) !== JSON.stringify(receipt.source_tree)) {
+    throw new Error('the seed source surface changed after the tested revision');
+  }
+  const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  if (sha256(path.join(root, 'Cargo.lock')) !== receipt.inputs.cargo_lock_sha256) {
+    throw new Error('Cargo.lock changed after the tested revision');
+  }
+  if (sha256(path.join(root, 'rust-toolchain.toml')) !== receipt.inputs.rust_toolchain_sha256) {
+    throw new Error('rust-toolchain.toml changed after the tested revision');
+  }
+  const parentObject = spawnSync('git', ['cat-file', '-e', receipt.tested_revision + '^{commit}'],
+    { cwd: root, encoding: 'utf8' });
+  if (parentObject.status === 0) {
+    const changed = git(['diff', '--name-only', receipt.tested_revision + '..' + sha])
+      .split('\n').filter(Boolean);
+    const receiptRelative = path.relative(root, receiptPath);
+    const unexpected = changed.filter((file) => file !== receiptRelative);
+    if (unexpected.length > 0) {
+      throw new Error('source changed after the receipt revision: ' + unexpected.join(', '));
+    }
   }
 
   evidence.push({
@@ -77,7 +106,7 @@ run(({ evidence }) => {
   });
   evidence.push({
     type: 'source',
-    value: 'the receipt revision is an ancestor of the target and the only file changed since it is the receipt itself',
+    value: 'the receipt commit directly follows the tested revision, its recorded seed-surface Git blobs match HEAD, and Cargo.lock/toolchain hashes match the tested inputs',
   });
   return 'the native macOS/APFS run proves a CoW-backed seed and dependency reuse on first build';
 });
