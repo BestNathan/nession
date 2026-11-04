@@ -69,7 +69,7 @@ tEnd(130,330);settled();
 check('native touchend commits Sessions',route().startsWith('sessions'));
 tStart(380,300);tMove(300,300);tEnd(300,300);settled();
 check('native reverse route returns Terminal',route().startsWith('terminal'));
-tStart(380,290);tMove(250,290);tEnd(250,290,true);settled();
+tStart(380,290);tMove(250,290);tEnd(250,290,42,true);settled();
 check('native touchcancel snaps back',route().startsWith('terminal'));
 check('native cancellation trace includes reason',get('trace').textContent.includes('native touchcancel'));
 tStart(10,310);tMove(100,310);
