@@ -22,7 +22,7 @@ Open `index.html` directly over HTTPS in a mobile browser (or local file; no ext
 
 ### Interaction states
 `idle → candidate → navigation | content | direction → committed | cancelled`.
-The inspector displays current page, gesture phase, owner, destination, travel, commit result and bounded event history. Native vertical scrolling in the mock content remains possible. `pointercancel` aborts navigation.
+The inspector displays current page, gesture phase, owner, destination, travel, commit result and bounded event history. Native vertical scrolling in the mock content remains possible. On touchscreens, **Touch Events own the gesture from touchstart to touchend using the same Touch.identifier**; touch-generated Pointer Events (including pointercancel and lostpointercapture) are ignored to prevent two concurrent owners. Mouse/pen Pointer Events are an independent desktop rehearsal path. A genuine native `touchcancel` still aborts navigation and records its cause.
 
 ## Prototype parameters (hypotheses)
 - Start band: 28 px, **measured against the phone shell**, not browser window. Chrome outside work surfaces does not need the edge band.
@@ -33,15 +33,15 @@ The inspector displays current page, gesture phase, owner, destination, travel, 
 
 ## Fidelity and limitations
 - **Mock**: terminal output, scrollback, Session/Agent/Workspace data, connection, direction-pad behavior, page transitions, editor dirty state. No PTY/tmux/xterm.js, OS navigation gesture listener, TUI event bytes, Clipboard, backend calls or persistent state.
-- **Simulated but interactive**: pointer-drag ownership, swipe reveal/threshold/velocity/return, normal vertical DOM scroll, long-press exclusivity, Capsule Peek and Workspace depth guard, accessible visible navigation controls.
+- **Simulated but interactive**: native touch and mouse/pen pointer ownership, swipe reveal/threshold/velocity/return, normal vertical DOM scroll, long-press exclusivity, Capsule Peek and Workspace depth guard, accessible visible navigation controls. Once navigation locks, the target and direction remain fixed; briefly reversing past the touch origin clamps preview to zero **without prematurely settling**. Release decides commit/snapback; unexpected `touchcancel` is explicit. The shell installs a non-passive, capture-phase `touchmove` only on its prototype root and suppresses nested scroll propagation **only after its gesture has been claimed**.
 - **Not proven**: real Safari/PWA edge gesture interception; native touch cancellation timing; xterm alternate-screen / mouse-reporting; keyboard/IME integration; actual PTY dimensions; production focus/scroll preservation; iOS haptics.
 - CSS is a compact visual approximation of the Nession dark Terminal App. It does not claim to be emitted by production design tokens, and has no dependency on the real App bundle.
 
 ## Verification
 - HTML is standalone with inline CSS/JS and no remote/CDN assets.
 - Repository readback: JS syntactically compiled in a JS runtime; no duplicate DOM IDs or missing `$('id')` DOM references.
-- **Mock interaction smoke:** 20/20 passed against the actual inline JS using a minimal fake DOM and deterministic timers (routes, edge/center/vertical cancel, short snapback, Peek, detail/dirty guard, no-Session root, hold-direction touch ownership). Reproduce with `node mobile-swipe-2724/smoke-test.mjs` from the prototype branch root; suite is dependency-free. This is *mock state-machine* proof only.
-- Real browser interaction and actual mobile Safari/PWA execution: **not independently verified**. Production Acceptance, device testing and Pages SHA readback are **Pending**.
+- **Mock interaction smoke:** **36/36 passed** against the actual inline JS using a minimal fake DOM and deterministic timers (original routes, edge/center/vertical, short snapback, Peek, detail/dirty guard, no-Session, long-press plus native touchstart/move/end tracking, reverse past origin then resume, touch-generated pointercancel/capture-loss immunity, actual touchcancel rollback, multitouch cancellation, native vertical scroll non-interference and exclusive direction hold). Reproduce with `node mobile-swipe-2724/smoke-test.mjs` from the prototype branch root; suite is dependency-free. This is *mock state-machine* proof only.
+- Real browser interaction and actual mobile Safari/PWA execution: **not independently verified**. Public Pages/manifest endpoints could not be read via the available external viewer. Production Acceptance, device testing and Pages SHA readback are **Pending**. Browser-managed OS Back swipes at the physical edge can still preempt page JavaScript and require an on-device assessment; this is intentionally not hidden by the fake DOM.
 - Reproduce via direct pointer/touch interactions described above. A completed workflow must additionally inspect the browser console, screenshot 375/390/430 widths and landscape, and verify iOS Safari edge ownership.
 
 ## Publication
