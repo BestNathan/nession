@@ -18,13 +18,25 @@ test('SC-09: dimensions, alternate screen, mouse TUI, touch scroll and direction
   const { runtime, sha } = verifiedRuntime('SC-09');
   const name = await openSession(page, expect, runtime, 'case-2710-sc09');
   await markTerminal(page);
-  const paneBefore = paneSize(runtime, name);
 
   // App fits 96 fixed columns, so the grid is tall; a short `seq` would leave
   // no scrollback at 390px.
   await command(page, 'seq 1 300');
   await expect.poll(async () => (await terminalGeometry(page))?.baseY ?? 0, { timeout: 20_000 })
     .toBeGreaterThan(50);
+
+  // The viewport change from the desktop create/attach flow reaches tmux
+  // through the controller's debounced resize. Capture the settled pane size
+  // as the baseline, not the pre-resize one, or opening the panel looks like a
+  // resize when the first fit lands late.
+  let paneReading = '';
+  await expect.poll(async () => {
+    const next = paneSize(runtime, name);
+    const settled = next === paneReading;
+    paneReading = next;
+    return settled;
+  }, { timeout: 20_000, intervals: [500] }).toBe(true);
+  const paneBefore = paneReading;
   const before = await terminalGeometry(page);
   await openCapability(page, expect, 'terminal-keys');
   await expect.poll(async () => (await terminalGeometry(page))?.panelClearance ?? 0, { timeout: 10_000 })
