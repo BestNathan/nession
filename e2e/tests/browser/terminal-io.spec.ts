@@ -796,24 +796,49 @@ test.describe('Terminal clipboard protocols', () => {
   });
 
   /**
-   * #2614: on an ordinary HTTP origin there is no `navigator.clipboard`, so a
-   * blocked OSC 52 copy must complete through the DOM copy command instead of
-   * retrying the absent async API. The API is removed in-page to reproduce the
-   * capability state (the acceptance Case runs on a real insecure origin); the
-   * real clipboard object is kept only to verify the result afterwards.
+   * #2614/#2656: an automatic OSC 52 write attempts the shared library even
+   * without `navigator.clipboard`; when the browser refuses its legacy command,
+   * the truthful notice's user-click path completes through that same library
+   * inside the click. The API is removed in-page to reproduce the capability
+   * state (the acceptance Case runs on a real insecure origin); the real
+   * clipboard object is kept only to verify the result afterwards.
    */
   test('an insecure-origin copy completes through the DOM copy command (#2614)', async ({ page }) => {
     await page.evaluate(() => {
       const host = window as unknown as {
         __realClipboard: Clipboard;
+        __realExecCommand: typeof document.execCommand;
         __copyProbe: { selected: string[]; executed: boolean | null; commands: number };
       };
       host.__realClipboard = navigator.clipboard;
+      host.__realExecCommand = document.execCommand.bind(document);
       host.__copyProbe = { selected: [], executed: null, commands: 0 };
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-      const original = document.execCommand.bind(document);
+      // Refuse the automatic attempt so the notice path is deterministic; the
+      // gesture phase below restores the real command.
       document.execCommand = (command, showUI, value) => {
-        if (command !== 'copy') { return original(command, showUI, value); }
+        if (command !== 'copy') {
+          return host.__realExecCommand(command, showUI, value);
+        }
+        return false;
+      };
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      harness.emit('\x1b]52;c;' + btoa('http copy payload') + '\x1b\\');
+    });
+    // #2658: clipboard details are opt-in; the Terminal mounts no notice.
+    await page.getByTestId('terminal-notices-trigger').click();
+    const notice = page.getByTestId('terminal-clipboard-notice');
+    await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
+
+    await page.evaluate(() => {
+      const host = window as unknown as {
+        __realExecCommand: typeof document.execCommand;
+        __copyProbe: { selected: string[]; executed: boolean | null; commands: number };
+      };
+      document.execCommand = (command, showUI, value) => {
+        if (command !== 'copy') {
+          return host.__realExecCommand(command, showUI, value);
+        }
         host.__copyProbe.commands += 1;
         // copy-to-clipboard selects a hidden span and lets the browser's
         // default copy action carry it; capture that selection (the old
@@ -823,20 +848,14 @@ test.describe('Terminal clipboard protocols', () => {
         };
         document.addEventListener('copy', snoop, true);
         try {
-          const result = original(command, showUI, value);
+          const result = host.__realExecCommand(command, showUI, value);
           host.__copyProbe.executed = result;
           return result;
         } finally {
           document.removeEventListener('copy', snoop, true);
         }
       };
-      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
-      harness.emit('\x1b]52;c;' + btoa('http copy payload') + '\x1b\\');
     });
-    // #2658: clipboard details are opt-in; the Terminal mounts no notice.
-    await page.getByTestId('terminal-notices-trigger').click();
-    const notice = page.getByTestId('terminal-clipboard-notice');
-    await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
     await notice.getByRole('button', { name: 'Copy' }).click();
     const result = await page.evaluate(async () => {
       const host = window as unknown as {
