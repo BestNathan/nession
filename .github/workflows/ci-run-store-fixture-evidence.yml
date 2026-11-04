@@ -42,6 +42,7 @@ jobs:
         # preserve its verified report instead of executing the matrix twice.
         env:
           RUN_STORE_CAS_EVIDENCE_OUTPUT: ${{ runner.temp }}/store-fixture-evidence/cas-matrix.json
+          RUN_STORE_AGENT_FIXTURE_EVIDENCE_OUTPUT: ${{ runner.temp }}/store-fixture-evidence/agent-store.json
         run: |
           mkdir -p "$RUNNER_TEMP/store-fixture-evidence"
           ./gates/run agent-checkpoint-store run-store-integrity
@@ -62,6 +63,7 @@ jobs:
             echo "## Disposable encrypted agent-store / CAS proof"
             echo "- Trusted main SHA: $TRUSTED_SHA"
             echo "- Canonical gates: agent-checkpoint-store, run-store-integrity **Pass**"
+            echo "- Source-aligned agent-store CAS outcomes: agent-store.json (encrypted refs, edit/delete denial, authorized pointer advances, stale rejection, no plaintext)"
             echo "- Status: fixture only. Production Ruleset, App identity, external anchor and real agent-store remain Pending"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload finite-retention main SHA Gate evidence
