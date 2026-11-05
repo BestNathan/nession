@@ -19,6 +19,7 @@ try{
   fs.mkdirSync(path.join(root,'src'));
   write('src/calc.js','module.exports = (a, b) => a - b;\n');
   write('src/other.js','const other = true;\n');
+  write('.gitignore','.tmp/\\n');
   git('add','.');
   git('commit','-m','source fixture');
   const sha=git('rev-parse','HEAD');
@@ -74,6 +75,11 @@ try{
   };
   checkInvalid(()=>write('src/other.js','const other = false;\n'),/missing or unbounded|outside approved/);
   checkInvalid(()=>write('src/new.js','untracked\n'),/untracked/);
+  checkInvalid(()=>{
+    fs.mkdirSync(path.join(root,'.tmp'),{recursive:true});
+    write('src/calc.js','module.exports = (a, b) => a + b;\\n');
+    write('.tmp/secret','must never escape the model workspace');
+  },/ignored workspace artifacts/);
   checkInvalid(()=>{
     write('src/calc.js','module.exports = (a, b) => a + b;\n');
     git('add','src/calc.js');
