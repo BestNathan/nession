@@ -24,6 +24,7 @@ import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION,
   isControlledRepairAction} from './development-resume.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
+import {ingestQwenVerifiedCandidate} from './qwen-development-commit.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const FILES=['agents.ndjson','checkpoints.ndjson','runs.ndjson','run_events.ndjson'];
@@ -283,7 +284,7 @@ async function main(){
       !HEX40.test(env.GITHUB_SHA??'')||
       typeof token!=='string'||token.length<8||
       !env.AGENT_STORE_CONTROLLER_REMOTE?.startsWith('https://x-access-token:')||
-      typeof env.STORE_WRITER_PRIVATE_KEY!=='string'||!env.CURSOR_RESUME_PRIVATE_KEY_B64)
+      typeof env.STORE_WRITER_PRIVATE_KEY!=='string')
     fail('independent main-owned Store checkpoint Ingest required');
   const event=JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));
   const authority=resolveTrustedIngestSource({environment:env,event});
@@ -328,6 +329,41 @@ async function main(){
   const result=readJsonFromZip(resultZip,'result.json');
   const proof=readJsonFromZip(resultZip,'proof.json');
   const wrapped=readJsonFromZip(resultZip,'ciphertext.json');
+  // The same canonical source Run, both immutable Artifact ZIP digests and
+  // signed claim are independently read above. A selected registered Qwen
+  // Developer uses the new *trusted* candidate->Store CAS/Outbox path, not the
+  // hard-coded historical #1997 Cursor checkpoint decoder.
+  if(claim.inputs.agent_id==='dev-qwen-01'){
+    if(env.GITHUB_EVENT_NAME!=='workflow_run'||
+        !env.QWEN_RESUME_PRIVATE_KEY_B64)
+      fail('Qwen requires natural main Worker source and dedicated native key');
+    const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
+    const aesKey=deriveStoreAesKey(env.STORE_WRITER_PRIVATE_KEY);
+    try{
+      const resultQwen=await ingestQwenVerifiedCandidate({
+        remote:env.AGENT_STORE_CONTROLLER_REMOTE,
+        registry:JSON.parse(fs.readFileSync(
+          'automation/agents/registry.json','utf8')),
+        run,claim,reader,rootKey,aesKey,
+        privateKeyPem:Buffer.from(env.QWEN_RESUME_PRIVATE_KEY_B64,'base64')
+          .toString('utf8'),
+        result,proof,ciphertext:wrapped,
+      });
+      // Sanitized, independently re-readable Store receipt; no native bytes
+      // or model-generated text are ever logged by the privileged process.
+      console.log(JSON.stringify({schema_version:1,
+        kind:'authenticated_qwen_development_checkpoint_receipt',
+        status:resultQwen.status,issue:resultQwen.issue,
+        action_id:resultQwen.action_id,run_id:run.id,
+        attempt:run.run_attempt,worker_sha:run.head_sha,
+        checkpoint_version:resultQwen.checkpoint.version,
+        checkpoint_commit_sha:resultQwen.checkpoint.commit_sha,
+        ciphertext_sha256:resultQwen.checkpoint.ciphertext_sha256}));
+      return;
+    }finally{rootKey.fill(0);aesKey.fill(0);}
+  }
+  if(!env.CURSOR_RESUME_PRIVATE_KEY_B64)
+    fail('historical Cursor native decrypt key missing');
   const metadata=matchingResult(result,proof,wrapped,claim,run);
   const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   const aesKey=deriveStoreAesKey(env.STORE_WRITER_PRIVATE_KEY);
