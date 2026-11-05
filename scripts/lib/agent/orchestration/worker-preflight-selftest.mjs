@@ -9,6 +9,7 @@ import {startDevelopment,recordDispatchIntent,recordDispatch} from './outbox.mjs
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {authorizeWorkerFromStore} from './worker-preflight.mjs';
+import {bindQwenDeveloper} from './qwen-developer-policy.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
@@ -89,6 +90,58 @@ try{
     /unregistered Worker identity/);
   assert.throws(()=>authorizeWorkerFromStore({...opts,input:{
     ...plan.inputs,resume_from:'bad'}}),/differ from canonical/);
+  // The production trust boundary is provider-neutral: a newly assigned
+  // dev-qwen-01 Action can only be admitted through a signed Controller
+  // ticket + immutable Store write-ahead and independently verified Run ACK.
+  // This does NOT turn on the Cursor-only model-execution workflow.
+  const qIssue=2274,qRunId=33013,qSha='b'.repeat(40);
+  const qState=startDevelopment(registry,{issue:qIssue,sha:qSha,
+    developer:'dev-qwen-01',reviewer:'review-qwen-01',acceptor:'accept-qwen-01'},
+  identity);
+  const qAction=qState.outbox[0];
+  const qDispatch=planGitHubDispatch(qState,qAction.id,registry,signer);
+  const qPrepared=recordDispatchIntent(qState,1,qAction.id,{
+    status:'prepared',dispatch_id:qAction.id,issuer_run_id:902,
+    ticket_sha256:createHash('sha256').update(
+      qDispatch.inputs.dispatch_ticket).digest('hex')});
+  const qAcknowledged=recordDispatch(qPrepared,2,qAction.id,{
+    status:'verified',dispatch_id:qAction.id,source_run_id:qRunId});
+  const qOptions={remote,registry,role:'developer',runId:qRunId,
+    input:qDispatch.inputs};
+  save(1,qState,0);
+  assert.throws(()=>authorizeWorkerFromStore(qOptions),/no exact authenticated/);
+  save(2,qPrepared,1);
+  assert.throws(()=>authorizeWorkerFromStore(qOptions),/no exact authenticated/);
+  save(3,qAcknowledged,2);
+  const qAdmission=authorizeWorkerFromStore(qOptions);
+  assert.equal(qAdmission.agent_id,'dev-qwen-01');
+  assert.equal(qAdmission.provider,'claude-code');
+  assert.equal(qAdmission.environment,'dev-claude-qwen');
+  assert.equal(qAdmission.input_sha,qSha);
+  assert.equal(qAdmission.state_version,3);
+  assert.equal(Object.hasOwn(qAdmission,'resume_from'),false);
+  const qEnvironment={ANTHROPIC_MODEL:'qwen3.7-plus',
+    ANTHROPIC_BASE_URL:'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+    ANTHROPIC_AUTH_TOKEN:'test-secret-never-record'};
+  const qPlan=bindQwenDeveloper(qAdmission,registry,qEnvironment,
+    {cliVersion:'2.1.34'});
+  assert.equal(qPlan.agent_id,qAdmission.agent_id);
+  assert.equal(qPlan.source_sha,qSha);
+  assert.ok(!JSON.stringify(qPlan).includes(qEnvironment.ANTHROPIC_AUTH_TOKEN));
+  assert.throws(()=>bindQwenDeveloper(qAdmission,registry,{
+    ...qEnvironment,ANTHROPIC_MODEL:'claude-sonnet-5'},{
+      cliVersion:'2.1.34'}),/Qwen/);
+  assert.throws(()=>bindQwenDeveloper(qAdmission,registry,{
+    ...qEnvironment,ANTHROPIC_AUTH_TOKEN:''},{cliVersion:'2.1.34'}),
+    /credentials/);
+  assert.throws(()=>authorizeWorkerFromStore({...qOptions,
+    input:{...qDispatch.inputs,agent_id:'dev-cursor-01'}}),
+    /differ from canonical/);
+  assert.throws(()=>authorizeWorkerFromStore({...qOptions,
+    runId:qRunId+1}),/no exact authenticated/);
+  assert.throws(()=>bindQwenDeveloper(allowed,registry,qEnvironment,
+    {cliVersion:'2.1.34'}),/mismatch/);
+  console.log('Qwen Developer signed Store ACK -> provider/Environment/model plan; pre-ACK, impersonation, missing secret, and legacy Cursor substitution rejected');
   console.log('Worker read-only preflight: real Git Store Run/ACK, committed Ticket SHA, registered role and forged/early execution negatives passed');
 }finally{
   signer.key.fill(0);
