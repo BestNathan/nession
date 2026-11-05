@@ -28,7 +28,7 @@
 - Browser: open `index.html` with static HTTP server, test sizes and all fixture flows above. Clicking actions should update in-memory state and never send network calls.
 - Test `title||session_name`, edit/save and Cancel, duplicate tag rejection, offline/conflict non-save, same-name new identity, unsaved-change confirmation, switching screens and keyboard Enter tag creation.
 - Before claiming a live Pages link, read `https://bestnathan.github.io/nession/prototypes/manifest.json` and compare its SHA with the exact `prototype` commit, then actually open the direct HTML.
-- **Evidence status:** standalone JS syntax compiled; 19 deterministic V8 DOM-stub assertions passed on the first revision. A checked-in Node smoke-test reproduces the revised decisions (run it locally before claiming a Node result). Chromium screenshots/click-through, Pages manifest exact-SHA and real integration remain separate unverified evidence. No mock outcome can satisfy production SC-01 to SC-05.
+- **Evidence status:** standalone JS syntax compiled; 21/21 mock-state checks and 7 static/asset assertions passed in an isolated V8 DOM-stub adapter against the checked-in smoke script, with asset readbacks from GitHub. The Node CLI entrypoint itself was not executed in this environment. Chromium screenshots/click-through, Pages manifest exact-SHA and real integration remain separate unverified evidence. No mock outcome can satisfy production SC-01 to SC-05.
 
 ## Source and preview
 - [HTML preview route](https://bestnathan.github.io/nession/prototypes/session-metadata-2789/index.html) — only count as **verified** after live HTTPS + manifest SHA checks.
