@@ -18,12 +18,20 @@ const MAX_SOURCE_FILE=1024*1024;
 function fail(s){throw Error('Qwen Developer source: '+s);}
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 function git(root,...args){
+  // Git global/index/worktree overrides must not redirect the source proof
+  // away from the pinned disposable checkout. The model cannot control Git
+  // config, hooks, process environment or repository index semantics.
+  const env={...process.env,GIT_TERMINAL_PROMPT:'0',
+    GIT_NO_REPLACE_OBJECTS:'1',GIT_CONFIG_NOSYSTEM:'1',
+    GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0'};
+  for(const key of ['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE',
+    'GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_CONFIG_PARAMETERS','GIT_CONFIG_COUNT','GIT_EXTERNAL_DIFF'])
+    delete env[key];
   try{
     return execFileSync('git',['-C',root,...args],{
       encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:15000,
-      maxBuffer:2*1024*1024,
-      env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1',
-        GIT_EXTERNAL_DIFF:'',GIT_CONFIG_NOSYSTEM:'1'},
+      maxBuffer:2*1024*1024,env,
     });
   }catch{fail('exact Git source or bounded patch check failed');}
 }
