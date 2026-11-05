@@ -21,13 +21,13 @@ function blobSha(bytes){
 }
 function git(root,args,options={}){
   try{return execFileSync('git',['-c','core.hooksPath=/dev/null',...args],{
-    cwd:root,encoding:options.input?'buffer':'utf8',
+    cwd:root,encoding:'utf8',
     input:options.input,stdio:['pipe','pipe','pipe'],timeout:30000,
     maxBuffer:3*1024*1024,env:{PATH:process.env.PATH??'/usr/bin:/bin',
       HOME:options.home??root,GIT_CONFIG_NOSYSTEM:'1',
       GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',
       GIT_NO_REPLACE_OBJECTS:'1',GIT_OPTIONAL_LOCKS:'0',LC_ALL:'C'}
-  }).toString().trimEnd();}catch{reject('disposable Git source verification failed');}
+  }).trimEnd();}catch(e){reject('disposable Git '+args[0]+' failed (exit '+(e.status??'unknown')+')');}
 }
 function verifiedSpec(preflight,intent){
   const record=validateQwenPublisherIntent(intent?.record);
