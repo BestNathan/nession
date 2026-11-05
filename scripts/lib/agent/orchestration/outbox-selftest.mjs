@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { startDevelopment,recordDispatch,failedDispatch,acceptTaskResult,
   acceptPublisherPublication,reconcileOutbox,validateDevelopmentState,
-  recordControlledReviewerRecoveryIntent } from './outbox.mjs';
+  recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint } from './outbox.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState,issueStatePath } from './state-store.mjs';
 import { advanceWorkflow } from './transition.mjs';
 
@@ -270,5 +270,67 @@ assert.throws(()=>validateDevelopmentState({...fenced,outbox:[{...fenced.outbox[
   receipt:{...fenced.outbox[0].receipt,reviewer_recovery:{
     ...fenced.outbox[0].receipt.reviewer_recovery,ticket_sha256:'bad'}}}]}),
   /unbound controlled Reviewer recovery/);
+// #1997 real v22 Review→Repair history was published AFTER the Developer
+// Slice chain was pruned. A new task cannot pretend to have a yielded parent.
+const repairAction='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const publishedSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const oldSource='220266b9233ec97b1beacbc54e5cc7f82d3cece2';
+const preRepair={
+  schema_version:1,issue:1997,version:22,phase:'repair',target_sha:publishedSha,
+  repair_attempts:1,
+  transitions:[
+    {kind:'publisher',run_id:39609600546,attempt:1,
+      target_sha:publishedSha,outcome:'published'},
+    {kind:'reviewer',run_id:41962609841,attempt:1,
+      target_sha:publishedSha,outcome:'changes_requested'}],
+  assignments:{developer:'dev-cursor-01',reviewer:'review-qwen-01',
+    acceptor:'accept-cursor-01'},
+  outbox:[{id:repairAction,task:{type:'dispatch',role:'developer',
+    task:'repair',sha:publishedSha,resume:true,agent_id:'dev-cursor-01'},
+    status:'pending',attempts:0,receipt:null}],
+};
+validateDevelopmentState(preRepair);
+const repairProof={verified:true,checkpoint_version:3,
+  checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf',
+  ciphertext_sha256:'7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0',
+  source_sha:oldSource,source_run_id:39448549052};
+const boundRepair=bindVerifiedRepairCheckpoint(preRepair,22,repairAction,repairProof);
+assert.equal(boundRepair.version,23);
+assert.equal(boundRepair.phase,'repair');
+assert.equal(boundRepair.outbox[0].id,repairAction);
+assert.equal(boundRepair.outbox[0].status,'pending');
+assert.equal(boundRepair.outbox[0].task.repair_checkpoint.source_sha,oldSource);
+assert.equal(boundRepair.outbox[0].task.sha,publishedSha);
+assert.deepEqual(bindVerifiedRepairCheckpoint(boundRepair,23,repairAction,repairProof),boundRepair);
+assert.equal(preRepair.version,22);
+assert.equal(preRepair.outbox[0].task.repair_checkpoint,undefined);
+for(const altered of [
+  {...repairProof,verified:false},
+  {...repairProof,source_sha:publishedSha},
+  {...repairProof,source_run_id:0},
+  {...repairProof,checkpoint_version:0},
+  {...repairProof,ciphertext_sha256:'bad'},
+  {...repairProof,checkpoint_commit_sha:'bad'},
+  {...repairProof,extra:true},
+])assert.throws(()=>bindVerifiedRepairCheckpoint(preRepair,22,repairAction,altered));
+for(const altered of [
+  {...preRepair,phase:'quality'},
+  {...preRepair,outbox:[{...preRepair.outbox[0],status:'dispatching'}]},
+  {...preRepair,outbox:[...preRepair.outbox,preRepair.outbox[0]]},
+])assert.throws(()=>bindVerifiedRepairCheckpoint(altered,22,repairAction,repairProof));
+assert.throws(()=>bindVerifiedRepairCheckpoint(preRepair,23,repairAction,repairProof),/stale/);
+assert.throws(()=>bindVerifiedRepairCheckpoint(boundRepair,23,repairAction,
+  {...repairProof,source_run_id:39448549053}),/conflicting Repair checkpoint origin/);
+for(const bad of [
+  {task:{...boundRepair.outbox[0].task,repair_checkpoint:{
+    ...boundRepair.outbox[0].task.repair_checkpoint,source_sha:publishedSha}}},
+  {task:{...boundRepair.outbox[0].task,repair_checkpoint:{
+    ...boundRepair.outbox[0].task.repair_checkpoint,source_run_id:0}}},
+  {task:{...boundRepair.outbox[0].task,task:'implement'}},
+]){
+  assert.throws(()=>validateDevelopmentState({...boundRepair,
+    outbox:[{...boundRepair.outbox[0],...bad}]}),
+    /invalid cross-phase Repair checkpoint/);
+}
 validateDevelopmentState(state);
 console.log('agent Issue outbox: durable CAS, trusted result transitions and replay fixtures passed');
