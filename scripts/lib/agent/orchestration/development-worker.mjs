@@ -224,12 +224,36 @@ async function main(){
       JSON.stringify({number:1997,body:issue.body,recent_comments:recent});
     // SDK confines available native tools to read, grep and edit (no shell);
     // settingSources=[] forbids ambient project configuration injection.
+    // Cursor SDK file discovery requires ripgrep inside the *same* isolated
+    // container, not merely on the trusted Actions runner. A missing or
+    // unusable binary is a pre-model error, never a reason to drop evidence.
+    let ripgrep;
+    try{
+      ripgrep=execFileSync('rg',['--version'],{
+        encoding:'utf8',timeout:5000,stdio:['ignore','pipe','ignore'],
+      }).split('\n')[0];
+    }catch{fail('isolated Cursor SDK ripgrep runtime unavailable before Provider call');}
+    if(!/^ripgrep [0-9]+\.[0-9]+\.[0-9]+/.test(ripgrep))
+      fail('unrecognized isolated Cursor SDK ripgrep binary');
+    console.log('Cursor SDK local file-search runtime verified: '+ripgrep);
     const {result,meta}=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
       tools:['read','grep','edit'],sandbox:false,prompt,
       resumeAgentId:resuming?'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6':null,
     });
+    // Only bounded status/tool *metadata* is logged. Never emit model text,
+    // prompts, tool arguments, native JSONL or credentials on error.
+    console.log('Developer Provider outcome metadata '+JSON.stringify({
+      result_status:typeof result?.status==='string'?result.status:null,
+      agent_status:typeof meta?.status==='string'?meta.status:null,
+      native_resumed:meta?.resumed===true,
+      turns:Number.isSafeInteger(meta?.turns)?meta.turns:null,
+      observed_tools:Array.isArray(meta?.tool_calls)?
+        meta.tool_calls.filter(x=>typeof x==='string').slice(0,16):[],
+      available_tools:Array.isArray(meta?.available_tools)?
+        meta.available_tools.filter(x=>typeof x==='string').slice(0,16):[],
+    }));
     if(result?.status!=='finished'||meta.status!=='finished'||
         !/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??'')||
         !meta.tool_calls.some(x=>String(x).toLowerCase().includes('read'))||
