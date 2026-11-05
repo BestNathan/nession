@@ -52,3 +52,14 @@ Implementing new runtime key APIs, general keyboard protocol negotiation, OSC/cl
 - Owning issue: https://github.com/BestNathan/nession/issues/2710
 - Pages preview (verified live): https://bestnathan.github.io/nession/prototypes/terminal-keys-commands-2710/index.html
 - Source: https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710
+
+### Product-source fidelity review: App header and shortcut glyphs
+
+This revision compared the mock directly with current `web/src/app/patterns/SessionHeader.tsx`, `web/src/app/experiences/app/AppLayout.tsx`, `web/src/app/experiences/app/appTypography.ts` and `web/src/product/terminal/capsule/physKeys.ts`:
+
+- Correct the Session title to use the **App title role** (generated `--nession-typography-title-*`), instead of a hand-written 14px approximation.
+- Restore the real App's right-hand **Workspace destination** icon and centered header status spacer; the mock gives the destination a minimal returnable empty layer only, **not** a complete Workspace model.
+- Match production QuickChord labels `⌃C` / `⌃R` / `⌃L` and preserve accessible `Ctrl+C` / `Ctrl+R` / `Ctrl+L` names.
+
+This closes those three source-observable differences; it does **not** claim production pixel equivalence, interactive xterm correctness, or that the Workspace mock is complete. Browser/fixture overlay comparison remains necessary.
+

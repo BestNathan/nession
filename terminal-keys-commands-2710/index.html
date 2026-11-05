@@ -183,6 +183,16 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 .panel-body.keys-body .mod{flex:1;min-width:0;max-width:none}
 .panel-body.keys-body .arrows{display:grid;grid-template-columns:repeat(4,var(--nession-terminal-capsule-phys-key-arrow-width));width:auto;flex:0 0 auto;gap:2px}
 .panel-body.keys-body .arrow{width:var(--nession-terminal-capsule-phys-key-arrow-width);min-width:var(--nession-terminal-capsule-phys-key-arrow-width);height:var(--nession-control-md)}
+/* App Session header parity with SessionHeader.tsx (title, status spacer, Workspace action). */
+.topbar .sess{flex:0 1 auto}
+.topbar .sess strong{font-size:var(--nession-typography-title-size);font-weight:var(--nession-typography-title-weight)}
+.topbar .session-header-status{display:flex;flex:1;min-width:0}
+.topbar .workspace-nav{width:var(--nession-control-md);height:var(--nession-control-md);flex:0 0 var(--nession-control-md);display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--nession-radius-control);background:transparent;color:var(--nession-foreground)}
+.workspace-mock-view{position:absolute;inset:0;z-index:8;background:var(--nession-background);display:flex;flex-direction:column}
+.workspace-mock-header{display:flex;min-height:52px;align-items:center;gap:8px;padding:4px var(--nession-shell-space-3)}
+.workspace-mock-header button{border:0;background:transparent;width:var(--nession-control-md);height:var(--nession-control-md);color:var(--nession-foreground);font-size:22px;border-radius:var(--nession-radius-control)}
+.workspace-mock-header h2{margin:0;font-size:var(--nession-typography-title-size);font-weight:var(--nession-typography-title-weight)}
+.workspace-mock-body{flex:1;min-height:0;background:var(--nession-background)}
 </style>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 </head>
@@ -218,7 +228,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   </div>
   <div class="np-stage">
 <div class="phone np-device" data-np-device data-experience="app" style="--np-device-height:844px">
-  <header class="topbar"><button class="back" id="sessions" type="button" aria-label="Sessions" aria-expanded="false">☰</button><div class="sess"><strong>dev-session</strong></div></header>
+  <header class="topbar"><button class="back" id="sessions" type="button" aria-label="Sessions" aria-expanded="false">☰</button><div class="sess"><strong>dev-session</strong></div><div class="session-header-status" aria-hidden="true"></div><button id="workspace" class="workspace-nav" type="button" aria-label="Workspace" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></button></header>
   <div class="terminal" id="terminal" role="region" aria-label="Terminal">
     <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
@@ -234,6 +244,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
     </div>
   </div>
   <section class="sessions-view" id="sessions-view" hidden aria-label="Sessions"><h2>Sessions</h2><button type="button" id="current-session">dev-session · Current</button></section>
+  <section class="workspace-mock-view" id="workspace-view" hidden aria-label="Workspace"><header class="workspace-mock-header"><button type="button" id="workspace-return" aria-label="Return to Terminal">‹</button><h2>Workspace</h2></header><div class="workspace-mock-body"></div></section>
 </div>
   </div>
   <p class="np-stage-label" data-np-current-size>390 CSS px · 1:1</p>
@@ -285,7 +296,17 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   const intent=document.getElementById("intent");
   const plus=document.getElementById("plus");
   const sessions=document.getElementById("sessions"), sessionsView=document.getElementById("sessions-view");
-  sessions.addEventListener("click",()=>{ const opening=sessionsView.hidden;sessionsView.hidden=!opening;sessions.setAttribute("aria-expanded",String(opening));if(opening)open(""); });
+  const workspaceButton=document.getElementById("workspace"), workspaceView=document.getElementById("workspace-view");
+  function closeWorkspace(){workspaceView.hidden=true;workspaceButton.setAttribute("aria-expanded","false");}
+  workspaceButton.addEventListener("click",()=>{
+    sessionsView.hidden=true;sessions.setAttribute("aria-expanded","false");
+    const expanded=workspaceView.hidden;workspaceView.hidden=!expanded;
+    workspaceButton.setAttribute("aria-expanded",String(expanded));
+    if(expanded)open("");
+  });
+  document.getElementById("workspace-return").addEventListener("click",closeWorkspace);
+
+  sessions.addEventListener("click",()=>{ closeWorkspace();const opening=sessionsView.hidden;sessionsView.hidden=!opening;sessions.setAttribute("aria-expanded",String(opening));if(opening)open(""); });
   document.getElementById("current-session").addEventListener("click",()=>{sessionsView.hidden=true;sessions.setAttribute("aria-expanded","false");});
 
 
@@ -425,7 +446,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
       const code=modifier ? '<div class="chord-row"><span class="chord-label">'+modifier+' +</span><div class="letters" aria-label="Letter selector, swipe to find a letter">'+
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(x=>'<button class="letter" type="button" data-letter="'+x+'" aria-label="'+modifier+' plus '+x+'">'+x+'</button>').join("")+
         '</div><button type="button" class="cancel" data-act="cancel">Cancel</button></div>'
-        :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C">⌃ C</button><button class="quickkey" data-chord="Ctrl+R">⌃ R</button><button class="quickkey" data-chord="Ctrl+L">⌃ L</button></div>';
+        :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C" aria-label="Ctrl+C">⌃C</button><button class="quickkey" data-chord="Ctrl+R" aria-label="Ctrl+R">⌃R</button><button class="quickkey" data-chord="Ctrl+L" aria-label="Ctrl+L">⌃L</button></div>';
       body='<div class="panel-body keys-body">'+
         '<div><div class="caption">'+(modifier?"":"Common shortcuts")+'</div>'+code+'</div>'+
         '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
