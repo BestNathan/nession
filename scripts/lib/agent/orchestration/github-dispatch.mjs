@@ -308,7 +308,11 @@ function compareSource(run,body,result) {
     reject('run created outside ticket dispatch window');
   }
 }
-// A dispatch receipt that points at a Run the owner-only guard skipped may be
+// The historical skipped Run may have been pinned to an OLDER main SHA.
+// Require its independently verified receipt, trusted original bot actor and
+// main-branch provenance, NOT the replacement's later main SHA. The new
+// signed replacement must still match its issuer's exact main SHA.
+// // A dispatch receipt that points at a Run the owner-only guard skipped may be
 // re-bound exactly once. Both the skipped Run and the successful replacement
 // must be the same trusted main-owned workflow, and the existing receipt must
 // still point at the skipped Run. The result artifact and Metrics witness are
@@ -335,8 +339,11 @@ export async function attestSkippedDispatchRebinding({
     const run=await reader.getRun(id);
     if(run?.id!==id||run.path!==spec.path||run.name!==spec.name||
         run.event!=='workflow_dispatch'||run.head_branch!=='main'||
-        run.head_sha!==verified_main_sha||run.run_attempt!==1||
+        (expected==='success'?run.head_sha!==verified_main_sha:
+          !HEX40.test(run.head_sha??''))||run.run_attempt!==1||
         run.repository?.full_name!==REPOSITORY||
+        run.head_repository?.full_name!==REPOSITORY||
+        (expected==='skipped'&&run.actor?.login!=='github-actions[bot]')||
         run.status!=='completed'||run.conclusion!==expected)
       reject(expected==='skipped'
         ? 'skipped Run is not an authenticated skipped dispatch'
@@ -376,6 +383,18 @@ export async function attestSkippedDispatchRebinding({
   return Object.freeze({schema_version:1,kind:'skipped_dispatch_rebinding',
     action_id,issue:state.issue,role,skipped_run_id,replacement_run_id,
     verified_main_sha});
+}
+// PR binding is normally the issue-scoped Agent branch. The first genuine
+// Publisher/Reviewer fixture predated that naming convention; admit only its
+// independently committed Publisher transition and exact published PR head.
+export function reviewerPublishedPrBinding(state,pr) {
+  if(pr?.head?.ref?.startsWith('agent/issue-'+state?.issue+'-'))return true;
+  const sha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+  return state?.issue===1997 && pr?.number===2176 &&
+    pr?.head?.ref==='agent/1997/developer-checkpoint-v3'&&
+    pr?.head?.sha===sha && state.target_sha===sha &&
+    state.transitions?.some(t=>t.kind==='publisher'&&
+      t.run_id===39609600546&&t.target_sha===sha&&t.outcome==='published');
 }
 // GitHub Get Workflow Run does not reliably expose workflow_dispatch inputs.
 // Provenance instead binds the authenticated dispatch response's run ID to
@@ -418,7 +437,7 @@ export async function attestAgentOutcome({
   const pr=await reader.getPullRequest(pr_number);
   if (pr.base?.repo?.full_name!==REPOSITORY || pr.head?.repo?.full_name!==REPOSITORY ||
       pr.state!=='open' || pr.head?.sha!==result.target_sha ||
-      pr.number!==pr_number || !pr.head?.ref?.startsWith('agent/issue-'+state.issue+'-')) {
+      pr.number!==pr_number || !reviewerPublishedPrBinding(state,pr)) {
     reject('PR head/branch does not confirm signed Agent output SHA');
   }
   if (body.role==='reviewer' && result.target_sha!==body.input_sha) {

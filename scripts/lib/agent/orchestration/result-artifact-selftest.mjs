@@ -309,8 +309,9 @@ const skippedState=recordDispatch(reviewReady,reviewReady.version,realReviewActi
   status:'verified',dispatch_id:realReviewAction.id,source_run_id:334});
 const replacementRun={...worker,id:335,
   path:'.github/workflows/agent-review.yml',name:'Agent / Review',
-  actor:{login:'BestNathan'}};
-const skippedRun={...replacementRun,id:334,conclusion:'skipped'};
+  head_repository:{full_name:repo},actor:{login:'BestNathan'}};
+const skippedRun={...replacementRun,id:334,conclusion:'skipped',
+  head_sha:'d'.repeat(40),actor:{login:'github-actions[bot]'}};
 const rebindRuns=new Map([[222,issuer],[334,skippedRun],[335,replacementRun]]);
 const rebindReader={
   getRun:async id=>structuredClone(rebindRuns.get(id)),
@@ -382,6 +383,11 @@ const notSkipped=new Map(rebindRuns);
 notSkipped.set(334,{...skippedRun,conclusion:'success'});
 await assert.rejects(()=>attestSkippedDispatchRebinding({...rebindRequest,
   reader:{...rebindReader,getRun:async id=>structuredClone(notSkipped.get(id))}}),
+  /skipped Run is not an authenticated skipped dispatch/);
+const hostileSkip=new Map(rebindRuns);
+hostileSkip.set(334,{...skippedRun,actor:{login:'untrusted'}});
+await assert.rejects(()=>attestSkippedDispatchRebinding({...rebindRequest,
+  reader:{...rebindReader,getRun:async id=>structuredClone(hostileSkip.get(id))}}),
   /skipped Run is not an authenticated skipped dispatch/);
 const wrongMain=new Map(rebindRuns);
 wrongMain.set(335,{...replacementRun,head_sha:'d'.repeat(40)});
