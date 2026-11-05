@@ -58,7 +58,7 @@ test('structured review frame uses its own top navigation with pinned source, no
     const framed = '<!doctype html><html><head><title>Review</title></head>' +
       '<body data-nession-prototype-frame="v1">' +
       '<header><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a>' +
-      '<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">View source</a></header>' +
+      '<a data-nession-source-link class="source" href="https://github.com/BestNathan/nession/tree/prototype">View source</a></header>' +
       '<main>1:1 interactive preview</main><section>Design notes</section></body></html>';
     const path = join(source, 'terminal-fixed-cols-2487', 'index.html');
     await writeFile(path, framed);

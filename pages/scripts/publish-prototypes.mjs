@@ -41,7 +41,7 @@ function decoratedHtml(html, sha, path) {
   // Legacy mocks keep the floating footer as a compatibility fallback.
   if (/<body\b[^>]*\bdata-nession-prototype-frame="v1"[^>]*>/i.test(html)) {
     const galleryLink = /<a\s+data-nession-gallery-link\s+href="\.\.\/\.\.\/#\/prototypes"[^>]*>/gi;
-    const sourceLink = /<a\s+data-nession-source-link\s+href="[^"]*"[^>]*>/gi;
+    const sourceLink = /<a\b(?=[^>]*\bdata-nession-source-link(?:\s|>))(?=[^>]*\bhref="[^"]*")[^>]*>/gi;
     const galleries = [...html.matchAll(galleryLink)];
     const sources = [...html.matchAll(sourceLink)];
     if (galleries.length !== 1 || sources.length !== 1) {
