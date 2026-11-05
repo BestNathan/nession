@@ -14,6 +14,7 @@ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
   NESSION_DEVELOPER_ISOLATED:'docker-v1',GITHUB_WORKSPACE:'/workspace',
   RUNNER_TEMP:'/tmp'};
 assert.equal(qwenWorkerAuthority(admission,env).agent_id,'dev-qwen-01');
+assert.equal(qwenWorkerAuthority({...admission,issue:1998},env).issue,1998);
 const issue={number:2274,state:'open',title:'Fix tracked application source',
   body:'Accept a bounded patch after reading code'};
 const prompt=qwenDeveloperPrompt(issue,admission);
@@ -34,7 +35,7 @@ for(const extra of [
     /isolated Qwen Developer|Qwen Developer evidence/);
 }
 for(const change of [
-  {authorized:false},{issue:1997},{run_id:55502},
+  {authorized:false},{issue:0},{run_id:55502},
   {agent_id:'dev-cursor-01'},{provider:'cursor'},
   {environment:'deepseek'},{task:'review'},{input_sha:'invalid'},
 ])
