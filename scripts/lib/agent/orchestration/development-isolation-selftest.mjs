@@ -40,6 +40,16 @@ const dockerfile=fs.readFileSync(
 assert.match(dockerfile,/^FROM node:24-bookworm$/m);
 assert.match(dockerfile,/apt-get install -y --no-install-recommends ripgrep/);
 assert.doesNotMatch(dockerfile,/^(?:COPY|ADD|ARG|ENV|RUN .*curl|RUN .*wget)\b/m);
+const worker=fs.readFileSync(
+  'scripts/lib/agent/orchestration/development-worker.mjs','utf8');
+const preflight=worker.indexOf("execFileSync('rg',['--version']");
+const providerCall=worker.indexOf('await runCursorSession({');
+const reported=worker.indexOf('Developer Provider outcome metadata');
+const evidence=worker.indexOf("fail('real native read/edit Provider outcome missing')");
+assert.ok(preflight>0&&providerCall>preflight&&reported>providerCall&&
+  evidence>reported,'ripgrep preflight and safe status diagnostics must bracket the model call');
+assert.match(worker,/isolated Cursor SDK ripgrep runtime unavailable before Provider call/);
+assert.doesNotMatch(worker.slice(reported,evidence),/result\.result|\.prompt|\.content|\.text/);
 assert.equal(safe(block),true);
 for(const flag of ['--read-only','--cap-drop=ALL','-e CURSOR_SDK_ROOT=/sdk',
   '-v "$GITHUB_WORKSPACE:/trusted-code:ro"','-e NESSION_DEVELOPER_ISOLATED=docker-v1'])
