@@ -295,7 +295,7 @@ jobs:
             -e CURSOR_MODEL_FAST -e CURSOR_RESUME_PUBLIC_KEY_B64 \
             -e CURSOR_SDK_VERSION \
             -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
-            -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
+            -e CURSOR_SDK_ROOT=/sdk -e CURSOR_RIPGREP_PATH=/usr/bin/rg -e HOME=/tmp \
             nession-cursor-worker-rg:local \
             node scripts/lib/agent/orchestration/development-worker.mjs \
               /admission.json /output
