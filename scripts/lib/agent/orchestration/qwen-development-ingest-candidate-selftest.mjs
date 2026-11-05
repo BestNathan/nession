@@ -118,6 +118,16 @@ try {
     for(const change of denies)
       assert.throws(()=>validateQwenDevelopmentCandidate({...opts,...change}),
         /trusted Qwen Developer candidate/);
+    // The Store's outer AES checkpoint has a 16 MiB bound; a valid inner
+    // RSA envelope must not consume that budget before re-wrapping.
+    const big=Buffer.alloc(10*1024*1024+1,0x41);
+    const bigHash=createHash('sha256').update(big).digest('hex');
+    assert.throws(()=>validateQwenDevelopmentCandidate({
+      ...opts,ciphertext:{...candidate.ciphertext,
+        ciphertext:big.toString('base64'),ciphertext_sha256:bigHash},
+      result:{...candidate.result,ciphertext_sha256:bigHash},
+      proof:{...candidate.proof,ciphertext_sha256:bigHash},
+    }),/invalid encrypted native Session bytes/);
     // Matching JSON hashes are insufficient if the Git patch header actually
     // targets a path different from the separately attested file manifest.
     const otherPatch=patch.patch.replace(
