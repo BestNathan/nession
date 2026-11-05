@@ -120,7 +120,8 @@ export async function ingestQwenVerifiedCandidate({
 }){
   if(!Buffer.isBuffer(rootKey)||rootKey.length!==32||
       !Buffer.isBuffer(aesKey)||aesKey.length!==32||
-      !remote?.startsWith('https://x-access-token:')||
+      !(remote?.startsWith('https://x-access-token:')||
+        (process.env.NODE_ENV==='test'&&path.isAbsolute(remote)))||
       typeof privateKeyPem!=='string'||privateKeyPem.length<100)
     fail('missing isolated trusted Store and native decryption authority');
   const authenticated=await verifyWorkerClaimForAck({
