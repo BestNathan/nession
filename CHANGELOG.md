@@ -218,3 +218,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Cross-link the new #2724 App navigation/touch ownership article from the terminal engine and component ownership article
 - Source: https://github.com/BestNathan/nession/issues/2724
+
+## 2026-11-05T03:50:00Z | update | App mobile spatial navigation and Terminal touch ownership
+- Path: topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md
+- Topic: app
+- Categories: app, interaction, navigation, ownership, terminal, touch
+- Reason: Repoint the exact-commit sources at the clean staging-based PR head 1b12f778 after the branch was recreated from staging to remove unrelated main history; content unchanged
+- Source: https://github.com/BestNathan/nession/issues/2724

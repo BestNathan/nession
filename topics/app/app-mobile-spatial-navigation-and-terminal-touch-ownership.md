@@ -5,8 +5,8 @@ topic: app
 categories: ["app","interaction","navigation","ownership","terminal","touch"]
 status: candidate
 created_at: 2026-11-05T03:28:50Z
-updated_at: 2026-11-05T03:28:50Z
-sources: ["https://github.com/BestNathan/nession/issues/2724","https://github.com/BestNathan/nession/pull/2753","https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/docs/design/interaction/app.md","https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/web/src/app/experiences/app/gesture.ts","https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/web/src/app/experiences/app/swipeGesture.ts","https://github.com/BestNathan/nession/blob/3ba12b8de09e7d608501c14797e505082dcc8a13/mobile-swipe-2724/index.html"]
+updated_at: 2026-11-05T03:50:00Z
+sources: ["https://github.com/BestNathan/nession/issues/2724","https://github.com/BestNathan/nession/pull/2753","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/docs/design/interaction/app.md","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/gesture.ts","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/swipeGesture.ts","https://github.com/BestNathan/nession/blob/3ba12b8de09e7d608501c14797e505082dcc8a13/mobile-swipe-2724/index.html"]
 ---
 
 # App mobile spatial navigation and Terminal touch ownership
@@ -85,12 +85,12 @@ Session, or drops a pushed Workspace depth.
 
 Owned by [Requirement #2724](https://github.com/BestNathan/nession/issues/2724)
 and implemented in
-[`gesture.ts`](https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/web/src/app/experiences/app/gesture.ts)
-(constants), [`swipeGesture.ts`](https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/web/src/app/experiences/app/swipeGesture.ts)
+[`gesture.ts`](https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/gesture.ts)
+(constants), [`swipeGesture.ts`](https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/swipeGesture.ts)
 (pure state machine), `swipeTouchBinding.ts` (native listeners),
 `useSwipeSettle.ts` (release animation) and `useSwipePager.ts` (React state).
 The product contract is
-[`docs/design/interaction/app.md`](https://github.com/BestNathan/nession/blob/da808a966b6f6d35a9dcbcc301ad1e740f8e3a72/docs/design/interaction/app.md).
+[`docs/design/interaction/app.md`](https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/docs/design/interaction/app.md).
 The interaction was shaped by the approved
 [mobile prototype](https://github.com/BestNathan/nession/blob/3ba12b8de09e7d608501c14797e505082dcc8a13/mobile-swipe-2724/index.html)
 on the shared `prototype` branch.
