@@ -9,9 +9,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CONTROLLED_ORIGINAL_PUBLICATION as P,
   verifyControlledOriginalPublication } from './publication-readback.mjs';
-import { CONTROLLED_PUBLISHER_INTENT_PATH } from './store-intent.mjs';
+import { CONTROLLED_PUBLISHER_INTENT_PATH, validateQwenPublisherIntent,
+  qwenPublisherIntentPath } from './store-intent.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState } from '../orchestration/state-store.mjs';
-import { acceptPublisherPublication } from '../orchestration/outbox.mjs';
+import { acceptPublisherPublication, acceptAttestedQwenPublication }
+  from '../orchestration/outbox.mjs';
 import { githubFetcher } from '../github-read.mjs';
 import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
 import { publish } from '../../../run-store-cas-push.mjs';
@@ -225,4 +227,99 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     console.error('::error::' + error.message);
     process.exitCode = 1;
   });
+}
+
+// The Qwen publication runs from the same canonical Store/Outbox owners as
+// the historical #1997 Publisher, but its source was a DISPATCHED Worker
+// (not a fabricated yielded continuation). The main-only caller must fetch
+// readback using readBackQwenPublishedPR immediately before this transition.
+export function applyQwenPublisherReviewHandoff({
+  storeRoot,readback,intent,registry,
+}){
+  const record=validateQwenPublisherIntent(intent?.record);
+  if(!readback||readback.schema_version!==1||
+      readback.kind!=='authenticated_qwen_publisher_pr_receipt'||
+      readback.status!=='published_verified_by_github'||
+      readback.issue!==record.issue||
+      readback.action_id!==record.action_id||
+      readback.source_run_id!==record.worker_run_id||
+      readback.source_run_attempt!==1||
+      readback.publisher_run_id!==record.publisher_run_id||
+      readback.publication_intent_store_sha!==intent.store_commit_sha||
+      readback.checkpoint_commit_sha!==record.checkpoint_commit_sha||
+      readback.target_main_sha!==record.target_main_sha||
+      readback.patch_sha256!==record.patch_sha256||
+      readback.branch!==record.branch||
+      !Number.isSafeInteger(readback.pull_request)||
+      readback.pull_request<1||!SHA.test(readback.head_sha??'')||
+      readback.head_sha===record.source_sha||
+      !Array.isArray(readback.files)||
+      readback.files.length!==record.file_count)
+    fail('Qwen handoff has no independently verified GitHub PR/source');
+  const location=qwenPublisherIntentPath(record);
+  const full=path.join(storeRoot,location);
+  const stat=fs.lstatSync(full,{throwIfNoEntry:false});
+  if(!stat?.isFile()||stat.isSymbolicLink()||stat.size>8192)
+    fail('unreadable immutable Qwen Publisher Intent');
+  let saved;
+  try{saved=JSON.parse(fs.readFileSync(full,'utf8'));}
+  catch{fail('invalid Qwen Publisher Intent in Store');}
+  if(JSON.stringify(saved)!==JSON.stringify(record))
+    fail('Publisher Qwen Intent differs from committed Store record');
+  const ancestors=git(storeRoot,['merge-base','--is-ancestor',
+    intent.store_commit_sha,'HEAD']);
+  if(ancestors!==''||!SHA.test(intent.store_commit_sha??''))
+    fail('Publisher Qwen Intent was not committed in ancestor Store');
+  const current=readIssueWorkflowState(storeRoot,record.issue);
+  if(!current.state)fail('Qwen Issue workflow State missing');
+  const event={kind:'publisher',issue:record.issue,outcome:'published',
+    run_id:record.publisher_run_id,run_attempt:1,
+    target_sha:readback.head_sha};
+  const trusted={role:'publisher',workflow_run_id:record.publisher_run_id,
+    attempt:1,issue:record.issue,source_sha:readback.head_sha,
+    developer_action_id:record.action_id,
+    developer_run_id:record.worker_run_id,developer_attempt:1,
+    developer_source_sha:record.source_sha,
+    checkpoint_commit_sha:record.checkpoint_commit_sha,
+    pr_number:readback.pull_request};
+  const next=acceptAttestedQwenPublication(
+    current.state,current.version,event,trusted,registry);
+  if(next===current.state){
+    return {changed:false,version:current.version,issue:record.issue,
+      target_sha:current.state.target_sha};
+  }
+  const written=writeIssueWorkflowState(storeRoot,next,current.version);
+  const reviewer=next.outbox.filter(x=>x.status==='pending'&&
+    x.task?.type==='dispatch'&&x.task?.role==='reviewer');
+  if(reviewer.length!==1)fail('Qwen Publisher must produce exactly one Reviewer');
+  return {changed:written.changed,version:written.version,issue:record.issue,
+    target_sha:next.target_sha,reviewer_action_id:reviewer[0].id,
+    reviewer_agent_id:reviewer[0].task.agent_id};
+}
+export function applyQwenPublicationToRemote({remote,readback,intent,registry,
+  publishStore=publish,onCandidate=null}){
+  if(typeof remote!=='string'||!remote||
+      (process.env.NODE_ENV!=='test'&&
+       !remote.startsWith('https://x-access-token:')))
+    fail('separately scoped trusted Qwen Store writer required');
+  const {temp,work}=openStoreRemote(remote);
+  try{
+    const applied=applyQwenPublisherReviewHandoff({
+      storeRoot:work,readback,intent,registry});
+    if(!applied.changed)return {...applied,replayed:true,commit_sha:null};
+    git(work,['add','-A']);
+    if(auditStagedRunStore(work,STORE_REF).checked_changes!==2)
+      fail('Qwen Publisher must CAS only workflow state and head');
+    git(work,['-c','user.name=nession-agent-controller',
+      '-c','user.email=nession-agent-controller@users.noreply.github.com',
+      'commit','-m','agent-store: Qwen Publisher Review handoff Issue '+
+        applied.issue]);
+    if(onCandidate!==null){
+      if(process.env.NODE_ENV!=='test')fail('test injection outside fixture');
+      onCandidate();
+    }
+    const committed=publishStore(STORE_REF,work,4);
+    return {...applied,replayed:committed.replayed,
+      commit_sha:committed.commit_sha};
+  }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
