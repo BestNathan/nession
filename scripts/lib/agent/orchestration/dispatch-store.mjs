@@ -11,7 +11,8 @@ import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './s
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
-  acceptTaskResult} from './outbox.mjs';
+  acceptTaskResult,recordAttestedRepairRuntimeFailure,
+  repairRuntimeSuccessorId} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
@@ -154,6 +155,54 @@ export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr})
       state_version:next.version,store_commit_sha:pushed.commit_sha,
       reviewer_action_id:next.outbox.find(x=>
         x.status==='pending'&&x.task.role==='reviewer').id};
+  });
+}
+
+// One bounded, source-authenticated recovery for historical failed
+// no-result published-PR Repair. Never POST the old Action: it may have
+// consumed model tokens but cannot have committed a Store result or PR edit.
+export function recoverAttestedRepairRuntimeFailure({remote,source}){
+  if(source?.verified!==true||source.issue!==1997||
+     source.run_id!==42020432271||source.attempt!==1||
+     source.failure_code!=='cursor_native_read_missing_uncommitted')
+    fail('untrusted historical Repair failure source');
+  const issue=1997;
+  const oldId='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+  const nextId=repairRuntimeSuccessorId(issue,oldId,source.run_id);
+  return withStore(remote,dir=>{
+    const read=readIssueWorkflowState(dir,issue);
+    if(!read.state)fail('missing authenticated Repair Store State');
+    const old=read.state.outbox.find(x=>x.id===oldId);
+    if(old?.status==='failed'){
+      const next=read.state.outbox.find(x=>x.id===nextId);
+      if(old.receipt?.failure_code!==source.failure_code||
+         old.receipt?.source_run_id!==source.run_id||
+         !next||next.task.role!=='developer'||
+         next.task.task!=='repair'||
+         next.task.agent_id!=='dev-cursor-01'||
+         next.task.repair_checkpoint?.checkpoint_version!==3||
+         !['pending','dispatching','dispatched'].includes(next.status))
+        fail('conflicting historical Repair failure replay');
+      return {status:'replayed',issue,action_id:nextId,
+        state_version:read.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(read.version!==25||old?.status!=='dispatched'||
+       old.receipt?.source_run_id!==source.run_id||
+       old.task?.repair_checkpoint?.checkpoint_version!==3)
+      fail('historical Repair Run/State changed or not complete');
+    const cp=path.join(dir,'roles/developer/dev-cursor-01/issues/1997/head.json');
+    let cpHead;
+    try{cpHead=JSON.parse(fs.readFileSync(cp,'utf8'));}
+    catch{fail('missing original Developer checkpoint head');}
+    if(cpHead.version!==3||
+       cpHead.ciphertext_sha256!=='7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0')
+      fail('native cursor Checkpoint already moved or changed');
+    const next=recordAttestedRepairRuntimeFailure(
+      read.state,read.version,oldId,source);
+    const pushed=persist(dir,next,read.version,issue);
+    if(pushed.replayed)fail('unexpected first Repair recovery CAS replay');
+    return {status:'recovered',issue,action_id:nextId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
   });
 }
 
