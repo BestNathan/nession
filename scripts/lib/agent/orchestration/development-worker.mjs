@@ -11,7 +11,8 @@ import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
 import {cursorModel} from '../providers/model-selection.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest,
-  CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
+  CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+  CONTROLLED_REPAIR_RETRY_ACTION,isControlledRepairAction} from './development-resume.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
@@ -42,12 +43,13 @@ function readAdmission(file){
         nativeResumeSuccessorId(1997,
           '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',39376331942),
         CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+        CONTROLLED_REPAIR_RETRY_ACTION,
       ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||
       (a.task==='repair'?
-        a.action_id!==CONTROLLED_REPAIR_ACTION||
+        !isControlledRepairAction(a.action_id)||
           a.input_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4':
-        a.action_id===CONTROLLED_REPAIR_ACTION||
+        isControlledRepairAction(a.action_id)||
           a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2')||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||
       process.env.GITHUB_REPOSITORY!==REPO||
