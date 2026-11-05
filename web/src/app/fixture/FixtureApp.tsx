@@ -61,8 +61,11 @@ export function FixtureApp() {
   // and until #838 the capsule did not render here at all. This stub is what
   // lets a Peek draw real content offline; installed for the route's lifetime
   // and released on unmount. Nothing emerges by default, so the canonical
-  // screenshots are unaffected unless a case opens one.
-  useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+  // screenshots are unaffected unless a case opens one. The scenario is the
+  // route's input, so it is read here too: this install is the last one for
+  // the route and therefore the surface the Git capability actually talks to
+  // (#2787's controlled overlap needs it).
+  useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
   // The conversation stub, one layer down and for the same reason (#1128).
   // Claude Code's Workspace draws a conversation, and the fixture advertised no

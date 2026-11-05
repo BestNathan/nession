@@ -41,8 +41,10 @@ export function FixtureShell() {
   // Installed for the route's lifetime and released on unmount. Nothing
   // emerges by default, so the canonical screenshots are unaffected unless a
   // case opens one — the entry itself already renders here, because Terminal
-  // Keys earns disclosure without a stub.
-  useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+  // Keys earns disclosure without a stub. Carrying the route's scenario keeps
+  // this install equivalent to the fixture App's when it is the one that
+  // remains bound (#2787).
+  useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
   const selectedId = FIXTURE_SELECTED_ID;
   const paneCommand = fixturePaneCommand(search);
