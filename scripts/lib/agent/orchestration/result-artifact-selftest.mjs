@@ -58,7 +58,6 @@ const action=reconcileOutbox(state).pending[0];
 const key=Buffer.alloc(32,0x76),keyring={'key-v1':key};
 const {ticket}=issueDispatchTicket(state,action.id,registry,{
   key,key_id:'key-v1',issuer_run_id:222,now,ttl_ms:600000});
-const beforeDispatch=state;
 state=recordDispatch(state,state.version,action.id,{
   status:'verified',dispatch_id:action.id,source_run_id:333});
 const result={kind:'developer',issue,run_id:333,run_attempt:1,
