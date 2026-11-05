@@ -138,7 +138,9 @@ try{
       return {status:201};
     }
     reads++;
-    return {ok:true,json:async()=>reads>1?[{body:marker}]:[]};
+    return {ok:true,json:async()=>reads>1?[{body:marker,
+      user:{login:'github-actions[bot]'}}]:[{body:marker,
+      user:{login:'malicious-reader'}}]};
   };
   assert.equal((await projectReviewerIssue({receipt,commit,version:next.version,
     token:'fixture-token123',fetchFn})).projected,true);
