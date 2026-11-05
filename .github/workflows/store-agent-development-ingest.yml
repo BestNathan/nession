@@ -43,7 +43,8 @@ jobs:
          (github.event.comment.body == '/nession ingest issue=1997 worker_run=39288961865' ||
           startsWith(github.event.comment.body, '/nession ingest issue=1997 action=3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8 worker_run=') ||
           github.event.comment.body == '/nession ingest issue=1997 action=6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e worker_run=39396836009' ||
-          github.event.comment.body == '/nession ingest issue=1997 action=dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31 worker_run=39448549052'))
+          github.event.comment.body == '/nession ingest issue=1997 action=dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31 worker_run=39448549052' ||
+          startsWith(github.event.comment.body, '/nession ingest-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d worker_run=')))
       )
     runs-on: ubuntu-24.04
     environment: cursor
@@ -127,7 +128,8 @@ jobs:
             "$RUNNER_TEMP/development-worker-claim.zip" \
             "$RUNNER_TEMP/development-worker.zip" \
             > "$RUNNER_TEMP/development-ingest-receipt.json"
-          jq -e '.status == "yielded" or .status == "replayed"' \
+          jq -e '.status == "yielded" or .status == "replayed" or
+            .status == "accepted"' \
             "$RUNNER_TEMP/development-ingest-receipt.json" >/dev/null
           # Actual one-line sanitized output, independently authenticated by
           # the read-only collector; no prompts/native bytes or key material.
