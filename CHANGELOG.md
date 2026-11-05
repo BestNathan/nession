@@ -225,3 +225,17 @@
 - Categories: app, interaction, navigation, ownership, terminal, touch
 - Reason: Repoint the exact-commit sources at the clean staging-based PR head 1b12f778 after the branch was recreated from staging to remove unrelated main history; content unchanged
 - Source: https://github.com/BestNathan/nession/issues/2724
+
+## 2026-11-05T08:36:00Z | create | Web primitive focus treatment and visual vocabulary ownership
+- Path: topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md
+- Topic: web
+- Categories: design, interaction, web, accessibility, ownership
+- Reason: Record #2750's product decision and implementation: pointer/touch adds no outer focus chrome, bordered fields repaint their own border in ring, borderless controls draw the token inset outline, invalid keeps the destructive border plus an inset focus indicator, and the canonical regression guard is ui-contract-web with fail-closed helper proofs; merged to staging as 5e6b195d
+- Source: https://github.com/BestNathan/nession/issues/2750
+
+## 2026-11-05T08:36:00Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Cross-link the new #2750 Web primitive focus treatment article from the terminal engine/component ownership article, whose renderer boundary keeps xterm's own focus/caret rendering separate from chrome primitives
+- Source: https://github.com/BestNathan/nession/issues/2750

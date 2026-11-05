@@ -86,7 +86,23 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-05T03:28:50Z"
+        "updated_at": "2026-11-05T08:36:00Z"
+      }
+    ],
+    "web": [
+      {
+        "title": "Web primitive focus treatment and visual vocabulary ownership",
+        "description": "Modality-aware focus for Web primitives: pointer/touch adds no outer chrome, keyboard focus is an inset token outline or a border repaint, and invalid/disabled semantics plus the regression owners keep the recipe from drifting",
+        "path": "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
+        "status": "verified",
+        "categories": [
+          "design",
+          "interaction",
+          "web",
+          "accessibility",
+          "ownership"
+        ],
+        "updated_at": "2026-11-05T08:36:00Z"
       }
     ],
     "workflows": [
@@ -135,6 +151,9 @@
     "acceptance": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
+    "accessibility": [
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
+    ],
     "agent": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
@@ -161,7 +180,8 @@
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "design": [
-      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "e2e": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
@@ -171,7 +191,8 @@
     ],
     "interaction": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
-      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
+      "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "knowledge": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -184,7 +205,8 @@
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
-      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
+      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
@@ -219,7 +241,8 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
     "web": [
-      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
+      "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "workflows": [
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
