@@ -135,6 +135,18 @@ assert.ok(calls.includes('merge-base --is-ancestor '+sourceSha+' '+'d'.repeat(40
 calls.length=0;
 sourceAllowed(sourceSha,'reviewer',{run:accept,mainSha:'d'.repeat(40)});
 assert.ok(calls.includes('merge-base --is-ancestor '+publishedMain+' '+sourceSha));
+const exactRepairSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const repairContext={task:'repair',sha:exactRepairSha,agent_id:'dev-cursor-01',
+  repair_checkpoint:{source_sha:'220266b9233ec97b1beacbc54e5cc7f82d3cece2',
+    source_run_id:39448549052}};
+calls.length=0;
+sourceAllowed(exactRepairSha,'developer',{run:accept,task:repairContext});
+assert.ok(calls.includes('merge-base --is-ancestor '+publishedMain+' '+exactRepairSha));
+assert.throws(()=>sourceAllowed(sourceSha,'developer',{run:accept,task:repairContext}),
+  /exact authenticated published PR source/);
+assert.throws(()=>sourceAllowed(exactRepairSha,'developer',{run:accept,
+  task:{...repairContext,repair_checkpoint:{...repairContext.repair_checkpoint,
+    source_run_id:39448549053}}}),/exact authenticated published PR source/);
 const denyMerge=args=>{calls.push(args.join(' '));if(args[0]==='merge-base')throw Error('not ancestor');};
 assert.throws(()=>sourceAllowed(sourceSha,'developer',{run:denyMerge,mainSha:'d'.repeat(40)}),
   /reachable trusted main ancestor/);
