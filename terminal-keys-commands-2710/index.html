@@ -5,92 +5,163 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Nession · Mobile terminal key & command capsule</title>
 <style>
-:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#232528;background:#e9eaed;font-synthesis:none}
+/* minimal Nession generated-token snapshot, main c4ea99d1; product source owns values */
+:root{
+--nession-background: oklch(1 0 0);
+--nession-foreground: oklch(0.2636 0.0063 258.359);
+--nession-muted: oklch(0.9519 0.0013 106.424);
+--nession-muted-foreground: oklch(0.553 0.0118 261.773);
+--nession-accent: oklch(0.9519 0.0013 106.424);
+--nession-border: oklch(0.9274 0.0027 106.451);
+--nession-ring: oklch(0.553 0.0118 261.773);
+--nession-primary: oklch(0.2636 0.0063 258.359);
+--nession-primary-foreground: oklch(1 0 0);
+--nession-radius: 0.625rem;
+--nession-radius-control: 0.625rem;
+--nession-radius-capsule: calc(var(--nession-radius) * 2.2);
+--nession-elevation-floating: 0 0 0 1px oklch(0 0 0 / 6%), 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 8%);
+--nession-terminal-background: var(--nession-background);
+--nession-terminal-foreground: var(--nession-foreground);
+--nession-terminal-cursor: var(--nession-ring);
+--nession-terminal-capsule-surface: oklch(1 0 0 / 96%);
+--nession-control-md: 32px;
+--nession-typography-title-size: 16px;
+--nession-typography-title-weight: var(--nession-typography-role-title-weight);
+--nession-typography-primary-size: 14px;
+--nession-typography-body-size: 13px;
+--nession-typography-metadata-size: 11.5px;
+--nession-shell-space-3: 0.75rem;
+--nession-terminal-capsule-shell-pad-x: 0.75rem;
+--nession-terminal-capsule-shell-pad-y: 0.375rem;
+--nession-terminal-capsule-projection-max-height: 18rem;
+--nession-terminal-capsule-projection-pad: 0.75rem;
+--nession-terminal-capsule-phys-key-height: 36px;
+--nession-terminal-capsule-projection-margin-bottom: 0.5rem;
+--nession-typography-role-title-weight: 600;
+}
+[data-experience="app"]{
+--nession-control-md: 44px;
+--nession-typography-title-size: 17px;
+--nession-typography-title-weight: var(--nession-typography-role-title-weight);
+--nession-typography-primary-size: 16px;
+--nession-typography-body-size: 14px;
+--nession-typography-metadata-size: 12px;
+--nession-terminal-capsule-shell-inset: 0.75rem;
+--nession-terminal-capsule-shell-safe-area: env(safe-area-inset-bottom, 0px);
+--nession-terminal-capsule-shell-pad-x: 0.625rem;
+--nession-terminal-capsule-shell-pad-y: 0.375rem;
+--nession-terminal-capsule-projection-max-height: 16rem;
+--nession-terminal-capsule-projection-pad: 0.75rem;
+--nession-terminal-capsule-phys-key-height: 44px;
+--nession-terminal-capsule-projection-margin-bottom: 0.5rem;
+}
+
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--nession-foreground);background:var(--nession-muted);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0}
-a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible,input:focus-visible{outline:2px solid #3974bc;outline-offset:2px}
-.page{min-height:100dvh;display:grid;place-content:center;gap:13px;padding:16px}
-.demo-note{max-width:390px;color:#666b70;font-size:12px;line-height:1.45;display:flex;justify-content:space-between;gap:18px}
-.phone{width:min(390px,calc(100vw - 24px));height:min(816px,calc(100dvh - 20px));min-height:500px;position:relative;overflow:hidden;background:#fff;box-shadow:0 12px 48px #1a1b2522,0 1px 3px #1a1b2512;border-radius:32px;isolation:isolate}
-.topbar{height:58px;padding:17px 16px 10px;display:flex;align-items:center;gap:11px;background:#fff}
-.back{width:30px;height:30px;border:0;background:transparent;border-radius:50%;font-size:26px;line-height:1}
-.sess{min-width:0;flex:1}.sess strong{display:block;font-weight:620;font-size:14px;letter-spacing:-.02em}.sess small{display:block;color:#777b80;font-size:11px;margin-top:3px}
-.topdot{width:9px;height:9px;border-radius:50%;background:#76aa87}.source{font-size:10px;color:#7b8287;text-decoration:none;white-space:nowrap}.source:hover{text-decoration:underline}
-.terminal{position:absolute;inset:58px 0 0;padding:17px 17px 82px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;word-break:break-word}
-.terminal .faint{color:#8f949a}.terminal .prompt{color:#587364}.terminal .strong{color:#292d31}
+a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible,input:focus-visible{outline:2px solid var(--nession-ring);outline-offset:2px}
+.page{min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 230px;align-items:center;gap:22px;padding:18px clamp(18px,4vw,56px)}
+.demo-note{max-width:390px;color:var(--nession-muted-foreground);font-size:12px;line-height:1.45;display:flex;justify-content:space-between;gap:18px}
+.phone{width:min(var(--preview-width,390px),100%);height:min(816px,calc(100dvh - 36px));min-height:500px;position:relative;overflow:hidden;background:var(--nession-terminal-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-capsule);isolation:isolate}
+.topbar{height:52px;padding:8px var(--nession-shell-space-3);display:flex;align-items:center;gap:8px;background:var(--nession-background)}
+.back{width:var(--nession-control-md);height:var(--nession-control-md);border:0;background:transparent;border-radius:var(--nession-radius-control);font-size:20px;line-height:1;color:var(--nession-foreground)}
+.sess{min-width:0;flex:1}.sess strong{display:block;font-weight:620;font-size:14px;letter-spacing:-.02em}.sess small{display:block;color:var(--nession-muted-foreground);font-size:11px;margin-top:3px}
+.topdot{width:9px;height:9px;border-radius:50%;background:var(--nession-muted-foreground)}.source{font-size:10px;color:var(--nession-muted-foreground);text-decoration:none;white-space:nowrap}.source:hover{text-decoration:underline}
+.terminal{position:absolute;inset:52px 0 0;padding:17px 17px 82px;font:12.5px/1.55 "SFMono-Regular",Menlo,Consolas,monospace;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;word-break:break-word;background:var(--nession-terminal-background)}
+.terminal .faint{color:var(--nession-muted-foreground)}.terminal .prompt{color:var(--nession-foreground)}.terminal .strong{color:var(--nession-foreground)}
 .terminal .entry{white-space:pre-wrap;margin:0 0 7px}.terminal .entry.blank{height:10px}
-.terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:-2px;background:#31363a;opacity:.8}
-.dock{position:absolute;inset-inline:12px;bottom:max(14px,env(safe-area-inset-bottom));z-index:3;display:flex;flex-direction:column;gap:9px}
+.terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:-2px;background:var(--nession-terminal-cursor);opacity:.8}
+.dock{position:absolute;inset-inline:var(--nession-terminal-capsule-shell-inset);bottom:max(var(--nession-terminal-capsule-shell-inset),var(--nession-terminal-capsule-shell-safe-area));z-index:3;display:flex;flex-direction:column;gap:var(--nession-terminal-capsule-projection-margin-bottom)}
 /* The published gallery injects a fixed bottom navigation bar ("View source"
    and the gallery link). Reserve its height so the mock's + and composer stay
    operable on the published page; the local/source-only page has no nav and
    keeps the original bottom. */
 body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bottom) + 58px))}
 @media(max-width:580px){body:has(.nession-preview-nav) .dock{bottom:64px}}
-.surface{background:rgba(246,248,250,.98);box-shadow:0 0 0 1px #30353a12,0 5px 18px #222c3414,0 18px 38px #2b303716;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:23px;color:#232528}
-.composer{height:56px;padding:6px 7px;display:flex;align-items:center;gap:5px}
-.tap{min-width:44px;min-height:44px;display:grid;place-items:center;border:0;background:transparent;border-radius:12px;color:#4d5257}
-.plus{font-size:26px;font-weight:300;line-height:1}.plus.active{background:#e5e8ea}
-.intent{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#222;font-size:14px;padding:10px 2px}
-.intent::placeholder{color:#888d91}
-.send{width:36px;height:36px;min-width:36px;border-radius:50%;border:0;color:white;background:#292e31;font-size:19px;display:grid;place-items:center;margin:0 4px}
+.surface{background:var(--nession-terminal-capsule-surface);box-shadow:var(--nession-elevation-floating);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:var(--nession-radius-capsule);color:var(--nession-foreground)}
+.composer{height:56px;padding:var(--nession-terminal-capsule-shell-pad-y) var(--nession-terminal-capsule-shell-pad-x);display:flex;align-items:center;gap:5px}
+.tap{min-width:var(--nession-control-md);min-height:var(--nession-control-md);display:grid;place-items:center;border:0;background:transparent;border-radius:var(--nession-radius-control);color:var(--nession-foreground)}
+.plus{font-size:26px;font-weight:300;line-height:1}.plus.active{background:var(--nession-accent)}
+.intent{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--nession-foreground);font-size:14px;padding:10px 2px}
+.intent::placeholder{color:var(--nession-muted-foreground)}
+.send{width:36px;height:36px;min-width:36px;border-radius:50%;border:0;color:white;background:var(--nession-foreground);font-size:19px;display:grid;place-items:center;margin:0 4px}
 .chooser{padding:12px 8px 8px}
-.chooser-title{color:#8a9095;letter-spacing:.06em;font-size:10px;font-weight:700;text-transform:uppercase;margin:5px 11px 5px}
-.choose{height:50px;display:flex;align-items:center;gap:11px;width:100%;background:transparent;border:0;text-align:left;color:#292d31;border-radius:14px;padding:0 12px}
-.choose:hover,.choose:active{background:#eaedef}
-.choose .sym{width:27px;text-align:center;font-size:18px;color:#6a6f75}
+.chooser-title{color:var(--nession-muted-foreground);letter-spacing:.06em;font-size:10px;font-weight:700;text-transform:uppercase;margin:5px 11px 5px}
+.choose{height:50px;display:flex;align-items:center;gap:11px;width:100%;background:transparent;border:0;text-align:left;color:var(--nession-foreground);border-radius:14px;padding:0 12px}
+.choose:hover,.choose:active{background:var(--nession-accent)}
+.choose .sym{width:27px;text-align:center;font-size:18px;color:var(--nession-muted-foreground)}
 .choose .cname{flex:1;font-size:14px;font-weight:560}
-.choose .sub{font-size:11px;color:#92979b}
-.panel{padding:8px;max-height:min(360px,48dvh);overflow:hidden;display:flex;flex-direction:column;animation:rise .15s ease-out}
+.choose .sub{font-size:11px;color:var(--nession-muted-foreground)}
+.panel{padding:var(--nession-terminal-capsule-projection-pad);max-height:min(var(--nession-terminal-capsule-projection-max-height),48dvh);overflow:hidden;display:flex;flex-direction:column}
 @keyframes rise{from{opacity:.5;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
 .panel-head{height:39px;display:flex;align-items:center;padding:0 2px 0 6px;gap:4px;flex:0 0 auto}
 .switch{display:flex;align-items:center;gap:4px;min-width:0;flex:1}
-.switch button{height:33px;padding:0 12px;border:0;background:transparent;border-radius:11px;color:#7a8084;font-size:13px;font-weight:580}
-.switch button.sel{background:#e8ebed;color:#2a3033}
-.close{border:0;background:none;min-width:38px;min-height:38px;border-radius:50%;color:#81878c;font-size:22px}
+.switch button{height:33px;padding:0 12px;border:0;background:transparent;border-radius:11px;color:var(--nession-muted-foreground);font-size:13px;font-weight:580}
+.switch button.sel{background:var(--nession-accent);color:var(--nession-foreground)}
+.close{border:0;background:none;min-width:38px;min-height:38px;border-radius:50%;color:var(--nession-muted-foreground);font-size:22px}
 .panel-body{min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:8px 6px 6px;gap:11px}
-.caption{font-size:10px;color:#81868b;letter-spacing:.03em;font-weight:580;margin-bottom:7px}
+.caption{font-size:10px;color:var(--nession-muted-foreground);letter-spacing:.03em;font-weight:580;margin-bottom:7px}
 .quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
-.quickkey{height:42px;border:0;border-radius:12px;background:#e9edef;color:#2b3136;font:600 13px/1 "SFMono-Regular",Menlo,monospace}
-.quickkey:active{background:#dadee1}
+.quickkey{height:var(--nession-control-md);border:0;border-radius:var(--nession-radius-control);background:var(--nession-accent);color:var(--nession-foreground);font:600 13px/1 "SFMono-Regular",Menlo,monospace}
+.quickkey:active{background:var(--nession-accent)}
 .keyrow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
-.key{min-width:0;height:44px;border:0;border-radius:12px;background:#fff;color:#373d42;box-shadow:inset 0 0 0 1px #e6e9ea;font-size:12px;font-weight:560}
-.key:active,.mod:active{background:#e3e7e9}
+.key{min-width:0;height:var(--nession-terminal-capsule-phys-key-height);border:0;border-radius:var(--nession-radius-control);background:var(--nession-background);color:var(--nession-foreground);box-shadow:inset 0 0 0 1px var(--nession-border);font-size:12px;font-weight:560}
+.key:active,.mod:active{background:var(--nession-accent)}
 .bottom-row{display:flex;align-items:center;justify-content:space-between;gap:7px}
 .mods{display:flex;flex:1;min-width:0;gap:5px}
-.mod{flex:1;min-width:0;max-width:67px;height:44px;border:0;border-radius:12px;background:#e9edef;color:#44494c;font-size:12px;font-weight:620}
-.mod.on{background:#313638;color:white}
+.mod{flex:1;min-width:0;max-width:67px;height:var(--nession-control-md);border:0;border-radius:var(--nession-radius-control);background:var(--nession-accent);color:var(--nession-foreground);font-size:12px;font-weight:620}
+.mod.on{background:var(--nession-primary);color:white}
 .arrows{display:flex;gap:4px}
-.arrow{width:39px;height:44px;display:grid;place-items:center;border:0;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px #e6e9ea;color:#41484c;font-size:17px}
+.arrow{width:35px;height:var(--nession-control-md);display:grid;place-items:center;border:0;border-radius:var(--nession-radius-control);background:var(--nession-background);box-shadow:inset 0 0 0 1px var(--nession-border);color:var(--nession-foreground);font-size:17px}
 .chord-row{height:42px;display:flex;align-items:center;gap:8px;min-width:0}
-.chord-label{white-space:nowrap;font:650 12px/1 Menlo,monospace;letter-spacing:-.04em;color:#292f33}
+.chord-label{white-space:nowrap;font:650 12px/1 Menlo,monospace;letter-spacing:-.04em;color:var(--nession-foreground)}
 .letters{min-width:0;flex:1;display:flex;overflow-x:auto;gap:4px;overscroll-behavior-x:contain;scrollbar-width:none}
 .letters::-webkit-scrollbar{display:none}
-.letter{flex:0 0 42px;height:42px;background:white;border:0;border-radius:11px;box-shadow:inset 0 0 0 1px #e3e6e8;font:650 13px Menlo,monospace}
-.cancel{border:0;background:transparent;color:#7f858a;font-size:12px;height:42px;padding:0 4px}
+.letter{flex:0 0 var(--nession-control-md);height:var(--nession-control-md);background:var(--nession-background);border:0;border-radius:var(--nession-radius-control);box-shadow:inset 0 0 0 1px var(--nession-border);font:650 13px Menlo,monospace}
+.cancel{border:0;background:transparent;color:var(--nession-muted-foreground);font-size:12px;height:42px;padding:0 4px}
 .commands{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:1px 0 1px}
 .command{display:flex;align-items:center;gap:7px;min-height:64px;padding:8px 3px 8px 7px;border-radius:13px}
-.command+.command{border-top:1px solid #e9ecee}
+.command+.command{border-top:1px solid var(--nession-border)}
 .command-main{flex:1;min-width:0;cursor:pointer}
 .command-main b{font-size:13px;font-weight:620;display:block;margin-bottom:5px}
-.command-main code{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font:11px Menlo,monospace;color:#777e83}
+.command-main code{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font:11px Menlo,monospace;color:var(--nession-muted-foreground)}
 .insert,.run{height:40px;border:0;border-radius:11px;padding:0 10px;font-size:12px;font-weight:560}
-.insert{background:transparent;color:#636b70}
-.run{background:#303538;color:#fff;min-width:46px}
-.commands-head{display:flex;justify-content:space-between;align-items:center;color:#858b90;font-size:11px;margin:2px 8px 0}
-.hint{color:#8e9497;font-size:10.5px;padding:0 5px;min-height:14px}
-.status{display:flex;justify-content:space-between;gap:8px;max-width:390px;font-size:11px;color:#686e73}
-.status strong{color:#3d4448}
-@media(max-width:440px){body{background:#fff}.page{padding:0;display:block}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.status{display:none}.panel{max-height:min(370px,50dvh)}} 
+.insert{background:transparent;color:var(--nession-muted-foreground)}
+.run{background:var(--nession-primary);color:var(--nession-background);min-width:46px}
+.commands-head{display:flex;justify-content:space-between;align-items:center;color:var(--nession-muted-foreground);font-size:11px;margin:2px 8px 0}
+.hint{color:var(--nession-muted-foreground);font-size:10.5px;padding:0 5px;min-height:14px}
+.status{display:flex;justify-content:space-between;gap:8px;max-width:390px;font-size:11px;color:var(--nession-muted-foreground)}
+.status strong{color:var(--nession-foreground)}
+@media(max-width:440px){body{background:var(--nession-background)}.page{padding:0;display:block}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.status{display:none}.panel{max-height:min(370px,50dvh)}} 
 @media(max-height:640px){.panel{max-height:42dvh}.panel-body{gap:7px}.keyrow{display:none}}
 @media(prefers-reduced-motion:reduce){.panel{animation:none}}
+
+[hidden]{display:none!important}
+.prototype-stage{min-width:0;display:flex;justify-content:center}
+.prototype-harness{max-width:230px;color:var(--nession-muted-foreground);font-size:12px;line-height:1.6}
+.prototype-harness h1{font-size:var(--nession-typography-title-size);color:var(--nession-foreground);line-height:1.3;margin:0 0 8px}
+.prototype-harness p{margin:4px 0 12px}
+.prototype-harness a{color:var(--nession-foreground);font-weight:550}
+.prototype-harness .harness-tools{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.prototype-harness button{border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);background:var(--nession-background);color:var(--nession-foreground);padding:6px 10px;cursor:pointer}
+.prototype-harness button[aria-pressed="true"]{background:var(--nession-primary);color:var(--nession-primary-foreground)}
+.prototype-harness .harness-links{display:flex;gap:16px;margin:12px 0}
+.prototype-harness details{border-top:1px solid var(--nession-border);padding-top:10px}
+.prototype-harness summary{cursor:pointer;color:var(--nession-foreground)}
+.prototype-harness ol{padding-left:18px}
+.prototype-harness li{margin:4px 0}
+.sessions-view{position:absolute;z-index:6;inset:52px 0 0;background:var(--nession-background);padding:18px var(--nession-shell-space-3)}
+.sessions-view h2{font-size:var(--nession-typography-title-size);font-weight:var(--nession-typography-title-weight);margin:0 0 15px}
+.sessions-view button{width:100%;height:var(--nession-control-md);border:0;border-radius:var(--nession-radius-control);background:var(--nession-accent);color:var(--nession-foreground);text-align:left;padding:0 12px}
+body{background:var(--nession-muted);color:var(--nession-foreground)}
+@media(max-width:760px){.page{display:block;padding:0}.prototype-stage{display:block;height:100dvh}.phone{width:100%;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}.prototype-harness{max-width:none;padding:18px 20px 90px;background:var(--nession-muted)}}
 </style>
 </head>
 <body>
 <div class="page">
-<div class="demo-note"><span>NESSION / INTERACTIVE PROTOTYPE <b>#2710</b></span><span>Mock transport · no real commands</span></div>
-<div class="phone">
-  <header class="topbar"><button class="back" type="button" aria-label="Back is a mock" title="Navigation is not part of this prototype">‹</button><div class="sess"><strong>dev-session</strong><small>beijing · zsh</small></div><span class="topdot" aria-label="Connected (mock)"></span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">Source</a></header>
-  <main class="terminal" id="terminal" aria-label="Simulated terminal">
+  <div class="prototype-stage" aria-label="Nession App Terminal preview">
+<div class="phone" data-experience="app">
+  <header class="topbar"><button class="back" id="sessions" type="button" aria-label="Sessions" aria-expanded="false">☰</button><div class="sess"><strong>dev-session</strong></div></header>
+  <main class="terminal" id="terminal" aria-label="Terminal">
     <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› cargo test</span></div><div class="entry">running 38 tests</div><div class="entry">test result: ok. 38 passed; 0 failed</div><div class="entry blank"></div>
@@ -104,8 +175,21 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
       <button class="send" id="send" aria-label="Send terminal input">↑</button>
     </div>
   </div>
+  <section class="sessions-view" id="sessions-view" hidden aria-label="Sessions"><h2>Sessions</h2><button type="button" id="current-session">dev-session · Current</button></section>
 </div>
-<div class="status"><span>Open +, swipe terminal <strong>up</strong> for newest output, then <strong>down</strong> to return to the top.</span><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
+  </div>
+  <aside class="prototype-harness" aria-label="Prototype controls and design notes">
+    <h1>Terminal Keys + Commands</h1>
+    <p>Interactive App prototype · #2710 · simulated input and terminal output</p>
+    <div class="harness-tools" aria-label="Preview width">
+      <button type="button" data-preview-width="375" aria-pressed="false">375</button>
+      <button type="button" data-preview-width="390" aria-pressed="true">390</button>
+      <button type="button" data-preview-width="430" aria-pressed="false">430</button>
+      <button type="button" id="reset-prototype">Reset</button>
+    </div>
+    <div class="harness-links"><a href="https://github.com/BestNathan/nession/issues/2710" target="_blank" rel="noopener noreferrer">Issue #2710</a><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
+    <details><summary>Scenarios and mock limitations</summary><ol><li>+ → Keys: Ctrl+C; Ctrl → X; Cancel.</li><li>Commands: Insert versus Run.</li><li>Open or switch panels; scroll to expose the last terminal line, then reverse to the first.</li></ol><p>Mock only: no real xterm, PTY, tmux, network or shell execution.</p><strong>Simulated event log</strong><pre id="mock-event-log" aria-live="polite">No events yet</pre></details>
+  </aside>
 </div>
 <script>
 (function(){
@@ -116,6 +200,11 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
   const dock=document.getElementById("dock");
   const intent=document.getElementById("intent");
   const plus=document.getElementById("plus");
+  const sessions=document.getElementById("sessions"), sessionsView=document.getElementById("sessions-view");
+  sessions.addEventListener("click",()=>{ const opening=sessionsView.hidden;sessionsView.hidden=!opening;sessions.setAttribute("aria-expanded",String(opening));if(opening)open(""); });
+  document.getElementById("current-session").addEventListener("click",()=>{sessionsView.hidden=true;sessions.setAttribute("aria-expanded","false");});
+  document.getElementById("reset-prototype").addEventListener("click",()=>location.reload());
+  document.querySelectorAll("[data-preview-width]").forEach(btn=>btn.addEventListener("click",()=>{phone.style.setProperty("--preview-width",btn.dataset.previewWidth+"px");document.querySelectorAll("[data-preview-width]").forEach(b=>b.setAttribute("aria-pressed",String(b===btn)));scheduleClearance();}));
   let view=""; // "", menu, keys, commands
   let modifier="";
   let seq=0;
@@ -192,6 +281,10 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     {name:"Show Kubernetes pods",text:"kubectl get pods -A"},
     {name:"Inspect recent logs",text:"journalctl -n 80 --no-pager"}
   ];
+  function recordMockEvent(message){
+    const log=document.getElementById("mock-event-log");
+    log.textContent=(log.textContent==="No events yet"?"":log.textContent+"\n")+message;
+  }
   function append(message){
     const wasFollowing=following && !userDragActive;
     const priorScrollTop=term.scrollTop;
@@ -207,8 +300,10 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
   }
   function sendKey(label,bytes){
     seq++;
-    const suffix=bytes ? " · " + bytes : "";
-    append("[mock " + seq + "] " + label + suffix);
+    recordMockEvent("Key " + seq + ": " + label + (bytes ? " · " + bytes : ""));
+    // Terminal-native feedback only; encoding/event diagnostics live outside the UI.
+    if(label==="Ctrl+C")append("^C");
+    else if(label==="Enter")append("");
   }
   function keyEncoding(chord){
     if(/^Ctrl\+[A-Z]$/.test(chord))return "0x"+(chord.charCodeAt(5)-64).toString(16).padStart(2,"0");
@@ -237,7 +332,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
       upper.innerHTML='<div class="surface chooser"><div class="chooser-title">Terminal tools</div>'+
       '<button class="choose" type="button" data-act="keys"><span class="sym">⌘</span><span class="cname">Terminal Keys</span><span class="sub">Keys & chords</span></button>'+
       '<button class="choose" type="button" data-act="commands"><span class="sym">›_</span><span class="cname">Quick Commands</span><span class="sub">Saved commands</span></button>'+
-      '<div class="hint">Swipe terminal ↑ to reveal latest output · ↓ to see earlier lines</div></div>';
+      '</div>';
       scheduleClearance();
       return;
     }
@@ -248,21 +343,21 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
         '</div><button type="button" class="cancel" data-act="cancel">Cancel</button></div>'
         :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C">⌃ C</button><button class="quickkey" data-chord="Ctrl+R">⌃ R</button><button class="quickkey" data-chord="Ctrl+L">⌃ L</button></div>';
       body='<div class="panel-body">'+
-        '<div><div class="caption">'+(modifier?"Select a key · one-shot":"Common shortcuts · one tap")+'</div>'+code+'</div>'+
+        '<div><div class="caption">'+(modifier?"Modifier: "+modifier:"Shortcuts")+'</div>'+code+'</div>'+
         '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
         '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["←","↑","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
-        '<div class="hint">'+(modifier?"Selected modifier clears after the next key or Cancel.":"Modifiers are one-shot. The Terminal stays interactive.")+'</div></div>';
+        '</div>';
     }else if(view==="commands"){
-      body='<div class="panel-body"><div class="commands-head"><span>Saved for this Session · mock data</span><span>'+saved.length+' commands</span></div><div class="commands">'+
+      body='<div class="panel-body"><div class="commands-head"><span>Saved commands</span><span>'+saved.length+' commands</span></div><div class="commands">'+
        saved.map((c,i)=>'<div class="command"><div class="command-main" data-insert="'+i+'" role="button" tabindex="0"><b>'+c.name+'</b><code>'+c.text+'</code></div><button class="insert" data-insert="'+i+'">Insert</button><button class="run" data-run="'+i+'">Run</button></div>').join("")+
-       '</div><div class="hint">Insert edits the input. Run sends the command with Return.</div></div>';
+       '</div></div>';
     }
     upper.innerHTML='<section class="surface panel" role="region" aria-label="Terminal '+(view==="keys"?"Keys":"Quick Commands")+'">'+
       '<div class="panel-head"><div class="switch" role="tablist" aria-label="Terminal tools"><button role="tab" aria-selected="'+(view==="keys")+'" class="'+(view==="keys"?"sel":"")+'" data-act="keys">Keys</button><button role="tab" aria-selected="'+(view==="commands")+'" class="'+(view==="commands"?"sel":"")+'" data-act="commands">Commands</button></div><button class="close" aria-label="Close" data-act="close">×</button></div>'+body+'</section>';
     scheduleClearance();
   }
   plus.addEventListener("click",()=>open(view?"":"menu"));
-  document.getElementById("send").addEventListener("click",()=>{const v=intent.value.trim();if(v){append("[mock] sent input: "+v);intent.value="";}open("");});
+  document.getElementById("send").addEventListener("click",()=>{const v=intent.value.trim();if(v){recordMockEvent("Send: "+v);append("$ "+v);intent.value="";}open("");});
   intent.addEventListener("focus",()=>{if(view)open("");});
   intent.addEventListener("keydown",(e)=>{if(e.key==="Enter"){e.preventDefault();document.getElementById("send").click();}});
   upper.addEventListener("click",(e)=>{
@@ -275,7 +370,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
     if(el.dataset.letter){chord(el.dataset.letter);return;}
     if(el.dataset.key){chord(el.dataset.key);return;}
     if(el.dataset.insert!==undefined){const c=saved[Number(el.dataset.insert)];intent.value=c.text;open("");intent.focus();return;}
-    if(el.dataset.run!==undefined){const c=saved[Number(el.dataset.run)];append("[mock] RUN: "+c.text+" ↵");return;}
+    if(el.dataset.run!==undefined){const c=saved[Number(el.dataset.run)];recordMockEvent("Run: "+c.text+" + Return");append("$ "+c.text);return;}
   });
   upper.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-insert][role=button]")){e.preventDefault();e.target.click();}});
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&view){if(modifier){modifier="";render();}else open("");}});
