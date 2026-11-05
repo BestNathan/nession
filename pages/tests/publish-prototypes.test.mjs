@@ -52,3 +52,32 @@ test('fails closed on missing SHA, malformed HTML, and unreviewed symbolic links
     await assert.rejects(() => publishPrototypes(source, output, SHA), /symlink/);
   });
 });
+
+test('structured review frame uses its own top navigation with pinned source, no overlapping footer', async () => {
+  await fixture(async (source, output) => {
+    const framed = '<!doctype html><html><head><title>Review</title></head>' +
+      '<body data-nession-prototype-frame="v1">' +
+      '<header><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a>' +
+      '<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">View source</a></header>' +
+      '<main>1:1 interactive preview</main><section>Design notes</section></body></html>';
+    const path = join(source, 'terminal-fixed-cols-2487', 'index.html');
+    await writeFile(path, framed);
+    await publishPrototypes(source, output, SHA);
+    const published = await readFile(join(output, 'terminal-fixed-cols-2487', 'index.html'), 'utf8');
+    assert.match(published, /Content-Security-Policy/);
+    assert.match(published, /data-nession-prototype-frame="v1"/);
+    assert.match(published, /href="\.\.\/\.\.\/#\/prototypes"/);
+    assert.match(published, new RegExp('href="https://github.com/BestNathan/nession/blob/' + SHA + '/terminal-fixed-cols-2487/index.html"'));
+    assert.doesNotMatch(published, /class="nession-preview-nav"/);
+  });
+});
+
+test('structured review frame missing trusted navigation slots fails closed', async () => {
+  await fixture(async (source, output) => {
+    const path = join(source, 'terminal-fixed-cols-2487', 'index.html');
+    await writeFile(path, '<html><head></head><body data-nession-prototype-frame="v1"><a data-nession-source-link href="broken">Source</a></body></html>');
+    await assert.rejects(() => publishPrototypes(source, output, SHA), /one gallery and one source link/);
+    await writeFile(path, '<html><head></head><body data-nession-prototype-frame="v1"><a data-nession-gallery-link href="../../#/prototypes">Back</a></body></html>');
+    await assert.rejects(() => publishPrototypes(source, output, SHA), /one gallery and one source link/);
+  });
+});
