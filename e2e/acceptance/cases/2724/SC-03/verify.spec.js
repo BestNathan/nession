@@ -78,6 +78,7 @@ test('SC-03: composer, Peek, capability row, editor and direction pad keep their
   await page.getByTestId('file-row-web/src/App.tsx').click();
   const editor = page.locator('.cm-editor');
   await expect(editor).toBeVisible();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   const editorBox = await editor.boundingBox();
   if (!editorBox) throw new Error('the editor must be laid out');
   await page.locator('.cm-content').click();

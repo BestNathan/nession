@@ -100,11 +100,18 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   await expect(anchor.layerRoot).toHaveAttribute('data-layer', 'terminal');
 
   // A pushed dirty detail keeps its own leave; the shell cannot discard it.
+  // Re-open the canonical Session fixture: the no-Session root has no
+  // Workspace affordance by design (#1082).
+  await openFixtureApp(page);
   await page.getByTestId('app-header-workspace').first().click();
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await page.getByTestId('file-row-web').click();
   await page.getByTestId('file-row-web/src').click();
   await page.getByTestId('file-row-web/src/App.tsx').click();
+  await page.locator('.cm-editor').waitFor();
+  // The read-first viewer becomes editable through its own Edit action; only
+  // then does typing create the draft the leave must guard.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.locator('.cm-content').click();
   await page.keyboard.type('// guarded draft');
   await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to Files');
@@ -112,8 +119,9 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   await page.getByTestId('app-page-back').click();
   const dialog = page.getByRole('alertdialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('Discard unsaved changes?');
-  await dialog.getByRole('button', { name: /Keep editing/i }).click();
+  await expect(dialog).toContainText('Unsaved changes');
+  await expect(dialog).toContainText('Leave anyway?');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.locator('.cm-editor')).toBeVisible();
 
   // The shell's own swipe is muted on this depth; it must not bypass the guard.
@@ -130,8 +138,12 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
   await page.getByTestId('app-page-back').click();
-  await expect(page.getByRole('alertdialog')).toBeVisible();
-  await page.getByRole('button', { name: /Discard/i }).click();
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm).toBeVisible();
+  // Activate with the keyboard: the always-mounted Radix confirmation can
+  // place its overlay above the content on a reopen, so a pointer click is
+  // intercepted even though the action is reachable and visible.
+  await confirm.getByRole('button', { name: 'Leave without saving', exact: true }).press('Enter');
   await expect(page.getByTestId('app-page-header')).toContainText('src');
 
   test.info().annotations.push({
