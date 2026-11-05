@@ -61,6 +61,10 @@ const replayEvent={action:'created',repository:{full_name:repo},
     body:'/nession ingest-review issue=1997 run=41962609841 attempt=1'}};
 assert.deepEqual(resolveReviewIngestSource({environment:replayEnv,
   event:replayEvent}),{run_id:41962609841,attempt:1,expected_sha:null});
+assert.deepEqual(resolveReviewIngestSource({environment:replayEnv,
+  event:{...replayEvent,comment:{...replayEvent.comment,
+    body:'/nession ingest-review issue=1997 run=41962609842 attempt=1'}}}),
+  {run_id:41962609842,attempt:1,expected_sha:null});
 for(const invalid of [
   {...replayEvent,action:'edited'},
   {...replayEvent,issue:{number:1997,pull_request:{url:'https://evil'}}},
@@ -68,7 +72,11 @@ for(const invalid of [
   {...replayEvent,sender:{login:'attacker'}},
   {...replayEvent,comment:{...replayEvent.comment,user:{login:'attacker'}}},
   {...replayEvent,comment:{...replayEvent.comment,
-    body:'/nession ingest-review issue=1997 run=41962609842 attempt=1'}},
+    body:'/nession ingest-review issue=1997 run=041962609842 attempt=1'}},
+  {...replayEvent,comment:{...replayEvent.comment,
+    body:'/nession ingest-review issue=1997 run=41962609842 attempt=2'}},
+  {...replayEvent,comment:{...replayEvent.comment,
+    body:'/nession ingest-review issue=1997 run=41962609842 attempt=1 '}},
 ])assert.throws(()=>resolveReviewIngestSource({environment:replayEnv,
   event:invalid}),/untrusted/);
 assert.throws(()=>resolveReviewIngestSource({environment:{
