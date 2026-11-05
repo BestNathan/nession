@@ -10,10 +10,11 @@ import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
-  recordControlledReviewerRecoveryIntent} from './outbox.mjs';
+  recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
+import {readPublishedRepairCheckpoint} from './repair-checkpoint.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
 
@@ -53,6 +54,29 @@ function persist(dir,state,previousVersion,issue) {
     'commit','-m','agent-store: Issue '+issue+' dispatch state v'+state.version]);
   return publish(REF,dir,4);
 }
+// The one #1997 Repair origin can be attached only by the already-trusted
+// Store writer, after independent immutable pre-publish Run/Checkpoint
+// inspection in the same checkout. This operation has NO workflow_dispatch,
+// Provider, PR or Issue side effect. A subsequent versioned ticket/Worker
+// implementation must still be separately activated before any Repair POST.
+export function bindControlledRepairCheckpoint({remote,issue,actionId}){
+  if(issue!==1997||
+     actionId!=='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d')
+    fail('only exact #1997 reviewed Repair is authorized');
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,issue);
+    if(!prior.state)fail('missing initialized Repair Issue');
+    const origin=readPublishedRepairCheckpoint(dir,prior.state,actionId);
+    const next=bindVerifiedRepairCheckpoint(prior.state,prior.version,actionId,origin);
+    if(next===prior.state)return {status:'replayed',issue,action_id:actionId,
+      state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    const pushed=persist(dir,next,prior.version,issue);
+    if(pushed.replayed)fail('unexpected first Repair origin CAS replay');
+    return {status:'bound',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
 // Begin the exact external side effect ONLY after this function returns
 // status='committed'. If it returns 'reconcile', never repeat HTTP POST.
 // The persistent intent is an immutable no-redelivery fence after a crash.
