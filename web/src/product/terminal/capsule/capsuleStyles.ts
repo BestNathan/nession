@@ -313,11 +313,12 @@ export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscr
 export const contextCapsuleRowClass = [
   'flex w-full min-h-[length:var(--nession-context-capsule-row-height)] items-center gap-[length:var(--nession-terminal-capsule-control-gap)]',
   'rounded-[var(--nession-radius-control)] text-left transition-colors',
-  // `ring-inset`, because a row is full-bleed inside a scrolling container: an
-  // outset ring is clipped on every side but the last row's, which drew a stray
-  // underline under the first row when focus moved into the list (caught in the
-  // screenshot, invisible to every assertion about the row's box).
-  'hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+  // The focus outline is inset (negative offset), because a row is full-bleed
+  // inside a scrolling container: an outset indicator is clipped on every side
+  // but the last row's, which drew a stray underline under the first row when
+  // focus moved into the list (caught in the screenshot, invisible to every
+  // assertion about the row's box).
+  'hover:bg-accent/40 focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
 ].join(' ');
 
 /** The icon column, present even when empty so titles share one edge. */
@@ -482,7 +483,7 @@ export const capsuleProjectionScrollClass =
   'max-h-[length:var(--nession-terminal-capsule-projection-max-height)] overflow-y-auto';
 
 export const capsuleProjectionItemClass =
-  'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]';
 
 /** The change letter's column, fixed so the filenames beside it share an edge. */
 export const capsuleProjectionMarkClass =

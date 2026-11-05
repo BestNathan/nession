@@ -14,7 +14,9 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   expectAlignedY,
   expectDrawnAffordance,
+  expectInsetFocusOutline,
   expectNoUnexpectedOverflow,
+  expectQuietPointerFocus,
   expectScrollable,
   expectSingleLine,
   expectTokenHeight,
@@ -256,6 +258,42 @@ test.describe('assertion helpers detect deliberate violations', () => {
         <div style="height: 300px;">tall content</div>
       </div>`);
     await expectScrollable(page.locator('#root'), list); // passes
+  });
+
+  // #2750 — the two focus helpers are only useful if they can fail. Each proof
+  // keeps every other part of the recipe valid so the reported rule is the one
+  // under test: an outset outline must fail on geometry, an added box-shadow
+  // ring on paint, and a pointer-focus outline on the pointer rule.
+  test('focus outline: an inset token outline passes, an outset one and an outer ring fail (#2750)', async ({ page }) => {
+    const tokens = `:root { --nession-ring: oklch(0.553 0.0118 261.773); --nession-focus-ring-width: 2px; --nession-focus-ring-offset: 2px; }`;
+    const focusByKeyboard = async (id: string) => {
+      await page.keyboard.press('Tab');
+      await page.locator(`#${id}`).focus();
+    };
+
+    await page.setContent(`<style>${tokens} #inset:focus-visible { outline: 2px solid var(--nession-ring); outline-offset: -2px; }</style><button id="inset">inset</button>`);
+    await focusByKeyboard('inset');
+    await expectInsetFocusOutline(page.locator('#inset'), WEB); // passes
+
+    await page.setContent(`<style>${tokens} #outer:focus-visible { outline: 2px solid var(--nession-ring); outline-offset: 2px; }</style><button id="outer">outer</button>`);
+    await focusByKeyboard('outer');
+    await rejectsWith(expectInsetFocusOutline(page.locator('#outer'), WEB), 'focus-outline');
+
+    await page.setContent(`<style>${tokens} #ring:focus-visible { outline: 2px solid var(--nession-ring); outline-offset: -2px; box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.4); }</style><button id="ring">ring</button>`);
+    await focusByKeyboard('ring');
+    await rejectsWith(expectInsetFocusOutline(page.locator('#ring'), WEB), 'focus-outline');
+  });
+
+  test('pointer focus: a border repaint passes, an outline fails (#2750)', async ({ page }) => {
+    const tokens = `:root { --nession-ring: oklch(0.553 0.0118 261.773); --nession-focus-ring-width: 2px; --nession-focus-ring-offset: 2px; }`;
+
+    await page.setContent(`<style>${tokens} #field { outline: none; } #field:focus { border-style: solid; border-width: 1px; border-color: var(--nession-ring); }</style><input id="field">`);
+    await page.locator('#field').click();
+    await expectQuietPointerFocus(page.locator('#field'), WEB, { border: 'ring' }); // passes
+
+    await page.setContent(`<style>${tokens} #outlined:focus { outline: 2px solid var(--nession-ring); border-style: solid; border-width: 1px; border-color: var(--nession-ring); }</style><input id="outlined">`);
+    await page.locator('#outlined').click();
+    await rejectsWith(expectQuietPointerFocus(page.locator('#outlined'), WEB, { border: 'ring' }), 'focus-quiet');
   });
 });
 

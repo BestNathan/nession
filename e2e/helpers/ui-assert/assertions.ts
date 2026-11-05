@@ -691,3 +691,191 @@ export async function expectScrollable(locator: Locator, opts: AssertOptions): P
     );
   }
 }
+
+// ── Focus treatment (#2750) ────────────────────────────────────────────────
+
+/**
+ * True when a computed `box-shadow` paints anything.
+ *
+ * Tailwind predefines several transparent shadows on every element, so a
+ * reintroduced `ring-3` is not the only thing a raw `boxShadow !== 'none'`
+ * check would see. Split the colour functions out and test their alpha
+ * instead: transparent placeholders are quiet, any painted shadow is not.
+ */
+function visibleShadow(boxShadow: string): boolean {
+  if (boxShadow === 'none' || boxShadow.trim() === '') return false;
+  const colors = boxShadow.match(/(?:rgba?|hsla?|oklch|oklab|lab|lch|color)\([^)]*\)|#[0-9a-fA-F]{3,8}/g);
+  if (colors === null) return true; // a shadow without a parseable colour is painted
+  return colors.some((color) => {
+    if (color.startsWith('#')) {
+      const hex = color.slice(1);
+      if (hex.length === 4) return hex[3] !== '0';
+      if (hex.length === 8) return hex.slice(6) !== '00';
+      return true;
+    }
+    const slash = color.match(/\/\s*([0-9.]+%?)\s*\)$/);
+    if (slash !== null) return Number.parseFloat(slash[1]) * (slash[1].endsWith('%') ? 0.01 : 1) > 0;
+    const fn = color.slice(0, color.indexOf('('));
+    if (fn === 'rgba' || fn === 'hsla') {
+      const parts = color.slice(color.indexOf('(') + 1, -1).split(',');
+      const alpha = parts.at(-1)?.trim() ?? '1';
+      return Number.parseFloat(alpha) * (alpha.endsWith('%') ? 0.01 : 1) > 0;
+    }
+    return true;
+  });
+}
+
+/** Resolve a Nession colour custom property the same way the browser serializes it. */
+function resolvedColor(el: Element, property: string): string {
+  const probe = el.ownerDocument.createElement('span');
+  probe.style.color = `var(${property})`;
+  el.ownerDocument.body.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  probe.remove();
+  return resolved;
+}
+
+/**
+ * Await a computed-style condition instead of sampling a CSS transition.
+ *
+ * Focus recipes use `transition-all`/`transition-colors`, so reading the
+ * computed value immediately after `.click()` or `.focus()` can catch the
+ * first frame of the animation (observed: a border halfway between `input`
+ * and `ring`). Poll until the expected state settles, then let the caller
+ * report the last measurement if it never does.
+ */
+async function settle<T>(
+  locator: Locator,
+  read: (el: Element) => T,
+  done: (value: T) => boolean,
+  timeoutMs = 1500,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let value = await locator.evaluate(read);
+  while (!done(value) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    value = await locator.evaluate(read);
+  }
+  return value;
+}
+
+interface QuietFocusStyle {
+  focused: boolean;
+  border: string;
+  outlineStyle: string;
+  outlineWidth: number;
+  boxShadow: string;
+}
+
+function readQuietFocus(el: Element): QuietFocusStyle {
+  const s = getComputedStyle(el);
+  return {
+    focused: document.activeElement === el,
+    border: s.borderTopColor,
+    outlineStyle: s.outlineStyle,
+    outlineWidth: Number.parseFloat(s.outlineWidth),
+    boxShadow: s.boxShadow,
+  };
+}
+
+/**
+ * Pointer focus must not add outer chrome (#2750).
+ *
+ * A click/tap may move focus — that is an interaction state, not a reason to
+ * paint a halo. The control must not grow an outline or a box-shadow ring. With
+ * `{ border: 'ring' }` it must instead repaint its own border in the focus
+ * colour, which is the quiet in-geometry indicator the fields use.
+ */
+export async function expectQuietPointerFocus(
+  locator: Locator,
+  opts: AssertOptions,
+  expected: { border?: 'ring' } = {},
+): Promise<void> {
+  const focused = await locator.evaluate((el) => document.activeElement === el);
+  if (!focused) {
+    violation(opts, 'focus-quiet', 'the control itself is focused', 'focus is elsewhere');
+  }
+  const ring = expected.border === 'ring' ? await locator.evaluate(resolvedColor, '--nession-ring') : null;
+  const quiet = (m: QuietFocusStyle) =>
+    (m.outlineStyle === 'none' || m.outlineWidth <= 0) &&
+    !visibleShadow(m.boxShadow) &&
+    (ring === null || m.border === ring);
+  const m = await settle(locator, readQuietFocus, quiet);
+  if (m.outlineStyle !== 'none' && m.outlineWidth > 0) {
+    violation(opts, 'focus-quiet', 'no focus outline from pointer focus', `outline: ${m.outlineStyle} ${m.outlineWidth}px`);
+  }
+  if (visibleShadow(m.boxShadow)) {
+    violation(opts, 'focus-quiet', 'no focus ring from pointer focus', `box-shadow: ${m.boxShadow}`);
+  }
+  if (ring !== null && m.border !== ring) {
+    violation(opts, 'focus-quiet', `border repainted in ring (${ring})`, m.border);
+  }
+}
+
+interface InsetOutlineStyle {
+  focused: boolean;
+  focusVisible: boolean;
+  outlineStyle: string;
+  outlineWidth: number;
+  outlineOffset: number;
+  outlineColor: string;
+  widthToken: string;
+  offsetToken: string;
+  boxShadow: string;
+}
+
+function readInsetOutline(el: Element): InsetOutlineStyle {
+  const s = getComputedStyle(el);
+  return {
+    focused: document.activeElement === el,
+    focusVisible: el.matches(':focus-visible'),
+    outlineStyle: s.outlineStyle,
+    outlineWidth: Number.parseFloat(s.outlineWidth),
+    outlineOffset: Number.parseFloat(s.outlineOffset),
+    outlineColor: s.outlineColor,
+    widthToken: s.getPropertyValue('--nession-focus-ring-width').trim(),
+    offsetToken: s.getPropertyValue('--nession-focus-ring-offset').trim(),
+    boxShadow: s.boxShadow,
+  };
+}
+
+/**
+ * Keyboard focus must be an inset outline drawn from the focus tokens (#2750).
+ *
+ * The assertion reads `--nession-focus-ring-width` / `-offset` from the element
+ * under test, so it pins the recipe (width, inward offset, ring colour) rather
+ * than a number copied into the test. An outset ring fails on the offset; a
+ * reintroduced `ring-3` fails on the box-shadow.
+ */
+export async function expectInsetFocusOutline(locator: Locator, opts: AssertOptions): Promise<void> {
+  const first = await locator.evaluate(readInsetOutline);
+  if (!first.focused || !first.focusVisible) {
+    violation(opts, 'focus-outline', 'keyboard focus matches :focus-visible', 'focus-visible is false');
+  }
+  const width = Number.parseFloat(first.widthToken);
+  const offset = -Number.parseFloat(first.offsetToken);
+  if (!Number.isFinite(width) || !Number.isFinite(offset)) {
+    violation(opts, 'focus-outline', 'focus tokens resolve to px', `width=${first.widthToken} offset=${first.offsetToken}`);
+  }
+  const ring = await locator.evaluate(resolvedColor, '--nession-ring');
+  const settled = (m: InsetOutlineStyle) =>
+    m.outlineStyle === 'solid' &&
+    Math.abs(m.outlineWidth - width) <= 0.5 &&
+    Math.abs(m.outlineOffset - offset) <= 0.5 &&
+    m.outlineOffset <= 0 &&
+    m.outlineColor === ring &&
+    !visibleShadow(m.boxShadow);
+  const m = await settle(locator, readInsetOutline, settled);
+  if (m.outlineStyle !== 'solid' || Math.abs(m.outlineWidth - width) > 0.5) {
+    violation(opts, 'focus-outline', `solid ${width}px focus outline`, `${m.outlineStyle} ${m.outlineWidth}px`);
+  }
+  if (Math.abs(m.outlineOffset - offset) > 0.5 || m.outlineOffset > 0) {
+    violation(opts, 'focus-outline', `outline offset ${offset}px (inside the control)`, `${m.outlineOffset}px`);
+  }
+  if (m.outlineColor !== ring) {
+    violation(opts, 'focus-outline', `outline drawn in ring (${ring})`, m.outlineColor);
+  }
+  if (visibleShadow(m.boxShadow)) {
+    violation(opts, 'focus-outline', 'no outer box-shadow ring', `box-shadow: ${m.boxShadow}`);
+  }
+}
