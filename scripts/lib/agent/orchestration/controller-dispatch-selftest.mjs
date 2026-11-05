@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
+  CONTROLLED_REPAIR_DISPATCH_COMMENT}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -127,6 +128,17 @@ assert.throws(()=>deriveDispatchKey('fake'),/private key/);
 assert.throws(()=>parseDispatchKey('fake'),/HMAC|base64/);
 // #2262 follow-up: Reviewer actions point at the published PR head, not a main
 // ancestor; they must descend from the original published main SHA instead.
+const repairAction='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+for(const command of [CONTROLLED_REPAIR_BIND_COMMENT,CONTROLLED_REPAIR_DISPATCH_COMMENT]){
+  const repair={...commentValid,actionId:repairAction,
+    event:{...commentValid.event,comment:{...commentValid.event.comment,body:command}}};
+  assert.equal(assertDispatchAuthority(repair).action_id,repairAction);
+  assert.throws(()=>assertDispatchAuthority({...repair,actionId:reviewRecover.actionId}),
+    /authenticated owner\/main/);
+  assert.throws(()=>assertDispatchAuthority({...repair,
+    event:{...repair.event,comment:{...repair.event.comment,body:command+' '}}}),
+    /authenticated owner\/main/);
+}
 const sourceSha='c'.repeat(40),publishedMain=CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha;
 const calls=[];
 const accept=args=>{calls.push(args.join(' '));};
