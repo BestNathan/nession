@@ -228,3 +228,10 @@ Common file navigation stays immediate. Advanced file operations, provider choic
 - [ ] Master/detail remains local to Files and adapts to App/narrow layouts.
 - [ ] Source/location context is shown when it matters and allowed to disappear when it does not.
 - [ ] Returning to the Session preserves continuity rather than recreating terminal/runtime state unnecessarily.
+
+## Prototype record
+
+The interactive Files prototype and its verified preview are recorded in
+[files-workspace-2751-prototype.md](files-workspace-2751-prototype.md). The mock
+is an exploration artifact, not production evidence; the implementation and its
+Acceptance Cases own the shipped contract.
