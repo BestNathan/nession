@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {generateKeyPairSync} from 'node:crypto';
+import {generateKeyPairSync,createHash} from 'node:crypto';
 import {prepareQwenDevelopmentSource,collectQwenDevelopmentPatch}
   from './qwen-development-source.mjs';
 import {sealQwenDevelopmentProposal}
@@ -58,7 +58,10 @@ try {
       admission,snapshot,patch,sessionId,configDir:dir,publicKeyPem});
     const run={id:runId,run_attempt:1,status:'completed',conclusion:'success',
       name:'Agent / Development',path:'.github/workflows/agent-develop.yml',
-      event:'workflow_dispatch',head_branch:'main',head_sha:'b'.repeat(40)};
+      event:'workflow_dispatch',head_branch:'main',head_sha:'b'.repeat(40),
+      actor:{login:'github-actions[bot]'},
+      repository:{full_name:'BestNathan/nession'},
+      head_repository:{full_name:'BestNathan/nession'}};
     const opts={admission,run,result:candidate.result,
       proof:candidate.proof,ciphertext:candidate.ciphertext};
     const accepted=validateQwenDevelopmentCandidate(opts);
@@ -92,6 +95,8 @@ try {
       {run:{...run,id:runId+1}},
       {run:{...run,run_attempt:2}},
       {run:{...run,head_branch:'staging'}},
+      {run:{...run,actor:{login:'attacker'}}},
+      {run:{...run,repository:{full_name:'other/repo'}}},
       {run:{...run,path:'.github/workflows/another.yml'}},
       {run:{...run,conclusion:'failure'}},
       {admission:{...admission,agent_id:'dev-cursor-01'}},
@@ -113,6 +118,20 @@ try {
     for(const change of denies)
       assert.throws(()=>validateQwenDevelopmentCandidate({...opts,...change}),
         /trusted Qwen Developer candidate/);
+    // Matching JSON hashes are insufficient if the Git patch header actually
+    // targets a path different from the separately attested file manifest.
+    const otherPatch=patch.patch.replace(
+      'diff --git a/hello.js b/hello.js',
+      'diff --git a/other.js b/other.js');
+    const otherHash=createHash('sha256').update(otherPatch).digest('hex');
+    assert.notEqual(otherPatch,patch.patch);
+    assert.throws(()=>validateQwenDevelopmentCandidate({
+      ...opts,
+      result:{...candidate.result,patch_base64:Buffer.from(otherPatch)
+        .toString('base64'),patch_sha256:otherHash},
+      proof:{...candidate.proof,patch_sha256:otherHash,
+        patch_bytes:Buffer.byteLength(otherPatch)},
+    }),/proposed Git patch does not match attested changed paths/);
     assert.throws(()=>sealQwenCandidateForStore({
       ...opts,privateKeyPem:'invalid',storeKey:key,nextVersion:2}),
       /Claude native checkpoint/);
