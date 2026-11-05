@@ -1,0 +1,243 @@
+name: Store / Qwen Publisher
+
+# #2274: a verified successful *main-owned Store Ingest* is the only wake.
+# The original model has no GitHub/Store/Publisher writer credentials.
+# The Publisher re-authenticates both original Worker ZIPs, signed Outbox,
+# immutable encrypted native Store checkpoint, and exact SHA source bytes.
+on:
+  workflow_run:
+    workflows: ["Store / Agent Development Ingest"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: trusted-qwen-publisher-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_run' &&
+      github.event.action == 'completed' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.path == '.github/workflows/store-agent-development-ingest.yml' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    outputs:
+      qwen: ${{ steps.select.outputs.qwen }}
+      source_artifact: ${{ steps.select.outputs.source_artifact }}
+    steps:
+      - name: Check the exact independently fetched completed Ingest Run and artifacts
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_INGEST_RUN: ${{ github.event.workflow_run.id }}
+          SOURCE_INGEST_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "qwen=false" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN" \
+            > "$RUNNER_TEMP/ingest-run.json"
+          jq -e --argjson id "$SOURCE_INGEST_RUN" --arg sha "$SOURCE_INGEST_SHA" '
+            .id == $id and .head_sha == $sha and
+            .run_attempt == 1 and .status == "completed" and
+            .conclusion == "success" and .event == "workflow_run" and
+            .path == ".github/workflows/store-agent-development-ingest.yml" and
+            .head_branch == "main" and
+            .repository.full_name == "BestNathan/nession" and
+            .head_repository.full_name == "BestNathan/nession"
+          ' "$RUNNER_TEMP/ingest-run.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_INGEST_RUN/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/ingest-artifacts.json"
+          jq -e '.total_count == (.artifacts | length) and .total_count <= 100' \
+            "$RUNNER_TEMP/ingest-artifacts.json" >/dev/null
+          name="development-qwen-ingest-${SOURCE_INGEST_RUN}-1"
+          count="$(jq -r --arg name "$name" '[.artifacts[] | select(.name == $name)] | length' \
+            "$RUNNER_TEMP/ingest-artifacts.json")"
+          [[ "$count" =~ ^[0-9]+$ ]] && (( count <= 1 ))
+          if (( count == 0 )); then
+            # Cursor/other Ingest success is intentionally Not Applicable.
+            exit 0
+          fi
+          id="$(jq -er --arg name "$name" '
+            [.artifacts[] | select(.name == $name and .expired == false and
+              (.digest | test("^sha256:[a-f0-9]{64}$")) and
+              (.size_in_bytes > 0 and .size_in_bytes < 32768))] |
+            if length == 1 then .[0].id else empty end
+          ' "$RUNNER_TEMP/ingest-artifacts.json")"
+          [[ "$id" =~ ^[1-9][0-9]*$ ]]
+          echo "source_artifact=$id" >> "$GITHUB_OUTPUT"
+          echo "qwen=true" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: detect
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      needs.detect.result == 'success' &&
+      needs.detect.outputs.qwen == 'true'
+    runs-on: ubuntu-24.04
+    environment: cursor
+    timeout-minutes: 22
+    steps:
+      - name: Checkout exact main-owned Publisher script only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate signed Qwen/Store/Publisher negative contracts before secrets
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/publisher/qwen-trusted-publisher-selftest.mjs
+          node scripts/lib/agent/publisher/patch-preflight-selftest.mjs
+          node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
+          ./gates/run run-store-integrity
+
+      - name: Fetch exact trusted Ingest receipt and original Worker ZIPs
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: ${{ github.event.workflow_run.id }}
+          RECEIPT_ARTIFACT: ${{ needs.detect.outputs.source_artifact }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RECEIPT_ARTIFACT" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$UPSTREAM" \
+            > "$RUNNER_TEMP/qwen-ingest.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$UPSTREAM/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/qwen-ingest-artifacts.json"
+          name="development-qwen-ingest-${UPSTREAM}-1"
+          digest="$(jq -er --arg name "$name" --argjson id "$RECEIPT_ARTIFACT" '
+            [.artifacts[] | select(.name == $name and .id == $id and
+              .expired == false and .workflow_run.id == $id)] | .[0].digest
+          ' "$RUNNER_TEMP/qwen-ingest-artifacts.json")"
+          # The source Artifact is uploaded by Run UPSTREAM (not Artifact ID).
+          digest="$(jq -er --arg name "$name" --argjson id "$RECEIPT_ARTIFACT" \
+            --argjson run "$UPSTREAM" '
+            [.artifacts[] | select(.name == $name and .id == $id and
+              .expired == false and .workflow_run.id == $run)] |
+            if length == 1 then .[0].digest else empty end
+          ' "$RUNNER_TEMP/qwen-ingest-artifacts.json")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$RECEIPT_ARTIFACT/zip" \
+            > "$RUNNER_TEMP/qwen-ingest-receipt.zip"
+          actual="$(sha256sum "$RUNNER_TEMP/qwen-ingest-receipt.zip" | cut -d' ' -f1)"
+          test "sha256:$actual" = "$digest"
+          test "$(unzip -Z1 "$RUNNER_TEMP/qwen-ingest-receipt.zip")" = "development-ingest-receipt.json"
+          unzip -p "$RUNNER_TEMP/qwen-ingest-receipt.zip" development-ingest-receipt.json \
+            > "$RUNNER_TEMP/qwen-ingest-receipt.json"
+          test "$(stat -c '%s' "$RUNNER_TEMP/qwen-ingest-receipt.json")" -le 8192
+          worker="$(jq -er .run_id "$RUNNER_TEMP/qwen-ingest-receipt.json")"
+          [[ "$worker" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$worker" \
+            > "$RUNNER_TEMP/qwen-worker.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$worker/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/qwen-worker-artifacts.json"
+          for artifact in development-worker-claim development-worker; do
+            name="${artifact}-${worker}-1"
+            id="$(jq -er --arg name "$name" '
+              [.artifacts[] | select(.name == $name and .expired == false)] |
+              if length == 1 then .[0].id else empty end
+            ' "$RUNNER_TEMP/qwen-worker-artifacts.json")"
+            [[ "$id" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" \
+              > "$RUNNER_TEMP/$artifact.zip"
+          done
+          node scripts/lib/agent/publisher/qwen-trusted-publisher.mjs source \
+            "$RUNNER_TEMP/qwen-worker.json" \
+            "$RUNNER_TEMP/qwen-worker-artifacts.json" \
+            "$RUNNER_TEMP/development-worker-claim.zip" \
+            > "$RUNNER_TEMP/qwen-source.json"
+          source_sha="$(jq -er .source_sha "$RUNNER_TEMP/qwen-source.json")"
+          [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]]
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      # This checkout is Git data ONLY. No npm install, Bash, hooks, package
+      # scripts, source execution or checkout credentials are allowed here.
+      - name: Checkout original exact-SHA source strictly as inert Git data
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mint repository-scoped Store Writer App token outside model jobs
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+
+      # GITHUB_TOKEN-created PRs do not trigger downstream PR CI; only a
+      # distinct installed GitHub App may create the candidate PR.
+      - name: Mint separate Publisher GitHub App token
+        id: publisher
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Authenticate original Qwen and publish/reconcile one real PR
+        env:
+          ACTIONS_READ_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          PUBLISHER_GITHUB_TOKEN: ${{ steps.publisher.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN" && test -n "$PUBLISHER_GITHUB_TOKEN"
+          test "$STORE_APP_TOKEN" != "$PUBLISHER_GITHUB_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/publisher/qwen-trusted-publisher.mjs publish \
+            "$RUNNER_TEMP/qwen-ingest.json" \
+            "$RUNNER_TEMP/qwen-ingest-receipt.json" \
+            "$RUNNER_TEMP/qwen-worker.json" \
+            "$RUNNER_TEMP/qwen-worker-artifacts.json" \
+            "$RUNNER_TEMP/development-worker-claim.zip" \
+            "$RUNNER_TEMP/development-worker.zip" \
+            "$GITHUB_WORKSPACE/source" \
+            > "$RUNNER_TEMP/qwen-publisher-result.json"
+          jq -e '
+            .schema_version == 1 and .kind == "trusted_qwen_publisher_handoff" and
+            (.status == "reviewer_pending" or .status == "replayed") and
+            .issue > 0 and .pull_request > 0 and
+            (.pr_head_sha | test("^[a-f0-9]{40}$"))
+          ' "$RUNNER_TEMP/qwen-publisher-result.json" >/dev/null
+          {
+            echo "## Signed Qwen Developer → Store CAS → Publisher PR → Reviewer"
+            echo "- Worker Run: $(jq -r .developer_run_id "$RUNNER_TEMP/qwen-publisher-result.json")"
+            echo "- Published PR: $(jq -r .pull_request "$RUNNER_TEMP/qwen-publisher-result.json")"
+            echo "- Result: $(jq -r .status "$RUNNER_TEMP/qwen-publisher-result.json")"
+            echo "- Reviewer Action: $(jq -r .reviewer_action_id "$RUNNER_TEMP/qwen-publisher-result.json")"
+            echo "- No model code or native plaintext was executed by this job."
+          } >> "$GITHUB_STEP_SUMMARY"
