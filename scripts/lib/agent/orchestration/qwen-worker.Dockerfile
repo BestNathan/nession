@@ -4,7 +4,7 @@
 FROM node:24-bookworm
 ARG CLAUDE_CODE_VERSION
 RUN set -eux; \
-    echo "$CLAUDE_CODE_VERSION" | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+([-+][A-Za-z0-9.-]+)?$'; \
+    echo "$CLAUDE_CODE_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$'; \
     apt-get update; \
     apt-get install -y --no-install-recommends git ripgrep ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
