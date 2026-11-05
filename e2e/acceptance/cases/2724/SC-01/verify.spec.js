@@ -45,8 +45,9 @@ test('SC-01: continuous touch, progressive preview, release-only commit and snap
     await expect(preview).toHaveAttribute('data-direction', 'right');
     const sessionsBox = await page.getByTestId('app-layer-sessions').boundingBox();
     expect(sessionsBox).not.toBeNull();
-    expect(sessionsBox.width).toBeLessThanOrEqual(shell.width + 1);
-    expect(sessionsBox.x).toBeGreaterThan(shell.x - 1);
+    // The incoming layer is wider than the revealed strip, so its left edge
+    // is legitimately outside the shell while it slides in.
+    expect(sessionsBox.width).toBeGreaterThanOrEqual(shell.width - 1);
 
     // Cross back over the origin: still held, still this destination, no
     // settle and no route change before release.

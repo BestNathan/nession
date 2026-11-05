@@ -8,10 +8,12 @@
 // `Touch.identifier`, which is the ownership a phone browser gives a finger.
 const KEY = '__nessionSwipe2724Touch';
 
-async function openFixtureApp(page, query = '') {
+async function openFixtureApp(page, query = '', { terminal = true } = {}) {
   await page.goto('/#/fixture/app' + query);
   await page.getByTestId('app-layer-root').waitFor({ timeout: 30_000 });
-  await page.locator('.xterm').waitFor({ timeout: 30_000 });
+  if (terminal) {
+    await page.locator('.xterm').waitFor({ timeout: 30_000 });
+  }
 }
 
 async function shellAnchor(page) {

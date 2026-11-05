@@ -63,7 +63,7 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   await expect(anchor.layerRoot).toHaveAttribute('data-layer', 'terminal');
 
   // No-Session root: Workspace does not exist and is not invented.
-  await openFixtureApp(page, '?selection=none');
+  await openFixtureApp(page, '?selection=none', { terminal: false });
   anchor = await shellAnchor(page);
   await expect(anchor.layerRoot).toHaveAttribute('data-layer', 'terminal');
   await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);

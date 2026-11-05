@@ -537,8 +537,18 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(back).toHaveAttribute('aria-label', 'Back to terminal');
 
       // The pair: at the capability root the shell's gesture is back, because
-      // there Back and the shell both mean the Terminal.
-      await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
+      // there Back and the shell both mean the Terminal. The file rows are
+      // interactive owners (#2724), so start on the page-header band — the
+      // shell's own chrome — rather than on the row at the editor's old y.
+      const pageHeader = await page.getByTestId('app-page-header').boundingBox();
+      if (!pageHeader) {
+        throw new Error('the capability root must lay out its page header');
+      }
+      await swipeHorizontally(page, {
+        y: Math.round(pageHeader.y + pageHeader.height / 2),
+        fromX: shell.x + 2,
+        toX: shell.x + 162,
+      });
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
     });
 
