@@ -67,7 +67,7 @@ try{
       environment:'agent-dev-cursor-01'}}),/mismatch/);
   const checkInvalid=(mutate,pattern)=>{
     git('reset','--hard','HEAD');
-    git('clean','-fd');
+    git('clean','-fdx');
     const a=prepareQwenDevelopmentSource(request);
     mutate();
     assert.throws(()=>collectQwenDevelopmentPatch(a,{
@@ -95,7 +95,7 @@ try{
     write('src/other.js','const other = false;\n');
   },/unbounded|outside approved/);
   git('reset','--hard','HEAD');
-  git('clean','-fd');
+  git('clean','-fdx');
   // The fixture is itself a real Git commit and the result is a real diff;
   // no model text or self-reported "success" can replace those checks.
   console.log('Qwen bounded Developer source: exact Git SHA, real patch, native tool evidence, drift/extra edits/symlink/index/credential/model negatives passed');
