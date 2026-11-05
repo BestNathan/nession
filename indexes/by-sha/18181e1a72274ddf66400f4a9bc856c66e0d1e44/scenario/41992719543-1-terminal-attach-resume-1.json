@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41992719543,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2750-quiet-focus-staging",
+    "target_sha": "18181e1a72274ddf66400f4a9bc856c66e0d1e44",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41992719543",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "1145c3607442ce99737c2a96f1114e76c418dd7039fcf5d983f3c367a0d59cf6"
+  },
+  "record": "runs/2026-11-05/41992719543-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "4841b9924e0f4651acd3c372e261e0bb347799d2832e49160da2d60cc351895e"
+}
