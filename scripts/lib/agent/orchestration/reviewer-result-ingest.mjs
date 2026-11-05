@@ -257,7 +257,8 @@ export async function projectReviewerIssue({receipt,commit,version,token,
     if(!response.ok)fail('Issue receipt read failed: '+response.status);
     const comments=await response.json();
     if(!Array.isArray(comments)||comments.length>100)fail('unsafe Issue comment page');
-    if(comments.some(c=>typeof c.body==='string'&&c.body.includes(marker)))
+    if(comments.some(c=>c?.user?.login==='github-actions[bot]'&&
+       typeof c.body==='string'&&c.body.includes(marker)))
       return {projected:false,already_present:true};
     if(comments.length<100)break;
     if(page===20)fail('Issue comments exceed bounded reconciliation');
