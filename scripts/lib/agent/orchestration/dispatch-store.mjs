@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 // #1664: Trusted Controller-only Git transaction boundary around workflow_dispatch.
 // Repository scope, HMAC signing key, and Git writer token MUST be supplied
 // by the independently authenticated Controller/Ingester, never by Provider
@@ -8,8 +9,10 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
-  recordAttestedNativeResumeFailure,nativeResumeSuccessorId} from './outbox.mjs';
-import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,acceptAttestedSliceYield}
+  recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
+  recordControlledReviewerRecoveryIntent} from './outbox.mjs';
+import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
+  verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -192,6 +195,69 @@ export function recoverConfirmedFailedDeveloperDispatch({
       action_id:failedDeveloperRetryActionId(issue,actionId,runId),
       state_version:next.version,store_commit_sha:published.commit_sha};
   });
+}
+
+// Exactly once recovery of the real owner-guard-skipped #1997 Reviewer Run.
+// A durable CAS intent precedes the new external workflow_dispatch; crashes,
+// 204s, timeouts and retries NEVER authorize another POST. The original Run
+// receipt remains in Store until Reviewer result ingest verifies replacement.
+export async function executeControlledReviewerRecovery({
+  remote,registry,signer,actionsToken,source,fetchFn=null,
+}) {
+  const issue=1997;
+  const actionId='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
+  if(source?.verified!==true||source.run_id!==39943178597||
+     source.attempt!==1||source.conclusion!=='skipped'||
+     typeof actionsToken!=='string'||actionsToken.length<8||
+     !Buffer.isBuffer(signer?.key)||signer.key.length<32||
+     signer.key_id!=='main-controller'||!Number.isSafeInteger(signer.issuer_run_id)||
+     signer.issuer_run_id<1)
+    fail('historical Reviewer recovery requires authenticated old Run and owner signer');
+  if(fetchFn!==null&&(process.env.NODE_ENV!=='test'||typeof fetchFn!=='function'))
+    fail('mock Actions client unavailable outside fixtures');
+  const now=signer.now;
+  const issued=withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,issue);
+    if(!prior.state)fail('controlled Reviewer Store state missing');
+    const item=prior.state.outbox.find(x=>x.id===actionId);
+    if(item?.receipt?.reviewer_recovery)
+      return {status:'reconcile',issue,action_id:actionId,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    const plan=planControlledReviewerRecovery(prior.state,actionId,registry,signer);
+    const digest=createHash('sha256').update(plan.ticket).digest('hex');
+    const next=recordControlledReviewerRecoveryIntent(prior.state,prior.version,
+      actionId,{kind:'controlled_review_recovery_intent',
+        skipped_run_id:source.run_id,issuer_run_id:signer.issuer_run_id,
+        ticket_sha256:digest,source_verified:true});
+    const published=persist(dir,next,prior.version,issue);
+    if(published.replayed)fail('first Reviewer recovery intent was replayed');
+    return {status:'committed',issue,action_id:actionId,plan,
+      state_version:next.version,store_commit_sha:published.commit_sha};
+  });
+  if(issued.status!=='committed')return issued;
+  const keyring={[signer.key_id]:signer.key};
+  withStore(remote,dir=>{
+    const current=readIssueWorkflowState(dir,issue);
+    const action=current.state?.outbox.find(x=>x.id===actionId);
+    const ticket=verifyDispatchTicket(issued.plan.ticket,keyring,{now});
+    const digest=createHash('sha256').update(issued.plan.ticket).digest('hex');
+    if(current.version!==issued.state_version||
+       action?.receipt?.reviewer_recovery?.ticket_sha256!==digest||
+       action.receipt.reviewer_recovery.issuer_run_id!==ticket.issuer_run_id||
+       ticket.action_id!==actionId||ticket.state_version!==19||
+       ticket.role!=='reviewer'||ticket.issue!==issue||
+       ticket.input_sha!==action.task.sha)
+      fail('Reviewer recovery CAS commitment changed before dispatch');
+  });
+  // Never retry even if the HTTP result is ambiguous. Metrics and Reviewer
+  // result ingestion reconcile independently from the signed replacement Run.
+  const dispatch=createGitHubDispatchClient(actionsToken,{
+    keyring,now,...(fetchFn?{fetchFn}:{})});
+  const response=await dispatch(issued.plan);
+  return {status:response.status==='verified'?'dispatched':'ambiguous',
+    issue,action_id:actionId,state_version:issued.state_version,
+    store_commit_sha:issued.store_commit_sha,
+    ...(response.status==='verified'?{source_run_id:response.source_run_id}:{})};
 }
 
 // One exact historical native Resume recovery. Independent GitHub proof
