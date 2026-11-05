@@ -258,9 +258,28 @@ export function checkInventory(manifest,workflows){
       // Such events can run branch-selected workflow code with contents:write,
       // irrespective of whether its default-branch YAML has a guarded job.
       const triggers=body.split(/^permissions:\s*$/m)[0];
+      // The ONLY privileged repository_dispatch exception is the Metrics
+      // Writer's exact bot wake for a completed Reviewer. The webhook is
+      // untrusted until an independent REST Run/attempt/main SHA attestation
+      // and canonical artifact verification. All other writers remain denied.
+      const reviewerWake=writer.workflow==='.github/workflows/metrics-agent-telemetry.yml'&&
+        /^  repository_dispatch:\s*\n    types: \[nession-agent-review-completed\]\s*$/m.test(triggers)&&
+        body.includes("github.ref == 'refs/heads/main'")&&
+        body.includes("github.event.action == 'nession-agent-review-completed'")&&
+        body.includes("github.actor == 'github-actions[bot]'")&&
+        body.includes("github.event.sender.login == 'github-actions[bot]'")&&
+        body.includes("github.event_name == 'repository_dispatch'")&&
+        body.includes('EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}')&&
+        body.includes('.head_sha == $sha')&&
+        body.includes('.run_attempt == $attempt')&&
+        body.includes('.path == ".github/workflows/agent-review.yml"')&&
+        body.includes('ref: main')&&
+        body.includes('node scripts/agent-telemetry-ingest.mjs stage')&&
+        body.includes('run-store-cas-push.mjs');
       if(!/^on:\s*$/m.test(triggers)||
          !/^  (workflow_run|schedule):\s*$/m.test(triggers)||
-         /^  (workflow_dispatch|repository_dispatch):\s*$/m.test(triggers))
+         /^  workflow_dispatch:\s*$/m.test(triggers)||
+         (/^  repository_dispatch:\s*$/m.test(triggers)&&!reviewerWake))
         fail('untrusted manual dispatch/trigger on privileged Store writer: '+writer.workflow);
       const trustedSource=writer.workflow==='.github/workflows/metrics-repository.yml'
         ? body.includes('ref: ${{ github.sha }}')&&
@@ -560,6 +579,28 @@ function selfTest(){
   const foreign=clone(manifest);
   foreign.stores.find(x=>x.ref==='task-results').writers[0].source='attacker';
   assert.throws(()=>checkInventory(foreign,sources),/unclassified writer/);
+  const metricsWake='.github/workflows/metrics-agent-telemetry.yml';
+  const metricsOriginal=sources.get(metricsWake);
+  for(const [name,modify] of [
+    ['arbitrary repository_dispatch type',x=>x.replace(
+      'types: [nession-agent-review-completed]','types: [any-event]')],
+    ['foreign sender',x=>x.replace(
+      "github.event.sender.login == 'github-actions[bot]'",
+      "github.event.sender.login == 'attacker'")],
+    ['unbound source SHA',x=>x.replace('.head_sha == $sha',
+      '.head_sha != $sha')],
+    ['untrusted source head',x=>x.replace('ref: main',
+      'ref: ${{ github.event.client_payload.ref }}')],
+    ['manual branch-selectable trigger',x=>x.replace(
+      '  repository_dispatch:', '  workflow_dispatch:\n  repository_dispatch:')],
+  ]){
+    const mutated=modify(metricsOriginal);
+    assert.notEqual(mutated,metricsOriginal,name+' fixture must modify workflow');
+    const sourcesCopy=new Map(sources);
+    sourcesCopy.set(metricsWake,mutated);
+    assert.throws(()=>checkInventory(manifest,sourcesCopy),
+      /untrusted manual dispatch\/trigger on privileged Store writer/,name);
+  }
   const downgraded=clone(manifest);
   downgraded.stores.find(x=>x.ref==='metrics').writers[0].app_token.scope='all repositories';
   assert.throws(()=>checkInventory(downgraded,sources),/unclassified App writer/);
