@@ -26,6 +26,17 @@ assert.throws(()=>issueDispatchTicket(unsignedRepairState,
   'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
 assert.throws(()=>planGitHubDispatch(unsignedRepairState,
   'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+// The exact immutable #1997 v22 Repair action must not become a signed
+// workflow_dispatch from a mere boolean flag.
+const historicalRepairAction=
+  'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const historicalRepairState={...unsignedRepairState,issue:1997,version:22,
+  target_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4',
+  outbox:[{...unsignedRepairState.outbox[0],id:historicalRepairAction,
+    task:{...unsignedRepairState.outbox[0].task,
+      sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4'}}]};
+assert.throws(()=>planGitHubDispatch(historicalRepairState,
+  historicalRepairAction,registry,signer),/Store-bound native checkpoint/);
 for(const wrong of [false,undefined]){
   const invalid={...unsignedRepairState,outbox:[
     {...unsignedRepairState.outbox[0],task:{
