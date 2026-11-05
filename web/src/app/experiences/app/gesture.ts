@@ -11,8 +11,11 @@
  * work-surface start gate, and #1081 re-admitted the shell's own edges as an
  * exception so the gesture remained reachable on the Terminal screen. That
  * split still owns where a page may begin: shell chrome keeps its whole width;
- * a work surface keeps its interior and yields only `EDGE_BAND_PX` at a shell
- * edge, in the one direction that edge's layer arrives from.
+ * a work surface keeps its interior and yields only a bounded band after the
+ * platform's own edge guard, in the one direction that edge's layer arrives
+ * from. #2724's physical-device finding moved that band inward: the outermost
+ * strip belongs to Safari/Android back navigation, which the page cannot
+ * cancel, so the shell stops competing for it.
  *
  * #2724 adds the in-flight half of the contract: a touch is not navigation the
  * moment it lands. It is a candidate until it has moved past
@@ -70,13 +73,24 @@ export const SWIPE_RESIST_MAX_PX = 24;
 export const SWIPE_SETTLE_MS = 180;
 
 /**
- * The width of the shell edge band that may claim a horizontal drag which
- * started over a work surface (#1081).
+ * The outer strip that belongs to the platform's own edge gesture (#2724).
  *
- * 28px is the middle of the 24–32px #473 proposed and #1081 re-proposed. It is
- * a *starting* value: the band's real width is bounded by what a phone browser
- * reserves for its own edge gesture, which no test here can see. See
- * `edgeBand.ts` and SC-07.
+ * iPhone Safari's back swipe is recognised from the screen edge by the OS
+ * before the page sees a cancelable move. A shell band that starts at the
+ * edge therefore loses the gesture to the browser — measured on a physical
+ * device on 2026-11-05. The shell starts its band *after* this guard instead
+ * of competing for the same pixels; the guard is deliberately not a larger
+ * shell band.
+ */
+export const EDGE_PLATFORM_GUARD_PX = 24;
+
+/**
+ * The width of the shell edge band that may claim a horizontal drag which
+ * started over a work surface (#1081, #2724).
+ *
+ * 28px is the middle of the 24–32px #473 proposed and #1081 re-proposed. It
+ * is a *starting* value; device validation (SC-07) decides whether it stays.
+ * The band begins after {@link EDGE_PLATFORM_GUARD_PX}; see `edgeBand.ts`.
  */
 export const EDGE_BAND_PX = 28;
 

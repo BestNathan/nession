@@ -27,7 +27,7 @@ test('SC-02: xterm owns center, vertical, diagonal and cancelled contacts', asyn
 
   await page.setViewportSize({ width: 390, height: 844 });
   await openFixtureApp(page);
-  const { layerRoot, y, leftX, rightX } = await shellAnchor(page);
+  const { layerRoot, y, leftX, rightX, leftGuardX } = await shellAnchor(page);
   const viewport = await page.locator('[data-terminal-viewport]').first().boundingBox();
   if (!viewport) {
     throw new Error('the terminal viewport must be laid out');
@@ -45,6 +45,14 @@ test('SC-02: xterm owns center, vertical, diagonal and cancelled contacts', asyn
   await page.waitForTimeout(300);
   await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
   expect(await xtermRows(page)).toBe(baseline);
+
+  // The outer guard belongs to the OS edge gesture; the shell must not claim
+  // it even though the target is the xterm work surface (#2724).
+  await startTouch(page, { x: leftGuardX, y });
+  await moveTouch(page, { x: leftGuardX + 160, y });
+  await endTouch(page, { x: leftGuardX + 160, y });
+  await page.waitForTimeout(300);
+  await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
 
   // Vertical history scrolling from the edge is content's, and cannot turn
   // into a page later in the same contact.

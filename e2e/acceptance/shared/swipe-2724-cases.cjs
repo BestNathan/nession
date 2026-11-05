@@ -22,12 +22,22 @@ async function shellAnchor(page) {
   if (!shell) {
     throw new Error('the App shell must be laid out');
   }
+  // The shell publishes the platform guard it deliberately does not claim
+  // (#2724); ordinary edge gestures start just inside it, while `leftGuardX`
+  // and `rightGuardX` are the OS-owned strips a Case asserts remain unclaimed.
+  const guard = Number(await layerRoot.getAttribute('data-swipe-guard-px'));
+  if (!Number.isFinite(guard) || guard < 0) {
+    throw new Error('the App shell must publish its platform guard');
+  }
   return {
     layerRoot,
     shell,
+    guard,
     y: Math.round(shell.y + shell.height / 2),
-    leftX: Math.round(shell.x + 2),
-    rightX: Math.round(shell.x + shell.width - 2),
+    leftGuardX: Math.round(shell.x + 2),
+    rightGuardX: Math.round(shell.x + shell.width - 2),
+    leftX: Math.round(shell.x + guard + 2),
+    rightX: Math.round(shell.x + shell.width - guard - 2),
   };
 }
 

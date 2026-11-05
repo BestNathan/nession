@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EDGE_BAND_PX } from '../../gesture';
+import { EDGE_BAND_PX, EDGE_PLATFORM_GUARD_PX } from '../../gesture';
 import {
   SwipeGesture,
   type SwipeGestureOptions,
@@ -230,7 +230,7 @@ describe('SwipeGesture — release-only commit and frozen destination', () => {
 
   it('caps the preview at 80% of the shell width', () => {
     const engine = harness();
-    start(engine, 10);
+    start(engine, EDGE_PLATFORM_GUARD_PX + 10);
     move(engine, 390);
 
     expect(engine.snapshot().offset).toBe(320);
@@ -294,21 +294,30 @@ describe('SwipeGesture — work-surface and edge arbitration', () => {
     expect(engine.snapshot().phase).toBe('idle');
   });
 
-  it('allows the left band to pull Sessions in', () => {
+  it('leaves the platform guard to the OS', () => {
+    // The outer strip is where Safari/Android recognise their own back
+    // gesture; the shell must not claim it (#2724).
     const engine = harness();
-    expect(start(engine, 2, 300, xterm())).toBe(true);
+    expect(start(engine, 4, 300, xterm())).toBe(false);
+    expect(engine.snapshot().reason).toBe('platform-guard');
+    expect(engine.snapshot().phase).toBe('idle');
+  });
+
+  it('allows the left band after the platform guard to pull Sessions in', () => {
+    const engine = harness();
+    expect(start(engine, EDGE_PLATFORM_GUARD_PX + 2, 300, xterm())).toBe(true);
     expect(move(engine, 100).snapshot.destinationIndex).toBe(0);
   });
 
-  it('allows the right band to pull Workspace in', () => {
+  it('allows the right band before the platform guard to pull Workspace in', () => {
     const engine = harness();
-    expect(start(engine, 400 - 2, 300, xterm())).toBe(true);
+    expect(start(engine, WIDE_PHONE.right - EDGE_PLATFORM_GUARD_PX - 2, 300, xterm())).toBe(true);
     expect(move(engine, 300).snapshot.destinationIndex).toBe(2);
   });
 
   it('surrenders the band when the drag moves the other way', () => {
     const engine = harness();
-    start(engine, 2, 300, xterm());
+    start(engine, EDGE_PLATFORM_GUARD_PX + 2, 300, xterm());
     const result = move(engine, -60);
 
     expect(result.snapshot.phase).toBe('idle');
@@ -316,18 +325,23 @@ describe('SwipeGesture — work-surface and edge arbitration', () => {
     expect(result.snapshot.offset).toBe(0);
   });
 
-  it('measures the band from the shell, not the window', () => {
+  it('measures the guard and band from the shell, not the window', () => {
     const inset = { left: 182, right: 572 };
     const engine = harness();
     engine.setBounds(inset);
 
-    expect(start(engine, 184, 300, xterm())).toBe(true);
+    expect(start(engine, 182 + EDGE_PLATFORM_GUARD_PX + 2, 300, xterm())).toBe(true);
     expect(move(engine, 250).snapshot.destinationIndex).toBe(0);
 
     const outside = harness();
     outside.setBounds(inset);
     expect(start(outside, 2, 300, xterm())).toBe(false);
     expect(outside.snapshot().reason).toBe('surface-interior');
+
+    const guard = harness();
+    guard.setBounds(inset);
+    expect(start(guard, 184, 300, xterm())).toBe(false);
+    expect(guard.snapshot().reason).toBe('platform-guard');
   });
 
   it('declines a work-surface start when the shell cannot be measured', () => {
@@ -338,9 +352,18 @@ describe('SwipeGesture — work-surface and edge arbitration', () => {
     expect(engine.snapshot().reason).toBe('unmeasurable-shell');
   });
 
-  it('still pages from shell chrome at the same coordinate', () => {
+  it('does not page from shell chrome inside the platform guard', () => {
+    // The edge belongs to the OS even when the touch lands on shell chrome:
+    // the Terminal's outer strip is chrome, and claiming it would still lose
+    // to Safari's back gesture.
     const engine = harness();
-    expect(start(engine, 2, 300, chrome())).toBe(true);
+    expect(start(engine, 2, 300, chrome())).toBe(false);
+    expect(engine.snapshot().reason).toBe('platform-guard');
+  });
+
+  it('still pages from shell chrome after the platform guard', () => {
+    const engine = harness();
+    expect(start(engine, EDGE_PLATFORM_GUARD_PX + 2, 300, chrome())).toBe(true);
     expect(move(engine, -80).snapshot.destinationIndex).toBe(2);
   });
 

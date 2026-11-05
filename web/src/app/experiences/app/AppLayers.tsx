@@ -14,6 +14,7 @@ import {
   type AppLayer,
 } from './appLayerPositions';
 import type { ShellBounds } from './edgeBand';
+import { EDGE_PLATFORM_GUARD_PX } from './gesture';
 import { useAppShellWidth } from './useAppShellWidth';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { useSwipePager } from './useSwipePager';
@@ -201,6 +202,7 @@ export function AppLayers({
       data-swipe-phase={phase}
       data-swipe-destination={destinationIndex === null ? undefined : destinationIndex}
       data-swipe-reason={lastReason ?? undefined}
+      data-swipe-guard-px={EDGE_PLATFORM_GUARD_PX}
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {/* Every layer is inside the App's popup container, so a menu opened from

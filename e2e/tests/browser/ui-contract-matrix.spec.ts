@@ -72,11 +72,10 @@ test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 /**
  * The App shell's two edge anchors at mid-height (#2724).
  *
- * `shell.x + 2` / `shell.x + width - 2` are inside the 28px band at every
- * matrix width and land over whatever the Terminal layout puts there; either a
- * work surface (the band re-admits it) or shell chrome (the whole width is
- * navigation's) is a valid start. Using the shell edge rather than a surface
- * probe keeps the gesture tests independent of the terminal's inner inset.
+ * The anchors start just inside the platform guard the shell publishes
+ * (`data-swipe-guard-px`), at every matrix width. Landing there is navigation's
+ * on chrome and, over a work surface, inside the re-admitted band; starting
+ * inside the guard would belong to the OS and is asserted separately.
  */
 async function appSwipeAnchor(page: Page) {
   const layerRoot = page.getByTestId('app-layer-root');
@@ -84,12 +83,19 @@ async function appSwipeAnchor(page: Page) {
   if (!shell) {
     throw new Error('the App shell must be laid out');
   }
+  // The shell publishes the platform guard it will not claim (#2724); start
+  // just inside it so the touch is the shell's, not Safari's back gesture.
+  const guard = Number(await layerRoot.getAttribute('data-swipe-guard-px'));
+  if (!Number.isFinite(guard) || guard < 0) {
+    throw new Error('the App shell must publish its platform guard');
+  }
   return {
     layerRoot,
     shell,
+    guard,
     y: Math.round(shell.y + shell.height / 2),
-    leftX: Math.round(shell.x + 2),
-    rightX: Math.round(shell.x + shell.width - 2),
+    leftX: Math.round(shell.x + guard + 2),
+    rightX: Math.round(shell.x + shell.width - guard - 2),
   };
 }
 
@@ -544,10 +550,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       if (!pageHeader) {
         throw new Error('the capability root must lay out its page header');
       }
+      // The Back control sits at the header's left edge; its title area is
+      // chrome and is past the platform guard, so start there.
       await swipeHorizontally(page, {
         y: Math.round(pageHeader.y + pageHeader.height / 2),
-        fromX: shell.x + 2,
-        toX: shell.x + 162,
+        fromX: pageHeader.x + pageHeader.width / 2,
+        toX: pageHeader.x + pageHeader.width / 2 + 160,
       });
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
     });
@@ -588,13 +596,14 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       if (!shell) {
         throw new Error('the App shell must be laid out');
       }
+      const guard = Number(await page.getByTestId('app-layer-root').getAttribute('data-swipe-guard-px'));
       const y = shell.y + shell.height / 2;
 
       // Leftward from the right edge band. There is no third position to page
       // to, so this must be a no-op rather than a slide onto a blank depth.
       await swipeHorizontally(page, {
         y,
-        fromX: shell.x + shell.width - 2,
+        fromX: shell.x + shell.width - guard - 2,
         toX: shell.x + shell.width - 150,
       });
       // A no-op is an absence, so it needs a window in which a wrong commit
@@ -604,7 +613,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
 
       // Rightward from the left edge band: the one layer that does exist.
-      await swipeHorizontally(page, { y, fromX: shell.x + 2, toX: shell.x + 150 });
+      await swipeHorizontally(page, { y, fromX: shell.x + guard + 2, toX: shell.x + 150 });
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });
 
@@ -628,9 +637,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // centred inside it (#2592), so it is not the surface edge. Narrow the
       // band below `surface.x + padX` and this fails — which is right, because
       // the band would then add nothing the gate did not already allow.
+      const guard = Number(await layerRoot.getAttribute('data-swipe-guard-px'));
       const padX = await viewport.evaluate((element) =>
         Number.parseFloat(getComputedStyle(element).paddingLeft));
-      const probe = surface.x + padX + 4;
+      // The band begins after the platform guard; stay past both the guard
+      // and the terminal's own inset so the probe is on the surface.
+      const probe = Math.max(shell.x + guard + 4, surface.x + padX + 4);
       await swipeHorizontally(page, { y, fromX: probe, toX: probe + 140 });
 
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
@@ -666,9 +678,10 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // build where the pager was simply never wired up would pass. The probe
       // is past the owned inset, not a fixed offset into the centred grid
       // (#2592).
+      const guard = Number(await layerRoot.getAttribute('data-swipe-guard-px'));
       const padX = await viewport.evaluate((element) =>
         Number.parseFloat(getComputedStyle(element).paddingLeft));
-      const shellEdge = Math.round(surface.x + padX + 4);
+      const shellEdge = Math.round(Math.max(shell.x + guard + 4, surface.x + padX + 4));
       await swipeHorizontally(page, { y, fromX: shellEdge, toX: shellEdge + 140 });
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });
@@ -717,8 +730,8 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       }
       await swipeHorizontally(page, {
         y: Math.round(header.y + header.height / 2),
-        fromX: Math.round(shell.x + 6),
-        toX: Math.round(shell.x + 156),
+        fromX: Math.round(shell.x + shell.width / 2),
+        toX: Math.round(shell.x + shell.width / 2 + 150),
       });
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
     });
@@ -816,7 +829,8 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // with the tap the user aimed at.
       const x = Math.round(box.x + 2);
       const y = Math.round(box.y + box.height / 2);
-      expect(x).toBeLessThanOrEqual(shell.x + 28);
+      const guard = Number(await layerRoot.getAttribute('data-swipe-guard-px'));
+      expect(x).toBeLessThanOrEqual(shell.x + guard + 28);
 
       await startSwipeTouch(page, { x, y });
       await moveSwipeTouch(page, { x: x + 140, y });
@@ -838,7 +852,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       }
       // The header's left edge is shell padding, not its Back control: a start
       // on the control is correctly the control's (SC-03).
-      const startX = Math.round(shell.x + 2);
+      const startX = Math.round(header.x + header.width / 2);
       const headerY = Math.round(header.y + header.height / 2);
 
       // Observe the DOM for the whole settle: a wrong geometry mounts the
