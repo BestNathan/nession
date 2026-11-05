@@ -61,7 +61,7 @@ export function allowedQwenTrackedPath(relative){
   // The Publisher's canonical protected-path owner is authoritative even
   // when the model only gets Read/Edit/Write tools.
   try{validPublisherFile(relative);}catch{return false;}
-  return /\\.(?:rs|go|ts|tsx|js|jsx|mjs|json|md|css|html|toml)$/.test(relative);
+  return /\.(?:rs|go|ts|tsx|js|jsx|mjs|json|md|css|html|toml)$/.test(relative);
 }
 function ordinaryFile(root,relative){
   let target=root;
