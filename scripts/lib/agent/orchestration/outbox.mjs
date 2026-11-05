@@ -101,7 +101,10 @@ export function validateDevelopmentState(state) {
           item.task.type!=='dispatch'||item.task.role!=='developer'||
           item.task.task!=='repair'||item.task.resume!==true||
           item.task.continuation!=null||item.task.sha!==state.target_sha||
-          state.phase!=='repair'||!positive(c.checkpoint_version)||
+          (state.phase!=='repair'&&!(item.status==='failed'&&
+            item.id===CONTROLLED_REPAIR_ACTION&&
+            item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE))||
+          !positive(c.checkpoint_version)||
           !SHA.test(c.checkpoint_commit_sha??'')||
           !HEX64.test(c.ciphertext_sha256??'')||
           !SHA.test(c.source_sha??'')||c.source_sha===item.task.sha||
