@@ -236,7 +236,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$REPAIR_INPUT_ISSUE" = '1997'
-          test "$REPAIR_INPUT_ACTION" = 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'
+          case "$REPAIR_INPUT_ACTION" in
+            d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d|ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5) ;;
+            *) echo "::error::Unrecognized native Repair Action"; exit 1 ;;
+          esac
           test "$REPAIR_INPUT_SHA" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
           git fetch --quiet --no-tags origin refs/pull/2176/head
           test "$(git rev-parse FETCH_HEAD)" = "$REPAIR_INPUT_SHA"
