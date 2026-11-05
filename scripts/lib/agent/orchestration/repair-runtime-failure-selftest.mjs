@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {verifyControlledRepairRuntimeFailure} from './repair-runtime-failure.mjs';
+import fs from 'node:fs';
 import {validateDevelopmentState,recordAttestedRepairRuntimeFailure,
-  repairRuntimeSuccessorId} from './outbox.mjs';
+  repairRuntimeSuccessorId,recordDispatch,acceptTaskResult} from './outbox.mjs';
 
 const oldAction='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 const sha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
@@ -80,6 +81,28 @@ assert.equal(updated.outbox[1].id,successor);
 assert.equal(updated.outbox[1].status,'pending');
 assert.deepEqual(updated.outbox[1].task,state.outbox[0].task);
 assert.equal(state.outbox[0].status,'dispatched');
+// Once a DISTINCT successful replacement Worker is independently ingested,
+// the original failed Action remains immutable and exactly one Reviewer is
+// spawned. No spurious PR edit or a second Developer result is accepted.
+const run2=440004;
+const dispatched=recordDispatch(updated,26,successor,{
+  status:'verified',dispatch_id:successor,source_run_id:run2,
+});
+const result={kind:'developer',issue:1997,run_id:run2,run_attempt:1,
+  target_sha:sha,outcome:'implementation_ready',task_id:successor};
+const source={repository:'BestNathan/nession',path:'.github/workflows/agent-develop.yml',
+  name:'Agent / Development',run_id:run2,attempt:1,
+  event:'workflow_dispatch',ref:'refs/heads/main',issue:1997,
+  task_id:successor,agent_id:'dev-cursor-01',input_sha:sha,
+  output_sha:sha,verified:true};
+const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+const reviewed=acceptTaskResult(dispatched,dispatched.version,result,source,registry);
+assert.equal(reviewed.phase,'review');
+assert.equal(reviewed.outbox.filter(x=>x.status==='pending'&&
+  x.task.role==='reviewer').length,1);
+assert.equal(reviewed.outbox.find(x=>x.id===oldAction).status,'failed');
+assert.equal(reviewed.outbox.some(x=>x.id===successor),false);
+assert.throws(()=>acceptTaskResult(reviewed,reviewed.version,result,source,registry));
 assert.throws(()=>recordAttestedRepairRuntimeFailure(updated,26,oldAction,proof));
 assert.throws(()=>recordAttestedRepairRuntimeFailure(state,24,oldAction,proof));
 for(const bad of [
