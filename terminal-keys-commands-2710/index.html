@@ -160,7 +160,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 .send span{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--nession-primary);color:var(--nession-primary-foreground)}
 .panel-head{min-height:var(--nession-control-md);height:auto}
 .switch button,.close,.cancel{min-height:var(--nession-control-md)}
-.panel-body{overflow-y:auto;overscroll-behavior:contain}
+.panel-body.keys-body{overflow-y:auto;overscroll-behavior:contain}
 .bottom-row{display:flex;flex-direction:column;align-items:stretch;gap:6px}
 .mods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
 .mod{max-width:none;min-width:var(--nession-control-md)}
@@ -356,13 +356,13 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(x=>'<button class="letter" type="button" data-letter="'+x+'" aria-label="'+modifier+' plus '+x+'">'+x+'</button>').join("")+
         '</div><button type="button" class="cancel" data-act="cancel">Cancel</button></div>'
         :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C">⌃ C</button><button class="quickkey" data-chord="Ctrl+R">⌃ R</button><button class="quickkey" data-chord="Ctrl+L">⌃ L</button></div>';
-      body='<div class="panel-body">'+
+      body='<div class="panel-body keys-body">'+
         '<div><div class="caption">'+(modifier?"Modifier: "+modifier:"Shortcuts")+'</div>'+code+'</div>'+
         '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
         '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["←","↑","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
         '</div>';
     }else if(view==="commands"){
-      body='<div class="panel-body"><div class="commands-head"><span>Saved commands</span><span>'+saved.length+' commands</span></div><div class="commands">'+
+      body='<div class="panel-body commands-body"><div class="commands-head"><span>Saved commands</span><span>'+saved.length+' commands</span></div><div class="commands">'+
        saved.map((c,i)=>'<div class="command"><div class="command-main" data-insert="'+i+'" role="button" tabindex="0"><b>'+c.name+'</b><code>'+c.text+'</code></div><button class="insert" data-insert="'+i+'">Insert</button><button class="run" data-run="'+i+'">Run</button></div>').join("")+
        '</div></div>';
     }
