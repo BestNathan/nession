@@ -7,6 +7,7 @@ import { startDevelopment,recordDispatch,failedDispatch,acceptTaskResult,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint } from './outbox.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState,issueStatePath } from './state-store.mjs';
 import { advanceWorkflow } from './transition.mjs';
+import {attestCrossPhaseRepairFacts} from './repair-checkpoint.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const issue=1696;
@@ -332,5 +333,54 @@ for(const bad of [
     outbox:[{...boundRepair.outbox[0],...bad}]}),
     /invalid cross-phase Repair checkpoint/);
 }
+// The trusted source reader must correlate the actual historical yielded
+// Worker, checkpoint head, encrypted object, and immutable Run record.
+const historicalYield={
+  schema_version:1,issue:1997,version:16,phase:'ready',target_sha:null,
+  repair_attempts:0,transitions:[],
+  assignments:preRepair.assignments,
+  outbox:[{id:'dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31',
+    task:{type:'dispatch',role:'developer',task:'implement',
+      sha:oldSource,agent_id:'dev-cursor-01'},
+    status:'yielded',attempts:1,receipt:{
+      status:'yielded',dispatch_id:'dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31',
+      source_run_id:39448549052,source_attempt:1,
+      checkpoint_version:3,
+      checkpoint_commit_sha:repairProof.checkpoint_commit_sha,
+      ciphertext_sha256:repairProof.ciphertext_sha256}}],
+};
+const path3='roles/developer/dev-cursor-01/issues/1997/checkpoints/00000003.json';
+const checkpointHead={version:3,checkpoint_path:path3,
+  ciphertext_sha256:repairProof.ciphertext_sha256};
+const cp={schema_version:1,kind:'encrypted_agent_checkpoint',
+  path:path3,identity:{role:'developer',agent_id:'dev-cursor-01',issue:1997},
+  version:3,metadata:{provider:'cursor',source_sha:oldSource,
+    session_id:'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6',
+    harness_digest:'b'.repeat(64)},
+  ciphertext_sha256:repairProof.ciphertext_sha256};
+const sourceRun={schema_version:1,kind:'agent_checkpoint_run',
+  role:'developer',agent_id:'dev-cursor-01',issue:1997,run_id:39448549052,
+  attempt:1,version:3,source_sha:oldSource,
+  workflow:'.github/workflows/agent-develop.yml',
+  workflow_sha:'a'.repeat(40),checkpoint_path:path3,
+  ciphertext_sha256:repairProof.ciphertext_sha256,
+  harness_digest:cp.metadata.harness_digest};
+const facts={current:preRepair,historical:historicalYield,
+  head:checkpointHead,checkpoint:cp,run:sourceRun,
+  checkpointCommitSha:repairProof.checkpoint_commit_sha,actionId:repairAction};
+assert.deepEqual(attestCrossPhaseRepairFacts(facts),repairProof);
+for(const bad of [
+  {historical:{...historicalYield,outbox:[]}},
+  {historical:{...historicalYield,outbox:[{...historicalYield.outbox[0],
+    receipt:{...historicalYield.outbox[0].receipt,source_run_id:39448549053}}]}},
+  {head:{...checkpointHead,version:2}},
+  {checkpoint:{...cp,metadata:{...cp.metadata,source_sha:publishedSha}}},
+  {checkpoint:{...cp,metadata:{...cp.metadata,provider:'unknown'}}},
+  {run:{...sourceRun,source_sha:publishedSha}},
+  {run:{...sourceRun,run_id:999}},
+  {current:{...preRepair,transitions:[preRepair.transitions[0]]}},
+  {checkpointCommitSha:'f'.repeat(40)},
+])assert.throws(()=>attestCrossPhaseRepairFacts({...facts,...bad}),
+  /trusted Repair checkpoint/);
 validateDevelopmentState(state);
 console.log('agent Issue outbox: durable CAS, trusted result transitions and replay fixtures passed');
