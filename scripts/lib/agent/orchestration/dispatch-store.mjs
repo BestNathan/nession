@@ -13,6 +13,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
   repairRuntimeSuccessorId} from './outbox.mjs';
+import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
@@ -86,9 +87,10 @@ export function bindControlledRepairCheckpoint({remote,issue,actionId}){
 // already authenticated, checksum-matched Worker + independently committed
 // v4 ciphertext may advance the original pending Repair to a NEW Review.
 // All protocol transitions stay with acceptTaskResult and a single Store CAS.
-export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr}){
+export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr,actionId}){
   const issue=1997;
-  const actionId='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+  if(!isControlledRepairAction(actionId))
+    fail('unrecognized attested Repair Action');
   const prSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
   if(!Number.isSafeInteger(run?.id)||run.id<1||run?.run_attempt!==1||
      run.path!=='.github/workflows/agent-develop.yml'||
@@ -118,6 +120,14 @@ export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr})
         state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
     }
     const action=prior.state.outbox.find(x=>x.id===actionId);
+    if(actionId===CONTROLLED_REPAIR_RETRY_ACTION){
+      const failed=prior.state.outbox.find(x=>x.id===
+        'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d');
+      if(failed?.status!=='failed'||failed.receipt?.failure_code!==
+         'cursor_native_read_missing_uncommitted'||
+         failed.receipt.source_run_id!==42020432271)
+        fail('replacement Repair has no retained original failure proof');
+    }
     if(prior.state.phase!=='repair'||action?.status!=='dispatched'||
        action.task.role!=='developer'||action.task.task!=='repair'||
        action.task.agent_id!=='dev-cursor-01'||action.task.sha!==prSha||
