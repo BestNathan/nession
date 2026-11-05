@@ -58,7 +58,6 @@ const action=reconcileOutbox(state).pending[0];
 const key=Buffer.alloc(32,0x76),keyring={'key-v1':key};
 const {ticket}=issueDispatchTicket(state,action.id,registry,{
   key,key_id:'key-v1',issuer_run_id:222,now,ttl_ms:600000});
-const beforeDispatch=state;
 state=recordDispatch(state,state.version,action.id,{
   status:'verified',dispatch_id:action.id,source_run_id:333});
 const result={kind:'developer',issue,run_id:333,run_attempt:1,
@@ -299,51 +298,131 @@ assert.match(reviewWorkflow,
   /path: \$\{\{ runner\.temp \}\}\/review-output\/agent-result\.json/);
 // A skipped owner-guard Run may be re-bound exactly once to the successful
 // replacement, retaining the skipped Run for audit.
-const skippedRun=structuredClone(worker);
-Object.assign(skippedRun,{id:334,conclusion:'skipped'});
-const rebindRuns=new Map([[222,issuer],[333,worker],[334,skippedRun]]);
-const rebindReader={getRun:async id=>structuredClone(rebindRuns.get(id))};
-const skippedState=recordDispatch(beforeDispatch,beforeDispatch.version,action.id,{
-  status:'verified',dispatch_id:action.id,source_run_id:334});
-const attestation=await attestSkippedDispatchRebinding({state:skippedState,
-  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
-  reader:rebindReader,verified_main_sha:main});
+// A skipped Reviewer dispatch can be replaced only by a Run that carries
+// the same authenticated action claim Artifact, not merely the same main SHA.
+const reviewReady=acceptTaskResult(state,state.version,result,evidence.source,registry);
+const realReviewAction=reconcileOutbox(reviewReady).pending[0];
+assert.equal(realReviewAction.task.role,'reviewer');
+const {ticket:reviewTicket}=issueDispatchTicket(reviewReady,realReviewAction.id,registry,{
+  key,key_id:'key-v1',issuer_run_id:222,now,ttl_ms:600000});
+const skippedState=recordDispatch(reviewReady,reviewReady.version,realReviewAction.id,{
+  status:'verified',dispatch_id:realReviewAction.id,source_run_id:334});
+const replacementRun={...worker,id:335,
+  path:'.github/workflows/agent-review.yml',name:'Agent / Review',
+  actor:{login:'BestNathan'}};
+const skippedRun={...replacementRun,id:334,conclusion:'skipped'};
+const rebindRuns=new Map([[222,issuer],[334,skippedRun],[335,replacementRun]]);
+const rebindReader={
+  getRun:async id=>structuredClone(rebindRuns.get(id)),
+  getPullRequest:async id=>id===43?structuredClone(prRecord):null,
+};
+const realReviewResult={kind:'reviewer',issue,run_id:335,run_attempt:1,
+  target_sha:outputSha,outcome:'approved',task_id:realReviewAction.id};
+const reviewZip=zipFixture(realReviewResult);
+const claim={schema_version:1,kind:'reviewer_dispatch_claim',
+  action_id:realReviewAction.id,dispatch_ticket:reviewTicket};
+function reviewerArtifacts({claimDoc=claim,runId=335,omitClaim=false,
+  duplicateClaim=false,corruptDigest=false}={}) {
+  const claimZip=zipFixture(claimDoc,{name:'review-claim.json'});
+  const meta=(id,name,bytes)=>({
+    id,name,digest:'sha256:'+sha(bytes),expired:false,
+    size_in_bytes:bytes.length,created_at:new Date(now+5000).toISOString(),
+    workflow_run:{id:runId,head_sha:main},
+  });
+  const resultArtifact=meta(1001,'agent-result-'+runId+'-1-'+realReviewAction.id,reviewZip);
+  const claimArtifact=meta(1002,'review-claim-'+runId+'-1',claimZip);
+  if(corruptDigest)claimArtifact.digest='sha256:'+'0'.repeat(64);
+  const artifacts=[resultArtifact,
+    ...(!omitClaim?[claimArtifact]:[]),
+    ...(duplicateClaim?[{...claimArtifact,id:1003}]:[])];
+  return {
+    listRunArtifacts:async()=>({total_count:artifacts.length,artifacts}),
+    downloadZip:async id=>id===1001?reviewZip:claimZip,
+  };
+}
+const claimReader=reviewerArtifacts();
+const rebindRequest={state:skippedState,action_id:realReviewAction.id,
+  skipped_run_id:334,replacement_run_id:335,reader:rebindReader,
+  artifactReader:claimReader,keyring,verified_main_sha:main,now:now+30000};
+const attestation=await attestSkippedDispatchRebinding(rebindRequest);
 const rebound=recordReboundDispatch(skippedState,skippedState.version,
-  action.id,attestation);
+  realReviewAction.id,attestation);
 assert.equal(rebound.version,skippedState.version+1);
-assert.deepEqual(rebound.outbox.find(x=>x.id===action.id).receipt,{
-  status:'verified',dispatch_id:action.id,source_run_id:333,
+assert.deepEqual(rebound.outbox.find(x=>x.id===realReviewAction.id).receipt,{
+  status:'verified',dispatch_id:realReviewAction.id,source_run_id:335,
   rebound_from_run_id:334});
-assert.equal(recordReboundDispatch(rebound,rebound.version,action.id,attestation),
+assert.equal(recordReboundDispatch(rebound,rebound.version,realReviewAction.id,attestation),
   rebound);
-assert.equal((await ingestAgentResult({...options,state:rebound})).result.run_id,333);
-for(const [change,regex] of [
-  [{state:skippedState,skipped_run_id:333,replacement_run_id:334},
-    /no verified receipt/],
-  [{state:skippedState,skipped_run_id:334,replacement_run_id:334},
-    /invalid skipped dispatch rebinding request/],
-  [{state:skippedState,skipped_run_id:334,replacement_run_id:999},
-    /replacement Run is not an authenticated successful dispatch/],
-]) await assert.rejects(()=>attestSkippedDispatchRebinding({action_id:action.id,
-  reader:rebindReader,verified_main_sha:main,...change}),regex);
+const realReviewMetrics={...reviewArgs.metrics,
+  identity:{...reviewArgs.metrics.identity,github_run_id:335},
+  task:{...reviewArgs.metrics.task,action_id:realReviewAction.id}};
+const ingestedReview=await ingestAgentResult({...options,state:rebound,
+  action_id:realReviewAction.id,reader:rebindReader,
+  artifactReader:claimReader,dispatch_ticket:reviewTicket,
+  metrics:realReviewMetrics});
+assert.equal(ingestedReview.result.run_id,335);
+assert.equal(acceptTaskResult(rebound,rebound.version,
+  ingestedReview.result,ingestedReview.source,registry).phase,'quality');
+for(const [overrides,regex] of [
+  [{skipped_run_id:335,replacement_run_id:334},/no verified receipt/],
+  [{replacement_run_id:334},/invalid skipped dispatch rebinding request/],
+  [{replacement_run_id:999},/replacement Run/],
+  [{artifactReader:reviewerArtifacts({omitClaim:true})},/missing or duplicate/],
+  [{artifactReader:reviewerArtifacts({duplicateClaim:true})},/missing or duplicate/],
+  [{artifactReader:reviewerArtifacts({corruptDigest:true})},/claim ZIP digest/],
+  [{artifactReader:reviewerArtifacts({claimDoc:{...claim,
+      action_id:'f'.repeat(64)}})},/claim is not bound/],
+  [{artifactReader:reviewerArtifacts({claimDoc:{...claim,
+      dispatch_ticket:ticket}})},/replacement signed claim/],
+  [{artifactReader:reviewerArtifacts({claimDoc:{...claim,
+      dispatch_ticket:reviewTicket.slice(0,-3)+'aaa'}})},/HMAC|signature|malformed/],
+]) await assert.rejects(()=>attestSkippedDispatchRebinding({
+  ...rebindRequest,...overrides}),regex);
 const notSkipped=new Map(rebindRuns);
 notSkipped.set(334,{...skippedRun,conclusion:'success'});
-await assert.rejects(()=>attestSkippedDispatchRebinding({state:skippedState,
-  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
-  reader:{getRun:async id=>structuredClone(notSkipped.get(id))},
-  verified_main_sha:main}),/skipped Run is not an authenticated skipped dispatch/);
+await assert.rejects(()=>attestSkippedDispatchRebinding({...rebindRequest,
+  reader:{...rebindReader,getRun:async id=>structuredClone(notSkipped.get(id))}}),
+  /skipped Run is not an authenticated skipped dispatch/);
 const wrongMain=new Map(rebindRuns);
-wrongMain.set(333,{...worker,head_sha:'d'.repeat(40)});
-await assert.rejects(()=>attestSkippedDispatchRebinding({state:skippedState,
-  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
-  reader:{getRun:async id=>structuredClone(wrongMain.get(id))},
-  verified_main_sha:main}),/replacement Run/);
+wrongMain.set(335,{...replacementRun,head_sha:'d'.repeat(40)});
+await assert.rejects(()=>attestSkippedDispatchRebinding({...rebindRequest,
+  reader:{...rebindReader,getRun:async id=>structuredClone(wrongMain.get(id))}}),
+  /replacement Run/);
+const unauthorized=new Map(rebindRuns);
+unauthorized.set(335,{...replacementRun,actor:{login:'untrusted'}});
+await assert.rejects(()=>attestSkippedDispatchRebinding({...rebindRequest,
+  reader:{...rebindReader,getRun:async id=>structuredClone(unauthorized.get(id))}}),
+  /authorized Reviewer actor/);
+// The formerly accepted unrelated same-workflow/main-SHA Run for another
+// signed action must fail before recordReboundDispatch could poison the Store.
+const otherRequest={...request,issue:issue+1};
+const otherStart=startDevelopment(registry,otherRequest,authority);
+const otherDev=reconcileOutbox(otherStart).pending[0];
+const otherDispatched=recordDispatch(otherStart,otherStart.version,otherDev.id,{
+  status:'verified',dispatch_id:otherDev.id,source_run_id:333});
+const otherResult={...result,issue:issue+1,task_id:otherDev.id};
+const otherSource={...evidence.source,issue:issue+1,task_id:otherDev.id};
+const otherReady=acceptTaskResult(otherDispatched,otherDispatched.version,
+  otherResult,otherSource,registry);
+const otherAction=reconcileOutbox(otherReady).pending[0];
+const {ticket:otherTicket}=issueDispatchTicket(otherReady,otherAction.id,
+  registry,{key,key_id:'key-v1',issuer_run_id:222,now,ttl_ms:600000});
+const unrelatedRun={...replacementRun,id:336};
+const unrelatedRuns=new Map([...rebindRuns,[336,unrelatedRun]]);
+await assert.rejects(()=>attestSkippedDispatchRebinding({
+  ...rebindRequest,replacement_run_id:336,
+  reader:{...rebindReader,getRun:async id=>structuredClone(unrelatedRuns.get(id))},
+  artifactReader:reviewerArtifacts({runId:336,claimDoc:{
+    ...claim,action_id:otherAction.id,dispatch_ticket:otherTicket}}),
+}),/claim is not bound/);
 assert.throws(()=>recordReboundDispatch(skippedState,skippedState.version,
-  action.id,{...attestation,kind:'other'}),/invalid skipped dispatch rebinding/);
-assert.throws(()=>recordReboundDispatch(rebound,rebound.version,action.id,
-  {...attestation,replacement_run_id:335,build:true}),/invalid skipped dispatch rebinding/);
-assert.throws(()=>recordReboundDispatch(rebound,rebound.version,action.id,
-  {...attestation,replacement_run_id:335}),/does not point at the skipped Run/);
+  realReviewAction.id,{...attestation,kind:'other'}),/invalid skipped dispatch rebinding/);
+assert.throws(()=>recordReboundDispatch(rebound,rebound.version,
+  realReviewAction.id,{...attestation,replacement_run_id:337,build:true}),
+  /invalid skipped dispatch rebinding/);
+assert.throws(()=>recordReboundDispatch(rebound,rebound.version,
+  realReviewAction.id,{...attestation,replacement_run_id:337}),
+  /does not point at the skipped Run/);
 assert.throws(()=>recordReboundDispatch(skippedState,skippedState.version,
-  action.id,{...attestation,role:'reviewer'}),/rebinding action/);
+  realReviewAction.id,{...attestation,role:'developer'}),/rebinding action/);
 console.log('Agent Artifact Ingest verified single-file ZIP, GitHub digest, run/Issue binding and replay fixtures passed');

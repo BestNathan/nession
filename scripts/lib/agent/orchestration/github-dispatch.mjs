@@ -316,7 +316,8 @@ function compareSource(run,body,result) {
 const REBINDING_FIELDS=['schema_version','kind','action_id','issue','role',
   'skipped_run_id','replacement_run_id','verified_main_sha'];
 export async function attestSkippedDispatchRebinding({
-  state,action_id,skipped_run_id,replacement_run_id,reader,verified_main_sha,
+  state,action_id,skipped_run_id,replacement_run_id,reader,artifactReader,
+  keyring,verified_main_sha,now=Date.now(),
 }) {
   validateDevelopmentState(state);
   if(!HEX40.test(verified_main_sha??'')||!positive(skipped_run_id)||
@@ -343,7 +344,35 @@ export async function attestSkippedDispatchRebinding({
     return run;
   };
   await inspect(skipped_run_id,'skipped');
-  await inspect(replacement_run_id,'success');
+  const replacement=await inspect(replacement_run_id,'success');
+  // Only Reviewer is currently eligible. A successful unrelated same-SHA
+  // workflow_run must not be able to poison the immutable Store receipt.
+  if(role!=='reviewer')reject('skipped Run rebinding requires a Reviewer action');
+  if(!['BestNathan','github-actions[bot]'].includes(replacement.actor?.login))
+    reject('replacement was not dispatched by an authorized Reviewer actor');
+  // Artifact parsing has one canonical owner in result-artifact. Load it here
+  // only when reconciling to avoid a top-level ESM cycle with Run attestation.
+  const {readAuthenticatedReviewClaim}=await import('./result-artifact.mjs');
+  const claim=await readAuthenticatedReviewClaim({
+    artifactReader,run:replacement,action_id});
+  const body=verifyDispatchTicket(claim.dispatch_ticket,keyring,
+    {now,allowExpired:true});
+  if(body.schema_version!==1||body.action_id!==action_id||
+      body.issue!==state.issue||body.role!==role||
+      body.agent_id!==pending.task.agent_id||
+      body.agent_id!==state.assignments.reviewer||
+      body.task!==pending.task.task||body.input_sha!==pending.task.sha||
+      body.state_version>state.version)
+    reject('replacement signed claim does not bind the original Reviewer action');
+  const issuer=await reader.getRun(body.issuer_run_id);
+  if(issuer?.id!==body.issuer_run_id||
+      !authenticatedTicketIssuer(issuer,verified_main_sha))
+    reject('replacement claim issuer is not the trusted Controller');
+  compareSource(replacement,body,{
+    kind:role,issue:state.issue,task_id:action_id,
+    run_id:replacement.id,run_attempt:replacement.run_attempt,
+    target_sha:pending.task.sha,
+  });
   return Object.freeze({schema_version:1,kind:'skipped_dispatch_rebinding',
     action_id,issue:state.issue,role,skipped_run_id,replacement_run_id,
     verified_main_sha});
