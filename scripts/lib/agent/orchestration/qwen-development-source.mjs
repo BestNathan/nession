@@ -47,6 +47,11 @@ function ordinaryFile(root,relative){
   }
   return target;
 }
+// Git status deliberately hides ignored paths. Isolated model work must not
+// manufacture unreviewed files under ignored build/cache directories either.
+function ignoredArtifacts(root){
+  return git(root,'ls-files','--others','--ignored','--exclude-standard','-z');
+}
 function verifyCheckout(root,sourceSha,files){
   if(!SHA.test(sourceSha??'')||typeof root!=='string'||!path.isAbsolute(root))
     fail('exact source SHA and absolute workspace are required');
@@ -56,7 +61,8 @@ function verifyCheckout(root,sourceSha,files){
     fail('source workspace must have a stable non-symlink root');
   if(git(real,'rev-parse','--show-toplevel').trim()!==real||
       git(real,'rev-parse','HEAD').trim()!==sourceSha||
-      git(real,'status','--porcelain=v1','-z','--untracked-files=all').length!==0)
+      git(real,'status','--porcelain=v1','-z','--untracked-files=all').length!==0||
+      ignoredArtifacts(real).length!==0)
     fail('source checkout is not the clean signed commit');
   for(const rel of files){
     ordinaryFile(real,rel);
@@ -99,6 +105,8 @@ export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
       !observed.some(x=>x==='Edit'||x==='Write')||
       observed.some(x=>!['Read','Edit','Write'].includes(x)))
     fail('required actual restricted native Read/Edit evidence missing');
+  if(ignoredArtifacts(root).length)
+    fail('model created or retained ignored workspace artifacts');
   const status=git(root,'status','--porcelain=v1','-z','--untracked-files=all');
   const rows=status.split('\0').filter(Boolean);
   if(!rows.length||rows.length>files.length)fail('missing or unbounded source edits');
