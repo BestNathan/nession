@@ -7,6 +7,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {bindQwenDeveloper} from './qwen-developer-policy.mjs';
+import {toolUseNames} from '../providers/claude-stream.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const FILE=/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/;
@@ -151,8 +152,11 @@ function checkedGitPatch(snapshot){
 // Tool observations MUST come from actual Claude native events. This is the
 // only entrypoint that attests Read/Edit; do not fabricate tool observations
 // when re-checking a patch later at the checkpoint seal boundary.
-export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
-  const observed=Array.isArray(toolNames)?toolNames:null;
+export function collectQwenDevelopmentPatch(snapshot,{events}={}){
+  // A textual model report saying "Read" or "Edit" is not a tool event.
+  // Reuse the canonical Claude Code native stream parser's tool-use owner;
+  // the caller must supply the real parsed stream, never claimed names.
+  const observed=Array.isArray(events)?toolUseNames(events):null;
   if(!observed||!observed.includes('Read')||
       !observed.some(x=>x==='Edit'||x==='Write')||
       observed.some(x=>!['Read','Edit','Write'].includes(x)))
