@@ -20,3 +20,22 @@ export type {
 export type StatusFilter = 'all' | 'online' | 'offline' | 'degraded';
 export type SortField = 'name' | 'activity';
 export type SortDirection = 'asc' | 'desc';
+
+/**
+ * The Session-owned user fields, as an update request carries them (#2789).
+ *
+ * A full replacement: `null` clears title/description, an empty array clears
+ * tags. `expectedRevision` is the revision the caller last read; 0 is the
+ * legacy Session that has no metadata yet.
+ */
+export interface SessionMetadataInput {
+  title: string | null;
+  description: string | null;
+  tags: string[];
+  expectedRevision: number;
+}
+
+export type {
+  SessionMetadata,
+  SessionMetadataResponse,
+} from '@/generated/protocol/core/server-session-metadata-get/v1';

@@ -157,6 +157,12 @@ export interface SessionItemProps {
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
   /**
+   * The Session's user-facing display identity (#2789): its metadata title when
+   * set, otherwise the tmux name. The row keeps rendering `session_name` as
+   * the fallback so a Session without metadata looks exactly as it did.
+   */
+  displayTitle?: string;
+  /**
    * Whether the meta line carries the recency slot. Default `true`.
    *
    * Off when the list is grouped by time (`session-list.md` §Session row
@@ -241,7 +247,9 @@ export function SessionItem({
   onConfigure,
   onKill,
   showRecency = true,
+  displayTitle,
 }: SessionItemProps) {
+  const title = displayTitle ?? session.session_name;
   return (
     <div
       data-testid="session-item-row"
@@ -277,13 +285,14 @@ export function SessionItem({
             bug rather than a second line of information; the mockup sets
             `white-space: nowrap` on both for the same reason. */}
         <span
+          data-testid="session-item-title"
           className={cn(
             'truncate',
             chromeSansRole('primary'),
             selected ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
           )}
         >
-          {session.session_name}
+          {title}
         </span>
         <SessionMetaLine
           session={session}
@@ -316,7 +325,7 @@ export function SessionItem({
                 size="icon"
                 variant="ghost"
                 data-testid={`session-settings-${session.session_id}`}
-                aria-label={`Configure attach settings for ${session.session_name}`}
+                aria-label={`Configure attach settings for ${title}`}
                 className={cn(
                   iconReveal,
                   'hover:text-foreground',
