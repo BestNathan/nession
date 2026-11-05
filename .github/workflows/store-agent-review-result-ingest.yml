@@ -1,0 +1,126 @@
+name: Store / Agent Review Result Ingest
+
+# #2294. Metrics wakes this workflow AFTER its immutable Run Summary
+# has been CAS-published. Main-owned only. No model or PR-head code receives
+# writer authority.
+on:
+  repository_dispatch:
+    types: [nession-review-metrics-ingested]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Authenticated Reviewer source Run ID (owner recovery)
+        required: true
+        type: string
+      source_run_attempt:
+        description: Exact successful Reviewer Run attempt
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: store-review-result-${{ github.event.client_payload.source_run_id || inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.event.action == 'nession-review-metrics-ingested' &&
+         github.actor == 'github-actions[bot]' &&
+         github.event.sender.login == 'github-actions[bot]') ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.actor == 'BestNathan')
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout only pinned trusted main code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prove Reviewer / Store integrity contracts
+        run: ./gates/run agent-provider-contract run-store-integrity
+      - name: Independently authenticate the source Run before minting App token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          EVENT_ATTEMPT: ${{ github.event.client_payload.source_run_attempt }}
+          OWNER_RUN_ID: ${{ inputs.source_run_id }}
+          OWNER_ATTEMPT: ${{ inputs.source_run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          run_id="${EVENT_RUN_ID:-${OWNER_RUN_ID:-}}"
+          attempt="${EVENT_ATTEMPT:-${OWNER_ATTEMPT:-}}"
+          [[ "$run_id" =~ ^[1-9][0-9]{0,14}$ ]]
+          [[ "$attempt" =~ ^[1-9][0-9]?$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" \
+            > "$RUNNER_TEMP/reviewer-source-run.json"
+          jq -e --argjson id "$run_id" --argjson attempt "$attempt" \
+            --arg repo "$GITHUB_REPOSITORY" '
+            .id == $id and .run_attempt == $attempt and
+            .path == ".github/workflows/agent-review.yml" and
+            .name == "Agent / Review" and
+            .event == "workflow_dispatch" and .head_branch == "main" and
+            (.head_sha | test("^[a-f0-9]{40}$")) and
+            .status == "completed" and .conclusion == "success" and
+            (.actor.login == "BestNathan" or .actor.login == "github-actions[bot]") and
+            .repository.full_name == $repo and
+            .head_repository.full_name == $repo
+          ' "$RUNNER_TEMP/reviewer-source-run.json" >/dev/null
+      - name: Mint existing scoped Store App after source preflight
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Verify signed claim, immutable Metrics and Store; CAS and project Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          test -n "$STORE_WRITER_PRIVATE_KEY"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/reviewer-result-ingest.mjs ingest \
+            > "$RUNNER_TEMP/reviewer-result-ingest.json"
+          unset STORE_APP_TOKEN AGENT_STORE_CONTROLLER_REMOTE
+          jq -e '
+            (.status == "accepted" or .status == "replayed") and
+            (.action_id | test("^[a-f0-9]{64}$")) and
+            (.store_commit_sha | test("^[a-f0-9]{40}$")) and
+            (.state_version > 0)
+          ' "$RUNNER_TEMP/reviewer-result-ingest.json" >/dev/null
+          {
+            echo "## Authenticated Reviewer Result -> Store -> Issue"
+            echo
+            echo "- Source Run: $(jq -r .run_id "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo "- Attempt: $(jq -r .attempt "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo "- Outcome: $(jq -r .outcome "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo "- Store version: $(jq -r .state_version "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo "- Store CAS commit: $(jq -r .store_commit_sha "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo "- Issue projection committed: $(jq -r .issue_projection.projected "$RUNNER_TEMP/reviewer-result-ingest.json")"
+            echo
+            echo "This is an Agent orchestration record, not independent Acceptance Pass."
+          } >> "$GITHUB_STEP_SUMMARY"
