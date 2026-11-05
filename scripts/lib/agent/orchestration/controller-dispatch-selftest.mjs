@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT}
@@ -8,6 +9,15 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 
+// An authenticated recover-repair action persists the new Store CAS and
+// returns status=recovered. The main-owned wrapper must not turn that
+// successful durable mutation into a red job with a stale output allowlist.
+const workflowText=readFileSync('.github/workflows/agent-controller-dispatch.yml','utf8');
+const receiptGate=workflowText.slice(workflowText.indexOf("jq -e '.issue > 0"),
+  workflowText.indexOf('agent-controller-dispatch-receipt.json',workflowText.indexOf("jq -e '.issue > 0")));
+assert.match(receiptGate,/\.status == "recovered"/);
+assert.match(receiptGate,/\.status == "dispatched"/);
+assert.match(receiptGate,/\.status == "ambiguous"/);
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
 const environment={
   GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
