@@ -371,6 +371,13 @@ export async function attestSkippedDispatchRebinding({
       body.task!==pending.task.task||body.input_sha!==pending.task.sha||
       body.state_version>state.version)
     reject('replacement signed claim does not bind the original Reviewer action');
+  const recovery=pending.receipt.reviewer_recovery;
+  if(recovery && (recovery.kind!=='controlled_review_recovery_intent'||
+      recovery.skipped_run_id!==skipped_run_id||
+      recovery.issuer_run_id!==body.issuer_run_id||
+      recovery.ticket_sha256!==createHash('sha256')
+        .update(claim.dispatch_ticket).digest('hex')))
+    reject('replacement claim diverges from immutable recovery intent');
   const issuer=await reader.getRun(body.issuer_run_id);
   if(issuer?.id!==body.issuer_run_id||
       !authenticatedTicketIssuer(issuer,verified_main_sha))
@@ -395,6 +402,30 @@ export function reviewerPublishedPrBinding(state,pr) {
     pr?.head?.sha===sha && state.target_sha===sha &&
     state.transitions?.some(t=>t.kind==='publisher'&&
       t.run_id===39609600546&&t.target_sha===sha&&t.outcome==='published');
+}
+// One historical owner-commanded recovery uses the canonical ticket signer,
+// but the actual persisted action stays DISPATCHED until a new authenticated
+// result arrives. A transient shadow only permits reusing planGitHubDispatch;
+// no pending action is created in the authoritative Store.
+export function planControlledReviewerRecovery(state,actionId,registry,signer){
+  validateDevelopmentState(state);
+  if(state.issue!==1997||state.version!==19||
+     actionId!=='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434'||
+     state.phase!=='review'||
+     state.target_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4')
+    reject('controlled Reviewer recovery may sign only the original Store action');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(item?.status!=='dispatched'||item.task.role!=='reviewer'||
+     item.task.task!=='review'||item.task.agent_id!=='review-qwen-01'||
+     item.task.sha!==state.target_sha||item.attempts!==1||
+     item.receipt?.status!=='verified'||
+     item.receipt.source_run_id!==39943178597||
+     item.receipt.dispatch_id!==actionId||
+     item.receipt.reviewer_recovery!==undefined)
+    reject('original Reviewer action is no longer recoverable');
+  const shadow={...state,outbox:state.outbox.map(x=>x.id===actionId?{
+    ...x,status:'pending',receipt:null}:x)};
+  return planGitHubDispatch(shadow,actionId,registry,signer);
 }
 // GitHub Get Workflow Run does not reliably expose workflow_dispatch inputs.
 // Provenance instead binds the authenticated dispatch response's run ID to

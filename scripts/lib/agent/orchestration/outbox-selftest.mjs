@@ -3,7 +3,8 @@ import { readFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import { startDevelopment,recordDispatch,failedDispatch,acceptTaskResult,
-  acceptPublisherPublication,reconcileOutbox,validateDevelopmentState } from './outbox.mjs';
+  acceptPublisherPublication,reconcileOutbox,validateDevelopmentState,
+  recordControlledReviewerRecoveryIntent } from './outbox.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState,issueStatePath } from './state-store.mjs';
 import { advanceWorkflow } from './transition.mjs';
 
@@ -232,5 +233,42 @@ try {
   assert.throws(()=>writeIssueWorkflowState(symlinkDir,
     startDevelopment(registry,request,permission),0),/unsafe directory/);
 } finally {rmSync(symlinkDir,{recursive:true,force:true});}
+// #1997 one-shot Reviewer recovery: immutable original skipped Run and
+// bounded no-redelivery intent; replay, forged SHA or wrong Action fail closed.
+const reviewId='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
+const reviewSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const legacy={
+  schema_version:1,issue:1997,version:19,phase:'review',target_sha:reviewSha,
+  repair_attempts:0,transitions:[{kind:'publisher',run_id:39609600546,
+    attempt:1,outcome:'published',target_sha:reviewSha}],
+  assignments:{developer:'dev-cursor-01',reviewer:'review-qwen-01',
+    acceptor:'accept-cursor-01'},
+  outbox:[{id:reviewId,task:{type:'dispatch',role:'reviewer',task:'review',
+    sha:reviewSha,agent_id:'review-qwen-01'},status:'dispatched',
+    attempts:1,receipt:{status:'verified',dispatch_id:reviewId,
+      source_run_id:39943178597}}],
+};
+validateDevelopmentState(legacy);
+const recovery={kind:'controlled_review_recovery_intent',
+  skipped_run_id:39943178597,issuer_run_id:902,
+  ticket_sha256:'a'.repeat(64),source_verified:true};
+const fenced=recordControlledReviewerRecoveryIntent(legacy,19,reviewId,recovery);
+assert.equal(fenced.version,20);
+assert.equal(fenced.outbox[0].receipt.source_run_id,39943178597);
+assert.equal(fenced.outbox[0].receipt.reviewer_recovery.ticket_sha256,
+  recovery.ticket_sha256);
+assert.equal(validateDevelopmentState(fenced),fenced);
+assert.throws(()=>recordControlledReviewerRecoveryIntent(fenced,20,reviewId,
+  recovery),/historical Reviewer recovery target has changed/);
+assert.throws(()=>recordControlledReviewerRecoveryIntent(legacy,19,
+  'f'.repeat(64),recovery),/historical Reviewer recovery target has changed/);
+assert.throws(()=>recordControlledReviewerRecoveryIntent(legacy,19,reviewId,
+  {...recovery,source_verified:false}),/unverified historical/);
+assert.throws(()=>recordControlledReviewerRecoveryIntent({...legacy,
+  target_sha:'b'.repeat(40)},19,reviewId,recovery),/target has changed/);
+assert.throws(()=>validateDevelopmentState({...fenced,outbox:[{...fenced.outbox[0],
+  receipt:{...fenced.outbox[0].receipt,reviewer_recovery:{
+    ...fenced.outbox[0].receipt.reviewer_recovery,ticket_sha256:'bad'}}}]}),
+  /unbound controlled Reviewer recovery/);
 validateDevelopmentState(state);
 console.log('agent Issue outbox: durable CAS, trusted result transitions and replay fixtures passed');
