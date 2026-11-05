@@ -93,6 +93,14 @@ function sourceAction(state,actionId) {
 }
 export function issueDispatchTicket(state,actionId,registry,{key,key_id,issuer_run_id,now=Date.now(),ttl_ms=600000}) {
   const action=sourceAction(state,actionId), t=action.task;
+  // A Reviewer-induced repair is NOT a new implement Slice. The native
+  // session must be bound to a previously attested encrypted checkpoint by
+  // the committed Outbox before any write-ahead intent or external POST.
+  // A boolean resume flag is not a checkpoint proof. #1997 v22 presently
+  // lacks the necessary lineage, so fail here (before CAS) rather than
+  // dispatching a Worker that would silently start fresh or fail later.
+  if(t.task==='repair'&&(t.resume!==true||t.continuation==null))
+    reject('repair resume requires a Store-bound native checkpoint');
   const registered=registry.instances[t.agent_id];
   if (!registered || registered.role!==t.role) reject('unregistered Agent assignment');
   resolveIdentity(registry,t.agent_id,t.task,registered.environment);
