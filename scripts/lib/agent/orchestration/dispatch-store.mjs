@@ -123,11 +123,16 @@ export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr})
        action.task.repair_checkpoint?.checkpoint_version!==3||
        action.receipt?.status!=='verified'||action.receipt.source_run_id!==run.id)
       fail('Repair is not the exact authenticated pending Worker Run');
-    const checkpointRecord=verifyCommittedCheckpoint({
+    verifyCommittedCheckpoint({
       remote,identity:{role:'developer',agent_id:'dev-cursor-01',issue},
       commit_sha:checkpoint.commit_sha,version:4,
       ciphertext_sha256:checkpoint.ciphertext_sha256,
     });
+    // The public object is metadata only; never expose its ciphertext in
+    // a log. Git-backed commitment above verifies creation SHA and head.
+    const checkpointFile=path.join(dir,
+      'roles/developer/dev-cursor-01/issues/1997/checkpoints/00000004.json');
+    const checkpointRecord=JSON.parse(fs.readFileSync(checkpointFile,'utf8'));
     if(checkpointRecord?.metadata?.provider!=='cursor'||
        checkpointRecord?.metadata?.source_sha!==prSha||
        checkpointRecord?.metadata?.session_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6')
