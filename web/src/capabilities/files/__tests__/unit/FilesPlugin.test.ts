@@ -141,6 +141,40 @@ describe('readFileChunked', () => {
     expect(readFile).toHaveBeenCalledTimes(1);
     expect(progress).toHaveBeenCalledWith(1, 12);
   });
+
+  it('advances by bytes and decodes a multi-byte sequence split across chunks', async () => {
+    // 'aé𝄞b': a=1 byte, é=2, 𝄞=4, b=1 → 8 bytes. The split at 4 bytes lands
+    // inside 𝄞, so a per-chunk decoder would emit two replacement characters.
+    const text = 'aé𝄞b';
+    const bytes = new TextEncoder().encode(text);
+    expect(bytes.length).toBe(8);
+    const toB64 = (slice: Uint8Array) => {
+      let binary = '';
+      for (const byte of slice) {
+        binary += String.fromCharCode(byte);
+      }
+      return btoa(binary);
+    };
+    const responses: FileData[] = [
+      { path: '/u.txt', content: toB64(bytes.slice(0, 4)), mime_type: 'text/plain', offset: 0, total_size: 8, has_more: true },
+      { path: '/u.txt', content: toB64(bytes.slice(4)), mime_type: 'text/plain', offset: 4, total_size: 8, has_more: false },
+    ];
+    const readFile = vi.fn(async (_path: string, options?: { offset?: number; limit?: number }) => {
+      const want = options?.offset ?? 0;
+      return responses.find((response) => response.offset === want) ?? emptyFile('/u.txt');
+    });
+    const fileOps = stubFileOps({ readFile });
+    const progress = vi.fn();
+
+    const handle = readFileChunked(fileOps, '/u.txt', progress);
+
+    await expect(handle.promise).resolves.toBe(text);
+    expect(progress.mock.calls).toEqual([
+      [4, 8],
+      [8, 8],
+    ]);
+    expect(readFile).toHaveBeenNthCalledWith(2, '/u.txt', { offset: 4, limit: DEFAULT_CHUNK_SIZE });
+  });
 });
 
 describe('FilesPlugin', () => {
@@ -247,6 +281,65 @@ describe('FilesPlugin', () => {
 
       surface.resolveNext('agent.file.write', { path: '/tmp/a.txt', written: 5 });
       await expect(pending).resolves.toEqual({ path: '/tmp/a.txt', written: 5 });
+    });
+
+    it('writeFile forwards the create-only and expected-revision guards', async () => {
+      const pending = plugin.writeFile('/tmp/a.txt', 'aGk=', {
+        createOnly: true,
+        expectedRevision: 'rev-1',
+      });
+      expect(surface.requests[0]).toMatchObject({
+        type: 'agent.file.write',
+        payload: {
+          path: '/tmp/a.txt',
+          content: 'aGk=',
+          create_only: true,
+          expected_revision: 'rev-1',
+        },
+      });
+
+      surface.resolveNext('agent.file.write', {
+        path: '/tmp/a.txt',
+        written: 2,
+        revision: 'rev-2',
+      });
+      await expect(pending).resolves.toEqual({
+        path: '/tmp/a.txt',
+        written: 2,
+        revision: 'rev-2',
+      });
+    });
+
+    it('createDir forwards create_only and rename forwards no_replace', async () => {
+      const create = plugin.createDir('/tmp/dir', { createOnly: true });
+      expect(surface.requests[0]).toMatchObject({
+        type: 'agent.file.create-dir',
+        payload: { path: '/tmp/dir', create_only: true },
+      });
+      surface.resolveNext('agent.file.create-dir', { path: '/tmp/dir', success: true });
+      await expect(create).resolves.toEqual({ path: '/tmp/dir', success: true });
+
+      const rename = plugin.renameFile('/tmp/a', '/tmp/b', { noReplace: true });
+      expect(surface.requests[surface.requests.length - 1]).toMatchObject({
+        type: 'agent.file.rename',
+        payload: { from: '/tmp/a', to: '/tmp/b', no_replace: true },
+      });
+      surface.resolveNext('agent.file.rename', { from: '/tmp/a', to: '/tmp/b', success: true });
+      await expect(rename).resolves.toEqual({ from: '/tmp/a', to: '/tmp/b', success: true });
+    });
+
+    it('uploadFile defaults to create-only', async () => {
+      // jsdom File has no arrayBuffer in every environment; FileReader is the
+      // path the plugin owns, so exercise readAsDataURL.
+      const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+      const pending = plugin.uploadFile('/tmp/hello.txt', file);
+      await vi.waitFor(() => expect(surface.requests).toHaveLength(1));
+      expect(surface.requests[0]).toMatchObject({
+        type: 'agent.file.write',
+        payload: { path: '/tmp/hello.txt', create_only: true },
+      });
+      surface.resolveNext('agent.file.write', { path: '/tmp/hello.txt', written: 5 });
+      await expect(pending).resolves.toMatchObject({ path: '/tmp/hello.txt', written: 5 });
     });
 
     it('deleteFile defaults recursive to false', async () => {

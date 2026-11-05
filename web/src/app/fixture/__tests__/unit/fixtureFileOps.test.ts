@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fixtureFileOps } from '../../fixtureFileOps';
+import { fixtureFileOps, fixtureFilesControl } from '../../fixtureFileOps';
 import { FIXTURE_FILE_CONTENTS, FIXTURE_FILES } from '../../fixtureFiles';
 
 const ops = fixtureFileOps();
@@ -60,13 +60,47 @@ describe('fixtureFileOps', () => {
     expect(ops.base64Decode(ops.base64Encode('hello 终端'))).toBe('hello 终端');
   });
 
-  it('rejects mutating operations as not supported', async () => {
-    await expect(ops.writeFile('a.ts', 'x')).rejects.toThrow('fixture: not supported');
-    await expect(ops.deleteFile('a.ts')).rejects.toThrow('fixture: not supported');
-    await expect(ops.createDir('d')).rejects.toThrow('fixture: not supported');
-    await expect(ops.renameFile('a', 'b')).rejects.toThrow('fixture: not supported');
-    await expect(ops.getCwd('s')).rejects.toThrow('fixture: not supported');
-    await expect(ops.uploadFile('a.ts', {} as File)).rejects.toThrow('fixture: not supported');
+  it('mutations are real: create-only, revision conflicts and no-replace rename', async () => {
+    fixtureFilesControl().reset();
+    const target = fixtureFileOps();
+
+    const created = await target.writeFile('new/dir/a.ts', 'one', { createOnly: true });
+    expect(created.revision).toBeTruthy();
+    const loaded = await target.readFile('new/dir/a.ts');
+    expect(loaded.revision).toBe(created.revision);
+    expect(target.base64Decode(loaded.content)).toBe('one');
+
+    await expect(target.writeFile('new/dir/a.ts', 'two', { createOnly: true }))
+      .rejects.toThrow('already_exists');
+    await expect(target.writeFile('new/dir/a.ts', 'two', { expectedRevision: 'stale' }))
+      .rejects.toThrow('conflict');
+
+    const updated = await target.writeFile('new/dir/a.ts', 'two', {
+      expectedRevision: created.revision,
+    });
+    expect(updated.revision).not.toBe(created.revision);
+
+    await target.createDir('new/folder', { createOnly: true });
+    await expect(target.createDir('new/folder', { createOnly: true }))
+      .rejects.toThrow('already_exists');
+
+    await target.renameFile('new/dir/a.ts', 'new/dir/b.ts', { noReplace: true });
+    await expect(target.readFile('new/dir/a.ts')).rejects.toThrow('fixture: unknown file');
+    expect(target.base64Decode((await target.readFile('new/dir/b.ts')).content)).toBe('two');
+
+    await target.writeFile('new/occupied.ts', 'x', { createOnly: true });
+    await expect(
+      target.renameFile('new/dir/b.ts', 'new/occupied.ts', { noReplace: true }),
+    ).rejects.toThrow('already_exists');
+
+    const listing = await target.listDir('new/dir');
+    expect(listing.entries.map((entry) => entry.path)).toEqual(['new/dir/b.ts']);
+
+    fixtureFilesControl().reset();
+  });
+
+  it('getCwd answers the fixture root', async () => {
+    await expect(ops.getCwd('s')).resolves.toEqual({ path: '' });
   });
 
   it('derives sizes from content so the size column and total_size agree', () => {

@@ -21,13 +21,25 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type FileRenamePayload = { from: string, to: string, };
+export type FileRenamePayload = { from: string, to: string, 
+/**
+ * Refuse to replace an existing destination. Rename/move from the UI
+ * passes `true`; the historical unconditional rename default keeps older
+ * clients working.
+ */
+no_replace: boolean, };
 export type FileRenameResponse = { from: string, to: string, success: boolean, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type FileRenameCall = { from: string, to: string, };
+export type FileRenameCall = { from: string, to: string, 
+/**
+ * Refuse to replace an existing destination. Rename/move from the UI
+ * passes `true`; the historical unconditional rename default keeps older
+ * clients working.
+ */
+no_replace: boolean, };
 
 /** The payload the provider answers with. */
 export type FileRenameReply = { from: string, to: string, success: boolean, };

@@ -21,13 +21,25 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type FileCreateDirPayload = { path: string, };
+export type FileCreateDirPayload = { path: string, 
+/**
+ * Refuse creation when the directory already exists. The App/Web folder
+ * actions use this so "New folder" reports the existing name instead of
+ * silently accepting it.
+ */
+create_only: boolean, };
 export type FileMutationResponse = { path: string, success: boolean, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type FileCreateDirCall = { path: string, };
+export type FileCreateDirCall = { path: string, 
+/**
+ * Refuse creation when the directory already exists. The App/Web folder
+ * actions use this so "New folder" reports the existing name instead of
+ * silently accepting it.
+ */
+create_only: boolean, };
 
 /** The payload the provider answers with. */
 export type FileCreateDirReply = { path: string, success: boolean, };

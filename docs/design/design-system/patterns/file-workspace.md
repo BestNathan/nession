@@ -27,6 +27,62 @@ A current Session normally gives Nession a useful default Location and working d
 
 Local and remote are properties of resource sources / Workspace Locations, not separate Files products.
 
+### File identity and the source boundary (#2751)
+
+A file reference is `{ sourceId, path }`. The path is only meaningful inside its
+source: changing the source invalidates scoped selection and open-document
+state rather than retargeting the old path at a different Agent/Location.
+
+- The Session-derived source is a **default**, not a permanent root. Its id is
+  `session:<id>`, falling back to `agent:<id>` when no Session is available.
+- The Files capability consumes an already-authorized provider. It does not
+  infer isolation from a Session id, implement Sandbox policy, or fall back to
+  the Agent host when the selected source is unavailable — #2681 owns sandbox
+  policy and enforcement. An absent provider is an explicit unavailable state
+  naming the missing provider, not a silent host view.
+- A source change resets the selected file/editor; a stale path is never
+  reopened against the new source.
+
+### Operation context (#2751)
+
+Explorer **selection**, **active/open file**, **expanded directories** and the
+**browse directory** are distinct state. Creating or uploading captures an
+explicit target when the form opens:
+
+| Context | Destination |
+|---|---|
+| Selected directory | that directory |
+| Selected file | its parent |
+| No selection | the active node if it is a directory, otherwise its parent; then the browse directory |
+| Right-clicked directory | that directory (regardless of the current selection/browse path) |
+
+The captured `{ source, parentPath }` is held by the form, displayed before
+submit (`In <parent> → <path>`), and cannot be redirected by a later selection
+change. A name is one path segment: empty, `.`, `..`, `/`, `\`, control
+characters and overlong names are rejected before calling the provider. App's
+folder sheet performs the same operation against the folder it was opened on,
+with the current pushed directory as its default.
+
+### Safe mutations (#2751)
+
+- **Create file / upload** are create-only: an existing path is refused
+  atomically, so two clients racing on one name cannot replace each other.
+- **Rename/move** is no-replace: an existing destination reports a conflict
+  instead of being silently overwritten.
+- **Write** carries the revision returned by the read. A stale revision is a
+  conflict, not an overwrite; the agent checks and replaces under one mutation
+  lock. The editor offers **Reload file** (discard the local edit) or
+  **Overwrite** (explicitly save over the newer content).
+- A successful create refreshes its captured parent and reveals the new target;
+  a failure leaves the form and its typed name intact.
+
+### Byte/text boundary
+
+Chunked reads advance by the raw byte count of each chunk, not the decoded
+UTF-16 length, and decode with a streaming UTF-8 decoder so a sequence split
+across a chunk boundary survives. Files above the chunked threshold remain
+explicitly read-only rather than round-tripping through a single write.
+
 ## Presence
 
 Files is a capability, not a guaranteed navigation slot.
@@ -172,3 +228,10 @@ Common file navigation stays immediate. Advanced file operations, provider choic
 - [ ] Master/detail remains local to Files and adapts to App/narrow layouts.
 - [ ] Source/location context is shown when it matters and allowed to disappear when it does not.
 - [ ] Returning to the Session preserves continuity rather than recreating terminal/runtime state unnecessarily.
+
+## Prototype record
+
+The interactive Files prototype and its verified preview are recorded in
+[files-workspace-2751-prototype.md](files-workspace-2751-prototype.md). The mock
+is an exploration artifact, not production evidence; the implementation and its
+Acceptance Cases own the shipped contract.

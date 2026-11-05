@@ -30,6 +30,30 @@ export interface FileData {
   total_size?: number;
   /** True when the file has more data past this chunk (chunked reads only). */
   has_more?: boolean;
+  /**
+   * Opaque revision at read time. Pass it back as `expectedRevision` on a
+   * write so a competing edit is reported as a conflict instead of being
+   * silently replaced. Older agents omit it.
+   */
+  revision?: string;
+}
+
+/** Options shared by the guarded file mutations. */
+export interface WriteFileOptions {
+  /** Refuse the write if the target changed since this revision was read. */
+  expectedRevision?: string;
+  /** Refuse the write if the target already exists. */
+  createOnly?: boolean;
+}
+
+export interface CreateDirOptions {
+  /** Refuse creation if the directory already exists. */
+  createOnly?: boolean;
+}
+
+export interface RenameFileOptions {
+  /** Refuse to replace an existing destination. */
+  noReplace?: boolean;
 }
 
 /**
@@ -41,12 +65,27 @@ export interface FileOps {
   listDir(path: string): Promise<{ entries: FileEntry[] }>;
   readFile(path: string, options?: { offset?: number; limit?: number }): Promise<FileData>;
   /** Plaintext content — encoded to base64 before hitting the wire. */
-  writeFile(path: string, content: string): Promise<{ path: string; written: number }>;
+  writeFile(
+    path: string,
+    content: string,
+    options?: WriteFileOptions,
+  ): Promise<{ path: string; written: number; revision?: string }>;
   deleteFile(path: string, recursive?: boolean): Promise<{ path: string; success: boolean }>;
-  createDir(path: string): Promise<{ path: string; success: boolean }>;
-  renameFile(from: string, to: string): Promise<{ from: string; to: string; success: boolean }>;
+  createDir(
+    path: string,
+    options?: CreateDirOptions,
+  ): Promise<{ path: string; success: boolean }>;
+  renameFile(
+    from: string,
+    to: string,
+    options?: RenameFileOptions,
+  ): Promise<{ from: string; to: string; success: boolean }>;
   getCwd(sessionId: string): Promise<{ path: string }>;
-  uploadFile(path: string, file: File): Promise<{ path: string; written: number }>;
+  uploadFile(
+    path: string,
+    file: File,
+    options?: { createOnly?: boolean },
+  ): Promise<{ path: string; written: number; revision?: string }>;
   base64Decode(b64: string): string;
   base64Encode(s: string): string;
 }

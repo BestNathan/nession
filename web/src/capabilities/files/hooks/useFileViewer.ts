@@ -9,6 +9,7 @@ import {
   isMarkdownExt,
 } from '@/shared/markdown';
 import { readFileChunked, type FileOps } from '@/capabilities/files';
+import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
 import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
 export type ViewMode = 'preview' | 'raw';
 
@@ -65,6 +66,9 @@ interface FileLoaderResult {
   totalBytes: number;
   isChunkedLoading: boolean;
   forceReadOnly: boolean;
+  /** Revision of the content currently loaded, for guarded saves. */
+  revision: string | undefined;
+  setRevision: (revision: string | undefined) => void;
   loadFile: () => Promise<void>;
   setContent: (content: string) => void;
   setOriginalContent: (content: string) => void;
@@ -103,6 +107,7 @@ function useFileLoader(
   const [totalBytes, setTotalBytes] = useState(0);
   const [isChunkedLoading, setIsChunkedLoading] = useState(false);
   const [forceReadOnly, setForceReadOnly] = useState(false);
+  const [revision, setRevision] = useState<string | undefined>(undefined);
   const blobUrlRef = useRef<string | null>(null);
   const chunkedCancelRef = useRef<(() => void) | null>(null);
 
@@ -126,6 +131,10 @@ function useFileLoader(
     setForceReadOnly(true);
     setIsChunkedLoading(true);
     setTotalBytes(size);
+    // A chunked document is read-only; a guarded save is not offered and the
+    // per-chunk revision would describe the file at a moment, not the whole
+    // loaded result.
+    setRevision(undefined);
     const result = readFileChunked(fileOps, path, (loaded, total) => {
       setLoadedBytes(loaded);
       setTotalBytes(total);
@@ -167,6 +176,7 @@ function useFileLoader(
 
     try {
       const data = await fileOps.readFile(path);
+      setRevision(data.revision);
 
       // Media files
       if (viewerType && viewerType !== 'markdown') {
@@ -207,10 +217,98 @@ function useFileLoader(
     totalBytes,
     isChunkedLoading,
     forceReadOnly,
+    revision,
+    setRevision,
     loadFile,
     setContent,
     setOriginalContent,
     handleCancelLoad,
+  };
+}
+
+/**
+ * Dirty/save lifecycle, including the guarded write and its conflict actions.
+ *
+ * Kept apart from the viewer body because the save decision (which revision to
+ * expect, what to do with a conflict) is a lifecycle of its own; the viewer is
+ * already the largest composition in this feature.
+ */
+function useFileSave({
+  fileOps,
+  path,
+  filename,
+  content,
+  revision,
+  setRevision,
+  setOriginalContent,
+  onDirtyChange,
+  loadFile,
+}: {
+  fileOps: FileOps;
+  path: string;
+  filename: string;
+  content: string;
+  revision: string | undefined;
+  setRevision: (revision: string | undefined) => void;
+  setOriginalContent: (content: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  loadFile: () => Promise<void>;
+}) {
+  const [isDirty, setIsDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
+
+  const save = useCallback(async (overwrite: boolean) => {
+    setSaving(true);
+    setConflict(false);
+    try {
+      const result = await fileOps.writeFile(
+        path,
+        content,
+        overwrite || revision === undefined ? {} : { expectedRevision: revision },
+      );
+      setRevision(result.revision);
+      setOriginalContent(content);
+      setIsDirty(false);
+      onDirtyChange?.(false);
+      toast.success(`Saved ${filename}`);
+    } catch (err) {
+      if (fileErrorKind(err) === 'conflict') {
+        setConflict(true);
+        toast.error(fileErrorMessage(err, 'save file'));
+      } else {
+        toastError(err, 'Failed to save file');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [fileOps, path, content, filename, onDirtyChange, revision, setOriginalContent, setRevision]);
+
+  const handleSave = useCallback(() => {
+    void save(false);
+  }, [save]);
+
+  const handleSaveOverwrite = useCallback(() => {
+    void save(true);
+  }, [save]);
+
+  /** Discard the local edit and read the file again after a conflict. */
+  const handleReloadAfterConflict = useCallback(() => {
+    setConflict(false);
+    setIsDirty(false);
+    onDirtyChange?.(false);
+    void loadFile();
+  }, [loadFile, onDirtyChange]);
+
+  return {
+    isDirty,
+    setIsDirty,
+    saving,
+    conflict,
+    setConflict,
+    handleSave,
+    handleSaveOverwrite,
+    handleReloadAfterConflict,
   };
 }
 
@@ -231,8 +329,6 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   const suggestionDismissedRef = useRef(false);
 
   const [isReadOnly, setIsReadOnly] = useState(true);
-  const [isDirty, setIsDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   const handleDecoded = useCallback((decoded: string, mimeType?: string) => {
@@ -263,9 +359,21 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
 
   const {
     viewerType, content, originalContent, mediaBlobUrl, loading, error,
-    loadedBytes, totalBytes, isChunkedLoading, forceReadOnly,
-    loadFile, setContent, setOriginalContent, handleCancelLoad,
+    loadedBytes, totalBytes, isChunkedLoading, forceReadOnly, revision,
+    setRevision, loadFile, setContent, setOriginalContent, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
+
+  const saveState = useFileSave({
+    fileOps,
+    path,
+    filename,
+    content,
+    revision,
+    setRevision,
+    setOriginalContent,
+    onDirtyChange,
+    loadFile,
+  });
 
   const handleEditToggle = () => {
     // Chunked-loaded files are forced read-only — too large to round-trip safely.
@@ -283,31 +391,16 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
     const dirty = newContent !== originalContent;
-    setIsDirty(dirty);
+    saveState.setIsDirty(dirty);
     onDirtyChange?.(dirty);
   };
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    try {
-      await fileOps.writeFile(path, content);
-      setOriginalContent(content);
-      setIsDirty(false);
-      onDirtyChange?.(false);
-      toast.success(`Saved ${filename}`);
-    } catch (err) {
-      toastError(err, 'Failed to save file');
-    } finally {
-      setSaving(false);
-    }
-  }, [fileOps, path, content, filename, onDirtyChange, setOriginalContent]);
 
   // Only ever wired to a control when `onClose` was given (`FileViewer` passes
   // `onCloseClick` conditionally), so the optional call is not a fallback —
   // it is the same "no close affordance, no close" the rest of this hook
   // implements, with no branch that cannot be taken.
   const handleCloseClick = () => {
-    if (isDirty) {
+    if (saveState.isDirty) {
       setShowUnsavedDialog(true);
       return;
     }
@@ -342,8 +435,10 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     loading,
     error,
     isReadOnly,
-    isDirty,
-    saving,
+    isDirty: saveState.isDirty,
+    saving: saveState.saving,
+    conflict: saveState.conflict,
+    setConflict: saveState.setConflict,
     showUnsavedDialog,
     isText,
     loadedBytes,
@@ -355,7 +450,9 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     handleEditToggle,
     handleSetViewMode,
     handleContentChange,
-    handleSave,
+    handleSave: saveState.handleSave,
+    handleSaveOverwrite: saveState.handleSaveOverwrite,
+    handleReloadAfterConflict: saveState.handleReloadAfterConflict,
     handleCloseClick,
     handleConfirmClose,
     handleSuggestionPreview,

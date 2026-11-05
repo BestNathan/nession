@@ -41,9 +41,11 @@ function makeCtx(fileOps: FileOps | null): WorkspaceContext {
 }
 
 describe('FilesWebLayout (web layout)', () => {
-  it('renders nothing while fileOps is unavailable (tool availability owns that state)', () => {
-    const { container } = render(<FilesWebLayout ctx={makeCtx(null)} />);
-    expect(container.firstChild).toBeNull();
+  it('renders an explicit unavailable state when no file provider is resolved', () => {
+    render(<FilesWebLayout ctx={makeCtx(null)} />);
+    expect(screen.getByTestId('file-source-unavailable')).toHaveTextContent(
+      'No file provider is available',
+    );
   });
 
   it('root keeps the file-workspace testid and exposes the web layout grid', () => {

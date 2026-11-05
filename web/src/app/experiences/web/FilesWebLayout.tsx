@@ -1,24 +1,54 @@
-import { useEffect, useState } from 'react';
-import { FileBrowser, FileViewer, type FileEntry } from '@/capabilities/files';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  FileBrowser,
+  FileViewer,
+  makeFileRef,
+  resolveFileSource,
+  type FileEntry,
+  type FileRef,
+} from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
-interface SelectedFile { path: string; filename: string; size: number; }
+interface SelectedFile {
+  ref: FileRef;
+  filename: string;
+  size: number;
+}
 
 /** Web layout: tree ‖ editor on a CSS grid — proportions, no fixed px. */
 export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
   const [selected, setSelected] = useState<SelectedFile | null>(null);
 
-  // Reset the viewer when the transport changes (detach/reattach or session
-  // switch) so a stale file view from a previous session never reappears.
+  const source = useMemo(
+    () =>
+      resolveFileSource({
+        sessionId: ctx.session?.session_id,
+        agentId: ctx.agent?.agent_id,
+        agentLabel: ctx.agent?.display_name ?? ctx.agent?.hostname,
+        fileOps: ctx.fileOps,
+      }),
+    [ctx.session?.session_id, ctx.agent, ctx.fileOps],
+  );
+
+  // Reset the viewer when the source changes (detach/reattach, Session switch,
+  // or a different provider): a path is only meaningful inside its source.
   useEffect(() => {
     setSelected(null);
-  }, [ctx.fileOps]);
+  }, [source.id, ctx.fileOps]);
 
-  if (!ctx.fileOps) {
-    return null;
+  if (source.fileOps === null) {
+    return (
+      <div
+        data-testid="file-source-unavailable"
+        className={cn('flex h-full items-center justify-center px-6 text-center text-muted-foreground', chromeSansRole('secondary'))}
+      >
+        {source.reason}
+      </div>
+    );
   }
+
   return (
     <div data-testid="file-workspace" className="h-full min-h-0 overflow-hidden">
       {/* A fixed navigation column and a fluid editor, not two fractions. The
@@ -33,13 +63,25 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
       >
         <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <FileBrowser
-            fileOps={ctx.fileOps}
-            onFileClick={(entry: FileEntry) => setSelected({ path: entry.path, filename: entry.name, size: entry.size })}
+            fileOps={source.fileOps}
+            onFileClick={(entry: FileEntry) => {
+              const ref = makeFileRef(source, entry.path);
+              if (ref !== null) {
+                setSelected({ ref, filename: entry.name, size: entry.size });
+              }
+            }}
           />
         </div>
         <div className="min-h-0 overflow-hidden">
           {selected ? (
-            <FileViewer key={selected.path} fileOps={ctx.fileOps} path={selected.path} filename={selected.filename} fileSize={selected.size} onClose={() => setSelected(null)} />
+            <FileViewer
+              key={`${selected.ref.sourceId}:${selected.ref.path}`}
+              fileOps={source.fileOps}
+              path={selected.ref.path}
+              filename={selected.filename}
+              fileSize={selected.size}
+              onClose={() => setSelected(null)}
+            />
           ) : (
             <div className={cn('flex h-full items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view it.</div>
           )}

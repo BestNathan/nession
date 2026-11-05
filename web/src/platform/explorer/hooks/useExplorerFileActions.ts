@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
+import { toastError } from '@/shared/lib/errorHelpers';
+
 import { renamedNodeId } from '../adapters/arboristAdapter';
 import type { ExplorerStore } from '../ExplorerStore';
 import type { ExplorerContextMenuContext } from '../commands/types';
@@ -43,24 +45,34 @@ export function useExplorerFileActions({
         return;
       }
 
-      await provider.rename?.(node, trimmed);
-      store.applyEvent({
-        type: 'rename',
-        nodeId: node.id,
-        name: trimmed,
-        newId: renamedNodeId(node, trimmed),
-      });
-      onFileRenamed?.(node, trimmed);
-      handleRenameCancel();
+      try {
+        await provider.rename?.(node, trimmed);
+        store.applyEvent({
+          type: 'rename',
+          nodeId: node.id,
+          name: trimmed,
+          newId: renamedNodeId(node, trimmed),
+        });
+        onFileRenamed?.(node, trimmed);
+        handleRenameCancel();
+      } catch (error) {
+        // Keep the inline rename open so the name can be corrected; the
+        // destination conflict is the provider's to report.
+        toastError(error, 'Failed to rename');
+      }
     },
     [handleRenameCancel, onFileRenamed, provider, renameValue, store],
   );
 
   const handleDelete = useCallback(
     async (node: ExplorerNode) => {
-      await provider.delete?.(node);
-      store.applyEvent({ type: 'delete', nodeId: node.id });
-      onFileDeleted?.(node);
+      try {
+        await provider.delete?.(node);
+        store.applyEvent({ type: 'delete', nodeId: node.id });
+        onFileDeleted?.(node);
+      } catch (error) {
+        toastError(error, 'Failed to delete');
+      }
     },
     [onFileDeleted, provider, store],
   );

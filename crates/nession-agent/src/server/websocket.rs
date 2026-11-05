@@ -2705,13 +2705,36 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let path = payload.path.clone();
-                match ctx.file_ops.write_file(&payload.path, &payload.content).await {
-                    Ok(written) => {
-                        let resp = FileWriteResponse { path, written };
+                match ctx
+                    .file_ops
+                    .write_file_with_options(
+                        &payload.path,
+                        &payload.content,
+                        payload.expected_revision.as_deref(),
+                        payload.create_only,
+                    )
+                    .await
+                {
+                    Ok((written, revision)) => {
+                        let resp = FileWriteResponse {
+                            path,
+                            written,
+                            revision,
+                        };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("write_error", &e.to_string()),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else if msg.contains("conflict") {
+                            "conflict"
+                        } else {
+                            "write_error"
+                        };
+                        ctx.err(code, &msg)
+                    }
                 }
             }
             "agent.file.delete" => "agent.file.delete" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
@@ -2738,7 +2761,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let path = payload.path.clone();
-                match ctx.file_ops.create_dir(&payload.path).await {
+                match ctx
+                    .file_ops
+                    .create_dir_with_options(&payload.path, payload.create_only)
+                    .await
+                {
                     Ok(()) => {
                         let resp = FileMutationResponse {
                             path,
@@ -2747,7 +2774,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else {
+                            "create_dir_failed"
+                        };
+                        ctx.err(code, &format_error_chain(&e))
+                    }
                 }
             }
             "agent.file.rename" => "agent.file.rename" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
@@ -2757,7 +2792,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 let from = payload.from.clone();
                 let to = payload.to.clone();
-                match ctx.file_ops.rename(&payload.from, &payload.to).await {
+                match ctx
+                    .file_ops
+                    .rename_with_options(&payload.from, &payload.to, payload.no_replace)
+                    .await
+                {
                     Ok(()) => {
                         let resp = FileRenameResponse {
                             from,
@@ -2767,7 +2806,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("rename_failed", &e.to_string()),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else {
+                            "rename_failed"
+                        };
+                        ctx.err(code, &msg)
+                    }
                 }
             }
             "agent.file.cwd" => "agent.file.cwd" => 1 => WireScope::Files => Query => {
@@ -5449,6 +5496,8 @@ mod tests {
             FileWritePayload {
                 path: "roundtrip_test.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let write_resp: Message<FileWriteResponse> =
@@ -5488,6 +5537,8 @@ mod tests {
             FileWritePayload {
                 path: "rt/from_list.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let write_resp: Message<FileWriteResponse> =
@@ -5580,6 +5631,8 @@ mod tests {
             FileWritePayload {
                 path: "to_delete.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let _: Message<FileWriteResponse> =
@@ -5646,6 +5699,7 @@ mod tests {
             msg_types::FILE_CREATE_DIR,
             FileCreateDirPayload {
                 path: "test_dir/sub_dir".to_string(),
+                create_only: false,
             },
         );
         let create_resp: Message<serde_json::Value> =
@@ -5703,6 +5757,8 @@ mod tests {
             FileWritePayload {
                 path: "old_name.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let _ = send_and_receive::<_, FileWriteResponse>(&mut sink, &mut stream, &write_req).await;
@@ -5713,6 +5769,7 @@ mod tests {
             FileRenamePayload {
                 from: "old_name.txt".to_string(),
                 to: "new_name.txt".to_string(),
+                no_replace: false,
             },
         );
         let rename_resp: Message<serde_json::Value> =

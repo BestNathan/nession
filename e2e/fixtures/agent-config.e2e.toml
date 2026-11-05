@@ -17,6 +17,17 @@ advertise_address = "127.0.0.1"
 # the 3s browser probe deadline.
 disable_address_autodetect = true
 
+# Isolated working dir — must NOT default to $HOME. A fresh /tmp/nession-e2e
+# directory is created by globalSetup.ts before the agent starts; tmux
+# sessions are spawned inside it. The real $HOME stays untouched, so rustup
+# (which `cargo run` invokes) still reads ~/.rustup/~/.cargo from the CI
+# runner's real home.
+#
+# This must stay above the first `[[advertise_addresses]]` table: a bare key
+# after an array-of-tables header belongs to that element, and the Agent
+# silently kept its $HOME default (the file sandbox root follows it).
+default_working_dir = "/tmp/nession-e2e"
+
 [[advertise_addresses]]
 url = "ws://127.0.0.1:19091/ws"
 label = "E2E local"
@@ -28,13 +39,6 @@ url = "ws://127.0.0.1:19092/ws"
 label = "E2E stalled probe"
 network_type = "custom"
 priority = 50
-
-# Isolated working dir — must NOT default to $HOME. A fresh /tmp/nession-e2e
-# directory is created by globalSetup.ts before the agent starts; tmux
-# sessions are spawned inside it. The real $HOME stays untouched, so rustup
-# (which `cargo run` invokes) still reads ~/.rustup/~/.cargo from the CI
-# runner's real home.
-default_working_dir = "/tmp/nession-e2e"
 
 # Logging — set to info for debugging CI issues.
 # Can be reduced to "warn" once agent stability is confirmed.
