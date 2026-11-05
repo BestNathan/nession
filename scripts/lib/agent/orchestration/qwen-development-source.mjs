@@ -57,7 +57,10 @@ function verifyCheckout(root,sourceSha,files){
     fail('exact source SHA and absolute workspace are required');
   let real;
   try{real=fs.realpathSync(root);}catch{fail('source workspace unavailable');}
-  if(real!==path.resolve(root)||!fs.lstatSync(real).isDirectory())
+  // macOS temp paths may have a system-owned symlink ancestor (/var ->
+  // /private/var). Reject a symlink at the workspace root itself, but
+  // consistently operate on the physical Git root after realpath resolution.
+  if(fs.lstatSync(root).isSymbolicLink()||!fs.lstatSync(real).isDirectory())
     fail('source workspace must have a stable non-symlink root');
   if(git(real,'rev-parse','--show-toplevel').trim()!==real||
       git(real,'rev-parse','HEAD').trim()!==sourceSha||
