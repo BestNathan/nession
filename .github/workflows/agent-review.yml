@@ -236,3 +236,39 @@ jobs:
             ${{ runner.temp }}/review-output/review-verdict.json
           if-no-files-found: warn
           retention-days: 14
+
+  # This is a separate secretless job, not the OS-isolated model process.
+  # GITHUB_TOKEN-triggered workflow_dispatch does not provide a reliable
+  # workflow_run wake. A repository_dispatch is an explicit GitHub exception.
+  # The Metrics writer still authenticates the completed GitHub Run and
+  # immutable artifacts before committing anything to the metrics ref.
+  notify-metrics:
+    needs: [prepare, review]
+    if: >-
+      needs.prepare.result == 'success' &&
+      needs.review.result == 'success' &&
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]')
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Notify canonical Metrics after Reviewer Slice
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=nession-agent-review-completed \
+            -F "client_payload[source_run_id]=$GITHUB_RUN_ID" \
+            -F "client_payload[source_run_attempt]=$GITHUB_RUN_ATTEMPT" \
+            -f "client_payload[source_sha]=$GITHUB_SHA"
+          echo "Emitted a wake only; Metrics will authenticate this Reviewer Run after it completes." >> "$GITHUB_STEP_SUMMARY"
