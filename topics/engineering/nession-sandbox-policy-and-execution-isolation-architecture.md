@@ -5,7 +5,7 @@ topic: engineering
 categories: ["agent","architecture","sandbox","security"]
 status: candidate
 created_at: 2026-11-03T08:52:21.743Z
-updated_at: 2026-11-03T08:52:21.743Z
+updated_at: 2026-11-05T10:32:06Z
 sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/session-tmux-sdk-ownership.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md"]
 ---
 
@@ -171,6 +171,7 @@ macOS sandbox-exec is deprecated and should be treated as a version-probed, risk
 - **Existing process discovery:** [Agent process discovery](https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md) is read-only and intentionally does not create cgroups or grant resource control.
 - **Historical OOM:** [#1286](https://github.com/BestNathan/nession/issues/1286) records an Agent-Pod OOM affecting multiple Sessions; the proposed on-demand Sandbox is **not** a complete fix for all Native Sessions or parent Pod limits.
 - **Env boundary:** [#170](https://github.com/BestNathan/nession/issues/170) owns per-Session environment binding; Sandbox policy must not absorb that responsibility.
+- **Agent-host Files is not this policy:** [#2751](https://github.com/BestNathan/nession/issues/2751) scopes Files to an explicit `FileSource`; the Agent's file root is only a browse root and absolute paths outside it remain reachable for terminal parity. The Files browser must not be cited as Sandbox confinement or as proof that a Session's view is isolated.
 - **Terminal SDK:** [#2469](https://github.com/BestNathan/nession/issues/2469) owns shared tmux command/API boundaries.
 - **External kernel mechanisms:** Linux [cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html), [seccomp](https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html), and [Bubblewrap](https://github.com/containers/bubblewrap). These establish mechanism semantics, **not** proof Nession currently implements them.
 
@@ -178,6 +179,7 @@ macOS sandbox-exec is deprecated and should be treated as a version-probed, risk
 
 - [Web terminal emulator engine and component ownership](../terminal/web-terminal-emulator-engine-and-component-ownership.md) — xterm/terminal transport ownership stays separate from Sandbox process isolation.
 - [Nession instruction architecture and knowledge ownership](nession-instruction-architecture-and-knowledge-ownership.md) — source and current-knowledge ownership rules.
+- [Files capability identity, creation context and safe mutation ownership](../web/files-capability-identity-creation-context-and-safe-mutation-ownership.md) — Agent-host Files resolves and writes through an explicit source; its browse root is not a SandboxPolicy or isolation guarantee.
 
 ### Limits / when to revisit
 

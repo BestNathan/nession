@@ -239,3 +239,17 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Cross-link the new #2750 Web primitive focus treatment article from the terminal engine/component ownership article, whose renderer boundary keeps xterm's own focus/caret rendering separate from chrome primitives
 - Source: https://github.com/BestNathan/nession/issues/2750
+
+## 2026-11-05T10:32:06Z | create | Files capability identity, creation context and safe mutation ownership
+- Path: topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md
+- Topic: web
+- Categories: app, files, ownership, protocol, safety, web
+- Reason: Record #2751's source-scoped FileRef boundary, one frozen create destination per operation, create-only/no-replace/expected-revision mutations under one Agent lock, byte-correct chunked reads, and the Agent file root's non-isolation role; merged to staging as 9230d49c
+- Source: https://github.com/BestNathan/nession/issues/2751
+
+## 2026-11-05T10:32:06Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Cross-link the new #2751 Files ownership article and state that the Agent-host Files browse root is not a SandboxPolicy or isolation guarantee
+- Source: https://github.com/BestNathan/nession/issues/2751

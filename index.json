@@ -57,7 +57,7 @@
           "sandbox",
           "security"
         ],
-        "updated_at": "2026-11-03T08:52:21.743Z"
+        "updated_at": "2026-11-05T10:32:06Z"
       }
     ],
     "terminal": [
@@ -90,6 +90,21 @@
       }
     ],
     "web": [
+      {
+        "title": "Files capability identity, creation context and safe mutation ownership",
+        "description": "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, and mutations refuse silent overwrites or stale writes instead of trusting a path alone",
+        "path": "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+        "status": "verified",
+        "categories": [
+          "app",
+          "files",
+          "ownership",
+          "protocol",
+          "safety",
+          "web"
+        ],
+        "updated_at": "2026-11-05T10:32:06Z"
+      },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
         "description": "Modality-aware focus for Web primitives: pointer/touch adds no outer chrome, keyboard focus is an inset token outline or a border repaint, and invalid/disabled semantics plus the regression owners keep the recipe from drifting",
@@ -162,7 +177,8 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "app": [
-      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
     ],
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
@@ -186,6 +202,9 @@
     "e2e": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
+    "files": [
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
+    ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
@@ -206,10 +225,14 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
+    ],
+    "protocol": [
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
     ],
     "provenance": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
@@ -219,6 +242,9 @@
     ],
     "research": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
+    "safety": [
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
     ],
     "sandbox": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
@@ -242,6 +268,7 @@
     ],
     "web": [
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "workflows": [
