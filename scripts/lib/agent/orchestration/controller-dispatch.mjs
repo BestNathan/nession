@@ -10,6 +10,7 @@ import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
+import {bindControlledRepairCheckpoint} from './dispatch-store.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -22,6 +23,9 @@ export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95
 export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
 export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1997 failed_run=39376331942';
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
+export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
 const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
@@ -39,7 +43,9 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT&&actionId===CONTROLLED_V2_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION)||
-        (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION))&&
+        (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -166,7 +172,10 @@ async function main(){
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
   const recoveringNative=commanded&&event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT;
   const recoveringReview=commanded&&event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT;
-  const actionId=commanded?(recoveringReview?REVIEW_ACTION:
+  const bindingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT;
+  const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
+  const actionId=commanded?(bindingRepair||dispatchingRepair?REPAIR_ACTION:
+    recoveringReview?REVIEW_ACTION:
     continuingV2?CONTROLLED_V2_CONTINUATION:
     continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
     recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
@@ -190,6 +199,12 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(bindingRepair){
+      const result=bindControlledRepairCheckpoint({
+        remote:storeRemote,issue:1997,actionId:REPAIR_ACTION});
+      console.log(JSON.stringify(result));
+      return; // No GitHub workflow_dispatch or model call from binding command.
+    }
     if(recoveringReview){
       const source=await verifyKnownSkippedReviewerLive(token);
       const signer={key,key_id:'main-controller',
