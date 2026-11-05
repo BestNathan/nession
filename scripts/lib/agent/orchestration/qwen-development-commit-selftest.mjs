@@ -19,6 +19,8 @@ import {sealQwenDevelopmentProposal}
   from './qwen-development-evidence.mjs';
 import {ingestQwenVerifiedCandidate,qwenCheckpointNextVersion}
   from './qwen-development-commit.mjs';
+import {preflightTrustedQwenPublisher}
+  from '../publisher/qwen-source-preflight.mjs';
 
 const priorNodeEnv=process.env.NODE_ENV;
 process.env.NODE_ENV='test';
@@ -143,6 +145,52 @@ try {
   assert.equal(replay.checkpoint.ciphertext_sha256,
     accepted.checkpoint.ciphertext_sha256);
   assert.equal(readIssueWorkflowState(cloned,issue).version,record.version);
+  // The Publisher independently reads the exact signed source Run, immutable
+  // native checkpoint, and applies the Worker patch to a CLEAN isolated Git
+  // checkout, even though the model's disposable source is now modified.
+  const pubCheckout=path.join(home,'publisher-source');
+  git(home,'clone','--no-hardlinks',source,pubCheckout);
+  const published=await preflightTrustedQwenPublisher({
+    remote,registry,run,claim,reader,rootKey:key,
+    result:candidate.result,proof:candidate.proof,
+    ciphertext:candidate.ciphertext,sourceCheckout:pubCheckout});
+  assert.equal(published.evidence.issue,issue);
+  assert.equal(published.evidence.action_id,action.id);
+  assert.equal(published.evidence.worker_run_id,workerId);
+  assert.equal(published.evidence.checkpoint_commit_sha,
+    accepted.checkpoint.commit_sha);
+  assert.equal(published.evidence.patch_sha256,patch.patch_sha256);
+  assert.equal(published.evidence.file_manifest.length,1);
+  assert.equal(published.evidence.file_manifest[0].path,'calc.js');
+  assert.match(published.patch,/module.exports/);
+  assert.ok(!JSON.stringify(published).includes('PRIVATE_QWEN_MARKER'));
+  assert.equal(published.evidence.status,'preflight_only');
+  for(const bad of [
+    {run:{...run,id:workerId+1}},
+    {run:{...run,actor:{login:'attacker'}}},
+    {claim:{inputs:{...signed.inputs,agent_id:'dev-cursor-01'}}},
+    {result:{...candidate.result,patch_sha256:'a'.repeat(64)}},
+    {proof:{...candidate.proof,changed_paths:['scripts/lib/agent/evil.js']}},
+  ]){
+    await assert.rejects(()=>preflightTrustedQwenPublisher({
+      remote,registry,run,claim,reader,rootKey:key,
+      result:candidate.result,proof:candidate.proof,
+      ciphertext:candidate.ciphertext,sourceCheckout:pubCheckout,
+      ...bad}),/Qwen|claim|dispatch|candidate|Publisher|Developer/i);
+  }
+  const wrongSource=path.join(home,'publisher-wrong-sha');
+  git(home,'clone','--no-hardlinks',source,wrongSource);
+  fs.writeFileSync(path.join(wrongSource,'other.js'),'const bad=true;\\n');
+  git(wrongSource,'add','other.js');
+  git(wrongSource,'config','user.name','Wrong Source');
+  git(wrongSource,'config','user.email','wrong@example.invalid');
+  git(wrongSource,'commit','-m','different source');
+  await assert.rejects(()=>preflightTrustedQwenPublisher({
+    remote,registry,run,claim,reader,rootKey:key,
+    result:candidate.result,proof:candidate.proof,
+    ciphertext:candidate.ciphertext,sourceCheckout:wrongSource,
+  }),/Agent patch preflight/);
+
   const badCandidates=[
     {result:{...candidate.result,patch_sha256:'f'.repeat(64)}},
     {proof:{...candidate.proof,patch_sha256:'f'.repeat(64)}},
@@ -155,7 +203,7 @@ try {
     await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,...bad}),
       /Qwen|claim|dispatch|trusted|candidate|Store/i);
   }
-  console.log('Qwen signed outbox -> native RSA -> Store CAS -> publisher-ready immutable Run, no duplicate Developer');
+  console.log('Qwen signed Outbox -> AES Store CAS -> immutable receipt -> trusted Publisher patch reapply/replay verified');
 }finally{
   key.fill(0);aesKey.fill(0);
   fs.rmSync(home,{recursive:true,force:true});
