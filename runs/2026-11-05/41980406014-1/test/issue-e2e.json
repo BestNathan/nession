@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "00135538a4b63aca7cb3bb7a75f2f534355c71c7",
+  "run_id": 41980406014,
+  "run_attempt": 1,
+  "plan_digest": "afffb529e8380466309c4ec45435b2a5159d782edb9adeb5b752cbe99ba7cb47",
+  "artifact_digest": "sha256:13efb587f80f601216f51739b77e0f1f73b9f43b63a72035b3cac7f68672d847",
+  "results": [
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 100,
+      "passed": 100,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 824
+    }
+  ]
+}
