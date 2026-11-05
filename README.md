@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Shared Prototype Page Kit (review-frame components, three regions) | [#2758](https://github.com/BestNathan/nession/issues/2758) | [Interactive HTML](prototype-frame-2758/index.html) · [Reusable CSS](prototype-frame-2758/frame.css) · [Behavior](prototype-frame-2758/frame.js) |
+
 | Prototype | Requirement | HTML |
 |---|---|---|
 | Files Workspace / source-aware selection, creation and safe edit | [#2751](https://github.com/BestNathan/nession/issues/2751) | [Interactive HTML](files-workspace-2751/index.html) · [Scenario & fidelity](files-workspace-2751/README.md) |

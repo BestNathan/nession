@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Prototype Page Kit</title>
+<link rel="stylesheet" href="./frame.css">
+<style>
+.demo-surface{display:flex;flex-direction:column;height:100%;font:13px/1.45 Inter,system-ui,sans-serif;color:#292c30;background:white}
+.demo-top{padding:15px;border-bottom:1px solid #e7e9ec;font-weight:600}
+.demo-work{flex:1;padding:18px;font:12px/1.6 Menlo,Consolas,monospace}
+.demo-capsule{margin:0 12px 15px;min-height:56px;padding:14px 18px;border-radius:22px;box-shadow:0 2px 12px #1112;background:white;border:1px solid #e9ebed}
+</style>
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+<header class="np-overview">
+  <nav class="np-breadcrumb" aria-label="Review navigation"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Standard review frame</span></nav>
+  <span class="np-eyebrow">DESIGN SYSTEM / PROTOTYPE REVIEW</span>
+  <div class="np-header-main"><div><h1 class="np-title">Prototype page kit</h1>
+  <p class="np-subtitle">The common layout around interactive Nession mocks: requirement summary, 1:1 product preview, and evidence. The demo below is a placeholder, not a production UI fidelity claim.</p></div>
+  <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/2758" target="_blank" rel="noopener noreferrer">Issue #2758</a><a href="https://github.com/BestNathan/nession/pull/2759" target="_blank" rel="noopener noreferrer">Skill PR #2759</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div>
+  <div class="np-meta"><span>Surface: <strong>Review frame, not product</strong></span><span>Fidelity: <strong>Layout sample</strong></span><span>Publication: <strong>pinned by Pages</strong></span></div>
+</header>
+<main>
+<section class="np-preview" aria-label="Example pixel-size preview">
+<div class="np-section-heading"><div><h2>Interactive preview</h2><p>Device-size controls and simulator frame stay outside the product.</p></div><div class="np-preview-toolbar"><button data-np-size="375">375</button><button data-np-size="390" aria-pressed="true">390</button><button data-np-size="430">430</button><button data-np-reset>Reset</button></div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-height:844px">
+<div class="demo-surface"><div class="demo-top">dev-session</div><div class="demo-work">~/nession › <span aria-hidden="true">▍</span></div><div class="demo-capsule">+ &nbsp; Ask Nession…</div></div>
+</div></div><p class="np-stage-label" data-np-current-size>390 CSS px · 1:1</p>
+</section>
+<section class="np-details" aria-label="Design and verification">
+<h2>Functional design &amp; verification</h2><p class="np-details-lede">Standard documentation slots; replace these examples with facts from each Issue.</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>Component inventory</h3><ol class="np-steps"><li>Header: title, goal, Issue/PR, exact source</li><li>Preview: fixed CSS-pixel device, size/reset actions</li><li>Details: behavior, evidence, limits</li></ol></article>
+<article class="np-detail"><h3>Fidelity boundary</h3><p>1:1 refers to viewport pixels, not screenshot equivalence. A real prototype compares its rendering with Nession production fixtures and records differences.</p><span class="np-status">Example only</span></article>
+<article class="np-detail"><h3>What to test</h3><p>375 / 390 / 430 controls, keyboard access, mobile horizontal scroll at widths narrower than 375, no scale transforms, source pinning.</p></article>
+<article class="np-detail"><h3>Evidence</h3><p>Mock source, published manifest SHA and real browser verification are separate proof types. Never infer pixel matching from token use.</p><details class="np-inspector"><summary>Debug state (optional)</summary><pre>Review frame owns no product state.</pre></details></article>
+</div>
+</section>
+</main><footer class="np-footer">Nession prototype review · Public interactive mock, not a trusted Acceptance result.</footer>
+</div><script src="./frame.js"></script></body></html>
