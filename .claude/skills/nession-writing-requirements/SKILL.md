@@ -36,6 +36,10 @@ The Issue Audit Agent should assess scope, touched components, trust/security im
 
 **Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to `when: pr` and source-aligned relevant evidence. `when: merged` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is `Not Required`, never a fabricated `Full Pass`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
 
+**Mandatory before writing any new or materially revised SC:** first select **one primary scenario per SC** from the [eight-scenario catalog](../nession-acceptance/references/scenario-catalog.md), then apply its corresponding [execution playbook](../nession-acceptance/references/verification-playbook.md). Include a specialized profile for OS-native kernel guarantees or GitHub server-side authorization when relevant. For each SC identify the exact observable assertion, source-aligned verifier or independently authenticated existing record, required tools/runner/credentials, earliest genuinely valid `when`, appropriate `agent | case` method and evidence. Record a compact **SC → scenario** mapping in ordinary Issue prose (group SCs sharing a scene to avoid boilerplate) for Reviewer/Acceptance audit; **do not add scene IDs as Acceptance Plan YAML keys or invent a new Issue schema**. Existing prototype and E2E sections remain independent.
+
+**Stop-and-ask rule:** do **not** create, finalize, or materially rewrite an Issue with an SC that (a) has no suitable catalog scenario, (b) lacks an objectively observable Pass/Fail predicate, or (c) has no feasible **approved** execution/attestation path for the claimed behavior. Ask the product owner one focused question with the exact SC and choices: refine/scope the assertion, authorize/provision a safe proof lane, or defer/remove that outcome. Never silently invent a new scenario/method, pretend source review is a runtime Case, lower the SC, broaden Full E2E, move timing to main, or mark `N/A` to get unstuck. An approved existing SC can remain `Pending` when its currently documented proof lane is unavailable; preserve its evidence and ask before materially migrating its contract. The [catalog hard-stop procedure](../nession-acceptance/references/scenario-catalog.md#hard-stop-uncovered-or-unverifiable-scenario) is authoritative for this task workflow.
+
 ## SC proof timing: earliest safe boundary (mandatory authoring review)
 
 Choose `when` from **where the invariant first becomes verifiable with authenticated
@@ -291,5 +295,6 @@ Do not finalize when:
 - there is no area owner;
 - Success Criteria are implementation tasks instead of outcomes;
 - Acceptance rows do not match SC IDs;
+- any new/materially revised SC has no selected catalog scenario, observable assertion or feasible approved proof path (stop and ask the product owner before publishing);
 - a Bug root cause is stated as fact without evidence;
 - product-facing behavior conflicts with Vision/Principles without an explicit decision.
