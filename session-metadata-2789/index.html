@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Session Metadata · Interactive Prototype #2789</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+<header class="np-overview">
+  <nav class="np-breadcrumb" aria-label="Review navigation">
+    <a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Session metadata</span>
+  </nav>
+  <span class="np-eyebrow">SESSION / WORK CONTEXT</span>
+  <div class="np-header-main">
+    <div>
+      <h1 class="np-title">Session metadata · Workspace</h1>
+      <p class="np-subtitle">让 Session 可以被描述，而不只是一个 tmux 名称。试用 Title / Description / Tags 的查看、编辑、保存与冲突反馈；保持终端、Workspace 和 Session 身份边界。</p>
+    </div>
+    <div class="np-links">
+      <a href="https://github.com/BestNathan/nession/issues/2789" target="_blank" rel="noopener noreferrer">Issue #2789</a>
+      <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+    </div>
+  </div>
+  <div class="np-meta"><span>Surface: <strong>Session → Workspace</strong></span><span>Visual baseline: <strong>Nession current main tokens</strong></span><span>Runtime: <strong>mock-only</strong></span></div>
+</header>
+<main>
+<section class="np-preview" aria-label="Interactive Session metadata">
+  <div class="np-section-heading">
+    <div><h2>1:1 interactive product preview</h2><p>Web / App 视口按 CSS 像素显示；下方选项仅模拟数据状态，不属于产品 UI。</p></div>
+    <div class="np-preview-toolbar" aria-label="Preview size controls">
+      <button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button>
+      <button type="button" data-np-size="1024">Web 1024</button>
+      <button type="button" data-np-size="430">App 430</button>
+      <button type="button" data-np-size="390">App 390</button>
+      <button type="button" data-np-size="375">App 375</button>
+      <button type="button" data-np-reset>Reset</button>
+    </div>
+  </div>
+  <div class="np-stage">
+    <div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:720px">
+      <div id="n-product" class="n-product" aria-live="off"></div>
+    </div>
+  </div>
+  <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+  <div class="np-fixtures" aria-label="External fixture controls">
+    <span class="np-fixtures-title">Test states (review controls)</span>
+    <button type="button" data-fixture="normal" aria-pressed="true">Normal</button>
+    <button type="button" data-fixture="legacy">No metadata</button>
+    <button type="button" data-fixture="offline">Agent offline</button>
+    <button type="button" data-fixture="conflict">Remote revision conflict</button>
+    <button type="button" data-fixture="reused">Recreated name</button>
+  </div>
+</section>
+<section class="np-details" aria-label="Behavior, decisions, verification">
+  <h2>Function design &amp; verification</h2>
+  <p class="np-details-lede">上半部分是真实尺寸的产品交互模拟；下面才是设计决议、范围与证据，不在 Workspace 内展示开发说明。</p>
+  <div class="np-detail-grid">
+    <article class="np-detail">
+      <h3>试用路径</h3>
+      <ol class="np-steps">
+        <li>在 Workspace 的 Session 视图点「编辑信息」；修改 Title / Description / Tags。</li>
+        <li>保存后观察 Session 列表标题同步改变，tmux 名和 Session ID 不变。</li>
+        <li>再次编辑并「取消」，检查草稿丢弃；切换 Session 时检查未保存确认。</li>
+        <li>切换 No metadata、Offline、Conflict、Recreated 观察回退及错误处理。</li>
+        <li>从 Terminal 返回 Workspace；App 按 Back 保留 Session 上下文。</li>
+      </ol>
+    </article>
+    <article class="np-detail">
+      <h3>明确的产品边界</h3>
+      <p>Title 为展示别名；Session ID、Agent、tmux name、实时 cwd 与 foreground command 不通过元信息编辑。Tags 为简单索引，不生成永久导航。结束与重建同名 Session 不继承旧元信息。</p>
+      <p>不包含 Input History、Output History、MCP stream、Agent 调度或 AI 自动打标签。</p>
+    </article>
+    <article class="np-detail">
+      <h3>视觉参照</h3>
+      <p>依据 <code>docs/design/composition.md</code>、SessionItem、SessionDetails、WorkspaceShell、AppPageHeader 及 <code>design/generated/web.css</code> 的语义色与排版角色。Web 保持侧栏 + 工作面，App 使用层级与底部 Capsule。</p>
+      <p>这是 HTML 近似，不包含生产 React/shadcn、xterm 字形计算和实际手势。</p>
+    </article>
+    <article class="np-detail">
+      <h3>证据与限制</h3>
+      <p>所有 Session、存储 revision、冲突和离线数据是内存模拟，无任何网络调用、真实持久化或生产权限校验。页面刷新重置；外部 Reset 重播初始状态。</p>
+      <p>独立测试需检查桌面/移动点击、键盘可访问、非法输入、冲突、取消、滚动、链接和控制台。Pages SHA 以实际清单读回为准。</p>
+      <details class="np-inspector"><summary>Inspect mock protocol boundaries</summary><pre>SessionMetadata: title? / description? / tags[] / revision
+Display name: title || session_name
+Authority: Agent Session metadata store
+Session route key: agent_id:session_name (unchanged)
+Deferred: I/O Observation and History</pre></details>
+    </article>
+  </div>
+</section>
+</main>
+<footer class="np-footer">Nession design prototype · Mock data &amp; behavior only · Not production acceptance evidence</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body>
+</html>

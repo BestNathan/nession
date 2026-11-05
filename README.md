@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Session Metadata / editable title, description and tags | [#2789](https://github.com/BestNathan/nession/issues/2789) | [Interactive HTML](session-metadata-2789/index.html) · [Scenario & fidelity](session-metadata-2789/README.md) |
+
 | Shared Prototype Page Kit (review-frame components, three regions) | [#2758](https://github.com/BestNathan/nession/issues/2758) | [Interactive HTML](prototype-frame-2758/index.html) · [Reusable CSS](prototype-frame-2758/frame.css) · [Behavior](prototype-frame-2758/frame.js) |
 
 | Prototype | Requirement | HTML |
