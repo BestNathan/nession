@@ -285,6 +285,10 @@ export class XtermEmulator implements TerminalEmulator {
     return this.terminal.onScroll(listener);
   }
 
+  onBufferChange(listener: () => void): TerminalDisposable {
+    return this.terminal.buffer.onBufferChange(() => listener());
+  }
+
   onResize(listener: () => void): TerminalDisposable {
     return this.terminal.onResize(listener);
   }

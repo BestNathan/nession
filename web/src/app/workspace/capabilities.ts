@@ -19,6 +19,12 @@ import {
   TERMINAL_KEYS_TITLE,
   resolveTerminalKeysState,
 } from '@/product/terminal/terminalKeys';
+import {
+  QUICK_COMMANDS_ID,
+  QUICK_COMMANDS_SHORT_TITLE,
+  QUICK_COMMANDS_TITLE,
+  resolveQuickCommandsState,
+} from '@/product/terminal/quickCommands/quickCommands';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -153,6 +159,24 @@ function terminalKeysProvider(workspaceContext: WorkspaceContext): CapabilityDef
 }
 
 /**
+ * Quick Commands is a Terminal-local capability too (#2710): it needs a
+ * Session to send to, and nothing else. The saved-command list itself is the
+ * server's and may be loading or unavailable — the Peek says so rather than
+ * making the capability disappear.
+ */
+function quickCommandsProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: QUICK_COMMANDS_ID,
+    title: QUICK_COMMANDS_TITLE,
+    shortTitle: QUICK_COMMANDS_SHORT_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveQuickCommandsState(context),
+    }),
+  };
+}
+
+/**
  * Shipping capability registry: every capability the app can show, registered
  * once, none of them through a compatibility path.
  */
@@ -167,6 +191,7 @@ export function createWorkspaceCapabilityRegistry(
   registry.register(claudeCodeProvider(workspaceContext));
   registry.register(gitProvider(workspaceContext));
   registry.register(terminalKeysProvider(workspaceContext));
+  registry.register(quickCommandsProvider(workspaceContext));
 
   return registry;
 }

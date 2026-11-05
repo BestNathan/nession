@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { WORK_SURFACE_SELECTOR, isWorkSurface } from '../../workSurface';
+import {
+  INTERACTIVE_OWNER_SELECTOR,
+  WORK_SURFACE_SELECTOR,
+  hasActiveSelectionWithin,
+  isInteractiveOwner,
+  isWorkSurface,
+} from '../../workSurface';
 
 function element(html: string, selector: string): Element {
   const host = document.createElement('div');
@@ -94,5 +100,119 @@ describe('isWorkSurface', () => {
     // is on the list.
     expect(WORK_SURFACE_SELECTOR.split(', ')).toHaveLength(6);
     expect(element('<div class="cm-editor"></div>', '.cm-editor').matches(WORK_SURFACE_SELECTOR)).toBe(true);
+  });
+});
+
+describe('isInteractiveOwner (#2724)', () => {
+  const owned: Array<[string, string, string]> = [
+    ['a button', '<button type="button">Sessions</button>', 'button'],
+    ['an input', '<form><input /></form>', 'input'],
+    ['a select', '<form><select></select></form>', 'select'],
+    ['a textarea', '<form><textarea></textarea></form>', 'textarea'],
+    ['a link', '<a href="/workspace">Workspace</a>', 'a'],
+    ['a contenteditable region', '<div contenteditable="true"><span></span></div>', 'span'],
+    ['a role=button control', '<div role="button"><span></span></div>', 'span'],
+    ['an open dialog', '<div role="dialog"><div class="body"></div></div>', '.body'],
+    ['an alert dialog', '<div role="alertdialog"><button>Discard</button></div>', 'button'],
+    [
+      'the expanded Capsule Peek',
+      '<div role="region" data-testid="capsule-capability-projection"><span></span></div>',
+      'span',
+    ],
+    [
+      'the capability capsule row',
+      '<nav data-testid="workspace-capability-capsule"><div data-testid="workspace-capability-scroll"></div></nav>',
+      '[data-testid="workspace-capability-scroll"]',
+    ],
+    ['an explicit swipe owner', '<div data-swipe-owner><span></span></div>', 'span'],
+  ];
+
+  it.each(owned)('reports %s as an interactive owner', (_name, html, selector) => {
+    expect(isInteractiveOwner(element(html, selector))).toBe(true);
+  });
+
+  const free: Array<[string, string, string]> = [
+    ['shell chrome', '<div class="shell-chrome"></div>', '.shell-chrome'],
+    ['the xterm surface', '<div data-terminal-viewport><div class="xterm"></div></div>', '.xterm'],
+    ['the CodeMirror editor', '<div class="cm-editor"><div class="cm-content"></div></div>', '.cm-content'],
+    ['the capsule composer root', '<div data-testid="terminal-capsule"><span></span></div>', 'span'],
+  ];
+
+  it.each(free)('does not report %s as an interactive owner', (_name, html, selector) => {
+    expect(isInteractiveOwner(element(html, selector))).toBe(false);
+  });
+
+  it('resolves a text node through its parent element', () => {
+    const host = element('<button type="button">Sessions</button>', 'button');
+    const text = host.firstChild;
+
+    expect(text).not.toBeNull();
+    expect(isInteractiveOwner(text)).toBe(true);
+  });
+
+  it('treats an unclassifiable target as not interactive', () => {
+    expect(isInteractiveOwner(null)).toBe(false);
+    expect(isInteractiveOwner(document)).toBe(false);
+    expect(isInteractiveOwner({} as EventTarget)).toBe(false);
+  });
+
+  it('exposes the always-owned set as one selector', () => {
+    // Pinned so adding a control/panel owner is a decision. The work-surface
+    // rule may yield a 28px band; these may not, because the touch the user
+    // aimed at a control or a nested scroller is that owner's.
+    expect(INTERACTIVE_OWNER_SELECTOR.split(', ')).toHaveLength(12);
+  });
+});
+
+describe('hasActiveSelectionWithin (#2724)', () => {
+  function selectContents(host: Element): void {
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    const selection = document.getSelection();
+    if (!selection) {
+      throw new Error('jsdom exposes getSelection');
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  it('recognises a live selection inside the touched target', () => {
+    const host = element('<div data-terminal-viewport><span>echo hello</span></div>', '[data-terminal-viewport]');
+    document.body.appendChild(host);
+    selectContents(host);
+
+    expect(hasActiveSelectionWithin(host)).toBe(true);
+    document.getSelection()?.removeAllRanges();
+    host.remove();
+  });
+
+  it('does not claim a collapsed selection', () => {
+    const host = element('<div data-terminal-viewport><span>echo hello</span></div>', '[data-terminal-viewport]');
+    document.body.appendChild(host);
+    const span = host.querySelector('span');
+    if (!span) {
+      throw new Error('fixture span missing');
+    }
+    const range = document.createRange();
+    range.setStart(span.firstChild ?? span, 0);
+    range.collapse(true);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+
+    expect(hasActiveSelectionWithin(host)).toBe(false);
+    document.getSelection()?.removeAllRanges();
+    host.remove();
+  });
+
+  it('does not claim a selection elsewhere on the page', () => {
+    const host = element('<div data-terminal-viewport><span>echo hello</span></div>', '[data-terminal-viewport]');
+    const elsewhere = element('<div><span>other</span></div>', 'span');
+    document.body.append(host, elsewhere);
+    selectContents(elsewhere);
+
+    expect(hasActiveSelectionWithin(host)).toBe(false);
+    document.getSelection()?.removeAllRanges();
+    host.remove();
+    elsewhere.remove();
   });
 });

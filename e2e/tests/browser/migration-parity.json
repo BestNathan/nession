@@ -25,7 +25,7 @@
     "ui-contract-matrix.spec.ts"
   ],
   "baseline_png_blobs": {
-    "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "673a24afce1c05ba455b3683ae033902d497687d",
+    "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "c2147a1f1dd52e23575f35edc57d94cba4efb746",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "9ed341b623cba99f5eafcb615fde1ace6e825eea",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "9219465bc3fdfec261d215a02158baddf75f85ef",
@@ -47,10 +47,10 @@
     "__snapshots__/fixture-visual.spec.ts/app-sessions-filtered-linux.png": "4328cc79730ef5e963b71d481850c1260d8960e5",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-linux.png": "88912de0058ce7444c621d0409da7a1c24628d2d",
     "__snapshots__/fixture-visual.spec.ts/app-sessions-status-filtered-linux.png": "094b92aa673bb12794a3602c80fa60a1c6758845",
-    "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "11783b88cd34b364a4a1698d0e24bfd9628c8582",
+    "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-linux.png": "39ea237dd4dcd3d20bf3bcb92bc997466348a9ef",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-linux.png": "be41d555dcb75b3ce1f9c6c59e5dc7a792766187",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-multiline-linux.png": "2f158e83a3cf8d7c15aa0143bdb72a661e023408",
-    "__snapshots__/fixture-visual.spec.ts/app-cli-open-context-disclosure-linux.png": "e31a570823fe663757573ae8a76da107405f0d53",
+    "__snapshots__/fixture-visual.spec.ts/app-cli-open-context-disclosure-linux.png": "3b2106c4f9e56b6e8fffb2648b45da132e26950d",
     "__snapshots__/fixture-visual.spec.ts/app-workspace-linux.png": "3a5e030295c92cf4e4b8ab00ff61d836a766e981",
     "__snapshots__/fixture-visual.spec.ts/web-active-terminal-linux.png": "226d846ac395ae7595320310a23a295380a3fb7d",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-chat-dialect-linux.png": "5741267dd5bc3e2173c60336deb7f061ca7eb497",
@@ -67,7 +67,9 @@
     "__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png": "6c431871ae688d976bfa5d1897dd13b22e9dbdca",
     "__snapshots__/fixture-visual.spec.ts/web-sidebar-rail-linux.png": "b1e5e4f69313b0975862c4e763b6ffe24f451e77",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-linux.png": "b622aa850a64e61f37e3b510103f74adc4c22852",
-    "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "b7ff411bff0ff0e72afe6acfb2ce3b8c946afadd"
+    "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "b7ff411bff0ff0e72afe6acfb2ce3b8c946afadd",
+    "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-ctrl-linux.png": "6a47c7f03431e9867c864d764a6a91e7e5b07df8",
+    "__snapshots__/fixture-visual.spec.ts/app-quick-commands-linux.png": "7da7ce6ab15976a2f3db0ac90ff4c6430cd63be3"
   },
   "baseline_set_updated": {
     "requirement": 2487,

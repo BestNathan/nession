@@ -102,6 +102,25 @@ export interface CapsuleCapabilityDisclosure {
   onSelect: (id: CapabilityId) => void;
 }
 
+/** One option in the upper slot's compact view switch (#2710). */
+export interface CapsuleCapabilityViewSwitchOption {
+  id: CapabilityId;
+  label: string;
+  selected: boolean;
+}
+
+/**
+ * The peer views a capability shares its upper slot with.
+ *
+ * `onSelect` is the app's own capability choice — the same `choose` the `+`
+ * list uses — so switching views is one selection path rather than a second
+ * state owner.
+ */
+export interface CapsuleCapabilityViewSwitch {
+  options: readonly CapsuleCapabilityViewSwitchOption[];
+  onSelect: (id: CapabilityId) => void;
+}
+
 export interface CapsuleCapabilityPresence {
   id: string;
   label: string;
@@ -152,6 +171,24 @@ export interface CapsuleCapabilityProjection {
         seq?: string;
         semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
       }) => void;
+      /**
+       * One atomic modifier chord (`Ctrl+C`). Encoded by the interaction
+       * runtime, never by this layer (#2710 SC-02/SC-03).
+       */
+      sendChord?: (
+        modifier: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordModifier,
+        key: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordKey,
+      ) => void;
+      /**
+       * Put a saved command into the composer without executing it, and hand
+       * typing back to the user (#2710 SC-05).
+       */
+      insertText: (text: string) => void;
+      /**
+       * Send a saved command with its Return as one terminal action, without
+       * pretending the command succeeded (#2710 SC-05).
+       */
+      runCommand: (text: string) => void;
       openWorkspace: (resourceId?: string) => void;
       openDetail: (detail: CapsuleDetail) => void;
       disabled: boolean;
@@ -160,6 +197,17 @@ export interface CapsuleCapabilityProjection {
   onDismiss: () => void;
   /** Present when the capability has somewhere deeper to go. */
   onOpenWorkspace?: (resourceId?: string) => void;
+  /**
+   * Sibling views that share this one upper slot (#2710).
+   *
+   * The compact header switch is drawn by the host, and the capability says
+   * only which peers it has and which one is showing — the capsule still has no
+   * capability ids of its own. A capability without peers keeps the host's
+   * title; one with peers replaces the title with the switch, so the surface
+   * never reads as a title above a second title (one dismissal owner, one
+   * header).
+   */
+  viewSwitch?: CapsuleCapabilityViewSwitch;
   /**
    * Whether this projection claims the soft keyboard while it is up (#1034).
    *

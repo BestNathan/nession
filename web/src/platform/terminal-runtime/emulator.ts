@@ -123,6 +123,12 @@ export interface TerminalEmulator {
   onCursorMove(listener: () => void): TerminalDisposable;
   onRender(listener: () => void): TerminalDisposable;
   onScroll(listener: () => void): TerminalDisposable;
+  /**
+   * The active buffer changed (normal ↔ alternate). The scroll-clearance owner
+   * uses this to stop shifting the rendered screen as soon as an application
+   * takes the alternate buffer (#2710 SC-09).
+   */
+  onBufferChange(listener: () => void): TerminalDisposable;
   onResize(listener: () => void): TerminalDisposable;
   onTitleChange(listener: (title: string) => void): TerminalDisposable;
 

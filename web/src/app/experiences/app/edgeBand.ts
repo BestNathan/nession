@@ -1,8 +1,8 @@
-import { EDGE_BAND_PX } from './gesture';
+import { EDGE_BAND_PX, EDGE_PLATFORM_GUARD_PX } from './gesture';
 
 /**
  * Where a top-level App navigation gesture may start when it lands on a work
- * surface (#1081).
+ * surface (#1081, #2724).
  *
  * `workSurface.ts` says a work surface owns the touches that begin in it, and
  * gives the reason: a page that started there would spend the surface's first
@@ -14,21 +14,33 @@ import { EDGE_BAND_PX } from './gesture';
  *
  * So the edge is re-admitted, and what keeps that from being a retreat to a
  * band-only gesture (#473, rejected in #748) is that it is an **exception on
- * top of the exclusion**, not a replacement for it:
+ * top of the exclusion**, not a replacement for it. The outer strip belongs to
+ * the platform first (#2724):
  *
  * ```text
  * touch starts on shell chrome            -> the shell may page, whole width
  * touch starts inside a work surface,
- *   within EDGE_BAND_PX of a shell edge   -> the shell may page, if the drag
- *                                            moves the way that edge's layer
- *                                            arrives
+ *   in the outer guard                     -> the platform owns it (Safari back,
+ *                                             Android system back); the shell
+ *                                             does not claim it
  * touch starts inside a work surface,
- *   anywhere else                         -> the surface owns it
+ *   after the guard, within EDGE_BAND_PX   -> the shell may page, if the drag
+ *                                             moves the way that edge's layer
+ *                                             arrives
+ * touch starts inside a work surface,
+ *   anywhere else                          -> the surface owns it
  * ```
+ *
+ * The guard exists because a physical iPhone test on 2026-11-05 showed that a
+ * 28px band starting at the screen edge loses the leftward back-swipe contest
+ * to Safari's OS gesture: the page never receives a cancelable move. Moving
+ * the shell band inward is the only way to keep the gesture and stop fighting
+ * the platform. It is not a wider band; the shell still claims only
+ * `EDGE_BAND_PX`.
  *
  * Two details bound the exception, and both are load-bearing:
  *
- * - **The band is measured from the shell, not from the window.** An App 390px
+ * - **The bands are measured from the shell, not from the window.** An App 390px
  *   wide inside a desktop browser — or inside the fixture the browser contract
  *   suite drives — has to put its edges where the user sees them. A band
  *   measured from `window.innerWidth` would sit off-screen there and the
@@ -43,9 +55,7 @@ import { EDGE_BAND_PX } from './gesture';
  * (#1081), which is a question that outranks this one — see `shellMayPage` in
  * `useSwipePager.ts`. In practice that is the whole Workspace layer: its only
  * work surfaces are inside a pushed detail, and there the capability's page
- * header owns the leave. Measured on the fixture, 390 of 705 band cells sit
- * over a work surface on the Terminal layer and 0 of 705 at the Workspace root,
- * so the two rules overlap nowhere and nothing was given up to state both.
+ * header owns the leave.
  */
 
 /** The shell's horizontal extent, in the same client coordinates as a touch. */
@@ -63,11 +73,15 @@ export type EdgeSide = 'left' | 'right';
  * Which shell edge a touch at `clientX` originates from, or `null` when it is
  * in neither band.
  *
- * A band is bounded on **both** sides — `left <= clientX <= left + EDGE_BAND_PX`
- * and not merely the upper half — so a point outside the shell is claimed by
- * neither edge. It matters for an App inset inside a wider window: without the
- * lower bound, every coordinate to the left of an inset App would read as that
- * App's left band, and a touch in the page *behind* it would page the App.
+ * A band is bounded on both sides by the shell and shifted inward by
+ * `guardPx`. The outer guard is deliberately **not** part of the band: Safari
+ * and Android reserve it for their own back gesture, and a page cannot win
+ * that contest.
+ *
+ * It matters for an App inset inside a wider window: without the shell's own
+ * lower/upper bounds, every coordinate to the left of an inset App would read
+ * as that App's left band, and a touch in the page *behind* it would page the
+ * App.
  *
  * A shell narrower than two bands puts some touches in both. The left band is
  * tested first and wins, which is a tie-break rather than a rule: at every
@@ -76,25 +90,49 @@ export type EdgeSide = 'left' | 'right';
 export function edgeBandSide(
   clientX: number,
   bounds: ShellBounds,
+  guardPx: number = EDGE_PLATFORM_GUARD_PX,
 ): EdgeSide | null {
-  if (clientX >= bounds.left && clientX <= bounds.left + EDGE_BAND_PX) {
+  const leftStart = bounds.left + guardPx;
+  if (clientX >= leftStart && clientX <= Math.min(leftStart + EDGE_BAND_PX, bounds.right)) {
     return 'left';
   }
-  if (clientX <= bounds.right && clientX >= bounds.right - EDGE_BAND_PX) {
+  const rightEnd = bounds.right - guardPx;
+  if (clientX <= rightEnd && clientX >= Math.max(rightEnd - EDGE_BAND_PX, bounds.left)) {
     return 'right';
   }
   return null;
 }
 
 /**
- * Whether a touch belongs to the shell's reserved edge band (#2657).
+ * Which edge's platform guard contains `clientX`, if any (#2724).
+ *
+ * This strip belongs to the browser/OS edge gesture. The shell never pages
+ * from it, and the Terminal direction pad must not arm there either.
+ */
+export function platformGuardSide(
+  clientX: number,
+  bounds: ShellBounds,
+  guardPx: number = EDGE_PLATFORM_GUARD_PX,
+): EdgeSide | null {
+  if (clientX >= bounds.left && clientX < bounds.left + guardPx) {
+    return 'left';
+  }
+  if (clientX <= bounds.right && clientX > bounds.right - guardPx) {
+    return 'right';
+  }
+  return null;
+}
+
+/**
+ * Whether a touch belongs to the shell's reserved edge region (#2657, #2724).
  *
  * The Terminal's long-press direction pad must not arm on a touch the App
- * pager may claim; that band is shell navigation's, so the product leaf asks
- * the App layer through a predicate instead of importing this module (the
- * layer rule has no product → app edge). The predicate reads the same
- * `edgeBandSide` rule the pager uses, measured from the nearest App experience
- * root so an inset App keeps its band where the user sees it.
+ * pager may claim, nor in the platform's guard: a hold that later moves could
+ * still be read as a system back swipe. The reserved region is the guard plus
+ * the shell band. The product leaf asks the App layer through a predicate
+ * instead of importing this module (the layer rule has no product → app edge).
+ * The predicate reads the same rules the pager uses, measured from the nearest
+ * App experience root so an inset App keeps its band where the user sees it.
  */
 export function appEdgeBandReservation(target: EventTarget | null, clientX: number): boolean {
   const element = target instanceof Element
@@ -107,7 +145,8 @@ export function appEdgeBandReservation(target: EventTarget | null, clientX: numb
     return false;
   }
   const rect = shell.getBoundingClientRect();
-  return edgeBandSide(clientX, { left: rect.left, right: rect.right }) !== null;
+  const bounds = { left: rect.left, right: rect.right };
+  return platformGuardSide(clientX, bounds) !== null || edgeBandSide(clientX, bounds) !== null;
 }
 
 /**

@@ -49,6 +49,72 @@ A single-finger vertical drag scrolls the terminal, and which answer that is com
 
 Vertical travel accumulates in pixels and emits whole lines (16px cell = one line in the fixtures), carrying the remainder: a high-frequency touch stream must not turn each 1px move into a line jump. Sub-slop movement before the axis is decided is absorbed.
 
+## Terminal Keys chords (#2710)
+
+Terminal Keys is a key surface, not a second interaction model. A direct key
+(Esc/Tab/Space/Enter/Delete/arrows) is a semantic key: the interaction runtime
+encodes it from the terminal's current modes, so DECCKM still decides an
+unmodified arrow's bytes.
+
+A **one-shot modifier** (Ctrl/Alt/Shift) is panel state, not a terminal keypress.
+Selecting one sends nothing and opens the A–Z selector; the next compatible key
+produces **one atomic chord** through `TerminalInteractionController.sendChord`
+and clears the modifier. Cancel clears it without a write. The mapping mirrors
+xterm's own keyboard evaluator for the exposed set: Ctrl+letter is the C0
+control byte, Alt+letter the ESC-prefixed meta form, Shift+Tab `CSI Z`, and a
+modified cursor/Delete key the mode-independent `CSI 1;<modifier>` form. The UI
+holds no escape table.
+
+There is no key chain. The old long-press chain accumulated keys and sent them
+one after another, which is not a chord; it is retired, and ordinary taps keep
+their existing path. Chords are owned by the interaction runtime, so a UI
+adapter cannot invent an escape string, a sequential write, or an IME-dependent
+keydown.
+
+## Upper-panel scroll clearance (#2710)
+
+The Capsule publishes two independent measures:
+
+- **Fit occlusion** (`--nession-local-terminal-capsule-occlusion`) is measured
+  from the composer shell. It controls the viewport fit and must **never**
+  include the temporary upper panel, or opening a Peek will resize xterm rows
+  and the PTY/tmux pane.
+- **Panel scroll clearance** (`--nession-local-terminal-capsule-panel-clearance`)
+  measures how far the highest open surface rises above the composer. It adds
+  a **reversible local visual scroll range**; it is not an unconditional screen
+  translation or a change in the remote terminal buffer.
+
+**A panel opening must not automatically push xterm content upward.** The
+existing screen origin and any current history anchor remain where they were.
+The user can then swipe toward the live bottom to spend the panel scroll range
+and reveal the newest prompt above the panel. Swiping the other way first
+**recovers the original top rows**, then continues into real xterm history.
+Moving in the reverse direction first returns to the buffer's live bottom and
+then raises the screen into the expanded-panel clearance. Thus both boundaries
+remain reachable, even when xterm has **zero scrollback lines**. This replaces
+the old rule that held a full-height `translateY` offset while browsing
+history: that rule clipped the top rows with no way to recover them (#2710
+post-acceptance report).
+
+Only the **normal local buffer without mouse tracking** uses this visual range.
+In alternate-screen or mouse-reporting TUI modes the application owns its
+screen and wheel/mouse input, so it is never transformed. The visual scroll
+range must not change xterm rows, the PTY size, tmux pane size or cursor
+coordinates; touch gestures owned by the direction pad and App navigation
+keep their existing priority. A viewport or panel height change may clamp
+the visual pan to the new clearance, but must not invent an auto-follow jump
+while the user is browsing history.
+
+The implementation needs regression evidence for these boundaries:
+
+1. Panel opens over a live prompt **without immediately moving the screen**.
+2. A downward drag recovers the original first visible line before scrolling
+   history, including when the xterm buffer has no scrollback.
+3. An upward drag can reach the latest output above the panel; both directions
+   work continuously on the same gesture.
+4. Closing/switching panels, mouse-reporting/alternate-screen applications,
+   keyboard/IME, scroll-wheel and session continuity remain unaffected.
+
 ## Touch direction pad (#2657)
 
 A stationary single-finger hold inside the Terminal viewport arms a compact four-direction dial. The gesture is a **terminal input accelerator**, not cursor repositioning: each direction is forwarded as the semantic key a physical arrow would produce, through `TerminalInteractionController.sendSemanticKey` (via `TerminalController.sendPhysKey`). The pad never writes ANSI bytes, fakes a `KeyboardEvent`, moves the local xterm cursor, or bypasses the input lease, so application cursor-key mode (DECCKM), `onData`, the observer gate and the existing Terminal Keys path all apply unchanged.

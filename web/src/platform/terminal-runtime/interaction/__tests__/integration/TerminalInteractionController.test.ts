@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { Terminal } from '@xterm/xterm';
-import { TerminalInteractionController } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
+import {
+  TERMINAL_CHORD_LETTERS,
+  encodeTerminalChord,
+  TerminalInteractionController,
+} from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 
 // xterm.open() needs matchMedia in jsdom.
 Object.defineProperty(window, 'matchMedia', {
@@ -278,6 +282,60 @@ describe('TerminalInteractionController — terminal mode transitions', () => {
     controller.sendPtyBytes('\x04');
 
     expect(sent).toEqual(['\x03', '\x04']);
+    unbind();
+  });
+});
+
+describe('TerminalInteractionController — one-shot chords (#2710)', () => {
+  it('encodes Ctrl + a letter as the C0 control byte', () => {
+    expect(encodeTerminalChord('ctrl', 'C')).toBe('\x03');
+    expect(encodeTerminalChord('ctrl', 'L')).toBe('\x0c');
+    expect(encodeTerminalChord('ctrl', 'R')).toBe('\x12');
+    for (const letter of TERMINAL_CHORD_LETTERS) {
+      expect(encodeTerminalChord('ctrl', letter)).toBe(
+        String.fromCharCode(letter.charCodeAt(0) - 64),
+      );
+    }
+  });
+
+  it('encodes Alt as the ESC-prefixed meta form', () => {
+    expect(encodeTerminalChord('alt', 'X')).toBe('\x1bx');
+    expect(encodeTerminalChord('alt', 'Space')).toBe('\x1b ');
+    expect(encodeTerminalChord('alt', 'Escape')).toBe('\x1b\x1b');
+    expect(encodeTerminalChord('alt', 'Enter')).toBe('\x1b\r');
+  });
+
+  it('encodes Shift the way a physical keyboard does', () => {
+    expect(encodeTerminalChord('shift', 'A')).toBe('A');
+    expect(encodeTerminalChord('shift', 'Tab')).toBe('\x1b[Z');
+    expect(encodeTerminalChord('shift', 'Space')).toBe(' ');
+  });
+
+  it('encodes modified cursor keys mode-independently', () => {
+    expect(encodeTerminalChord('ctrl', 'ArrowUp')).toBe('\x1b[1;5A');
+    expect(encodeTerminalChord('alt', 'ArrowLeft')).toBe('\x1b[1;3D');
+    expect(encodeTerminalChord('shift', 'ArrowRight')).toBe('\x1b[1;2C');
+    expect(encodeTerminalChord('ctrl', 'Delete')).toBe('\x1b[3;5~');
+  });
+
+  it('delivers a chord as one atomic write, not a sequence of key sends', () => {
+    const { controller, sent, unbind } = setup();
+
+    controller.sendChord('ctrl', 'C');
+
+    expect(sent).toEqual(['\x03']);
+    unbind();
+  });
+
+  it('keeps the chord encoding independent of the cursor mode', async () => {
+    const { terminal, controller, sent, unbind } = setup();
+
+    await write(terminal, '\x1b[?1h'); // DECCKM — plain arrows change spelling
+    controller.sendChord('ctrl', 'ArrowUp');
+
+    // A modified arrow uses CSI 1;5A in both modes; only the unmodified arrow
+    // switches to SS3. This is xterm's own rule, mirrored here.
+    expect(sent).toEqual(['\x1b[1;5A']);
     unbind();
   });
 });

@@ -15,10 +15,13 @@ import {
   capsuleProjectionScrollClass,
   capsuleUpperCloseButtonClass,
   capsuleUpperHeaderClass,
+  capsuleUpperSwitchClass,
+  capsuleUpperSwitchOptionClass,
   capsuleUpperTitleClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import type {
   CapsuleCapabilityProjection,
+  CapsuleCapabilityViewSwitch,
   CapsuleDetail,
 } from '@/product/terminal/capsule/types';
 
@@ -49,6 +52,9 @@ export function PeekHost({
   projection,
   sendText,
   sendPhysKey,
+  sendChord,
+  insertText,
+  runCommand,
   disabled,
   triggerRef,
   focusFromContext,
@@ -61,6 +67,12 @@ export function PeekHost({
     seq?: string;
     semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
   }) => void;
+  sendChord?: (
+    modifier: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordModifier,
+    key: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordKey,
+  ) => void;
+  insertText: (text: string) => void;
+  runCommand: (text: string) => void;
   disabled: boolean;
   /** Stable lower-Capsule trigger that owns focus when this upper layer closes. */
   triggerRef: React.RefObject<HTMLButtonElement | null>;
@@ -76,7 +88,7 @@ export function PeekHost({
   // capability supplies content and nothing else, exactly as it does for the
   // body itself.
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
-  const { title, onDismiss, onOpenWorkspace } = projection;
+  const { title, onOpenWorkspace } = projection;
 
   usePeekFocusLifecycle({
     focusFromContext,
@@ -109,32 +121,14 @@ export function PeekHost({
         'contain-paint',
       ].join(' ')}
     >
-      <div className={capsuleUpperHeaderClass}>
-        {/* The title names the projection. It is not a control: there is only
-            one depth, so there is nothing behind it to open — it used to be the
-            Signal's way in. */}
-        <h2
-          data-testid="capsule-capability-title"
-          className={capsuleUpperTitleClass}
-        >
-          {title}
-        </h2>
-        <button
-          type="button"
-          data-testid="capsule-capability-dismiss"
-          aria-label={`Dismiss ${title}`}
-          onClick={() => onDismiss()}
-          className={capsuleUpperCloseButtonClass}
-        >
-          <CapsuleIconVisual>
-            <X />
-          </CapsuleIconVisual>
-        </button>
-      </div>
+      <PeekHeader projection={projection} />
 
       {projection.body(focus, setFocus, {
         sendText,
         sendPhysKey,
+        sendChord,
+        insertText,
+        runCommand,
         // Bound here rather than in the hook, because `focus` is this
         // component's state: the deepening a capability offers is *at the item
         // the user picked*, and only the host knows which that was.
@@ -210,6 +204,77 @@ export function PeekHost({
     </div>
   );
 }
+/**
+ * The upper slot's header: identity on the left, dismissal on the right.
+ *
+ * Extracted so the host's render stays one expression per region and so the
+ * switch/title choice has a single owner; the close control is still the one
+ * dismissal action either way (#2710).
+ */
+function PeekHeader({ projection }: { projection: CapsuleCapabilityProjection }) {
+  return (
+    <div className={capsuleUpperHeaderClass}>
+      {projection.viewSwitch ? (
+        <CapsuleViewSwitch viewSwitch={projection.viewSwitch} />
+      ) : (
+        /* The title names the projection. It is not a control: there is only
+           one depth, so there is nothing behind it to open — it used to be the
+           Signal's way in. */
+        <h2 data-testid="capsule-capability-title" className={capsuleUpperTitleClass}>
+          {projection.title}
+        </h2>
+      )}
+      <button
+        type="button"
+        data-testid="capsule-capability-dismiss"
+        aria-label={`Dismiss ${projection.title}`}
+        onClick={() => projection.onDismiss()}
+        className={capsuleUpperCloseButtonClass}
+      >
+        <CapsuleIconVisual>
+          <X />
+        </CapsuleIconVisual>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The compact header switch between peer capability views (#2710).
+ *
+ * A group of pressed-state buttons, not a tab widget: the options select a
+ * capability (the app's one selection path), and there is no roving tabindex or
+ * tabpanel to keep honest. The surface's own `aria-label` still names the
+ * capability currently showing, so a screen reader hears the view it is in.
+ */
+function CapsuleViewSwitch({ viewSwitch }: { viewSwitch: CapsuleCapabilityViewSwitch }) {
+  return (
+    <div
+      role="group"
+      aria-label="Terminal tools"
+      data-testid="capsule-view-switch"
+      className={capsuleUpperSwitchClass}
+    >
+      {viewSwitch.options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          data-testid={`capsule-view-${option.id}`}
+          aria-pressed={option.selected}
+          onClick={() => {
+            if (!option.selected) {
+              viewSwitch.onSelect(option.id);
+            }
+          }}
+          className={capsuleUpperSwitchOptionClass(option.selected)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function usePeekFocusLifecycle({
   focusFromContext,
   onFocusFromContextHandled,
