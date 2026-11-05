@@ -124,7 +124,7 @@ try {
     result:candidate.result,proof:candidate.proof,
     ciphertext:candidate.ciphertext};
   const accepted=await ingestQwenVerifiedCandidate(args);
-  assert.equal(accepted.status,'yielded');
+  assert.equal(accepted.status,'committed');
   assert.equal(accepted.checkpoint.version,1);
   assert.match(accepted.checkpoint.commit_sha,/^[a-f0-9]{40}$/);
   assert.equal(accepted.action_id,action.id);
@@ -132,10 +132,11 @@ try {
   const cloned=path.join(home,'readback');
   git(home,'clone','--branch','agent-store',remote,cloned);
   const record=readIssueWorkflowState(cloned,issue);
-  assert.ok(record.version>=4);
-  const yielded=record.state.outbox.find(a=>a.id===action.id);
-  assert.equal(yielded.status,'yielded');
-  assert.equal(yielded.receipt.source_run_id,workerId);
+  assert.equal(record.version,3);
+  const original=record.state.outbox.find(a=>a.id===action.id);
+  assert.equal(original.status,'dispatched');
+  assert.equal(original.receipt.source_run_id,workerId);
+  assert.equal(record.state.outbox.filter(a=>a.task.role==='developer').length,1);
   const replay=await ingestQwenVerifiedCandidate(args);
   assert.equal(replay.status,'replayed');
   assert.equal(replay.checkpoint.commit_sha,accepted.checkpoint.commit_sha);
@@ -154,7 +155,7 @@ try {
     await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,...bad}),
       /Qwen|claim|dispatch|trusted|candidate|Store/i);
   }
-  console.log('Qwen signed outbox -> native RSA proof -> canonical Store CAS -> immutable Run -> one Yield/replay verified');
+  console.log('Qwen signed outbox -> native RSA -> Store CAS -> publisher-ready immutable Run, no duplicate Developer');
 }finally{
   key.fill(0);aesKey.fill(0);
   fs.rmSync(home,{recursive:true,force:true});
