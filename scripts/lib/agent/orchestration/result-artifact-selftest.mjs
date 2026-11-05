@@ -309,7 +309,7 @@ const skippedState=recordDispatch(reviewReady,reviewReady.version,realReviewActi
   status:'verified',dispatch_id:realReviewAction.id,source_run_id:334});
 const replacementRun={...worker,id:335,
   path:'.github/workflows/agent-review.yml',name:'Agent / Review',
-  actor:{login:'BestNathan'}};
+  head_repository:{full_name:repo},actor:{login:'BestNathan'}};
 const skippedRun={...replacementRun,id:334,conclusion:'skipped',
   head_sha:'d'.repeat(40),actor:{login:'github-actions[bot]'}};
 const rebindRuns=new Map([[222,issuer],[334,skippedRun],[335,replacementRun]]);
