@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "70941361d7132231ba59030bef1aed3657398546",
+  "run_id": 42084025074,
+  "run_attempt": 1,
+  "plan_digest": "e9c17575bd1127c423dcce7cd0a92436cef836cc436b34af2b9ce897a8515d79",
+  "artifact_digest": "sha256:3338db9152ea6946bf2ccb4cbfdcaedb0fba4573c8170cc2381f2a805e5e33f9",
+  "results": [
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 27
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "session-metadata",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 34
+    }
+  ]
+}
