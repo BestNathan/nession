@@ -97,13 +97,16 @@ export function validateDevelopmentState(state) {
       const c=item.task.repair_checkpoint;
       onlyKeys(c,['checkpoint_version','checkpoint_commit_sha',
         'ciphertext_sha256','source_sha','source_run_id'], 'Repair checkpoint');
+      const historicalFailedRepair=item.status==='failed'&&
+        item.id===CONTROLLED_REPAIR_ACTION&&
+        item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE&&
+        item.task.sha===CONTROLLED_REVIEW_SHA;
       if(Object.keys(c).length!==5||
           item.task.type!=='dispatch'||item.task.role!=='developer'||
           item.task.task!=='repair'||item.task.resume!==true||
-          item.task.continuation!=null||item.task.sha!==state.target_sha||
-          (state.phase!=='repair'&&!(item.status==='failed'&&
-            item.id===CONTROLLED_REPAIR_ACTION&&
-            item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE))||
+          item.task.continuation!=null||
+          ((item.task.sha!==state.target_sha||state.phase!=='repair')&&
+            !historicalFailedRepair)||
           !positive(c.checkpoint_version)||
           !SHA.test(c.checkpoint_commit_sha??'')||
           !HEX64.test(c.ciphertext_sha256??'')||
