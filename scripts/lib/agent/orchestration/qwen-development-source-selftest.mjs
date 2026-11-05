@@ -184,7 +184,9 @@ try{
     assert.equal(allowedQwenTrackedPath(allowed),true);
   for(const blocked of ['.github/workflows/deploy.yml','gates/owner.mjs',
     'automation/agents/registry.json','AGENTS.md','../src/secret.ts',
-    'node_modules/evil.js','src/.env','src/private.txt'])
+    'node_modules/evil.js','src/.env','src/private.txt',
+    'scripts/lib/agent/evil.mjs','scripts/requirement-acceptance.mjs',
+    'scripts/agent-workflow-telemetry.mjs'])
     assert.equal(allowedQwenTrackedPath(blocked),false);
   const tracked=prepareQwenTrackedSource({
     admission,registry,environment:env,cliVersion:'2.1.34',workspace:root});
