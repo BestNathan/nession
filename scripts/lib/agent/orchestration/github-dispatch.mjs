@@ -51,11 +51,21 @@ function validContinuation(value) {
   }
   return value;
 }
+function validRepairCheckpoint(value){
+  const fields=['checkpoint_version','checkpoint_commit_sha','ciphertext_sha256',
+    'source_sha','source_run_id'];
+  if(!own(value,fields)||Object.keys(value).length!==fields.length||
+     !positive(value.checkpoint_version)||!HEX40.test(value.checkpoint_commit_sha??'')||
+     !HEX64.test(value.ciphertext_sha256??'')||
+     !HEX40.test(value.source_sha??'')||!positive(value.source_run_id))
+    reject('invalid signed cross-phase Repair checkpoint');
+  return value;
+}
 function validBody(body) {
-  const resumed=body?.schema_version===2;
+  const resumed=[2,3].includes(body?.schema_version);
   const allowed=resumed?[...BODY_FIELDS,'resume_from']:BODY_FIELDS;
   if (!own(body,allowed) || Object.keys(body).length !== allowed.length ||
-      ![1,2].includes(body.schema_version) || body.repository !== REPOSITORY || !positive(body.issue) ||
+      ![1,2,3].includes(body.schema_version) || body.repository !== REPOSITORY || !positive(body.issue) ||
       !HEX64.test(body.action_id ?? '') || !positive(body.state_version) ||
       !PROVIDERS[body.role]?.tasks.includes(body.task) || !ID.test(body.agent_id ?? '') ||
       !HEX40.test(body.input_sha ?? '') || !positive(body.issuer_run_id) ||
@@ -63,7 +73,14 @@ function validBody(body) {
       !Number.isSafeInteger(body.expires_at) ||
       body.expires_at <= body.issued_at ||
       body.expires_at - body.issued_at > MAX_TTL_MS) reject('invalid dispatch ticket body');
-  if(resumed)validContinuation(body.resume_from);
+  if(body.schema_version===2)validContinuation(body.resume_from);
+  if(body.schema_version===3){
+    if(body.role!=='developer'||body.task!=='repair')
+      reject('cross-phase checkpoint only supports Developer Repair');
+    validRepairCheckpoint(body.resume_from);
+    if(body.resume_from.source_sha===body.input_sha)
+      reject('Repair must distinguish historic Session source from PR work SHA');
+  }
   return body;
 }
 function decodeTicket(ticket) {
@@ -93,6 +110,15 @@ function sourceAction(state,actionId) {
 }
 export function issueDispatchTicket(state,actionId,registry,{key,key_id,issuer_run_id,now=Date.now(),ttl_ms=600000}) {
   const action=sourceAction(state,actionId), t=action.task;
+  // A Reviewer-induced repair is NOT a new implement Slice. The native
+  // session must be bound to a previously attested encrypted checkpoint by
+  // the committed Outbox before any write-ahead intent or external POST.
+  // A boolean resume flag is not a checkpoint proof. #1997 v22 presently
+  // lacks the necessary lineage, so fail here (before CAS) rather than
+  // dispatching a Worker that would silently start fresh or fail later.
+  if(t.task==='repair'&&(t.resume!==true||
+      (t.continuation==null&&t.repair_checkpoint==null)))
+    reject('repair resume requires a Store-bound native checkpoint');
   const registered=registry.instances[t.agent_id];
   if (!registered || registered.role!==t.role) reject('unregistered Agent assignment');
   resolveIdentity(registry,t.agent_id,t.task,registered.environment);
@@ -101,10 +127,14 @@ export function issueDispatchTicket(state,actionId,registry,{key,key_id,issuer_r
     reject('invalid ticket signer identity or TTL');
   }
   const continuation=t.continuation==null?null:validContinuation(t.continuation);
-  const body=validBody({schema_version:continuation?2:1,repository:REPOSITORY,issue:state.issue,
+  const repair=t.repair_checkpoint==null?null:validRepairCheckpoint(t.repair_checkpoint);
+  if(repair&&continuation)reject('a Repair cannot use both native origin types');
+  const source=repair??continuation;
+  const body=validBody({schema_version:repair?3:continuation?2:1,
+    repository:REPOSITORY,issue:state.issue,
     action_id:action.id,state_version:state.version,role:t.role,agent_id:t.agent_id,
     task:t.task,input_sha:t.sha,issuer_run_id,issued_at:now,expires_at:now+ttl_ms,key_id,
-    ...(continuation?{resume_from:continuation}:{})});
+    ...(source?{resume_from:source}:{})});
   const encoded=Buffer.from(canonical(body)).toString('base64url');
   return {ticket:encoded+'.'+mac(key,encoded).toString('base64url'),body};
 }
@@ -131,7 +161,7 @@ function dispatchInputs(body, ticket) {
   return { action_id: body.action_id, issue_number: String(body.issue),
     agent_id: body.agent_id, task: body.task, input_sha: body.input_sha,
     dispatch_ticket: ticket,
-    ...(body.schema_version === 2 ? { resume_from: Buffer.from(canonical(body.resume_from))
+    ...(body.schema_version !== 1 ? { resume_from: Buffer.from(canonical(body.resume_from))
       .toString('base64url') } : {}) };
 }
 function planTicket(plan) {
@@ -152,7 +182,7 @@ function planMatchesBody(plan, body, ticket) {
     plan.inputs.agent_id === body.agent_id &&
     plan.inputs.task === body.task &&
     plan.inputs.input_sha === body.input_sha &&
-    (body.schema_version === 2 ?
+    (body.schema_version !== 1 ?
       plan.inputs.resume_from === Buffer.from(canonical(body.resume_from)).toString('base64url') :
       !Object.hasOwn(plan.inputs, 'resume_from'));
 }
@@ -203,10 +233,13 @@ export function verifyPersistedDispatchIntent({state,plan,keyring,now=Date.now()
       action.task.task!==body.task||action.task.sha!==body.input_sha||
       state.assignments[body.role]!==body.agent_id||
       body.state_version>=state.version||
-      (action.task.continuation?
-        body.schema_version!==2||
-          canonical(action.task.continuation)!==canonical(body.resume_from):
-        body.schema_version!==1)) {
+      (action.task.repair_checkpoint?
+        body.schema_version!==3||
+          canonical(action.task.repair_checkpoint)!==canonical(body.resume_from):
+        action.task.continuation?
+          body.schema_version!==2||
+            canonical(action.task.continuation)!==canonical(body.resume_from):
+          body.schema_version!==1)) {
     reject('dispatch intent not persisted at a newer Store state');
   }
   if(!planMatchesBody(plan,body,ticket)) {

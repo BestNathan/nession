@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppLayout } from '@/app/experiences/app/AppLayout';
+import { EDGE_PLATFORM_GUARD_PX } from '@/app/experiences/app/gesture';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { WorkspaceDepthControl } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
@@ -98,9 +99,10 @@ function renderLayout(onLayerChange = vi.fn()) {
 
 /** A rightward drag on the Workspace layer's chrome — the page back to Terminal. */
 function swipeRight(target: HTMLElement) {
-  fireEvent.touchStart(target, { touches: [{ clientX: 20, clientY: 300 }] });
-  fireEvent.touchMove(target, { touches: [{ clientX: 100, clientY: 300 }] });
-  fireEvent.touchMove(target, { touches: [{ clientX: 180, clientY: 300 }] });
+  const from = EDGE_PLATFORM_GUARD_PX + 20;
+  fireEvent.touchStart(target, { touches: [{ clientX: from, clientY: 300 }] });
+  fireEvent.touchMove(target, { touches: [{ clientX: from + 80, clientY: 300 }] });
+  fireEvent.touchMove(target, { touches: [{ clientX: from + 160, clientY: 300 }] });
   fireEvent.touchEnd(target);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
@@ -19,7 +19,11 @@ import type {
 } from '@/product/terminal/capsule/types';
 import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
-import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
+import type {
+  TerminalChordKey,
+  TerminalChordModifier,
+  TerminalSemanticKey,
+} from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
@@ -357,6 +361,51 @@ function TerminalNoticeDetails({
  * Session-first terminal surface: well host + floating capsule.
  * Does not import legacy TerminalLayout / MobileTerminalLayout / BottomBar.
  */
+/**
+ * The capsule's terminal actions, gated by the same input-authority flag every
+ * other user-input path uses (#1095).
+ *
+ * A chord goes to `TerminalController.sendChord`, which hands it to the
+ * interaction runtime's encoder; this file never composes an escape.
+ */
+function useCapsuleTerminalSenders(
+  controller: TerminalController | null,
+  inputDisabled: boolean,
+) {
+  const capsuleSendText = useCallback((text: string) => {
+    if (inputDisabled) {
+      return;
+    }
+    controller?.handleInput({
+      source: 'component-quickcmd',
+      data: text,
+      timestamp: Date.now(),
+    });
+  }, [controller, inputDisabled]);
+
+  const capsuleSendPhysKey = useCallback(
+    (key: { seq?: string; semanticKey?: TerminalSemanticKey }) => {
+      if (inputDisabled) {
+        return;
+      }
+      controller?.sendPhysKey(key);
+    },
+    [controller, inputDisabled],
+  );
+
+  const capsuleSendChord = useCallback(
+    (modifier: TerminalChordModifier, key: TerminalChordKey) => {
+      if (inputDisabled) {
+        return;
+      }
+      controller?.sendChord(modifier, key);
+    },
+    [controller, inputDisabled],
+  );
+
+  return { capsuleSendText, capsuleSendPhysKey, capsuleSendChord };
+}
+
 export function TerminalSurface({
   children,
   inputDisabled,
@@ -385,23 +434,8 @@ export function TerminalSurface({
       onDismissClipboardNotice,
     });
 
-  const capsuleSendText = (text: string) => {
-    if (inputDisabled) {
-      return;
-    }
-    controller?.handleInput({
-      source: 'component-quickcmd',
-      data: text,
-      timestamp: Date.now(),
-    });
-  };
-
-  const capsuleSendPhysKey = (key: { seq?: string; semanticKey?: TerminalSemanticKey }) => {
-    if (inputDisabled) {
-      return;
-    }
-    controller?.sendPhysKey(key);
-  };
+  const { capsuleSendText, capsuleSendPhysKey, capsuleSendChord } =
+    useCapsuleTerminalSenders(controller, inputDisabled);
 
   return (
     <div
@@ -434,6 +468,7 @@ export function TerminalSurface({
             experience={experience}
             sendText={capsuleSendText}
             sendPhysKey={capsuleSendPhysKey}
+            sendChord={capsuleSendChord}
             disabled={inputDisabled}
             capabilityDisclosure={capsuleCapabilities?.disclosure}
             capabilityProjection={capsuleProjection}

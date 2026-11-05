@@ -42,6 +42,7 @@ describe('workspace capability providers', () => {
       'claude-code',
       'git',
       'terminal-keys',
+      'quick-commands',
     ]);
   });
 

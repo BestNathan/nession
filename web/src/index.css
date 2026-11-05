@@ -195,6 +195,11 @@ html {
    cannot is a testable limitation rather than a product scroll/clip fallback. */
 [data-terminal-capsule-host] [data-terminal-viewport] .xterm {
   pointer-events: auto;
+  /* #2710 SC-08/SC-09: an expanded upper panel shifts the rendered xterm
+     *screen* up (CapsuleOcclusionScroll) without changing rows or the buffer.
+     This clips the equivalent top band, so the visible grid ends just above
+     the panel instead of painting over the shell above it. */
+  overflow: hidden;
   max-width: var(--nession-local-terminal-content-width, 100%);
   /* Centre the measured grid inside the owned symmetric inset at every width.
      The inset and the surface's own edges are unchanged, so the shell's 28px

@@ -22,7 +22,7 @@ async function main(){
   assert.deepEqual(specs,migration.specs,'regression spec migration inventory drift');
   assert.equal(fs.existsSync(path.join(repo,'e2e/specs')),false,'duplicate old regression tree');
   const blobs=Object.entries(migration.baseline_png_blobs);
-  assert.equal(blobs.length,43);
+  assert.equal(blobs.length,45);
   for(const [relative,digest] of blobs){
     const p=path.resolve(browserRoot,relative);
     assert.ok(p.startsWith(browserRoot+path.sep),'snapshot escaped tree');
@@ -39,9 +39,9 @@ async function main(){
   assert.match(workflow,/e2e\/tests\/browser\/__snapshots__/);
   const response=await fetch(runtime.base_url+'/',{signal:AbortSignal.timeout(8000)});
   assert.equal(response.status,200);
-  console.log(JSON.stringify({status:'pass',summary:'Pinned 21-spec and 43-snapshot migration inventory and real isolated production Web verified at exact staging SHA.',evidence:[
+  console.log(JSON.stringify({status:'pass',summary:'Pinned 21-spec and 45-snapshot migration inventory and real isolated production Web verified at exact staging SHA.',evidence:[
     {type:'regression',value:'21 migrated specs equal recorded migration source inventory '+migration.source_sha},
-    {type:'visual',value:'43 PNG Git blob SHA-1 values match migration-parity manifest; legacy specs absent'},
+    {type:'visual',value:'45 PNG Git blob SHA-1 values match migration-parity manifest; legacy specs absent'},
     {type:'workflow',value:'canonical e2e/run test --all and migrated snapshot upload configured'},
     {type:'runtime',value:'Web HTTP='+response.status+' at target_sha='+sha}
   ]}));

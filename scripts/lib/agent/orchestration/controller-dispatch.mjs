@@ -10,6 +10,7 @@ import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
+import {bindControlledRepairCheckpoint} from './dispatch-store.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -22,6 +23,11 @@ export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95
 export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
 export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1997 failed_run=39376331942';
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
+export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const REVIEW_DISPATCH_PREFIX='/nession dispatch-review issue=1997 action=';
+const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=1997 action=([a-f0-9]{64})$/;
+const REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
 const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
@@ -39,7 +45,10 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT&&actionId===CONTROLLED_V2_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION)||
-        (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION))&&
+        (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION)||
+        (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -95,8 +104,8 @@ async function api(token,resource) {
   if(!r.ok)fail('GitHub authority read failed ('+r.status+')');
   return r.json();
 }
-function sourceStillAllowed(sha, role) {
-  return sourceAllowed(sha, role);
+function sourceStillAllowed(sha, role, task) {
+  return sourceAllowed(sha, role, {task});
 }
 // A Developer action points at a source commit that must be reachable from
 // current main. A Reviewer action points at the published PR head, which is
@@ -105,7 +114,8 @@ function sourceStillAllowed(sha, role) {
 // main SHA instead. Exported for deterministic fixtures.
 export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', args,
   { stdio: 'ignore', timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
-  publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha } = {}) {
+  publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha,
+  task = null } = {}) {
   if (!HEX40.test(sha ?? '')) fail('invalid dispatch source SHA');
   if (role !== 'developer' && role !== 'reviewer') fail('invalid dispatch role');
   try {
@@ -113,11 +123,19 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
   } catch {
     fail('dispatch source SHA is not a commit');
   }
+  const repair=role==='developer'&&task?.task==='repair';
+  if(repair&&(sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+      task?.sha!==sha||task?.agent_id!=='dev-cursor-01'||
+      task?.repair_checkpoint?.source_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
+      task?.repair_checkpoint?.source_run_id!==39448549052))
+    fail('Repair target is not the exact authenticated published PR source');
   try {
-    if (role === 'reviewer') run(['merge-base', '--is-ancestor', publishedMainSha, sha]);
+    if(role==='reviewer'||repair)
+      run(['merge-base','--is-ancestor',publishedMainSha,sha]);
     else run(['merge-base', '--is-ancestor', sha, mainSha]);
   } catch {
-    if (role === 'reviewer') fail('Reviewer target is not on the published branch history');
+    if(role==='reviewer'||repair)
+      fail('Reviewer/Repair target is not on the published branch history');
     fail('Developer source SHA is not a reachable trusted main ancestor');
   }
 }
@@ -157,10 +175,14 @@ async function main(){
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
   const recoveringNative=commanded&&event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT;
   const recoveringReview=commanded&&event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT;
-  const actionId=commanded?(recoveringReview?REVIEW_ACTION:
+  const bindingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT;
+  const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
+  const newReviewAction=commanded?REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
+  const actionId=commanded?(newReviewAction??(bindingRepair||dispatchingRepair?REPAIR_ACTION:
+    recoveringReview?REVIEW_ACTION:
     continuingV2?CONTROLLED_V2_CONTINUATION:
     continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
-    recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
+    recovering?RECOVERY_ACTION:ORIGINAL_ACTION)):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
@@ -181,6 +203,12 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(bindingRepair){
+      const result=bindControlledRepairCheckpoint({
+        remote:storeRemote,issue:1997,actionId:REPAIR_ACTION});
+      console.log(JSON.stringify(result));
+      return; // No GitHub workflow_dispatch or model call from binding command.
+    }
     if(recoveringReview){
       const source=await verifyKnownSkippedReviewerLive(token);
       const signer={key,key_id:'main-controller',

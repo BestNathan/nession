@@ -6,6 +6,7 @@
 // parser, so a synthetic touch sequence exercises the shipped handler while
 // the harness transport records every byte the PTY would receive.
 const { openClipboardFixture } = require('./terminal-clipboard-cases.cjs');
+const { terminalPoint } = require('./terminal-tools-browser.cjs');
 
 async function openScrollFixture(page) {
   await openClipboardFixture(page);
@@ -80,4 +81,54 @@ async function fillScrollback(page, lines = 120) {
   await page.waitForTimeout(150);
 }
 
-module.exports = { dispatchTouch, fillScrollback, openScrollFixture, terminalView };
+/**
+ * Let the capsule's post-open follow reconciliation settle.
+ *
+ * `CapsuleOcclusionScroll` schedules `scrollToMarginBottom` on a double
+ * `requestAnimationFrame` when a panel geometry change lands while following.
+ * A drag started before those frames run can be undone by that follow, so
+ * wait them out before measuring or dragging.
+ */
+async function settleTerminalFrames(page, frames = 4) {
+  await page.evaluate((count) => new Promise((resolve) => {
+    let left = count;
+    const tick = () => {
+      left -= 1;
+      if (left <= 0) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), frames);
+}
+
+/**
+ * One vertical finger drag over the real terminal.
+ *
+ * Positive `rows` moves the finger down (browses older output); negative moves
+ * it up. Travel is several cells per requested row and is split across moves:
+ * xterm's cell height is fractional and may change on a font/fit pass, so a
+ * drag sized to exactly one cell can round to zero whole lines. Assertions use
+ * the direction of travel, not the exact line count.
+ */
+async function dragTerminalRows(page, rows) {
+  const view = await terminalView(page);
+  const point = await terminalPoint(page);
+  const travel = Math.max(32, Math.ceil(view.cellHeight * Math.abs(rows) * 3));
+  const direction = rows > 0 ? 1 : -1;
+  // Upward drags start lower so the whole gesture stays on the visible screen.
+  const startY = direction > 0 ? point.y : point.y + 4 + travel;
+  const moves = 5;
+  await dispatchTouch(page, 'touchstart', [[point.x, startY]]);
+  // The first 4px stays inside the axis slop, exactly like a real finger.
+  await dispatchTouch(page, 'touchmove', [[point.x, startY + direction * 4]]);
+  for (let index = 1; index <= moves; index += 1) {
+    const y = startY + direction * (4 + Math.round((travel * index) / moves));
+    await dispatchTouch(page, 'touchmove', [[point.x, y]]);
+  }
+  await dispatchTouch(page, 'touchend', []);
+}
+
+module.exports = {
+  dispatchTouch, dragTerminalRows, fillScrollback, openScrollFixture,
+  settleTerminalFrames, terminalView,
+};

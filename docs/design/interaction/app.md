@@ -176,12 +176,12 @@ explanation is the same dead end one step earlier.
   returns at the Workspace root, where Back and the shell both mean the
   Terminal and there is nothing to compete over.
 - The gesture spans the shell chrome. **A work surface owns every touch that
-  begins in it, except at the shell's own edges** (#1081). Inside a work surface
-  the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`
-  (28px) of a shell edge, and each edge owns one direction: the left band pulls
-  Sessions in (a rightward drag), the right band pulls Workspace in (a leftward
-  one). A drag from an edge band that moves the other way is surrendered back to
-  the surface.
+  begins in it, except in the shell's edge region** (#1081, #2724). The outer
+  `EDGE_PLATFORM_GUARD_PX` (24px) of the shell belongs to the platform's own
+  edge gesture; the shell's `EDGE_BAND_PX` (28px) starts *after* that guard.
+  Each band owns one direction: the left band pulls Sessions in (a rightward
+  drag), the right band pulls Workspace in (a leftward one). A drag from an
+  edge band that moves the other way is surrendered back to the surface.
 - The exclusion is what makes the band necessary, and also what keeps it small.
   A surface keeps the touches that begin in it because a page that started there
   would spend the surface's first horizontal pixels — an xterm selection, a
@@ -193,24 +193,74 @@ explanation is the same dead end one step earlier.
   began. The band restores a reachable start; it does not give back the
   surface's interior, and it takes nothing from the shell chrome, where the
   gesture keeps its whole width.
-- The band is a **starting** value, not a measured one. A phone browser or an
-  installed PWA may reserve a screen edge for its own back gesture, and nothing
-  in this repository can see that: the band is exercised at the DOM level only.
-  If a platform does consume an edge, the visible control is the fallback — the
-  gesture is not widened back across the surface to compensate.
+- The guard is a **physical-device finding**, not a width increase. On
+  2026-11-05 an iPhone Safari test showed that a band starting at the screen
+  edge loses the leftward back-swipe contest to the OS: Safari recognises the
+  gesture before the page receives a cancelable move. The shell therefore
+  starts its 28px band after a 24px platform guard instead of competing for the
+  same pixels. The guard and band are still hypotheses — SC-07 must confirm
+  them on the actual device and the visible Sessions/Workspace controls remain
+  the fallback. A start inside the guard is not shell navigation, and neither
+  the shell pager nor the Terminal direction pad may claim it.
 - **Inside the Terminal, a stationary long-press is the terminal's own input
   gesture** (#2657). After roughly 380 ms the viewport shows a small translucent
   direction dial; dragging along an axis sends that semantic arrow key, and
   holding repeats at 1/2/4/8 keys per second, farther from the centre being
   faster. Returning to the centre or releasing stops it. Before the hold ends
   nothing is consumed, so a tap, a quick swipe and scrolling behave as before,
-  and the gesture never starts inside the shell's `EDGE_BAND_PX` — the edge
-  stays navigation's. The dial is an accelerator, not a persistent control;
-  Terminal Keys remain the visible, accessible fallback. The terminal-owned
-  contract (ownership, key encoding, cancellation) is in
+  and the gesture never starts inside the platform guard plus the shell's
+  `EDGE_BAND_PX` — that edge region stays navigation's. The dial is an
+  accelerator, not a persistent control; Terminal Keys remain the visible,
+  accessible fallback. The terminal-owned contract (ownership, key encoding,
+  cancellation) is in
   [interaction-semantics.md](../terminal/interaction-semantics.md#touch-direction-pad-2657).
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
+
+### Swipe contact ownership and feedback (#2724)
+
+The edge band says *where* a page may begin. #2724 owns what happens to the
+contact after that, and the answer is: much less until release.
+
+- **A touch is not navigation at `touchstart`.** It is a candidate. Ownership is
+  decided only after `SWIPE_SLOP_PX` (12px) of movement, and a vertical drag is
+  content's for the rest of that contact — a later horizontal move cannot revive
+  it. A second finger, a genuine `touchcancel`, the browser committing the touch
+  to native scrolling, or another surface claiming the finger all cancel.
+- **One physical contact, one owner.** Touch Events own it by
+  `Touch.identifier` from start to end. Touch-generated `pointercancel` /
+  `lostpointercapture` are not its end; Pointer Events are only a desktop
+  rehearsal path. The Terminal's long-press direction pad (#2657) claims the
+  identifier through the shared registry; once claimed, the shell stands down
+  immediately rather than waiting for events the pad now consumes.
+- **A claimed destination is frozen.** Crossing back over the origin clamps the
+  preview to zero instead of settling; only release decides commit or snapback.
+  A reversal followed by forward travel may still commit the same destination.
+- **Release decides.** Commit at `max(64px, 18% of the shell width)`, or on a
+  purposeful flick of at least 40px at 0.45 px/ms or faster; speed alone cannot
+  commit a shorter travel. With no destination at all (the end of the pager, or
+  no Workspace before a Session) the preview is damped rather than claimed.
+- **Feedback exists only while the drag is live.** The adjacent layer reveals
+  progressively under the finger with a subtle shadow, and a transient label
+  names the frozen destination with its direction. There is no resting swipe
+  tutorial, edge rail or navigation overlay; release removes the label. The
+  no-Session root names its index-1 destination **Home**, never a fake Terminal.
+- **Interactive owners outrank the band.** A button, input, open alert dialog,
+  an expanded Capsule Peek, a nested horizontal scroller (including the
+  capability row) or an active text selection keeps its touch even at the
+  shell edge: claiming there would spend the first pixels of the action the
+  user aimed at. A pushed Workspace detail continues to own its own leave.
+- **Reduced motion is an instant decision.** The settle animation collapses to
+  the same commit/snapback state change. Opening, cancelling or completing a
+  layer never remounts xterm, changes PTY/tmux dimensions, resets scrollback,
+  clears the composer or drops Workspace context.
+- **Numbers are hypotheses until SC-07.** The values above come from the
+  approved mobile prototype
+  ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724)),
+  plus the 2026-11-05 iPhone Safari finding that the outer edge belongs to the
+  OS. The guard, band, thresholds and velocity are initial exploration values;
+  a physical Safari/PWA lane must confirm the platform's own edge ownership and
+  settle the final numbers before they are treated as measured.
 
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
 
@@ -306,16 +356,16 @@ App presentation should normally map it as follows:
 
 Exact detection is implementation-specific.
 
-## Device and viewport coverage
+## Chromium + Playwright viewport coverage
 
 The executable matrix is [`design/contracts/viewports.json`](../../../design/contracts/viewports.json) — the single source that the browser contract suite iterates. For App it currently pins portrait at 375 / 390 / 430 and landscape at 844×390.
 
-**Two scenarios are not covered, and are recorded here as limitations rather than left silently unchecked** (#1049):
+**Two important environment-specific inputs need explicit deterministic Chromium/Playwright fixtures rather than physical-device acceptance** (#1049):
 
-- **Safe area.** Every consumer of `env(safe-area-inset-*)` in the web client uses `-top` or `-bottom`; `-left` and `-right` appear nowhere. That is adequate in portrait, where the notches and the home indicator are top and bottom — but landscape is exactly the case where those insets move to the **sides**, and nothing accounts for that. No fixture sets a non-zero inset, and Playwright cannot synthesise `env()` values without a real device.
-- **Software keyboard.** Opening an IME changes the visual viewport, and the capsule is meant to stay docked above it. No test exercises this: jsdom has no keyboard, and the Playwright fixtures run without one. Resizing the viewport in a test is *not* a substitute — it emulates a smaller viewport, not an IME appearing over one.
+- **Safe area.** The existing browser fixture matrix does not assert a non-zero effective safe-area inset in landscape. Add an explicit Chromium test fixture or test-only CSS-controlled inset input and assert the app-owned layout bounds; this is an application-level invariant, not a claim to reproduce iOS hardware notches or Safari's native `env()` behavior.
+- **Software keyboard / visual viewport.** A plain window resize is not equivalent to a real OS keyboard. Use a deterministic Chromium fixture that controls the app-observable visual viewport/keyboard state, then assert keyboard-related layout, focus and scroll behavior. Do not describe this as native iOS IME testing.
 
-Closing either needs a real device or emulator. Until then this is a **known evidence gap, not a known defect**: nothing here says the App breaks under an IME or a landscape inset, only that no test would notice if it did.
+**Acceptance policy:** Web and App interaction/visual SCs use Chromium + Playwright at the canonical desktop/mobile viewport matrix; no physical phone, Mobile Safari or installed-App test is required. When a missing fixture prevents an app-owned assertion, record that fixture as the `Pending` prerequisite; lack of native iOS instrumentation alone is not a blocker. Native Safari/OS-specific behavior remains outside the automated acceptance claim, without inventing a Pass for it.
 
 ## What App must not do
 

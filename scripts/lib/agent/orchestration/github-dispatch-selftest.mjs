@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
-import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
+import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox,bindVerifiedRepairCheckpoint} from './outbox.mjs';
+import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,prepareGitHubDispatch,
   createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome,
-  reviewerPublishedPrBinding,planControlledReviewerRecovery} from './github-dispatch.mjs';
+  reviewerPublishedPrBinding,planControlledReviewerRecovery,verifyPersistedDispatchIntent} from './github-dispatch.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const a='a'.repeat(40), b='b'.repeat(40), main='f'.repeat(40);
@@ -17,6 +17,80 @@ let state=startDevelopment(registry,request,authority);
 const item=reconcileOutbox(state).pending[0];
 const signer={key,key_id:'control-v1',issuer_run_id:222,now,ttl_ms:600000};
 const {ticket,body}=issueDispatchTicket(state,item.id,registry,signer);
+
+const unsignedRepairState={...state,phase:'repair',target_sha:b,repair_attempts:1,
+  outbox:[{id:'e'.repeat(64),task:{type:'dispatch',role:'developer',
+    agent_id:'dev-cursor-01',task:'repair',sha:b,resume:true},
+    status:'pending',attempts:0,receipt:null}]};
+assert.throws(()=>issueDispatchTicket(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+assert.throws(()=>planGitHubDispatch(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+// The exact immutable #1997 v22 Repair action must not become a signed
+// workflow_dispatch from a mere boolean flag.
+const historicalRepairAction=
+  'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const historicalRepairState={...unsignedRepairState,issue:1997,version:22,
+  target_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4',
+  outbox:[{...unsignedRepairState.outbox[0],id:historicalRepairAction,
+    task:{...unsignedRepairState.outbox[0].task,
+      sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4'}}]};
+assert.throws(()=>planGitHubDispatch(historicalRepairState,
+  historicalRepairAction,registry,signer),/Store-bound native checkpoint/);
+assert.throws(()=>prepareGitHubDispatch(historicalRepairState,
+  historicalRepairAction,registry,signer),/Store-bound native checkpoint/);
+// Failed preflight must leave the durable source object untouched; it must
+// not stage a write-ahead intent or mutate an existing Outbox status.
+assert.equal(historicalRepairState.version,22);
+assert.equal(historicalRepairState.outbox[0].status,'pending');
+assert.equal(historicalRepairState.outbox[0].receipt,null);
+// The same immutable v22 Repair Action, once independently bound to the
+// v3 pre-publication native checkpoint, gets a distinct schema-v3 ticket.
+// The PR work SHA and native Session's old source SHA MUST remain separate.
+const reviewedRepair={...historicalRepairState,transitions:[
+  {kind:'publisher',outcome:'published',run_id:39609600546,attempt:1,
+    target_sha:historicalRepairState.target_sha},
+  {kind:'reviewer',outcome:'changes_requested',run_id:41962609841,attempt:1,
+    target_sha:historicalRepairState.target_sha}]};
+const repairProof={verified:true,checkpoint_version:3,
+  checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf',
+  ciphertext_sha256:'7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0',
+  source_sha:'220266b9233ec97b1beacbc54e5cc7f82d3cece2',
+  source_run_id:39448549052};
+const bound=bindVerifiedRepairCheckpoint(reviewedRepair,22,historicalRepairAction,repairProof);
+const repairTicket=issueDispatchTicket(bound,historicalRepairAction,registry,signer);
+assert.equal(repairTicket.body.schema_version,3);
+assert.equal(repairTicket.body.task,'repair');
+assert.equal(repairTicket.body.input_sha,historicalRepairState.target_sha);
+assert.deepEqual(repairTicket.body.resume_from,bound.outbox[0].task.repair_checkpoint);
+assert.equal(verifyDispatchTicket(repairTicket.ticket,keyring,{now}).schema_version,3);
+const repairPlan=planGitHubDispatch(bound,historicalRepairAction,registry,signer);
+assert.equal(repairPlan.workflow_id,'agent-develop.yml');
+assert.equal(repairPlan.inputs.task,'repair');
+assert.deepEqual(JSON.parse(Buffer.from(repairPlan.inputs.resume_from,
+  'base64url').toString('utf8')),repairTicket.body.resume_from);
+const preparedRepair=prepareGitHubDispatch(bound,historicalRepairAction,registry,signer);
+assert.equal(preparedRepair.prepared.outbox[0].status,'dispatching');
+assert.equal(verifyPersistedDispatchIntent({state:preparedRepair.prepared,
+  plan:preparedRepair.plan,keyring,now}).action_id,historicalRepairAction);
+for(const bad of [
+  {...bound,outbox:[{...bound.outbox[0],task:{...bound.outbox[0].task,
+    repair_checkpoint:{...bound.outbox[0].task.repair_checkpoint,source_sha:
+      historicalRepairState.target_sha}}}]},
+  {...bound,outbox:[{...bound.outbox[0],task:{...bound.outbox[0].task,
+    repair_checkpoint:{...bound.outbox[0].task.repair_checkpoint,source_run_id:0}}}]},
+])assert.throws(()=>issueDispatchTicket(bad,historicalRepairAction,registry,signer));
+assert.throws(()=>verifyPersistedDispatchIntent({state:preparedRepair.prepared,
+  plan:{...preparedRepair.plan,inputs:{...preparedRepair.plan.inputs,resume_from:'forged'}},
+  keyring,now}),/diverges/);
+for(const wrong of [false,undefined]){
+  const invalid={...unsignedRepairState,outbox:[
+    {...unsignedRepairState.outbox[0],task:{
+      ...unsignedRepairState.outbox[0].task,resume:wrong}}]};
+  assert.throws(()=>issueDispatchTicket(invalid,'e'.repeat(64),registry,signer),
+    /Store-bound native checkpoint/);
+}
+
 const plan=planGitHubDispatch(state,item.id,registry,signer);
 assert.equal(plan.workflow_id,'agent-develop.yml');
 assert.deepEqual(verifyDispatchTicket(ticket,keyring,{now}),body);

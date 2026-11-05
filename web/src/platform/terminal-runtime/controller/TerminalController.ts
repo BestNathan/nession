@@ -22,6 +22,8 @@ import { SerializedTerminalWriter, type TerminalWriterLimits } from './Serialize
 import { MobileImeInput } from '../input/MobileImeInput';
 import {
   TerminalInteractionController,
+  type TerminalChordKey,
+  type TerminalChordModifier,
   type TerminalSemanticKey,
 } from '../interaction/TerminalInteractionController';
 import { TerminalGeometry } from '../view/TerminalGeometry';
@@ -994,6 +996,14 @@ export class TerminalController {
     if (key.seq) {
       this.send(key.seq, 'component-input');
     }
+  }
+
+  /**
+   * A one-shot modifier chord (`Ctrl+C`) — encoded by the interaction layer,
+   * never by the capsule (#2710 SC-02/SC-03).
+   */
+  sendChord(modifier: TerminalChordModifier, key: TerminalChordKey): void {
+    this.interaction?.sendChord(modifier, key);
   }
 
   /** Get the currently active input source. */

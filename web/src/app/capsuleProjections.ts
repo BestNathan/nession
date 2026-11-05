@@ -8,6 +8,10 @@ import {
   TERMINAL_KEYS_ID,
   terminalKeysProjection,
 } from '@/product/terminal/terminalKeys';
+import {
+  QUICK_COMMANDS_ID,
+  quickCommandsProjection,
+} from '@/product/terminal/quickCommands/quickCommands';
 
 /**
  * How a capability supplies its Terminal projection body.
@@ -59,6 +63,16 @@ export interface CapsuleProjectionBinding {
    * not get to take it away from the composer.
    */
   ownsInputFocus?: boolean;
+  /**
+   * Peer capabilities that share this one's upper-slot views (#2710).
+   *
+   * Declared by the capability rather than inferred from ids or from a list in
+   * the host: Terminal Keys and Quick Commands are two explicit views of one
+   * terminal-tools slot, and a future peer joins by declaring the same
+   * relationship from its own binding. The host draws the compact switch; it
+   * still knows no capability names.
+   */
+  companions?: readonly CapabilityId[];
   body: (props: {
     agentId: string | undefined;
     sessionId: string | undefined;
@@ -88,6 +102,15 @@ export interface CapsuleProjectionBinding {
       seq?: string;
       semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
     }) => void;
+    /** One atomic modifier chord, encoded by the interaction runtime. */
+    sendChord?: (
+      modifier: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordModifier,
+      key: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordKey,
+    ) => void;
+    /** Put text in the composer without executing it (#2710 SC-05). */
+    insertText: (text: string) => void;
+    /** Send text plus Return as one terminal action (#2710 SC-05). */
+    runCommand: (text: string) => void;
     /**
      * The host's routing into the Workspace, for the body's *content* rows —
      * a conversation candidate that opens itself, at the item it names or the
@@ -137,6 +160,7 @@ const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
   claudeCodeProjection,
   gitProjection,
   terminalKeysProjection,
+  quickCommandsProjection,
 ];
 
 export function projectionBindingFor(id: CapabilityId): CapsuleProjectionBinding | undefined {
@@ -172,4 +196,4 @@ export const CAPSULE_PROJECTION_IDS: readonly CapabilityId[] = CAPSULE_PROJECTIO
   (binding) => binding.id,
 );
 
-export { CLAUDE_CODE_ID, GIT_ID, TERMINAL_KEYS_ID };
+export { CLAUDE_CODE_ID, GIT_ID, QUICK_COMMANDS_ID, TERMINAL_KEYS_ID };

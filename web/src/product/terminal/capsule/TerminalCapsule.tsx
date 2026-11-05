@@ -16,11 +16,17 @@ import {
 } from '@/product/terminal/capsule/types';
 import { useCapsuleLayoutFlip } from '@/product/terminal/capsule/useCapsuleLayoutFlip';
 import { useCapsuleDockClearance } from '@/product/terminal/capsule/hooks/useCapsuleDockClearance';
+import { useCapsuleCommandActions } from '@/product/terminal/capsule/hooks/useCapsuleCommandActions';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 export interface TerminalCapsuleProps {
   sendText: (text: string) => void;
   sendPhysKey?: (key: { seq?: string; semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey }) => void;
+  /** One atomic modifier chord, encoded by the terminal interaction runtime. */
+  sendChord?: (
+    modifier: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordModifier,
+    key: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalChordKey,
+  ) => void;
   disabled?: boolean;
   experience?: CapsuleExperience;
   /** Capabilities that earned no chip, reachable through the disclosure entry. */
@@ -73,6 +79,7 @@ function useContextPeekFocusIntent(projectionId?: string) {
 export function TerminalCapsule({
   sendText,
   sendPhysKey,
+  sendChord,
   disabled = false,
   experience = 'web',
   capabilityDisclosure,
@@ -103,55 +110,20 @@ export function TerminalCapsule({
   const projectionId = capabilityProjection?.id ?? null;
   const peekFocus = useContextPeekFocusIntent(capabilityProjection?.id);
 
-  /**
-   * The accessory takes the keyboard when it appears.
-   *
-   * Blurring the field is *how* a soft keyboard is dismissed — there is no
-   * declarative equivalent — and leaving it focused would put the IME on top of
-   * the keys the accessory exists to expose (#1034 §5, criterion 7).
-   *
-   * Keyed on the projection's identity as well as the flag: a projection that
-   * replaces another one still claims the keyboard on arrival, and two
-   * keyboard-owning surfaces are already mutually exclusive by construction.
-   */
-  useEffect(() => {
-    if (projectionOwnsInputFocus) {
-      fieldRef.current?.blur();
-    }
-  }, [projectionId, projectionOwnsInputFocus]);
+  const handleFieldFocus = useCapsuleInputFocus({
+    projectionId,
+    projectionOwnsInputFocus,
+    capabilityProjection,
+    fieldRef,
+  });
 
-  /**
-   * …and the composer takes it back when the user reaches for it.
-   *
-   * Tapping the field dismisses the projection rather than merely focusing the
-   * field. That is what makes the two secondary surfaces exclusive (criterion
-   * 14) and what returns the user to text entry (criterion 8): the dismissal
-   * steps the projection out and nothing else — the Session and the Terminal are
-   * not touched, because neither is part of what was dismissed.
-   */
-  const handleFieldFocus = useCallback(() => {
-    if (projectionOwnsInputFocus) {
-      capabilityProjection?.onDismiss();
-    }
-  }, [capabilityProjection, projectionOwnsInputFocus]);
+  // Composer-only terminal fit stays exactly what it was; the hook also
+  // publishes the upper panel's *scroll* clearance as a separate value, so an
+  // expanded surface never reflows the terminal grid (#2710 SC-08/SC-09).
+  useCapsuleDockClearance(shellRef, dockRef);
 
-  // The shell, not the dock: the dock also carries a capability projection when
-  // one has emerged, and reserving terminal height for a temporary surface
-  // reflows the work surface every time it appears and goes away
-  // (see the hook).
-  useCapsuleDockClearance(shellRef);
-
-  const {
-    applyLineCount,
-    composerLayout,
-    send: stateSend,
-    ...restState
-  } = state;
-
-  const { captureBeforeLayoutChange } = useCapsuleLayoutFlip(
-    composerLayout,
-    inputRowRef,
-  );
+  const { applyLineCount, composerLayout, send: stateSend, ...restState } = state;
+  const { captureBeforeLayoutChange } = useCapsuleLayoutFlip(composerLayout, inputRowRef);
 
   const handleLineCountChange = useCallback(
     (lineCount: number) => {
@@ -171,6 +143,14 @@ export function TerminalCapsule({
     stateSend();
   }, [captureBeforeLayoutChange, composerLayout, stateSend]);
 
+  const { insertText, runCommand } = restState;
+  const { handleInsertText, handleRunCommand } = useCapsuleCommandActions({
+    insertText,
+    runCommand,
+    capabilityProjection,
+    fieldRef,
+  });
+
   const measureMirrorRef = useComposerMeasure({
     value: restState.inputValue,
     shellRef,
@@ -178,36 +158,25 @@ export function TerminalCapsule({
     onLineCountChange: handleLineCountChange,
   });
 
-  /**
-   * The dock's one upper layer (#1347 SC-43): the Context Capsule while it is
-   * open, otherwise the capability Peek, otherwise nothing.
-   *
-   * One slot rather than two, deliberately. The owner's model is that selecting
-   * a row *deepens this layer* — the list becomes the Peek — so two slots would
-   * allow a state the design does not have (a list with a Peek above it), and
-   * the inter-Capsule gap would have to be re-derived for it. It also means the
-   * lower capsule is untouched by construction: nothing here renders inside it.
-   */
-  const upperLayer =
-    restState.contextOpen && capabilityDisclosure ? (
-      <ContextCapsule
-        disclosure={capabilityDisclosure}
-        workContext={workContext}
-        onDismiss={() => restState.setContextOpen(false)}
-        onDeepen={peekFocus.onDeepen}
-        triggerRef={restState.contextTriggerRef}
-      />
-    ) : capabilityProjection ? (
-      <PeekHost
-        projection={capabilityProjection}
-        sendText={sendText}
-        sendPhysKey={sendPhysKey}
-        disabled={disabled}
-        triggerRef={restState.contextTriggerRef}
-        focusFromContext={peekFocus.focusFromContext}
-        onFocusFromContextHandled={peekFocus.onFocusFromContextHandled}
-      />
-    ) : null;
+  const upperLayer = (
+    <CapsuleUpperLayer
+      contextOpen={restState.contextOpen}
+      capabilityDisclosure={capabilityDisclosure}
+      workContext={workContext}
+      onCloseContext={() => restState.setContextOpen(false)}
+      onDeepen={peekFocus.onDeepen}
+      contextTriggerRef={restState.contextTriggerRef}
+      capabilityProjection={capabilityProjection}
+      sendText={sendText}
+      sendPhysKey={sendPhysKey}
+      sendChord={sendChord}
+      insertText={handleInsertText}
+      runCommand={handleRunCommand}
+      disabled={disabled}
+      focusFromContext={peekFocus.focusFromContext}
+      onFocusFromContextHandled={peekFocus.onFocusFromContextHandled}
+    />
+  );
 
   return (
     <CapsuleProvider
@@ -242,4 +211,116 @@ export function TerminalCapsule({
       </CapsuleShell>
     </CapsuleProvider>
   );
+}
+
+/**
+ * The dock's one upper layer (#1347 SC-43): the Context Capsule while it is
+ * open, otherwise the capability Peek, otherwise nothing.
+ *
+ * One slot rather than two, deliberately. The owner's model is that selecting a
+ * row *deepens this layer* — the list becomes the Peek — so two slots would
+ * allow a state the design does not have (a list with a Peek above it). It also
+ * means the lower capsule is untouched by construction: nothing here renders
+ * inside it.
+ */
+function CapsuleUpperLayer({
+  contextOpen,
+  capabilityDisclosure,
+  workContext,
+  onCloseContext,
+  onDeepen,
+  contextTriggerRef,
+  capabilityProjection,
+  sendText,
+  sendPhysKey,
+  sendChord,
+  insertText,
+  runCommand,
+  disabled,
+  focusFromContext,
+  onFocusFromContextHandled,
+}: {
+  contextOpen: boolean;
+  capabilityDisclosure?: CapsuleCapabilityDisclosure;
+  workContext?: ResolvedWorkContext;
+  onCloseContext: () => void;
+  onDeepen: (capabilityId: string) => void;
+  contextTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  capabilityProjection?: CapsuleCapabilityProjection;
+  sendText: (text: string) => void;
+  sendPhysKey?: TerminalCapsuleProps['sendPhysKey'];
+  sendChord?: TerminalCapsuleProps['sendChord'];
+  insertText: (text: string) => void;
+  runCommand: (text: string) => void;
+  disabled: boolean;
+  focusFromContext: boolean;
+  onFocusFromContextHandled: () => void;
+}) {
+  if (contextOpen && capabilityDisclosure) {
+    return (
+      <ContextCapsule
+        disclosure={capabilityDisclosure}
+        workContext={workContext}
+        onDismiss={onCloseContext}
+        onDeepen={onDeepen}
+        triggerRef={contextTriggerRef}
+      />
+    );
+  }
+  if (!capabilityProjection) {
+    return null;
+  }
+  return (
+    <PeekHost
+      projection={capabilityProjection}
+      sendText={sendText}
+      sendPhysKey={sendPhysKey}
+      sendChord={sendChord}
+      insertText={insertText}
+      runCommand={runCommand}
+      disabled={disabled}
+      triggerRef={contextTriggerRef}
+      focusFromContext={focusFromContext}
+      onFocusFromContextHandled={onFocusFromContextHandled}
+    />
+  );
+}
+
+/**
+ * The projection/composer keyboard contract (#1034 §5, criteria 7/8/14).
+ *
+ * Blurring the field is *how* a soft keyboard is dismissed — there is no
+ * declarative equivalent — and leaving it focused would put the IME on top of
+ * the keys the accessory exists to expose. Keyed on the projection's identity
+ * as well as the flag, so a projection that replaces another still claims the
+ * keyboard on arrival.
+ *
+ * …and the composer takes it back when the user reaches for it. Tapping the
+ * field dismisses the projection rather than merely focusing the field: that is
+ * what makes the two secondary surfaces exclusive and returns the user to text
+ * entry. The dismissal steps the projection out and nothing else — the Session
+ * and the Terminal are not touched.
+ */
+function useCapsuleInputFocus({
+  projectionId,
+  projectionOwnsInputFocus,
+  capabilityProjection,
+  fieldRef,
+}: {
+  projectionId: string | null;
+  projectionOwnsInputFocus: boolean;
+  capabilityProjection?: CapsuleCapabilityProjection;
+  fieldRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  useEffect(() => {
+    if (projectionOwnsInputFocus) {
+      fieldRef.current?.blur();
+    }
+  }, [fieldRef, projectionId, projectionOwnsInputFocus]);
+
+  return useCallback(() => {
+    if (projectionOwnsInputFocus) {
+      capabilityProjection?.onDismiss();
+    }
+  }, [capabilityProjection, projectionOwnsInputFocus]);
 }

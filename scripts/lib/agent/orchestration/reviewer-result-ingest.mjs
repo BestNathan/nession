@@ -111,13 +111,23 @@ export function resolveReviewIngestSource({environment,event}){
     fail('not a trusted main-owned Ingest workflow');
   const dispatch=environment.GITHUB_EVENT_NAME==='repository_dispatch';
   const owner=environment.GITHUB_EVENT_NAME==='workflow_dispatch';
-  if(event?.repository?.full_name!==REPO||!dispatch&&!owner||
+  const recovery=environment.GITHUB_EVENT_NAME==='issue_comment';
+  if(event?.repository?.full_name!==REPO||!dispatch&&!owner&&!recovery||
      (dispatch&&(event.action!=='nession-review-metrics-ingested'||
        environment.GITHUB_ACTOR!=='github-actions[bot]'||
        event.sender?.login!=='github-actions[bot]'))||
-     (owner&&environment.GITHUB_ACTOR!=='BestNathan'))
+     (owner&&environment.GITHUB_ACTOR!=='BestNathan')||
+     (recovery&&(environment.GITHUB_ACTOR!=='BestNathan'||
+       event.action!=='created'||event.sender?.login!=='BestNathan'||
+       event.issue?.number!==1997||event.issue?.pull_request||
+       event.comment?.user?.login!=='BestNathan'||
+       !/^\/nession ingest-review issue=1997 run=[1-9][0-9]{0,14} attempt=1$/.test(
+         event.comment?.body??''))))
     fail('untrusted Review ingest event');
-  const args=dispatch?event.client_payload:event.inputs;
+  const args=recovery?{
+    source_run_id:Number(event.comment.body.match(/run=([0-9]+) attempt=1$/)[1]),
+    source_run_attempt:1}:
+    dispatch?event.client_payload:event.inputs;
   const id=Number(args?.source_run_id),attempt=Number(args?.source_run_attempt);
   if(!positive(id)||!positive(attempt)||attempt>10)
     fail('unbound Review source Run/attempt');

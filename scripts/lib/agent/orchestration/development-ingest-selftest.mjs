@@ -4,7 +4,9 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {matchingResult,resolveTrustedIngestSource,V2_INGEST_WORKER_RUN,V2_INGEST_COMMAND} from './development-ingest.mjs';
-import {CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
+import {CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
+import {acceptTaskResult,bindVerifiedRepairCheckpoint,recordDispatch} from './outbox.mjs';
+import fs from 'node:fs';
 
 const issue=1997,runId=33012,attempt=1,source_sha='a'.repeat(40);
 const action_id='b'.repeat(64),digest=s=>createHash('sha256').update(s).digest('hex');
@@ -74,6 +76,77 @@ assert.throws(()=>matchingResult(v2Result,{...v2Proof,action_id:action_id},
 assert.throws(()=>matchingResult(v2Result,v2Proof,resumedWrapped,
   {...v2Claim,inputs:{...v2Claim.inputs,action_id}},run),/no authentic/);
 
+const published='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const repairClaim={inputs:{...ticket,action_id:CONTROLLED_REPAIR_ACTION,
+  input_sha:published,task:'repair',resume_from:'signed-v3-origin'}};
+const repairMetadata={...resumedMeta,source_sha:published};
+const repairProof={...resumedProof,action_id:CONTROLLED_REPAIR_ACTION,
+  source_sha:published,metadata:repairMetadata};
+const repairWrapped={...resumedWrapped,metadata:repairMetadata};
+const repairResult={...resumedResult,kind:'developer_repair_dispute',
+  action_id:CONTROLLED_REPAIR_ACTION,source_sha:published,
+  status:'review_disputed_no_change',native_read_edit_verified:undefined,
+  native_read_verified:true,reviewer_run_id:41962609841,
+  parent_checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf'};
+assert.equal(matchingResult(repairResult,repairProof,repairWrapped,repairClaim,run)
+  .agent_id,repairMetadata.agent_id);
+for(const bad of [
+  {kind:'developer_proposal'},{status:'proposed_not_published'},
+  {native_read_verified:false},{native_resumed:false},
+  {reviewer_run_id:41962609842},
+  {parent_checkpoint_commit_sha:'0'.repeat(40)},
+  {content_sha256:result.content_sha256},
+  {source_sha:source_sha},
+]){
+  assert.throws(()=>matchingResult({...repairResult,...bad},repairProof,
+    repairWrapped,repairClaim,run),/no verified|no authentic/);
+}
+assert.throws(()=>matchingResult(repairResult,repairProof,repairWrapped,
+  {...repairClaim,inputs:{...repairClaim.inputs,task:'implement'}},run),
+  /no authentic/);
+// A real authenticated Repair result must consume the ORIGINAL pending
+// Action and produce exactly one new Reviewer attempt on the unchanged PR SHA.
+const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+const repairAction=CONTROLLED_REPAIR_ACTION;
+const repairHistory={
+  schema_version:1,issue,version:22,phase:'repair',target_sha:published,
+  repair_attempts:1,
+  transitions:[
+    {key:'publisher:39609600546:1',kind:'publisher',run_id:39609600546,
+      attempt:1,target_sha:published,outcome:'published'},
+    {key:'reviewer:41962609841:1',kind:'reviewer',run_id:41962609841,
+      attempt:1,target_sha:published,outcome:'changes_requested'},
+  ],
+  assignments:{developer:'dev-cursor-01',reviewer:'review-qwen-01',
+    acceptor:'accept-cursor-01'},
+  outbox:[{id:repairAction,task:{type:'dispatch',role:'developer',
+    task:'repair',sha:published,resume:true,agent_id:'dev-cursor-01'},
+    status:'pending',attempts:0,receipt:null}],
+};
+const proof3={verified:true,checkpoint_version:3,
+  checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf',
+  ciphertext_sha256:'7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0',
+  source_sha:'220266b9233ec97b1beacbc54e5cc7f82d3cece2',
+  source_run_id:39448549052};
+const bound=bindVerifiedRepairCheckpoint(repairHistory,22,repairAction,proof3);
+const dispatched=recordDispatch(bound,bound.version,repairAction,{
+  status:'verified',dispatch_id:repairAction,source_run_id:44044});
+const resultEvent={kind:'developer',issue,run_id:44044,run_attempt:1,
+  target_sha:published,outcome:'implementation_ready',task_id:repairAction};
+const resultSource={repository:'BestNathan/nession',
+  path:'.github/workflows/agent-develop.yml',name:'Agent / Development',
+  run_id:44044,attempt:1,event:'workflow_dispatch',ref:'refs/heads/main',
+  issue,task_id:repairAction,agent_id:'dev-cursor-01',
+  input_sha:published,output_sha:published,verified:true};
+const repaired=acceptTaskResult(dispatched,dispatched.version,
+  resultEvent,resultSource,registry);
+assert.equal(repaired.phase,'review');
+assert.equal(repaired.target_sha,published);
+assert.equal(repaired.outbox.filter(a=>a.task.role==='reviewer'&&
+  a.status==='pending').length,1);
+assert.equal(repaired.outbox.some(a=>a.id===repairAction),false);
+assert.throws(()=>acceptTaskResult(repaired,repaired.version,
+  resultEvent,resultSource,registry));
 const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
   GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW:'Store / Agent Development Ingest',
   GITHUB_SHA:'a'.repeat(40),GITHUB_EVENT_NAME:'issue_comment',GITHUB_ACTOR:'BestNathan'};

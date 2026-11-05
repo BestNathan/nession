@@ -18,6 +18,11 @@ export const CONTROLLED_CONTINUATION_COMMENT='/nession resume issue=1997 checkpo
 export const CONTROLLED_V2_CONTINUATION='dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31';
 export const CONTROLLED_V2_CONTINUATION_COMMENT='/nession resume issue=1997 checkpoint=2';
 const SOURCE='220266b9233ec97b1beacbc54e5cc7f82d3cece2';
+const PUBLISHED_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+export const CONTROLLED_REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const REPAIR_SOURCE_RUN=39448549052;
+const REPAIR_CHECKPOINT_COMMIT='eb891ee2154d02ddb758d50f0f694e70a343ffdf';
+const REPAIR_CIPHERTEXT='7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0';
 const COMMIT='d812e3655c0ad6337b1003aa0c1794c12335adb0';
 const CIPHERTEXT='a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107';
 const PARENT='85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656';
@@ -43,7 +48,25 @@ const KNOWN_CONTINUATIONS=[
     checkpoint_commit_sha:'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142',
     ciphertext_sha256:'ae089e6b7b1743a9afdb78814ba716be024ccde9da0a1ddfbc965601f2691f1e'},
 ];
+// Cross-phase Repair uses the ORIGINAL native Cursor Agent and its v3
+// encrypted Session, but the NEW worktree is the App-authored PR HEAD.
+// No source/path rewrite may impersonate ordinary same-task continuation.
+export function assertControlledRepair(a){
+  const c=a?.resume_from;
+  if(a?.authorized!==true||a.issue!==1997||a.role!=='developer'||
+     a.agent_id!=='dev-cursor-01'||a.provider!=='cursor'||
+     a.action_id!==CONTROLLED_REPAIR_ACTION||a.task!=='repair'||
+     a.input_sha!==PUBLISHED_SHA||!c||
+     Object.keys(c).sort().join(',')!==
+       'checkpoint_commit_sha,checkpoint_version,ciphertext_sha256,source_run_id,source_sha'||
+     c.checkpoint_version!==3||c.checkpoint_commit_sha!==REPAIR_CHECKPOINT_COMMIT||
+     c.ciphertext_sha256!==REPAIR_CIPHERTEXT||
+     c.source_sha!==SOURCE||c.source_run_id!==REPAIR_SOURCE_RUN)
+    fail('unbound or incompatible published-PR native Repair checkpoint');
+  return c;
+}
 export function assertControlledContinuation(a) {
+  if(a?.task==='repair')return assertControlledRepair(a);
   const c=a?.resume_from;
   const known=KNOWN_CONTINUATIONS.find(x=>x.action_id===a?.action_id);
   if(a?.authorized!==true||a.issue!==1997||a.role!=='developer'||
@@ -60,6 +83,9 @@ export function assertControlledContinuation(a) {
 // their ciphertext was committed. The restore Job still checks the exact
 // Store commit/head and ciphertext, native ID and current Harness.
 export function controlledCheckpointSourceRun(c) {
+  if(c?.checkpoint_version===3&&c.checkpoint_commit_sha===REPAIR_CHECKPOINT_COMMIT&&
+     c.ciphertext_sha256===REPAIR_CIPHERTEXT&&c.source_sha===SOURCE&&
+     c.source_run_id===REPAIR_SOURCE_RUN)return REPAIR_SOURCE_RUN;
   if(c?.checkpoint_version===1&&c.checkpoint_commit_sha===COMMIT&&
      c.ciphertext_sha256===CIPHERTEXT)return 39288961865;
   if(c?.checkpoint_version===2&&

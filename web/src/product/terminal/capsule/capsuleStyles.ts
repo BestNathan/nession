@@ -144,6 +144,28 @@ export const capsuleUpperCloseButtonClass = cn(
   'flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground',
 );
 
+/**
+ * The compact header switch between peer upper-slot views (#2710).
+ *
+ * Sits in the header's identity region and takes the space the title would
+ * have, so a switched surface never stacks a title above a tab row. Each
+ * option is a full `control.md` hit target — the painted segment and the touch
+ * target are the same box here because the segment is the label, not an icon
+ * whose paint is deliberately smaller (#1034's two-axis rule).
+ */
+export const capsuleUpperSwitchClass =
+  'flex min-w-0 flex-1 items-center gap-[length:var(--nession-terminal-capsule-control-gap)]';
+
+export function capsuleUpperSwitchOptionClass(selected: boolean): string {
+  return cn(
+    'flex h-[length:var(--nession-control-md)] min-w-0 flex-1 items-center justify-center truncate rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-shell-pad-x)] transition-colors',
+    chromeSansRole('body'),
+    selected
+      ? 'bg-accent text-accent-foreground'
+      : 'text-muted-foreground hover:text-foreground',
+  );
+}
+
 /** Product-owned styling for the child detail launched from a Peek body. */
 export const capsuleDetailDialogClass =
   'flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[var(--nession-radius-capsule)] sm:max-w-lg';
@@ -377,6 +399,19 @@ export const capsuleEmptyStatePadClass = cn(
   chromeSansRole('body'),
 );
 
+/** Saved-command rows: the list owns its scroll inside a bounded Peek (#2710). */
+export const capsuleCommandListClass =
+  'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain';
+
+export const capsuleCommandRowClass =
+  'flex items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] border-b border-border/60 py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] last:border-b-0';
+
+/** Insert/Run are text actions, so the label is the hit target (44px on App). */
+export const capsuleCommandActionClass = cn(
+  'h-[length:var(--nession-control-md)] shrink-0 rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-shell-pad-x)] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground',
+  chromeSansRole('caption'),
+);
+
 export const capsuleHistoryItemClass =
   'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left hover:bg-accent/40';
 
@@ -395,13 +430,14 @@ export const capsuleArrowKeyAppButtonClass =
 
 export const capsulePhysKeyIconClass = 'size-[length:var(--nession-terminal-capsule-phys-key-icon-size)]';
 
+/** One letter in the one-shot selector; the row scrolls, so each has width. */
+export const capsuleChordLetterClass =
+  'h-[length:var(--nession-terminal-capsule-phys-key-height)] w-[length:var(--nession-control-md)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--nession-terminal-capsule-phys-key-font-size)] leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]';
+
 export const capsulePhysKeyRowClass =
   'flex flex-row items-center gap-[length:var(--nession-terminal-capsule-phys-key-grid-gap)] border-b border-border/60 px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-y)]';
 
 export const capsulePhysKeyGridGapClass = 'gap-[length:var(--nession-terminal-capsule-phys-key-grid-gap)]';
-
-export const capsuleChainBarClass =
-  'flex items-center gap-[length:var(--nession-terminal-capsule-popover-gap)] border-b border-border/60 bg-primary/10 px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-popover-inner-pad)] text-[length:var(--nession-terminal-capsule-font-size)]';
 
 export const capsuleMiniButtonClass =
   'h-[length:var(--nession-terminal-capsule-mini-control-height)] text-[length:var(--nession-terminal-capsule-caption-font-size)]';

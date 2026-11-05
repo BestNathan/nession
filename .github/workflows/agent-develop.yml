@@ -226,6 +226,23 @@ jobs:
           else
             mkdir -m 700 "$RUNNER_TEMP/development-native"
           fi
+      - name: Stage only the exact authenticated published PR Git tree for Repair
+        if: inputs.task == 'repair'
+        shell: bash
+        env:
+          REPAIR_INPUT_ISSUE: ${{ inputs.issue_number }}
+          REPAIR_INPUT_ACTION: ${{ inputs.action_id }}
+          REPAIR_INPUT_SHA: ${{ inputs.input_sha }}
+        run: |
+          set -euo pipefail
+          test "$REPAIR_INPUT_ISSUE" = '1997'
+          test "$REPAIR_INPUT_ACTION" = 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'
+          test "$REPAIR_INPUT_SHA" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
+          git fetch --quiet --no-tags origin refs/pull/2176/head
+          test "$(git rev-parse FETCH_HEAD)" = "$REPAIR_INPUT_SHA"
+          git update-ref refs/nession/repair-source "$REPAIR_INPUT_SHA"
+          # Only inert Git objects are brought into the disposable clone.
+          # Never checkout or execute any PR-head code in this trusted job.
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
@@ -238,6 +255,13 @@ jobs:
           # repository. Docker never mounts the runner's .git or credential dir.
           git clone --no-hardlinks --local "$GITHUB_WORKSPACE" \
             "$RUNNER_TEMP/development-checkout"
+          if [[ "${{ inputs.task }}" == repair ]]; then
+            git -C "$RUNNER_TEMP/development-checkout" fetch --quiet --no-tags \
+              "$GITHUB_WORKSPACE" \
+              refs/nession/repair-source:refs/nession/repair-source
+            test "$(git -C "$RUNNER_TEMP/development-checkout" rev-parse refs/nession/repair-source)" = \
+              '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
+          fi
           git -C "$RUNNER_TEMP/development-checkout" remote remove origin
           mkdir -p "$RUNNER_TEMP/development-output"
           chmod 0700 "$RUNNER_TEMP/development-output"

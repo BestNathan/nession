@@ -47,7 +47,10 @@ jobs:
           github.event.comment.body == '/nession resume issue=1997 checkpoint=1' ||
           github.event.comment.body == '/nession resume issue=1997 checkpoint=2' ||
           github.event.comment.body == '/nession recover-native issue=1997 failed_run=39376331942' ||
-          github.event.comment.body == '/nession recover-review issue=1997 skipped_run=39943178597'))
+          github.event.comment.body == '/nession recover-review issue=1997 skipped_run=39943178597' ||
+          github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+          github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+          startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 12
@@ -61,6 +64,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Fetch exact published PR commit as inert Git data for Repair only
+        if: >-
+          (github.event_name == 'workflow_dispatch' &&
+           inputs.action_id == 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d') ||
+          (github.event_name == 'issue_comment' &&
+           (github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+            github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+            startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin refs/pull/2176/head
+          test "$(git rev-parse FETCH_HEAD)" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
+          git cat-file -e '3d8e3807cc01f6082734b8d0ba458217c28f60a4^{commit}'
+          # No checkout, build or execution of PR code in this privileged job.
       - name: Verify ticket, CAS and Worker admission negative contracts
         run: |
           set -euo pipefail
@@ -95,7 +113,8 @@ jobs:
           node scripts/lib/agent/orchestration/controller-dispatch.mjs dispatch |
             tee "$RUNNER_TEMP/agent-controller-dispatch-receipt.json"
           jq -e '.issue > 0 and (.status == "dispatched" or
-            .status == "ambiguous" or .status == "reconcile")' \
+            .status == "ambiguous" or .status == "reconcile" or
+            .status == "bound" or .status == "replayed")' \
             "$RUNNER_TEMP/agent-controller-dispatch-receipt.json" >/dev/null
           {
             echo "## Authenticated Developer dispatch"

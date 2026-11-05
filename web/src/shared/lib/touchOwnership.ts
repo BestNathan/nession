@@ -15,6 +15,22 @@
  */
 const owners = new Map<number, symbol>();
 
+export type TouchOwnershipListener = (identifier: number, owner: string) => void;
+
+const listeners = new Set<TouchOwnershipListener>();
+
+/**
+ * Observe claims so a consumer that has already started a gesture can stand
+ * down immediately, even when the new owner consumes the following events
+ * before they reach it (#2724). Returns an unsubscribe function.
+ */
+export function subscribeTouchOwnership(listener: TouchOwnershipListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /**
  * Claim `identifier` for `owner`. Returns a release function that is inert if
  * the identifier has since been claimed again — a stale release from an old
@@ -23,6 +39,9 @@ const owners = new Map<number, symbol>();
 export function claimTouchOwnership(identifier: number, owner: string): () => void {
   const token = Symbol(owner);
   owners.set(identifier, token);
+  for (const listener of listeners) {
+    listener(identifier, owner);
+  }
   return () => {
     if (owners.get(identifier) === token) {
       owners.delete(identifier);
