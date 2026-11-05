@@ -60,6 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_RUN_ID: ${{ github.event.client_payload.source_run_id }}
           EVENT_ATTEMPT: ${{ github.event.client_payload.source_run_attempt }}
+          EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
           OWNER_RUN_ID: ${{ inputs.source_run_id }}
           OWNER_ATTEMPT: ${{ inputs.source_run_attempt }}
         shell: bash
@@ -84,6 +85,10 @@ jobs:
             .repository.full_name == $repo and
             .head_repository.full_name == $repo
           ' "$RUNNER_TEMP/reviewer-source-run.json" >/dev/null
+          if [[ "$GITHUB_EVENT_NAME" == repository_dispatch ]]; then
+            [[ "$EVENT_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+            jq -e --arg sha "$EVENT_SOURCE_SHA" '.head_sha == $sha'               "$RUNNER_TEMP/reviewer-source-run.json" >/dev/null
+          fi
       - name: Mint existing scoped Store App after source preflight
         id: writer
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
