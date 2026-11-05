@@ -130,10 +130,6 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$UPSTREAM/artifacts?per_page=100" \
             > "$RUNNER_TEMP/qwen-ingest-artifacts.json"
           name="development-qwen-ingest-${UPSTREAM}-1"
-          digest="$(jq -er --arg name "$name" --argjson id "$RECEIPT_ARTIFACT" '
-            [.artifacts[] | select(.name == $name and .id == $id and
-              .expired == false and .workflow_run.id == $id)] | .[0].digest
-          ' "$RUNNER_TEMP/qwen-ingest-artifacts.json")"
           # The source Artifact is uploaded by Run UPSTREAM (not Artifact ID).
           digest="$(jq -er --arg name "$name" --argjson id "$RECEIPT_ARTIFACT" \
             --argjson run "$UPSTREAM" '
