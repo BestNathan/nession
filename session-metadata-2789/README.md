@@ -12,7 +12,7 @@
 3. Edit then cancel; start an edit then select another Session to get a discard confirmation.
 4. Switch fixture to **No metadata** to confirm fallback to the tmux name and empty description/tags.
 5. Switch fixture to **Agent offline** and attempt a save: error, no silent success, preserve draft.
-6. Switch fixture to **Remote revision conflict** and attempt a save: explicit conflict, then refresh revision and resubmit.
+6. Switch fixture to **Remote revision conflict** and attempt a save: explicit conflict, then explicitly discard the draft to load the remote metadata; the stale draft is never silently replayed.
 7. Switch fixture to **Recreated name**: mock new instance has same tmux name and route display, but no inherited metadata.
 8. Switch between Web (1180 / 1024) and App (430 / 390 / 375). App uses Workspace depth and Back, rather than a miniature desktop sidebar. From Terminal return to Workspace. Reset to replay.
 
@@ -28,9 +28,18 @@
 - Browser: open `index.html` with static HTTP server, test sizes and all fixture flows above. Clicking actions should update in-memory state and never send network calls.
 - Test `title||session_name`, edit/save and Cancel, duplicate tag rejection, offline/conflict non-save, same-name new identity, unsaved-change confirmation, switching screens and keyboard Enter tag creation.
 - Before claiming a live Pages link, read `https://bestnathan.github.io/nession/prototypes/manifest.json` and compare its SHA with the exact `prototype` commit, then actually open the direct HTML.
-- **Evidence status at authoring:** source/static mock can be checked; browser, Pages live SHA and production integration must be reported independently. No mock outcome can satisfy production SC-01 to SC-05.
+- **Evidence status:** standalone JS syntax compiled; 19 deterministic V8 DOM-stub assertions passed on the first revision. A checked-in Node smoke-test reproduces the revised decisions (run it locally before claiming a Node result). Chromium screenshots/click-through, Pages manifest exact-SHA and real integration remain separate unverified evidence. No mock outcome can satisfy production SC-01 to SC-05.
 
 ## Source and preview
 - [HTML preview route](https://bestnathan.github.io/nession/prototypes/session-metadata-2789/index.html) — only count as **verified** after live HTTPS + manifest SHA checks.
 - [Shared prototype source](https://github.com/BestNathan/nession/tree/prototype/session-metadata-2789) — replace with an immutable commit SHA in the owning Issue after publication.
 - [Prototype gallery](https://bestnathan.github.io/nession/#/prototypes).
+
+## Repeatable mock smoke
+From the `prototype` branch root:
+
+```sh
+node session-metadata-2789/smoke-test.mjs
+```
+
+This uses only built-in Node APIs, exercises the HTML entry, shared-frame relative assets, Session title fallback, editing, tag validation, unsaved confirmation, offline/conflict/recreated states and App size switch. It does not run a browser, which still requires separate Chromium verification.

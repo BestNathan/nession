@@ -38,7 +38,7 @@ return '<div class="n-content" data-testid="session-metadata-editor"><div class=
 '<div class="n-field"><label for="n-title">Title</label><input id="n-title" data-testid="title-input" value="'+esc(state.draft.title)+'" maxlength="160" autocomplete="off" placeholder="'+esc(s.name)+'"><div class="n-help">留空时显示 tmux 名称 · 不超过 120 字</div></div>'+
 '<div class="n-field"><label for="n-description">Description</label><textarea id="n-description" data-testid="description-input" maxlength="2200" placeholder="记录当前工作目标或说明…">'+esc(state.draft.description)+'</textarea><div class="n-help">纯文本 · 不超过 2000 字</div></div>'+
 '<div class="n-field"><label for="n-new-tag">Tags</label>'+editorTags()+'</div>'+
-'<div class="n-edit-actions"><button class="n-btn is-primary" type="button" data-action="save">保存</button><button class="n-btn" type="button" data-action="cancel">取消</button>'+(state.conflict&&state.noticeKind==='error'?'<button type="button" class="n-btn" data-action="refresh-conflict">加载最新版本</button>':'')+'</div>'+
+'<div class="n-edit-actions"><button class="n-btn is-primary" type="button" data-action="save">保存</button><button class="n-btn" type="button" data-action="cancel">取消</button>'+(state.conflict&&state.noticeKind==='error'?'<button type="button" class="n-btn" data-action="refresh-conflict">放弃草稿并加载最新版本</button>':'')+'</div>'+
 '<section class="n-data-list" aria-label="Immutable Session identifiers">'+datum('tmux 名称（不可编辑）',s.name,true)+datum('Session ID（不可编辑）',s.id,true)+'</section></div>'}
 function dock(){return '<div class="n-dock" aria-label="Workspace navigation"><button class="n-dock-circle" data-action="terminal" type="button" aria-label="Open terminal" title="Open terminal">⌁</button><div class="n-dock-pill"><button type="button" data-action="workspace" aria-current="page">▤ &nbsp; Session</button></div></div>'}
 function terminal(){
@@ -77,7 +77,7 @@ if(action==='add-tag'){addTag();return}
 if(action==='remove-tag'){readDraft();state.draft.tags.splice(Number(el.getAttribute('data-index')),1);state.notice='';render();return}
 if(action==='save'){save();return}
 if(action==='cancel'){state.edit=false;state.draft=null;state.notice='修改已取消。';state.noticeKind='';render();return}
-if(action==='refresh-conflict'){readDraft();state.conflictResolved=true;state.conflict=false;active().revision++;state.notice='已加载最新版本号，请检查草稿并再次保存。';state.noticeKind='';render();return}
+if(action==='refresh-conflict'){var current=active();current.title='Terminal reconnect — updated elsewhere';current.description='另一台设备刚刚更新了这项工作说明。';current.tags=['nession','terminal'];current.revision++;state.draft=null;state.edit=false;state.tagInput='';state.conflict=false;state.conflictResolved=false;state.notice='已加载其他设备的最新信息，之前的草稿已按选择放弃。';state.noticeKind='';render();return}
 if(action==='stay'){state.modal=null;render();return}
 if(action==='discard'){var next=state.modal.after;state.modal=null;state.edit=false;state.draft=null;state.notice='';state.noticeKind='';next();render();return}
 if(action==='collapse'){state.collapsed=true;render();return}
