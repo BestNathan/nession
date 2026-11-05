@@ -19,7 +19,8 @@ import {readIssueWorkflowState} from './state-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
-import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
+import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION,
+  CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 
@@ -41,15 +42,31 @@ export function matchingResult(result,proof,sealed,claim,run) {
   const valid=doc=>doc?.issue===Number(ticket.issue_number)&&
     doc.action_id===ticket.action_id&&doc.source_sha===ticket.input_sha&&
     doc.run_id===run.id&&doc.attempt===run.run_attempt;
+  const repairing=ticket.task==='repair';
+  const repairFile='Durable Worker fixture: complete\nPrevious value: pending\n';
+  if(repairing&&(
+     ticket.action_id!==CONTROLLED_REPAIR_ACTION||
+     ticket.input_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+     result.kind!=='developer_repair_dispute'||
+     result.status!=='review_disputed_no_change'||
+     result.native_read_verified!==true||
+     result.native_resumed!==true||
+     result.reviewer_run_id!==41962609841||
+     result.parent_checkpoint_commit_sha!=='eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+     result.content_sha256!==hash(repairFile)||
+     proof.metadata?.agent_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'))
+    fail('no verified unchanged published PR bytes and same native Agent');
   if(run.status!=='completed'||run.conclusion!=='success'||
       !valid(result)||!valid(proof)||
-      result.schema_version!==1||result.kind!=='developer_proposal'||
-      result.status!=='proposed_not_published'||
-      result.native_read_edit_verified!==true||
+      result.schema_version!==1||
+      (!repairing&&(result.kind!=='developer_proposal'||
+        result.status!=='proposed_not_published'||
+        result.native_read_edit_verified!==true))||
       result.file!=='e2e/fixtures/agent-development/1997-canary.txt'||
       result.content_sha256!==hash(resuming?
         'Durable Worker fixture: complete\nPrevious value: pending\n':'Durable Worker fixture: complete\n')||
-      (resuming&&(result.native_resumed!==true||result.prior_turn_word_observed!==true||
+      (!repairing&&resuming&&(result.native_resumed!==true||
+        result.prior_turn_word_observed!==true||
         result.parent_checkpoint_commit_sha!==(
           ticket.action_id===CONTROLLED_V2_CONTINUATION
             ?'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142'
@@ -87,7 +104,8 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     const record=readIssueWorkflowState(dir,issue);
     const action=record.state?.outbox.find(x=>x.id===claim.inputs.action_id);
     if(!action||action.task.type!=='dispatch'||action.task.role!=='developer'||
-        action.task.task!=='implement'||action.task.agent_id!=='dev-cursor-01'||
+        !['implement','repair'].includes(action.task.task)||
+        action.task.agent_id!=='dev-cursor-01'||
         action.task.sha!==claim.inputs.input_sha||
         action.receipt?.source_run_id!==run.id||
         action.receipt?.dispatch_id!==claim.inputs.action_id||
@@ -95,7 +113,8 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
       fail('no authenticated exact Run-bound persisted dispatch to ingest');
     const prefix='roles/developer/dev-cursor-01/issues/'+issue;
     const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
-    const previous_version=action.task.continuation?.checkpoint_version??0;
+    const previous_version=action.task.repair_checkpoint?.checkpoint_version??
+      action.task.continuation?.checkpoint_version??0;
     const next_version=previous_version+1;
     const checkpointPath=prefix+'/checkpoints/'+String(next_version).padStart(8,'0')+'.json';
     const runFile=path.join(dir,runPath),checkpointFile=path.join(dir,checkpointPath);
@@ -121,7 +140,8 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     }
     return {state_version:record.version,store_commit_sha:git('-C',dir,'rev-parse','HEAD'),
       previous_version,next_version,action,
-      already_yielded:action.status==='yielded',existing_checkpoint};
+      already_yielded:action.status==='yielded',
+      repairing:action.task.task==='repair',existing_checkpoint};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
 async function api(token,endpoint){
