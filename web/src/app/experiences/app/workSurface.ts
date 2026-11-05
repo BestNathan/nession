@@ -39,10 +39,81 @@ export const WORK_SURFACE_SELECTOR = [
   // are wider than a phone, so it pans by touch. A shell page claimed there
   // would spend the row's first horizontal pixels and move the surface at the
   // same time — measured on the Workspace root 2026-10-03, the row scrolled
-  // *and* the pager paged. The row owns its drags; the shell's edge bands are
-  // the bounded exception, exactly as they are over the terminal.
+  // *and* the pager paged. #2724 makes the row a full owner: a nested
+  // horizontal scroller keeps its touch even at the shell edge, because
+  // claiming there would still spend the first pixels of its own pan.
   '[data-testid="workspace-capability-capsule"]',
 ].join(', ');
+
+/**
+ * Elements that own a touch unconditionally (#2724).
+ *
+ * These are not work surfaces that may yield a bounded edge band: a control,
+ * a text field, an open panel or a pushed detail is the surface's own
+ * interaction, and a shell swipe that began on one would compete with the
+ * action the user aimed at. The distinction matters at the edge: #1081's band
+ * may re-admit the *interior* of an xterm or editor, but it must not claim a
+ * button, a composer field, an open Peek or a horizontal row simply because
+ * the touch is near an edge. The prototype that shaped this rule filtered the
+ * same set before it ever looked at the band.
+ *
+ * `[data-swipe-owner]` is the explicit escape hatch for a future surface that
+ * owns a gesture without having a semantic role or test id.
+ */
+export const INTERACTIVE_OWNER_SELECTOR = [
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'a[href]',
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  // The expanded Capsule Peek: a capability preview with its own controls and
+  // scroll region, not chrome the shell may page from.
+  '[data-testid="capsule-capability-projection"]',
+  // The capability row is a nested horizontal scroller and therefore fully
+  // owns its drags (see the note in `WORK_SURFACE_SELECTOR`).
+  '[data-testid="workspace-capability-capsule"]',
+  '[data-swipe-owner]',
+].join(', ');
+
+/**
+ * Whether `target` is an interactive owner that always keeps its touch.
+ *
+ * Checked before the work-surface rule: an element can be both (a textarea is
+ * a work surface *and* an input), and the stricter owner wins.
+ */
+export function isInteractiveOwner(target: EventTarget | null): boolean {
+  const element = asElement(target);
+  return element !== null && element.closest(INTERACTIVE_OWNER_SELECTOR) !== null;
+}
+
+/**
+ * Whether a native text selection is active on or around `target` (#2724).
+ *
+ * A selection is the surface's own interaction: a shell page that began in it
+ * would steal the drag that extends or collapses it. The check is limited to
+ * the touched target's own subtree so a selection elsewhere on the page does
+ * not disable navigation.
+ */
+export function hasActiveSelectionWithin(target: EventTarget | null): boolean {
+  if (typeof document === 'undefined' || typeof document.getSelection !== 'function') {
+    return false;
+  }
+  const selection = document.getSelection();
+  const node = selection?.anchorNode ?? null;
+  const element = asElement(target);
+  if (selection === null || selection.isCollapsed || node === null || element === null) {
+    return false;
+  }
+  if (element.contains(node)) {
+    return true;
+  }
+  const anchorElement = node instanceof Element ? node : node.parentElement;
+  return anchorElement !== null && anchorElement.contains(element);
+}
 
 /**
  * Whether a touch that started on `target` belongs to a work surface rather

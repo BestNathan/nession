@@ -212,6 +212,50 @@ explanation is the same dead end one step earlier.
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
 
+### Swipe contact ownership and feedback (#2724)
+
+The edge band says *where* a page may begin. #2724 owns what happens to the
+contact after that, and the answer is: much less until release.
+
+- **A touch is not navigation at `touchstart`.** It is a candidate. Ownership is
+  decided only after `SWIPE_SLOP_PX` (12px) of movement, and a vertical drag is
+  content's for the rest of that contact — a later horizontal move cannot revive
+  it. A second finger, a genuine `touchcancel`, the browser committing the touch
+  to native scrolling, or another surface claiming the finger all cancel.
+- **One physical contact, one owner.** Touch Events own it by
+  `Touch.identifier` from start to end. Touch-generated `pointercancel` /
+  `lostpointercapture` are not its end; Pointer Events are only a desktop
+  rehearsal path. The Terminal's long-press direction pad (#2657) claims the
+  identifier through the shared registry; once claimed, the shell stands down
+  immediately rather than waiting for events the pad now consumes.
+- **A claimed destination is frozen.** Crossing back over the origin clamps the
+  preview to zero instead of settling; only release decides commit or snapback.
+  A reversal followed by forward travel may still commit the same destination.
+- **Release decides.** Commit at `max(64px, 18% of the shell width)`, or on a
+  purposeful flick of at least 40px at 0.45 px/ms or faster; speed alone cannot
+  commit a shorter travel. With no destination at all (the end of the pager, or
+  no Workspace before a Session) the preview is damped rather than claimed.
+- **Feedback exists only while the drag is live.** The adjacent layer reveals
+  progressively under the finger with a subtle shadow, and a transient label
+  names the frozen destination with its direction. There is no resting swipe
+  tutorial, edge rail or navigation overlay; release removes the label. The
+  no-Session root names its index-1 destination **Home**, never a fake Terminal.
+- **Interactive owners outrank the band.** A button, input, open alert dialog,
+  an expanded Capsule Peek, a nested horizontal scroller (including the
+  capability row) or an active text selection keeps its touch even at the
+  shell edge: claiming there would spend the first pixels of the action the
+  user aimed at. A pushed Workspace detail continues to own its own leave.
+- **Reduced motion is an instant decision.** The settle animation collapses to
+  the same commit/snapback state change. Opening, cancelling or completing a
+  layer never remounts xterm, changes PTY/tmux dimensions, resets scrollback,
+  clears the composer or drops Workspace context.
+- **Numbers are hypotheses until SC-07.** The values above come from the
+  approved mobile prototype
+  ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724));
+  the band, thresholds and velocity are initial exploration values, and a
+  physical Safari/PWA lane must confirm the platform's own edge ownership
+  before they are treated as measured.
+
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
 
 ## Workspace inside App
