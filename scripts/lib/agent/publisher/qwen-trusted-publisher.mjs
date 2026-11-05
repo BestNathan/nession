@@ -184,6 +184,26 @@ export async function runTrustedQwenPublication({
   }finally{key.fill(0);}
 }
 async function main(){
+  // Public-data-only origin for a data checkout. This runs BEFORE any Store
+  // or Publisher App secret is minted. Recheck everything in publish mode.
+  if(process.argv[2]==='source'&&process.argv.length===6){
+    const worker=jsonFile(process.argv[3],32*1024);
+    const artifacts=jsonFile(process.argv[4],128*1024);
+    const identity=authenticateWorkerClaimRun(worker,artifacts);
+    const art=artifactFor(artifacts,worker,
+      'development-worker-claim-'+worker.id+'-1',256*1024);
+    if(identity.artifact_id!==art.id||identity.digest!==art.digest)
+      fail('unsafe Worker claim origin');
+    const claim=inspectWorkerClaimZip(
+      zipVerified(process.argv[5],art,256*1024),art.digest,worker);
+    if(claim.inputs.agent_id!=='dev-qwen-01'||
+        !SHA.test(claim.inputs.input_sha??'')||
+        !positive(Number(claim.inputs.issue_number)))
+      fail('selected Worker is not exact-sha Qwen Developer');
+    console.log(JSON.stringify({source_sha:claim.inputs.input_sha,
+      issue:Number(claim.inputs.issue_number),worker_run_id:worker.id}));
+    return;
+  }
   if(process.argv.length!==10||process.argv[2]!=='publish')
     fail('usage: publish INGEST_RUN_JSON RECEIPT_JSON WORKER_JSON ARTIFACTS_JSON CLAIM_ZIP RESULT_ZIP SOURCE_DIR');
   const env=process.env;
