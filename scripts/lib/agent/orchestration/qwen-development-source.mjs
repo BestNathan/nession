@@ -11,7 +11,9 @@ import {toolUseNames} from '../providers/claude-stream.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const FILE=/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/;
-const MAX_PATCH=64*1024;
+// A 32 KiB binary patch stays under the canonical 64 KiB result.json ZIP
+// member budget after base64 encoding and provenance metadata.
+const MAX_PATCH=32*1024;
 const MAX_SOURCE_FILE=1024*1024;
 function fail(s){throw Error('Qwen Developer source: '+s);}
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
