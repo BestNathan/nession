@@ -96,6 +96,8 @@ Environment/setup details belong to `nession-env`.
 
 Local build-cache behavior is documented in `references/local-build-cache.md`.
 
+For Issue SCs, consult the [SC verification playbook](../nession-acceptance/references/verification-playbook.md) before claiming completion. Perform safe local preflight only; do not run the prohibited local full E2E stack or treat a source review as acceptance of a runtime/deployed SC. Record which trusted Case, CI, staging, deployed or device proof still needs to run.
+
 ## 5. Verify Gate-first
 
 While iterating, run the narrowest relevant Gate(s).
