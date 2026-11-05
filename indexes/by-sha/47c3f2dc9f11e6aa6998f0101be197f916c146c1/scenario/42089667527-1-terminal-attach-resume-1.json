@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42089667527,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/960-agent-registration-generation",
+    "target_sha": "47c3f2dc9f11e6aa6998f0101be197f916c146c1",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42089667527",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3211f32dfb46e343d89a1fe78cf69653160f232951ab9b5b11ff7b2f8c4fee9d"
+  },
+  "record": "runs/2026-11-05/42089667527-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "315d08165bb54a912ed7507d65bbfca3785eee836acfb71e242bb7ab3ce79a4c"
+}
