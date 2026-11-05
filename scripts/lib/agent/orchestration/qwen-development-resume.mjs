@@ -85,10 +85,13 @@ function put(folder,name,obj){
 }
 function prepare(admissionFile,destination){
   const a=authority(read(admissionFile),process.env),p=plan(a);
+  // Only the existing Store AES key seed is required for trusted read.
+  // The Qwen Restore job has NO GitHub/Store write token, and fetches the
+  // independently committed public orphan branch read-only.
   if(!process.env.STORE_WRITER_PRIVATE_KEY||
-     !process.env.AGENT_STORE_CONTROLLER_REMOTE?.startsWith(
-       'https://x-access-token:'))
-    fail('trusted Store checkpoint read credentials missing');
+      process.env.AGENT_STORE_CONTROLLER_REMOTE!==
+        'https://github.com/BestNathan/nession.git')
+    fail('trusted read-only Store checkpoint authority missing');
   const c=a.resume_from;
   const source_sha=a.task==='repair'?c.source_sha:p.source_sha;
   const key=deriveStoreAesKey(process.env.STORE_WRITER_PRIVATE_KEY);
