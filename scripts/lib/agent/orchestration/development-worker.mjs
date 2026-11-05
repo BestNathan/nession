@@ -227,6 +227,8 @@ async function main(){
     // Cursor SDK file discovery requires ripgrep inside the *same* isolated
     // container, not merely on the trusted Actions runner. A missing or
     // unusable binary is a pre-model error, never a reason to drop evidence.
+    if(process.env.CURSOR_RIPGREP_PATH!=='/usr/bin/rg')
+      fail('Cursor SDK ripgrep absolute path not configured inside isolated Worker');
     let ripgrep;
     try{
       ripgrep=execFileSync('rg',['--version'],{
