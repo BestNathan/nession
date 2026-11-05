@@ -118,6 +118,10 @@ server_routes!(handler, msg, payload;
     // land on one key — see `session_by_parts` / `session_by_id`.
     "server.session.create" => "server.session.create" => 1 => Key(session_by_parts(payload)) => handler.handle_client_session_create(msg).await,
     "server.session.kill" => "server.session.kill" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_kill(msg).await,
+    // Session-owned metadata (#2789). Both name one session by the same
+    // `session_id` the rest of the Session family uses, so they share its key.
+    "server.session.metadata.get" => "server.session.metadata.get" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_get(msg).await,
+    "server.session.metadata.update" => "server.session.metadata.update" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_update(msg).await,
     "server.session.capture-preview" => "server.session.capture-preview" => 1 => Query => handler.handle_client_session_capture_preview(msg).await,
     "server.env.list" => "server.env.list" => 1 => Query => handler.handle_client_env_list(msg).await,
     "server.env.get" => "server.env.get" => 1 => Query => handler.handle_client_env_get(msg).await,
