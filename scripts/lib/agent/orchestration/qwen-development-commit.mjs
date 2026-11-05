@@ -11,7 +11,6 @@ import {validateQwenDevelopmentCandidate,sealQwenCandidateForStore}
 import {readCheckpointHeadVersion,publishEncryptedAgentCheckpoint,
   verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
-import {commitAttestedSliceYield} from './dispatch-store.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 function fail(message){throw Error('trusted Qwen Developer ingest: '+message);}
@@ -148,22 +147,11 @@ export async function ingestQwenVerifiedCandidate({
     verifyCommittedCheckpoint({remote,identity,
       commit_sha:previous.commit_sha,version:previous.version,
       ciphertext_sha256:previous.ciphertext_sha256});
-    // A lost ACK after checkpoint CAS must finish the original signed Slice
-    // Yield exactly once; do not leave a valid checkpoint with a stuck Action.
-    const resumed=previous.action_status==='dispatched'?
-      await commitAttestedSliceYield({
-        remote,issue:identity.issue,
-        dispatchTicket:claim.inputs.dispatch_ticket,
-        keyring:{'main-controller':rootKey},reader,
-        checkpoint:{version:previous.version,commit_sha:previous.commit_sha,
-          ciphertext_sha256:previous.ciphertext_sha256,
-          run_id:run.id,attempt:run.run_attempt},
-        verifiedMainSha:run.head_sha,
-      }):null;
-    return {status:resumed?.status??'replayed',issue:identity.issue,
-      action_id:authenticated.action_id,checkpoint:previous,
-      ...(resumed?{state_version:resumed.state_version,
-        store_commit_sha:resumed.store_commit_sha}:{})};
+    // The proposed patch is ready for the trusted Publisher, not another
+    // model Slice. A crash after checkpoint CAS is a byte-identical replay;
+    // NEVER generate a continuation action or repeat a Provider call.
+    return {status:'replayed',issue:identity.issue,
+      action_id:authenticated.action_id,checkpoint:previous};
   }
   admission=authorizeWorkerFromStore({remote,registry,role:'developer',
     runId:run.id,input:claim.inputs});
@@ -184,12 +172,10 @@ export async function ingestQwenVerifiedCandidate({
     commit_sha:published.commit_sha,
     ciphertext_sha256:sealed.ciphertext_sha256,
     run_id:run.id,attempt:run.run_attempt};
-  const advanced=await commitAttestedSliceYield({
-    remote,issue:admission.issue,dispatchTicket:claim.inputs.dispatch_ticket,
-    keyring:{'main-controller':rootKey},reader,
-    checkpoint,verifiedMainSha:run.head_sha});
-  return {status:advanced.status,issue:admission.issue,
-    action_id:authenticated.action_id,checkpoint,
-    state_version:advanced.state_version,
-    store_commit_sha:advanced.store_commit_sha};
+  // The signed original Developer Action stays dispatched while the trusted
+  // Publisher consumes this immutable Run/checkpoint and independently
+  // publishes a PR. Only that verified PR output may advance Outbox to Review.
+  return {status:published.replayed?'replayed':'committed',
+    issue:admission.issue,action_id:authenticated.action_id,
+    checkpoint,store_commit_sha:published.commit_sha};
 }
