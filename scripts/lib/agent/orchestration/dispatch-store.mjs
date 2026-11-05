@@ -10,12 +10,14 @@ import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
-  recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint} from './outbox.mjs';
+  recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
+  acceptTaskResult} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {readPublishedRepairCheckpoint} from './repair-checkpoint.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
+import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
 
 const REF='agent-store';
@@ -74,6 +76,79 @@ export function bindControlledRepairCheckpoint({remote,issue,actionId}){
     if(pushed.replayed)fail('unexpected first Repair origin CAS replay');
     return {status:'bound',issue,action_id:actionId,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// A completed native same-Session Repair with no PR modification is an
+// authenticated Developer response to Reviewer changes_requested, not a new
+// PR publication and not a request to waive the Reviewer outcome. Only the
+// already authenticated, checksum-matched Worker + independently committed
+// v4 ciphertext may advance the original pending Repair to a NEW Review.
+// All protocol transitions stay with acceptTaskResult and a single Store CAS.
+export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr}){
+  const issue=1997;
+  const actionId='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+  const prSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+  if(!Number.isSafeInteger(run?.id)||run.id<1||run?.run_attempt!==1||
+     run.path!=='.github/workflows/agent-develop.yml'||
+     run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
+     run.actor?.login!=='github-actions[bot]'||
+     run.head_branch!=='main'||run.repository?.full_name!=='BestNathan/nession'||
+     run.head_repository?.full_name!=='BestNathan/nession'||
+     !/^[a-f0-9]{40}$/.test(run.head_sha??'')||
+     run.status!=='completed'||run.conclusion!=='success'||
+     pr?.number!==2176||pr.state!=='open'||pr.head?.sha!==prSha||
+     pr.head?.ref!=='agent/1997/developer-checkpoint-v3'||
+     pr.head?.repo?.full_name!=='BestNathan/nession'||
+     pr.base?.repo?.full_name!=='BestNathan/nession'||
+     checkpoint?.version!==4||!(/^[a-f0-9]{40}$/).test(checkpoint.commit_sha??'')||
+     !(/^[a-f0-9]{64}$/).test(checkpoint.ciphertext_sha256??''))
+    fail('Repair commit requires exact authentic source Run, PR and v4 checkpoint');
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,issue);
+    if(!prior.state)fail('Repair workflow State missing');
+    const existing=prior.state.transitions.filter(t=>t.kind==='developer'&&
+      t.run_id===run.id&&t.attempt===run.run_attempt);
+    if(existing.length){
+      if(existing.length!==1||existing[0].target_sha!==prSha||
+         existing[0].outcome!=='implementation_ready'||prior.state.phase!=='review')
+        fail('conflicting authenticated Repair replay');
+      return {status:'replayed',issue,action_id:actionId,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const action=prior.state.outbox.find(x=>x.id===actionId);
+    if(prior.state.phase!=='repair'||action?.status!=='dispatched'||
+       action.task.role!=='developer'||action.task.task!=='repair'||
+       action.task.agent_id!=='dev-cursor-01'||action.task.sha!==prSha||
+       action.task.repair_checkpoint?.checkpoint_version!==3||
+       action.receipt?.status!=='verified'||action.receipt.source_run_id!==run.id)
+      fail('Repair is not the exact authenticated pending Worker Run');
+    const checkpointRecord=verifyCommittedCheckpoint({
+      remote,identity:{role:'developer',agent_id:'dev-cursor-01',issue},
+      commit_sha:checkpoint.commit_sha,version:4,
+      ciphertext_sha256:checkpoint.ciphertext_sha256,
+    });
+    if(checkpointRecord?.metadata?.provider!=='cursor'||
+       checkpointRecord?.metadata?.source_sha!==prSha||
+       checkpointRecord?.metadata?.session_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6')
+      fail('committed Repair ciphertext is not same native Agent and PR source');
+    const result={kind:'developer',issue,run_id:run.id,run_attempt:1,
+      target_sha:prSha,outcome:'implementation_ready',task_id:actionId};
+    const source={repository:'BestNathan/nession',path:run.path,name:run.name,
+      run_id:run.id,attempt:1,event:run.event,ref:'refs/heads/main',
+      issue,task_id:actionId,agent_id:'dev-cursor-01',input_sha:prSha,
+      output_sha:prSha,verified:true};
+    const next=acceptTaskResult(prior.state,prior.version,result,source,registry);
+    if(next.phase!=='review'||next.outbox.filter(x=>
+       x.status==='pending'&&x.task.role==='reviewer').length!==1||
+       next.outbox.some(x=>x.id===actionId))
+      fail('Repair must lead to exactly one new Reviewer action');
+    const pushed=persist(dir,next,prior.version,issue);
+    if(pushed.replayed)fail('unexpected Repair result Store replay');
+    return {status:'accepted',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha,
+      reviewer_action_id:next.outbox.find(x=>
+        x.status==='pending'&&x.task.role==='reviewer').id};
   });
 }
 
