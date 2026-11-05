@@ -213,6 +213,7 @@
     }
   },
   "focus": {
+    "$description": "Focus is a modality-aware interaction state, not outer decoration (#2750). Pointer/touch interaction adds no halo and no second frame around the control; keyboard focus stays inside the control's own geometry. Bordered field primitives (Input, Textarea, SelectTrigger) repaint their existing border in `ring`. Controls and surfaces without a usable border to repaint (Button, Toggle, Tabs, Checkbox, ScrollArea, borderless list rows) draw an inset outline `ringWidth` thick in `ring`, placed `ringOffset` inside the border edge — the negative offset is what keeps the indicator inside the control instead of drawing the old shell's outset halo. Invalid owns the border (`destructive`) and keeps the same inset outline while focused, so focus never disappears on an invalid control. Focus visibility is never globally suppressed.",
     "ringWidth": {
       "value": "2px"
     },
