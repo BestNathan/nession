@@ -436,7 +436,8 @@ async function main(){
       // is independently verified against the remote Git commit.
       const advanced=admission.repairing?
         commitAttestedRepairDispute({
-          remote:store,run,registry:JSON.parse(fs.readFileSync(
+          remote:store,run,actionId:verified.action_id,
+          registry:JSON.parse(fs.readFileSync(
             'automation/agents/registry.json','utf8')),
           pr:await reader.getPullRequest(2176),
           checkpoint:{version:published.version,commit_sha:published.commit_sha,
