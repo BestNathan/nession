@@ -10,7 +10,7 @@
 //
 // Density isolation: web rows only run web-block assertions (no touch
 // target); app rows enforce the app touch target from the app block.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   expectDrawnAffordance,
   expectNoUnexpectedOverflow,
@@ -26,7 +26,15 @@ import {
   waitForSettledBox,
 } from '../../helpers/ui-assert/assertions';
 import { loadContracts, patternBlock, type Experience } from '../../helpers/ui-assert/contracts';
-import { swipeHorizontally } from '../../helpers/shell';
+import {
+  addSecondSwipeTouch,
+  cancelSwipeTouch,
+  dispatchTouchPointerCancellation,
+  endSwipeTouch,
+  moveSwipeTouch,
+  startSwipeTouch,
+  swipeHorizontally,
+} from '../../helpers/shell';
 import { waitForFixtureTerminal } from '../../helpers/fixtureVisual';
 
 import {
@@ -59,6 +67,31 @@ import {
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
 // ── App experience (Mobile Web proxy, interaction/app.md) ──────────────────
+
+
+/**
+ * The App shell's two edge anchors at mid-height (#2724).
+ *
+ * `shell.x + 2` / `shell.x + width - 2` are inside the 28px band at every
+ * matrix width and land over whatever the Terminal layout puts there; either a
+ * work surface (the band re-admits it) or shell chrome (the whole width is
+ * navigation's) is a valid start. Using the shell edge rather than a surface
+ * probe keeps the gesture tests independent of the terminal's inner inset.
+ */
+async function appSwipeAnchor(page: Page) {
+  const layerRoot = page.getByTestId('app-layer-root');
+  const shell = await layerRoot.boundingBox();
+  if (!shell) {
+    throw new Error('the App shell must be laid out');
+  }
+  return {
+    layerRoot,
+    shell,
+    y: Math.round(shell.y + shell.height / 2),
+    leftX: Math.round(shell.x + 2),
+    rightX: Math.round(shell.x + shell.width - 2),
+  };
+}
 
 for (const row of viewports.filter((v) => v.experience === 'app')) {
   test.describe(`${row.id} ${row.width}×${row.height}`, () => {
@@ -678,6 +711,186 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
         toX: Math.round(shell.x + 156),
       });
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
+    test('a claimed swipe survives reversal and settles only on release (#2724 SC-01)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, y, leftX } = await appSwipeAnchor(page);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      // Resting Terminal carries no swipe affordance at all.
+      await expect(page.getByTestId('app-swipe-preview')).toHaveCount(0);
+
+      await startSwipeTouch(page, { x: leftX, y });
+      await moveSwipeTouch(page, { x: leftX + 120, y });
+
+      const preview = page.getByTestId('app-swipe-preview');
+      await expect(preview).toBeVisible();
+      await expect(preview).toContainText('Sessions');
+      await expect(preview).toHaveAttribute('data-direction', 'right');
+      await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+
+      // Cross back over the origin. The destination is frozen, the preview is
+      // still this contact's, and no route change happens before release.
+      await moveSwipeTouch(page, { x: leftX - 40, y });
+      await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+      await expect(preview).toBeVisible();
+      await expect(preview).toContainText('Sessions');
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+
+      // Recover past the threshold, then release.
+      await moveSwipeTouch(page, { x: leftX + 160, y });
+      await endSwipeTouch(page, { x: leftX + 160, y });
+
+      await expect(layerRoot).toHaveAttribute('data-layer', 'sessions');
+      await expect(page.getByTestId('app-swipe-preview')).toHaveCount(0);
+      await expect(layerRoot).toHaveAttribute('data-swipe-reason', 'distance');
+    });
+
+    test('a native touchcancel cancels the swipe and records its cause (#2724 SC-02)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, y, leftX } = await appSwipeAnchor(page);
+
+      await startSwipeTouch(page, { x: leftX, y });
+      await moveSwipeTouch(page, { x: leftX + 160, y });
+      await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+
+      await cancelSwipeTouch(page, { x: leftX + 160, y });
+
+      await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'idle');
+      await expect(layerRoot).toHaveAttribute('data-swipe-reason', 'native-touchcancel');
+      await expect(page.getByTestId('app-swipe-preview')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
+    test('touch-generated pointer cancellation does not end the held drag (#2724 SC-02)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, y, leftX } = await appSwipeAnchor(page);
+
+      await startSwipeTouch(page, { x: leftX, y });
+      await moveSwipeTouch(page, { x: leftX + 80, y });
+      await dispatchTouchPointerCancellation(page);
+
+      // The finger is still down; the pointer race is not its owner.
+      await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+      await moveSwipeTouch(page, { x: leftX + 160, y });
+      await endSwipeTouch(page, { x: leftX + 160, y });
+
+      await expect(layerRoot).toHaveAttribute('data-layer', 'sessions');
+    });
+
+    test('a second finger cancels the shell gesture (#2724 SC-02)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, y, leftX } = await appSwipeAnchor(page);
+
+      await startSwipeTouch(page, { x: leftX, y });
+      await moveSwipeTouch(page, { x: leftX + 120, y });
+      await addSecondSwipeTouch(page, { x: leftX + 120, y }, { x: leftX + 200, y });
+
+      await expect(layerRoot).toHaveAttribute('data-swipe-reason', 'multitouch');
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
+    test('an interactive control keeps its edge touch instead of paging (#2724 SC-03)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, shell } = await appSwipeAnchor(page);
+      const sessions = page.getByTestId('app-header-sessions');
+      const box = await sessions.boundingBox();
+      if (!box) {
+        throw new Error('the Sessions control must be laid out');
+      }
+      // Two pixels into the button is inside the shell's 28px band. The
+      // button is the owner regardless: a shell page begun there would compete
+      // with the tap the user aimed at.
+      const x = Math.round(box.x + 2);
+      const y = Math.round(box.y + box.height / 2);
+      expect(x).toBeLessThanOrEqual(shell.x + 28);
+
+      await startSwipeTouch(page, { x, y });
+      await moveSwipeTouch(page, { x: x + 140, y });
+      await endSwipeTouch(page, { x: x + 140, y });
+
+      await page.waitForTimeout(300);
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+    });
+
+    test('Workspace settling to Terminal never flashes Sessions (#2724 SC-01)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, shell, y } = await appSwipeAnchor(page);
+      await page.getByTestId('app-header-workspace').first().click();
+      await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
+
+      const header = await page.getByTestId('app-page-header').boundingBox();
+      if (!header) {
+        throw new Error('the Workspace page header must be laid out');
+      }
+      // The header's left edge is shell padding, not its Back control: a start
+      // on the control is correctly the control's (SC-03).
+      const startX = Math.round(shell.x + 2);
+      const headerY = Math.round(header.y + header.height / 2);
+
+      // Observe the DOM for the whole settle: a wrong geometry mounts the
+      // Sessions slab at exactly one shell width on its way to Terminal, even
+      // though it is not a destination.
+      await page.evaluate(() => {
+        const observed = window as unknown as {
+          __sessionsSeen?: boolean;
+          __sessionsObserver?: MutationObserver;
+        };
+        observed.__sessionsSeen = false;
+        const root = document.querySelector('[data-testid="app-layer-root"]');
+        if (!root) {
+          throw new Error('the App shell must be mounted');
+        }
+        const observer = new MutationObserver(() => {
+          if (root.querySelector('[data-testid="app-layer-sessions"]')) {
+            observed.__sessionsSeen = true;
+          }
+        });
+        observer.observe(root, { childList: true, subtree: true });
+        observed.__sessionsObserver = observer;
+      });
+
+      await startSwipeTouch(page, { x: startX, y: headerY });
+      await moveSwipeTouch(page, { x: startX + 120, y: headerY });
+      await moveSwipeTouch(page, { x: startX + 200, y: headerY });
+      await endSwipeTouch(page, { x: startX + 200, y: headerY });
+
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+      const sessionsSeen = await page.evaluate(() => {
+        const observed = window as unknown as {
+          __sessionsSeen?: boolean;
+          __sessionsObserver?: MutationObserver;
+        };
+        observed.__sessionsObserver?.disconnect();
+        return observed.__sessionsSeen === true;
+      });
+      expect(sessionsSeen).toBe(false);
+
+      // The swipe did not disturb the Terminal root.
+      await expect(page.locator('.xterm')).toHaveCount(1);
+      expect(y).toBeGreaterThan(0);
+    });
+
+    test('a cancelled swipe keeps the Terminal, scrollback and attach mount (#2724 SC-05)', async ({ page }) => {
+      await page.goto('/#/fixture/app');
+      const { layerRoot, y, leftX } = await appSwipeAnchor(page);
+      const xterm = page.locator('.xterm');
+      await expect(xterm).toHaveCount(1);
+      await xterm.evaluate((el) => el.setAttribute('data-2724-instance', 'original'));
+      const rowsBefore = await page.locator('.xterm-rows').innerText();
+
+      await startSwipeTouch(page, { x: leftX, y });
+      await moveSwipeTouch(page, { x: leftX + 160, y });
+      await cancelSwipeTouch(page, { x: leftX + 160, y });
+      await page.waitForTimeout(300);
+
+      await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+      await expect(xterm).toHaveCount(1);
+      await expect(xterm).toHaveAttribute('data-2724-instance', 'original');
+      expect(await page.locator('.xterm-rows').innerText()).toBe(rowsBefore);
     });
   });
 }

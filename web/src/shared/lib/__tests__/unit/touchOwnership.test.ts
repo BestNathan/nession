@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   claimTouchOwnership,
   isTouchOwned,
   releaseAllTouchOwnership,
+  subscribeTouchOwnership,
 } from '../../touchOwnership';
 
 describe('touch ownership registry', () => {
@@ -35,5 +36,30 @@ describe('touch ownership registry', () => {
 
     expect(isTouchOwned(1)).toBe(false);
     expect(isTouchOwned(2)).toBe(false);
+  });
+
+  it('notifies subscribers when a finger is claimed (#2724)', () => {
+    // A consumer that has already started a gesture must be able to stand down
+    // even when the new owner consumes the following events before they reach
+    // it — ordering is not authority.
+    const listener = vi.fn();
+    const unsubscribe = subscribeTouchOwnership(listener);
+
+    const release = claimTouchOwnership(4, 'terminal-direction-pad');
+
+    expect(listener).toHaveBeenCalledWith(4, 'terminal-direction-pad');
+
+    unsubscribe();
+    release();
+  });
+
+  it('stops notifying after unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeTouchOwnership(listener);
+    unsubscribe();
+
+    const release = claimTouchOwnership(5, 'terminal-direction-pad');
+    expect(listener).not.toHaveBeenCalled();
+    release();
   });
 });
