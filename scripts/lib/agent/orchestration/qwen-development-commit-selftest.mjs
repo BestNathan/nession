@@ -21,6 +21,12 @@ import {ingestQwenVerifiedCandidate,qwenCheckpointNextVersion}
   from './qwen-development-commit.mjs';
 import {preflightTrustedQwenPublisher}
   from '../publisher/qwen-source-preflight.mjs';
+import {commitQwenPublisherIntent}
+  from '../publisher/store-intent.mjs';
+import {materializeQwenTrustedBlobs,publishTrustedQwenGitHubPR,
+  readBackQwenPublishedPR} from '../publisher/qwen-github-publish.mjs';
+import {applyQwenPublicationToRemote}
+  from '../publisher/publication-ingest.mjs';
 
 const priorNodeEnv=process.env.NODE_ENV;
 process.env.NODE_ENV='test';
@@ -191,6 +197,122 @@ try {
     ciphertext:candidate.ciphertext,sourceCheckout:wrongSource,
   }),/Agent patch preflight/);
 
+
+  // One independent Publisher job must fence its GitHub POST with an
+  // immutable Store results/ Intent, then read back exact PR HEAD and files,
+  // and only then enqueue exactly one Reviewer through canonical State CAS.
+  const publisherRun=992233;
+  const intent=commitQwenPublisherIntent({remote,preflight:published,
+    target_main_sha:inputSha,publisher_run_id:publisherRun});
+  assert.equal(intent.status,'committed');
+  assert.equal(intent.may_publish,true);
+  const replayIntent=commitQwenPublisherIntent({remote,preflight:published,
+    target_main_sha:inputSha,publisher_run_id:publisherRun});
+  assert.equal(replayIntent.status,'reconcile');
+  assert.equal(replayIntent.may_publish,false);
+  assert.throws(()=>commitQwenPublisherIntent({remote,preflight:published,
+    target_main_sha:inputSha,publisher_run_id:publisherRun+1}),
+    /conflicting immutable/);
+  const blobs=materializeQwenTrustedBlobs({
+    sourceCheckout:pubCheckout,preflight:published,intent});
+  assert.equal(blobs.length,1);
+  assert.equal(blobs[0].path,'calc.js');
+  const blobSha=blobs[0].git_blob_sha;
+  const treeSha='d'.repeat(40),commitSha='e'.repeat(40);
+  const branch=intent.record.branch;
+  const prNumber=4817;
+  let posts=0,wasRefCreated=false,wasPRCreated=false;
+  const repoIdentity={full_name:'BestNathan/nession'};
+  const expectedPR={number:prNumber,state:'open',
+    head:{sha:commitSha,ref:branch,repo:repoIdentity},
+    base:{ref:'main',repo:repoIdentity}};
+  const api=async(method,endpoint,body)=>{
+    if(method==='GET'){
+      if(endpoint==='git/ref/heads/main')
+        return {ref:'refs/heads/main',object:{sha:inputSha}};
+      if(endpoint.startsWith('pulls?state=all&head=BestNathan:'))
+        return wasPRCreated?[expectedPR]:[];
+      if(endpoint==='git/ref/heads/'+branch){
+        if(!wasRefCreated)throw Object.assign(Error('missing'),{status:404});
+        return {ref:'refs/heads/'+branch,object:{sha:commitSha}};
+      }
+      if(endpoint==='git/commits/'+inputSha)
+        return {tree:{sha:'f'.repeat(40)}};
+      if(endpoint==='git/commits/'+commitSha)
+        return {parents:[{sha:inputSha}],tree:{sha:treeSha}};
+      if(endpoint==='pulls/'+prNumber)return expectedPR;
+      if(endpoint==='pulls/'+prNumber+'/files?per_page=100')
+        return [{filename:'calc.js',status:'modified',sha:blobSha}];
+      throw Error('unexpected read-only GitHub API '+endpoint);
+    }
+    assert.equal(method,'POST');
+    posts++;
+    if(endpoint==='git/blobs'){
+      assert.equal(body.encoding,'base64');
+      assert.equal(body.content,blobs[0].content_base64);
+      return {sha:blobSha};
+    }
+    if(endpoint==='git/trees'){
+      assert.equal(body.base_tree,'f'.repeat(40));
+      assert.deepEqual(body.tree,[{path:'calc.js',mode:'100644',
+        type:'blob',sha:blobSha}]);
+      return {sha:treeSha};
+    }
+    if(endpoint==='git/commits'){
+      assert.equal(body.tree,treeSha);
+      assert.deepEqual(body.parents,[inputSha]);
+      return {sha:commitSha,tree:{sha:treeSha}};
+    }
+    if(endpoint==='git/refs'){
+      assert.equal(body.sha,commitSha);
+      wasRefCreated=true;
+      return {ref:'refs/heads/'+branch,object:{sha:commitSha}};
+    }
+    if(endpoint==='pulls'){
+      assert.equal(body.head,branch);
+      assert.equal(body.base,'main');
+      wasPRCreated=true;
+      return expectedPR;
+    }
+    throw Error('unexpected mutating GitHub API '+endpoint);
+  };
+  const publishedPR=await publishTrustedQwenGitHubPR({
+    preflight:published,intent,sourceCheckout:pubCheckout,api});
+  assert.equal(publishedPR.head_sha,commitSha);
+  assert.equal(publishedPR.pull_request,prNumber);
+  assert.equal(posts,5);
+  const readback=await readBackQwenPublishedPR({preflight:published,
+    intent:replayIntent,sourceCheckout:pubCheckout,api});
+  assert.equal(readback.head_sha,commitSha);
+  assert.equal(posts,5,'GET-only recovery must never retry a PR POST');
+  await assert.rejects(()=>publishTrustedQwenGitHubPR({
+    preflight:published,intent:replayIntent,
+    sourceCheckout:pubCheckout,api}),/first authenticated/);
+  const handoff=applyQwenPublicationToRemote({remote,
+    readback,intent,registry});
+  assert.equal(handoff.changed,true);
+  assert.equal(handoff.target_sha,commitSha);
+  assert.equal(handoff.reviewer_agent_id,'review-qwen-01');
+  const reHandoff=applyQwenPublicationToRemote({remote,
+    readback,intent,registry});
+  assert.equal(reHandoff.changed,false);
+  const post=path.join(home,'after-publisher');
+  git(home,'clone','--branch','agent-store',remote,post);
+  const after=readIssueWorkflowState(post,issue);
+  assert.equal(after.state.phase,'review');
+  assert.equal(after.state.target_sha,commitSha);
+  assert.equal(after.state.outbox.filter(x=>x.task.role==='reviewer').length,1);
+  assert.equal(after.state.outbox.filter(x=>x.task.role==='developer').length,0);
+  assert.equal(after.state.transitions.filter(x=>x.kind==='publisher').length,1);
+  for(const wrong of [
+    {...readback,head_sha:'0'.repeat(40)},
+    {...readback,source_run_id:workerId+1},
+    {...readback,publisher_run_id:publisherRun+1},
+    {...readback,checkpoint_commit_sha:'0'.repeat(40)},
+  ])assert.throws(()=>applyQwenPublicationToRemote({
+    remote,readback:wrong,intent,registry}),/Publisher|Qwen/i);
+  assert.equal(posts,5,'Store handoff must not send new model or GitHub POST');
+
   const badCandidates=[
     {result:{...candidate.result,patch_sha256:'f'.repeat(64)}},
     {proof:{...candidate.proof,patch_sha256:'f'.repeat(64)}},
@@ -203,7 +325,7 @@ try {
     await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,...bad}),
       /Qwen|claim|dispatch|trusted|candidate|Store/i);
   }
-  console.log('Qwen signed Outbox -> AES Store CAS -> immutable receipt -> trusted Publisher patch reapply/replay verified');
+  console.log('Qwen signed Worker -> Store CAS -> Publisher write-ahead -> exact GitHub PR readback -> one Reviewer CAS and replay verified');
 }finally{
   key.fill(0);aesKey.fill(0);
   fs.rmSync(home,{recursive:true,force:true});
