@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
+  CONTROLLED_REPAIR_DISPATCH_COMMENT}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -127,6 +128,17 @@ assert.throws(()=>deriveDispatchKey('fake'),/private key/);
 assert.throws(()=>parseDispatchKey('fake'),/HMAC|base64/);
 // #2262 follow-up: Reviewer actions point at the published PR head, not a main
 // ancestor; they must descend from the original published main SHA instead.
+const repairAction='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+for(const command of [CONTROLLED_REPAIR_BIND_COMMENT,CONTROLLED_REPAIR_DISPATCH_COMMENT]){
+  const repair={...commentValid,actionId:repairAction,
+    event:{...commentValid.event,comment:{...commentValid.event.comment,body:command}}};
+  assert.equal(assertDispatchAuthority(repair).action_id,repairAction);
+  assert.throws(()=>assertDispatchAuthority({...repair,actionId:reviewRecover.actionId}),
+    /authenticated owner\/main/);
+  assert.throws(()=>assertDispatchAuthority({...repair,
+    event:{...repair.event,comment:{...repair.event.comment,body:command+' '}}}),
+    /authenticated owner\/main/);
+}
 const sourceSha='c'.repeat(40),publishedMain=CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha;
 const calls=[];
 const accept=args=>{calls.push(args.join(' '));};
@@ -135,6 +147,18 @@ assert.ok(calls.includes('merge-base --is-ancestor '+sourceSha+' '+'d'.repeat(40
 calls.length=0;
 sourceAllowed(sourceSha,'reviewer',{run:accept,mainSha:'d'.repeat(40)});
 assert.ok(calls.includes('merge-base --is-ancestor '+publishedMain+' '+sourceSha));
+const exactRepairSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const repairContext={task:'repair',sha:exactRepairSha,agent_id:'dev-cursor-01',
+  repair_checkpoint:{source_sha:'220266b9233ec97b1beacbc54e5cc7f82d3cece2',
+    source_run_id:39448549052}};
+calls.length=0;
+sourceAllowed(exactRepairSha,'developer',{run:accept,task:repairContext});
+assert.ok(calls.includes('merge-base --is-ancestor '+publishedMain+' '+exactRepairSha));
+assert.throws(()=>sourceAllowed(sourceSha,'developer',{run:accept,task:repairContext}),
+  /exact authenticated published PR source/);
+assert.throws(()=>sourceAllowed(exactRepairSha,'developer',{run:accept,
+  task:{...repairContext,repair_checkpoint:{...repairContext.repair_checkpoint,
+    source_run_id:39448549053}}}),/exact authenticated published PR source/);
 const denyMerge=args=>{calls.push(args.join(' '));if(args[0]==='merge-base')throw Error('not ancestor');};
 assert.throws(()=>sourceAllowed(sourceSha,'developer',{run:denyMerge,mainSha:'d'.repeat(40)}),
   /reachable trusted main ancestor/);

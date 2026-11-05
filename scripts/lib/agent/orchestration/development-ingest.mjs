@@ -14,12 +14,13 @@ import {authenticateWorkerClaimRun,inspectWorkerClaimZip,
   verifyWorkerClaimForAck} from './worker-reconcile.mjs';
 import {createGitHubRunReader} from './github-dispatch.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
-import {commitAttestedSliceYield} from './dispatch-store.mjs';
+import {commitAttestedSliceYield,commitAttestedRepairDispute} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
-import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
+import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION,
+  CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 
@@ -41,15 +42,31 @@ export function matchingResult(result,proof,sealed,claim,run) {
   const valid=doc=>doc?.issue===Number(ticket.issue_number)&&
     doc.action_id===ticket.action_id&&doc.source_sha===ticket.input_sha&&
     doc.run_id===run.id&&doc.attempt===run.run_attempt;
+  const repairing=ticket.task==='repair';
+  const repairFile='Durable Worker fixture: complete\nPrevious value: pending\n';
+  if(repairing&&(
+     ticket.action_id!==CONTROLLED_REPAIR_ACTION||
+     ticket.input_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+     result.kind!=='developer_repair_dispute'||
+     result.status!=='review_disputed_no_change'||
+     result.native_read_verified!==true||
+     result.native_resumed!==true||
+     result.reviewer_run_id!==41962609841||
+     result.parent_checkpoint_commit_sha!=='eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+     result.content_sha256!==hash(repairFile)||
+     proof.metadata?.agent_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'))
+    fail('no verified unchanged published PR bytes and same native Agent');
   if(run.status!=='completed'||run.conclusion!=='success'||
       !valid(result)||!valid(proof)||
-      result.schema_version!==1||result.kind!=='developer_proposal'||
-      result.status!=='proposed_not_published'||
-      result.native_read_edit_verified!==true||
+      result.schema_version!==1||
+      (!repairing&&(result.kind!=='developer_proposal'||
+        result.status!=='proposed_not_published'||
+        result.native_read_edit_verified!==true))||
       result.file!=='e2e/fixtures/agent-development/1997-canary.txt'||
       result.content_sha256!==hash(resuming?
         'Durable Worker fixture: complete\nPrevious value: pending\n':'Durable Worker fixture: complete\n')||
-      (resuming&&(result.native_resumed!==true||result.prior_turn_word_observed!==true||
+      (!repairing&&resuming&&(result.native_resumed!==true||
+        result.prior_turn_word_observed!==true||
         result.parent_checkpoint_commit_sha!==(
           ticket.action_id===CONTROLLED_V2_CONTINUATION
             ?'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142'
@@ -86,8 +103,35 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     const issue=Number(claim.inputs.issue_number);
     const record=readIssueWorkflowState(dir,issue);
     const action=record.state?.outbox.find(x=>x.id===claim.inputs.action_id);
+    const repairReplay=claim.inputs.task==='repair'&&!action&&
+      record.state?.transitions.some(t=>t.kind==='developer'&&
+        t.run_id===run.id&&t.attempt===run.run_attempt&&
+        t.target_sha===claim.inputs.input_sha&&
+        t.outcome==='implementation_ready');
+    if(repairReplay){
+      const prefix='roles/developer/dev-cursor-01/issues/'+issue;
+      const checkpointPath=prefix+'/checkpoints/00000004.json';
+      const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
+      const receipt=JSON.parse(fs.readFileSync(path.join(dir,runPath),'utf8'));
+      const checkpoint=JSON.parse(fs.readFileSync(path.join(dir,checkpointPath),'utf8'));
+      if(receipt.run_id!==run.id||receipt.attempt!==run.run_attempt||
+         receipt.source_sha!==claim.inputs.input_sha||
+         receipt.workflow_sha!==run.head_sha||receipt.version!==4||
+         receipt.checkpoint_path!==checkpointPath||
+         checkpoint.ciphertext_sha256!==receipt.ciphertext_sha256)
+        fail('conflicting previously accepted Repair native checkpoint');
+      const commit_sha=git('-C',dir,'log','-1','--format=%H','HEAD','--',checkpointPath);
+      if(!HEX40.test(commit_sha))fail('missing durable Repair checkpoint creator');
+      return {state_version:record.version,
+        store_commit_sha:git('-C',dir,'rev-parse','HEAD'),
+        already_consumed:true,repairing:true,action:null,
+        existing_checkpoint:{version:4,commit_sha,
+          ciphertext_sha256:checkpoint.ciphertext_sha256,
+          metadata:checkpoint.metadata}};
+    }
     if(!action||action.task.type!=='dispatch'||action.task.role!=='developer'||
-        action.task.task!=='implement'||action.task.agent_id!=='dev-cursor-01'||
+        !['implement','repair'].includes(action.task.task)||
+        action.task.agent_id!=='dev-cursor-01'||
         action.task.sha!==claim.inputs.input_sha||
         action.receipt?.source_run_id!==run.id||
         action.receipt?.dispatch_id!==claim.inputs.action_id||
@@ -95,7 +139,14 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
       fail('no authenticated exact Run-bound persisted dispatch to ingest');
     const prefix='roles/developer/dev-cursor-01/issues/'+issue;
     const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
-    const previous_version=action.task.continuation?.checkpoint_version??0;
+    const previous_version=action.task.repair_checkpoint?.checkpoint_version??
+      action.task.continuation?.checkpoint_version??0;
+    if(action.task.task==='repair'&&(
+       action.status!=='dispatched'||previous_version!==3||
+       action.task.repair_checkpoint?.checkpoint_commit_sha!==
+         'eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+       action.task.repair_checkpoint?.source_run_id!==39448549052))
+      fail('Repair must resume from the attested v3 published origin');
     const next_version=previous_version+1;
     const checkpointPath=prefix+'/checkpoints/'+String(next_version).padStart(8,'0')+'.json';
     const runFile=path.join(dir,runPath),checkpointFile=path.join(dir,checkpointPath);
@@ -121,7 +172,8 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     }
     return {state_version:record.version,store_commit_sha:git('-C',dir,'rev-parse','HEAD'),
       previous_version,next_version,action,
-      already_yielded:action.status==='yielded',existing_checkpoint};
+      already_yielded:action.status==='yielded',
+      repairing:action.task.task==='repair',existing_checkpoint};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
 async function api(token,endpoint){
@@ -136,7 +188,7 @@ async function api(token,endpoint){
 // independently. This is a transport receipt, never an SC verdict.
 export function developmentIngestReceipt({status,run,claim,metadata,claimArtifact,
   resultArtifact,checkpoint,stateVersion,storeCommit,environment}) {
-  if(!['yielded','replayed'].includes(status)||!HEX40.test(storeCommit??'')||
+  if(!['yielded','replayed','accepted'].includes(status)||!HEX40.test(storeCommit??'')||
       !HEX40.test(checkpoint?.commit_sha??'')||
       !HEX64.test(checkpoint?.ciphertext_sha256??'')||
       !Number.isSafeInteger(stateVersion)||stateVersion<1||
@@ -169,6 +221,9 @@ export const V2_INGEST_WORKER_RUN=39448549052;
 export const V2_INGEST_WORKER_SHA='271b48e494b6bd54843403b831709d6365f30530';
 export const V2_INGEST_COMMAND='/nession ingest issue=1997 action='+CONTROLLED_V2_CONTINUATION+
   ' worker_run='+V2_INGEST_WORKER_RUN;
+const REPAIR_INGEST_PREFIX='/nession ingest-repair issue=1997 action='+CONTROLLED_REPAIR_ACTION+
+  ' worker_run=';
+const REPAIR_INGEST_PATTERN=new RegExp('^'+REPAIR_INGEST_PREFIX+'[1-9][0-9]{0,14}'+'$');
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
 // recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
@@ -197,7 +252,8 @@ export function resolveTrustedIngestSource({environment,event}){
         (event.comment?.body!==PINNED_RECOVERY_COMMAND&&
           !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??'')&&
           event.comment?.body!==NATIVE_RECOVERY_INGEST_COMMAND&&
-          event.comment?.body!==V2_INGEST_COMMAND)||
+          event.comment?.body!==V2_INGEST_COMMAND&&
+          !REPAIR_INGEST_PATTERN.test(event.comment?.body??''))||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual checkpoint recovery requires exact owner/main Issue comment');
     if(event.comment.body===PINNED_RECOVERY_COMMAND)
@@ -206,7 +262,8 @@ export function resolveTrustedIngestSource({environment,event}){
     if(!Number.isSafeInteger(id)||id<=PINNED_RECOVERY_SOURCE_RUN)fail('invalid continuation source Run');
     return {run_id:id,source:null,continuation:true,
       ...(event.comment.body===NATIVE_RECOVERY_INGEST_COMMAND?{native_recovery:true}:{}),
-      ...(event.comment.body===V2_INGEST_COMMAND?{v2_recovery:true}:{})};
+      ...(event.comment.body===V2_INGEST_COMMAND?{v2_recovery:true}:{}),
+      ...(REPAIR_INGEST_PATTERN.test(event.comment.body)?{repair_recovery:true}:{})};
   }
   fail('unsupported Ingest trigger');
 }
@@ -285,19 +342,34 @@ async function main(){
             39267659650),
           CONTROLLED_CONTINUATION,
           NATIVE_RECOVERY_ACTION,
-          CONTROLLED_V2_CONTINUATION,
+          CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
     if(authority.continuation&&(
-         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION,CONTROLLED_V2_CONTINUATION].includes(verified.action_id)||
+         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION,CONTROLLED_V2_CONTINUATION,
+           CONTROLLED_REPAIR_ACTION].includes(verified.action_id)||
          run.run_attempt!==1||
          (authority.native_recovery&&verified.action_id!==NATIVE_RECOVERY_ACTION)||
          (authority.v2_recovery&&verified.action_id!==CONTROLLED_V2_CONTINUATION)||
-         (!authority.native_recovery&&!authority.v2_recovery&&
+         (authority.repair_recovery&&verified.action_id!==CONTROLLED_REPAIR_ACTION)||
+         (!authority.native_recovery&&!authority.v2_recovery&&!authority.repair_recovery&&
           verified.action_id!==CONTROLLED_CONTINUATION)))
       fail('continuation recovery source is not the exact controlled Action/Attempt');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
+    if(admission.already_consumed){
+      const cp=admission.existing_checkpoint;
+      verifyCommittedCheckpoint({remote:store,
+        identity:{role:'developer',agent_id:'dev-cursor-01',issue:1997},
+        commit_sha:cp.commit_sha,version:cp.version,
+        ciphertext_sha256:cp.ciphertext_sha256});
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:'replayed',run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:cp,
+        stateVersion:admission.state_version,storeCommit:admission.store_commit_sha,
+        environment:env})));
+      return;
+    }
     if(admission.already_yielded) {
       const receipt=admission.action.receipt;
       if(receipt?.source_run_id!==run.id||
@@ -349,7 +421,7 @@ async function main(){
         const source={repository:REPO,run_id:run.id,attempt:run.run_attempt,
           issue:1997,workflow_sha:run.head_sha,target_sha:claim.inputs.input_sha,
           head_branch:'main',path:run.path,workflow_name:run.name,
-          role:'developer',agent_id:'dev-cursor-01',task:'implement',
+          role:'developer',agent_id:'dev-cursor-01',task:claim.inputs.task,
           environment:'agent-dev-cursor-01',provider:'cursor',event:run.event};
         published=publishEncryptedAgentCheckpoint({
           remote:store,source,sealed,registry:JSON.parse(fs.readFileSync(
@@ -362,11 +434,19 @@ async function main(){
     }
       // Second CAS advances canonical state only after the committed checkpoint
       // is independently verified against the remote Git commit.
-      const advanced=await commitAttestedSliceYield({remote:store,issue:1997,
-        dispatchTicket:claim.inputs.dispatch_ticket,keyring:{'main-controller':rootKey},
-        reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
-          ciphertext_sha256:encryptedDigest,run_id:run.id,
-          attempt:run.run_attempt},verifiedMainSha:run.head_sha});
+      const advanced=admission.repairing?
+        commitAttestedRepairDispute({
+          remote:store,run,registry:JSON.parse(fs.readFileSync(
+            'automation/agents/registry.json','utf8')),
+          pr:await reader.getPullRequest(2176),
+          checkpoint:{version:published.version,commit_sha:published.commit_sha,
+            ciphertext_sha256:encryptedDigest},
+        }):
+        await commitAttestedSliceYield({remote:store,issue:1997,
+          dispatchTicket:claim.inputs.dispatch_ticket,keyring:{'main-controller':rootKey},
+          reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
+            ciphertext_sha256:encryptedDigest,run_id:run.id,
+            attempt:run.run_attempt},verifiedMainSha:run.head_sha});
       console.log(JSON.stringify(developmentIngestReceipt({
         status:advanced.status,run,claim,metadata,claimArtifact:verifiedClaim,
         resultArtifact:matching[0],checkpoint:{version:published.version,
