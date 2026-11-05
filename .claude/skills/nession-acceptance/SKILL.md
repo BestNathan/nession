@@ -11,6 +11,12 @@ Issue structure belongs to `nession-writing-requirements`; Gate semantics belong
 
 For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while new three-column Acceptance Reports derive their compatibility stage from the Plan; historical four-column Reports retain explicit Stage. `when: deployed` is executable as an **explicit deployed run**: `Acceptance / Cases` with `stage=deployed` and `environment` selects an authenticated deployment record from `acceptance-results` (source SHA, GitOps revision, image digests, workload identity) and evaluates only criteria bound to that environment. It is never inferred from a main merge and is not yet automatically scheduled; production environment access and remote execution remain owned by #1616.
 
+## Select a feasible proof method
+
+Before executing or reviewing each SC, identify its primary proof scenario in the [eight-scenario catalog](references/scenario-catalog.md) and load the matching [SC verification playbook](references/verification-playbook.md) section. The catalog covers static/deterministic, Chromium Web/App, Terminal/protocol/native runtime, provider/Store, CI/GitHub governance, performance/compatibility, deployed/remote, and docs/Knowledge/prototype delivery. OS kernel enforcement and GitHub Ruleset/App authorization use their specialized playbooks. Map **scenario → observed assertion → tool/runner → source-aligned `case` or authenticated `agent` evidence → earliest safe stage**; scenarios are not extra YAML `method` values. Treat local Agent checks as preflight, not substitutes for CI-only full-stack, actual staging/deployed or kernel/GitHub server-side proof.
+
+**Coverage/feasibility review:** If a new or materially changed criterion cannot be mapped to a scenario with an objective, feasible proof, **stop and ask the product owner** before inventing a method, relaxing the criterion or changing its Plan. For a pre-existing Issue, preserve the exact SC/Plan/Report and historical evidence; keep an unavailable formal proof `Pending` with named prerequisites, request an owner decision for any contract migration, and never project an unexecuted assertion as Pass. Do not stop unrelated independently provable SCs.
+
 ## Lifecycle
 
 ```text
@@ -115,7 +121,7 @@ When a criterion depends on deployment/runtime state, prove the exact revision/e
 
 ## Source-aligned Acceptance Cases
 
-Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. The canonical shape is `e2e/acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
+Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. Choose its proof scene from the [scenario catalog](references/scenario-catalog.md) before selecting a Browser/Protocol/Runtime verifier; native OS and real GitHub-security behaviors require independently authorized execution/attestation, not implicit privileges in the generic Case. The canonical shape is `e2e/acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
 
 Choose the Case stage from the trusted Acceptance contract: the Plan for canonical new Issues or the explicit/legacy Acceptance Report for historical Issues. Use `browser` for UI/browser-observable behavior, `protocol` for wire/WebSocket behavior, and `runtime` for orchestration/process/config/file evidence. All verifier types may share the same `full-stack-local` Runtime Harness; protocol/runtime verification must not launch Playwright unless a browser verifier is declared.
 
