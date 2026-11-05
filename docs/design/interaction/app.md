@@ -176,12 +176,12 @@ explanation is the same dead end one step earlier.
   returns at the Workspace root, where Back and the shell both mean the
   Terminal and there is nothing to compete over.
 - The gesture spans the shell chrome. **A work surface owns every touch that
-  begins in it, except at the shell's own edges** (#1081). Inside a work surface
-  the shell may still claim a horizontal drag that starts within `EDGE_BAND_PX`
-  (28px) of a shell edge, and each edge owns one direction: the left band pulls
-  Sessions in (a rightward drag), the right band pulls Workspace in (a leftward
-  one). A drag from an edge band that moves the other way is surrendered back to
-  the surface.
+  begins in it, except in the shell's edge region** (#1081, #2724). The outer
+  `EDGE_PLATFORM_GUARD_PX` (24px) of the shell belongs to the platform's own
+  edge gesture; the shell's `EDGE_BAND_PX` (28px) starts *after* that guard.
+  Each band owns one direction: the left band pulls Sessions in (a rightward
+  drag), the right band pulls Workspace in (a leftward one). A drag from an
+  edge band that moves the other way is surrendered back to the surface.
 - The exclusion is what makes the band necessary, and also what keeps it small.
   A surface keeps the touches that begin in it because a page that started there
   would spend the surface's first horizontal pixels — an xterm selection, a
@@ -193,21 +193,26 @@ explanation is the same dead end one step earlier.
   began. The band restores a reachable start; it does not give back the
   surface's interior, and it takes nothing from the shell chrome, where the
   gesture keeps its whole width.
-- The band is a **starting** value, not a measured one. A phone browser or an
-  installed PWA may reserve a screen edge for its own back gesture, and nothing
-  in this repository can see that: the band is exercised at the DOM level only.
-  If a platform does consume an edge, the visible control is the fallback — the
-  gesture is not widened back across the surface to compensate.
+- The guard is a **physical-device finding**, not a width increase. On
+  2026-11-05 an iPhone Safari test showed that a band starting at the screen
+  edge loses the leftward back-swipe contest to the OS: Safari recognises the
+  gesture before the page receives a cancelable move. The shell therefore
+  starts its 28px band after a 24px platform guard instead of competing for the
+  same pixels. The guard and band are still hypotheses — SC-07 must confirm
+  them on the actual device and the visible Sessions/Workspace controls remain
+  the fallback. A start inside the guard is not shell navigation, and neither
+  the shell pager nor the Terminal direction pad may claim it.
 - **Inside the Terminal, a stationary long-press is the terminal's own input
   gesture** (#2657). After roughly 380 ms the viewport shows a small translucent
   direction dial; dragging along an axis sends that semantic arrow key, and
   holding repeats at 1/2/4/8 keys per second, farther from the centre being
   faster. Returning to the centre or releasing stops it. Before the hold ends
   nothing is consumed, so a tap, a quick swipe and scrolling behave as before,
-  and the gesture never starts inside the shell's `EDGE_BAND_PX` — the edge
-  stays navigation's. The dial is an accelerator, not a persistent control;
-  Terminal Keys remain the visible, accessible fallback. The terminal-owned
-  contract (ownership, key encoding, cancellation) is in
+  and the gesture never starts inside the platform guard plus the shell's
+  `EDGE_BAND_PX` — that edge region stays navigation's. The dial is an
+  accelerator, not a persistent control; Terminal Keys remain the visible,
+  accessible fallback. The terminal-owned contract (ownership, key encoding,
+  cancellation) is in
   [interaction-semantics.md](../terminal/interaction-semantics.md#touch-direction-pad-2657).
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
@@ -251,10 +256,11 @@ contact after that, and the answer is: much less until release.
   clears the composer or drops Workspace context.
 - **Numbers are hypotheses until SC-07.** The values above come from the
   approved mobile prototype
-  ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724));
-  the band, thresholds and velocity are initial exploration values, and a
-  physical Safari/PWA lane must confirm the platform's own edge ownership
-  before they are treated as measured.
+  ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724)),
+  plus the 2026-11-05 iPhone Safari finding that the outer edge belongs to the
+  OS. The guard, band, thresholds and velocity are initial exploration values;
+  a physical Safari/PWA lane must confirm the platform's own edge ownership and
+  settle the final numbers before they are treated as measured.
 
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
 

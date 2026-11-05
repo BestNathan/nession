@@ -43,10 +43,15 @@ test('SC-04: routes, no-Session root, dirty leave and visible controls', async (
   });
   await expect(anchor.layerRoot).toHaveAttribute('data-layer', 'workspace');
 
-  // Workspace -> Terminal by the reverse swipe.
+  // Workspace -> Terminal by the reverse swipe. The page header's Back
+  // control owns its left edge, so start on its chrome title area.
+  const workspaceHeader = await page.getByTestId('app-page-header').boundingBox();
+  if (!workspaceHeader) throw new Error('the Workspace page header must be laid out');
+  const workspaceHeaderX = Math.round(workspaceHeader.x + workspaceHeader.width / 2);
+  const workspaceHeaderY = Math.round(workspaceHeader.y + workspaceHeader.height / 2);
   await swipe(page, {
-    from: { x: anchor.leftX, y: sessionsHeaderY },
-    to: { x: anchor.leftX + 160, y: sessionsHeaderY },
+    from: { x: workspaceHeaderX, y: workspaceHeaderY },
+    to: { x: workspaceHeaderX + 160, y: workspaceHeaderY },
   });
   await expect(anchor.layerRoot).toHaveAttribute('data-layer', 'terminal');
 

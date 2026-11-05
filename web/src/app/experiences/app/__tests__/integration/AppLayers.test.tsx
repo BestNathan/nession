@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppLayers } from '../../AppLayers';
+import { EDGE_PLATFORM_GUARD_PX } from '../../gesture';
 
 function renderLayers(
   layer: 'sessions' | 'terminal' | 'workspace',
@@ -149,7 +150,7 @@ describe('AppLayers — the edge band is measured from this element (#1081)', ()
     const onLayerChange = renderWithWorkSurface();
     pinShell(390);
 
-    swipeRight(2, 120);
+    swipeRight(EDGE_PLATFORM_GUARD_PX + 2, 120);
 
     await waitFor(() => expect(onLayerChange).toHaveBeenCalledWith('sessions'));
   });
@@ -206,7 +207,7 @@ describe('AppLayers — a pushed Workspace detail owns its own leave (#1081)', (
     const onLayerChange = renderWorkspaceLayer(true);
     pinShell(390);
 
-    dragOn(screen.getByTestId('stub-page-header'), 20, 170);
+    dragOn(screen.getByTestId('stub-page-header'), EDGE_PLATFORM_GUARD_PX + 20, EDGE_PLATFORM_GUARD_PX + 190);
 
     await new Promise((resolve) => setTimeout(resolve, 260));
     expect(onLayerChange).not.toHaveBeenCalled();
@@ -218,7 +219,7 @@ describe('AppLayers — a pushed Workspace detail owns its own leave (#1081)', (
     const onLayerChange = renderWorkspaceLayer(true);
     pinShell(390);
 
-    dragOn(screen.getByTestId('stub-editor'), 20, 170);
+    dragOn(screen.getByTestId('stub-editor'), EDGE_PLATFORM_GUARD_PX + 20, EDGE_PLATFORM_GUARD_PX + 190);
 
     await new Promise((resolve) => setTimeout(resolve, 260));
     expect(onLayerChange).not.toHaveBeenCalled();
@@ -230,7 +231,7 @@ describe('AppLayers — a pushed Workspace detail owns its own leave (#1081)', (
     const onLayerChange = renderWorkspaceLayer(false);
     pinShell(390);
 
-    dragOn(screen.getByTestId('stub-page-header'), 20, 170);
+    dragOn(screen.getByTestId('stub-page-header'), EDGE_PLATFORM_GUARD_PX + 20, EDGE_PLATFORM_GUARD_PX + 190);
 
     await waitFor(() => expect(onLayerChange).toHaveBeenCalledWith('terminal'));
   });
@@ -363,12 +364,12 @@ describe('AppLayers — in-flight feedback exists only during a drag (#2724)', (
     const surface = screen.getByTestId('stub-sessions');
 
     fireEvent.touchStart(surface, {
-      touches: [touchAt(380)],
-      changedTouches: [touchAt(380)],
+      touches: [touchAt(390 - EDGE_PLATFORM_GUARD_PX - 2)],
+      changedTouches: [touchAt(390 - EDGE_PLATFORM_GUARD_PX - 2)],
     });
     fireEvent.touchMove(surface, {
-      touches: [touchAt(220)],
-      changedTouches: [touchAt(220)],
+      touches: [touchAt(390 - EDGE_PLATFORM_GUARD_PX - 122)],
+      changedTouches: [touchAt(390 - EDGE_PLATFORM_GUARD_PX - 122)],
     });
 
     expect(screen.getByTestId('app-swipe-preview')).toHaveTextContent('Home');
@@ -391,13 +392,14 @@ describe('AppLayers — in-flight feedback exists only during a drag (#2724)', (
     pinShell(390);
 
     const header = screen.getByTestId('stub-workspace');
+    const from = EDGE_PLATFORM_GUARD_PX + 20;
     fireEvent.touchStart(header, {
-      touches: [touchAt(20)],
-      changedTouches: [touchAt(20)],
+      touches: [touchAt(from)],
+      changedTouches: [touchAt(from)],
     });
     fireEvent.touchMove(header, {
-      touches: [touchAt(220)],
-      changedTouches: [touchAt(220)],
+      touches: [touchAt(from + 200)],
+      changedTouches: [touchAt(from + 200)],
     });
 
     // The live drag is already the failure window: the three-slot geometry
@@ -409,7 +411,7 @@ describe('AppLayers — in-flight feedback exists only during a drag (#2724)', (
 
     fireEvent.touchEnd(header, {
       touches: [],
-      changedTouches: [touchAt(220)],
+      changedTouches: [touchAt(from + 200)],
     });
 
     expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'settling');

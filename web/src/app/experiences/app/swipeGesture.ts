@@ -1,4 +1,4 @@
-import { edgeBandSide, edgeOwnsDrag, type EdgeSide, type ShellBounds } from './edgeBand';
+import { edgeBandSide, edgeOwnsDrag, platformGuardSide, type EdgeSide, type ShellBounds } from './edgeBand';
 import {
   SWIPE_FLICK_MIN_PX,
   SWIPE_FLICK_VELOCITY_PX_PER_MS,
@@ -179,10 +179,21 @@ export class SwipeGesture {
     }
 
     const bounds = this.options.getShellBounds();
+
+    // The outer platform guard is the OS's for every target, not only over a
+    // work surface: on the Terminal screen the very edge is shell/terminal
+    // chrome, and claiming it there still loses to Safari's back gesture
+    // (#2724, physical iPhone finding).
+    if (bounds !== null && platformGuardSide(touch.clientX, bounds) !== null) {
+      this.reason = 'platform-guard';
+      return false;
+    }
+
     let edge: EdgeSide | null = null;
     if (isWorkSurface(touch.target)) {
-      // The work surface owns its interior; only its outside 28px yields to
-      // the shell, and then only in the direction that edge arrives from.
+      // The work surface owns its interior; only the band after the platform
+      // guard yields to the shell, and then only in the direction that edge
+      // arrives from.
       if (bounds === null) {
         this.reason = 'unmeasurable-shell';
         return false;

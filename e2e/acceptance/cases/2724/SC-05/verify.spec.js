@@ -88,10 +88,15 @@ test('SC-05: xterm, scrollback, composer, Session and Workspace depth survive ge
   await page.getByTestId('file-row-web/src').click();
   await expect(page.getByTestId('app-page-header')).toContainText('src');
 
-  // Rightward from the left edge previews Terminal; cancel it.
-  await startTouch(page, { x: Math.round(shell.x + 2), y: Math.round(shell.y + 30) });
-  await moveTouch(page, { x: Math.round(shell.x + 162), y: Math.round(shell.y + 30) });
-  await cancelTouch(page, { x: Math.round(shell.x + 162), y: Math.round(shell.y + 30) });
+  // Rightward from the page header's chrome (its Back control owns the left
+  // edge) previews Terminal; cancel it.
+  const pageHeader = await page.getByTestId('app-page-header').boundingBox();
+  if (!pageHeader) throw new Error('the Workspace page header must be laid out');
+  const headerX = Math.round(pageHeader.x + pageHeader.width / 2);
+  const headerY = Math.round(pageHeader.y + pageHeader.height / 2);
+  await startTouch(page, { x: headerX, y: headerY });
+  await moveTouch(page, { x: headerX + 160, y: headerY });
+  await cancelTouch(page, { x: headerX + 160, y: headerY });
   await page.waitForTimeout(300);
 
   await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
