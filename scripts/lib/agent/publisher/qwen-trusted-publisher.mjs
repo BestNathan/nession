@@ -184,7 +184,7 @@ export async function runTrustedQwenPublication({
   }finally{key.fill(0);}
 }
 async function main(){
-  if(process.argv.length!==9||process.argv[2]!=='publish')
+  if(process.argv.length!==10||process.argv[2]!=='publish')
     fail('usage: publish INGEST_RUN_JSON RECEIPT_JSON WORKER_JSON ARTIFACTS_JSON CLAIM_ZIP RESULT_ZIP SOURCE_DIR');
   const env=process.env;
   if(!env.AGENT_STORE_CONTROLLER_REMOTE?.startsWith('https://x-access-token:')||
