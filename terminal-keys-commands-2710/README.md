@@ -27,6 +27,16 @@ Open capabilities using the lower + control; select Terminal Keys. A single tap 
 - **Approximations:** plain DOM terminal output and locally approximated CSS/layout, **not** xterm rendering or actual tmux/PTY; viewport/safe-area/IME fidelity requires physical/runtime testing.
 - **Verification of this exact revision:** pending published HTTPS/manifest and browser-readback before claiming the interactive preview is current. Old browser receipts and accepted SCs do not prove this visual-only mock revision.
 
+## Standard three-region review frame (2026-11-05; #2758 second iteration)
+
+The owning prototype was migrated in place to the **shared** `../prototype-frame-2758/frame.css` and `frame.js` review frame (source kit [#2758](https://github.com/BestNathan/nession/issues/2758)). It uses **top overview** (problem/Issue/source), a **middle 1:1 CSS-pixel interactive App viewport** (375/390/430 × 844, no zoom/transform), and **bottom functionality/visual baseline/mock boundaries/debug log**. Product-only Session/Terminal/Capsule markup is nested exclusively in the central device viewport.
+
+This explicitly supersedes the previous two-column “phone + side inspector” trial, whose external harness felt unrelated to a unified prototype page. App width selection/reset are handled by the shared `frame.js`; the mock key/command/scroll runtime stays local. The trusted main Pages publisher PR #2759 adds a native top gallery/source-link slot with exact SHA pinning and prevents a fixed footer from covering a structured preview. Legacy published mocks remain compatible.
+
+**Important fidelity distinction:** geometry is 1 CSS pixel to 1 CSS pixel; current Terminal output still uses plain DOM, not the production xterm fixture, so **pixel-perfect product match is NOT claimed**. Visual owner: `web/src/app/patterns/SessionHeader.tsx`, `web/src/product/terminal/{patterns/TerminalSurface.tsx,capsule/TerminalCapsule.tsx}`, `web/src/app/fixture/FixtureTerminal.tsx` and generated `design/generated/web.css` tokens (snapshot main `c4ea99d1`). Review-page CSS is `np-*` only and cannot modify product colors. Known gaps: actual xterm glyph metrics, full Header/Keycap React geometry, mode-dependent PTY bytes, IME and hardware touch.
+
+**Verification scope:** static structural assertions and source checks passed; a fresh browser read-back, exact published Pages SHA and actual product screenshot comparison remain distinct further gates. Old mock browser receipts predate this new review frame.
+
 ## Non-goals
 Implementing new runtime key APIs, general keyboard protocol negotiation, OSC/clipboard, saved command storage, live Session connection, navigation gestures (#2657), or a production-ready UI.
 

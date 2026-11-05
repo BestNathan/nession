@@ -75,8 +75,8 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
    and the gallery link). Reserve its height so the mock's + and composer stay
    operable on the published page; the local/source-only page has no nav and
    keeps the original bottom. */
-body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bottom) + 58px))}
-@media(max-width:580px){body:has(.nession-preview-nav) .dock{bottom:64px}}
+
+@media(max-width:580px){}
 .surface{background:var(--nession-terminal-capsule-surface);box-shadow:var(--nession-elevation-floating);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:var(--nession-radius-capsule);color:var(--nession-foreground)}
 .composer{height:56px;padding:var(--nession-terminal-capsule-shell-pad-y) var(--nession-terminal-capsule-shell-pad-x);display:flex;align-items:center;gap:5px}
 .tap{min-width:var(--nession-control-md);min-height:var(--nession-control-md);display:grid;place-items:center;border:0;background:transparent;border-radius:var(--nession-radius-control);color:var(--nession-foreground)}
@@ -169,18 +169,47 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 .insert,.run{min-height:var(--nession-control-md);height:var(--nession-control-md)}
 @media(max-width:760px){.prototype-harness [data-preview-width]{display:none}}
 </style>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 </head>
-<body>
-<div class="page">
-  <div class="prototype-stage" aria-label="Nession App Terminal preview">
-<div class="phone" data-experience="app">
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+<header class="np-overview">
+  <nav class="np-breadcrumb" aria-label="Prototype navigation">
+    <a data-nession-gallery-link href="../../#/prototypes" aria-label="Back to Nession prototype gallery">← Nession / Prototypes</a>
+    <span>·</span><span>App / Terminal</span><span>·</span><span>Requirement #2710</span>
+  </nav>
+  <span class="np-eyebrow">INTERACTIVE DESIGN / MOBILE TERMINAL</span>
+  <div class="np-header-main">
+    <div><h1 class="np-title">Terminal Keys &amp; Quick Commands</h1>
+    <p class="np-subtitle">让移动端能够可靠发送 Ctrl 组合键、复用 Session 快捷命令，同时让展开的 Capsule 不遮住终端历史与最新输出。</p></div>
+    <div class="np-links">
+      <a href="https://github.com/BestNathan/nession/issues/2710" target="_blank" rel="noopener noreferrer">Requirement #2710</a>
+      <a href="https://github.com/BestNathan/nession/issues/2758" target="_blank" rel="noopener noreferrer">Design system #2758</a>
+      <a data-nession-source-link class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a>
+    </div>
+  </div>
+  <div class="np-meta"><span>Target <strong>App · Terminal / Capsule</strong></span><span>Device <strong>375 / 390 / 430 CSS px</strong></span><span>Evidence <strong>Interactive mock, not production</strong></span></div>
+</header>
+<main>
+<section class="np-preview" aria-label="Interactive Terminal Keys preview">
+  <div class="np-section-heading">
+    <div><h2>1:1 Interactive Preview</h2><p>设备宽度按 CSS px 直接渲染。产品区域不包含调试控件，左右滑动只移动查看窗口。</p></div>
+    <div class="np-preview-toolbar" aria-label="Preview options">
+      <button type="button" data-np-size="375" aria-pressed="false">375</button>
+      <button type="button" data-np-size="390" aria-pressed="true">390</button>
+      <button type="button" data-np-size="430" aria-pressed="false">430</button>
+      <button type="button" data-np-reset>Reset</button>
+    </div>
+  </div>
+  <div class="np-stage">
+<div class="phone np-device" data-np-device data-experience="app" style="--np-device-height:844px">
   <header class="topbar"><button class="back" id="sessions" type="button" aria-label="Sessions" aria-expanded="false">☰</button><div class="sess"><strong>dev-session</strong></div></header>
-  <main class="terminal" id="terminal" aria-label="Terminal">
+  <div class="terminal" id="terminal" role="region" aria-label="Terminal">
     <div class="entry faint">Last login: Tue Nov 3 23:47:02 on ttys001</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› git status</span></div><div class="entry">On branch feature/mobile-capsule</div><div class="entry">nothing to commit, working tree clean</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">› cargo test</span></div><div class="entry">running 38 tests</div><div class="entry">test result: ok. 38 passed; 0 failed</div><div class="entry blank"></div>
     <div class="entry"><span class="prompt">~/nession</span> <span class="strong">›</span> <span class="cursor"></span></div>
-  </main>
+  </div>
   <div class="dock" id="dock">
     <div id="upper" aria-live="polite"></div>
     <div class="surface composer" id="composer">
@@ -192,18 +221,44 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   <section class="sessions-view" id="sessions-view" hidden aria-label="Sessions"><h2>Sessions</h2><button type="button" id="current-session">dev-session · Current</button></section>
 </div>
   </div>
-  <aside class="prototype-harness" aria-label="Prototype controls and design notes">
-    <h1>Terminal Keys + Commands</h1>
-    <p>Interactive App prototype · #2710 · simulated input and terminal output</p>
-    <div class="harness-tools" aria-label="Preview width">
-      <button type="button" data-preview-width="375" aria-pressed="false">375</button>
-      <button type="button" data-preview-width="390" aria-pressed="true">390</button>
-      <button type="button" data-preview-width="430" aria-pressed="false">430</button>
-      <button type="button" id="reset-prototype">Reset</button>
-    </div>
-    <div class="harness-links"><a href="https://github.com/BestNathan/nession/issues/2710" target="_blank" rel="noopener noreferrer">Issue #2710</a><a class="source" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View source</a></div>
-    <details><summary>Scenarios and mock limitations</summary><ol><li>+ → Keys: Ctrl+C; Ctrl → X; Cancel.</li><li>Commands: Insert versus Run.</li><li>Open or switch panels; scroll to expose the last terminal line, then reverse to the first.</li></ol><p>Mock only: no real xterm, PTY, tmux, network or shell execution.</p><strong>Simulated event log</strong><pre id="mock-event-log" aria-live="polite">No events yet</pre></details>
-  </aside>
+  <p class="np-stage-label" data-np-current-size>390 CSS px · 1:1</p>
+</section>
+<section class="np-details" aria-label="Prototype functional specification">
+<h2>功能设计与交互说明</h2>
+<p class="np-details-lede">下方是评审资料，不属于 Nession App。可直接在上方真实尺寸预览里操作。</p>
+<div class="np-detail-grid">
+  <article class="np-detail"><h3>核心能力</h3>
+    <ol class="np-steps">
+      <li>Terminal Keys：直接发送 Esc、Tab、Enter、方向键和快捷组合键。</li>
+      <li>Ctrl / Alt / Shift 是一次性修饰键；选择字母后发送一个组合事件并清除状态。</li>
+      <li>Quick Commands：区分 Insert（插入文本）和 Run（提交并执行）。</li>
+      <li>Capsule 的展开只增加可逆滚动空间，不自动推走已有终端内容。</li>
+    </ol>
+  </article>
+  <article class="np-detail"><h3>手动验收路径</h3>
+    <ol class="np-steps">
+      <li>点击 + → Terminal Keys → Ctrl+C；观察下方事件日志。</li>
+      <li>选择 Ctrl → X；再次进入并 Cancel。</li>
+      <li>切换 Commands，分别尝试 Insert 与 Run。</li>
+      <li>保持 Keys / Commands 展开，在 Terminal 上滚动至最新输出，再恢复到最初行。</li>
+      <li>用 375 / 390 / 430 宽度重试，不改变终端行数。</li>
+    </ol>
+  </article>
+  <article class="np-detail"><h3>视觉基线与已知差异</h3>
+    <p>产品结构参考主干 <code>SessionHeader</code>、<code>TerminalSurface</code>、<code>TerminalCapsule</code>、<code>capsuleStyles</code> 及 <code>FixtureTerminal</code>。本预览使用固定版本 <code>--nession-*</code> Token 快照，保留 App Capsule 的可触控尺寸和浮层关系。</p>
+    <p><strong>尚未达到像素级还原：</strong>这里的 Terminal 仍是 DOM 文本，不是 xterm.js；部分 Header、Keycap 和真实 TUI 布局只做近似。屏幕的 1:1 尺寸不代表真实组件已经逐像素一致。</p>
+  </article>
+  <article class="np-detail"><h3>模拟范围与验证证据</h3>
+    <p>使用模拟命令清单与事件，未连接 Server / Agent、PTY、tmux，也不会执行实际 shell 命令。滚动清障使用 DOM padding，不能代替生产 xterm 的证明。</p>
+    <p>Source 检查、Pages manifest 发布 SHA、浏览器交互、生产 Acceptance 应分别记录；旧版本的截图不作为本版本证明。</p>
+    <details class="np-inspector" open><summary>Mock 事件日志</summary>
+      <pre id="mock-event-log" aria-live="polite">No events yet</pre>
+    </details>
+  </article>
+</div>
+</section>
+</main>
+<footer class="np-footer">Nession Interactive Prototype · #2710 · Static public design mock, not trusted production Acceptance.</footer>
 </div>
 <script>
 (function(){
@@ -217,8 +272,8 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   const sessions=document.getElementById("sessions"), sessionsView=document.getElementById("sessions-view");
   sessions.addEventListener("click",()=>{ const opening=sessionsView.hidden;sessionsView.hidden=!opening;sessions.setAttribute("aria-expanded",String(opening));if(opening)open(""); });
   document.getElementById("current-session").addEventListener("click",()=>{sessionsView.hidden=true;sessions.setAttribute("aria-expanded","false");});
-  document.getElementById("reset-prototype").addEventListener("click",()=>location.reload());
-  document.querySelectorAll("[data-preview-width]").forEach(btn=>btn.addEventListener("click",()=>{phone.style.setProperty("--preview-width",btn.dataset.previewWidth+"px");document.querySelectorAll("[data-preview-width]").forEach(b=>b.setAttribute("aria-pressed",String(b===btn)));scheduleClearance();}));
+
+
   let view=""; // "", menu, keys, commands
   let modifier="";
   let seq=0;
@@ -400,5 +455,6 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   scheduleClearance();
 })();
 </script>
+<script src="../prototype-frame-2758/frame.js"></script>
 </body>
 </html>
