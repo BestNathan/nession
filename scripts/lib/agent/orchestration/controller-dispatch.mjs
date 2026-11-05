@@ -25,6 +25,8 @@ export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const REVIEW_DISPATCH_PREFIX='/nession dispatch-review issue=1997 action=';
+const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=1997 action=([a-f0-9]{64})$/;
 const REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
@@ -45,7 +47,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION)||
         (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
-        (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION))&&
+        (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION)||
+        (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -174,11 +177,12 @@ async function main(){
   const recoveringReview=commanded&&event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT;
   const bindingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT;
   const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
-  const actionId=commanded?(bindingRepair||dispatchingRepair?REPAIR_ACTION:
+  const newReviewAction=commanded?REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
+  const actionId=commanded?(newReviewAction??(bindingRepair||dispatchingRepair?REPAIR_ACTION:
     recoveringReview?REVIEW_ACTION:
     continuingV2?CONTROLLED_V2_CONTINUATION:
     continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
-    recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
+    recovering?RECOVERY_ACTION:ORIGINAL_ACTION)):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
