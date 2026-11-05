@@ -8,13 +8,15 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
-  recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery} from './dispatch-store.mjs';
+  recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
+  recoverAttestedRepairRuntimeFailure} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {bindControlledRepairCheckpoint} from './dispatch-store.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
+import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 
 const REPO='BestNathan/nession';
@@ -25,9 +27,12 @@ export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
+export const CONTROLLED_REPAIR_RETRY_COMMENT='/nession dispatch-repair issue=1997 action=ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
 const REVIEW_DISPATCH_PREFIX='/nession dispatch-review issue=1997 action=';
 const REVIEW_DISPATCH_RE=/^\/nession dispatch-review issue=1997 action=([a-f0-9]{64})$/;
 const REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const REPAIR_RETRY_ACTION='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
 const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
@@ -48,6 +53,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT&&actionId===REPAIR_ACTION)||
         (event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT&&actionId===REPAIR_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
+        (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
         (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
@@ -177,8 +184,11 @@ async function main(){
   const recoveringReview=commanded&&event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT;
   const bindingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_BIND_COMMENT;
   const dispatchingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_DISPATCH_COMMENT;
+  const recoveringRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_FAILURE_COMMENT;
+  const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=commanded?REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]:null;
-  const actionId=commanded?(newReviewAction??(bindingRepair||dispatchingRepair?REPAIR_ACTION:
+  const actionId=commanded?(newReviewAction??(recoveringRepair||retryingRepair?
+    REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
     recoveringReview?REVIEW_ACTION:
     continuingV2?CONTROLLED_V2_CONTINUATION:
     continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
@@ -203,6 +213,13 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringRepair){
+      const source=await verifyControlledRepairRuntimeFailureLive(token);
+      const result=recoverAttestedRepairRuntimeFailure({
+        remote:storeRemote,source});
+      console.log(JSON.stringify(result));
+      return; // Only Store CAS; never a Worker's old POST or Provider call.
+    }
     if(bindingRepair){
       const result=bindControlledRepairCheckpoint({
         remote:storeRemote,issue:1997,actionId:REPAIR_ACTION});
