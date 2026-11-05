@@ -20,7 +20,8 @@ import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION,
-  CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
+  CONTROLLED_REPAIR_ACTION,CONTROLLED_REPAIR_RETRY_ACTION,
+  isControlledRepairAction} from './development-resume.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 
@@ -45,7 +46,7 @@ export function matchingResult(result,proof,sealed,claim,run) {
   const repairing=ticket.task==='repair';
   const repairFile='Durable Worker fixture: complete\nPrevious value: pending\n';
   if(repairing&&(
-     ticket.action_id!==CONTROLLED_REPAIR_ACTION||
+     !isControlledRepairAction(ticket.action_id)||
      ticket.input_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
      result.kind!=='developer_repair_dispute'||
      result.status!=='review_disputed_no_change'||
@@ -221,9 +222,7 @@ export const V2_INGEST_WORKER_RUN=39448549052;
 export const V2_INGEST_WORKER_SHA='271b48e494b6bd54843403b831709d6365f30530';
 export const V2_INGEST_COMMAND='/nession ingest issue=1997 action='+CONTROLLED_V2_CONTINUATION+
   ' worker_run='+V2_INGEST_WORKER_RUN;
-const REPAIR_INGEST_PREFIX='/nession ingest-repair issue=1997 action='+CONTROLLED_REPAIR_ACTION+
-  ' worker_run=';
-const REPAIR_INGEST_PATTERN=new RegExp('^'+REPAIR_INGEST_PREFIX+'[1-9][0-9]{0,14}'+'$');
+const REPAIR_INGEST_PATTERN=/^\/nession ingest-repair issue=1997 action=(?:d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d|ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5) worker_run=[1-9][0-9]{0,14}$/;
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
 // recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
@@ -343,15 +342,16 @@ async function main(){
           CONTROLLED_CONTINUATION,
           NATIVE_RECOVERY_ACTION,
           CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+          CONTROLLED_REPAIR_RETRY_ACTION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
     if(authority.continuation&&(
          ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION,CONTROLLED_V2_CONTINUATION,
-           CONTROLLED_REPAIR_ACTION].includes(verified.action_id)||
+           CONTROLLED_REPAIR_ACTION,CONTROLLED_REPAIR_RETRY_ACTION].includes(verified.action_id)||
          run.run_attempt!==1||
          (authority.native_recovery&&verified.action_id!==NATIVE_RECOVERY_ACTION)||
          (authority.v2_recovery&&verified.action_id!==CONTROLLED_V2_CONTINUATION)||
-         (authority.repair_recovery&&verified.action_id!==CONTROLLED_REPAIR_ACTION)||
+         (authority.repair_recovery&&!isControlledRepairAction(verified.action_id))||
          (!authority.native_recovery&&!authority.v2_recovery&&!authority.repair_recovery&&
           verified.action_id!==CONTROLLED_CONTINUATION)))
       fail('continuation recovery source is not the exact controlled Action/Attempt');
