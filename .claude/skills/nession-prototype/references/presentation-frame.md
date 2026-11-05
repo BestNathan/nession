@@ -42,7 +42,7 @@ Structured review pages opt into `<body data-nession-prototype-frame="v1">`. The
 <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">View source</a>
 ```
 
-The trusted main-owned `pages/scripts/publish-prototypes.mjs` validates both slots, replaces the Source `href` with the **pinned published SHA + exact HTML path**, injects its existing CSP, and **does not** inject the legacy fixed bottom nav. This remains compatible with old unstructured prototypes, whose publisher-managed nav continues unchanged. Never rely on an unpinned branch-relative Source link as public provenance; README records the exact commit.
+The trusted main-owned `pages/scripts/publish-prototypes.mjs` validates both slots, replaces the Source `href` with the **pinned published SHA + exact HTML path**, injects its existing CSP, and **does not** inject the legacy fixed bottom nav. This remains compatible with old unstructured prototypes, whose publisher-managed nav continues unchanged. Never rely on an unpinned branch-relative Source link as public provenance; README records the exact commit. **The trusted publisher is the sole owner of the Source URL after publication**: prototype scripts must not `fetch` a manifest to rewrite, relink, or downgrade that anchor to a branch-relative `tree/` URL. Keep the exact pinned HTML-source `blob/<sha>/<path>` supplied by the publisher.
 
 ## Fidelity classification (do not confuse 1:1 with pixel-perfect)
 
