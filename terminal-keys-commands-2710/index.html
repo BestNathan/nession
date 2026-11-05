@@ -132,7 +132,7 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
 .status{display:flex;justify-content:space-between;gap:8px;max-width:390px;font-size:11px;color:var(--nession-muted-foreground)}
 .status strong{color:var(--nession-foreground)}
 @media(max-width:440px){body{background:var(--nession-background)}.page{padding:0;display:block}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.status{display:none}.panel{max-height:min(370px,50dvh)}} 
-@media(max-height:640px){.panel{max-height:42dvh}.panel-body{gap:7px}.keyrow{display:none}}
+@media(max-height:640px){.panel{max-height:42dvh}.panel-body{gap:7px}}
 @media(prefers-reduced-motion:reduce){.panel{animation:none}}
 
 [hidden]{display:none!important}
@@ -154,6 +154,20 @@ body:has(.nession-preview-nav) .dock{bottom:max(72px,calc(env(safe-area-inset-bo
 .sessions-view button{width:100%;height:var(--nession-control-md);border:0;border-radius:var(--nession-radius-control);background:var(--nession-accent);color:var(--nession-foreground);text-align:left;padding:0 12px}
 body{background:var(--nession-muted);color:var(--nession-foreground)}
 @media(max-width:760px){.page{display:block;padding:0}.prototype-stage{display:block;height:100dvh}.phone{width:100%;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}.prototype-harness{max-width:none;padding:18px 20px 90px;background:var(--nession-muted)}}
+
+/* App interaction geometry: a key's painted cap may be smaller than its 44px hit target. */
+.send{width:var(--nession-control-md);height:var(--nession-control-md);min-width:var(--nession-control-md);padding:0;margin:0;background:transparent;color:var(--nession-primary-foreground)}
+.send span{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--nession-primary);color:var(--nession-primary-foreground)}
+.panel-head{min-height:var(--nession-control-md);height:auto}
+.switch button,.close,.cancel{min-height:var(--nession-control-md)}
+.panel-body{overflow-y:auto;overscroll-behavior:contain}
+.bottom-row{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.mods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
+.mod{max-width:none;min-width:var(--nession-control-md)}
+.arrows{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:4px}
+.arrow{width:100%;min-width:var(--nession-control-md)}
+.insert,.run{min-height:var(--nession-control-md);height:var(--nession-control-md)}
+@media(max-width:760px){.prototype-harness [data-preview-width]{display:none}}
 </style>
 </head>
 <body>
@@ -172,7 +186,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
     <div class="surface composer" id="composer">
       <button class="tap plus" type="button" id="plus" aria-label="Open capabilities" title="Capabilities">+</button>
       <input class="intent" id="intent" placeholder="Ask Nession…" aria-label="Terminal input">
-      <button class="send" id="send" aria-label="Send terminal input">↑</button>
+      <button class="send" id="send" aria-label="Send terminal input"><span aria-hidden="true">↑</span></button>
     </div>
   </div>
   <section class="sessions-view" id="sessions-view" hidden aria-label="Sessions"><h2>Sessions</h2><button type="button" id="current-session">dev-session · Current</button></section>
