@@ -255,6 +255,13 @@ jobs:
           # repository. Docker never mounts the runner's .git or credential dir.
           git clone --no-hardlinks --local "$GITHUB_WORKSPACE" \
             "$RUNNER_TEMP/development-checkout"
+          if [[ "${{ inputs.task }}" == repair ]]; then
+            git -C "$RUNNER_TEMP/development-checkout" fetch --quiet --no-tags \
+              "$GITHUB_WORKSPACE" \
+              refs/nession/repair-source:refs/nession/repair-source
+            test "$(git -C "$RUNNER_TEMP/development-checkout" rev-parse refs/nession/repair-source)" = \
+              '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
+          fi
           git -C "$RUNNER_TEMP/development-checkout" remote remove origin
           mkdir -p "$RUNNER_TEMP/development-output"
           chmod 0700 "$RUNNER_TEMP/development-output"
