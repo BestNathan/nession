@@ -111,7 +111,7 @@ export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr})
       t.run_id===run.id&&t.attempt===run.run_attempt);
     if(existing.length){
       if(existing.length!==1||existing[0].target_sha!==prSha||
-         existing[0].outcome!=='implementation_ready'||prior.state.phase!=='review')
+         existing[0].outcome!=='implementation_ready')
         fail('conflicting authenticated Repair replay');
       return {status:'replayed',issue,action_id:actionId,
         state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
