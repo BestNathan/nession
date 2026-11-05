@@ -29,6 +29,11 @@ pub struct SessionMetadataStore {
     /// One writer per Session instance. The map itself is only an index; the
     /// inner async lock is what serializes the read-compare-replace.
     locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    /// One initializer per Session name. The instance id must be resolved
+    /// before the per-instance lock exists, and two callers racing that first
+    /// resolution could otherwise create two ids (and two locks) for one tmux
+    /// Session.
+    name_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
 }
 
 impl SessionMetadataStore {
@@ -44,6 +49,7 @@ impl SessionMetadataStore {
             root: nession_common::paths::agent_sessions_dir()
                 .unwrap_or_else(|_| PathBuf::from(".nession/agent/sessions")),
             locks: Mutex::new(HashMap::new()),
+            name_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -53,6 +59,7 @@ impl SessionMetadataStore {
             tmux,
             root,
             locks: Mutex::new(HashMap::new()),
+            name_locks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -107,6 +114,12 @@ impl SessionMetadataStore {
         if session_name.trim().is_empty() {
             anyhow::bail!("not_found: a Session name is required");
         }
+        // Serialize first-time initialization: the per-instance lock is keyed
+        // by the id we do not have yet. Two concurrent readers of a legacy
+        // Session would otherwise race `set-option` and end up using different
+        // ids (and different locks).
+        let name_lock = self.lock_in(&self.name_locks, session_name);
+        let _guard = name_lock.lock().await;
         self.tmux
             .session_instance_id(session_name)
             .await
@@ -114,15 +127,23 @@ impl SessionMetadataStore {
     }
 
     fn lock_for(&self, instance: &str) -> Arc<AsyncMutex<()>> {
+        self.lock_in(&self.locks, instance)
+    }
+
+    fn lock_in(
+        &self,
+        locks: &Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+        key: &str,
+    ) -> Arc<AsyncMutex<()>> {
         // The index is only a lookup table; a poisoned lock still holds a
         // usable entry, and discarding it would let two writers diverge.
-        let mut locks = match self.locks.lock() {
+        let mut locks = match locks.lock() {
             Ok(locks) => locks,
             Err(poisoned) => poisoned.into_inner(),
         };
         Arc::clone(
             locks
-                .entry(instance.to_string())
+                .entry(key.to_string())
                 .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
         )
     }
@@ -440,12 +461,25 @@ mod tests {
             dir.path().to_path_buf(),
         ));
 
-        let (first, second) = tokio::join!(
-            store.update(&name, Some("A"), None, &[], 0),
-            store.update(&name, Some("B"), None, &[], 0),
-        );
-        let successes = usize::from(first.is_ok()) + usize::from(second.is_ok());
+        // More than two racers: the first save also initializes the tmux
+        // instance id, so this exercises both the name lock (initialization)
+        // and the per-instance lock (read-compare-replace).
+        let titles: Vec<String> = (0..8).map(|index| format!("T{index}")).collect();
+        let results = futures_util::future::join_all(
+            titles
+                .iter()
+                .map(|title| store.update(&name, Some(title.as_str()), None, &[], 0)),
+        )
+        .await;
+        let successes = results.iter().filter(|result| result.is_ok()).count();
         assert_eq!(successes, 1, "exactly one first save wins");
-        assert_eq!(store.get(&name).await.unwrap().revision, 1);
+        let current = store.get(&name).await.unwrap();
+        assert_eq!(current.revision, 1);
+        assert!(
+            titles
+                .iter()
+                .any(|title| current.title.as_deref() == Some(title.as_str())),
+            "the winner's title is the persisted one: {current:?}"
+        );
     }
 }
