@@ -2107,4 +2107,77 @@ esac"#,
         drop(stdin);
         let _ = child.wait().await;
     }
+
+    /// #2781 SC-03: a pending restoration is Session-local. A required restore
+    /// failing in one Session must not disturb another Session's durable
+    /// baseline, status, or simulated tmux environment.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_pending_restore_in_one_session_does_not_touch_another_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        std::fs::write(env_dir.join("OTHER"), "base-other").unwrap();
+
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            "nession-isolation-a",
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile-a")])],
+        )
+        .await
+        .expect("session A applies");
+        mgr.apply_binding(
+            "nession-isolation-b",
+            1,
+            &[profile_ref("b.env")],
+            &[snapshot("b.env", &[("OTHER", "profile-b")])],
+        )
+        .await
+        .expect("session B applies");
+
+        // A's required restore fails; B has no mutation in flight.
+        std::fs::write(&fail_marker, b"").unwrap();
+        mgr.apply_binding("nession-isolation-a", 2, &[], &[])
+            .await
+            .expect_err("A's failed restore is an error");
+
+        let a = mgr
+            .observe("nession-isolation-a")
+            .await
+            .expect("A is observable");
+        assert_eq!(a.status, STATUS_ERROR);
+        assert!(a.managed_keys.contains(&"MODE".to_string()));
+
+        let b = mgr
+            .observe("nession-isolation-b")
+            .await
+            .expect("B is observable");
+        assert_ne!(
+            b.status, STATUS_ERROR,
+            "A's failure must not become B's: {b:?}"
+        );
+        assert!(b.managed_keys.contains(&"OTHER".to_string()));
+        assert_eq!(
+            fake_environment_value(&env_dir, "OTHER").as_deref(),
+            Some("profile-b")
+        );
+
+        // B still restores on its own successful path once tmux is healthy.
+        std::fs::remove_file(&fail_marker).unwrap();
+        mgr.apply_binding("nession-isolation-b", 2, &[], &[])
+            .await
+            .expect("B's clear succeeds independently");
+        assert_eq!(
+            fake_environment_value(&env_dir, "OTHER").as_deref(),
+            Some("base-other")
+        );
+        let b = mgr
+            .observe("nession-isolation-b")
+            .await
+            .expect("B is observable");
+        assert!(b.managed_keys.is_empty());
+    }
 }
