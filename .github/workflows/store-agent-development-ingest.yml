@@ -149,3 +149,35 @@ jobs:
             echo "- Workflow State version: $(jq -r '.workflow_state_version // .state_version' "$RUNNER_TEMP/development-ingest-receipt.json")"
             echo "- No publisher/PR actions were granted to the model."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Only the independently authenticated Qwen candidate travels to the
+      # downstream Publisher. Historical #1997 Cursor Ingest remains unchanged.
+      - name: Select authenticated Qwen Publisher wake without credentials
+        id: qwen
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if jq -e --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" '
+            .schema_version == 1 and
+            .kind == "authenticated_qwen_development_checkpoint_receipt" and
+            (.status == "committed" or .status == "replayed") and
+            .ingester_run_id == $run and .ingester_sha == $sha and
+            .run_id > 0 and .issue > 0 and .attempt == 1 and
+            (.checkpoint_version > 0) and
+            (.checkpoint_commit_sha | test("^[a-f0-9]{40}$")) and
+            (.ciphertext_sha256 | test("^[a-f0-9]{64}$"))
+          ' "$RUNNER_TEMP/development-ingest-receipt.json" >/dev/null; then
+            echo "allow=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "allow=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload only bound Qwen Store Ingest receipt for separate Publisher
+        if: steps.qwen.outputs.allow == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-qwen-ingest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/development-ingest-receipt.json
+          if-no-files-found: error
+          retention-days: 3
