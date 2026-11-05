@@ -23,6 +23,7 @@ permissions:
   contents: read
   actions: write
   issues: read
+  pull-requests: read
 
 concurrency:
   group: agent-controller-dispatch-${{ inputs.issue_number }}-${{ inputs.action_id }}
