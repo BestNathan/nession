@@ -29,11 +29,18 @@ export function sealQwenDevelopmentProposal({
       plan.provider!==admission.provider||
       plan.environment!==admission.environment||
       plan.source_sha!==admission.input_sha||
+      snapshot.origin?.issue!==admission.issue||
+      snapshot.origin.action_id!==admission.action_id||
+      snapshot.origin.run_id!==admission.run_id||
+      snapshot.origin.task!==admission.task||
       !SHA.test(plan.source_sha??'')||!HEX.test(plan.harness_digest??'')||
       !HEX.test(admission.action_id??'')||
       !positive(admission.issue)||!positive(admission.run_id)||!positive(runAttempt)||
       patch?.kind!=='qwen_developer_bounded_patch'||
       patch.source_sha!==plan.source_sha||
+      patch.issue!==admission.issue||
+      patch.action_id!==admission.action_id||
+      patch.run_id!==admission.run_id||
       patch.agent_id!==plan.agent_id||
       patch.provider!==plan.provider||
       patch.harness_digest!==plan.harness_digest||
