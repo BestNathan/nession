@@ -63,3 +63,20 @@ This revision compared the mock directly with current `web/src/app/patterns/Sess
 
 This closes those three source-observable differences; it does **not** claim production pixel equivalence, interactive xterm correctness, or that the Workspace mock is complete. Browser/fixture overlay comparison remains necessary.
 
+
+
+## Source parity: fixed-column Terminal rendering (2026-11-05, #2758)
+
+A concrete mismatch in the previous mock: the Terminal had hardcoded `12.5px / 1.55` typography at phone widths, which is **not** the Nession App geometry. Production fits **96 canonical columns** (release default) to the available content width, with no App font-size minimum, using measured xterm cell widths and a 14 CSS-px release ceiling; App Terminal seeds at 11.5px/1.14 and has 14px x/y insets. Sources:
+`docs/design/terminal/terminal-sizing.md`,
+`web/src/platform/terminal-runtime/sizing.ts`,
+`web/src/app/fixture/FixtureTerminal.tsx`,
+`design/generated/terminal.ts`.
+
+This mock now:
+- Measures a browser DOM glyph ruler in the actual monospace fallback stack, bisects a font size at 0.05px resolution for **96 columns**, and centers the bounded content width within the 14px insets; it recalculates after 375/390/430 width changes and settled font loads.
+- Takes the exact generated Terminal theme's `#fff` background, `#24292f` foreground, `#0969da` cursor, rather than using a generic ring-colored cursor.
+- Keeps enough deterministic mock scrollback rows (160) to exercise reversible scroll clearance at the substantially smaller App font. Aligns directional-key presentation order with the production `physKeys.ts` inventory.
+- Removes an obsolete runtime `manifest.json` fetch that mutated the trusted publisher's **exact pinned HTML Source** href into a branch-like directory link. The trusted Pages publisher is now the sole source-link pinning owner.
+
+**Fidelity boundary:** DOM ruler measurement is an approximation, **not** xterm's measured-cell lifecycle, terminal rows, PTY buffer, ANSI parser, touch/IME, or pixel-perfect parity. This mock also uses the release default 96 columns, rather than an attached Session's authoritative `terminal_cols`. Real fixture screenshot comparison and browser tests remain required.

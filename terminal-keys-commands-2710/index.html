@@ -193,6 +193,38 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 .workspace-mock-header button{border:0;background:transparent;width:var(--nession-control-md);height:var(--nession-control-md);color:var(--nession-foreground);font-size:22px;border-radius:var(--nession-radius-control)}
 .workspace-mock-header h2{margin:0;font-size:var(--nession-typography-title-size);font-weight:var(--nession-typography-title-weight)}
 .workspace-mock-body{flex:1;min-height:0;background:var(--nession-background)}
+
+/*
+ * App Terminal fidelity pass against design/generated/terminal.ts +
+ * web/src/platform/terminal-runtime/sizing.ts (#2487, #2592).
+ * This is a DOM text mock, NOT an xterm renderer.
+ */
+.terminal{
+  padding:14px 14px 82px;
+  font-family:'JetBrains Mono Variable',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:var(--prototype-terminal-font-size,11.5px);
+  line-height:1.14;
+  color:#24292f;
+  background:#fff;
+  font-variant-ligatures:none;
+  word-break:normal;
+}
+.terminal .entry{
+  box-sizing:content-box;
+  width:var(--prototype-terminal-content-width,100%);
+  max-width:100%;
+  margin:0 auto;
+  min-height:1.14em;
+  white-space:pre;
+  overflow:hidden;
+}
+.terminal .entry.blank{height:1.14em}
+.terminal .cursor{
+  width:var(--prototype-terminal-cell-width,6px);
+  height:1em;
+  background:#0969da;
+  vertical-align:-1px;
+}
 </style>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 </head>
@@ -365,15 +397,67 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
     if(clearanceFrame)cancelAnimationFrame(clearanceFrame);
     clearanceFrame=requestAnimationFrame(()=>{clearanceFrame=0;syncTerminalScrollClearance();});
   }
-  const resizeObserver=new ResizeObserver(scheduleClearance);
+
+  // Source-guided DEMO font fitting (#2487), not a replacement for xterm's
+  // measured-cell implementation. DOM ruler uses the actual browser font advance,
+  // 96 canonical columns and no App minimum font size.
+  const MOCK_COLS=96;
+  const MOCK_FONT_CEILING=14; // release default, docs/design/terminal/terminal-sizing.md
+  const fontRuler=document.createElement("span");
+  fontRuler.textContent="0".repeat(32);
+  fontRuler.setAttribute("aria-hidden","true");
+  fontRuler.style.cssText="position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre;font-family:'JetBrains Mono Variable',ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-ligatures:none";
+  document.body.appendChild(fontRuler);
+  let lastMockGridWidth=-1;
+  const measureMockCell=(size)=>{
+    fontRuler.style.fontSize=size+"px";
+    const cell=fontRuler.getBoundingClientRect().width/32;
+    return Number.isFinite(cell)&&cell>0?cell:null;
+  };
+  function fitMockTerminal(force=false){
+    const style=getComputedStyle(term);
+    const available=term.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+    if(!Number.isFinite(available)||available<=0)return;
+    if(!force&&Math.abs(lastMockGridWidth-available)<.1)return;
+    const maxCell=measureMockCell(MOCK_FONT_CEILING);
+    if(maxCell===null)return;
+    let selected=MOCK_FONT_CEILING,cell=maxCell;
+    if(maxCell*MOCK_COLS>available){
+      let low=.1,high=MOCK_FONT_CEILING;
+      for(let probe=0;probe<16&&high-low>.05;probe++){
+        const candidate=Math.round(((low+high)/2)/.05)*.05;
+        if(candidate<=low||candidate>=high)break;
+        const measured=measureMockCell(candidate);
+        if(measured===null){high=candidate;continue;}
+        if(measured*MOCK_COLS<=available){selected=candidate;cell=measured;low=candidate;}
+        else high=candidate;
+      }
+    }
+    const atSelected=measureMockCell(selected);
+    if(atSelected===null)return;
+    cell=atSelected;
+    const wasFollowing=following&&!userDragActive,oldTop=term.scrollTop;
+    term.style.setProperty("--prototype-terminal-font-size",selected+"px");
+    term.style.setProperty("--prototype-terminal-cell-width",cell+"px");
+    term.style.setProperty("--prototype-terminal-content-width",(cell*MOCK_COLS)+"px");
+    term.dataset.mockTerminalCols=String(MOCK_COLS);
+    term.dataset.mockTerminalFontSize=selected.toFixed(2);
+    term.dataset.mockCellFit=String(cell*MOCK_COLS<=available+.5);
+    lastMockGridWidth=available;
+    if(wasFollowing)term.scrollTop=term.scrollHeight;
+    else term.scrollTop=oldTop;
+  }
+  document.querySelector("[data-np-device]")?.addEventListener("np:resize",()=>{fitMockTerminal();scheduleClearance()});
+  document.fonts?.ready.then(()=>fitMockTerminal(true)).catch(()=>{});
+  const resizeObserver=new ResizeObserver(()=>{fitMockTerminal();scheduleClearance()});
   resizeObserver.observe(dock);
   resizeObserver.observe(phone);
-  window.addEventListener("resize",scheduleClearance);
+  window.addEventListener("resize",()=>{fitMockTerminal();scheduleClearance()});
   if(window.visualViewport)window.visualViewport.addEventListener("resize",scheduleClearance);
   // Enough scrollback to prove panel clearance actually moves the live cursor:
   // a short static fixture would already fit above the overlay by coincidence.
   const fixturePrompt=term.lastElementChild;
-  for(let i=1;i<=48;i++){
+  for(let i=1;i<=160;i++){
     const row=document.createElement("div");
     row.className="entry";
     row.textContent="test capsule_scroll::case_"+String(i).padStart(2,"0")+" ... ok";
@@ -450,7 +534,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
       body='<div class="panel-body keys-body">'+
         '<div><div class="caption">'+(modifier?"":"Common shortcuts")+'</div>'+code+'</div>'+
         '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
-        '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["←","↑","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
+        '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["↑","←","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
         '</div>';
     }else if(view==="commands"){
       body='<div class="panel-body commands-body"><div class="commands-head"><span>Saved commands</span><span>'+saved.length+' commands</span></div><div class="commands">'+
@@ -479,15 +563,10 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
   });
   upper.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches("[data-insert][role=button]")){e.preventDefault();e.target.click();}});
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&view){if(modifier){modifier="";render();}else open("");}});
-  // Pages manifest identifies the source revision that actually got published.
-  // Fall back to branch source when the document is opened locally or elsewhere.
-  fetch("../manifest.json").then(r=>r.ok?r.json():null).then(m=>{
-    const sha=m&&(m.prototype_sha||m.source_sha||m.sha);
-    if(typeof sha==="string"&&/^[0-9a-f]{40}$/.test(sha)){
-      document.querySelectorAll(".source").forEach(a=>{a.href="https://github.com/BestNathan/nession/tree/"+sha+"/terminal-keys-commands-2710";});
-    }
-  }).catch(()=>{});
+  // GitHub Source href is pinned by trusted Pages publisher. Do NOT rewrite it
+  // from a manifest or orphan branch at runtime; the exact HTML path matters.
   render();
+  fitMockTerminal();
   scheduleClearance();
 })();
 </script>
