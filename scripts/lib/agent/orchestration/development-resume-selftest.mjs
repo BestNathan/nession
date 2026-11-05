@@ -136,9 +136,15 @@ try{
   key.fill(0);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 const workflow=fs.readFileSync('.github/workflows/agent-develop.yml','utf8');
-const [beforeDeveloper,developer]=workflow.split('\n  developer:\n');
+const [beforeDeveloper,developerAndQwen]=workflow.split('\n  developer:\n');
+const [developer,qwenJobs]=developerAndQwen.split('\n  qwen-restore:\n');
+const [qwenRestore,qwenDeveloper]=qwenJobs.split('\n  qwen-developer:\n');
 assert.ok(beforeDeveloper.includes('STORE_WRITER_PRIVATE_KEY:'));
 assert.ok(!developer.includes('STORE_WRITER_PRIVATE_KEY:'));
+assert.ok(qwenRestore.includes('STORE_WRITER_PRIVATE_KEY:'));
+assert.ok(!qwenDeveloper.includes('STORE_WRITER_PRIVATE_KEY:'));
+assert.ok(!qwenDeveloper.includes('STORE_APP_TOKEN:'));
+assert.ok(!qwenDeveloper.includes('PUBLISHER_GITHUB_TOKEN:'));
 assert.ok(beforeDeveloper.includes('development-worker-claim-'));
 assert.ok(beforeDeveloper.indexOf('development-worker-claim-')<beforeDeveloper.indexOf('  restore:'));
 assert.ok(developer.includes('needs: [claim, restore]'));
