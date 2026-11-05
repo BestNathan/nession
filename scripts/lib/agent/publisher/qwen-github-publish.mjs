@@ -189,3 +189,52 @@ export async function publishTrustedQwenGitHubPR({
     pull_request:pr.number,head_sha:newCommit.sha,
     files:blobs.map(b=>({path:b.path,sha256:b.sha256,blob_sha:b.git_blob_sha}))});
 }
+
+ 
+// Safe reconciliation after *any* ambiguous GitHub POST. This performs GET
+// only; it never interprets a Store Intent as permission to POST again.
+export async function readBackQwenPublishedPR({preflight,intent,sourceCheckout,api}){
+  if(typeof api!=='function')reject('read-only PR evidence client required');
+  const record=validateQwenPublisherIntent(intent?.record);
+  if(!['committed','reconcile'].includes(intent?.status)||
+      !SHA.test(intent.store_commit_sha??''))
+    reject('missing original Store Intent for PR readback');
+  const bytes=materializeQwenTrustedBlobs({sourceCheckout,preflight,
+    intent:{...intent,status:'committed',may_publish:true}});
+  const listed=await api('GET','pulls?state=all&head=BestNathan:'+
+    encodeURIComponent(record.branch)+'&per_page=100');
+  if(!Array.isArray(listed)||listed.length!==1)
+    reject('no unique existing Qwen Action PR; do not retry GitHub POST');
+  const pr=await get(api,'pulls/'+listed[0].number);
+  if(pr.state!=='open'||pr.number!==listed[0].number||
+      pr.head?.ref!==record.branch||
+      pr.head?.repo?.full_name!==REPO||
+      pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
+      !SHA.test(pr.head.sha??''))
+    reject('existing Qwen PR changed identity or is closed');
+  const branch=await get(api,'git/ref/heads/'+record.branch);
+  expect(branch.object?.sha,pr.head.sha,'PR/ref HEAD');
+  const commit=await get(api,'git/commits/'+pr.head.sha);
+  if(!Array.isArray(commit.parents)||commit.parents.length!==1||
+      commit.parents[0].sha!==record.target_main_sha||
+      !SHA.test(commit.tree?.sha??''))
+    reject('Qwen PR ancestry is not exact original main SHA');
+  const files=await api('GET','pulls/'+pr.number+'/files?per_page=100');
+  if(!Array.isArray(files)||files.length!==bytes.length||
+      new Set(files.map(x=>x.filename)).size!==bytes.length||
+      files.some(file=>!bytes.some(blob=>blob.path===file.filename&&
+        file.status==='modified'&&file.sha===blob.git_blob_sha)))
+    reject('Qwen PR files drifted from immutable signed Worker patch');
+  return Object.freeze({schema_version:1,
+    kind:'authenticated_qwen_publisher_pr_receipt',
+    status:'published_verified_by_github',issue:record.issue,
+    action_id:record.action_id,source_run_id:record.worker_run_id,
+    source_run_attempt:1,publisher_run_id:record.publisher_run_id,
+    publication_intent_store_sha:intent.store_commit_sha,
+    checkpoint_commit_sha:record.checkpoint_commit_sha,
+    target_main_sha:record.target_main_sha,
+    patch_sha256:record.patch_sha256,branch:record.branch,
+    pull_request:pr.number,head_sha:pr.head.sha,
+    files:bytes.map(x=>({path:x.path,sha256:x.sha256,
+      blob_sha:x.git_blob_sha}))});
+}
