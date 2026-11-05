@@ -6,6 +6,9 @@ name: Store / Agent Review Result Ingest
 on:
   repository_dispatch:
     types: [nession-review-metrics-ingested]
+  # Exact one-time owner recovery for the already persisted #1997 verdict.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -39,7 +42,14 @@ jobs:
          github.actor == 'github-actions[bot]' &&
          github.event.sender.login == 'github-actions[bot]') ||
         (github.event_name == 'workflow_dispatch' &&
-         github.actor == 'BestNathan')
+         github.actor == 'BestNathan') ||
+        (github.event_name == 'issue_comment' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan' &&
+         github.event.issue.number == 1997 &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession ingest-review issue=1997 run=41962609841 attempt=1')
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -61,8 +71,8 @@ jobs:
           EVENT_RUN_ID: ${{ github.event.client_payload.source_run_id }}
           EVENT_ATTEMPT: ${{ github.event.client_payload.source_run_attempt }}
           EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
-          OWNER_RUN_ID: ${{ inputs.source_run_id }}
-          OWNER_ATTEMPT: ${{ inputs.source_run_attempt }}
+          OWNER_RUN_ID: ${{ github.event_name == 'issue_comment' && '41962609841' || inputs.source_run_id }}
+          OWNER_ATTEMPT: ${{ github.event_name == 'issue_comment' && '1' || inputs.source_run_attempt }}
         shell: bash
         run: |
           set -euo pipefail

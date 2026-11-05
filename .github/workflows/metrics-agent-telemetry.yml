@@ -22,6 +22,10 @@ on:
       - Agent / Claude Resume Seed
       - Agent / Claude Resume Verify
     types: [completed]
+  # A bot-dispatched Reviewer Run cannot rely on workflow_run chaining.
+  # This wake is NOT a trusted result: the main-owned writer rechecks REST.
+  repository_dispatch:
+    types: [nession-agent-review-completed]
 permissions:
   actions: read
   contents: write
@@ -43,6 +47,11 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       (
         (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'repository_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.event.action == 'nession-agent-review-completed' &&
+          github.actor == 'github-actions[bot]' &&
+          github.event.sender.login == 'github-actions[bot]') ||
         (github.event_name == 'workflow_run' &&
           (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
           (
@@ -112,12 +121,12 @@ jobs:
       # One attempt-scoped artifact query. A source without Agent telemetry
       # is a no-op; the five-minute scheduled scan owns missed-run replay.
       - name: Detect source Agent telemetry
-        if: github.event_name == 'workflow_run'
+        if: github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch'
         id: event_artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id || github.event.client_payload.source_run_id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.event.client_payload.source_run_attempt }}
         run: |
           set -euo pipefail
           [[ "${EVENT_RUN_ID}" =~ ^[1-9][0-9]*$ ]] || exit 1
@@ -159,10 +168,12 @@ jobs:
           fi
 
       - name: Resolve source run
-        if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
+        if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
         id: source
         env:
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id || github.event.client_payload.source_run_id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.event.client_payload.source_run_attempt }}
+          EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
           RECOVERY_RUN_ID: ${{ steps.reconcile.outputs.run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -175,7 +186,29 @@ jobs:
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          # The dispatch sender cannot assert a successful source by itself.
+          # Only a tiny bounded readiness wait applies to the newly introduced
+          # bot wake: the notification job is still finishing when dispatched.
+          if [[ "$GITHUB_EVENT_NAME" == repository_dispatch ]]; then
+            [[ "$EVENT_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$EVENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            for attempt in 1 2 3 4 5 6 7 8; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"                 > "${RUNNER_TEMP}/telemetry-source-run.json"
+              if jq -e '.status == "completed"'                 "${RUNNER_TEMP}/telemetry-source-run.json" >/dev/null; then break; fi
+              sleep 3
+            done
+            jq -e --arg repo "$GITHUB_REPOSITORY"               --arg sha "$EVENT_SOURCE_SHA"               --argjson id "$run_id" --argjson attempt "$EVENT_RUN_ATTEMPT" '
+              .id == $id and .run_attempt == $attempt and .head_sha == $sha and
+              .path == ".github/workflows/agent-review.yml" and
+              .name == "Agent / Review" and .event == "workflow_dispatch" and
+              .head_branch == "main" and .status == "completed" and
+              .conclusion == "success" and .repository.full_name == $repo and
+              .head_repository.full_name == $repo and
+              (.actor.login == "BestNathan" or .actor.login == "github-actions[bot]")
+            ' "${RUNNER_TEMP}/telemetry-source-run.json" >/dev/null
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          fi
           # GitHub metadata, not Issue text or a scheduled run ID, determines
           # source identity. Validate origin and completion before artifacts.
           jq -e --arg repo "${GITHUB_REPOSITORY}" '
@@ -206,8 +239,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.source.outputs.run_id }}
           RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id || github.event.client_payload.source_run_id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.event.client_payload.source_run_attempt }}
         run: |
           set -euo pipefail
           # Reuse the event listing ONLY if the run and attempt still match.

@@ -177,12 +177,13 @@
         {
           "workflow": ".github/workflows/metrics-agent-telemetry.yml",
           "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
-          "execution": "main-owned workflow_run and schedule",
+          "execution": "main-owned workflow_run, schedule and authenticated bot Reviewer repository_dispatch",
           "depends_on": [
             ".github/workflows/agent-provider-smoke.yml",
             ".github/workflows/agent-sc-acceptance.yml",
             ".github/workflows/agent-issue-audit.yml",
-            ".github/workflows/acceptance-orchestrator.yml"
+            ".github/workflows/acceptance-orchestrator.yml",
+            ".github/workflows/agent-review.yml"
           ],
           "permissions": [
             "contents: write"
