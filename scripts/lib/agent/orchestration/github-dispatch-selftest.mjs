@@ -17,6 +17,23 @@ let state=startDevelopment(registry,request,authority);
 const item=reconcileOutbox(state).pending[0];
 const signer={key,key_id:'control-v1',issuer_run_id:222,now,ttl_ms:600000};
 const {ticket,body}=issueDispatchTicket(state,item.id,registry,signer);
+
+const unsignedRepairState={...state,phase:'repair',target_sha:b,repair_attempts:1,
+  outbox:[{id:'e'.repeat(64),task:{type:'dispatch',role:'developer',
+    agent_id:'dev-cursor-01',task:'repair',sha:b,resume:true},
+    status:'pending',attempts:0,receipt:null}]};
+assert.throws(()=>issueDispatchTicket(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+assert.throws(()=>planGitHubDispatch(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+for(const wrong of [false,undefined]){
+  const invalid={...unsignedRepairState,outbox:[
+    {...unsignedRepairState.outbox[0],task:{
+      ...unsignedRepairState.outbox[0].task,resume:wrong}}]};
+  assert.throws(()=>issueDispatchTicket(invalid,'e'.repeat(64),registry,signer),
+    /Store-bound native checkpoint/);
+}
+
 const plan=planGitHubDispatch(state,item.id,registry,signer);
 assert.equal(plan.workflow_id,'agent-develop.yml');
 assert.deepEqual(verifyDispatchTicket(ticket,keyring,{now}),body);
