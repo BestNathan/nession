@@ -44,6 +44,21 @@ function approvedPaths(paths){
     fail('missing or unsafe trusted edit allowlist');
   return Object.freeze([...paths].sort());
 }
+// A production Agent may discover its own target files, but cannot select
+// its own authority. This trusted, code-owned scope permits edits only to
+// existing tracked application source/docs, up to eight files and 32 KiB of
+// real Git patch. Governance, CI, Agent roles, dotfiles and secrets are out.
+export function allowedQwenTrackedPath(relative){
+  if(typeof relative!=='string'||relative.length>240||!FILE.test(relative))
+    return false;
+  const parts=relative.split('/');
+  if(parts.some(x=>x==='.'||x==='..'||x.startsWith('.')))return false;
+  if(['gates','automation','secrets','node_modules'].includes(parts[0]))
+    return false;
+  if(['AGENTS.md','VISION.md','PRINCIPLE.md'].includes(relative))
+    return false;
+  return /\\.(?:rs|go|ts|tsx|js|jsx|mjs|json|md|css|html|toml)$/.test(relative);
+}
 function ordinaryFile(root,relative){
   let target=root;
   const pieces=relative.split('/');
@@ -96,13 +111,28 @@ export function prepareQwenDevelopmentSource({
     run_id:admission.run_id,task:admission.task});
   return Object.freeze({plan,origin,workspace:root,allowed_files:files});
 }
+// The allowed set is derived from the trusted code policy and the pinned
+// Git index after Store-backed admission, never from Issue content or model
+// output. No static per-Issue allowlist or Controller protocol change needed.
+export function prepareQwenTrackedSource({
+  admission,registry,environment,cliVersion,workspace,
+}){
+  const plan=bindQwenDeveloper(admission,registry,environment,{cliVersion});
+  const root=verifyCheckout(workspace,plan.source_sha,[]);
+  const origin=Object.freeze({issue:admission.issue,action_id:admission.action_id,
+    run_id:admission.run_id,task:admission.task});
+  return Object.freeze({plan,origin,workspace:root,allowed_files:[],
+    scope:'tracked-safe-v1'});
+}
 function expectedWorkspace(snapshot){
   if(!snapshot||!SHA.test(snapshot.plan?.source_sha??'')||
       typeof snapshot.workspace!=='string'||
       !path.isAbsolute(snapshot.workspace)||
       !Array.isArray(snapshot.allowed_files))
     fail('missing verified source snapshot');
-  const files=approvedPaths(snapshot.allowed_files);
+  const files=snapshot.scope==='tracked-safe-v1'&&
+    snapshot.allowed_files.length===0?[]:
+    approvedPaths(snapshot.allowed_files);
   let root;
   try{root=fs.realpathSync(snapshot.workspace);}catch{fail('missing source workspace');}
   if(root!==snapshot.workspace||
@@ -120,13 +150,17 @@ function checkedGitPatch(snapshot){
     fail('model created or retained ignored workspace artifacts');
   const status=git(root,'status','--porcelain=v1','-z','--untracked-files=all');
   const rows=status.split('\0').filter(Boolean);
-  if(!rows.length||rows.length>files.length)fail('missing or unbounded source edits');
+  if(!rows.length||rows.length>(files.length||8))
+    fail('missing or unbounded source edits');
   const changed=new Set();
   for(const row of rows){
     if(!row.startsWith(' M ')||row.length<4)
       fail('untracked, index, rename or delete change prohibited');
     const name=row.slice(3);
-    if(!files.includes(name)||changed.has(name))
+    if((files.length?!files.includes(name):
+      (!allowedQwenTrackedPath(name)||
+        git(root,'ls-files','--error-unmatch','--',name).trim()!==name))||
+      changed.has(name))
       fail('edit outside approved source paths');
     ordinaryFile(root,name);
     changed.add(name);
