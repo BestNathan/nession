@@ -537,11 +537,14 @@ jobs:
             node scripts/lib/agent/orchestration/qwen-development-worker.mjs \
               /admission.json /output
       - name: Upload canonical real Qwen Developer telemetry
+        # A failed model attempt is still an Agent invocation and must retain
+        # its native-observable failure telemetry; no Store/PR publication.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-developer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/qwen-output/agent-telemetry.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
       - name: Upload only bounded patch and encrypted native Session
         uses: actions/upload-artifact@v4
