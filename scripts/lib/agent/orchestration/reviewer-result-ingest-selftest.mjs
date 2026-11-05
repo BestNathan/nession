@@ -30,8 +30,8 @@ const artifacts={total_count:2,artifacts:[{name:'review-claim-335-1'},
   {name:'agent-result-335-1-'+actionId}]};
 assert.equal(canonicalActionFromArtifacts(artifacts,run),actionId);
 assert.throws(()=>canonicalActionFromArtifacts({...artifacts,
-  artifacts:[artifacts.artifacts[1],artifacts.artifacts[1]]}),/duplicate/);
-assert.throws(()=>canonicalActionFromArtifacts({...artifacts,total_count:3}),/incomplete/);
+  artifacts:[artifacts.artifacts[1],artifacts.artifacts[1]]},run),/duplicate/);
+assert.throws(()=>canonicalActionFromArtifacts({...artifacts,total_count:3},run),/incomplete/);
 const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:repo,
   GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW:'Store / Agent Review Result Ingest',
   GITHUB_SHA:main,GITHUB_RUN_ATTEMPT:'1',GITHUB_EVENT_NAME:'repository_dispatch',
