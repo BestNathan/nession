@@ -184,7 +184,7 @@ export function validateRecoveryRouting(workflow){
     fail('trusted reconciliation or immutable Store Gate omitted');
   if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'")||
      !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'")||
-     !job.includes("if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
+     !job.includes("if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
      job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
     fail('empty telemetry events must skip history and scheduled recovery; retain source precedence');
@@ -201,10 +201,22 @@ export function validateRecoveryRouting(workflow){
     fail('missing empty-artifact no-op guard in a privileged ingest consumer');
   const scopedCounts=job.match(/agent-telemetry-reconcile\.mjs artifact-count/g)??[];
   if(scopedCounts.length!==2 ||
-     !job.includes('EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}') ||
+     !job.includes('EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.event.client_payload.source_run_attempt }}') ||
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
+  if(!trigger.includes('    types: [nession-agent-review-completed]') ||
+     !job.includes("github.event.action == 'nession-agent-review-completed'") ||
+     !job.includes("github.actor == 'github-actions[bot]'") ||
+     !job.includes("github.event.sender.login == 'github-actions[bot]'") ||
+     !job.includes("github.event_name == 'repository_dispatch'") ||
+     !job.includes('EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}') ||
+     !job.includes('.head_sha == $sha') ||
+     !job.includes('.run_attempt == $attempt') ||
+     !job.includes('.path == ".github/workflows/agent-review.yml"') ||
+     !job.includes('event == "workflow_dispatch"') ||
+     !job.includes('sleep 3'))
+    fail('untrusted or unbounded bot Reviewer Metrics wake');
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
@@ -230,6 +242,14 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("node scripts/agent-telemetry-reconcile.mjs select", "echo skip")
   ),/Gate omitted/);
+  for(const candidate of [
+    workflow.replace("github.event.sender.login == 'github-actions[bot]'",
+      "github.event.sender.login == 'attacker'"),
+    workflow.replace('EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}',
+      'EVENT_SOURCE_SHA: trusted'),
+    workflow.replace('sleep 3', 'sleep 300'),
+  ])assert.throws(()=>validateRecoveryRouting(candidate),
+    /untrusted or unbounded bot Reviewer Metrics wake/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("Verified failed Provider telemetry archived; no success-only Acceptance wake",
       "Always wake Acceptance irrespective of Provider conclusion")
@@ -255,7 +275,7 @@ function selfTest(){
   )),/empty telemetry events/);
   // Empty telemetry must not proceed through source resolution after preflight.
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
+    "if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
     "if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
