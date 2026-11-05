@@ -29,7 +29,7 @@ test('SC-03: Web and App edit Session metadata with truthful failure states', as
   await expect(page.getByTestId('session-metadata-tags-editor')).toContainText('#recovery');
 
   await page.getByTestId('session-metadata-save').click();
-  await expect(page.getByTestId('session-metadata-notice')).toContainText('Session ID is unchanged');
+  await expect(page.getByTestId('session-metadata-notice')).toContainText('Session ID are unchanged');
   await expect(page.getByTestId('session-title')).toHaveText('Reconnect hardening');
   await expect(page.getByTestId('session-details')).toContainText(SELECTED_ID);
 

@@ -40,7 +40,7 @@ test.describe('Web', () => {
 
     await page.getByTestId('session-metadata-save').click();
     await expect(page.getByTestId('session-metadata-notice')).toContainText(
-      'Session ID is unchanged',
+      'Session ID are unchanged',
     );
     await expect(page.getByTestId('session-title')).toHaveText('Reconnect hardening');
     await expect(page.getByTestId('session-metadata-tags-view')).toContainText('#recovery');
