@@ -36,6 +36,21 @@ function decoratedHtml(html, sha, path) {
 .nession-preview-nav a:focus-visible{outline:3px solid #43c8b0!important;outline-offset:2px!important}
 @media(max-width:580px){.nession-preview-nav{left:10px!important;right:10px!important;bottom:10px!important;justify-content:space-between!important;gap:6px!important;padding:9px!important}.nession-preview-nav>span{display:none!important}.nession-preview-nav a{font-size:11px!important}}
 </style>`;
+  // #2758: a structured review page owns its own minimal gallery/source nav.
+  // The publisher still pins the source to the exact immutable orphan SHA.
+  // Legacy mocks keep the floating footer as a compatibility fallback.
+  if (/<body\b[^>]*\bdata-nession-prototype-frame="v1"[^>]*>/i.test(html)) {
+    const galleryLink = /<a\s+data-nession-gallery-link\s+href="\.\.\/\.\.\/#\/prototypes"[^>]*>/gi;
+    const sourceLink = /<a\b(?=[^>]*\bdata-nession-source-link(?:\s|>))(?=[^>]*\bhref="[^"]*")[^>]*>/gi;
+    const galleries = [...html.matchAll(galleryLink)];
+    const sources = [...html.matchAll(sourceLink)];
+    if (galleries.length !== 1 || sources.length !== 1) {
+      throw new Error('Structured prototype frame must expose one gallery and one source link: ' + path);
+    }
+    const pinned = sources[0][0].replace(/href="[^"]*"/, 'href="' + source + '"');
+    return html.replace(sources[0][0], pinned)
+      .replace(/<\/head\s*>/i, csp + '\n</head>');
+  }
   return html.replace(/<\/head\s*>/i, csp + '\n</head>').replace(/<\/body\s*>/i, bar + '\n</body>');
 }
 

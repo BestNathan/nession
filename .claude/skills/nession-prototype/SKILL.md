@@ -14,7 +14,7 @@ A prototype is a way to **test a product interaction and settle uncertain behavi
 Before authoring:
 
 1. Read root `AGENTS.md`, `VISION.md`, `PRINCIPLE.md`, the affected `docs/design/*` sources and the owning Requirement/Bug.
-2. For UI patterns, read [nession-web-design](../nession-web-design/SKILL.md); when changing production Web/design sources, also read their scoped `AGENTS.md`. **Do not edit production Web or canonical design sources as part of a standalone mock prototype.**
+2. For UI patterns, read [nession-web-design](../nession-web-design/SKILL.md) and use **surface-specific visual references**: [presentation frame](references/presentation-frame.md) for all prototypes, [Web/App shell](references/web-app-shell.md) for full pages, [Terminal/Capsule](references/terminal.md) when Terminal appears, and [Workspace/capabilities](references/workspace.md) when Workspace appears. Read only those relevant to this mock. When changing production Web/design sources, also read their scoped `AGENTS.md`. **Do not edit production Web or canonical design sources as part of a standalone mock prototype.**
 3. Inspect `origin/prototype`, its `README.md` / gallery `index.html`, and any relevant existing prototype; discover whether the same interaction is already represented. **Reuse/extend the owning prototype directory** for the same Requirement rather than making duplicates.
 4. Read the Issue's `Prototype` decision. If absent, ask the authoring workflow to record the decision before substantial prototype work; do not invent a separate Requirement for the prototype alone when the interaction is already owned.
 
@@ -37,6 +37,7 @@ This is a bidirectional consistency obligation: revising a mock to settle a prod
 
 Write a small scenario/fidelity contract in the prototype `README.md` **before designing screens**:
 
+- **Product surface / fidelity baseline:** Web, App, Terminal, Workspace or an isolated capability; which current design docs, source components, fixture and token revision does the mock follow? Record any intentional divergence as a candidate design.
 - **Question/decision:** what user behavior, state transition, layout/ownership or interaction tradeoff is unresolved? What observation would settle it?
 - **Entry and user goal:** how does the user arrive, what do they see before any action, what ends the flow?
 - **Representative states:** blank/initial, loading/streaming (if relevant), success, error/unavailable, empty, partial input, return/reopen, and irreversible action confirmation where relevant.
@@ -100,6 +101,20 @@ If these commands conflict with a modified `prototype` branch's current catalog/
 
 ## 4. Build the interactive design
 
+### 4a. Product viewport and presentation harness (mandatory)
+
+When a mock **represents a Nession Web/App page**, its product viewport **must match Nession's current core visual language and layout relationships**. Select [Web/App shell](references/web-app-shell.md), [Terminal](references/terminal.md) and/or [Workspace](references/workspace.md) references before designing. Follow canonical `docs/design/`, generated `--nession-*` tokens, real component patterns and deterministic fixture screens. A standalone HTML approximation is allowed, but record the visual baseline revision and limitations; do not create a competing palette or shell. An explicitly proposed redesign is the only exception: compare it with the existing baseline in README and the **external** harness.
+
+Apply the [shared presentation frame](references/presentation-frame.md) to every prototype:
+
+- **Standard page anatomy — overview → preview → details:** the top header carries requirement title/goal, Issue, PR, pinned Source and revision; the middle hosts one dominant, full-function product viewport with external size/reset controls; the lower area contains behavior descriptions, design decisions, explicit fidelity gaps and verification. Use [presentation frame](references/presentation-frame.md) and its shared `prototype-frame-2758` assets rather than reinventing these review-page elements per Issue.
+- **Product viewport only:** actual end-user UI and genuine state messages. No prototype identity, mock badges, developer logs, source links, fixture selectors, or test instructions inside Terminal/Workspace/header/capsule.
+- **True-size preview:** show the App or Web target at the specified CSS pixel width/height, without `zoom`, `transform:scale` or fake screenshot-based interactions. On narrow browsers, permit horizontal stage scrolling rather than distorting the product. A 1:1 viewport is **not** proof of pixel-identical styling; compare with actual product fixtures and record approximation gaps.
+- **Trusted publication:** structured review pages opt into `data-nession-prototype-frame="v1"` and provide the gallery and Source anchors required by the publisher; its exact-SHA pin replaces the legacy floating overlay. Existing unframed mocks keep the legacy nav and are migrated only when relevant.
+- **Migration:** new and materially updated mocks follow this rule. Existing unrelated published mocks are not bulk rewritten or silently repinned.
+
+These references are **lookup maps, not competing design authorities**. If source and reference differ, check upstream Product/Design owners and update the reference rather than freezing stale values.
+
 1. **Begin with behavior, not arbitrary pages.** Mock real Nession nouns (Agent, Session, Terminal, Git, File, etc.) and scenario-relevant transitions; keep UI consistent with current Vision, Principles and appropriate Nession design-system roles.
 2. Make all visible actionable controls **work inside the mock**, update state deterministically, and show a result or an explicit disabled/unavailable explanation. Avoid inert buttons, fake network spinners that never settle, or a form that never submits.
 3. Preserve business meaning: a UI-only `Create Session` simulation must require an explicit user submit; merely showing a form or receiving model text cannot create a resource. Closing a Scene, message or component must not imply killing a backend Session.
@@ -118,6 +133,7 @@ Verify **what the prototype claims**, not unrelated production invariants:
 - **Deterministic behavior:** run provided smoke tests and negative-path tests (invalid input, unavailable data, duplicate submit, stale state/reference, reset/replay); report exact commands, counts and results.
 - **Real browser:** open the published/local page with an actual browser; click through the primary scenario, inspect desktop and narrow viewport, keyboard/focus/scroll, console errors and resource loads. Record screenshots or a concise reproducible browser walkthrough when possible.
 - **Fidelity:** separate `mock smoke passed`, `browser interaction verified`, `live API integration verified` and `trusted production Acceptance` in both README and Issue.
+- **Viewport/harness separation:** compare the simulated product area with the current relevant Web/App fixture, Terminal or Workspace code at desktop and narrow widths. Verify all prototype-only notes/switches/inspectors remain outside; record whether pixel/interaction comparison was actually browser-tested, source-reviewed, or unverified.
 
 **Never report browser verification because files exist, a parser smoke passed, a third-party URL was constructed, or an external preview service usually works.** If no browser is available, explicitly mark it unverified. Browser/design/E2E proof for production changes remains owned by `nession-web-design` and `nession-acceptance`, not this Skill.
 
