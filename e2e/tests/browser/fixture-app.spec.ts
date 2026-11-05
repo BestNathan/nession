@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openCapsuleCapability } from '../../helpers/capsule';
 import { openFixtureFile } from '../../helpers/fixtureVisual';
+import { shellAnchor, swipe } from '../../acceptance/shared/swipe-2724-cases.cjs';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes
@@ -335,6 +336,66 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await page.getByTestId('app-page-back').click();
   await expect(page.getByTestId('app-page-header')).toContainText('Files');
   await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
+});
+
+test('switching from a pushed Files detail to an Agent root restores the shell return swipe (#2780)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await page.getByTestId('app-header-workspace').click();
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
+  await openFixtureFile(page);
+  await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+
+  // The Capsule stays available at every depth (#1347). Switching to a root
+  // capability must move the shell's pager with it, not leave the Files depth
+  // owner fencing the Agent root.
+  await page.getByTestId('workspace-tool-agent').click();
+  await expect(page.getByTestId('app-page-header')).toContainText('Agent');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
+
+  const anchor = await shellAnchor(page);
+  await swipe(page, {
+    from: { x: anchor.leftX, y: anchor.y },
+    to: { x: anchor.rightX, y: anchor.y },
+  });
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
+  await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+});
+
+test('the shell return swipe still respects a pushed detail and its dirty guard (#2780)', async ({ page }) => {
+  await page.goto('/#/fixture/app');
+  await page.getByTestId('app-header-workspace').click();
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
+  await openFixtureFile(page);
+
+  // A pushed detail owns its leave: the shell must not discard the open
+  // document behind the capability's Back.
+  let anchor = await shellAnchor(page);
+  await swipe(page, {
+    from: { x: anchor.leftX, y: anchor.y },
+    to: { x: anchor.rightX, y: anchor.y },
+  });
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
+  await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
+
+  // A dirty editor still asks before leaving through that Back.
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.type('draft');
+  await page.getByTestId('app-page-back').click();
+  await expect(page.getByRole('alertdialog')).toContainText('Unsaved changes');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  // Switching to a root capability now releases the pager, and the edit is
+  // untouched by that switch (no dialog, no discard).
+  await page.getByTestId('workspace-tool-agent').click();
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to terminal');
+  anchor = await shellAnchor(page);
+  await swipe(page, {
+    from: { x: anchor.leftX, y: anchor.y },
+    to: { x: anchor.rightX, y: anchor.y },
+  });
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
 });
 
 /**
