@@ -8,6 +8,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {bindQwenDeveloper} from './qwen-developer-policy.mjs';
 import {toolUseNames} from '../providers/claude-stream.mjs';
+import {validPublisherFile} from '../publisher/patch-preflight.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const FILE=/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/;
@@ -57,6 +58,9 @@ export function allowedQwenTrackedPath(relative){
     return false;
   if(['AGENTS.md','VISION.md','PRINCIPLE.md'].includes(relative))
     return false;
+  // The Publisher's canonical protected-path owner is authoritative even
+  // when the model only gets Read/Edit/Write tools.
+  try{validPublisherFile(relative);}catch{return false;}
   return /\\.(?:rs|go|ts|tsx|js|jsx|mjs|json|md|css|html|toml)$/.test(relative);
 }
 function ordinaryFile(root,relative){
