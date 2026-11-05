@@ -100,13 +100,8 @@ function expectedWorkspace(snapshot){
 // An observed model success is never accepted without an independently
 // checked real Git diff. No untracked files, index writes, renames, deletes,
 // symlinks, submodules or modifications outside the trusted allowlist.
-export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
+function checkedGitPatch(snapshot){
   const {root,files}=expectedWorkspace(snapshot);
-  const observed=Array.isArray(toolNames)?toolNames:null;
-  if(!observed||!observed.includes('Read')||
-      !observed.some(x=>x==='Edit'||x==='Write')||
-      observed.some(x=>!['Read','Edit','Write'].includes(x)))
-    fail('required actual restricted native Read/Edit evidence missing');
   if(ignoredArtifacts(root).length)
     fail('model created or retained ignored workspace artifacts');
   const status=git(root,'status','--porcelain=v1','-z','--untracked-files=all');
@@ -148,4 +143,29 @@ export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
     harness_digest:snapshot.plan.harness_digest,
     paths:[...changed].sort(),patch_sha256:hash(patch),
     patch_bytes:Buffer.byteLength(patch),patch});
+}
+
+// Tool observations MUST come from actual Claude native events. This is the
+// only entrypoint that attests Read/Edit; do not fabricate tool observations
+// when re-checking a patch later at the checkpoint seal boundary.
+export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
+  const observed=Array.isArray(toolNames)?toolNames:null;
+  if(!observed||!observed.includes('Read')||
+      !observed.some(x=>x==='Edit'||x==='Write')||
+      observed.some(x=>!['Read','Edit','Write'].includes(x)))
+    fail('required actual restricted native Read/Edit evidence missing');
+  return checkedGitPatch(snapshot);
+}
+export function verifyQwenPatchStillMatches(snapshot,previous){
+  const current=checkedGitPatch(snapshot);
+  if(previous?.kind!==current.kind||
+      previous.patch_sha256!==current.patch_sha256||
+      previous.patch!==current.patch||
+      previous.issue!==current.issue||
+      previous.action_id!==current.action_id||
+      previous.run_id!==current.run_id||
+      previous.harness_digest!==current.harness_digest||
+      JSON.stringify(previous.paths)!==JSON.stringify(current.paths))
+    fail('proposed Git source changed before native checkpoint seal');
+  return current;
 }
