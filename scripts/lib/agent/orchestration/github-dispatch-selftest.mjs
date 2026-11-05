@@ -67,9 +67,8 @@ assert.equal(verifyDispatchTicket(repairTicket.ticket,keyring,{now}).schema_vers
 const repairPlan=planGitHubDispatch(bound,historicalRepairAction,registry,signer);
 assert.equal(repairPlan.workflow_id,'agent-develop.yml');
 assert.equal(repairPlan.inputs.task,'repair');
-assert.equal(repairPlan.inputs.resume_from,
-  Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(repairTicket.body.resume_from)
-    .sort(([a],[b])=>a.localeCompare(b))))).toString('base64url'));
+assert.deepEqual(JSON.parse(Buffer.from(repairPlan.inputs.resume_from,
+  'base64url').toString('utf8')),repairTicket.body.resume_from);
 const preparedRepair=prepareGitHubDispatch(bound,historicalRepairAction,registry,signer);
 assert.equal(preparedRepair.prepared.outbox[0].status,'dispatching');
 assert.equal(verifyPersistedDispatchIntent({state:preparedRepair.prepared,
