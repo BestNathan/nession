@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "dd858c2a2ece880806415151d5a8fe0097cf9fc3",
+  "run_id": 42034406603,
+  "run_attempt": 1,
+  "plan_digest": "c08ba6e8da7dd4475583e44255ba4c4d920050fe1232bad538f7d47f30f56808",
+  "artifact_digest": "sha256:5941c74ec10f1d30ae38186827abaabb8de9106516cd856b4f071fbb5a5f8d5d",
+  "results": [
+    {
+      "id": "files-context-create",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 40
+    }
+  ]
+}
