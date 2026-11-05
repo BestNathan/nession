@@ -40,12 +40,22 @@ function git(...args){
       GIT_NO_REPLACE_OBJECTS:'1'}}).trim();}
   catch{fail('read-only authenticated Store access failed');}
 }
-function readStoreReceipt(remote,identity,run,admissionSource,expected){
+function readStoreReceipt(remote,identity,run,admissionAction,admissionSource,expected){
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-store-reader-'));
   try{
     const dir=path.join(home,'store');
     git('clone','--no-tags','--single-branch','--branch','agent-store','--',
       remote,dir);
+    const record=readIssueWorkflowState(dir,identity.issue);
+    const action=record.state?.outbox.find(item=>item.id===admissionAction);
+    if(record.state?.assignments?.developer!==identity.agent_id||
+       !action||!['dispatched','yielded'].includes(action.status)||
+       action.task?.role!=='developer'||action.task?.task!=='implement'||
+       action.task?.agent_id!==identity.agent_id||
+       action.task?.sha!==admissionSource||
+       action.receipt?.source_run_id!==run.id||
+       action.receipt?.dispatch_id!==admissionAction)
+      fail('replayed Qwen checkpoint not bound to current Store Outbox');
     const prefix='roles/developer/'+identity.agent_id+'/issues/'+identity.issue;
     const location=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
     const file=path.join(dir,location);
@@ -78,7 +88,8 @@ function readStoreReceipt(remote,identity,run,admissionSource,expected){
       '--',receipt.checkpoint_path);
     if(!SHA.test(commit_sha))fail('immutable Qwen checkpoint commit missing');
     return {version:receipt.version,commit_sha,
-      ciphertext_sha256:receipt.ciphertext_sha256};
+      ciphertext_sha256:receipt.ciphertext_sha256,
+      action_status:action.status};
   }finally{fs.rmSync(home,{recursive:true,force:true});}
 }
 function sourceForStore(run,admission){
@@ -118,7 +129,7 @@ export async function ingestQwenVerifiedCandidate({
   const expected={session_id:proof?.metadata?.session_id,
     harness_digest:proof?.metadata?.harness_digest};
   const previous=readStoreReceipt(remote,identity,run,
-    claim.inputs.input_sha,expected);
+    claim.inputs.action_id,claim.inputs.input_sha,expected);
   // The public Artifact contents alone have no authority; cryptographic
   // claim verification and immutable Store admission precede version CAS.
   let admission;
@@ -136,8 +147,22 @@ export async function ingestQwenVerifiedCandidate({
     verifyCommittedCheckpoint({remote,identity,
       commit_sha:previous.commit_sha,version:previous.version,
       ciphertext_sha256:previous.ciphertext_sha256});
-    return {status:'replayed',issue:identity.issue,
-      action_id:authenticated.action_id,checkpoint:previous};
+    // A lost ACK after checkpoint CAS must finish the original signed Slice
+    // Yield exactly once; do not leave a valid checkpoint with a stuck Action.
+    const resumed=previous.action_status==='dispatched'?
+      await commitAttestedSliceYield({
+        remote,issue:identity.issue,
+        dispatchTicket:claim.inputs.dispatch_ticket,
+        keyring:{'main-controller':rootKey},reader,
+        checkpoint:{version:previous.version,commit_sha:previous.commit_sha,
+          ciphertext_sha256:previous.ciphertext_sha256,
+          run_id:run.id,attempt:run.run_attempt},
+        verifiedMainSha:run.head_sha,
+      }):null;
+    return {status:resumed?.status??'replayed',issue:identity.issue,
+      action_id:authenticated.action_id,checkpoint:previous,
+      ...(resumed?{state_version:resumed.state_version,
+        store_commit_sha:resumed.store_commit_sha}:{})};
   }
   admission=authorizeWorkerFromStore({remote,registry,role:'developer',
     runId:run.id,input:claim.inputs});
