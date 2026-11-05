@@ -149,6 +149,16 @@ const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
   result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
   pr_number:43,registry,action_id:reviewAction,state};
 assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+const requested={...reviewArgs,
+  result:{...reviewArgs.result,outcome:'changes_requested'},
+  metrics:{...reviewArgs.metrics,result:{status:'review-changes-requested'}}};
+assert.equal(assertMetricsAgreement(requested).result.status,
+  'review-changes-requested');
+for(const bogus of ['review-changes_requested','review-approved','review-failed']){
+  assert.throws(()=>assertMetricsAgreement({...requested,metrics:{
+    ...requested.metrics,result:{status:bogus}}}),/reviewed PR\/outcome/);
+}
+
 for(const [change,regex] of [
   [{metrics:null},/Metrics record/],
   [{metrics:{...reviewArgs.metrics,identity:{...reviewArgs.metrics.identity,
