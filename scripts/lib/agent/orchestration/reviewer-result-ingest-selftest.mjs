@@ -50,6 +50,29 @@ const ownerEnv={...env,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_ACTOR:'BestN
 const ownerEvent={repository:{full_name:repo},inputs:{
   source_run_id:'335',source_run_attempt:'1'}};
 assert.equal(resolveReviewIngestSource({environment:ownerEnv,event:ownerEvent}).attempt,1);
+// A historical Reviewer verdict is already in the public Metrics ref, but
+// the bot-triggered workflow_run wake was absent. Only this exact owner Issue
+// comment can reproject it; neither PR comments nor arbitrary source Run IDs
+// can borrow Store writer authority.
+const replayEnv={...env,GITHUB_EVENT_NAME:'issue_comment',GITHUB_ACTOR:'BestNathan'};
+const replayEvent={action:'created',repository:{full_name:repo},
+  sender:{login:'BestNathan'},issue:{number:1997},
+  comment:{user:{login:'BestNathan'},id:12345,
+    body:'/nession ingest-review issue=1997 run=41962609841 attempt=1'}};
+assert.deepEqual(resolveReviewIngestSource({environment:replayEnv,
+  event:replayEvent}),{run_id:41962609841,attempt:1,expected_sha:null});
+for(const invalid of [
+  {...replayEvent,action:'edited'},
+  {...replayEvent,issue:{number:1997,pull_request:{url:'https://evil'}}},
+  {...replayEvent,issue:{number:1998}},
+  {...replayEvent,sender:{login:'attacker'}},
+  {...replayEvent,comment:{...replayEvent.comment,user:{login:'attacker'}}},
+  {...replayEvent,comment:{...replayEvent.comment,
+    body:'/nession ingest-review issue=1997 run=41962609842 attempt=1'}},
+])assert.throws(()=>resolveReviewIngestSource({environment:replayEnv,
+  event:invalid}),/untrusted/);
+assert.throws(()=>resolveReviewIngestSource({environment:{
+  ...replayEnv,GITHUB_REF:'refs/heads/feature'},event:replayEvent}),/main-owned/);
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'review-result-ingest-test-'));
 try{
   const metricsRoot=path.join(tmp,'metrics');
