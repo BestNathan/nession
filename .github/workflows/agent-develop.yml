@@ -243,6 +243,17 @@ jobs:
           git update-ref refs/nession/repair-source "$REPAIR_INPUT_SHA"
           # Only inert Git objects are brought into the disposable clone.
           # Never checkout or execute any PR-head code in this trusted job.
+      - name: Build trusted isolated Cursor runtime with ripgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build from main-owned Dockerfile only. No repository or PR sources
+          # are in the build context; no secrets are accessible to this step.
+          docker build --pull=false --tag nession-cursor-worker-rg:local - \
+            < scripts/lib/agent/orchestration/cursor-worker.Dockerfile
+          docker run --rm --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            nession-cursor-worker-rg:local rg --version
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
@@ -285,7 +296,7 @@ jobs:
             -e CURSOR_SDK_VERSION \
             -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
             -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
-            node:24-bookworm \
+            nession-cursor-worker-rg:local \
             node scripts/lib/agent/orchestration/development-worker.mjs \
               /admission.json /output
       - name: Upload canonical immutable Agent telemetry
