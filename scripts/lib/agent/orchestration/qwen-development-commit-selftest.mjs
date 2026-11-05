@@ -180,7 +180,7 @@ try {
   }
   const wrongSource=path.join(home,'publisher-wrong-sha');
   git(home,'clone','--no-hardlinks',source,wrongSource);
-  fs.writeFileSync(path.join(wrongSource,'other.js'),'const bad=true;\\n');
+  fs.writeFileSync(path.join(wrongSource,'other.js'),'const bad=true;\n');
   git(wrongSource,'add','other.js');
   git(wrongSource,'config','user.name','Wrong Source');
   git(wrongSource,'config','user.email','wrong@example.invalid');
