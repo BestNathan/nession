@@ -42,6 +42,18 @@ try{
   assert.equal(snapshot.plan.source_sha,sha);
   assert.equal(snapshot.plan.agent_id,'dev-qwen-01');
   assert.equal(snapshot.allowed_files.join(','),'src/calc.js');
+  // A host/Git environment override cannot redirect a model's source
+  // verification to a different index or repository outside the admission.
+  for(const key of ['GIT_DIR','GIT_INDEX_FILE','GIT_WORK_TREE']){
+    const previous=process.env[key];
+    try{
+      process.env[key]='/definitely-not-the-signed-checkout';
+      assert.equal(prepareQwenDevelopmentSource(request).plan.source_sha,sha);
+    }finally{
+      if(previous===undefined)delete process.env[key];
+      else process.env[key]=previous;
+    }
+  }
   assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{
     events:native(['Read','Edit'])}),/missing or unbounded/);
   write('src/calc.js','module.exports = (a, b) => a + b;\n');
