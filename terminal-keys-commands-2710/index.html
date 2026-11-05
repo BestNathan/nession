@@ -59,8 +59,8 @@
 :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--nession-foreground);background:var(--nession-muted);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0}
 a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible,input:focus-visible{outline:2px solid var(--nession-ring);outline-offset:2px}
-.page{min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 230px;align-items:center;gap:22px;padding:18px clamp(18px,4vw,56px)}
-.demo-note{max-width:390px;color:var(--nession-muted-foreground);font-size:12px;line-height:1.45;display:flex;justify-content:space-between;gap:18px}
+
+
 .phone{width:min(var(--preview-width,390px),100%);height:min(816px,calc(100dvh - 36px));min-height:500px;position:relative;overflow:hidden;background:var(--nession-terminal-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-capsule);isolation:isolate}
 .topbar{height:52px;padding:8px var(--nession-shell-space-3);display:flex;align-items:center;gap:8px;background:var(--nession-background)}
 .back{width:var(--nession-control-md);height:var(--nession-control-md);border:0;background:transparent;border-radius:var(--nession-radius-control);font-size:20px;line-height:1;color:var(--nession-foreground)}
@@ -129,31 +129,31 @@ a{color:inherit}button,input{font:inherit}button{cursor:pointer;-webkit-tap-high
 .run{background:var(--nession-primary);color:var(--nession-background);min-width:46px}
 .commands-head{display:flex;justify-content:space-between;align-items:center;color:var(--nession-muted-foreground);font-size:11px;margin:2px 8px 0}
 .hint{color:var(--nession-muted-foreground);font-size:10.5px;padding:0 5px;min-height:14px}
-.status{display:flex;justify-content:space-between;gap:8px;max-width:390px;font-size:11px;color:var(--nession-muted-foreground)}
-.status strong{color:var(--nession-foreground)}
-@media(max-width:440px){body{background:var(--nession-background)}.page{padding:0;display:block}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.status{display:none}.panel{max-height:min(370px,50dvh)}} 
+
+
+@media(max-width:440px){body{background:var(--nession-background)}.phone{width:100%;height:100dvh;max-height:none;min-height:0;border-radius:0;box-shadow:none}.demo-note,.panel{max-height:min(370px,50dvh)}} 
 @media(max-height:640px){.panel{max-height:42dvh}.panel-body{gap:7px}}
 @media(prefers-reduced-motion:reduce){.panel{animation:none}}
 
 [hidden]{display:none!important}
-.prototype-stage{min-width:0;display:flex;justify-content:center}
-.prototype-harness{max-width:230px;color:var(--nession-muted-foreground);font-size:12px;line-height:1.6}
-.prototype-harness h1{font-size:var(--nession-typography-title-size);color:var(--nession-foreground);line-height:1.3;margin:0 0 8px}
-.prototype-harness p{margin:4px 0 12px}
-.prototype-harness a{color:var(--nession-foreground);font-weight:550}
-.prototype-harness .harness-tools{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-.prototype-harness button{border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);background:var(--nession-background);color:var(--nession-foreground);padding:6px 10px;cursor:pointer}
-.prototype-harness button[aria-pressed="true"]{background:var(--nession-primary);color:var(--nession-primary-foreground)}
-.prototype-harness .harness-links{display:flex;gap:16px;margin:12px 0}
-.prototype-harness details{border-top:1px solid var(--nession-border);padding-top:10px}
-.prototype-harness summary{cursor:pointer;color:var(--nession-foreground)}
-.prototype-harness ol{padding-left:18px}
-.prototype-harness li{margin:4px 0}
+
+
+
+
+
+
+
+
+
+
+
+
+
 .sessions-view{position:absolute;z-index:6;inset:52px 0 0;background:var(--nession-background);padding:18px var(--nession-shell-space-3)}
 .sessions-view h2{font-size:var(--nession-typography-title-size);font-weight:var(--nession-typography-title-weight);margin:0 0 15px}
 .sessions-view button{width:100%;height:var(--nession-control-md);border:0;border-radius:var(--nession-radius-control);background:var(--nession-accent);color:var(--nession-foreground);text-align:left;padding:0 12px}
 body{background:var(--nession-muted);color:var(--nession-foreground)}
-@media(max-width:760px){.page{display:block;padding:0}.prototype-stage{display:block;height:100dvh}.phone{width:100%;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}.prototype-harness{max-width:none;padding:18px 20px 90px;background:var(--nession-muted)}}
+@media(max-width:760px){.phone{width:100%;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}}
 
 /* App interaction geometry: a key's painted cap may be smaller than its 44px hit target. */
 .send{width:var(--nession-control-md);height:var(--nession-control-md);min-width:var(--nession-control-md);padding:0;margin:0;background:transparent;color:var(--nession-primary-foreground)}
@@ -167,7 +167,22 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
 .arrows{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%;gap:4px}
 .arrow{width:100%;min-width:var(--nession-control-md)}
 .insert,.run{min-height:var(--nession-control-md);height:var(--nession-control-md)}
-@media(max-width:760px){.prototype-harness [data-preview-width]{display:none}}
+@media(max-width:760px){}
+
+/* Product-only fidelity correction against TerminalKeysProjection + PhysKeyRow:
+   quick chords and modifier/arrow cluster are compact HORIZONTAL rows. */
+[data-experience="app"]{--nession-terminal-capsule-phys-key-arrow-width:2.25rem}
+.panel-body.keys-body>div:first-child{display:flex;align-items:center;gap:5px}
+.panel-body.keys-body .caption{margin:0;white-space:nowrap}
+.panel-body.keys-body .caption:empty{display:none}
+.panel-body.keys-body .quick-grid{display:flex;flex:1;gap:3px}
+.panel-body.keys-body .quickkey{flex:1;min-width:44px;height:var(--nession-control-md);background:transparent}
+.panel-body.keys-body .chord-row{flex:1;min-width:0}
+.panel-body.keys-body .bottom-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:4px}
+.panel-body.keys-body .mods{display:flex;flex:1;min-width:0;gap:2px}
+.panel-body.keys-body .mod{flex:1;min-width:0;max-width:none}
+.panel-body.keys-body .arrows{display:grid;grid-template-columns:repeat(4,var(--nession-terminal-capsule-phys-key-arrow-width));width:auto;flex:0 0 auto;gap:2px}
+.panel-body.keys-body .arrow{width:var(--nession-terminal-capsule-phys-key-arrow-width);min-width:var(--nession-terminal-capsule-phys-key-arrow-width);height:var(--nession-control-md)}
 </style>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 </head>
@@ -412,7 +427,7 @@ body{background:var(--nession-muted);color:var(--nession-foreground)}
         '</div><button type="button" class="cancel" data-act="cancel">Cancel</button></div>'
         :'<div class="quick-grid"><button class="quickkey" data-chord="Ctrl+C">⌃ C</button><button class="quickkey" data-chord="Ctrl+R">⌃ R</button><button class="quickkey" data-chord="Ctrl+L">⌃ L</button></div>';
       body='<div class="panel-body keys-body">'+
-        '<div><div class="caption">'+(modifier?"Modifier: "+modifier:"Shortcuts")+'</div>'+code+'</div>'+
+        '<div><div class="caption">'+(modifier?"":"Common shortcuts")+'</div>'+code+'</div>'+
         '<div class="keyrow">'+["Esc","Tab","Space","Enter","Delete"].map(x=>'<button class="key" data-key="'+x+'">'+(x==="Space"?"Space":x==="Delete"?"Del":x==="Enter"?"↵":x)+'</button>').join("")+'</div>'+
         '<div class="bottom-row"><div class="mods">'+["Ctrl","Alt","Shift"].map(x=>'<button class="mod '+(modifier===x?'on':'')+'" data-mod="'+x+'" aria-pressed="'+(modifier===x)+'">'+(x==="Shift"?"⇧":x)+'</button>').join("")+'</div><div class="arrows">'+["←","↑","↓","→"].map(x=>'<button class="arrow" data-key="'+x+'" aria-label="Arrow '+({"←":"Left","↑":"Up","↓":"Down","→":"Right"}[x])+'">'+x+'</button>').join("")+'</div></div>'+
         '</div>';
