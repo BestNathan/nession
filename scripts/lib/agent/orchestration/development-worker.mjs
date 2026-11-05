@@ -11,7 +11,8 @@ import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
 import {cursorModel} from '../providers/model-selection.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest,
-  CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
+  CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+  CONTROLLED_REPAIR_RETRY_ACTION,isControlledRepairAction} from './development-resume.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
@@ -42,12 +43,13 @@ function readAdmission(file){
         nativeResumeSuccessorId(1997,
           '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',39376331942),
         CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+        CONTROLLED_REPAIR_RETRY_ACTION,
       ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||
       (a.task==='repair'?
-        a.action_id!==CONTROLLED_REPAIR_ACTION||
+        !isControlledRepairAction(a.action_id)||
           a.input_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4':
-        a.action_id===CONTROLLED_REPAIR_ACTION||
+        isControlledRepairAction(a.action_id)||
           a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2')||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||
       process.env.GITHUB_REPOSITORY!==REPO||
@@ -224,12 +226,38 @@ async function main(){
       JSON.stringify({number:1997,body:issue.body,recent_comments:recent});
     // SDK confines available native tools to read, grep and edit (no shell);
     // settingSources=[] forbids ambient project configuration injection.
+    // Cursor SDK file discovery requires ripgrep inside the *same* isolated
+    // container, not merely on the trusted Actions runner. A missing or
+    // unusable binary is a pre-model error, never a reason to drop evidence.
+    if(process.env.CURSOR_RIPGREP_PATH!=='/usr/bin/rg')
+      fail('Cursor SDK ripgrep absolute path not configured inside isolated Worker');
+    let ripgrep;
+    try{
+      ripgrep=execFileSync('rg',['--version'],{
+        encoding:'utf8',timeout:5000,stdio:['ignore','pipe','ignore'],
+      }).split('\n')[0];
+    }catch{fail('isolated Cursor SDK ripgrep runtime unavailable before Provider call');}
+    if(!/^ripgrep [0-9]+\.[0-9]+\.[0-9]+/.test(ripgrep))
+      fail('unrecognized isolated Cursor SDK ripgrep binary');
+    console.log('Cursor SDK local file-search runtime verified: '+ripgrep);
     const {result,meta}=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
       tools:['read','grep','edit'],sandbox:false,prompt,
       resumeAgentId:resuming?'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6':null,
     });
+    // Only bounded status/tool *metadata* is logged. Never emit model text,
+    // prompts, tool arguments, native JSONL or credentials on error.
+    console.log('Developer Provider outcome metadata '+JSON.stringify({
+      result_status:typeof result?.status==='string'?result.status:null,
+      agent_status:typeof meta?.status==='string'?meta.status:null,
+      native_resumed:meta?.resumed===true,
+      turns:Number.isSafeInteger(meta?.turns)?meta.turns:null,
+      observed_tools:Array.isArray(meta?.tool_calls)?
+        meta.tool_calls.filter(x=>typeof x==='string').slice(0,16):[],
+      available_tools:Array.isArray(meta?.available_tools)?
+        meta.available_tools.filter(x=>typeof x==='string').slice(0,16):[],
+    }));
     if(result?.status!=='finished'||meta.status!=='finished'||
         !/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??'')||
         !meta.tool_calls.some(x=>String(x).toLowerCase().includes('read'))||

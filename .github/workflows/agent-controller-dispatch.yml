@@ -50,6 +50,8 @@ jobs:
           github.event.comment.body == '/nession recover-review issue=1997 skipped_run=39943178597' ||
           github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
           github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+          github.event.comment.body == '/nession recover-repair issue=1997 failed_run=42020432271' ||
+          github.event.comment.body == '/nession dispatch-repair issue=1997 action=ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5' ||
           startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
       )
     runs-on: ubuntu-24.04
@@ -67,10 +69,12 @@ jobs:
       - name: Fetch exact published PR commit as inert Git data for Repair only
         if: >-
           (github.event_name == 'workflow_dispatch' &&
-           inputs.action_id == 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d') ||
+           (inputs.action_id == 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+            inputs.action_id == 'ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5')) ||
           (github.event_name == 'issue_comment' &&
            (github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
             github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+            github.event.comment.body == '/nession dispatch-repair issue=1997 action=ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5' ||
             startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
         shell: bash
         run: |

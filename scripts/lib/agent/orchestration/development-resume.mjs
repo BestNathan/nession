@@ -20,6 +20,8 @@ export const CONTROLLED_V2_CONTINUATION_COMMENT='/nession resume issue=1997 chec
 const SOURCE='220266b9233ec97b1beacbc54e5cc7f82d3cece2';
 const PUBLISHED_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
 export const CONTROLLED_REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+export const CONTROLLED_REPAIR_RETRY_ACTION='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
+export const isControlledRepairAction=id=>[CONTROLLED_REPAIR_ACTION,CONTROLLED_REPAIR_RETRY_ACTION].includes(id);
 const REPAIR_SOURCE_RUN=39448549052;
 const REPAIR_CHECKPOINT_COMMIT='eb891ee2154d02ddb758d50f0f694e70a343ffdf';
 const REPAIR_CIPHERTEXT='7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0';
@@ -55,7 +57,7 @@ export function assertControlledRepair(a){
   const c=a?.resume_from;
   if(a?.authorized!==true||a.issue!==1997||a.role!=='developer'||
      a.agent_id!=='dev-cursor-01'||a.provider!=='cursor'||
-     a.action_id!==CONTROLLED_REPAIR_ACTION||a.task!=='repair'||
+     !isControlledRepairAction(a.action_id)||a.task!=='repair'||
      a.input_sha!==PUBLISHED_SHA||!c||
      Object.keys(c).sort().join(',')!==
        'checkpoint_commit_sha,checkpoint_version,ciphertext_sha256,source_run_id,source_sha'||

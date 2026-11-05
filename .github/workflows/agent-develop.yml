@@ -236,13 +236,27 @@ jobs:
         run: |
           set -euo pipefail
           test "$REPAIR_INPUT_ISSUE" = '1997'
-          test "$REPAIR_INPUT_ACTION" = 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'
+          case "$REPAIR_INPUT_ACTION" in
+            d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d|ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5) ;;
+            *) echo "::error::Unrecognized native Repair Action"; exit 1 ;;
+          esac
           test "$REPAIR_INPUT_SHA" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
           git fetch --quiet --no-tags origin refs/pull/2176/head
           test "$(git rev-parse FETCH_HEAD)" = "$REPAIR_INPUT_SHA"
           git update-ref refs/nession/repair-source "$REPAIR_INPUT_SHA"
           # Only inert Git objects are brought into the disposable clone.
           # Never checkout or execute any PR-head code in this trusted job.
+      - name: Build trusted isolated Cursor runtime with ripgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build from main-owned Dockerfile only. No repository or PR sources
+          # are in the build context; no secrets are accessible to this step.
+          docker build --pull=false --tag nession-cursor-worker-rg:local - \
+            < scripts/lib/agent/orchestration/cursor-worker.Dockerfile
+          docker run --rm --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            nession-cursor-worker-rg:local rg --version
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
@@ -284,8 +298,8 @@ jobs:
             -e CURSOR_MODEL_FAST -e CURSOR_RESUME_PUBLIC_KEY_B64 \
             -e CURSOR_SDK_VERSION \
             -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
-            -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
-            node:24-bookworm \
+            -e CURSOR_SDK_ROOT=/sdk -e CURSOR_RIPGREP_PATH=/usr/bin/rg -e HOME=/tmp \
+            nession-cursor-worker-rg:local \
             node scripts/lib/agent/orchestration/development-worker.mjs \
               /admission.json /output
       - name: Upload canonical immutable Agent telemetry
