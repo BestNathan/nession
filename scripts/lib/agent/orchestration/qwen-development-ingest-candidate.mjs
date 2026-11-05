@@ -61,6 +61,9 @@ export function validateQwenDevelopmentCandidate({
       run.status!=='completed'||run.conclusion!=='success'||
       run.name!=='Agent / Development'||run.path!==WORKFLOW||
       run.event!=='workflow_dispatch'||run.head_branch!=='main'||
+      run.repository?.full_name!=='BestNathan/nession'||
+      run.head_repository?.full_name!=='BestNathan/nession'||
+      run.actor?.login!=='github-actions[bot]'||
       !SHA.test(run.head_sha??''))
     fail('no authenticated successful exact-Run Developer admission');
   if(!exact(result,RESULT)||!exact(proof,PROOF)||
@@ -108,6 +111,18 @@ export function validateQwenDevelopmentCandidate({
       !HEX.test(result.patch_sha256??''))
     fail('noncanonical, mismatched or unsafe proposed patch');
   safePaths(proof.changed_paths);
+  // Independently inspect every Git diff header; a forged result may not
+  // claim "hello.js" while smuggling an edit of "other.js" in the patch.
+  // The trusted Publisher must still Git-apply/validate the exact source.
+  const patchText=patch.toString('utf8');
+  const headerPaths=[...patchText.matchAll(/^diff --git a\/([^\n]+) b\/([^\n]+)$/gm)]
+    .map(m=>{
+      if(m[1]!==m[2])fail('renamed or mismatched patch paths');
+      return m[1];
+    });
+  if(headerPaths.length!==proof.changed_paths.length||
+      !same([...headerPaths].sort(),proof.changed_paths))
+    fail('proposed Git patch does not match attested changed paths');
   if(!same(result.changed_paths,proof.changed_paths)||
       result.ciphertext_sha256!==ciphertext.ciphertext_sha256||
       proof.ciphertext_sha256!==ciphertext.ciphertext_sha256||
