@@ -354,6 +354,8 @@ async function main(){
       console.log(JSON.stringify({schema_version:1,
         kind:'authenticated_qwen_development_checkpoint_receipt',
         status:resultQwen.status,issue:resultQwen.issue,
+        ingester_run_id:Number(env.GITHUB_RUN_ID),
+        ingester_sha:env.GITHUB_SHA,
         action_id:resultQwen.action_id,run_id:run.id,
         attempt:run.run_attempt,worker_sha:run.head_sha,
         checkpoint_version:resultQwen.checkpoint.version,

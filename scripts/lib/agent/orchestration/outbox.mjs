@@ -402,6 +402,70 @@ export function acceptPublisherPublication(state, expectedVersion, event, truste
     ...advanced.state, schema_version: 1, version, outbox: [...outbox, ...spawned],
   });
 }
+// #2274: The Qwen Developer produced a REAL authenticated Worker Run and
+// immutable Store checkpoint, then the independently credentialed Publisher
+// published its exact original patch. Unlike historical #1997 yielded Slices,
+// the original Qwen Action stays dispatched until this publication is checked.
+// Keep the canonical publisher->review transition (including the publisher
+// transition required by native Repair); never fabricate a pending Developer.
+export function acceptAttestedQwenPublication(state,expectedVersion,event,trusted,registry){
+  validateDevelopmentState(state);
+  validateRegistry(registry);
+  if(state.version!==expectedVersion)reject('stale Qwen publication state CAS');
+  if(event?.kind!=='publisher'||event.outcome!=='published'||
+      event.issue!==state.issue||!positive(event.run_id)||
+      event.run_attempt!==1||!SHA.test(event.target_sha??'')||
+      trusted?.role!=='publisher'||trusted.workflow_run_id!==event.run_id||
+      trusted.attempt!==1||trusted.issue!==event.issue||
+      trusted.source_sha!==event.target_sha||
+      !HEX64.test(trusted.developer_action_id??'')||
+      !positive(trusted.developer_run_id)||trusted.developer_attempt!==1||
+      !SHA.test(trusted.developer_source_sha??'')||
+      !SHA.test(trusted.checkpoint_commit_sha??'')||
+      typeof trusted.pr_number!=='number'||!positive(trusted.pr_number)||
+      event.reviewer_agent_id!=null)
+    reject('untrusted signed Qwen publication and PR/Checkpoint origin');
+  const already=state.transitions.find(t=>t.kind==='publisher'&&
+    t.run_id===event.run_id&&t.attempt===event.run_attempt);
+  if(already){
+    if(already.target_sha!==event.target_sha||
+        already.outcome!=='published'||state.target_sha!==event.target_sha)
+      reject('conflicting authenticated Qwen publication replay');
+    return state;
+  }
+  if(state.phase!=='ready'||state.target_sha!=null||
+      state.transitions.some(t=>t.kind==='publisher'))
+    reject('Qwen publication requires unconsumed ready phase');
+  const actions=state.outbox.filter(x=>x.task.type==='dispatch'&&
+    x.task.role==='developer'&&x.status==='dispatched');
+  if(actions.length!==1||actions[0].id!==trusted.developer_action_id||
+      actions[0].task.task!=='implement'||
+      actions[0].task.agent_id!=='dev-qwen-01'||
+      state.assignments.developer!=='dev-qwen-01'||
+      actions[0].task.sha!==trusted.developer_source_sha||
+      actions[0].receipt?.status!=='verified'||
+      actions[0].receipt?.source_run_id!==trusted.developer_run_id||
+      actions[0].receipt?.dispatch_id!==actions[0].id||
+      state.outbox.some(x=>x!==actions[0]&&
+        ['dispatching','dispatched'].includes(x.status))||
+      state.outbox.some(x=>x.task.role==='reviewer'))
+    reject('Qwen Publisher source is not one signed in-flight Developer Run');
+  const advanced=advanceWorkflow(state,event,{
+    role:'publisher',workflow_run_id:event.run_id,attempt:1,
+    issue:event.issue,source_sha:event.target_sha});
+  if(advanced.duplicate||advanced.actions.length!==1||
+      advanced.actions[0].role!=='reviewer'||
+      advanced.state.phase!=='review'||
+      advanced.state.target_sha!==event.target_sha)
+    reject('Publisher did not produce one canonical Reviewer action');
+  const outbox=advanced.state.outbox.filter(x=>x.id!==actions[0].id);
+  if(outbox.length+1>MAX_OUTBOX)reject('Outbox exhausted');
+  const child=makeAction(state.issue,state.version+1,advanced.actions[0],
+    state.assignments,0);
+  boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  return validateDevelopmentState({...advanced.state,version:state.version+1,
+    outbox:[...outbox,child]});
+}
 // Bind an independently verified immutable Developer checkpoint to a pending
 // cross-phase Repair. Do not create a new Action or alter its identity: the
 // signed ticket must refer to this exact Store-persisted origin and PR target.
