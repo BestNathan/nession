@@ -49,7 +49,8 @@ jobs:
           github.event.comment.body == '/nession recover-native issue=1997 failed_run=39376331942' ||
           github.event.comment.body == '/nession recover-review issue=1997 skipped_run=39943178597' ||
           github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
-          github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'))
+          github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+          startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 12
@@ -69,7 +70,8 @@ jobs:
            inputs.action_id == 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d') ||
           (github.event_name == 'issue_comment' &&
            (github.event.comment.body == '/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
-            github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'))
+            github.event.comment.body == '/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d' ||
+            startsWith(github.event.comment.body, '/nession dispatch-review issue=1997 action=')))
         shell: bash
         run: |
           set -euo pipefail
