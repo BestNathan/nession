@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {matchingResult,resolveTrustedIngestSource,V2_INGEST_WORKER_RUN,V2_INGEST_COMMAND} from './development-ingest.mjs';
-import {CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
+import {CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION} from './development-resume.mjs';
 
 const issue=1997,runId=33012,attempt=1,source_sha='a'.repeat(40);
 const action_id='b'.repeat(64),digest=s=>createHash('sha256').update(s).digest('hex');
@@ -74,6 +74,34 @@ assert.throws(()=>matchingResult(v2Result,{...v2Proof,action_id:action_id},
 assert.throws(()=>matchingResult(v2Result,v2Proof,resumedWrapped,
   {...v2Claim,inputs:{...v2Claim.inputs,action_id}},run),/no authentic/);
 
+const published='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const repairClaim={inputs:{...ticket,action_id:CONTROLLED_REPAIR_ACTION,
+  input_sha:published,task:'repair',resume_from:'signed-v3-origin'}};
+const repairMetadata={...resumedMeta,source_sha:published};
+const repairProof={...resumedProof,action_id:CONTROLLED_REPAIR_ACTION,
+  source_sha:published,metadata:repairMetadata};
+const repairWrapped={...resumedWrapped,metadata:repairMetadata};
+const repairResult={...resumedResult,kind:'developer_repair_dispute',
+  action_id:CONTROLLED_REPAIR_ACTION,source_sha:published,
+  status:'review_disputed_no_change',native_read_edit_verified:undefined,
+  native_read_verified:true,reviewer_run_id:41962609841,
+  parent_checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf'};
+assert.equal(matchingResult(repairResult,repairProof,repairWrapped,repairClaim,run)
+  .agent_id,repairMetadata.agent_id);
+for(const bad of [
+  {kind:'developer_proposal'},{status:'proposed_not_published'},
+  {native_read_verified:false},{native_resumed:false},
+  {reviewer_run_id:41962609842},
+  {parent_checkpoint_commit_sha:'0'.repeat(40)},
+  {content_sha256:result.content_sha256},
+  {source_sha:source_sha},
+]){
+  assert.throws(()=>matchingResult({...repairResult,...bad},repairProof,
+    repairWrapped,repairClaim,run),/no verified|no authentic/);
+}
+assert.throws(()=>matchingResult(repairResult,repairProof,repairWrapped,
+  {...repairClaim,inputs:{...repairClaim.inputs,task:'implement'}},run),
+  /no authentic/);
 const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
   GITHUB_REF:'refs/heads/main',GITHUB_WORKFLOW:'Store / Agent Development Ingest',
   GITHUB_SHA:'a'.repeat(40),GITHUB_EVENT_NAME:'issue_comment',GITHUB_ACTOR:'BestNathan'};
