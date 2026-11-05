@@ -118,11 +118,17 @@ jobs:
           STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
           STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
           CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+          # Distinct RSA key; only the trusted Store Ingest job opens Qwen JSONL.
+          # Provision in this trusted job's Environment, never the model job.
+          QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$STORE_APP_TOKEN"
-          test -n "$CURSOR_RESUME_PRIVATE_KEY_B64"
+          # Provider-specific missing-key checks occur only AFTER independent
+          # immutable source/claim identification; do not require Cursor's
+          # key when handling an authenticated Qwen Run.
+          test -n "$CURSOR_RESUME_PRIVATE_KEY_B64" || test -n "$QWEN_RESUME_PRIVATE_KEY_B64"
           export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           node scripts/lib/agent/orchestration/development-ingest.mjs ingest \
             "$RUNNER_TEMP/development-worker-claim.zip" \
