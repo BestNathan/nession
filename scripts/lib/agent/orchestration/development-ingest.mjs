@@ -14,7 +14,7 @@ import {authenticateWorkerClaimRun,inspectWorkerClaimZip,
   verifyWorkerClaimForAck} from './worker-reconcile.mjs';
 import {createGitHubRunReader} from './github-dispatch.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
-import {commitAttestedSliceYield} from './dispatch-store.mjs';
+import {commitAttestedSliceYield,commitAttestedRepairDispute} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
@@ -103,6 +103,32 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     const issue=Number(claim.inputs.issue_number);
     const record=readIssueWorkflowState(dir,issue);
     const action=record.state?.outbox.find(x=>x.id===claim.inputs.action_id);
+    const repairReplay=claim.inputs.task==='repair'&&!action&&
+      record.state?.transitions.some(t=>t.kind==='developer'&&
+        t.run_id===run.id&&t.attempt===run.run_attempt&&
+        t.target_sha===claim.inputs.input_sha&&
+        t.outcome==='implementation_ready');
+    if(repairReplay){
+      const prefix='roles/developer/dev-cursor-01/issues/'+issue;
+      const checkpointPath=prefix+'/checkpoints/00000004.json';
+      const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
+      const receipt=JSON.parse(fs.readFileSync(path.join(dir,runPath),'utf8'));
+      const checkpoint=JSON.parse(fs.readFileSync(path.join(dir,checkpointPath),'utf8'));
+      if(receipt.run_id!==run.id||receipt.attempt!==run.run_attempt||
+         receipt.source_sha!==claim.inputs.input_sha||
+         receipt.workflow_sha!==run.head_sha||receipt.version!==4||
+         receipt.checkpoint_path!==checkpointPath||
+         checkpoint.ciphertext_sha256!==receipt.ciphertext_sha256)
+        fail('conflicting previously accepted Repair native checkpoint');
+      const commit_sha=git('-C',dir,'log','-1','--format=%H','HEAD','--',checkpointPath);
+      if(!HEX40.test(commit_sha))fail('missing durable Repair checkpoint creator');
+      return {state_version:record.version,
+        store_commit_sha:git('-C',dir,'rev-parse','HEAD'),
+        already_consumed:true,repairing:true,action:null,
+        existing_checkpoint:{version:4,commit_sha,
+          ciphertext_sha256:checkpoint.ciphertext_sha256,
+          metadata:checkpoint.metadata}};
+    }
     if(!action||action.task.type!=='dispatch'||action.task.role!=='developer'||
         !['implement','repair'].includes(action.task.task)||
         action.task.agent_id!=='dev-cursor-01'||
@@ -115,6 +141,12 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
     const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
     const previous_version=action.task.repair_checkpoint?.checkpoint_version??
       action.task.continuation?.checkpoint_version??0;
+    if(action.task.task==='repair'&&(
+       action.status!=='dispatched'||previous_version!==3||
+       action.task.repair_checkpoint?.checkpoint_commit_sha!==
+         'eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+       action.task.repair_checkpoint?.source_run_id!==39448549052))
+      fail('Repair must resume from the attested v3 published origin');
     const next_version=previous_version+1;
     const checkpointPath=prefix+'/checkpoints/'+String(next_version).padStart(8,'0')+'.json';
     const runFile=path.join(dir,runPath),checkpointFile=path.join(dir,checkpointPath);
@@ -156,7 +188,7 @@ async function api(token,endpoint){
 // independently. This is a transport receipt, never an SC verdict.
 export function developmentIngestReceipt({status,run,claim,metadata,claimArtifact,
   resultArtifact,checkpoint,stateVersion,storeCommit,environment}) {
-  if(!['yielded','replayed'].includes(status)||!HEX40.test(storeCommit??'')||
+  if(!['yielded','replayed','accepted'].includes(status)||!HEX40.test(storeCommit??'')||
       !HEX40.test(checkpoint?.commit_sha??'')||
       !HEX64.test(checkpoint?.ciphertext_sha256??'')||
       !Number.isSafeInteger(stateVersion)||stateVersion<1||
@@ -305,7 +337,7 @@ async function main(){
             39267659650),
           CONTROLLED_CONTINUATION,
           NATIVE_RECOVERY_ACTION,
-          CONTROLLED_V2_CONTINUATION,
+          CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
     if(authority.continuation&&(
@@ -318,6 +350,19 @@ async function main(){
       fail('continuation recovery source is not the exact controlled Action/Attempt');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
+    if(admission.already_consumed){
+      const cp=admission.existing_checkpoint;
+      verifyCommittedCheckpoint({remote:store,
+        identity:{role:'developer',agent_id:'dev-cursor-01',issue:1997},
+        commit_sha:cp.commit_sha,version:cp.version,
+        ciphertext_sha256:cp.ciphertext_sha256});
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:'replayed',run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:cp,
+        stateVersion:admission.state_version,storeCommit:admission.store_commit_sha,
+        environment:env})));
+      return;
+    }
     if(admission.already_yielded) {
       const receipt=admission.action.receipt;
       if(receipt?.source_run_id!==run.id||
@@ -369,7 +414,7 @@ async function main(){
         const source={repository:REPO,run_id:run.id,attempt:run.run_attempt,
           issue:1997,workflow_sha:run.head_sha,target_sha:claim.inputs.input_sha,
           head_branch:'main',path:run.path,workflow_name:run.name,
-          role:'developer',agent_id:'dev-cursor-01',task:'implement',
+          role:'developer',agent_id:'dev-cursor-01',task:claim.inputs.task,
           environment:'agent-dev-cursor-01',provider:'cursor',event:run.event};
         published=publishEncryptedAgentCheckpoint({
           remote:store,source,sealed,registry:JSON.parse(fs.readFileSync(
@@ -382,11 +427,19 @@ async function main(){
     }
       // Second CAS advances canonical state only after the committed checkpoint
       // is independently verified against the remote Git commit.
-      const advanced=await commitAttestedSliceYield({remote:store,issue:1997,
-        dispatchTicket:claim.inputs.dispatch_ticket,keyring:{'main-controller':rootKey},
-        reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
-          ciphertext_sha256:encryptedDigest,run_id:run.id,
-          attempt:run.run_attempt},verifiedMainSha:run.head_sha});
+      const advanced=admission.repairing?
+        commitAttestedRepairDispute({
+          remote:store,run,registry:JSON.parse(fs.readFileSync(
+            'automation/agents/registry.json','utf8')),
+          pr:await reader.getPullRequest(2176),
+          checkpoint:{version:published.version,commit_sha:published.commit_sha,
+            ciphertext_sha256:encryptedDigest},
+        }):
+        await commitAttestedSliceYield({remote:store,issue:1997,
+          dispatchTicket:claim.inputs.dispatch_ticket,keyring:{'main-controller':rootKey},
+          reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
+            ciphertext_sha256:encryptedDigest,run_id:run.id,
+            attempt:run.run_attempt},verifiedMainSha:run.head_sha});
       console.log(JSON.stringify(developmentIngestReceipt({
         status:advanced.status,run,claim,metadata,claimArtifact:verifiedClaim,
         resultArtifact:matching[0],checkpoint:{version:published.version,
