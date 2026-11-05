@@ -226,6 +226,19 @@ jobs:
           else
             mkdir -m 700 "$RUNNER_TEMP/development-native"
           fi
+      - name: Stage only the exact authenticated published PR Git tree for Repair
+        if: inputs.task == 'repair'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.issue_number }}" = '1997'
+          test "${{ inputs.action_id }}" = 'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d'
+          test "${{ inputs.input_sha }}" = '3d8e3807cc01f6082734b8d0ba458217c28f60a4'
+          git fetch --quiet --no-tags origin refs/pull/2176/head
+          test "$(git rev-parse FETCH_HEAD)" = "${{ inputs.input_sha }}"
+          git update-ref refs/nession/repair-source "${{ inputs.input_sha }}"
+          # Only inert Git objects are brought into the disposable clone.
+          # Never checkout or execute any PR-head code in this trusted job.
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
