@@ -14,6 +14,10 @@ const MODEL=/^qwen[a-z0-9._-]*$/i;
 const FILE=/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/;
 const WORKFLOW='.github/workflows/agent-develop.yml';
 const MAX_PATCH=32*1024;
+// The existing Store permits at most 16 MiB of outer encrypted payload.
+// Since the inner RSA ciphertext is base64-wrapped into that AES payload,
+// cap its raw bytes so a verified candidate can actually be persisted.
+const MAX_NATIVE_CIPHER=10*1024*1024;
 const digest=data=>createHash('sha256').update(data).digest('hex');
 const positive=x=>Number.isSafeInteger(x)&&x>0;
 function fail(x){throw Error('trusted Qwen Developer candidate: '+x);}
@@ -129,7 +133,7 @@ export function validateQwenDevelopmentCandidate({
       !HEX.test(ciphertext.ciphertext_sha256??''))
     fail('patch manifest or encrypted Session digest mismatch');
   const encrypted=Buffer.from(ciphertext.ciphertext??'','base64');
-  if(!encrypted.length||encrypted.length>20*1024*1024||
+  if(!encrypted.length||encrypted.length>MAX_NATIVE_CIPHER||
       encrypted.toString('base64')!==ciphertext.ciphertext||
       digest(encrypted)!==ciphertext.ciphertext_sha256)
     fail('invalid encrypted native Session bytes');
