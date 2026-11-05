@@ -14,26 +14,37 @@ Answer, at a glance:
 - how recent it is;
 - whether a reachability/lifecycle issue needs attention.
 
-The Session name remains the primary identity.
+The Session's **display identity** is the primary identity: its user-authored
+metadata title when one is set, otherwise its tmux name. A title is a display
+alias — it never renames tmux, changes `session_id`, or alters attach/kill
+targets (#2789).
 
 ## Contextual anatomy
 
 ```text
-Fix terminal reconnect
+Terminal reconnect reliability
 Claude Code · devbox-01 · 2m
 ```
+
+(`Terminal reconnect reliability` is the Session's metadata title; a Session
+without one shows `fix-terminal-reconnect`, its tmux name.)
 
 Possible parts:
 
 | Part | Role |
 |------|------|
-| Session name | Primary work identity |
+| Session display title | Primary work identity: metadata title, else tmux name |
 | Workload hint | Optional hint such as Claude Code, Codex, zsh; never an IA type |
 | Location / Agent hint | Optional execution-context metadata when useful for disambiguation |
 | Recency | Optional last-activity signal |
 | Selection | Shows the active Session |
 | Degraded state | Local, explicit signal only when continuity is affected |
 | Secondary actions | Progressive-disclosure actions such as rename/kill |
+
+Tags and descriptions belong to the Session's Workspace details, not to its
+navigation row: a row states what the work is, not its full description or a
+tag cloud (#2789). The display title changes the row's copy, never its
+structure, workload/Agent/recency slots or degraded-state semantics.
 
 Do not force every row to show every metadata fragment. If six rows are all on the same healthy Location, repeating the Agent name six times may add no value.
 
@@ -186,7 +197,8 @@ The semantic hierarchy remains the same.
 
 ## Acceptance for future implementation work
 
-- [ ] Session identity remains the primary row signal.
+- [ ] Session identity remains the primary row signal, using the metadata
+  title when set and the tmux name otherwise.
 - [ ] Workload and execution context are optional supporting metadata, not navigation parents.
 - [ ] Redundant healthy metadata can disappear.
 - [ ] Degraded infrastructure/lifecycle/attachment states remain semantically distinct.
