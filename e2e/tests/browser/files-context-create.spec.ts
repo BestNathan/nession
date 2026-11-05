@@ -133,3 +133,53 @@ test('App: create in the pushed folder, read-first viewer, unsaved guard', async
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
 });
+
+test('Web: selected row surface, disclosure caret and collapse after opening a file', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('/* fixture css */');
+
+  const tree = page.locator('[data-testid="file-workspace"] [role="tree"]');
+  const row = (name: string) =>
+    tree
+      .locator('[role="treeitem"]', { hasText: new RegExp('^\\s*' + name + '\\s*$') })
+      .first();
+  const trigger = (name: string) =>
+    row(name).locator('[data-slot="context-menu-trigger"]');
+
+  // Selection is a visible surface, the same row fill used by Session rows.
+  // The unselected sibling is the control, so this cannot pass on a shared
+  // stylesheet default.
+  const selectedBackground = await trigger('index.css').evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  const unselectedBackground = await trigger('App.tsx').evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  expect(selectedBackground).not.toBe(unselectedBackground);
+  expect(selectedBackground).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(row('index.css')).toHaveAttribute('aria-selected', 'true');
+
+  // Directories carry the disclosure control; files keep the same indent.
+  await expect(row('src').getByTestId('explorer-caret')).toHaveAttribute(
+    'aria-label',
+    'Collapse folder',
+  );
+  await expect(row('App.tsx').getByTestId('explorer-caret')).toHaveCount(0);
+
+  // Collapsing the folder that contains the open file must survive a tree
+  // reload; the file's path is not a standing reveal request.
+  await row('src').getByTestId('explorer-caret').click();
+  await expect(tree.getByText('index.css', { exact: true })).toHaveCount(0);
+  await expect(row('src')).toHaveAttribute('aria-expanded', 'false');
+  await page.getByLabel('Refresh').click();
+  await expect(tree.getByText('index.css', { exact: true })).toHaveCount(0);
+  await expect(row('src')).toHaveAttribute('aria-expanded', 'false');
+
+  // Re-expanding through the caret does not steal the file's selection.
+  await row('src').getByTestId('explorer-caret').click();
+  await expect(tree.getByText('index.css', { exact: true })).toBeVisible();
+  await expect(row('index.css')).toHaveAttribute('aria-selected', 'true');
+});

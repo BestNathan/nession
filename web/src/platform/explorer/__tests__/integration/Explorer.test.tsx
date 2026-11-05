@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { Explorer } from '@/platform/explorer/Explorer';
 import { ROOT_ID } from '@/platform/explorer/ExplorerStore';
@@ -242,5 +242,116 @@ describe('Explorer integration', () => {
     // The tree was not remounted: replacing the extension did not reload
     // already-loaded children through the provider.
     expect(provider.loadChildren.mock.calls.length).toBe(loadsBefore);
+  });
+
+  it('renders a disclosure caret and one selected-row surface', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/file.txt', 'file', 'root/a')],
+    });
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer provider={provider} extensions={[]} onFileActivate={vi.fn()} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+
+    const treeitem = (label: string) =>
+      screen.getByText(label).closest('[role="treeitem"]') as HTMLElement;
+    const trigger = (label: string) =>
+      treeitem(label).querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+
+    // The caret is the disclosure control. It expands without selecting the
+    // row, and does not change the browse path or activate the directory.
+    const caretFor = (label: string) => within(treeitem(label)).getByTestId('explorer-caret');
+    expect(caretFor('root')).toHaveAttribute('aria-label', 'Expand folder');
+    fireEvent.click(caretFor('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+    expect(treeitem('root')).toHaveAttribute('aria-expanded', 'true');
+    expect(treeitem('root')).toHaveAttribute('aria-selected', 'false');
+    expect(trigger('root')).toHaveAttribute('data-selected', 'false');
+    expect(within(treeitem('root')).getByTestId('explorer-caret')).toHaveAttribute(
+      'aria-label',
+      'Collapse folder',
+    );
+
+    // Activating a directory selects it and shows the one selection cue: the
+    // row surface. Expansion is not a second visual state on the row.
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+    });
+    expect(treeitem('a')).toHaveAttribute('aria-selected', 'true');
+    expect(trigger('a')).toHaveAttribute('data-selected', 'true');
+    expect(trigger('a').className.split(/\s+/)).toContain('bg-muted');
+
+    // A file has no caret; selecting it moves the surface off its parent.
+    expect(within(treeitem('file.txt')).queryByTestId('explorer-caret')).toBeNull();
+    fireEvent.click(screen.getByText('file.txt'));
+    await waitFor(() => {
+      expect(treeitem('file.txt')).toHaveAttribute('aria-selected', 'true');
+    });
+    expect(trigger('file.txt').className.split(/\s+/)).toContain('bg-muted');
+    expect(treeitem('a')).toHaveAttribute('aria-selected', 'false');
+    expect(trigger('a').className.split(/\s+/)).not.toContain('bg-muted');
+
+    // Expanding/collapsing a folder does not steal the selection. Collapsing
+    // root hides the open file, so re-expand it through the caret first.
+    fireEvent.click(caretFor('root'));
+    await waitFor(() => {
+      expect(treeitem('root')).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('file.txt')).not.toBeInTheDocument();
+    });
+    fireEvent.click(caretFor('root'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+    });
+    expect(treeitem('file.txt')).toHaveAttribute('aria-selected', 'true');
+    expect(trigger('file.txt').className.split(/\s+/)).toContain('bg-muted');
+  });
+
+  it('keeps a folder collapsed after a file inside it was opened', async () => {
+    const provider = createMockProvider({
+      [ROOT_ID]: [makeNode('root', 'directory')],
+      root: [makeNode('root/a', 'directory')],
+      'root/a': [makeNode('root/a/file.txt', 'file', 'root/a')],
+    });
+
+    render(
+      <div style={{ height: 400 }}>
+        <Explorer provider={provider} extensions={[]} onFileActivate={vi.fn()} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('root')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('root'));
+    await waitFor(() => {
+      expect(screen.getByText('a')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.getByText('file.txt')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('file.txt'));
+
+    // Opening the file is not a standing reveal request: collapsing its parent
+    // must stay collapsed instead of being undone by the file's path.
+    fireEvent.click(screen.getByText('a'));
+    await waitFor(() => {
+      expect(screen.queryByText('file.txt')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('a').closest('[role="treeitem"]')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
   });
 });

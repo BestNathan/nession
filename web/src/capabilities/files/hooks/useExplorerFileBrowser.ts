@@ -330,7 +330,9 @@ export function useExplorerFileBrowser({
 
   const handleFileActivate = useCallback(
     (node: ExplorerNode) => {
-      setRevealPath(node.uri);
+      // Activation opens/selects; it is not a reveal request. Reveal belongs to
+      // creation and explicit navigation, so collapsing a folder is never
+      // undone by the file the user opened inside it.
       if (node.kind === 'directory') {
         navigation.handleDirectoryActivate(node);
         return;
