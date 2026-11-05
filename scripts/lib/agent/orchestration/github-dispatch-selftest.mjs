@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
-import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
+import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,prepareGitHubDispatch,
   createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome,
   reviewerPublishedPrBinding,planControlledReviewerRecovery} from './github-dispatch.mjs';
 
@@ -17,6 +17,41 @@ let state=startDevelopment(registry,request,authority);
 const item=reconcileOutbox(state).pending[0];
 const signer={key,key_id:'control-v1',issuer_run_id:222,now,ttl_ms:600000};
 const {ticket,body}=issueDispatchTicket(state,item.id,registry,signer);
+
+const unsignedRepairState={...state,phase:'repair',target_sha:b,repair_attempts:1,
+  outbox:[{id:'e'.repeat(64),task:{type:'dispatch',role:'developer',
+    agent_id:'dev-cursor-01',task:'repair',sha:b,resume:true},
+    status:'pending',attempts:0,receipt:null}]};
+assert.throws(()=>issueDispatchTicket(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+assert.throws(()=>planGitHubDispatch(unsignedRepairState,
+  'e'.repeat(64),registry,signer),/Store-bound native checkpoint/);
+// The exact immutable #1997 v22 Repair action must not become a signed
+// workflow_dispatch from a mere boolean flag.
+const historicalRepairAction=
+  'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const historicalRepairState={...unsignedRepairState,issue:1997,version:22,
+  target_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4',
+  outbox:[{...unsignedRepairState.outbox[0],id:historicalRepairAction,
+    task:{...unsignedRepairState.outbox[0].task,
+      sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4'}}]};
+assert.throws(()=>planGitHubDispatch(historicalRepairState,
+  historicalRepairAction,registry,signer),/Store-bound native checkpoint/);
+assert.throws(()=>prepareGitHubDispatch(historicalRepairState,
+  historicalRepairAction,registry,signer),/Store-bound native checkpoint/);
+// Failed preflight must leave the durable source object untouched; it must
+// not stage a write-ahead intent or mutate an existing Outbox status.
+assert.equal(historicalRepairState.version,22);
+assert.equal(historicalRepairState.outbox[0].status,'pending');
+assert.equal(historicalRepairState.outbox[0].receipt,null);
+for(const wrong of [false,undefined]){
+  const invalid={...unsignedRepairState,outbox:[
+    {...unsignedRepairState.outbox[0],task:{
+      ...unsignedRepairState.outbox[0].task,resume:wrong}}]};
+  assert.throws(()=>issueDispatchTicket(invalid,'e'.repeat(64),registry,signer),
+    /Store-bound native checkpoint/);
+}
+
 const plan=planGitHubDispatch(state,item.id,registry,signer);
 assert.equal(plan.workflow_id,'agent-develop.yml');
 assert.deepEqual(verifyDispatchTicket(ticket,keyring,{now}),body);
