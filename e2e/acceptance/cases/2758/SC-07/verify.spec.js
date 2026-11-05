@@ -87,6 +87,8 @@ test('SC-07: public three-region 1:1 prototype is interactive and compared to re
     expect(real[width].appWidth).toBe(width);
     expect(real[width].columns).toBeGreaterThan(0);
     expect(real[width].rows).toBeGreaterThan(1);
+    expect(real[width].well.width, width+' actual xterm content well').toBeGreaterThan(0);
+    expect(real[width].projection.height, width+' actual Capsule upper projection').toBeGreaterThan(0);
     for (const key of ['Tab', 'Enter', '↑', '↓']) {
       expect(real[width].commonKeys, width + ' product includes ' + key)
         .toContain('phys-key-' + key);
