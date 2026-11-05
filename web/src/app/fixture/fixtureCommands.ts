@@ -1,7 +1,19 @@
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
-import type { PluginSurface } from '@/platform/socket/types';
+import type { ConnectionState, PluginSurface, SocketMessage } from '@/platform/socket/types';
 import type { ClientCommandsListResponsePayload, QuickCommandItem } from '@/capabilities/commands';
 import { FIXTURE_AGENTS } from './fixtureData';
+
+/**
+ * Deterministic triggers the recovery scenarios expose to their Case.
+ *
+ * This is input, not rendering: the Case chooses when the server pushes a
+ * change or the link reconnects, instead of waiting a guessed amount of time.
+ * Guarded for the node-env unit project, which has no `window`.
+ */
+type FixtureCommandsWindow = Window & {
+  fixtureCommandsChanged?: () => void;
+  fixtureCommandsReconnect?: () => void;
+};
 
 /**
  * The saved-command backend for the fixture route (#2710).
@@ -14,38 +26,93 @@ import { FIXTURE_AGENTS } from './fixtureData';
  *
  *   /#/fixture/app                     → five saved commands
  *   /#/fixture/app?commands=none       → an empty saved list
- *   /#/fixture/app?commands=error      → the server reports a failed read
+ *   /#/fixture/app?commands=error      → every read is the server's failed read
  *   /#/fixture/app?commands=disconnected → the server link is down
+ *   /#/fixture/app?commands=recover    → the first read fails; Retry succeeds
+ *   /#/fixture/app?commands=changed    → the first read fails; the Case fires
+ *     `window.fixtureCommandsChanged()`, then the refetch succeeds
+ *   /#/fixture/app?commands=reconnect  → the link starts down and the first
+ *     read fails; the Case fires `window.fixtureCommandsReconnect()`, then the
+ *     reconnect refetch succeeds
  */
 export function fixtureCommandsSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('commands') ?? 'ready';
   const protocols = new ProtocolDirectory();
   protocols.publish(manifestsOf(FIXTURE_AGENTS));
 
+  let listRequests = 0;
+  let connected = scenario !== 'disconnected' && scenario !== 'reconnect';
+  const changedListeners = new Set<(payload: unknown, raw: SocketMessage) => void>();
+  const stateListeners = new Set<(state: ConnectionState) => void>();
+
+  /** The server's failed-read shape: an empty list plus a generic message. */
+  const failedRead = (): ClientCommandsListResponsePayload => ({
+    commands: [],
+    error: 'Saved commands could not be loaded',
+  });
+  const readCommands = (): ClientCommandsListResponsePayload => ({
+    commands: FIXTURE_COMMANDS,
+  });
+
+  if (typeof window !== 'undefined') {
+    const controls = window as FixtureCommandsWindow;
+    if (scenario === 'changed') {
+      controls.fixtureCommandsChanged = () => {
+        for (const listener of changedListeners) {
+          listener(undefined, undefined as unknown as SocketMessage);
+        }
+      };
+    }
+    if (scenario === 'reconnect') {
+      controls.fixtureCommandsReconnect = () => {
+        if (connected) {
+          return;
+        }
+        connected = true;
+        for (const listener of stateListeners) {
+          listener('connected');
+        }
+      };
+    }
+  }
+
   return {
-    connectionState: scenario === 'disconnected' ? 'disconnected' : 'connected',
+    get connectionState(): ConnectionState {
+      return connected ? 'connected' : 'disconnected';
+    },
     protocols,
     request<T>(type: string): Promise<T> {
       if (type !== 'server.commands.list') {
         return Promise.reject(new Error(`fixture commands surface does not answer ${type}`));
       }
+      listRequests += 1;
       // `disconnected` still has a list (the last one the client knew); only
       // the link is down. `error` is the server's failed-read reply
       // (`{ commands: [], error }`), which the adapter must reject rather
       // than present as "no saved commands yet" (#2784).
       if (scenario === 'error') {
-        const failed: ClientCommandsListResponsePayload = {
-          commands: [],
-          error: 'Saved commands could not be loaded',
-        };
-        return Promise.resolve(failed as T);
+        return Promise.resolve(failedRead() as T);
       }
-      const commands = scenario === 'none' ? [] : FIXTURE_COMMANDS;
-      const payload: ClientCommandsListResponsePayload = { commands };
+      if (
+        (scenario === 'recover' || scenario === 'changed' || scenario === 'reconnect') &&
+        listRequests === 1
+      ) {
+        return Promise.resolve(failedRead() as T);
+      }
+      const payload = scenario === 'none' ? { commands: [] } : readCommands();
       return Promise.resolve(payload as T);
     },
     send(): void {},
-    subscribe(): () => void {
+    subscribe(
+      type: string,
+      listener: (payload: unknown, raw: SocketMessage) => void,
+    ): () => void {
+      if (type === 'server.commands.changed') {
+        changedListeners.add(listener);
+        return () => {
+          changedListeners.delete(listener);
+        };
+      }
       return () => {};
     },
     onBinary(): () => void {
@@ -54,8 +121,11 @@ export function fixtureCommandsSurface(search: string): PluginSurface {
     waitForConnection(): Promise<void> {
       return Promise.resolve();
     },
-    onConnectionStateChange(): () => void {
-      return () => {};
+    onConnectionStateChange(listener: (state: ConnectionState) => void): () => void {
+      stateListeners.add(listener);
+      return () => {
+        stateListeners.delete(listener);
+      };
     },
   };
 }
