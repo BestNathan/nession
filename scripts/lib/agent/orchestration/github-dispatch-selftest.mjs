@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
 import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
   createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome,
-  reviewerPublishedPrBinding} from './github-dispatch.mjs';
+  reviewerPublishedPrBinding,planControlledReviewerRecovery} from './github-dispatch.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const a='a'.repeat(40), b='b'.repeat(40), main='f'.repeat(40);
@@ -189,4 +189,36 @@ for(const [otherState,otherPr] of [
   [{...controlledState,transitions:[]},controlledPr],
   [{...controlledState,transitions:[{...controlledState.transitions[0],outcome:'other'}]},controlledPr],
 ])assert.equal(reviewerPublishedPrBinding(otherState,otherPr),false);
+const originalReviewAction='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
+const historicalReview={schema_version:1,issue:1997,version:19,phase:'review',
+  target_sha:originalSha,repair_attempts:0,transitions:[{
+    kind:'publisher',run_id:39609600546,attempt:1,
+    target_sha:originalSha,outcome:'published'}],
+  assignments:{developer:'dev-cursor-01',reviewer:'review-qwen-01',
+    acceptor:'accept-cursor-01'},
+  outbox:[{id:originalReviewAction,
+    task:{type:'dispatch',role:'reviewer',task:'review',sha:originalSha,
+      agent_id:'review-qwen-01'},status:'dispatched',attempts:1,
+    receipt:{status:'verified',dispatch_id:originalReviewAction,
+      source_run_id:39943178597}}],
+};
+const recoverySigner={key,key_id:'control-v1',issuer_run_id:222,
+  now,ttl_ms:600000};
+const recoveredPlan=planControlledReviewerRecovery(historicalReview,
+  originalReviewAction,registry,recoverySigner);
+assert.equal(recoveredPlan.workflow_id,'agent-review.yml');
+assert.equal(recoveredPlan.inputs.action_id,originalReviewAction);
+assert.equal(recoveredPlan.inputs.reviewer,'review-qwen-01');
+const recoveredBody=verifyDispatchTicket(recoveredPlan.ticket,keyring,{now});
+assert.equal(recoveredBody.issue,1997);
+assert.equal(recoveredBody.state_version,19);
+assert.equal(recoveredBody.input_sha,originalSha);
+for(const wrong of [
+  {...historicalReview,version:20},
+  {...historicalReview,target_sha:'e'.repeat(40)},
+  {...historicalReview,outbox:historicalReview.outbox.map(x=>({
+    ...x,receipt:{...x.receipt,source_run_id:39951010624}}))},
+])assert.throws(()=>planControlledReviewerRecovery(wrong,
+  originalReviewAction,registry,recoverySigner),
+  /controlled Reviewer recovery|no longer recoverable/);
 console.log('Agent signed dispatch, GitHub REST attestation and spoof/replay fixtures passed');
