@@ -8,7 +8,8 @@ import {assertUnprivilegedDeveloperEnvironment,originalCursorWorkspace,
   CURSOR_LOCAL_ROOT,CURSOR_WORKSPACE_PATH,CURSOR_JSONL_PATH} from './development-worker.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTROLLED_CONTINUATION,
-  CONTROLLED_V2_CONTINUATION,controlledCheckpointSourceRun,writeNativeBundle,
+  CONTROLLED_V2_CONTINUATION,CONTROLLED_REPAIR_ACTION,
+  assertControlledRepair,controlledCheckpointSourceRun,writeNativeBundle,
   developmentHarnessDigest} from './development-resume.mjs';
 
 // The native Agent index is workspace scoped; moved SDK JSONL alone is not
@@ -77,11 +78,32 @@ for(const bad of [
   {resume_from:{...admission.resume_from,ciphertext_sha256:'a'.repeat(64)}},
   {resume_from:{...admission.resume_from,parent_action_id:'a'.repeat(64)}},
   {resume_from:{...admission.resume_from,writer_token:'forbidden'}},
-])assert.throws(()=>assertControlledContinuation({...admission,...bad}),/committed controlled/);
+])assert.throws(()=>assertControlledContinuation({...admission,...bad}),
+  /committed controlled|native Repair checkpoint/);
 assert.equal(developmentHarnessDigest(source,'1.0.37',{id:'composer-2.5',fast:true}),
   'ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68');
 assert.notEqual(developmentHarnessDigest(source,'1.0.38',{id:'composer-2.5',fast:true}),
   developmentHarnessDigest(source,'1.0.37',{id:'composer-2.5',fast:true}));
+const repairAdmission={...admission,task:'repair',action_id:CONTROLLED_REPAIR_ACTION,
+  input_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4',
+  resume_from:{checkpoint_version:3,
+    checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf',
+    ciphertext_sha256:'7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0',
+    source_sha:source,source_run_id:39448549052}};
+assert.deepEqual(assertControlledContinuation(repairAdmission),repairAdmission.resume_from);
+assert.deepEqual(assertControlledRepair(repairAdmission),repairAdmission.resume_from);
+assert.equal(controlledCheckpointSourceRun(repairAdmission.resume_from),39448549052);
+for(const bad of [
+  {action_id:CONTROLLED_CONTINUATION},
+  {input_sha:source},{agent_id:'dev-other-01'},{provider:'claude-code'},
+  {resume_from:{...repairAdmission.resume_from,source_sha:repairAdmission.input_sha}},
+  {resume_from:{...repairAdmission.resume_from,source_run_id:39448549053}},
+  {resume_from:{...repairAdmission.resume_from,checkpoint_version:2}},
+  {resume_from:{...repairAdmission.resume_from,checkpoint_commit_sha:'a'.repeat(40)}},
+  {resume_from:{...repairAdmission.resume_from,ciphertext_sha256:'b'.repeat(64)}},
+  {resume_from:{...repairAdmission.resume_from,writer_token:'not allowed'}},
+])assert.throws(()=>assertControlledContinuation({...repairAdmission,...bad}),
+  /native Repair checkpoint/);
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 assert.doesNotThrow(()=>assertCurrentDevelopmentCapabilities(admission,registry));
 for(const permission of ['repo.read','repo.search','repo.edit','github.issue.read']){
