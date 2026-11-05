@@ -2,7 +2,8 @@
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
-  CONTROLLED_REPAIR_DISPATCH_COMMENT}
+  CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
+  CONTROLLED_REPAIR_RETRY_COMMENT}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -100,6 +101,20 @@ for(const patch of [
   {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
 ])assert.throws(()=>assertDispatchAuthority({...reviewRecover,...patch}),
   /authenticated owner\/main/);
+const repairRetry='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
+for(const command of [CONTROLLED_REPAIR_FAILURE_COMMENT,CONTROLLED_REPAIR_RETRY_COMMENT]){
+  const original={...commentValid,actionId:repairRetry,
+    event:{...commentValid.event,comment:{...commentValid.event.comment,
+      body:command}}};
+  assert.equal(assertDispatchAuthority(original).action_id,repairRetry);
+  for(const wrong of [
+    {...original,actionId:reviewRecover.actionId},
+    {...original,event:{...original.event,comment:{...original.event.comment,
+      body:command+' '}}},
+    {...original,event:{...original.event,comment:{...original.event.comment,
+      user:{login:'attacker'}}}},
+  ])assert.throws(()=>assertDispatchAuthority(wrong),/authenticated owner\/main/);
+}
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},

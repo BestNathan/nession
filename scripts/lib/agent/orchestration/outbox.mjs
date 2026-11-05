@@ -22,6 +22,10 @@ const NATIVE_FAILURE_CODE='native_cursor_agent_not_found_before_send';
 const CONTROLLED_REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
 const CONTROLLED_SKIPPED_REVIEW_RUN=39943178597;
 const CONTROLLED_REVIEW_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const CONTROLLED_REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const CONTROLLED_REPAIR_FAILED_RUN=42020432271;
+const CONTROLLED_REPAIR_FAILURE='cursor_native_read_missing_uncommitted';
+const CONTROLLED_REPAIR_SUCCESSOR='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
 
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -93,11 +97,17 @@ export function validateDevelopmentState(state) {
       const c=item.task.repair_checkpoint;
       onlyKeys(c,['checkpoint_version','checkpoint_commit_sha',
         'ciphertext_sha256','source_sha','source_run_id'], 'Repair checkpoint');
+      const historicalFailedRepair=item.status==='failed'&&
+        item.id===CONTROLLED_REPAIR_ACTION&&
+        item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE&&
+        item.task.sha===CONTROLLED_REVIEW_SHA;
       if(Object.keys(c).length!==5||
           item.task.type!=='dispatch'||item.task.role!=='developer'||
           item.task.task!=='repair'||item.task.resume!==true||
-          item.task.continuation!=null||item.task.sha!==state.target_sha||
-          state.phase!=='repair'||!positive(c.checkpoint_version)||
+          item.task.continuation!=null||
+          ((item.task.sha!==state.target_sha||state.phase!=='repair')&&
+            !historicalFailedRepair)||
+          !positive(c.checkpoint_version)||
           !SHA.test(c.checkpoint_commit_sha??'')||
           !HEX64.test(c.ciphertext_sha256??'')||
           !SHA.test(c.source_sha??'')||c.source_sha===item.task.sha||
@@ -185,7 +195,14 @@ export function validateDevelopmentState(state) {
         'failure_code'],'attested failed Run');
       if(Object.keys(r).length!==5||r.status!=='failed'||
           r.dispatch_id!==item.id||
-          !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE].includes(r.failure_code)||
+          !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE,
+            CONTROLLED_REPAIR_FAILURE].includes(r.failure_code)||
+          (r.failure_code===CONTROLLED_REPAIR_FAILURE&&(
+            item.id!==CONTROLLED_REPAIR_ACTION||
+            r.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+            item.task.task!=='repair'||
+            item.task.sha!==CONTROLLED_REVIEW_SHA||
+            item.task.repair_checkpoint?.checkpoint_version!==3))||
           (r.failure_code===NATIVE_FAILURE_CODE &&
             (item.id!==NATIVE_FAILED_RESUME||r.source_run_id!==NATIVE_FAILED_RUN||
              item.task.continuation?.checkpoint_version!==1))||
@@ -657,6 +674,56 @@ export function recordSliceYield(state,expectedVersion,actionId,checkpoint,sourc
     ...state,version:state.version+1,
     outbox:[...state.outbox.map(item=>item.id===actionId?{...item,status:'yielded',receipt}:item),next],
   });
+}
+
+// A Reviewer-originated Repair is a separate task from the original
+// Developer Slice. This exact failed Run restored the committed v3 native
+// state, but produced NO accepted result/checkpoint/PR change. A model call
+// may have occurred, so this is not represented as a "pre-send" failure.
+// The disposable Worker cannot commit a PR or Store result. Authorize one
+// new, independently attested, bounded Repair action; never resend the old.
+export function repairRuntimeSuccessorId(issue,actionId,runId){
+  if(issue!==1997||actionId!==CONTROLLED_REPAIR_ACTION||
+     runId!==CONTROLLED_REPAIR_FAILED_RUN)
+    reject('unsupported native Repair runtime recovery');
+  const next=hash([issue,actionId,runId,'native-repair-uncommitted-runtime-recovery-v1']);
+  if(next!==CONTROLLED_REPAIR_SUCCESSOR)reject('Repair successor identity drift');
+  return next;
+}
+export function recordAttestedRepairRuntimeFailure(state,expectedVersion,actionId,source){
+  validateDevelopmentState(state);
+  onlyKeys(source,['verified','issue','run_id','attempt','failure_code'],
+    'attested Repair runtime failure');
+  if(state.issue!==1997||state.version!==25||expectedVersion!==25||
+     state.phase!=='repair'||state.target_sha!==CONTROLLED_REVIEW_SHA||
+     actionId!==CONTROLLED_REPAIR_ACTION||source.verified!==true||
+     source.issue!==1997||source.run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+     source.attempt!==1||source.failure_code!==CONTROLLED_REPAIR_FAILURE)
+    reject('stale or unauthenticated Repair failure');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(item?.status!=='dispatched'||item.attempts!==1||
+     item.task.type!=='dispatch'||item.task.role!=='developer'||
+     item.task.agent_id!=='dev-cursor-01'||item.task.task!=='repair'||
+     item.task.sha!==CONTROLLED_REVIEW_SHA||item.task.resume!==true||
+     item.task.repair_checkpoint?.checkpoint_version!==3||
+     item.task.repair_checkpoint?.checkpoint_commit_sha!==
+       'eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+     item.task.repair_checkpoint?.source_run_id!==39448549052||
+     item.receipt?.status!=='verified'||
+     item.receipt?.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+     item.receipt?.dispatch_id!==actionId||
+     state.outbox.some(x=>x.id!==actionId&&x.status==='pending'&&
+       x.task.role==='developer')||state.outbox.length>=MAX_OUTBOX)
+    reject('Repair Action is not one uniquely failed Run');
+  const nextId=repairRuntimeSuccessorId(1997,actionId,source.run_id);
+  if(state.outbox.some(x=>x.id===nextId))reject('Repair successor collision');
+  const failed={...item,status:'failed',receipt:{
+    status:'failed',dispatch_id:actionId,source_run_id:source.run_id,
+    source_attempt:1,failure_code:CONTROLLED_REPAIR_FAILURE}};
+  const successor={id:nextId,task:{...item.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:[...state.outbox.map(x=>x.id===actionId?failed:x),successor]});
 }
 
 // A conclusively FAILED Worker may be retried only as a NEW Action ID with
