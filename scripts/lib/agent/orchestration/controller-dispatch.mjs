@@ -8,7 +8,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
-  recoverAttestedNativeResumeFailure} from './dispatch-store.mjs';
+  recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
@@ -21,9 +21,11 @@ const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
 export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
 export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1997 failed_run=39376331942';
+export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
 const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
+const REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
@@ -36,7 +38,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION)||
         (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT&&actionId===CONTROLLED_V2_CONTINUATION)||
-        (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION))&&
+        (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION)||
+        (event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT&&actionId===REVIEW_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -118,6 +121,28 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
     fail('Developer source SHA is not a reachable trusted main ancestor');
   }
 }
+// One exact historical source is independently authenticated before signing
+// the replacement. The old unsigned manual Review Run is never reusable.
+export async function verifyKnownSkippedReviewerLive(token) {
+  const run=await api(token,'/actions/runs/39943178597');
+  if(run?.id!==39943178597||run.run_attempt!==1||
+      run.path!=='.github/workflows/agent-review.yml'||
+      run.name!=='Agent / Review'||run.event!=='workflow_dispatch'||
+      run.head_branch!=='main'||run.head_sha!=='153cb8bdce062b37c94648e136fc8bea21195971'||
+      run.actor?.login!=='github-actions[bot]'||
+      run.status!=='completed'||run.conclusion!=='skipped'||
+      run.repository?.full_name!==REPO||
+      run.head_repository?.full_name!==REPO)
+    fail('unverified historical skipped Reviewer source Run');
+  const pr=await api(token,'/pulls/2176');
+  if(pr?.number!==2176||pr.state!=='open'||
+      pr.head?.sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+      pr.head?.ref!=='agent/1997/developer-checkpoint-v3'||
+      pr.head?.repo?.full_name!==REPO||pr.base?.repo?.full_name!==REPO)
+    fail('controlled published Reviewer PR changed');
+  return Object.freeze({verified:true,run_id:run.id,attempt:run.run_attempt,
+    conclusion:'skipped'});
+}
 async function main(){
   if(process.argv.length!==3||process.argv[2]!=='dispatch')
     fail('usage: dispatch (only from trusted main workflow)');
@@ -131,7 +156,9 @@ async function main(){
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
   const recoveringNative=commanded&&event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT;
-  const actionId=commanded?(continuingV2?CONTROLLED_V2_CONTINUATION:
+  const recoveringReview=commanded&&event?.comment?.body===CONTROLLED_REVIEW_RECOVERY_COMMENT;
+  const actionId=commanded?(recoveringReview?REVIEW_ACTION:
+    continuingV2?CONTROLLED_V2_CONTINUATION:
     continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
     recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
@@ -154,6 +181,15 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringReview){
+      const source=await verifyKnownSkippedReviewerLive(token);
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeControlledReviewerRecovery({
+        remote:storeRemote,registry,signer,actionsToken:token,source});
+      console.log(JSON.stringify(result));
+      return;
+    }
     if(recovering){
       const verified=await verifyKnownFailureLive(token);
       const recovery=recoverConfirmedFailedDeveloperDispatch({

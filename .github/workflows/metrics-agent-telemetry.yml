@@ -383,3 +383,39 @@ jobs:
             -F "client_payload[source_run_attempt]=$SOURCE_RUN_ATTEMPT" \
             -f "client_payload[target_sha]=$source_sha"
           echo "Notified Acceptance: durable Provider telemetry for $source_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      # The Store Reviewer consumer may execute only after this workflow has
+      # pushed the canonical immutable Metrics witness. Unlike an Agent result,
+      # this is a wake-up, not authority to mutate State or mark Acceptance Pass.
+      - name: Notify Store of durable Reviewer evidence
+        if: >-
+          success() &&
+          steps.source.outputs.expected_workflow_id == 'agent-review' &&
+          steps.persist.outputs.changed != '' &&
+          steps.persist.outputs.changed != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The trusted source was already allowlisted before Metrics commit;
+          # independently bind the wake to the completed successful Reviewer.
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .repository.full_name == $repo and
+            .head_repository.full_name == $repo and
+            .path == ".github/workflows/agent-review.yml" and
+            .name == "Agent / Review" and
+            .event == "workflow_dispatch" and .head_branch == "main" and
+            .status == "completed" and .conclusion == "success" and
+            (.actor.login == "BestNathan" or .actor.login == "github-actions[bot]") and
+            (.head_sha | test("^[a-f0-9]{40}$"))
+          ' "$RUNNER_TEMP/telemetry-source-run.json" >/dev/null
+          source_sha="$(jq -er .head_sha "$RUNNER_TEMP/telemetry-source-run.json")"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=nession-review-metrics-ingested \
+            -F "client_payload[source_run_id]=$SOURCE_RUN_ID" \
+            -F "client_payload[source_run_attempt]=$SOURCE_RUN_ATTEMPT" \
+            -f "client_payload[source_sha]=$source_sha"
+          echo "Notified trusted Reviewer result ingest after durable Metrics CAS: $SOURCE_RUN_ID/$SOURCE_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"

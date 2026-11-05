@@ -39,7 +39,7 @@ function crc32(bytes) {
 export function decodeResultZip(zip,expectedMember='agent-result.json') {
   // Reuse the exact same bounded, no-traversal, one-member ZIP parser for the
   // read-only Controller request Artifact; never allow caller-supplied paths.
-  if(!['agent-result.json','controller-request.json'].includes(expectedMember))
+  if(!['agent-result.json','controller-request.json','review-claim.json'].includes(expectedMember))
     fail('unapproved single-member artifact type');
   if(!Buffer.isBuffer(zip)||zip.length<52||zip.length>MAX_ZIP)fail('archive size/type');
   const end=zip.length-22;
@@ -137,8 +137,7 @@ export function createGitHubResultArtifactReader(token,{fetchFn=fetch}={}) {
     downloadZip:id=>{if(!positive(id))fail('invalid artifact ID');return get('/actions/artifacts/'+id+'/zip',true);},
   };
 }
-function ownedArtifact(artifacts,run,actionId) {
-  const name='agent-result-'+run.id+'-'+run.run_attempt+'-'+actionId;
+function ownedArtifact(artifacts,run,actionId,name='agent-result-'+run.id+'-'+run.run_attempt+'-'+actionId) {
   if(!Array.isArray(artifacts?.artifacts)||artifacts.total_count!==artifacts.artifacts.length ||
      artifacts.artifacts.length>100)fail('incomplete/paginated artifact listing');
   const found=artifacts.artifacts.filter(x=>x.name===name);
@@ -153,6 +152,32 @@ function ownedArtifact(artifacts,run,actionId) {
     !Number.isFinite(started)||!Number.isFinite(created)||!Number.isFinite(updated)||
     created<started-30000||created>updated+300000)fail('untrusted/expired Artifact metadata');
   return art;
+}
+// The Reviewer prepare job publishes the signed dispatch claim as a separate
+// single-member Artifact. A matching Run name/SHA is insufficient for rebinding:
+// this claim proves the replacement actually carried the SAME signed Action.
+// The caller verifies the HMAC and issuer; these bytes remain untrusted until then.
+export async function readAuthenticatedReviewClaim({artifactReader,run,action_id}) {
+  if(!HEX64.test(action_id??'')||!positive(run?.id)||!positive(run?.run_attempt)||
+     !artifactReader||typeof artifactReader.listRunArtifacts!=='function'||
+     typeof artifactReader.downloadZip!=='function')fail('invalid Reviewer claim read request');
+  const artifacts=await artifactReader.listRunArtifacts(run.id);
+  const art=ownedArtifact(artifacts,run,action_id,
+    'review-claim-'+run.id+'-'+run.run_attempt);
+  const zip=await artifactReader.downloadZip(art.id);
+  if(!Buffer.isBuffer(zip)||zip.length!==art.size_in_bytes||
+     sha(zip)!==art.digest.slice(7))fail('Reviewer claim ZIP digest mismatch');
+  const raw=decodeResultZip(zip,'review-claim.json');
+  let claim;
+  try{claim=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));}
+  catch{fail('invalid Reviewer claim JSON');}
+  if(!keys(claim,['schema_version','kind','action_id','dispatch_ticket'])||
+     claim.schema_version!==1||claim.kind!=='reviewer_dispatch_claim'||
+     claim.action_id!==action_id||typeof claim.dispatch_ticket!=='string'||
+     claim.dispatch_ticket.length<16||claim.dispatch_ticket.length>1800)
+    fail('Reviewer claim is not bound to the replacement Action');
+  return Object.freeze({dispatch_ticket:claim.dispatch_ticket,
+    artifact_id:art.id,artifact_digest:art.digest});
 }
 // The result artifact and its canonical Metrics record are independent
 // witnesses of the same Run. Neither may substitute for the other.

@@ -1,12 +1,13 @@
 name: Acceptance / Verified Issue Stage
 
-# Trusted owner-only trigger for an existing staged requirement after its
-# independently authenticated live Worker/Store evidence becomes available.
+# Owner-only manual verification for the controlled #2010 staged requirement.
+# The former issue_comment subscription created an Actions Run on every repo
+# Issue comment, even though only one exact #2010 owner command was accepted.
+# Use Actions > Acceptance / Verified Issue Stage > Run workflow on main.
 # The shared read-only Agent and deterministic Issue updater remain the ONLY
-# authority to project Success Criteria; comments never supply verdicts.
+# authority to project Success Criteria; a dispatch is not a verdict.
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,12 +24,8 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.action == 'created' &&
-      github.event.issue.number == 2010 &&
-      !github.event.issue.pull_request &&
-      github.event.comment.user.login == 'BestNathan' &&
-      github.event.comment.body == '/nession accept staging issue=2010'
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'BestNathan'
     uses: ./.github/workflows/agent-sc-acceptance.yml
     with:
       issue_number: '2010'
