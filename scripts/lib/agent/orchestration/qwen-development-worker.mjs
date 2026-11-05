@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync,execFileSync} from 'node:child_process';
-import {createHash,randomUUID} from 'node:crypto';
+import {createPublicKey,randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from '../harness/native.mjs';
 import {parseNativeEvents,toolUseNames} from '../providers/claude-stream.mjs';
@@ -169,6 +169,15 @@ async function main(){
   const prompt=qwenDeveloperPrompt(issue,admission);
   const publicKeyPem=Buffer.from(
     process.env.QWEN_RESUME_PUBLIC_KEY_B64??'','base64').toString('utf8');
+  // Missing/misbound public-only Resume configuration must fail BEFORE any
+  // model token is spent. Only the trusted ingester holds the private key.
+  let rsa;
+  try{rsa=createPublicKey(publicKeyPem);}catch{
+    fail('configured Qwen public-only native sealing key is invalid');
+  }
+  if(rsa.asymmetricKeyType!=='rsa'||
+      (rsa.asymmetricKeyDetails?.modulusLength??0)<2048)
+    fail('configured Qwen native sealing RSA key is unsafe');
   const out=path.resolve(process.argv[3]);
   if(out!=='/output'||!fs.lstatSync(out).isDirectory())
     fail('untrusted output destination');
