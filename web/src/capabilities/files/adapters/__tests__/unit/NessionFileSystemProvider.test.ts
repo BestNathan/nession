@@ -111,7 +111,7 @@ describe('createNessionFileSystemProvider', () => {
 
     await provider.create?.(DIR_NODE, 'file', 'new.ts');
 
-    expect(fileOps.writeFile).toHaveBeenCalledWith('src/new.ts', '');
+    expect(fileOps.writeFile).toHaveBeenCalledWith('src/new.ts', '', { createOnly: true });
     expect(fileOps.createDir).not.toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe('createNessionFileSystemProvider', () => {
 
     await provider.create?.(null, 'directory', 'docs');
 
-    expect(fileOps.createDir).toHaveBeenCalledWith('docs');
+    expect(fileOps.createDir).toHaveBeenCalledWith('docs', { createOnly: true });
     expect(fileOps.writeFile).not.toHaveBeenCalled();
   });
 
@@ -131,7 +131,20 @@ describe('createNessionFileSystemProvider', () => {
 
     await provider.rename?.(FILE_NODE, 'main.ts');
 
-    expect(fileOps.renameFile).toHaveBeenCalledWith('src/index.ts', 'src/main.ts');
+    expect(fileOps.renameFile).toHaveBeenCalledWith('src/index.ts', 'src/main.ts', {
+      noReplace: true,
+    });
+  });
+
+  it('rename surfaces a no-replace refusal as an actionable message', async () => {
+    const fileOps = makeFileOps({
+      renameFile: vi.fn().mockRejectedValue(new Error('already_exists: src/main.ts')),
+    });
+    const provider = createNessionFileSystemProvider(fileOps);
+
+    await expect(provider.rename?.(FILE_NODE, 'main.ts')).rejects.toThrow(
+      'Could not rename: that name already exists.',
+    );
   });
 
   it('delete file delegates to deleteFile without recursive', async () => {

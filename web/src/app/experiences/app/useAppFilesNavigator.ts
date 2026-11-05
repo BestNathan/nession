@@ -1,3 +1,4 @@
+import type { FileRef } from '@/capabilities/files';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceDepthControl } from '@/app/workspace/workspaceContext';
 import {
@@ -17,9 +18,11 @@ export function useAppFilesNavigator(
   depth: WorkspaceDepthControl,
   session: AppFilesNavigatorSession,
   resetKey: unknown,
+  sourceId: string,
 ) {
   const [dirStack, setDirStack] = useState<string[]>(['']);
   const [selected, setSelected] = useState<{
+    ref: FileRef;
     path: string;
     filename: string;
     size: number;
@@ -43,7 +46,7 @@ export function useAppFilesNavigator(
     setDirStack(['']);
     setSelected(null);
     scrollByPath.current.clear();
-  }, [resetKey]);
+  }, [resetKey, sourceId]);
 
   const snapshotScroll = useCallback(
     (scrollTop: number) => {
@@ -104,13 +107,14 @@ export function useAppFilesNavigator(
         closeSearch();
       }
       setSelected({
+        ref: { sourceId, path: entry.path },
         path: entry.path,
         filename: entry.name,
         size: entry.size,
         initialLine: options?.initialLine,
       });
     },
-    [closeSearch, searchOpen],
+    [closeSearch, searchOpen, sourceId],
   );
 
   const confirmDiscard = useCallback(() => {

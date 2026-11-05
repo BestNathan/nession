@@ -9,6 +9,12 @@ import type { ExplorerNode } from '@/platform/explorer/types';
 import { registerSeenLanguageIds, scanLanguageIdsFromPaths } from '@/platform/editor';
 import { toastError } from '@/shared/lib/errorHelpers';
 
+import {
+  joinPath,
+  resolveCreateTarget,
+  type CreateKind,
+} from '../model/createTarget';
+import { fileErrorMessage } from '../model/fileErrors';
 import { useFileBrowserDialogs } from './useFileBrowserDialogs';
 import { useNewEntryForm } from './useNewEntryForm';
 
@@ -111,6 +117,73 @@ function useExplorerFileBrowserNavigation(
   };
 }
 
+function resolveCurrentParent(
+  store: ExplorerStore | null,
+  currentPath: string,
+  contextTarget?: ExplorerNode | null,
+): string {
+  const snapshot = store?.getSnapshot();
+  const selected = snapshot
+    ? [...snapshot.selectedIds]
+        .map((id) => store?.getNode(id))
+        .filter((node): node is ExplorerNode => node !== undefined)
+    : [];
+  const active = snapshot?.activeId ? (store?.getNode(snapshot.activeId) ?? null) : null;
+  return resolveCreateTarget({
+    selected,
+    active,
+    currentPath,
+    contextTarget: contextTarget ?? null,
+  }).parentPath;
+}
+
+/**
+ * Upload lifecycle: capture the destination when the picker opens, then write
+ * the chosen file there. `uploadFile` defaults to create-only, so an upload
+ * cannot replace a same-named Workspace file.
+ */
+function useExplorerUpload({
+  fileOps,
+  currentPath,
+  storeRef,
+  onReveal,
+}: {
+  fileOps: FileOps;
+  currentPath: string;
+  storeRef: MutableRefObject<ExplorerStore | null>;
+  onReveal: (path: string) => void;
+}) {
+  const uploadTargetRef = useRef<string | null>(null);
+
+  const beginUpload = useCallback(() => {
+    uploadTargetRef.current = resolveCurrentParent(storeRef.current, currentPath);
+  }, [currentPath, storeRef]);
+
+  const handleUpload = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      const parentPath = uploadTargetRef.current ?? currentPath;
+      const fullPath = joinPath(parentPath, file.name);
+      try {
+        await fileOps.uploadFile(fullPath, file);
+        toast.success(`Uploaded ${file.name}`);
+        await storeRef.current?.refresh(parentPath || ROOT_ID);
+        onReveal(fullPath);
+      } catch (err) {
+        toast.error(fileErrorMessage(err, 'upload file'));
+      }
+      e.target.value = '';
+      uploadTargetRef.current = null;
+    },
+    [currentPath, fileOps, onReveal, storeRef],
+  );
+
+  return { beginUpload, handleUpload };
+}
+
 function useExplorerFileBrowserMutations({
   fileOps,
   currentPath,
@@ -119,6 +192,7 @@ function useExplorerFileBrowserMutations({
   dialogs,
   onFileDeleted,
   onFileRenamed,
+  onReveal,
 }: {
   fileOps: FileOps;
   currentPath: string;
@@ -127,57 +201,57 @@ function useExplorerFileBrowserMutations({
   dialogs: ReturnType<typeof useFileBrowserDialogs>;
   onFileDeleted?: (path: string) => void;
   onFileRenamed?: (oldPath: string, newPath: string) => void;
+  onReveal: (path: string) => void;
 }) {
-  const handleCreate = useCallback(
-    async (name: string, kind: 'file' | 'folder') => {
-      const trimmed = name.trim();
-      if (!trimmed) {
-        return;
-      }
+  const upload = useExplorerUpload({ fileOps, currentPath, storeRef, onReveal });
 
-      const path = currentPath ? `${currentPath}/${trimmed}` : trimmed;
-      try {
-        if (kind === 'file') {
-          await fileOps.writeFile(path, '');
-          toast.success(`Created ${trimmed}`);
-        } else {
-          await fileOps.createDir(path);
-          toast.success(`Created ${trimmed}/`);
-        }
-        await storeRef.current?.refresh(currentPath || ROOT_ID);
-        newEntryForm.reset();
-      } catch (err) {
-        toastError(err, `Failed to create ${kind}`);
+  const handleCreate = useCallback(async () => {
+    const target = newEntryForm.target;
+    if (!target || newEntryForm.validationError !== null) {
+      return;
+    }
+    const name = newEntryForm.newName.trim();
+    if (!name) {
+      return;
+    }
+
+    const path = joinPath(target.parentPath, name);
+    try {
+      if (target.kind === 'file') {
+        await fileOps.writeFile(path, '', { createOnly: true });
+        toast.success(`Created ${name}`);
+      } else {
+        await fileOps.createDir(path, { createOnly: true });
+        toast.success(`Created ${name}/`);
       }
-    },
-    [currentPath, fileOps, newEntryForm, storeRef],
-  );
+      await storeRef.current?.refresh(target.parentPath || ROOT_ID);
+      newEntryForm.reset();
+      onReveal(path);
+    } catch (err) {
+      // Keep the form and its contents: the user corrects the name and resubmits.
+      newEntryForm.setSubmitError(
+        fileErrorMessage(err, target.kind === 'file' ? 'create file' : 'create folder'),
+      );
+    }
+  }, [fileOps, newEntryForm, onReveal, storeRef]);
 
   const handleCreateFile = useCallback(() => {
-    void handleCreate(newEntryForm.newName, 'file');
-  }, [handleCreate, newEntryForm.newName]);
+    void handleCreate();
+  }, [handleCreate]);
 
   const handleCreateFolder = useCallback(() => {
-    void handleCreate(newEntryForm.newName, 'folder');
-  }, [handleCreate, newEntryForm.newName]);
+    void handleCreate();
+  }, [handleCreate]);
 
-  const handleUpload = useCallback(
-    async (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) {
-        return;
-      }
-      const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name;
-      try {
-        await fileOps.uploadFile(fullPath, file);
-        toast.success(`Uploaded ${file.name}`);
-        await storeRef.current?.refresh(currentPath || ROOT_ID);
-      } catch (err) {
-        toastError(err, 'Failed to upload file');
-      }
-      e.target.value = '';
+  /** Capture the creation destination, then open the form. */
+  const openCreate = useCallback(
+    (kind: CreateKind, contextTarget?: ExplorerNode | null) => {
+      newEntryForm.open(
+        kind,
+        resolveCurrentParent(storeRef.current, currentPath, contextTarget),
+      );
     },
-    [currentPath, fileOps, storeRef],
+    [currentPath, newEntryForm, storeRef],
   );
 
   const handleDeleteRequest = useCallback(
@@ -215,9 +289,11 @@ function useExplorerFileBrowserMutations({
   );
 
   return {
+    handleCreate,
     handleCreateFile,
     handleCreateFolder,
-    handleUpload,
+    openCreate,
+    ...upload,
     handleDeleteRequest,
     handleDeleteConfirm,
     handleExplorerRenamed,
@@ -237,6 +313,7 @@ export function useExplorerFileBrowser({
   const newEntryForm = useNewEntryForm();
   const dialogs = useFileBrowserDialogs();
 
+  const [revealPath, setRevealPath] = useState(initialPath);
   const provider = useMemo(() => createLangAwareFileSystemProvider(fileOps), [fileOps]);
 
   const navigation = useExplorerFileBrowserNavigation(initialPath, onGetTerminalPwd, storeRef);
@@ -248,10 +325,12 @@ export function useExplorerFileBrowser({
     dialogs,
     onFileDeleted,
     onFileRenamed,
+    onReveal: setRevealPath,
   });
 
   const handleFileActivate = useCallback(
     (node: ExplorerNode) => {
+      setRevealPath(node.uri);
       if (node.kind === 'directory') {
         navigation.handleDirectoryActivate(node);
         return;
@@ -277,6 +356,7 @@ export function useExplorerFileBrowser({
     newEntryForm,
     dialogs,
     handleFileActivate,
+    revealPath,
     showCwdButton: Boolean(onGetTerminalPwd),
     ...navigation,
     ...mutations,

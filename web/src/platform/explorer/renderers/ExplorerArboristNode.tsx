@@ -63,11 +63,16 @@ export function ExplorerArboristNode({
       }}
       onRenameCancel={onRenameCancel}
       onActivate={() => {
+        // Activating a row selects it; expansion and the browse directory stay
+        // separate state. The old directory branch only toggled, so "New file"
+        // had no selected directory to resolve and silently used the browse
+        // path instead.
+        store.setSelection([explorerNode.id]);
+        store.setActive(explorerNode.id);
         if (explorerNode.kind === 'directory') {
           node.toggle();
           return;
         }
-        store.setActive(explorerNode.id);
         onFileActivate(explorerNode);
       }}
     />

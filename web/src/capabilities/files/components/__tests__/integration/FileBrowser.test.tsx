@@ -182,3 +182,92 @@ describe('FileBrowser tree expansion', () => {
     expect(fileOps.listDir).toHaveBeenCalledWith('src');
   });
 });
+
+describe('FileBrowser create destination', () => {
+  const SRC = { name: 'src', path: 'src', full_path: '/root/src', is_dir: true, size: 0, modified: 0 };
+  const COMPONENTS = {
+    name: 'components',
+    path: 'src/components',
+    full_path: '/root/src/components',
+    is_dir: true,
+    size: 0,
+    modified: 0,
+  };
+  const FILE_IN_SRC = { name: 'a.txt', path: 'src/a.txt', full_path: '/root/src/a.txt', is_dir: false, size: 1, modified: 0 };
+
+  const tree = () => ({
+    '': [SRC],
+    src: [COMPONENTS, FILE_IN_SRC],
+    'src/components': [],
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a selected directory is the destination, including after navigation', async () => {
+    const fileOps = makeNestedFileOps(tree());
+    renderFileBrowser(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="src" />);
+
+    fireEvent.click(await screen.findByText('components'));
+    fireEvent.click(await screen.findByLabelText('New file'));
+
+    expect(screen.getByTestId('files-create-destination')).toHaveTextContent('In src/components');
+    fireEvent.change(screen.getByLabelText('New file name'), { target: { value: 'Button.tsx' } });
+    expect(screen.getByTestId('files-create-destination')).toHaveTextContent(
+      'src/components/Button.tsx',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(fileOps.writeFile).toHaveBeenCalledWith('src/components/Button.tsx', '', {
+        createOnly: true,
+      }),
+    );
+  });
+
+  it('a selected file resolves to its parent', async () => {
+    const fileOps = makeNestedFileOps(tree());
+    renderFileBrowser(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="src" />);
+
+    fireEvent.click(await screen.findByText('a.txt'));
+    fireEvent.click(await screen.findByLabelText('New folder'));
+
+    expect(screen.getByTestId('files-create-destination')).toHaveTextContent('In src');
+    fireEvent.change(screen.getByLabelText('New folder name'), { target: { value: 'lib' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(fileOps.createDir).toHaveBeenCalledWith('src/lib', { createOnly: true }),
+    );
+  });
+
+  it('a duplicate keeps the form and reports the conflict', async () => {
+    const fileOps = makeNestedFileOps(tree());
+    vi.mocked(fileOps.writeFile).mockRejectedValue(new Error('already_exists: src/components/Button.tsx'));
+    renderFileBrowser(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="src" />);
+
+    fireEvent.click(await screen.findByText('components'));
+    fireEvent.click(await screen.findByLabelText('New file'));
+    fireEvent.change(screen.getByLabelText('New file name'), { target: { value: 'Button.tsx' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('files-create-error')).toHaveTextContent('already exists'),
+    );
+    expect(screen.getByLabelText('New file name')).toHaveValue('Button.tsx');
+    expect(screen.getByTestId('files-create-form')).toBeInTheDocument();
+  });
+
+  it('rejects a traversal name without calling the provider', async () => {
+    const fileOps = makeNestedFileOps(tree());
+    renderFileBrowser(<FileBrowser fileOps={fileOps} onFileClick={vi.fn()} initialPath="src" />);
+
+    fireEvent.click(await screen.findByLabelText('New file'));
+    fireEvent.change(screen.getByLabelText('New file name'), { target: { value: '../escape' } });
+
+    expect(screen.getByTestId('files-create-error')).toHaveTextContent('/');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(fileOps.writeFile).not.toHaveBeenCalled();
+  });
+});

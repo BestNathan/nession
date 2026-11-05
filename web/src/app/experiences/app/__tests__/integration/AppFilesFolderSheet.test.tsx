@@ -62,4 +62,72 @@ describe('AppFilesFolderSheet', () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
+
+  it('creates a file in the captured folder, then pushes it to the viewer', async () => {
+    const user = userEvent.setup();
+    const fileOps = makeFileOps();
+    const onOpenChange = vi.fn();
+    const onRefresh = vi.fn();
+    const onCreatedFile = vi.fn();
+
+    render(
+      <AppFilesFolderSheet
+        open
+        onOpenChange={onOpenChange}
+        folderTitle="src"
+        relativeDir="src"
+        sessionId="sess-1"
+        fileOps={fileOps}
+        onRefresh={onRefresh}
+        onCreatedFile={onCreatedFile}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'New file' }));
+    await user.type(screen.getByLabelText('New file name'), 'Button.tsx');
+
+    expect(screen.getByTestId('app-files-create-destination')).toHaveTextContent(
+      'src/Button.tsx',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(fileOps.writeFile).toHaveBeenCalledWith('src/Button.tsx', '', { createOnly: true });
+      expect(onRefresh).toHaveBeenCalled();
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(onCreatedFile).toHaveBeenCalledWith({
+        path: 'src/Button.tsx',
+        name: 'Button.tsx',
+        size: 0,
+      });
+    });
+  });
+
+  it('keeps the form and reports a duplicate name', async () => {
+    const user = userEvent.setup();
+    const fileOps = makeFileOps();
+    vi.mocked(fileOps.writeFile).mockRejectedValue(new Error('already_exists: src/Button.tsx'));
+
+    render(
+      <AppFilesFolderSheet
+        open
+        onOpenChange={vi.fn()}
+        folderTitle="src"
+        relativeDir="src"
+        sessionId="sess-1"
+        fileOps={fileOps}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'New file' }));
+    await user.type(screen.getByLabelText('New file name'), 'Button.tsx');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('app-files-create-error')).toHaveTextContent('already exists'),
+    );
+    expect(screen.getByLabelText('New file name')).toHaveValue('Button.tsx');
+  });
 });
