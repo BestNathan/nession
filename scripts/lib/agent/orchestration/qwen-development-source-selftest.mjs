@@ -8,7 +8,8 @@ import {generateKeyPairSync} from 'node:crypto';
 import {openClaudeNativeSession} from '../providers/claude-native-store.mjs';
 import {sealQwenDevelopmentProposal,assertQwenModelHasNoStoreAuthority}
   from './qwen-development-evidence.mjs';
-import {prepareQwenDevelopmentSource,collectQwenDevelopmentPatch}
+import {prepareQwenDevelopmentSource,prepareQwenTrackedSource,
+  allowedQwenTrackedPath,collectQwenDevelopmentPatch}
   from './qwen-development-source.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
@@ -176,6 +177,23 @@ try{
   },/unbounded|outside approved/);
   git('reset','--hard','HEAD');
   git('clean','-fdx');
+  // Production source selection is code-owned. The model may discover a
+  // tracked application file, but cannot choose .github/Agent governance.
+  for(const allowed of ['crates/agent/src/main.rs','web/src/App.tsx',
+    'docs/example.md','src/calc.js'])
+    assert.equal(allowedQwenTrackedPath(allowed),true);
+  for(const blocked of ['.github/workflows/deploy.yml','gates/owner.mjs',
+    'automation/agents/registry.json','AGENTS.md','../src/secret.ts',
+    'node_modules/evil.js','src/.env','src/private.txt'])
+    assert.equal(allowedQwenTrackedPath(blocked),false);
+  const tracked=prepareQwenTrackedSource({
+    admission,registry,environment:env,cliVersion:'2.1.34',workspace:root});
+  write('src/calc.js','module.exports = (a, b) => a + b;\n');
+  const observed=collectQwenDevelopmentPatch(tracked,{
+    events:native(['Read','Edit'])});
+  assert.deepEqual(observed.paths,['src/calc.js']);
+  assert.equal(observed.action_id,admission.action_id);
+  git('reset','--hard','HEAD');
   // The fixture is itself a real Git commit and the result is a real diff;
   // no model text or self-reported "success" can replace those checks.
   console.log('Qwen bounded Developer source: exact Git SHA, real patch, native tool evidence, drift/extra edits/symlink/index/credential/model negatives passed');
