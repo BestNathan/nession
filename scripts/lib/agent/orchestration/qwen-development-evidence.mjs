@@ -1,6 +1,7 @@
 // #2274: one untrusted transport candidate for a bounded Qwen patch and the
 // same Run's encrypted Claude-native Session. Never a Publisher/Store writer.
 import {createHash} from 'node:crypto';
+import {verifyQwenPatchStillMatches} from './qwen-development-source.mjs';
 import {discoverClaudeNativeProject,sealClaudeNativeSession}
   from '../providers/claude-native-store.mjs';
 const SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
@@ -52,6 +53,8 @@ export function sealQwenDevelopmentProposal({
       !UUID.test(sessionId??'')||typeof configDir!=='string'||
       typeof snapshot.workspace!=='string')
     fail('unbound native Session or proposed source patch');
+  // Reinspect live Git delta immediately before binding it to native JSONL.
+  verifyQwenPatchStillMatches(snapshot,patch);
   const projectKey=discoverClaudeNativeProject(configDir,sessionId);
   const metadata={session_id:sessionId,source_sha:plan.source_sha,
     harness_digest:plan.harness_digest,project_key:projectKey,
