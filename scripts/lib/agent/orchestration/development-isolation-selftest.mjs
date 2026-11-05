@@ -24,6 +24,7 @@ function safe(workflow) {
     '-v "$RUNNER_TEMP/development-output:/output:rw"',
     '-e GITHUB_WORKSPACE=/workspace',
     '-e CURSOR_SDK_ROOT=/sdk',
+    '-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
     'nession-cursor-worker-rg:local',
     'node scripts/lib/agent/orchestration/development-worker.mjs',
   ];
@@ -40,7 +41,7 @@ assert.match(text,/Build trusted isolated Cursor runtime with ripgrep/);
 assert.match(text,/docker build --pull=false --tag nession-cursor-worker-rg:local/);
 assert.match(text,/docker run --rm --network=none --read-only --cap-drop=ALL/);
 assert.equal(safe(block),true);
-for(const flag of ['--read-only','--cap-drop=ALL','nession-cursor-worker-rg:local','-e CURSOR_SDK_ROOT=/sdk',
+for(const flag of ['--read-only','--cap-drop=ALL','nession-cursor-worker-rg:local','-e CURSOR_SDK_ROOT=/sdk','-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
   '-v "$GITHUB_WORKSPACE:/trusted-code:ro"','-e NESSION_DEVELOPER_ISOLATED=docker-v1'])
   assert.equal(safe(block.replace(flag,'')),false);
 const result=spawnSync(process.execPath,[
