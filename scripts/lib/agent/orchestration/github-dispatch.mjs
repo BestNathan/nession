@@ -308,7 +308,11 @@ function compareSource(run,body,result) {
     reject('run created outside ticket dispatch window');
   }
 }
-// A dispatch receipt that points at a Run the owner-only guard skipped may be
+// The historical skipped Run may have been pinned to an OLDER main SHA.
+// Require its independently verified receipt, trusted original bot actor and
+// main-branch provenance, NOT the replacement's later main SHA. The new
+// signed replacement must still match its issuer's exact main SHA.
+// // A dispatch receipt that points at a Run the owner-only guard skipped may be
 // re-bound exactly once. Both the skipped Run and the successful replacement
 // must be the same trusted main-owned workflow, and the existing receipt must
 // still point at the skipped Run. The result artifact and Metrics witness are
@@ -335,8 +339,11 @@ export async function attestSkippedDispatchRebinding({
     const run=await reader.getRun(id);
     if(run?.id!==id||run.path!==spec.path||run.name!==spec.name||
         run.event!=='workflow_dispatch'||run.head_branch!=='main'||
-        run.head_sha!==verified_main_sha||run.run_attempt!==1||
+        (expected==='success'?run.head_sha!==verified_main_sha:
+          !HEX40.test(run.head_sha??''))||run.run_attempt!==1||
         run.repository?.full_name!==REPOSITORY||
+        run.head_repository?.full_name!==REPOSITORY||
+        (expected==='skipped'&&run.actor?.login!=='github-actions[bot]')||
         run.status!=='completed'||run.conclusion!==expected)
       reject(expected==='skipped'
         ? 'skipped Run is not an authenticated skipped dispatch'
