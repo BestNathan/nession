@@ -95,8 +95,8 @@ async function api(token,resource) {
   if(!r.ok)fail('GitHub authority read failed ('+r.status+')');
   return r.json();
 }
-function sourceStillAllowed(sha, role) {
-  return sourceAllowed(sha, role);
+function sourceStillAllowed(sha, role, task) {
+  return sourceAllowed(sha, role, {task});
 }
 // A Developer action points at a source commit that must be reachable from
 // current main. A Reviewer action points at the published PR head, which is
@@ -105,7 +105,8 @@ function sourceStillAllowed(sha, role) {
 // main SHA instead. Exported for deterministic fixtures.
 export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', args,
   { stdio: 'ignore', timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
-  publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha } = {}) {
+  publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha,
+  task = null } = {}) {
   if (!HEX40.test(sha ?? '')) fail('invalid dispatch source SHA');
   if (role !== 'developer' && role !== 'reviewer') fail('invalid dispatch role');
   try {
@@ -113,11 +114,19 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
   } catch {
     fail('dispatch source SHA is not a commit');
   }
+  const repair=role==='developer'&&task?.task==='repair';
+  if(repair&&(sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+      task?.sha!==sha||task?.agent_id!=='dev-cursor-01'||
+      task?.repair_checkpoint?.source_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
+      task?.repair_checkpoint?.source_run_id!==39448549052))
+    fail('Repair target is not the exact authenticated published PR source');
   try {
-    if (role === 'reviewer') run(['merge-base', '--is-ancestor', publishedMainSha, sha]);
+    if(role==='reviewer'||repair)
+      run(['merge-base','--is-ancestor',publishedMainSha,sha]);
     else run(['merge-base', '--is-ancestor', sha, mainSha]);
   } catch {
-    if (role === 'reviewer') fail('Reviewer target is not on the published branch history');
+    if(role==='reviewer'||repair)
+      fail('Reviewer/Repair target is not on the published branch history');
     fail('Developer source SHA is not a reachable trusted main ancestor');
   }
 }
