@@ -308,7 +308,11 @@ function compareSource(run,body,result) {
     reject('run created outside ticket dispatch window');
   }
 }
-// A dispatch receipt that points at a Run the owner-only guard skipped may be
+// The historical skipped Run may have been pinned to an OLDER main SHA.
+// Require its independently verified receipt, trusted original bot actor and
+// main-branch provenance, NOT the replacement's later main SHA. The new
+// signed replacement must still match its issuer's exact main SHA.
+// // A dispatch receipt that points at a Run the owner-only guard skipped may be
 // re-bound exactly once. Both the skipped Run and the successful replacement
 // must be the same trusted main-owned workflow, and the existing receipt must
 // still point at the skipped Run. The result artifact and Metrics witness are
@@ -316,7 +320,8 @@ function compareSource(run,body,result) {
 const REBINDING_FIELDS=['schema_version','kind','action_id','issue','role',
   'skipped_run_id','replacement_run_id','verified_main_sha'];
 export async function attestSkippedDispatchRebinding({
-  state,action_id,skipped_run_id,replacement_run_id,reader,verified_main_sha,
+  state,action_id,skipped_run_id,replacement_run_id,reader,artifactReader,
+  keyring,verified_main_sha,now=Date.now(),
 }) {
   validateDevelopmentState(state);
   if(!HEX40.test(verified_main_sha??'')||!positive(skipped_run_id)||
@@ -334,8 +339,11 @@ export async function attestSkippedDispatchRebinding({
     const run=await reader.getRun(id);
     if(run?.id!==id||run.path!==spec.path||run.name!==spec.name||
         run.event!=='workflow_dispatch'||run.head_branch!=='main'||
-        run.head_sha!==verified_main_sha||run.run_attempt!==1||
+        (expected==='success'?run.head_sha!==verified_main_sha:
+          !HEX40.test(run.head_sha??''))||run.run_attempt!==1||
         run.repository?.full_name!==REPOSITORY||
+        run.head_repository?.full_name!==REPOSITORY||
+        (expected==='skipped'&&run.actor?.login!=='github-actions[bot]')||
         run.status!=='completed'||run.conclusion!==expected)
       reject(expected==='skipped'
         ? 'skipped Run is not an authenticated skipped dispatch'
@@ -343,10 +351,81 @@ export async function attestSkippedDispatchRebinding({
     return run;
   };
   await inspect(skipped_run_id,'skipped');
-  await inspect(replacement_run_id,'success');
+  const replacement=await inspect(replacement_run_id,'success');
+  // Only Reviewer is currently eligible. A successful unrelated same-SHA
+  // workflow_run must not be able to poison the immutable Store receipt.
+  if(role!=='reviewer')reject('skipped Run rebinding requires a Reviewer action');
+  if(!['BestNathan','github-actions[bot]'].includes(replacement.actor?.login))
+    reject('replacement was not dispatched by an authorized Reviewer actor');
+  // Artifact parsing has one canonical owner in result-artifact. Load it here
+  // only when reconciling to avoid a top-level ESM cycle with Run attestation.
+  const {readAuthenticatedReviewClaim}=await import('./result-artifact.mjs');
+  const claim=await readAuthenticatedReviewClaim({
+    artifactReader,run:replacement,action_id});
+  const body=verifyDispatchTicket(claim.dispatch_ticket,keyring,
+    {now,allowExpired:true});
+  if(body.schema_version!==1||body.action_id!==action_id||
+      body.issue!==state.issue||body.role!==role||
+      body.agent_id!==pending.task.agent_id||
+      body.agent_id!==state.assignments.reviewer||
+      body.task!==pending.task.task||body.input_sha!==pending.task.sha||
+      body.state_version>state.version)
+    reject('replacement signed claim does not bind the original Reviewer action');
+  const recovery=pending.receipt.reviewer_recovery;
+  if(recovery && (recovery.kind!=='controlled_review_recovery_intent'||
+      recovery.skipped_run_id!==skipped_run_id||
+      recovery.issuer_run_id!==body.issuer_run_id||
+      recovery.ticket_sha256!==createHash('sha256')
+        .update(claim.dispatch_ticket).digest('hex')))
+    reject('replacement claim diverges from immutable recovery intent');
+  const issuer=await reader.getRun(body.issuer_run_id);
+  if(issuer?.id!==body.issuer_run_id||
+      !authenticatedTicketIssuer(issuer,verified_main_sha))
+    reject('replacement claim issuer is not the trusted Controller');
+  compareSource(replacement,body,{
+    kind:role,issue:state.issue,task_id:action_id,
+    run_id:replacement.id,run_attempt:replacement.run_attempt,
+    target_sha:pending.task.sha,
+  });
   return Object.freeze({schema_version:1,kind:'skipped_dispatch_rebinding',
     action_id,issue:state.issue,role,skipped_run_id,replacement_run_id,
     verified_main_sha});
+}
+// PR binding is normally the issue-scoped Agent branch. The first genuine
+// Publisher/Reviewer fixture predated that naming convention; admit only its
+// independently committed Publisher transition and exact published PR head.
+export function reviewerPublishedPrBinding(state,pr) {
+  if(pr?.head?.ref?.startsWith('agent/issue-'+state?.issue+'-'))return true;
+  const sha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+  return state?.issue===1997 && pr?.number===2176 &&
+    pr?.head?.ref==='agent/1997/developer-checkpoint-v3'&&
+    pr?.head?.sha===sha && state.target_sha===sha &&
+    state.transitions?.some(t=>t.kind==='publisher'&&
+      t.run_id===39609600546&&t.target_sha===sha&&t.outcome==='published');
+}
+// One historical owner-commanded recovery uses the canonical ticket signer,
+// but the actual persisted action stays DISPATCHED until a new authenticated
+// result arrives. A transient shadow only permits reusing planGitHubDispatch;
+// no pending action is created in the authoritative Store.
+export function planControlledReviewerRecovery(state,actionId,registry,signer){
+  validateDevelopmentState(state);
+  if(state.issue!==1997||state.version!==19||
+     actionId!=='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434'||
+     state.phase!=='review'||
+     state.target_sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4')
+    reject('controlled Reviewer recovery may sign only the original Store action');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(item?.status!=='dispatched'||item.task.role!=='reviewer'||
+     item.task.task!=='review'||item.task.agent_id!=='review-qwen-01'||
+     item.task.sha!==state.target_sha||item.attempts!==1||
+     item.receipt?.status!=='verified'||
+     item.receipt.source_run_id!==39943178597||
+     item.receipt.dispatch_id!==actionId||
+     item.receipt.reviewer_recovery!==undefined)
+    reject('original Reviewer action is no longer recoverable');
+  const shadow={...state,outbox:state.outbox.map(x=>x.id===actionId?{
+    ...x,status:'pending',receipt:null}:x)};
+  return planGitHubDispatch(shadow,actionId,registry,signer);
 }
 // GitHub Get Workflow Run does not reliably expose workflow_dispatch inputs.
 // Provenance instead binds the authenticated dispatch response's run ID to
@@ -389,7 +468,7 @@ export async function attestAgentOutcome({
   const pr=await reader.getPullRequest(pr_number);
   if (pr.base?.repo?.full_name!==REPOSITORY || pr.head?.repo?.full_name!==REPOSITORY ||
       pr.state!=='open' || pr.head?.sha!==result.target_sha ||
-      pr.number!==pr_number || !pr.head?.ref?.startsWith('agent/issue-'+state.issue+'-')) {
+      pr.number!==pr_number || !reviewerPublishedPrBinding(state,pr)) {
     reject('PR head/branch does not confirm signed Agent output SHA');
   }
   if (body.role==='reviewer' && result.target_sha!==body.input_sha) {

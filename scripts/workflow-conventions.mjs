@@ -22,6 +22,7 @@ export const CATALOG = [
   ['agent-e2e-failure-analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent'],
   ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
   ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
+  ['store-agent-review-result-ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store'],
   ['store-controlled-publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store'],
   ['store-publisher-review-ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store'],
   ['agent-sc-acceptance', 'acceptance.yml', 'Acceptance', 'agent-sc-acceptance.yml', 'Agent / SC Acceptance', 'agent'],

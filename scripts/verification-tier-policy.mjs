@@ -54,8 +54,9 @@ export function assessChangedPaths(paths) {
     // The canonical instruction files include `.github/AGENTS.md` (with its
     // CLAUDE.md compatibility link); leaving them unclassified made every
     // merged PR that touched scope guidance fail the merge-selection audit
-    // even though it could not affect E2E (#2478).
-    if (/^(docs\/|\.claude\/|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
+    // even though it could not affect E2E (#2478). Root ignore rules are the
+    // same kind of repository metadata and cannot affect a browser runtime.
+    if (/^(docs\/|\.claude\/|\.gitignore$|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
     if (/^crates\/nession-(agent|server|protocol|common)\//.test(p)) {
       components.add('agent-server-protocol');
     } else if (/^web\//.test(p)) {
@@ -181,6 +182,10 @@ function selfTest() {
   assert.deepEqual(assessChangedPaths(['.github/AGENTS.md']).components, []);
   assert.equal(assessChangedPaths(['.github/AGENTS.md', '.github/CLAUDE.md']).floor,
     VERIFICATION_TIERS[0]);
+  // Root ignore rules are repository metadata; they cannot affect E2E.
+  assert.equal(assessChangedPaths(['.gitignore']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['.gitignore']).components, []);
+  assert.equal(assessChangedPaths(['.gitignore']).floor, VERIFICATION_TIERS[0]);
   // Non-documentation governance files still fail closed.
   assert.equal(assessChangedPaths(['.github/CODEOWNERS']).needsAudit, true);
   assert.equal(assessChangedPaths(['.github/ISSUE_TEMPLATE/bug.md']).needsAudit, true);

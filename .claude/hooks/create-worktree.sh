@@ -93,14 +93,38 @@ git -C "$worktree_dir" config core.hooksPath .githooks 2>/dev/null || true
 # the main worktree already has a compatible warm target let the filesystem
 # clone its blocks into the new directory. The seed script never falls back to
 # a full copy, and removes all workspace-member artifacts before publishing it.
+# Worktree creation always succeeds: seeded, skipped and failed are reported,
+# never converted into a creation failure.
 seed_script="$worktree_dir/scripts/seed-worktree-target.sh"
 if [ -f "$seed_script" ]; then
   main_worktree=$(git -C "$worktree_dir" worktree list --porcelain | sed -n '1s/^worktree //p')
   if [ -n "$main_worktree" ] && [ "$main_worktree" != "$worktree_dir" ]; then
     log "WorktreeCreate hook: attempting Cargo target warm seed"
-    if ! bash "$seed_script" "$main_worktree" "$worktree_dir" >&2; then
-      log "WorktreeCreate hook: target seed failed; continuing with an empty private target"
+    seed_output=''
+    seed_rc=0
+    seed_output=$(bash "$seed_script" "$main_worktree" "$worktree_dir" 2>&1) || seed_rc=$?
+    seed_status=''
+    if [ -n "$seed_output" ]; then
+      printf '%s\n' "$seed_output" >&2
+      seed_status=$(printf '%s\n' "$seed_output" | sed -n 's/^seed_status=//p' | tail -1)
+    fi
+    case "$seed_status" in
+      seeded)
+        log "WorktreeCreate hook: target seed seeded; the private target starts warm"
+        ;;
+      skipped)
+        log "WorktreeCreate hook: target seed skipped (exit $seed_rc); continuing with an empty private target"
+        ;;
+      failed)
+        log "WorktreeCreate hook: target seed failed (exit $seed_rc); continuing with an empty private target"
+        ;;
+      *)
+        log "WorktreeCreate hook: target seed outcome unknown (exit $seed_rc); continuing with an empty private target"
+        ;;
+    esac
+    if [ "$seed_status" != "seeded" ]; then
       log "  Fix/retry: cd \"$worktree_dir\" && just seed-worktree-target"
+      log "  If target/ already exists: just seed-worktree-target-replace (keeps the old target as a backup)"
     fi
   fi
 fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -85,6 +85,20 @@ assert.equal(assertDispatchAuthority(nativeRecovery).action_id,nativeId);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,actionId:continuation.actionId}),/authenticated owner\/main/);
 assert.throws(()=>assertDispatchAuthority({...nativeRecovery,event:{...nativeRecovery.event,
   comment:{...nativeRecovery.event.comment,body:CONTROLLED_NATIVE_RECOVERY_COMMENT+' '}}}),/authenticated owner\/main/);
+const reviewRecover={...commentValid,
+  actionId:'555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434',
+  event:{...commentEvent,comment:{...commentEvent.comment,
+    body:CONTROLLED_REVIEW_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(reviewRecover).action_id,reviewRecover.actionId);
+for(const patch of [
+  {actionId:commentValid.actionId},
+  {event:{...reviewRecover.event,comment:{...reviewRecover.event.comment,
+    body:CONTROLLED_REVIEW_RECOVERY_COMMENT+' '}}},
+  {event:{...reviewRecover.event,comment:{...reviewRecover.event.comment,
+    user:{login:'untrusted'}}}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+])assert.throws(()=>assertDispatchAuthority({...reviewRecover,...patch}),
+  /authenticated owner\/main/);
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},

@@ -19,6 +19,9 @@ const MAX_ATTEMPTS = 5;
 const NATIVE_FAILED_RESUME='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
 const NATIVE_FAILED_RUN=39376331942;
 const NATIVE_FAILURE_CODE='native_cursor_agent_not_found_before_send';
+const CONTROLLED_REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
+const CONTROLLED_SKIPPED_REVIEW_RUN=39943178597;
+const CONTROLLED_REVIEW_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
 
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -118,6 +121,8 @@ export function validateDevelopmentState(state) {
       }
     } else if (item.status === 'dispatched') {
       if (!item.receipt || !plain(item.receipt) ||
+          Object.keys(item.receipt).some(k=>!['status','dispatch_id','source_run_id',
+            'rebound_from_run_id','reviewer_recovery'].includes(k)) ||
           !['accepted','verified'].includes(item.receipt.status) ||
           item.receipt.dispatch_id !== item.id ||
           (item.receipt.status === 'verified' && !positive(item.receipt.source_run_id)) ||
@@ -126,6 +131,20 @@ export function validateDevelopmentState(state) {
              !positive(item.receipt.rebound_from_run_id) ||
              item.receipt.rebound_from_run_id === item.receipt.source_run_id))) {
         reject('missing acknowledged dispatch receipt');
+      }
+      if(item.receipt.reviewer_recovery!==undefined){
+        const c=item.receipt.reviewer_recovery;
+        onlyKeys(c,['kind','skipped_run_id','issuer_run_id','ticket_sha256'],
+          'one-time controlled Reviewer recovery intent');
+        if(Object.keys(c).length!==4||
+          c.kind!=='controlled_review_recovery_intent'||
+          state.issue!==1997||item.id!==CONTROLLED_REVIEW_ACTION||
+          item.task.role!=='reviewer'||item.task.sha!==CONTROLLED_REVIEW_SHA||
+          item.receipt.source_run_id!==CONTROLLED_SKIPPED_REVIEW_RUN||
+          item.receipt.status!=='verified'||item.attempts!==1||
+          c.skipped_run_id!==CONTROLLED_SKIPPED_REVIEW_RUN||
+          !positive(c.issuer_run_id)||!HEX64.test(c.ticket_sha256??''))
+          reject('unbound controlled Reviewer recovery intent');
       }
     } else if (item.status === 'yielded') {
       const c=item.receipt;
@@ -435,6 +454,39 @@ export function recordReboundDispatch(state,expectedVersion,actionId,attestation
     }}:x)});
 }
 
+// Historical #1997: persist one no-redelivery fence BEFORE replacing the
+// owner-guard-skipped Review Run. The old receipt stays authoritative until a
+// later, independently attested successful signed replacement is ingested.
+export function recordControlledReviewerRecoveryIntent(state,expectedVersion,actionId,intent){
+  validateDevelopmentState(state);
+  if(state.version!==19||expectedVersion!==19||state.issue!==1997||
+     state.phase!=='review'||state.target_sha!==CONTROLLED_REVIEW_SHA||
+     actionId!==CONTROLLED_REVIEW_ACTION)
+    reject('historical Reviewer recovery target has changed');
+  onlyKeys(intent,['kind','skipped_run_id','issuer_run_id','ticket_sha256',
+    'source_verified'],'controlled Reviewer recovery request');
+  if(Object.keys(intent).length!==5||
+     intent.kind!=='controlled_review_recovery_intent'||
+     intent.skipped_run_id!==CONTROLLED_SKIPPED_REVIEW_RUN||
+     intent.source_verified!==true||!positive(intent.issuer_run_id)||
+     !HEX64.test(intent.ticket_sha256??''))
+    reject('unverified historical Reviewer recovery request');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(item?.status!=='dispatched'||item.task.role!=='reviewer'||
+     item.task.task!=='review'||item.task.agent_id!=='review-qwen-01'||
+     item.task.sha!==CONTROLLED_REVIEW_SHA||item.attempts!==1||
+     item.receipt?.status!=='verified'||
+     item.receipt.source_run_id!==CONTROLLED_SKIPPED_REVIEW_RUN||
+     item.receipt.dispatch_id!==actionId||
+     item.receipt.reviewer_recovery!==undefined||
+     state.transitions?.some(t=>t.kind==='reviewer'))
+    reject('Reviewer action already changed or recovery already attempted');
+  const recovery={kind:intent.kind,skipped_run_id:intent.skipped_run_id,
+    issuer_run_id:intent.issuer_run_id,ticket_sha256:intent.ticket_sha256};
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:state.outbox.map(x=>x.id===actionId?{...x,
+      receipt:{...x.receipt,reviewer_recovery:recovery}}:x)});
+}
 // A terminal failed continuation may have one replacement, but NEVER a second
 // live sibling. Only this exact historically attested #1997 Run is eligible.
 export function nativeResumeSuccessorId(issue,actionId,runId){

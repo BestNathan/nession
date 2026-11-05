@@ -23,6 +23,7 @@ permissions:
   contents: read
   actions: write
   issues: read
+  pull-requests: read
 
 concurrency:
   group: agent-controller-dispatch-${{ inputs.issue_number }}-${{ inputs.action_id }}
@@ -45,7 +46,8 @@ jobs:
           github.event.comment.body == '/nession recover issue=1997 failed_run=39267659650' ||
           github.event.comment.body == '/nession resume issue=1997 checkpoint=1' ||
           github.event.comment.body == '/nession resume issue=1997 checkpoint=2' ||
-          github.event.comment.body == '/nession recover-native issue=1997 failed_run=39376331942'))
+          github.event.comment.body == '/nession recover-native issue=1997 failed_run=39376331942' ||
+          github.event.comment.body == '/nession recover-review issue=1997 skipped_run=39943178597'))
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 12
