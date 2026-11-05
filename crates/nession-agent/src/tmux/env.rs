@@ -1843,6 +1843,31 @@ esac"#,
         }
     }
 
+    /// Cross the prompt boundary that converges a revision published while the
+    /// shell was idle.
+    ///
+    /// The adapter applies a new revision from `PROMPT_COMMAND`, i.e. before
+    /// the shell reads the next line. The previous command's output can be
+    /// read *before* that hook has run, so an assertion sent immediately after
+    /// `write_runtime_files` races the write and can execute at the prompt
+    /// that was already rendered — the CI `VAL2:one` failure in these tests.
+    /// This barrier command executes after the write, so the hook that follows
+    /// it is guaranteed to see the new revision; the caller's assertion then
+    /// runs at that converged prompt. The arithmetic marker distinguishes the
+    /// command's output from the echoed command line.
+    #[cfg(unix)]
+    async fn cross_prompt_boundary(
+        stdin: &mut tokio::process::ChildStdin,
+        lines: &mut tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+    ) {
+        let line =
+            write_and_wait(stdin, lines, "echo \"BOUNDARY:$((6 * 7))\"", "BOUNDARY:42").await;
+        assert!(
+            line.contains("BOUNDARY:42"),
+            "the prompt barrier did not run: {line}"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn the_bash_adapter_converges_at_the_next_prompt_and_preserves_user_config() {
@@ -1902,6 +1927,7 @@ esac"#,
         )
         .await
         .unwrap();
+        cross_prompt_boundary(&mut stdin, &mut lines).await;
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -1984,6 +2010,7 @@ esac"#,
         )
         .await
         .unwrap();
+        cross_prompt_boundary(&mut stdin, &mut lines).await;
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -2083,6 +2110,7 @@ esac"#,
         )
         .await
         .unwrap();
+        cross_prompt_boundary(&mut stdin, &mut lines).await;
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
