@@ -78,7 +78,9 @@ export function prepareQwenDevelopmentSource({
   const plan=bindQwenDeveloper(admission,registry,environment,{cliVersion});
   const files=approvedPaths(allowedFiles);
   const root=verifyCheckout(workspace,plan.source_sha,files);
-  return Object.freeze({plan,workspace:root,allowed_files:files});
+  const origin=Object.freeze({issue:admission.issue,action_id:admission.action_id,
+    run_id:admission.run_id,task:admission.task});
+  return Object.freeze({plan,origin,workspace:root,allowed_files:files});
 }
 function expectedWorkspace(snapshot){
   if(!snapshot||!SHA.test(snapshot.plan?.source_sha??'')||
@@ -139,6 +141,8 @@ export function collectQwenDevelopmentPatch(snapshot,{toolNames}={}){
   }
   return Object.freeze({schema_version:1,kind:'qwen_developer_bounded_patch',
     source_sha:snapshot.plan.source_sha,
+    issue:snapshot.origin.issue,action_id:snapshot.origin.action_id,
+    run_id:snapshot.origin.run_id,
     agent_id:snapshot.plan.agent_id,
     provider:snapshot.plan.provider,
     harness_digest:snapshot.plan.harness_digest,
