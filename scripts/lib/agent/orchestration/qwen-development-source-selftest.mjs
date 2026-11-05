@@ -74,11 +74,11 @@ try{
     assert.equal(evidence.result.native_resumed,false);
     // Even a previously valid patch cannot be coupled to Session ciphertext
     // after a second model mutation changes the live working tree.
-    write('src/calc.js','module.exports = (a, b) => a * b;\\n');
+    write('src/calc.js','module.exports = (a, b) => a * b;\n');
     assert.throws(()=>sealQwenDevelopmentProposal({
       admission,snapshot,patch:proposed,sessionId,configDir,publicKeyPem}),
       /source changed before native checkpoint seal/);
-    write('src/calc.js','module.exports = (a, b) => a + b;\\n');
+    write('src/calc.js','module.exports = (a, b) => a + b;\n');
 
     assert.equal(Buffer.from(evidence.result.patch_base64,'base64').toString('utf8'),
       proposed.patch);
