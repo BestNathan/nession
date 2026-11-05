@@ -215,7 +215,7 @@ export function validateRecoveryRouting(workflow){
      !job.includes('.run_attempt == $attempt') ||
      !job.includes('.path == ".github/workflows/agent-review.yml"') ||
      !job.includes('event == "workflow_dispatch"') ||
-     !job.includes('sleep 3'))
+     !/^\s+sleep 3\s*$/m.test(job))
     fail('untrusted or unbounded bot Reviewer Metrics wake');
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
