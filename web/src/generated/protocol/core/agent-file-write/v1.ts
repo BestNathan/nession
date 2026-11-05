@@ -25,8 +25,30 @@ export type FileWritePayload = { path: string,
 /**
  * Base64-encoded content.
  */
-content: string, };
-export type FileWriteResponse = { path: string, written: number, };
+content: string, 
+/**
+ * Refuse the write unless the target's current revision equals this value.
+ *
+ * A reader passes back the `revision` from {@link FileData}; if the file
+ * changed in between, the agent answers `conflict` instead of silently
+ * overwriting the newer content. `None` keeps the historical
+ * unconditional-write behaviour for older clients.
+ */
+expected_revision?: string | null, 
+/**
+ * Refuse the write unless the target does not already exist.
+ *
+ * "Create file" and upload use this so two clients racing on the same
+ * name cannot replace each other's content. Defaults to `false` for the
+ * historical write semantics.
+ */
+create_only: boolean, };
+export type FileWriteResponse = { path: string, written: number, 
+/**
+ * Opaque revision of the file after the write, suitable for the next
+ * `expected_revision`.
+ */
+revision: string, };
 
 // ── Operations ──
 
@@ -35,8 +57,30 @@ export type FileWriteCall = { path: string,
 /**
  * Base64-encoded content.
  */
-content: string, };
+content: string, 
+/**
+ * Refuse the write unless the target's current revision equals this value.
+ *
+ * A reader passes back the `revision` from {@link FileData}; if the file
+ * changed in between, the agent answers `conflict` instead of silently
+ * overwriting the newer content. `None` keeps the historical
+ * unconditional-write behaviour for older clients.
+ */
+expected_revision?: string | null, 
+/**
+ * Refuse the write unless the target does not already exist.
+ *
+ * "Create file" and upload use this so two clients racing on the same
+ * name cannot replace each other's content. Defaults to `false` for the
+ * historical write semantics.
+ */
+create_only: boolean, };
 
 /** The payload the provider answers with. */
-export type FileWriteReply = { path: string, written: number, };
+export type FileWriteReply = { path: string, written: number, 
+/**
+ * Opaque revision of the file after the write, suitable for the next
+ * `expected_revision`.
+ */
+revision: string, };
 
