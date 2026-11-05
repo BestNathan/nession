@@ -39,7 +39,7 @@ function git(...args){
       GIT_NO_REPLACE_OBJECTS:'1'}}).trim();}
   catch{fail('read-only authenticated Store access failed');}
 }
-function readStoreReceipt(remote,identity,run,admissionAction,admissionSource,expected){
+export function readCommittedQwenRunReceipt(remote,identity,run,admissionAction,admissionSource,expected){
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-store-reader-'));
   try{
     const dir=path.join(home,'store');
@@ -128,7 +128,7 @@ export async function ingestQwenVerifiedCandidate({
   const identity=safeOrigin(run,claim,authenticated);
   const expected={session_id:proof?.metadata?.session_id,
     harness_digest:proof?.metadata?.harness_digest};
-  const previous=readStoreReceipt(remote,identity,run,
+  const previous=readCommittedQwenRunReceipt(remote,identity,run,
     claim.inputs.action_id,claim.inputs.input_sha,expected);
   // The public Artifact contents alone have no authority; cryptographic
   // claim verification and immutable Store admission precede version CAS.
