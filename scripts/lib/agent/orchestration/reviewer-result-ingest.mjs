@@ -121,10 +121,12 @@ export function resolveReviewIngestSource({environment,event}){
        event.action!=='created'||event.sender?.login!=='BestNathan'||
        event.issue?.number!==1997||event.issue?.pull_request||
        event.comment?.user?.login!=='BestNathan'||
-       event.comment?.body!==
-         '/nession ingest-review issue=1997 run=41962609841 attempt=1')))
+       !/^\/nession ingest-review issue=1997 run=[1-9][0-9]{0,14} attempt=1$/.test(
+         event.comment?.body??''))))
     fail('untrusted Review ingest event');
-  const args=recovery?{source_run_id:41962609841,source_run_attempt:1}:
+  const args=recovery?{
+    source_run_id:Number(event.comment.body.match(/run=([0-9]+) attempt=1$/)[1]),
+    source_run_attempt:1}:
     dispatch?event.client_payload:event.inputs;
   const id=Number(args?.source_run_id),attempt=Number(args?.source_run_attempt);
   if(!positive(id)||!positive(attempt)||attempt>10)
