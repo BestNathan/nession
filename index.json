@@ -1,6 +1,23 @@
 {
   "schema_version": 2,
   "topics": {
+    "app": [
+      {
+        "title": "App mobile spatial navigation and Terminal touch ownership",
+        "description": "One owned physical contact for the App shell swipe: slop and axis arbitration, a frozen destination, release-only commit, interactive-owner deference and stable Terminal/Workspace context",
+        "path": "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+        "status": "candidate",
+        "categories": [
+          "app",
+          "interaction",
+          "navigation",
+          "ownership",
+          "terminal",
+          "touch"
+        ],
+        "updated_at": "2026-11-05T03:28:50Z"
+      }
+    ],
     "engineering": [
       {
         "title": "Karpathy LLM Wiki principles for Nession project knowledge",
@@ -69,7 +86,7 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-04T08:40:00Z"
+        "updated_at": "2026-11-05T03:28:50Z"
       }
     ],
     "workflows": [
@@ -125,6 +142,9 @@
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
+    "app": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
+    ],
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
@@ -150,6 +170,7 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "interaction": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
     ],
     "knowledge": [
@@ -157,7 +178,11 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "navigation": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
+    ],
     "ownership": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
@@ -186,8 +211,12 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "terminal": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
+    ],
+    "touch": [
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
     "web": [
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"

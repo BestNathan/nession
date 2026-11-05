@@ -204,3 +204,17 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Cross-link the new #2710 terminal-tools ownership article from the engine/component ownership article
 - Source: https://github.com/BestNathan/nession/issues/2710
+
+## 2026-11-05T03:28:50Z | create | App mobile spatial navigation and Terminal touch ownership
+- Path: topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md
+- Topic: app
+- Categories: app, interaction, navigation, ownership, terminal, touch
+- Reason: Record #2724's production swipe contract: one owned native contact, 12px slop and axis arbitration, a frozen destination with release-only commit/snapback, the 28px edge band bounded by interactive-owner deference, the #2657 ownership registry, in-flight feedback only, and stable Terminal/Workspace context; SC-07 device evidence remains Pending
+- Source: https://github.com/BestNathan/nession/issues/2724
+
+## 2026-11-05T03:28:50Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Cross-link the new #2724 App navigation/touch ownership article from the terminal engine and component ownership article
+- Source: https://github.com/BestNathan/nession/issues/2724
