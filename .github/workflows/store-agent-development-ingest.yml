@@ -135,7 +135,7 @@ jobs:
             "$RUNNER_TEMP/development-worker.zip" \
             > "$RUNNER_TEMP/development-ingest-receipt.json"
           jq -e '.status == "yielded" or .status == "replayed" or
-            .status == "accepted"' \
+            .status == "accepted" or .status == "committed"' \
             "$RUNNER_TEMP/development-ingest-receipt.json" >/dev/null
           # Actual one-line sanitized output, independently authenticated by
           # the read-only collector; no prompts/native bytes or key material.
