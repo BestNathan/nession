@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
 
@@ -17,6 +17,7 @@ import { ExplorerRegistryContext } from './ExplorerRegistryContext';
 import { useExplorerFileActions } from './hooks/useExplorerFileActions';
 import { useExplorerRegistry } from './hooks/useExplorerRegistry';
 import { useExplorerStore } from './hooks/useExplorerStore';
+import { useExplorerRevealPath } from './hooks/useExplorerRevealPath';
 import { useExplorerTreeHeight } from './hooks/useExplorerTreeHeight';
 import { useWorkspaceClearancePx } from './hooks/useWorkspaceClearancePx';
 import type { ExplorerDataProvider } from './providers/types';
@@ -39,38 +40,6 @@ export interface ExplorerComponentProps {
   /** Receives the ExplorerStore instance for refresh/navigation from a parent shell. */
   storeRef?: MutableRefObject<ExplorerStore | null>;
   className?: string;
-}
-
-function revealPathInTree(
-  path: string,
-  store: ExplorerStore,
-  treeRef: RefObject<TreeApi<ArboristNode> | undefined>,
-): void {
-  const snapshot = store.getSnapshot();
-  const segments = path.split('/').filter(Boolean);
-  let built = '';
-  for (const segment of segments) {
-    built = built ? `${built}/${segment}` : segment;
-    if (!store.getNode(built)) {
-      break;
-    }
-    if (!snapshot.expandedIds.has(built)) {
-      store.expand(built);
-    }
-  }
-
-  if (path && store.getNode(path)) {
-    treeRef.current?.openParents(path);
-    treeRef.current?.open(path);
-    if (snapshot.activeId !== path) {
-      store.setActive(path);
-    }
-    return;
-  }
-
-  if (!path && snapshot.activeId !== null) {
-    store.setActive(null);
-  }
 }
 
 function ExplorerRefreshToolbar({ onRefresh }: { onRefresh: () => void }) {
@@ -151,18 +120,7 @@ export function Explorer({
     [flatData, store],
   );
 
-  useEffect(() => {
-    if (revealPath !== undefined) {
-      revealPathInTree(revealPath, store, treeRef);
-      return;
-    }
-
-    if (!initialPath) {
-      return;
-    }
-
-    revealPathInTree(initialPath, store, treeRef);
-  }, [initialPath, revealPath, store, treeData]);
+  useExplorerRevealPath({ store, treeRef, treeData, initialPath, revealPath });
 
   const handleToggle = useCallback(
     (id: string) => {

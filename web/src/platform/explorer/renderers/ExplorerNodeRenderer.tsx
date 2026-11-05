@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { Folder, File } from 'lucide-react';
+import { ChevronRight, Folder, File } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,10 @@ export interface ExplorerNodeRendererProps {
   decorations: ResolvedDecorations;
   contextMenuItems: ReactNode[];
   isRenaming?: boolean;
+  isSelected?: boolean;
+  isOpen?: boolean;
+  isLeaf?: boolean;
+  onToggle?: () => void;
   renameValue?: string;
   onRenameSubmit?: () => void;
   onRenameCancel?: () => void;
@@ -36,6 +40,39 @@ function NodeIcon({ node }: { node: ExplorerNode }) {
   return <File className="h-3.5 w-3.5 mr-1.5 text-muted-foreground flex-shrink-0" />;
 }
 
+function NodeCaret({
+  isOpen,
+  onToggle,
+}: {
+  isOpen: boolean;
+  onToggle?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={isOpen ? 'Collapse folder' : 'Expand folder'}
+      aria-expanded={isOpen}
+      data-testid="explorer-caret"
+      /* Disclosure is its own control: it must not select the row, change the
+         browse directory, or open the file. Stopping propagation keeps the
+         row's activate handler and arborist's row selection out of it. */
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle?.();
+      }}
+      className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[var(--nession-workspace-tree-row-radius)] text-muted-foreground transition-colors hover:bg-muted"
+    >
+      <ChevronRight
+        className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-90')}
+      />
+    </button>
+  );
+}
+
+function NodeCaretSpacer() {
+  return <span aria-hidden className="h-4 w-4 flex-shrink-0" />;
+}
+
 function ExplorerNodeRenameRow({
   node,
   renameValue,
@@ -48,6 +85,7 @@ function ExplorerNodeRenameRow({
 >) {
   return (
     <div className="flex items-center gap-1 w-full px-2 py-0.5">
+      <NodeCaretSpacer />
       <NodeIcon node={node} />
       <Input
         autoFocus
@@ -80,6 +118,10 @@ export function ExplorerNodeRenderer({
   decorations,
   contextMenuItems,
   isRenaming = false,
+  isSelected = false,
+  isOpen = false,
+  isLeaf = true,
+  onToggle,
   renameValue,
   onRenameSubmit,
   onRenameCancel,
@@ -108,12 +150,18 @@ export function ExplorerNodeRenderer({
         <ContextMenuTrigger
           onClick={() => onActivate()}
           title={decorations.tooltip}
+          data-selected={isSelected}
           className={cn(
-            'flex w-full items-center gap-[var(--nession-shell-space-1)] rounded-[var(--nession-workspace-tree-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-workspace-tree-row-pad-y)] transition-colors text-left cursor-default hover:bg-muted/60',
+            'flex w-full items-center gap-[var(--nession-shell-space-1)] rounded-[var(--nession-workspace-tree-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-workspace-tree-row-pad-y)] transition-colors text-left cursor-default',
+            /* One selection cue, the row surface — the same recipe as the
+               Session rows (visual-language.md: no stacked background + border
+               + shadow + accent). */
+            isSelected ? 'bg-muted' : 'hover:bg-muted/60',
             chromeMonoRole('secondary'),
             decorations.className,
           )}
         >
+          {isLeaf ? <NodeCaretSpacer /> : <NodeCaret isOpen={isOpen} onToggle={onToggle} />}
           <NodeIcon node={node} />
           <span className="flex-1 truncate min-w-0">{node.name}</span>
           {decorations.icons.map((icon, index) => (

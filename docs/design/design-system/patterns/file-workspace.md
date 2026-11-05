@@ -63,6 +63,21 @@ characters and overlong names are rejected before calling the provider. App's
 folder sheet performs the same operation against the folder it was opened on,
 with the current pushed directory as its default.
 
+### Tree row affordances (#2751 follow-up)
+
+A directory row carries a disclosure caret (`Expand folder` / `Collapse
+folder`). The caret toggles expansion only: it does not select the row, change
+the browse directory, or open the file. Activating the row selects it and moves
+the browse directory; activating a directory row also toggles its expansion.
+Selection is one surface fill (the same quiet row fill used by Session rows),
+never an added border, shadow or accent bar on top of it.
+
+Opening a file is **not** a standing reveal request. Reveal is a one-shot request
+owned by creation and explicit navigation, so collapsing the folder that contains
+the open file stays collapsed, including across a tree refresh. A selected row
+that is hidden by a collapsed parent keeps its selection; re-expanding the folder
+restores the selected surface without changing the active file.
+
 ### Safe mutations (#2751)
 
 - **Create file / upload** are create-only: an existing path is refused
