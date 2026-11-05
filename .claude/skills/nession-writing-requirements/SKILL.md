@@ -36,6 +36,8 @@ The Issue Audit Agent should assess scope, touched components, trust/security im
 
 **Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to `when: pr` and source-aligned relevant evidence. `when: merged` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is `Not Required`, never a fabricated `Full Pass`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
 
+Before choosing `method` for any SC, apply the [SC verification method and environment playbook](../nession-acceptance/references/verification-playbook.md). Record the observable assertion, needed browser/protocol/runtime/provider/remote components, earliest trusted execution environment and an achievable evidence path in ordinary Requirement prose. A locally unavailable proof remains an explicit `Pending` prerequisite; do not choose `agent` merely because it is available or invent a new Acceptance Plan method.
+
 ## SC proof timing: earliest safe boundary (mandatory authoring review)
 
 Choose `when` from **where the invariant first becomes verifiable with authenticated
