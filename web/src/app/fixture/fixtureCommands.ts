@@ -14,7 +14,7 @@ import { FIXTURE_AGENTS } from './fixtureData';
  *
  *   /#/fixture/app                     → five saved commands
  *   /#/fixture/app?commands=none       → an empty saved list
- *   /#/fixture/app?commands=error      → the list request fails
+ *   /#/fixture/app?commands=error      → the server reports a failed read
  *   /#/fixture/app?commands=disconnected → the server link is down
  */
 export function fixtureCommandsSurface(search: string): PluginSurface {
@@ -30,9 +30,15 @@ export function fixtureCommandsSurface(search: string): PluginSurface {
         return Promise.reject(new Error(`fixture commands surface does not answer ${type}`));
       }
       // `disconnected` still has a list (the last one the client knew); only
-      // the link is down. `error` is the failed-load state.
+      // the link is down. `error` is the server's failed-read reply
+      // (`{ commands: [], error }`), which the adapter must reject rather
+      // than present as "no saved commands yet" (#2784).
       if (scenario === 'error') {
-        return Promise.reject(new Error('fixture commands surface is unavailable'));
+        const failed: ClientCommandsListResponsePayload = {
+          commands: [],
+          error: 'Saved commands could not be loaded',
+        };
+        return Promise.resolve(failed as T);
       }
       const commands = scenario === 'none' ? [] : FIXTURE_COMMANDS;
       const payload: ClientCommandsListResponsePayload = { commands };

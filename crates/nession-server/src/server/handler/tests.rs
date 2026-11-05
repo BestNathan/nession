@@ -10,7 +10,19 @@ use tokio_tungstenite::tungstenite::Message;
 
 /// Build a test handler wired to in-memory DB + tempdir env store.
 async fn test_handler(auth_token: &str) -> ConnectionHandler {
-    let db = Arc::new(Database::new(":memory:").await.unwrap());
+    handler_with_db(
+        Arc::new(Database::new(":memory:").await.unwrap()),
+        auth_token,
+    )
+}
+
+/// Build a test handler around a caller-supplied database.
+///
+/// `test_handler` gives every test its own in-memory DB. A test that has to
+/// break the database itself — for example, to prove a read failure is
+/// reported rather than swallowed — needs the handler reading from the same
+/// `Database` the test broke.
+fn handler_with_db(db: Arc<Database>, auth_token: &str) -> ConnectionHandler {
     let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
     let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
     let command_broker = Arc::new(CommandBroker::new());
