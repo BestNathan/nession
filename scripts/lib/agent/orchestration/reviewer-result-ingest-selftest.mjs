@@ -140,6 +140,20 @@ try{
     acceptance_result:null,implementing_pr:{
       repository:repo,number:2176,head_sha_at_attestation:actionSha,
       relation:'trusted_pr_head_at_result_attestation'}};
+  // A real production Reviewer emitted changes_requested, not approved.
+  // This must deterministically enqueue the SAME assigned Developer for a
+  // bounded repair/resume; the model cannot nominate a different role/agent.
+  const changesRequested={...reviewResult,outcome:'changes_requested'};
+  const repaired=acceptTaskResult(dispatched,dispatched.version,
+    changesRequested,source,registry);
+  assert.equal(repaired.phase,'repair');
+  assert.equal(repaired.repair_attempts,1);
+  const pendingRepair=reconcileOutbox(repaired).pending;
+  assert.equal(pendingRepair.length,1);
+  assert.equal(pendingRepair[0].task.role,'developer');
+  assert.equal(pendingRepair[0].task.agent_id,'dev-cursor-01');
+  assert.equal(pendingRepair[0].task.task,'repair');
+  assert.equal(pendingRepair[0].task.resume,true);
   const next=acceptTaskResult(dispatched,dispatched.version,reviewResult,source,registry);
   assert.equal(next.phase,'quality');
   const record=readIssueWorkflowState(root,issue);
