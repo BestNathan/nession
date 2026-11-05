@@ -56,11 +56,43 @@ assert.throws(()=>bindQwenDeveloper(admission,registry,env,
   {cliVersion:'2.1.34',model:'qwen3-coder-plus'}),/model differs/);
 const metadata={session_id:'550e8400-e29b-41d4-a716-446655440000',
   source_sha:plan.source_sha,harness_digest:plan.harness_digest,
-  cli_version:plan.cli_version};
+  cli_version:plan.cli_version,run_id:admission.run_id,attempt:1};
+const committed={checkpoint_version:1,checkpoint_commit_sha:'f'.repeat(40),
+  ciphertext_sha256:'d'.repeat(64)};
 const continuation={...admission,resume_from:{
-  parent_action_id:'c'.repeat(64),checkpoint_version:1}};
+  parent_action_id:'c'.repeat(64),ordinal:2,...committed}};
 assert.equal(verifyQwenNativeContinuation(continuation,plan,metadata).session_id,
   metadata.session_id);
+assert.equal(verifyQwenNativeContinuation(continuation,plan,metadata).target_sha,
+  admission.input_sha);
+// Review->Repair legitimately changes the PR source SHA. A compatible Qwen
+// native Session must still resume, but its original signed source Run/SHA
+// and immutable Store checkpoint cannot be rewritten.
+const repair={...admission,task:'repair',input_sha:'e'.repeat(40),
+  resume_from:{...committed,source_sha:admission.input_sha,
+    source_run_id:admission.run_id}};
+const repairPlan=bindQwenDeveloper(repair,registry,env,{cliVersion:'2.1.34'});
+assert.notEqual(repairPlan.source_sha,plan.source_sha);
+assert.equal(repairPlan.harness_digest,plan.harness_digest);
+assert.deepEqual(verifyQwenNativeContinuation(repair,repairPlan,metadata),{
+  session_id:metadata.session_id,source_sha:admission.input_sha,
+  target_sha:repair.input_sha,harness_digest:plan.harness_digest,
+});
+for(const bad of [
+  {...repair,resume_from:{...repair.resume_from,source_run_id:402}},
+  {...repair,resume_from:{...repair.resume_from,source_sha:'c'.repeat(40)}},
+  {...repair,resume_from:{...repair.resume_from,checkpoint_commit_sha:'bad'}},
+  {...repair,resume_from:{...repair.resume_from,other:'unexpected'}},
+  {...repair,resume_from:{...repair.resume_from,ciphertext_sha256:'0'.repeat(63)}},
+]) assert.throws(()=>verifyQwenNativeContinuation(bad,repairPlan,metadata),
+  /incompatible or unbound/);
+assert.throws(()=>verifyQwenNativeContinuation(repair,repairPlan,{
+  ...metadata,source_sha:repair.input_sha}),/incompatible or unbound/);
+assert.throws(()=>verifyQwenNativeContinuation(continuation,repairPlan,metadata),
+  /incompatible or unbound/);
+assert.throws(()=>verifyQwenNativeContinuation({...continuation,
+  resume_from:{...continuation.resume_from,ordinal:0}},plan,metadata),
+  /incompatible or unbound/);
 assert.throws(()=>verifyQwenNativeContinuation(admission,plan,metadata),/unbound/);
 assert.throws(()=>verifyQwenNativeContinuation(continuation,plan,
   {...metadata,harness_digest:'d'.repeat(64)}),/incompatible/);
