@@ -1371,3 +1371,244 @@ pub enum ServerSessionProcessesReply {
     Snapshot(SessionProcessesResponse),
     Refused(SessionRefusal),
 }
+
+// ---------------------------------------------------------------------------
+// Session metadata (#2789)
+//
+// User-facing work context owned by the Session, independent of the tmux name
+// and of every runtime fact (status, cwd, foreground command, attachment).
+// `revision == 0` is the absent-metadata (legacy) state; the first successful
+// update creates revision 1. Updates are full replacements of the three user
+// fields and must name the revision the caller read.
+// ---------------------------------------------------------------------------
+
+/// Maximum title length, counted in Unicode scalar values.
+pub const SESSION_METADATA_TITLE_MAX_CHARS: usize = 120;
+/// Maximum description length, counted in Unicode scalar values.
+pub const SESSION_METADATA_DESCRIPTION_MAX_CHARS: usize = 2_000;
+/// Maximum length of one tag, counted in Unicode scalar values.
+pub const SESSION_METADATA_TAG_MAX_CHARS: usize = 32;
+/// Maximum number of tags on one Session.
+pub const SESSION_METADATA_TAG_LIMIT: usize = 12;
+
+/// Session-owned display context: what the work is about.
+///
+/// Not a runtime observation. `title` is a display alias, never a rename of the
+/// tmux Session; `session_id` and the underlying tmux name are unchanged when
+/// it is edited. `created_at` is present only after metadata was first saved.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMetadata {
+    /// 0 means no metadata has been recorded (a legacy Session).
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
+}
+
+impl SessionMetadata {
+    /// The display name a navigation row uses: the title when it is non-empty,
+    /// otherwise the Session's tmux name (the caller supplies it).
+    pub fn display_title<'a>(&'a self, session_name: &'a str) -> &'a str {
+        self.title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or(session_name)
+    }
+}
+
+/// `agent.session.metadata.get`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadataGetPayload {
+    pub name: String,
+}
+
+/// `agent.session.metadata.update`'s request.
+///
+/// A full replacement: absent title/description clear them, absent tags empty
+/// the list. `expected_revision` is the revision the caller last read (0 for a
+/// Session with no metadata yet).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadataUpdatePayload {
+    pub name: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub expected_revision: u64,
+}
+
+/// `server.session.metadata.get`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionMetadataGetPayload {
+    pub session_id: String,
+}
+
+/// `server.session.metadata.update`'s request.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSessionMetadataUpdatePayload {
+    pub session_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub expected_revision: u64,
+}
+
+/// The shared answer for both metadata operations, at both ends.
+///
+/// `error_kind` is the actionable classification the Web renders:
+/// `invalid`, `conflict`, `not_found` or `unavailable`. `error` carries the
+/// human-readable detail; `metadata` is present only on success.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMetadataResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadata>,
+}
+
+/// Bounds/normalization failure for a metadata update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionMetadataValidationError {
+    TitleTooLong { max: usize },
+    DescriptionTooLong { max: usize },
+    TooManyTags { max: usize },
+    TagTooLong { index: usize, max: usize },
+    EmptyTag { index: usize },
+    DuplicateTag { index: usize },
+}
+
+impl SessionMetadataValidationError {
+    /// One sentence naming the offending value and its bound.
+    pub fn message(&self) -> String {
+        match self {
+            Self::TitleTooLong { max } => {
+                format!("title must be at most {max} characters")
+            }
+            Self::DescriptionTooLong { max } => {
+                format!("description must be at most {max} characters")
+            }
+            Self::TooManyTags { max } => format!("at most {max} tags are allowed"),
+            Self::TagTooLong { index, max } => {
+                format!("tag {} must be at most {max} characters", index + 1)
+            }
+            Self::EmptyTag { index } => format!("tag {} cannot be empty", index + 1),
+            Self::DuplicateTag { index } => {
+                format!("tag {} duplicates an earlier tag", index + 1)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for SessionMetadataValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for SessionMetadataValidationError {}
+
+/// The normalized user fields a successful update persists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedSessionMetadata {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+}
+
+fn trimmed_nonempty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// Validate and normalize a metadata update.
+///
+/// Title and description are trimmed; an empty result is absent (the Session
+/// falls back to its tmux name). Tags are trimmed, empty tags are rejected,
+/// case-insensitively unique, and keep their first-seen order. Lengths count
+/// Unicode scalar values, not bytes, so a bound is the same for every script.
+pub fn validate_session_metadata(
+    title: Option<&str>,
+    description: Option<&str>,
+    tags: &[String],
+) -> Result<NormalizedSessionMetadata, SessionMetadataValidationError> {
+    let title = trimmed_nonempty(title);
+    if let Some(title) = &title {
+        if title.chars().count() > SESSION_METADATA_TITLE_MAX_CHARS {
+            return Err(SessionMetadataValidationError::TitleTooLong {
+                max: SESSION_METADATA_TITLE_MAX_CHARS,
+            });
+        }
+    }
+
+    let description = trimmed_nonempty(description);
+    if let Some(description) = &description {
+        if description.chars().count() > SESSION_METADATA_DESCRIPTION_MAX_CHARS {
+            return Err(SessionMetadataValidationError::DescriptionTooLong {
+                max: SESSION_METADATA_DESCRIPTION_MAX_CHARS,
+            });
+        }
+    }
+
+    if tags.len() > SESSION_METADATA_TAG_LIMIT {
+        return Err(SessionMetadataValidationError::TooManyTags {
+            max: SESSION_METADATA_TAG_LIMIT,
+        });
+    }
+
+    let mut normalized: Vec<String> = Vec::with_capacity(tags.len());
+    let mut seen: Vec<String> = Vec::with_capacity(tags.len());
+    for (index, tag) in tags.iter().enumerate() {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return Err(SessionMetadataValidationError::EmptyTag { index });
+        }
+        if tag.chars().count() > SESSION_METADATA_TAG_MAX_CHARS {
+            return Err(SessionMetadataValidationError::TagTooLong {
+                index,
+                max: SESSION_METADATA_TAG_MAX_CHARS,
+            });
+        }
+        let folded = tag.to_lowercase();
+        if seen.iter().any(|existing| existing == &folded) {
+            return Err(SessionMetadataValidationError::DuplicateTag { index });
+        }
+        seen.push(folded);
+        normalized.push(tag.to_string());
+    }
+
+    Ok(NormalizedSessionMetadata {
+        title,
+        description,
+        tags: normalized,
+    })
+}

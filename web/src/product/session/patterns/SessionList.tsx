@@ -5,7 +5,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { agentDisplayName } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { mapDomainState } from '@/product/session/model/domainState';
-import { SessionItem } from '@/product/session/patterns/SessionItem';
+import { SessionItem, type SessionItemProps } from '@/product/session/patterns/SessionItem';
+import { useSessionMetadata } from '@/product/session/hooks/useSessionMetadata';
+import { metadataDisplayTitle } from '@/product/session/model/sessionMetadata';
 import type { Agent, Session } from '@/types';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
@@ -22,6 +24,21 @@ export interface SessionGroup {
   key: string;
   header: ReactNode;
   sessions: Session[];
+}
+
+/**
+ * One row, with its display identity resolved from the Session metadata cache
+ * (#2789). Kept as a tiny component so the shared row pattern stays pure and
+ * each row subscribes only to its own entry.
+ */
+function SessionListRow(props: Omit<SessionItemProps, 'displayTitle'>) {
+  const entry = useSessionMetadata(props.session.session_id);
+  return (
+    <SessionItem
+      {...props}
+      displayTitle={metadataDisplayTitle(entry.metadata, props.session.session_name)}
+    />
+  );
 }
 
 export interface SessionListProps {
@@ -157,7 +174,7 @@ export function SessionList({
               });
 
               return (
-                <SessionItem
+                <SessionListRow
                   key={session.session_id}
                   session={session}
                   domain={domain}

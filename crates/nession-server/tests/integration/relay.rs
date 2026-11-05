@@ -13,6 +13,7 @@ use futures_util::{SinkExt, StreamExt};
 use nession_agent::config::AttachMode;
 use nession_agent::connection::ServerClient;
 use nession_agent::server::websocket::{AgentServer, AgentServerContext};
+use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
@@ -140,6 +141,7 @@ async fn start_agent(
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
+            session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },

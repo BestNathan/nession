@@ -1,21 +1,39 @@
-import { formatRelativeTime } from '@/shared/lib/format';
+import { formatAbsoluteTime, formatRelativeTime } from '@/shared/lib/format';
 import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { useSessionMetadata } from '@/product/session/hooks/useSessionMetadata';
+import { metadataDisplayTitle } from '@/product/session/model/sessionMetadata';
+import { SessionMetadataSection } from '@/product/session/components/SessionMetadataSection';
 
 export interface SessionDetailsProps {
   session: Session;
   state: DomainState;
 }
 
+/**
+ * The Session Workspace view (#2789).
+ *
+ * Runtime facts (identity, connection, windows, activity) come from the
+ * Session DTO and stay read-only. The user-owned work context — title,
+ * description, tags — is edited in `SessionMetadataSection`, which saves
+ * through the Agent-owned metadata store. The tmux name and `session_id` are
+ * never part of the edit: the title is a display alias.
+ */
 export function SessionDetails({ session, state }: SessionDetailsProps) {
+  const entry = useSessionMetadata(session.session_id);
+
   return (
     <div data-testid="session-details" className="flex flex-col gap-4 p-4">
       <div>
-        <h2 className={chromeSansRole('primary')}>{session.session_name}</h2>
-        <p className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>{session.session_id}</p>
+        <h2 data-testid="session-title" className={chromeSansRole('primary')}>
+          {metadataDisplayTitle(entry.metadata, session.session_name)}
+        </h2>
+        <p className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>
+          {session.session_id}
+        </p>
       </div>
 
       <ConnectionStatus state={state} />
@@ -29,7 +47,17 @@ export function SessionDetails({ session, state }: SessionDetailsProps) {
           <dt className="text-muted-foreground">Last activity</dt>
           <dd>{formatRelativeTime(session.last_activity)}</dd>
         </div>
+        {entry.metadata?.created_at ? (
+          // Only a recorded creation time is shown; last activity is never
+          // promoted into an invented creation time.
+          <div className="flex gap-2" data-testid="session-metadata-created">
+            <dt className="text-muted-foreground">Created</dt>
+            <dd>{formatAbsoluteTime(new Date(entry.metadata.created_at * 1000).toISOString())}</dd>
+          </div>
+        ) : null}
       </dl>
+
+      <SessionMetadataSection session={session} entry={entry} />
     </div>
   );
 }

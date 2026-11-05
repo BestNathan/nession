@@ -37,8 +37,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
     ClientSessionProcessesPayload, ProcessSnapshot, ServerSessionListPayload,
     ServerSessionListReply, ServerSessionProcessesReply, SessionEnvActiveResponse,
-    SessionEnvQueryResponse, SessionProcessesResponse, SessionRefusal, WebSessionInfo,
-    WebSessionKillResponse, WebSessionsListResponse,
+    SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
+    SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
+    WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -1350,7 +1351,112 @@ mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
+mod server_session_metadata_get_v1;
+mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
 mod server_session_relay_begin_v1;
 #[cfg(test)]
 mod tests;
+
+// ── Session metadata unit adapters (#2789) ─────────────────────────────────
+//
+// Both metadata units authorize the same way and translate the same Agent
+// answer, so the shared steps live here rather than in either unit. They are
+// not handlers: routes.rs names exactly one leaf handler per Unit.
+
+impl ConnectionHandler {
+    /// Authorize the client and split `agent:name`, then require a registered
+    /// online Agent. The Agent remains the metadata owner.
+    pub(super) async fn resolve_session_metadata_target(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(String, String), SessionMetadataResponse> {
+        if !self.authenticated_client {
+            return Err(metadata_refusal("unauthorized", "Not authenticated"));
+        }
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Err(metadata_refusal(
+                "invalid",
+                "Invalid session_id format. Expected 'agent_id:session_name'",
+            ));
+        };
+        if agent_id.is_empty() || session_name.is_empty() {
+            return Err(metadata_refusal(
+                "invalid",
+                "Invalid session_id format. Expected 'agent_id:session_name'",
+            ));
+        }
+
+        match self.agent_registry.get(agent_id).await {
+            Some(agent) if agent.status == AgentStatus::Online => {
+                Ok((agent_id.to_string(), session_name.to_string()))
+            }
+            Some(_) => Err(metadata_refusal(
+                "unavailable",
+                &format!("Agent '{agent_id}' is offline"),
+            )),
+            None => Err(metadata_refusal(
+                "not_found",
+                &format!("Agent '{agent_id}' not found"),
+            )),
+        }
+    }
+}
+
+pub(super) fn metadata_reply(
+    id: &str,
+    wire: &str,
+    response: SessionMetadataResponse,
+) -> HandlerAction {
+    reply_json(
+        id,
+        wire,
+        serde_json::to_value(&response).unwrap_or(serde_json::json!({
+            "success": false,
+            "error": "metadata response could not be serialized",
+            "error_kind": "unavailable",
+        })),
+    )
+}
+
+/// Translate the Agent's command payload into the shared response.
+pub(super) fn metadata_response(
+    response: Result<serde_json::Value, String>,
+) -> SessionMetadataResponse {
+    let value = match response {
+        Ok(value) => value,
+        Err(error) => return metadata_refusal("unavailable", &error),
+    };
+    let success = value
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let metadata = value
+        .get("metadata")
+        .cloned()
+        .and_then(|raw| serde_json::from_value::<SessionMetadata>(raw).ok());
+    if success && metadata.is_none() {
+        return metadata_refusal("unavailable", "Agent answered without Session metadata");
+    }
+    SessionMetadataResponse {
+        success,
+        error: value
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        error_kind: value
+            .get("error_kind")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        metadata,
+    }
+}
+
+pub(super) fn metadata_refusal(kind: &str, message: &str) -> SessionMetadataResponse {
+    SessionMetadataResponse {
+        success: false,
+        error: Some(message.to_string()),
+        error_kind: Some(kind.to_string()),
+        metadata: None,
+    }
+}
