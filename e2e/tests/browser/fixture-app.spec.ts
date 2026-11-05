@@ -2,7 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openCapsuleCapability } from '../../helpers/capsule';
 import { openFixtureFile } from '../../helpers/fixtureVisual';
-import { shellAnchor, swipe } from '../../acceptance/shared/swipe-2724-cases.cjs';
+import { shellAnchor, swipe } from '../../../e2e/acceptance/shared/swipe-2724-cases.cjs';
 
 // Local runs are forbidden: the webServer stack compiles and runs
 // nession-server/agent (which operate tmux), and globalSetup executes
