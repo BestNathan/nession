@@ -12,6 +12,8 @@ import {prepareQwenDevelopmentSource,collectQwenDevelopmentPatch}
   from './qwen-development-source.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+const native=names=>names.map((name,i)=>({type:'assistant',message:{
+  content:[{type:'tool_use',id:'native-'+i,name}]}}));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-development-source-'));
 const git=(...a)=>execFileSync('git',['-C',root,...a],{
   encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000}).trim();
@@ -41,9 +43,12 @@ try{
   assert.equal(snapshot.plan.agent_id,'dev-qwen-01');
   assert.equal(snapshot.allowed_files.join(','),'src/calc.js');
   assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{
-    toolNames:['Read','Edit']}),/missing or unbounded/);
+    events:native(['Read','Edit'])}),/missing or unbounded/);
   write('src/calc.js','module.exports = (a, b) => a + b;\n');
-  const proposed=collectQwenDevelopmentPatch(snapshot,{toolNames:['Read','Edit']});
+  const proposed=collectQwenDevelopmentPatch(snapshot,{events:native(['Read','Edit'])});
+  assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{
+    events:[{type:'result',result:'I used Read and Edit'}]}),
+    /restricted native Read\/Edit/);
   assert.equal(proposed.kind,'qwen_developer_bounded_patch');
   assert.equal(proposed.source_sha,sha);
   assert.deepEqual(proposed.paths,['src/calc.js']);
@@ -110,7 +115,7 @@ try{
         ...env,[k]:'forbidden'}),/privileged credential/);
   }finally{fs.rmSync(tempNative,{recursive:true,force:true});}
   for(const tools of [[],['Edit'],['Read'],['Read','Bash','Edit']])
-    assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{toolNames:tools}),
+    assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{events:native(tools)}),
       /restricted native Read\/Edit/);
   assert.throws(()=>prepareQwenDevelopmentSource(request),
     /not the clean signed/);
@@ -134,7 +139,7 @@ try{
     const a=prepareQwenDevelopmentSource(request);
     mutate();
     assert.throws(()=>collectQwenDevelopmentPatch(a,{
-      toolNames:['Read','Edit']}),pattern);
+      events:native(['Read','Edit'])}),pattern);
   };
   checkInvalid(()=>write('src/other.js','const other = false;\n'),/missing or unbounded|outside approved/);
   checkInvalid(()=>write('src/new.js','untracked\n'),/untracked/);
