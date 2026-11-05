@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import { startDevelopment,recordDispatch,failedDispatch,acceptTaskResult,
   acceptPublisherPublication,reconcileOutbox,validateDevelopmentState,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint } from './outbox.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState,issueStatePath } from './state-store.mjs';
 import { advanceWorkflow } from './transition.mjs';
-import {attestCrossPhaseRepairFacts} from './repair-checkpoint.mjs';
+import {attestCrossPhaseRepairFacts,readPublishedRepairCheckpoint} from './repair-checkpoint.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const issue=1696;
@@ -382,5 +383,35 @@ for(const bad of [
   {checkpointCommitSha:'f'.repeat(40)},
 ])assert.throws(()=>attestCrossPhaseRepairFacts({...facts,...bad}),
   /trusted Repair checkpoint/);
+// A real local Git object, not just a caller flag, owns the checkpoint
+// creation commit and exact blob bytes in the production Store reader.
+const repairStore=mkdtempSync(path.join(os.tmpdir(),'nession-repair-origin-git-'));
+const g=(...args)=>execFileSync('git',['-C',repairStore,...args],{
+  encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:15000}).trim();
+try {
+  g('init','-q','-b','agent-store');
+  g('config','user.name','Repair Origin Fixture');
+  g('config','user.email','repair@example.invalid');
+  const absolute=relative=>path.join(repairStore,relative);
+  const save=(relative,doc)=>{
+    mkdirSync(path.dirname(absolute(relative)),{recursive:true});
+    writeFileSync(absolute(relative),JSON.stringify(doc)+'\n');
+  };
+  save(path3,cp);
+  g('add','-A');g('commit','-qm','immutable v3 checkpoint');
+  const actualCommit=g('rev-parse','HEAD');
+  const hist={...historicalYield,outbox:[{...historicalYield.outbox[0],
+    receipt:{...historicalYield.outbox[0].receipt,
+      checkpoint_commit_sha:actualCommit}}]};
+  save(issueStatePath(1997,16),hist);
+  save('roles/developer/dev-cursor-01/issues/1997/head.json',checkpointHead);
+  save('roles/developer/dev-cursor-01/issues/1997/runs/39448549052-1.json',sourceRun);
+  g('add','-A');g('commit','-qm','independent audited source records');
+  const found=readPublishedRepairCheckpoint(repairStore,preRepair,repairAction);
+  assert.deepEqual(found,{...repairProof,checkpoint_commit_sha:actualCommit});
+  writeFileSync(absolute(path3),JSON.stringify({...cp,unexpected:true})+'\n');
+  assert.throws(()=>readPublishedRepairCheckpoint(repairStore,preRepair,repairAction),
+    /checkpoint bytes differ from original commit/);
+}finally{rmSync(repairStore,{recursive:true,force:true});}
 validateDevelopmentState(state);
 console.log('agent Issue outbox: durable CAS, trusted result transitions and replay fixtures passed');
