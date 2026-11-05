@@ -15,7 +15,7 @@
           "terminal",
           "touch"
         ],
-        "updated_at": "2026-11-05T03:50:00Z"
+        "updated_at": "2026-11-05T18:11:33Z"
       }
     ],
     "engineering": [
@@ -58,6 +58,22 @@
           "security"
         ],
         "updated_at": "2026-11-05T10:32:06Z"
+      },
+      {
+        "title": "Session metadata and display identity ownership",
+        "description": "Session-owned title, description and tags with an Agent store fenced by tmux instance identity; the display title aliases navigation without renaming tmux",
+        "path": "topics/engineering/session-metadata-and-display-identity-ownership.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "session",
+          "metadata",
+          "identity",
+          "ownership",
+          "web",
+          "app"
+        ],
+        "updated_at": "2026-11-05T18:11:33Z"
       }
     ],
     "terminal": [
@@ -178,10 +194,12 @@
     ],
     "app": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
     ],
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ],
@@ -205,6 +223,9 @@
     "files": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
     ],
+    "identity": [
+      "topics/engineering/session-metadata-and-display-identity-ownership.md"
+    ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
@@ -218,11 +239,15 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "metadata": [
+      "topics/engineering/session-metadata-and-display-identity-ownership.md"
+    ],
     "navigation": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
@@ -254,6 +279,9 @@
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "session": [
+      "topics/engineering/session-metadata-and-display-identity-ownership.md"
+    ],
     "skills": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
@@ -267,6 +295,7 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
     "web": [
+      "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"

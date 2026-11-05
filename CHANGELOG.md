@@ -253,3 +253,18 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Cross-link the new #2751 Files ownership article and state that the Agent-host Files browse root is not a SandboxPolicy or isolation guarantee
 - Source: https://github.com/BestNathan/nession/issues/2751
+
+
+## 2026-11-05T18:11:33Z | create | Session metadata and display identity ownership
+- Path: topics/engineering/session-metadata-and-display-identity-ownership.md
+- Topic: engineering
+- Categories: architecture, session, metadata, identity, ownership, web, app
+- Reason: Record the durable #2789 contract that Session metadata is Agent-owned and fenced by tmux instance identity, while the title is a display alias rather than a rename
+- Source: https://github.com/BestNathan/nession/issues/2789
+
+## 2026-11-05T18:11:33Z | update | App mobile spatial navigation and Terminal touch ownership
+- Path: topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md
+- Topic: app
+- Categories: app, interaction, navigation, ownership, terminal, touch
+- Reason: Link the App Workspace depth contract to the Session metadata article it now carries
+- Source: https://github.com/BestNathan/nession/issues/2789
