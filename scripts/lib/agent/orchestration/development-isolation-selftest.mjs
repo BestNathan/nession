@@ -24,7 +24,7 @@ function safe(workflow) {
     '-v "$RUNNER_TEMP/development-output:/output:rw"',
     '-e GITHUB_WORKSPACE=/workspace',
     '-e CURSOR_SDK_ROOT=/sdk',
-    'node:24-bookworm',
+    'nession-cursor-worker-rg:local',
     'node scripts/lib/agent/orchestration/development-worker.mjs',
   ];
   const denied=['-e STORE_APP_TOKEN','-e STORE_WRITER_PRIVATE_KEY',
@@ -32,6 +32,14 @@ function safe(workflow) {
     '-v "$HOME','-v "/var/run/docker.sock','--privileged','--cap-add'];
   return needed.every(x=>workflow.includes(x))&&!denied.some(x=>workflow.includes(x));
 }
+assert.match(text,/Build credential-free Cursor runtime with mandatory ripgrep/);
+assert.match(text,/docker build --pull=false --tag nession-cursor-worker-rg:local/);
+assert.match(text,/docker run --rm --network=none --read-only --cap-drop=ALL/);
+const dockerfile=fs.readFileSync(
+  'scripts/lib/agent/orchestration/cursor-worker.Dockerfile','utf8');
+assert.match(dockerfile,/^FROM node:24-bookworm$/m);
+assert.match(dockerfile,/apt-get install -y --no-install-recommends ripgrep/);
+assert.doesNotMatch(dockerfile,/^(?:COPY|ADD|ARG|ENV|RUN .*curl|RUN .*wget)\b/m);
 assert.equal(safe(block),true);
 for(const flag of ['--read-only','--cap-drop=ALL','-e CURSOR_SDK_ROOT=/sdk',
   '-v "$GITHUB_WORKSPACE:/trusted-code:ro"','-e NESSION_DEVELOPER_ISOLATED=docker-v1'])
