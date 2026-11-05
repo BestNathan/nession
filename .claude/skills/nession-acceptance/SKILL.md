@@ -11,6 +11,10 @@ Issue structure belongs to `nession-writing-requirements`; Gate semantics belong
 
 For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while new three-column Acceptance Reports derive their compatibility stage from the Plan; historical four-column Reports retain explicit Stage. `when: deployed` is executable as an **explicit deployed run**: `Acceptance / Cases` with `stage=deployed` and `environment` selects an authenticated deployment record from `acceptance-results` (source SHA, GitOps revision, image digests, workload identity) and evaluates only criteria bound to that environment. It is never inferred from a main merge and is not yet automatically scheduled; production environment access and remote execution remain owned by #1616.
 
+## Select a feasible proof method
+
+Before executing or reviewing each SC, use [SC verification playbook](references/verification-playbook.md) to identify the assertion, required components, available execution environment, appropriate `agent` vs `case` proof, and minimum evidence. Treat local Agent checks as preflight; they do not replace CI-only full-stack, real staging, or authenticated deployed proof. Do not silently change a live Issue Plan to work around an unavailable runner.
+
 ## Lifecycle
 
 ```text
