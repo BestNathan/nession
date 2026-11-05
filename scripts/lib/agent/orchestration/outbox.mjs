@@ -84,7 +84,30 @@ export function validateDevelopmentState(state) {
     }
     ids.add(item.id);
     onlyKeys(item.task, ['type','role','task','sha','resume','gate','when','reason','agent_id',
-      'continuation'], 'outbox action');
+      'continuation','repair_checkpoint'], 'outbox action');
+    if(item.task.repair_checkpoint != null){
+      // A Review/Quality-induced Repair is a different task and work SHA
+      // from the original Developer Slice. Its immutable native checkpoint
+      // comes from the previously published, already retired Developer chain,
+      // not a synthetic yielded parent in the current Outbox.
+      const c=item.task.repair_checkpoint;
+      onlyKeys(c,['checkpoint_version','checkpoint_commit_sha',
+        'ciphertext_sha256','source_sha','source_run_id'], 'Repair checkpoint');
+      if(Object.keys(c).length!==5||
+          item.task.type!=='dispatch'||item.task.role!=='developer'||
+          item.task.task!=='repair'||item.task.resume!==true||
+          item.task.continuation!=null||item.task.sha!==state.target_sha||
+          state.phase!=='repair'||!positive(c.checkpoint_version)||
+          !SHA.test(c.checkpoint_commit_sha??'')||
+          !HEX64.test(c.ciphertext_sha256??'')||
+          !SHA.test(c.source_sha??'')||c.source_sha===item.task.sha||
+          !positive(c.source_run_id)||
+          !state.transitions.some(t=>t.kind==='publisher'&&
+            t.outcome==='published'&&t.target_sha===item.task.sha)||
+          !state.transitions.some(t=>t.kind==='reviewer'&&
+            t.outcome==='changes_requested'&&t.target_sha===item.task.sha))
+        reject('unbound or invalid cross-phase Repair checkpoint');
+    }
     if (item.task.continuation != null) {
       const c=item.task.continuation;
       onlyKeys(c,['parent_action_id','ordinal','checkpoint_version','checkpoint_commit_sha',
@@ -362,6 +385,46 @@ export function acceptPublisherPublication(state, expectedVersion, event, truste
     ...advanced.state, schema_version: 1, version, outbox: [...outbox, ...spawned],
   });
 }
+// Bind an independently verified immutable Developer checkpoint to a pending
+// cross-phase Repair. Do not create a new Action or alter its identity: the
+// signed ticket must refer to this exact Store-persisted origin and PR target.
+// This is the only state transition allowed before a Repair dispatch intent.
+const REPAIR_PROOF_FIELDS=['verified','checkpoint_version','checkpoint_commit_sha',
+  'ciphertext_sha256','source_sha','source_run_id'];
+export function bindVerifiedRepairCheckpoint(state,expectedVersion,actionId,proof){
+  validateDevelopmentState(state);
+  if(state.version!==expectedVersion)reject('stale Repair checkpoint CAS');
+  onlyKeys(proof,REPAIR_PROOF_FIELDS,'authenticated Repair checkpoint proof');
+  if(Object.keys(proof).length!==REPAIR_PROOF_FIELDS.length||
+     proof.verified!==true||
+     !positive(proof.checkpoint_version)||
+     !SHA.test(proof.checkpoint_commit_sha??'')||
+     !HEX64.test(proof.ciphertext_sha256??'')||
+     !SHA.test(proof.source_sha??'')||!positive(proof.source_run_id))
+    reject('missing independently authenticated Repair checkpoint');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(!item||item.status!=='pending'||item.task.type!=='dispatch'||
+     item.task.role!=='developer'||item.task.task!=='repair'||
+     item.task.resume!==true||item.task.sha!==state.target_sha||
+     state.phase!=='repair'||state.outbox.filter(x=>
+       x.status==='pending'&&x.task.role==='developer').length!==1)
+    reject('Repair checkpoint can bind only one pending Developer Action');
+  const origin={checkpoint_version:proof.checkpoint_version,
+    checkpoint_commit_sha:proof.checkpoint_commit_sha,
+    ciphertext_sha256:proof.ciphertext_sha256,
+    source_sha:proof.source_sha,source_run_id:proof.source_run_id};
+  if(item.task.repair_checkpoint){
+    if(JSON.stringify(item.task.repair_checkpoint)!==JSON.stringify(origin))
+      reject('conflicting Repair checkpoint origin');
+    return state;
+  }
+  if(item.task.continuation!=null)
+    reject('cross-phase Repair must not reuse a same-task Slice continuation');
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:state.outbox.map(x=>x.id===actionId?
+      {...x,task:{...x.task,repair_checkpoint:origin}}:x)});
+}
+
 // Persist this transition *before* any non-idempotent workflow_dispatch API
 // call. A crash after GitHub accepts but before its HTTP response is ambiguous:
 // reconciliation must authenticate the original downstream Run, NEVER replay
