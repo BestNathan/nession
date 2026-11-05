@@ -200,10 +200,15 @@ test('SC-07: public three-region 1:1 prototype is interactive and compared to re
   try {
     const phone=await context.newPage();
     await phone.goto(URL);
+    // The three-region review header precedes the 844px device; on a real
+    // 390x844 browser its capsule starts below the initial fold. Scroll it into
+    // the visible touch viewport before using physical touchscreen coordinates.
+    await phone.locator('#plus').scrollIntoViewIfNeeded();
     const plus=await phone.locator('#plus').boundingBox();
     expect(plus).toBeTruthy();
     await phone.touchscreen.tap(plus.x+plus.width/2,plus.y+plus.height/2);
     await expect(phone.locator('#upper [data-act="keys"]')).toBeVisible();
+    await phone.locator('#upper [data-act="keys"]').scrollIntoViewIfNeeded();
     const keys=await phone.locator('#upper [data-act="keys"]').boundingBox();
     expect(keys).toBeTruthy();
     await phone.touchscreen.tap(keys.x+keys.width/2,keys.y+keys.height/2);
