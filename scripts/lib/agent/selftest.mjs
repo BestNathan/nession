@@ -3,7 +3,7 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
@@ -12,7 +12,7 @@ import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.m
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { createIssueReadTool } from './tools/gh/issue/read.mjs';
 import { normalizeCursorUsage, normalizeCursorCost, selectCursorModel, runCursorSession } from './providers/cursor.mjs';
-import { normalizeClaudeUsage, parseClaudeJson } from './providers/claude-code.mjs';
+import { normalizeClaudeUsage, parseClaudeJson, buildClaudeCliArgs } from './providers/claude-code.mjs';
 
 const issue = {
   number: 17,
@@ -40,10 +40,31 @@ assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
+assert.match(claude.text, /Allowed top-level JSON keys only: title, body, labels, comment, verification_tier, tier_reason/);
+assert.match(claude.text, /existing E2E Verification, E2E Report, Acceptance Plan and Acceptance Report content exactly unchanged/);
 assert.match(claude.text, /Exactly one kind: bug, requirement/);
 assert.match(claude.text, /One or more areas: terminal, web, ui, ux/);
 assert.match(claude.text, /Never include verification:\*/);
 assert.match(cursor.text, /one complete, distinct array of kind \+ area labels/);
+assert.deepEqual(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties.labels.items.enum.slice(0,2),['bug','requirement']);
+assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.additionalProperties,false);
+assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties.labels.items.enum.includes('verification:full'),false);
+assert.deepEqual(Object.keys(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties),['title','body','labels','comment','verification_tier','tier_reason']);
+assert.deepEqual(JSON.parse(issueAuditStructuredEnvelope({structured_output:{labels:['bug','cli']}}).result),
+  {labels:['bug','cli']});
+assert.throws(()=>issueAuditStructuredEnvelope({result:'{"labels":["bug","cli"]}'}),/structured output unavailable/);
+assert.throws(()=>issueAuditStructuredEnvelope({structured_output:[]}),/structured output unavailable/);
+await assert.rejects(applyIssueAuditProposal(issue,
+  issueAuditStructuredEnvelope({structured_output:{labels:['bug','cli'],issue_number:18}}),
+  'example/repo'),/unauthorized fields/);
+assert.throws(()=>buildClaudeCliArgs({
+  prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
+  jsonSchema:{type:'object',additionalProperties:true}
+}),/closed object/);
+assert.throws(()=>buildClaudeCliArgs({
+  prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
+  jsonSchema:[]
+}),/closed object/);
 assert.match(cursor.text, /missing Location/);
 assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
 assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);

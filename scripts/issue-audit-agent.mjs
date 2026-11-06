@@ -8,7 +8,7 @@ import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt } from './lib/agent/tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditStructuredEnvelope } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
@@ -214,6 +214,7 @@ function runAgent(issue) {
     prompt: promptFor(issue, audit), model: requestModel,
     maxTurns: process.env.ISSUE_AUDIT_MAX_TURNS || '20',
     allowedTools: allowed, disallowedTools: disallowed,
+    jsonSchema: ISSUE_AUDIT_PROPOSAL_SCHEMA,
   });
   if (result.error) throw result.error;
   const parsed = envelope;
@@ -224,7 +225,7 @@ function runAgent(issue) {
     throw error;
   }
   if (!parsed) throw new Error('Claude Code succeeded but returned no parseable JSON');
-  return parsed;
+  return issueAuditStructuredEnvelope(parsed);
 }
 
 async function selfTest() {
@@ -246,6 +247,14 @@ async function selfTest() {
   assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
   assert.match(args[1], /By turn 8, stop investigating/);
   assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Bash');
+  assert.equal(args.includes('--json-schema'),false,'schema must be explicit');
+  const schemaArgs=buildClaudeCliArgs({
+    prompt:'audit', model:claudeRequestModel(), maxTurns:20,
+    allowedTools:'Read,Glob,Grep', disallowedTools:'Bash',
+    jsonSchema:ISSUE_AUDIT_PROPOSAL_SCHEMA,
+  });
+  assert.deepEqual(JSON.parse(schemaArgs[schemaArgs.indexOf('--json-schema')+1]),ISSUE_AUDIT_PROPOSAL_SCHEMA);
+  assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.additionalProperties,false);
   const previousBackend=process.env.ISSUE_AUDIT_PROVIDER;
   process.env.ISSUE_AUDIT_PROVIDER='qwen';
   process.env.ISSUE_AUDIT_CLAUDE_MODEL='qwen3-coder-plus';
