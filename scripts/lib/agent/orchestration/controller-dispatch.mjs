@@ -11,7 +11,8 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
   recoverAttestedRepairRuntimeFailure} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
-import {bindControlledRepairCheckpoint} from './dispatch-store.mjs';
+import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint}
+  from './dispatch-store.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
@@ -19,6 +20,7 @@ import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-reco
 import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
+import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -130,17 +132,22 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
   // its immutable Publisher Intent. Do not fetch arbitrary model/Issue refs.
   const qwenReview=role==='reviewer'&&task?.agent_id==='review-qwen-01'&&
     context?.issue!==1997;
+  const qwenRepair=role==='developer'&&task?.task==='repair'&&
+    task?.agent_id==='dev-qwen-01'&&context?.issue!==1997;
   let qwenSource=null;
-  if(qwenReview){
-    qwenSource=qwenReviewerPublishedSource({storeRoot:context?.storeRoot,
-      issue:context?.issue,actionId:context?.actionId??task?.id,sha});
+  if(qwenReview||qwenRepair){
+    qwenSource=qwenReview?
+      qwenReviewerPublishedSource({storeRoot:context?.storeRoot,
+        issue:context?.issue,actionId:context?.actionId??task?.id,sha}):
+      qwenRepairPublishedSource({storeRoot:context?.storeRoot,
+        issue:context?.issue,actionId:context?.actionId??task?.id,sha});
     try{
       run(['fetch','--quiet','--no-tags','origin',qwenSource.branch]);
       const fetched=run(['rev-parse','FETCH_HEAD']);
       if(String(fetched).trim()!==sha)
-        fail('fetched Qwen Reviewer branch SHA differs from signed Outbox');
+        fail('fetched Qwen published PR SHA differs from signed Outbox');
     }catch{
-      fail('published Qwen Reviewer source ref unavailable or changed');
+      fail('published Qwen PR source ref unavailable or changed');
     }
   }
   try {
@@ -149,7 +156,7 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
     fail('dispatch source SHA is not a commit');
   }
   const repair=role==='developer'&&task?.task==='repair';
-  if(repair&&(sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
+  if(repair&&!qwenRepair&&(sha!=='3d8e3807cc01f6082734b8d0ba458217c28f60a4'||
       task?.sha!==sha||task?.agent_id!=='dev-cursor-01'||
       task?.repair_checkpoint?.source_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
       task?.repair_checkpoint?.source_run_id!==39448549052))
@@ -268,6 +275,12 @@ async function main(){
       const recovery=recoverAttestedNativeResumeFailure({remote:storeRemote,source:verified});
       if(recovery.action_id!==actionId||!['recovered','replayed'].includes(recovery.status))
         fail('native recovery action is not the verified CAS successor');
+    }
+    // Only an authenticated owner/main Workflow Dispatch may bind the
+    // original Qwen native Store checkpoint. The binder is a no-op for
+    // every other Action; it does not POST the Worker itself.
+    if(!commanded){
+      bindQwenRepairCheckpoint({remote:storeRemote,issue,actionId});
     }
     const signer={key,key_id:'main-controller',
       issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
