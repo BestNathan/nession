@@ -116,7 +116,7 @@ pub async fn wait_for_ready(
 /// child are not talking about the same file — which is how a `server stop`
 /// against a custom `--pid-file` used to silently do nothing (#1016).
 pub fn announced_pid(state_file: &str) -> Result<u32> {
-    let identity = crate::utils::pid_file::read_identity(state_file).with_context(|| {
+    let identity = crate::lifecycle::pid_file::read_identity(state_file).with_context(|| {
         format!(
             "the daemon announced it was serving but recorded no identity at {state_file}; \
              it was started with a different state file than the one being watched"
@@ -241,9 +241,10 @@ mod tests {
         let state_file = dir.path().join("server.pid");
         let state_file = state_file.to_str().expect("utf-8 path");
 
-        let written = crate::utils::pid_file::write_identity(
+        let written = crate::lifecycle::pid_file::write_identity(
             state_file,
-            crate::utils::pid_file::Component::Server,
+            crate::lifecycle::pid_file::Component::Server,
+            None,
         )
         .expect("write identity");
 
