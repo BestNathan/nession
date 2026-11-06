@@ -386,3 +386,191 @@ body[data-nession-prototype-frame="v1"] .np-device > #app .phone-footer {
   padding: 10px 12px;
 }
 /* Reviewer's window never chooses Files product layout; JS np:resize does. */
+
+/* IA v2: render the actual WorkspaceShell / WorkspacePanel boundary.
+ * FilesWebLayout owns only browser+viewer. On App one Shell page header owns
+ * Back/title at ALL depths; FilesAppLayout owns breadcrumbs and editor tools.
+ */
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-shell {
+  display:flex;
+  flex-direction:column;
+  width:100%;height:100%;min-height:0;
+  position:relative;
+  overflow:hidden;
+  background:var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-content {
+  display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-content > .content {
+  display:grid;
+  flex:1;
+  min-height:0;
+  grid-template-columns:var(--nession-workspace-tree-width) minmax(0,1fr);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-content > .content .explorer,
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-content > .content .viewer {
+  padding-bottom:76px;
+}
+/* A source is an attribute of Files resources, not the Workspace shell. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .browser-head {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-source-control {
+  display:flex;align-items:center;gap:6px;min-width:0;
+  color:var(--nession-muted-foreground);
+  font-size:10.5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-source-control .select-source {
+  flex:1;min-width:0;max-width:none;
+  height:26px;min-height:26px;padding:3px 5px;
+  background:transparent;border-color:transparent;
+  color:var(--nession-text-secondary);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-source-control .select-source:focus-visible {
+  border-color:var(--nession-ring);
+}
+/* Actual WorkspaceShell: contextual capsule, Web reciprocal Terminal circle,
+ * App single capability band (no second Terminal-return action). */
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-toolbar {
+  position:absolute;z-index:12;left:50%;bottom:16px;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  max-width:calc(100% - 20px);pointer-events:none;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-toolbar button {
+  pointer-events:auto;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-surface-destination {
+  flex:0 0 36px;height:36px;width:36px;
+  padding:0;border-radius:50%;border:1px solid var(--nession-border);
+  background:var(--nession-background);
+  color:var(--nession-foreground);font-size:18px;
+  box-shadow:0 1px 2px oklch(0 0 0 / 6%),0 8px 24px oklch(0 0 0 / 8%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-capability-capsule {
+  display:flex;align-items:center;max-width:100%;min-width:0;
+  min-height:36px;padding:4px;
+  border-radius:999px;border:1px solid var(--nession-border);
+  background:var(--nession-background);
+  box-shadow:0 1px 2px oklch(0 0 0 / 6%),0 8px 24px oklch(0 0 0 / 8%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-capability-capsule button {
+  display:flex;align-items:center;gap:6px;
+  height:28px;padding:0 11px;border:0;border-radius:999px;
+  background:var(--nession-muted);color:var(--nession-foreground);
+  font-size:12px;font-weight:550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-terminal-surface {
+  position:relative;height:100%;width:100%;
+  background:var(--nession-background);color:var(--nession-foreground);
+  font:12.5px/1.8 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-terminal-output {
+  padding:30px 24px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-terminal-output p {margin:4px 0}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-terminal-capsule {
+  position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-terminal-capsule button {
+  background:var(--nession-background);
+  box-shadow:0 1px 2px oklch(0 0 0 / 6%),0 8px 24px oklch(0 0 0 / 8%);
+}
+/* App WorkspacePanel: ONE AppPageHeader per depth, controlled by the shell. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-page-header {
+  display:flex;align-items:center;gap:4px;flex:0 0 auto;
+  min-height:46px;padding:6px 8px 4px;
+  background:var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-page-header h1 {
+  min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  margin:0;font-size:16px;font-weight:600;line-height:1.25;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-back {
+  width:36px;height:36px;min-width:36px;border:0;background:transparent;
+  color:var(--nession-foreground);font-size:24px;border-radius:7px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-back:hover {
+  background:var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .mobile-wrap {
+  flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .mobile-mock {
+  display:flex;flex-direction:column;flex:1;min-height:0;
+  position:relative;overflow:hidden;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-directory-tools {
+  display:flex;align-items:center;gap:4px;padding:0 10px 4px;
+  flex:0 0 auto;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-directory-path {
+  display:flex;gap:4px;align-items:center;min-width:0;flex:1;
+  overflow-x:auto;white-space:nowrap;scrollbar-width:none;
+  color:var(--nession-muted-foreground);
+  font:11.5px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-directory-path button {
+  background:none;border:0;padding:2px 0;
+  color:var(--nession-muted-foreground);
+  text-decoration:underline;text-underline-offset:3px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-directory-path strong {
+  font-weight:550;color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-source {
+  flex:0 0 auto;padding:0 12px 6px;max-width:100%;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-source .ia-source-control {
+  max-width:100%;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-editor-actions {
+  display:flex;align-items:center;gap:8px;min-height:36px;
+  padding:3px 12px;border-bottom:1px solid var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-editor-actions .spacer {
+  flex:1;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-search-row {
+  flex:0 0 auto;padding:6px 12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-search-row input {
+  width:100%;height:36px;box-sizing:border-box;
+  padding:5px 10px;border:1px solid var(--nession-border);
+  border-radius:7px;color:var(--nession-foreground);
+  background:var(--nession-workspace-background);
+  font:13px/1.35 ui-sans-serif,system-ui;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-search-empty {
+  padding:18px;color:var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-file-row {
+  display:flex;align-items:center;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-file-row .phone-row {
+  flex:1;min-width:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-chevron {
+  color:var(--nession-muted-foreground);font-size:18px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-content {
+  flex:1;min-height:0;overflow-y:auto;
+  padding-bottom:80px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-toolbar {
+  /* App uses the same dock slot as its single Workspace Capsule. */
+}
+@container (max-width:430px) {
+  body[data-nession-prototype-frame="v1"] .np-device > #app .ia-workspace-toolbar {
+    width:calc(100% - 20px);bottom:9px;
+  }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .ia-capability-capsule {
+    width:100%;justify-content:center;min-height:44px;
+  }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .ia-capability-capsule button {
+    min-height:36px;font-size:12px;
+  }
+}
