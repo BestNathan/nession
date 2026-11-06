@@ -15,13 +15,16 @@ import {readWorkerZipMember}
   from '../orchestration/worker-zip.mjs';
 import {deriveDispatchKey}
   from '../orchestration/controller-dispatch.mjs';
-import {preflightTrustedQwenPublisher}
+import {preflightTrustedQwenPublisher,preflightTrustedQwenRepairPublisher}
   from './qwen-source-preflight.mjs';
+import {commitQwenRepairPublisherIntent} from './qwen-repair-intent.mjs';
+import {publishQwenRepairToSamePR,readBackQwenRepairPR}
+  from './qwen-repair-github.mjs';
 import {commitQwenPublisherIntent}
   from './store-intent.mjs';
 import {publishTrustedQwenGitHubPR,readBackQwenPublishedPR}
   from './qwen-github-publish.mjs';
-import {applyQwenPublicationToRemote}
+import {applyQwenPublicationToRemote,applyQwenRepairPublicationToRemote}
   from './publication-ingest.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
@@ -107,18 +110,22 @@ function apiClient(token){
   if(typeof token!=='string'||token.length<12||/\s/.test(token))
     fail('separately scoped Publisher GitHub App token missing');
   return async(method,endpoint,payload)=>{
-    if(!['GET','POST'].includes(method)||typeof endpoint!=='string'||
+    if(!['GET','POST','PATCH'].includes(method)||typeof endpoint!=='string'||
         !/^[a-z0-9][A-Za-z0-9/?:=&_.%+-]*$/.test(endpoint)||
         endpoint.includes('..')||
-        (method==='POST'&&!/^(?:git\/(?:blobs|trees|commits|refs)|pulls)$/.test(endpoint)))
+        (method==='POST'&&!/^(?:git\/(?:blobs|trees|commits|refs)|pulls)$/.test(endpoint))||
+        (method==='PATCH'&&(
+          !/^git\/refs\/heads\/agent\/[1-9][0-9]*\/qwen-[a-f0-9]{16}$/.test(endpoint)||
+          !payload||Object.keys(payload).sort().join(',')!=='force,sha'||
+          payload.force!==false||!SHA.test(payload.sha??''))))
       fail('unapproved Publisher GitHub API endpoint');
     const response=await fetch('https://api.github.com/repos/'+REPO+'/'+endpoint,{
       method,headers:{
         Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
         'X-GitHub-Api-Version':'2022-11-28',
         'User-Agent':'nession-qwen-trusted-publisher',
-        ...(method==='POST'?{'Content-Type':'application/json'}:{})},
-      ...(method==='POST'?{body:JSON.stringify(payload)}:{}),
+        ...(method==='POST'||method==='PATCH'?{'Content-Type':'application/json'}:{})},
+      ...(method==='POST'||method==='PATCH'?{body:JSON.stringify(payload)}:{}),
       signal:AbortSignal.timeout(20000)});
     if(!response.ok)throw Object.assign(
       Error('Publisher GitHub API rejected request'),{status:response.status});
@@ -154,6 +161,40 @@ export async function runTrustedQwenPublication({
     fail('ingester receipt does not match original signed Qwen Worker');
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(claim.inputs.task==='repair'){
+      const preflight=await preflightTrustedQwenRepairPublisher({
+        remote,registry,run:worker,claim,reader,rootKey:key,
+        result,proof,ciphertext,sourceCheckout});
+      if(preflight.evidence.checkpoint_version!==receipt.checkpoint_version||
+          preflight.evidence.checkpoint_commit_sha!==receipt.checkpoint_commit_sha||
+          preflight.evidence.ciphertext_sha256!==receipt.ciphertext_sha256||
+          preflight.evidence.worker_sha!==receipt.worker_sha)
+        fail('Repair Publisher cannot diverge from main-owned native Ingest');
+      // Commit the immutable one-shot GitHub mutation fence FIRST. A replayed
+      // or ambiguous prior Intent grants GET-only readback, never another POST.
+      const intent=commitQwenRepairPublisherIntent({
+        remote,preflight,publisher_run_id:Number(env.GITHUB_RUN_ID)});
+      const published=intent.may_publish
+        ?await publishQwenRepairToSamePR({preflight,intent,sourceCheckout,api})
+        :null;
+      const readback=await readBackQwenRepairPR({
+        preflight,intent,sourceCheckout,api});
+      if(published&&(published.head_sha!==readback.head_sha||
+          published.pull_request!==readback.pull_request||
+          published.expected_tree_sha!==readback.expected_tree_sha))
+        fail('authenticated Repair Publisher response diverged from independent PR-B readback');
+      const handoff=applyQwenRepairPublicationToRemote({
+        remote,readback,intent,registry});
+      return {schema_version:1,kind:'trusted_qwen_publisher_handoff',
+        issue:receipt.issue,action_id:receipt.action_id,
+        developer_run_id:worker.id,publisher_run_id:Number(env.GITHUB_RUN_ID),
+        pull_request:readback.pull_request,pr_head_sha:readback.head_sha,
+        reviewer_action_id:handoff.reviewer_action_id??null,
+        status:handoff.changed?'reviewer_pending':'replayed',
+        store_commit_sha:handoff.commit_sha??null};
+    }
+    if(claim.inputs.task!=='implement')
+      fail('only independently signed implement or repair is publishable');
     const preflight=await preflightTrustedQwenPublisher({
       remote,registry,run:worker,claim,reader,rootKey:key,
       result,proof,ciphertext,sourceCheckout});
