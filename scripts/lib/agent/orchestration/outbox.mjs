@@ -480,6 +480,87 @@ export function acceptAttestedQwenPublication(state,expectedVersion,event,truste
   return validateDevelopmentState({...advanced.state,version:state.version+1,
     outbox:[...outbox,child]});
 }
+// #2137: The separately authenticated Qwen Repair Publisher has already
+// verified the original PR and a non-force A->B update by exact GET readback.
+// This state transition may ONLY retire the existing signed Repair Action and
+// enqueue the same registered Reviewer at SHA B. Model-produced text, a new PR,
+// or an unverified GitHub response cannot serve as this trusted source.
+export function acceptAttestedQwenRepairPublication(
+  state,expectedVersion,event,trusted,registry,
+){
+  validateDevelopmentState(state);
+  validateRegistry(registry);
+  if(state.version!==expectedVersion)reject('stale Qwen Repair Publisher CAS');
+  if(event?.kind!=='publisher'||event.outcome!=='published'||
+      event.issue!==state.issue||!positive(event.run_id)||
+      event.run_attempt!==1||!SHA.test(event.target_sha??'')||
+      trusted?.role!=='publisher'||
+      trusted.workflow_run_id!==event.run_id||trusted.attempt!==1||
+      trusted.issue!==event.issue||trusted.source_sha!==event.target_sha||
+      !HEX64.test(trusted.developer_action_id??'')||
+      !positive(trusted.developer_run_id)||
+      trusted.developer_attempt!==1||
+      !SHA.test(trusted.developer_source_sha??'')||
+      !SHA.test(trusted.checkpoint_commit_sha??'')||
+      !positive(trusted.original_publisher_run_id)||
+      !positive(trusted.pr_number)||
+      trusted.pr_previous_sha!==trusted.developer_source_sha||
+      event.reviewer_agent_id!=null)
+    reject('Qwen Repair requires signed Worker, existing PR and exact readback');
+  const previous=state.transitions.find(t=>
+    t.kind==='publisher'&&t.run_id===event.run_id&&t.attempt===1);
+  if(previous){
+    if(previous.outcome!=='published'||
+        previous.target_sha!==event.target_sha||
+        state.target_sha!==event.target_sha)
+      reject('conflicting Qwen Repair PR readback replay');
+    return state;
+  }
+  if(state.phase!=='repair'||state.target_sha!==trusted.developer_source_sha||
+      state.target_sha===event.target_sha||
+      state.assignments.developer!=='dev-qwen-01'||
+      state.assignments.reviewer!=='review-qwen-01')
+    reject('Qwen Repair Publisher wrong Review phase or PR SHA A');
+  const latest=state.transitions.at(-1);
+  const original=state.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published'&&t.target_sha===state.target_sha);
+  if(latest?.kind!=='reviewer'||latest.outcome!=='changes_requested'||
+      latest.target_sha!==state.target_sha||
+      original.length!==1||
+      original[0].run_id!==trusted.original_publisher_run_id||
+      original[0].attempt!==1)
+    reject('Qwen Repair missing latest authenticated Reviewer dispute');
+  const tasks=state.outbox.filter(x=>x.task.type==='dispatch'&&
+    x.task.role==='developer'&&x.status==='dispatched');
+  if(tasks.length!==1||tasks[0].id!==trusted.developer_action_id||
+      tasks[0].task.task!=='repair'||
+      tasks[0].task.agent_id!=='dev-qwen-01'||
+      tasks[0].task.sha!==state.target_sha||
+      tasks[0].task.resume!==true||
+      tasks[0].task.repair_checkpoint==null||
+      tasks[0].receipt?.status!=='verified'||
+      tasks[0].receipt.source_run_id!==trusted.developer_run_id||
+      tasks[0].receipt.dispatch_id!==tasks[0].id||
+      state.outbox.some(x=>x!==tasks[0]&&
+        ['dispatching','dispatched'].includes(x.status))||
+      state.outbox.some(x=>x.task.role==='reviewer'))
+    reject('Qwen Repair lacks one completed signed Developer dispatch');
+  const next=advanceWorkflow(state,event,{
+    role:'publisher',workflow_run_id:event.run_id,attempt:1,
+    issue:event.issue,source_sha:event.target_sha});
+  if(next.duplicate||next.actions.length!==1||
+      next.actions[0].role!=='reviewer'||
+      next.state.phase!=='review'||next.state.target_sha!==event.target_sha)
+    reject('repair PR SHA B did not produce canonical Reviewer');
+  const remaining=next.state.outbox.filter(x=>x.id!==tasks[0].id);
+  if(remaining.length+1>MAX_OUTBOX)reject('Repair Outbox exhausted');
+  const child=makeAction(state.issue,state.version+1,next.actions[0],
+    state.assignments,0);
+  boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  return validateDevelopmentState({...next.state,version:state.version+1,
+    outbox:[...remaining,child]});
+}
+
 // Bind an independently verified immutable Developer checkpoint to a pending
 // cross-phase Repair. Do not create a new Action or alter its identity: the
 // signed ticket must refer to this exact Store-persisted origin and PR target.
