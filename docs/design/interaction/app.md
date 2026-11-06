@@ -356,16 +356,16 @@ App presentation should normally map it as follows:
 
 Exact detection is implementation-specific.
 
-## Device and viewport coverage
+## Chromium + Playwright viewport coverage
 
 The executable matrix is [`design/contracts/viewports.json`](../../../design/contracts/viewports.json) — the single source that the browser contract suite iterates. For App it currently pins portrait at 375 / 390 / 430 and landscape at 844×390.
 
-**Two scenarios are not covered, and are recorded here as limitations rather than left silently unchecked** (#1049):
+**Two important environment-specific inputs need explicit deterministic Chromium/Playwright fixtures rather than physical-device acceptance** (#1049):
 
-- **Safe area.** Every consumer of `env(safe-area-inset-*)` in the web client uses `-top` or `-bottom`; `-left` and `-right` appear nowhere. That is adequate in portrait, where the notches and the home indicator are top and bottom — but landscape is exactly the case where those insets move to the **sides**, and nothing accounts for that. No fixture sets a non-zero inset, and Playwright cannot synthesise `env()` values without a real device.
-- **Software keyboard.** Opening an IME changes the visual viewport, and the capsule is meant to stay docked above it. No test exercises this: jsdom has no keyboard, and the Playwright fixtures run without one. Resizing the viewport in a test is *not* a substitute — it emulates a smaller viewport, not an IME appearing over one.
+- **Safe area.** The existing browser fixture matrix does not assert a non-zero effective safe-area inset in landscape. Add an explicit Chromium test fixture or test-only CSS-controlled inset input and assert the app-owned layout bounds; this is an application-level invariant, not a claim to reproduce iOS hardware notches or Safari's native `env()` behavior.
+- **Software keyboard / visual viewport.** A plain window resize is not equivalent to a real OS keyboard. Use a deterministic Chromium fixture that controls the app-observable visual viewport/keyboard state, then assert keyboard-related layout, focus and scroll behavior. Do not describe this as native iOS IME testing.
 
-Closing either needs a real device or emulator. Until then this is a **known evidence gap, not a known defect**: nothing here says the App breaks under an IME or a landscape inset, only that no test would notice if it did.
+**Acceptance policy:** Web and App interaction/visual SCs use Chromium + Playwright at the canonical desktop/mobile viewport matrix; no physical phone, Mobile Safari or installed-App test is required. When a missing fixture prevents an app-owned assertion, record that fixture as the `Pending` prerequisite; lack of native iOS instrumentation alone is not a blocker. Native Safari/OS-specific behavior remains outside the automated acceptance claim, without inventing a Pass for it.
 
 ## What App must not do
 

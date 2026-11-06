@@ -33,15 +33,17 @@ function safePath(value){
 // canonical callers pass nothing and keep the #2177 cursor contract.
 export function reviewModelView(admission,identity){
   assertReviewerAdmission(admission,identity);
-  return Object.freeze({
+  const common={
     issue: admission.issue,
     pull_request: admission.pr_number,
     target_sha: admission.target_sha,
     base_sha_at_publication: admission.base_sha_at_publication,
-    expected_file: admission.expected_file,
-    expected_file_sha256: admission.expected_file_sha256,
-    expected_file_mode: admission.expected_file_mode,
-  });
+  };
+  if(admission.kind==='authenticated_qwen_reviewer_admission_only')
+    return Object.freeze({...common,expected_files:admission.expected_files});
+  return Object.freeze({...common,expected_file:admission.expected_file,
+    expected_file_sha256:admission.expected_file_sha256,
+    expected_file_mode:admission.expected_file_mode});
 }
 
 export function renderReviewPrompt(admission,identity){
@@ -70,6 +72,9 @@ export function reviewModelResult(admission,raw,identity){
       evidence:singleLine(item.evidence,'finding evidence',MAX_EVIDENCE),
     });
   });
+  if(admission.kind==='authenticated_qwen_reviewer_admission_only'&&
+     findings.some(f=>!admission.expected_files.some(file=>file.path===f.path)))
+    fail('finding is outside the authenticated Qwen PR diff');
   if(parsed.outcome==='changes_requested'&&findings.length===0)
     fail('changes_requested requires at least one finding');
   return Object.freeze({

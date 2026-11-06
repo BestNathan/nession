@@ -70,17 +70,17 @@ function strictInput(input,role){
   let ticket;
   try{ticket=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(ticketBytes));}
   catch{deny('invalid native Dispatch Ticket');}
-  if(![1,2].includes(ticket.schema_version)||
+  if(![1,2,3].includes(ticket.schema_version)||
       ticket.issue!==Number(input.issue_number)||
       ticket.action_id!==input.action_id||
       ticket.agent_id!==input.agent_id||
       ticket.role!==role||ticket.task!==input.task||
       ticket.input_sha!==input.input_sha||
       (ticket.schema_version===1&&Object.hasOwn(input,'resume_from'))||
-      (ticket.schema_version===2&&!Object.hasOwn(input,'resume_from'))) {
+      (ticket.schema_version!==1&&!Object.hasOwn(input,'resume_from'))) {
     deny('Worker inputs differ from canonical Ticket identity');
   }
-  if(ticket.schema_version===2&&
+  if(ticket.schema_version!==1&&
       input.resume_from!==Buffer.from(canon(ticket.resume_from))
         .toString('base64url'))deny('Worker native continuation differs from Ticket');
   return ticket;
@@ -140,19 +140,27 @@ export function authorizeWorkerFromStore({remote,registry,role,runId,input}) {
        prior.task.sha!==action.task.sha)
       deny('immutable prepared and acknowledged Worker identities diverge');
     const c=action.task.continuation;
-    if(c){
-      if(ticket.schema_version!==2||
-          canon(c)!==canon(ticket.resume_from))deny('native continuation mismatch');
+    const repair=action.task.repair_checkpoint;
+    if(c&&repair)deny('ambiguous native checkpoint origin');
+    if(input.task==='repair'&&!repair)
+      deny('Repair needs a committed cross-phase native checkpoint');
+    const origin=repair??c;
+    if(origin){
+      if(ticket.schema_version!==(repair?3:2)||
+          canon(origin)!==canon(ticket.resume_from)||
+          canon(origin)!==canon(repair?prior.task.repair_checkpoint:
+            prior.task.continuation))
+        deny('signed native checkpoint differs from immutable prepared state');
       verifyCommittedCheckpoint({remote,
         identity:{role,agent_id:input.agent_id,issue},
-        commit_sha:c.checkpoint_commit_sha,version:c.checkpoint_version,
-        ciphertext_sha256:c.ciphertext_sha256});
+        commit_sha:origin.checkpoint_commit_sha,version:origin.checkpoint_version,
+        ciphertext_sha256:origin.ciphertext_sha256});
     }else if(ticket.schema_version!==1)deny('unexpected resume for initial Worker');
     return Object.freeze({authorized:true,issue,role,agent_id:input.agent_id,
       provider:registered.provider,environment:registered.environment,
       action_id:action.id,run_id:runId,input_sha:input.input_sha,
       state_version:record.version,task:input.task,
-      ...(c?{resume_from:c}:{}),capability_digest:identity.digest??null});
+      ...(origin?{resume_from:origin}:{}),capability_digest:identity.digest??null});
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
 function main(){

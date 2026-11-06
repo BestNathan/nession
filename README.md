@@ -1,60 +1,77 @@
 # Nession
 
-**Explore [Nession Pages](https://bestnathan.github.io/nession/)** — an independently designed, read-only project site introducing Nession and showing public AI workflow Agent activity, active engineering work, repository metrics, and evidence-source metadata. Pages (`pages/`) is separate from the authenticated product Web workspace (`web/`); it does not reuse its design system or runtime components.
+[Pages](https://bestnathan.github.io/nession/) · [Vision](VISION.md) · [Principles](PRINCIPLE.md) · [Product](PRODUCT.md)
+
+## Overview
+
+**Nession is an intelligent workspace for continuous work across devices, environments, and compute nodes.** It connects remote machines, persistent terminal Sessions, and the tools surrounding them so users can return to their work without rebuilding the environment each time.
+
+The existing **0.x** product centers on remote terminal control. The **1.x** product is under development, extending that foundation toward a **Session-first, Workspace-centered** experience with contextual capabilities. See [Product](PRODUCT.md) for the product-generation definitions.
+
+## Telemetry
+
+### Repository health
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-dark.svg?sanitize=true&v=2">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
-  <img alt="Nession Repository Telemetry — repository health and rolling engineering efficiency" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
+  <img alt="Nession repository telemetry: repository health, quality and engineering activity" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
 </picture>
 
-<sub>Generated every 4 hours from <code>main</code> · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
+<sub>Published from the <code>metrics</code> branch · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">repository metrics (JSON)</a></sub>
+
+### Agent workflow activity
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-dark.svg?sanitize=true&v=1">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
-  <img alt="Nession Agent Workflow Telemetry — rolling 7d and 30d runs, turns, tools, tokens, duration and cost" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
+  <img alt="Nession agent workflow telemetry: activity, outcomes, token usage and execution costs" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
 </picture>
 
-<sub>Agent workflow telemetry · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics.json">aggregate JSON</a> · immutable raw runs under <code>raw/workflows/</code> on the <code>metrics</code> branch</sub>
+<sub>Observed Agent workflow activity · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics.json">Agent workflow metrics (JSON)</a></sub>
 
-> An intelligent workspace for continuous work across devices, environments, and compute nodes.
+## Architecture
 
-Nession connects local machines, remote servers, cloud environments, terminals, coding agents, and other execution contexts into one continuous working experience. The infrastructure may be distributed and complex; the product should remain coherent, quiet, and extensible.
+Nession's current runtime uses a **Server / Agent / Client** architecture. The Server coordinates identity, discovery and Session metadata; each Agent owns execution on its node and connects to local tmux Sessions. Web and CLI clients attach through the Server relay or directly to an Agent where P2P is available.
 
-Product direction and design decisions are governed by two repository-level documents:
+```text
+                       Web (React / xterm.js)   CLI
+                                |                 |
+                                +--------+--------+
+                                         |
+                                   WebSocket
+                                         |
+                                         v
+                              Nession Server
+                         (registry / auth / SQLite)
+                                         |
+                             coordination / relay
+                                         |
+                                         v
+                              Nession Agent(s)
+                              (node execution)
+                                         |
+                                nession-tmux
+                                         |
+                                         v
+                            tmux-backed Sessions
 
-- [`VISION.md`](VISION.md) — what problem Nession exists to solve and where the product is going.
-- [`PRINCIPLE.md`](PRINCIPLE.md) — the durable design principles used to decide how Nession should grow.
-
-In short: Nession should absorb infrastructure complexity instead of exposing it, organize the experience around the work rather than a feature catalog, let relevant capabilities emerge from context, and reveal deeper complexity progressively. The two documents above are the canonical source when this summary and lower-level design documents diverge.
-
-Today, Nession provides distributed `tmux` session management across many machines. A central **server** tracks every **agent** (one per node), and clients attach to live sessions from the **Web UI** or **CLI** — over a relay through the server, or peer-to-peer directly to an agent for lower latency.
-
+     Web / CLI ---------------- P2P WebSocket ------------> Agent
 ```
-Browser / CLI
-     │  ws:// (or wss://)
-     ▼
-nession-server ── SQLite ── registry (agents, sessions)
-     │  ws://              ▲
-     ▼                      │ heartbeat + session sync
-nession-agent ── tmux ─────┘
-     │
-     ▼
-tmux sessions (per-node)
-```
 
-**Connection modes**
-- **Relay** — Browser/CLI → Server → Agent. Works anywhere the server is reachable.
-- **P2P** — Browser/CLI → Agent directly, using the agent address returned by the attach response. Lower latency.
+**Connection paths**
 
----
+- **Relay:** Client → Server → Agent, when the Server is reachable.
+- **P2P:** Client → Agent, when a direct endpoint is reachable and authorized.
+- **Session execution:** Agent → tmux; client attachment and node connectivity are distinct from Session lifetime.
+
+The longer-term product model introduces logical Workspaces, Workspace Locations and context-aware capabilities around Sessions; this target is described in [Product](PRODUCT.md) and [Product & UI Design](docs/design/README.md), not represented as fully shipped by the diagram above.
 
 ## Features
 
 - **Central registry** — agents register on connect and heartbeat; the server persists agents and sessions in SQLite.
-- **Web dashboard** — React + xterm.js UI to browse agents, create/kill sessions, and open a live terminal (light, on the same ground as the chrome).
-- **Interactive CLI** — attach to a session in a raw terminal, list agents/sessions, create and kill sessions.
+- **Web workspace** — React + xterm.js UI for Sessions, terminals and contextual capabilities; the broader Workspace product model is still evolving.
+- **Interactive CLI** — list Agents and Sessions, create/kill Sessions and attach to a terminal.
 - **Two transports** — relay through the server or P2P directly to the agent.
 - **Container-ready** — multi-arch (amd64/arm64) Docker images and Kubernetes manifests (kustomize base + staging/production overlays).
 - **Prebuilt binaries** — released for Linux and macOS on every version bump.
@@ -106,12 +123,12 @@ Produces three binaries: `nession` (CLI), `nession-agent`, `nession-server`.
 nession-server                 # reads ./config.toml if present, else uses defaults
 ```
 
-Without a config it listens on `127.0.0.1:8080` with no auth and stores its DB under `~/.nession/`. **The Vite dev server proxies `/ws` to `19090`, not `8080`** — so a config-less server is reachable by the CLI but not by the UI. Either pass a config that sets `listen_address = "127.0.0.1:19090"`, or expect to log in and see "disconnected" with no other clue.
+With no `config.toml`, the standalone `nession-server` executable listens on `127.0.0.1:8080` with no auth. The Web development server instead proxies `/ws` and `/api` to port `19090` by default. To use the Web UI locally, configure the Server to listen on `19090` as below (or override `NESSION_DEV_WS_PROXY` in the Web dev environment). Do not expose the no-auth default to untrusted networks.
 
 To customize, create a `config.toml`:
 
 ```toml
-listen_address = "0.0.0.0:8080"
+listen_address = "127.0.0.1:19090"
 tls_cert_path = ""             # set both to enable wss://
 tls_key_path = ""
 auth_token = "your-secret-token"
@@ -126,7 +143,7 @@ Copy and edit `agent-config.toml`:
 
 ```toml
 agent_id = "agent-local"
-server_url = "ws://127.0.0.1:8080/ws"
+server_url = "ws://127.0.0.1:19090/ws"
 auth_token = "your-secret-token"
 listen_address = "0.0.0.0:8080"   # internal WS server for P2P
 heartbeat_interval_secs = 10
@@ -149,9 +166,11 @@ nession server start|status|stop
 
 ### 3. Use it
 
-**CLI** (targets the central server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`):
+**CLI** (targets the central Server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`). For the `19090` example above, set the target and use the same auth token configured for the Server:
 
 ```bash
+export NESSION_SERVER_URL=ws://127.0.0.1:19090
+# Set NESSION_AUTH_TOKEN to the Server auth token securely in your shell.
 nession agents list
 nession sessions list [--agent-id <id>]
 nession sessions create --agent-id <id> --name dev
@@ -182,19 +201,14 @@ empty token. Agent and Server daemon configs do not override this CLI target.
 ```bash
 cd web
 npm ci
-npm run dev        # Vite dev server on http://localhost:13000, proxies /ws → :19090
+npm run dev        # Vite dev server :13000, proxies /ws and /api → :19090
 ```
 
 Open http://localhost:13000, connect to the server, then browse agents and open terminals. For production, `npm run build` emits static assets to `web/dist/` (served by nginx in the Docker/K8s images).
 
 ### Terminal presentation and scrollback
 
-Terminal font metrics come from the Web/App Experience design tokens
-(`design/generated/terminal.ts`), not fixed device scaling percentages.
-The terminal engine includes a `FontSizeManager` with pixel-size bounds,
-but the current Session-first Terminal surface does **not** expose the
-older +/-/reset toolbar controls. Do not assume an interactive zoom UI exists
-solely because the lower-level engine supports font size changes.
+The terminal uses a fixed logical column count per Session (96 by default; configurable for a release). Web/App adapt font size and visible rows to each viewport without reflowing the Session into a different column count. See [terminal sizing](docs/design/terminal/terminal-sizing.md) for the current contract.
 
 A Session's history is xterm's own scrollback — the wheel stays in the browser
 and never enters tmux copy mode — and attaching (or reloading) fills it from
@@ -209,18 +223,21 @@ states exactly what it does and does not give you.
 
 ```
 nession/
-├── crates/                 # Rust workspace (10 crates; see Cargo.toml)
+├── crates/                 # Rust workspace (11 crates; see Cargo.toml)
 │   ├── nession-common/     # shared configuration, paths and utilities
 │   ├── nession-protocol/   # versioned wire contracts
 │   ├── nession-protocol-codegen/ # TypeScript / JSON Schema generation
 │   ├── nession-runtime/    # reusable runtime primitives
 │   ├── nession-client/     # reusable client library
+│   ├── nession-tmux/       # independent typed tmux / Control Mode client
 │   ├── nession-server/     # broker, registry, SQLite, WebSocket + TLS
 │   ├── nession-agent/      # per-node tmux, server and P2P lifecycle
 │   ├── nession-cli/        # interactive CLI and process lifecycle
 │   ├── nession-git/        # Git capability / protocol
 │   └── nession-claude-code/ # Claude Code capability / protocol
-├── web/                    # React + Vite + TypeScript + shadcn/ui + xterm.js
+├── web/                    # authenticated React / Vite / xterm.js product UI
+├── pages/                  # independent public project observatory
+├── docs/                   # architecture, product and design documentation
 ├── deploy/                 # docker-compose + entrypoints + nginx template
 ├── design/                 # design tokens + executable UI contracts (`design/generated/` is codegen output)
 ├── e2e/                    # shared Runner, Cases, Scenarios, Playwright regressions
@@ -253,9 +270,9 @@ npm test           # Vitest
 npx tsc --noEmit   # type check
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for the full contributor workflow, coding conventions, and branch/PR rules.
+See [`AGENTS.md`](AGENTS.md) and the [development Skill](.claude/skills/nession-development/SKILL.md) for current contributor, worktree, Gate and PR rules.
 
-> **Never develop on `main`.** Create a feature branch: `git checkout -b feat/<slug>`.
+> **Never develop in the root `main` checkout.** Use an isolated worktree and feature branch.
 
 ---
 
@@ -289,7 +306,7 @@ The deployment nginx listener serves the UI and `/health` endpoint
 listener. Rust listener ports and external service ports are configuration,
 not fixed Kubernetes constants. CI publishes multi-arch images and promotes
 versioned image tags through the gitops workflow on version changes
-(see `.github/workflows/release.yml`).
+(see the current release workflows under `.github/workflows/`).
 
 ---
 

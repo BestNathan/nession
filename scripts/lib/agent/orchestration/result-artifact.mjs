@@ -188,7 +188,13 @@ export function assertMetricsAgreement({metrics,run,pending,result,pr_number,
   const name=role==='reviewer'?'Agent / Review':'Agent / Development';
   const type=role==='reviewer'?'review':'development';
   const instance=registry?.instances?.[pending?.task?.agent_id];
-  const status=typeof result?.outcome==='string'?'review-'+result.outcome:null;
+  // Signed results use the orchestration enum changes_requested, while
+  // canonical Metrics records use review-changes-requested. Map exactly
+  // these two allowed Reviewer outcomes, never accept fuzzy status matches.
+  const status={
+    approved:'review-approved',
+    changes_requested:'review-changes-requested',
+  }[result?.outcome]??null;
   if(!metrics||typeof metrics!=='object'||Array.isArray(metrics)||
       metrics.schema_version!==1||metrics.kind!=='agent_workflow_run'||
       metrics.identity?.workflow_id!==workflow||

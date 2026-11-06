@@ -82,7 +82,17 @@ try {
     /not pending/);
 
   // A real Git push must happen before any external GitHub POST.
-  const written=commitDispatchIntent({remote,issue,actionId:next.id,registry,signer});
+  const observedTasks=[];
+  const written=commitDispatchIntent({remote,issue,actionId:next.id,registry,signer,
+    sourceVerifier:(source,role,task)=>{
+      observedTasks.push({source,role,task});
+      assert.equal(source,sha);
+      assert.equal(role,'developer');
+      assert.equal(task.task,'implement');
+      assert.equal(task.sha,sha);
+      assert.equal(task.agent_id,'dev-cursor-01');
+    }});
+  assert.equal(observedTasks.length,1);
   assert.equal(written.status,'committed');
   assert.deepEqual(written.plan,plan);
   assert.match(written.store_commit_sha,/^[a-f0-9]{40}$/);

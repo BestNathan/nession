@@ -49,6 +49,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export function buildClaudeCliArgs({
   prompt, model, maxTurns, allowedTools, disallowedTools,
   sessionId = null, resumeSessionId = null, restricted = false, tools = null,
+  jsonSchema = null,
 }) {
   // A resumed Agent is the SAME native session, never --continue or --fork-session.
   if (sessionId && resumeSessionId) throw new Error('Claude cannot seed and resume at once');
@@ -58,6 +59,13 @@ export function buildClaudeCliArgs({
   const args = ['-p', prompt, '--output-format', 'json', '--max-turns', String(maxTurns),
     '--model', model, '--allowedTools', allowedTools, '--disallowedTools', disallowedTools];
   if (restricted) args.push('--restricted');
+  if (jsonSchema !== null) {
+    if (!jsonSchema || typeof jsonSchema !== 'object' || Array.isArray(jsonSchema) ||
+        jsonSchema.type !== 'object' || jsonSchema.additionalProperties !== false) {
+      throw new Error('Claude JSON Schema must be a closed object');
+    }
+    args.push('--json-schema', JSON.stringify(jsonSchema));
+  }
   if (tools !== null) {
     if (typeof tools !== 'string') throw new Error('invalid Claude explicit tools policy');
     args.push('--tools', tools, '--disallowedTools', 'mcp__*');
@@ -70,13 +78,13 @@ export function buildClaudeCliArgs({
 export function runClaudeCli({
   prompt, model, maxTurns, allowedTools, disallowedTools, cwd, env,
   sessionId = null, resumeSessionId = null, configDir = null, restricted = false,
-  tools = null, spawn = spawnSync,
+  tools = null, jsonSchema = null, spawn = spawnSync,
 }) {
   if ((sessionId || resumeSessionId) && !configDir) {
     throw new Error('Durable Claude requires an isolated CLAUDE_CONFIG_DIR');
   }
   const args = buildClaudeCliArgs({prompt,model,maxTurns,allowedTools,disallowedTools,
-    sessionId,resumeSessionId,restricted,tools});
+    sessionId,resumeSessionId,restricted,tools,jsonSchema});
   const cliEnv = {...process.env,...env,DISABLE_AUTOUPDATER:'1',
     ANTHROPIC_MODEL:model,ANTHROPIC_DEFAULT_SONNET_MODEL:model};
   if (configDir) cliEnv.CLAUDE_CONFIG_DIR=configDir;

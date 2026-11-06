@@ -2,12 +2,13 @@
 
 This directory translates Nession's repository-level product contract into concrete product models, information architecture, interactions, visual language, and executable UI constraints.
 
-The two upstream sources of truth live at the repository root:
+The upstream product sources live at the repository root:
 
-1. [`../../VISION.md`](../../VISION.md) — product direction: the problem Nession solves and where the product is going.
+1. [`../../VISION.md`](../../VISION.md) — enduring product direction: the problem Nession solves and where the product is going.
 2. [`../../PRINCIPLE.md`](../../PRINCIPLE.md) — durable product design decision rules.
+3. [`../../PRODUCT.md`](../../PRODUCT.md) — per-generation positioning and experience target, including 0.x and the developing 1.x.
 
-Everything in `docs/design/` is downstream from those two files. Existing design documents and shipping code must converge toward them when a conflict is found.
+Everything in `docs/design/` is downstream from Vision and Principles and must align with the applicable generation's product target. A target is not proof of shipped behavior.
 
 ## Precedence
 
@@ -15,6 +16,8 @@ Everything in `docs/design/` is downstream from those two files. Existing design
 VISION.md
     ↓
 PRINCIPLE.md
+    ↓
+PRODUCT.md / applicable generation
     ↓
 Product Model
     ↓
@@ -80,6 +83,7 @@ For any change involving Session, Workspace, navigation, UI, interactions, exten
 ```text
 VISION.md
   -> PRINCIPLE.md
+  -> PRODUCT.md / applicable generation
   -> this index
   -> product-model.md
   -> information-architecture.md
@@ -130,6 +134,7 @@ Before accepting a product-facing design, verify:
 
 - Does it move Nession toward [`VISION.md`](../../VISION.md)?
 - Does it obey [`PRINCIPLE.md`](../../PRINCIPLE.md)?
+- Does it advance the applicable product-generation target in [`PRODUCT.md`](../../PRODUCT.md), without treating an unshipped target as current behavior?
 - Is the current work still the visual and interaction focus?
 - Is every persistent control justified by what matters now?
 - Can contextual capability replace permanent navigation?

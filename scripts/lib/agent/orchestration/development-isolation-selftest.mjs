@@ -24,7 +24,8 @@ function safe(workflow) {
     '-v "$RUNNER_TEMP/development-output:/output:rw"',
     '-e GITHUB_WORKSPACE=/workspace',
     '-e CURSOR_SDK_ROOT=/sdk',
-    'node:24-bookworm',
+    '-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
+    'nession-cursor-worker-rg:local',
     'node scripts/lib/agent/orchestration/development-worker.mjs',
   ];
   const denied=['-e STORE_APP_TOKEN','-e STORE_WRITER_PRIVATE_KEY',
@@ -32,8 +33,15 @@ function safe(workflow) {
     '-v "$HOME','-v "/var/run/docker.sock','--privileged','--cap-add'];
   return needed.every(x=>workflow.includes(x))&&!denied.some(x=>workflow.includes(x));
 }
+const dockerfile=fs.readFileSync('scripts/lib/agent/orchestration/cursor-worker.Dockerfile','utf8');
+assert.match(dockerfile,/^FROM node:24-bookworm$/m);
+assert.match(dockerfile,/apt-get install -y --no-install-recommends ripgrep/);
+assert.doesNotMatch(dockerfile,/^(?:COPY|ADD|ARG|ENV)\b/m);
+assert.match(text,/Build trusted isolated Cursor runtime with ripgrep/);
+assert.match(text,/docker build --pull=false --tag nession-cursor-worker-rg:local/);
+assert.match(text,/docker run --rm --network=none --read-only --cap-drop=ALL/);
 assert.equal(safe(block),true);
-for(const flag of ['--read-only','--cap-drop=ALL','-e CURSOR_SDK_ROOT=/sdk',
+for(const flag of ['--read-only','--cap-drop=ALL','nession-cursor-worker-rg:local','-e CURSOR_SDK_ROOT=/sdk','-e CURSOR_RIPGREP_PATH=/usr/bin/rg',
   '-v "$GITHUB_WORKSPACE:/trusted-code:ro"','-e NESSION_DEVELOPER_ISOLATED=docker-v1'])
   assert.equal(safe(block.replace(flag,'')),false);
 const result=spawnSync(process.execPath,[
@@ -42,4 +50,12 @@ const result=spawnSync(process.execPath,[
   encoding:'utf8',timeout:5000});
 assert.notEqual(result.status,0);
 assert.match(result.stderr,/OS-isolated Docker worker is mandatory/);
+// The existing agent-provider-contract Gate owns both positive and negative
+// Cursor runtime evidence. A Provider that fails after invoke must still
+// produce canonical, sanitized telemetry without claiming a checkpoint.
+const telemetry=spawnSync(process.execPath,[
+  'scripts/lib/agent/orchestration/development-failure-telemetry-selftest.mjs',
+],{encoding:'utf8',timeout:15000});
+assert.equal(telemetry.status,0,telemetry.stderr);
+assert.match(telemetry.stdout,/Cursor failed Provider telemetry:/);
 console.log('Developer Docker boundary: exact secretless mounts, no host privileged capability and no-host fail-closed verified');
