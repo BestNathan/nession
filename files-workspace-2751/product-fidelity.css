@@ -380,7 +380,7 @@ body[data-nession-prototype-frame="v1"] .np-device > #app .sheet button:hover {
   background: var(--nession-muted);
 }
 body[data-nession-prototype-frame="v1"] .np-device > #app .phone-content .lines {
-  padding-left: 60px !important;
+  padding-left: 60px;
 }
 body[data-nession-prototype-frame="v1"] .np-device > #app .phone-footer {
   padding: 10px 12px;
