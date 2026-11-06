@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "6bc18badd4146ee45831846fd52d366eee4eca79",
+  "run_id": 42171220120,
+  "run_attempt": 1,
+  "plan_digest": "cc5e15d3e22db10ea9b78830bdc129dbd16220cf75a88107bc37e0b1df71fc52",
+  "artifact_digest": "sha256:bb47418dfca3e8ed3154bd09ea2f5cf9b61eb28174bc6b723ab64f3d6080d2b1",
+  "results": [
+    {
+      "id": "fixture-git",
+      "result": "Pass",
+      "discovered": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 38
+    }
+  ]
+}
