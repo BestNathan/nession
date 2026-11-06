@@ -8,13 +8,17 @@
 
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+
 use nession_protocol::contracts::agent::v1::{AgentListPayload, AgentListReply};
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
 use nession_protocol::contracts::session::v1::{
-    ClientSessionAttachPayload, ClientSessionAttachReply, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    ServerSessionListPayload, ServerSessionListReply,
+    ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionKillPayload,
+    ClientSessionKillResponsePayload, ServerSessionListPayload, ServerSessionListReply,
 };
+use nession_protocol::Message;
 
 use crate::connection::ClientConnection;
 use crate::error::ClientError;
@@ -62,6 +66,39 @@ impl UnitRequest for ClientSessionKillPayload {
 /// Not a field on `ClientConfig`: this is a property of what the unit does, not
 /// a preference, and the default there is the one for units that answer promptly.
 const SESSION_CREATE_TIMEOUT: Duration = Duration::from_secs(35);
+
+/// How long `relay.begin` waits for the Server's positive receipt.
+///
+/// The Server dials the Agent and performs the attach itself before it answers
+/// on the terminal lane, so there is nothing to read immediately. Its
+/// `server.session.relay.ready` receipt is the positive confirmation; a refusal
+/// frame or a closed socket is the negative one. **A timeout is not a
+/// verdict** — an Agent that predates the subscription identity cannot produce
+/// the receipt, and the Web client proceeds without proof in exactly that
+/// case — so the caller continues instead of failing a working relay.
+const RELAY_BEGIN_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What `server.session.relay.begin` established before it returned.
+#[derive(Debug)]
+pub enum RelayBeginOutcome {
+    /// The Server's receipt named this begin request: the Agent accepted the
+    /// relay attach and forwarding is live.
+    Ready {
+        /// Terminal frames the Server forwarded before the receipt. The caller
+        /// must replay them, or the session's first output is lost.
+        buffered: Vec<String>,
+    },
+    /// The Server or its Agent refused the relay. Carries the sender's own
+    /// sentence.
+    Refused { message: String },
+    /// No receipt inside [`RELAY_BEGIN_TIMEOUT`] and no refusal: the begin was
+    /// accepted, but the Agent cannot prove it (a pre-subscription-identity
+    /// Agent). The caller proceeds as the Web client does.
+    Unconfirmed {
+        /// Terminal frames received while waiting; replay them.
+        buffered: Vec<String>,
+    },
+}
 
 /// Which transport an attach prefers.
 ///
@@ -144,6 +181,135 @@ impl ClientConnection {
             },
         ))
         .await
+    }
+
+    /// `server.session.relay.begin` — start relay forwarding.
+    ///
+    /// Phase 2 of a relay attach. Phase 1 (`request_attach` with
+    /// [`AttachMode::Relay`]) only names the route; the Server dials the Agent
+    /// and attaches on it after this frame. **Success has no reply of its own**
+    /// — the Server enters forwarding — so the only positive evidence is the
+    /// `server.session.relay.ready` receipt, and the only negative evidence is
+    /// an error frame or the connection closing. Both are observed here; any
+    /// terminal frame that arrives first is returned for replay rather than
+    /// dropped.
+    ///
+    /// The Server performs the Agent attach itself, so a caller must **not**
+    /// also send `agent.attach` on this socket: that would attach the same
+    /// client twice.
+    pub async fn relay_begin(
+        &mut self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        size_known: Option<bool>,
+    ) -> Result<RelayBeginOutcome, ClientError> {
+        let wire_name = wire::SERVER_SESSION_RELAY_BEGIN;
+        let request = proto_msg(
+            wire::SERVER_SESSION_RELAY_BEGIN,
+            ClientRelayBeginPayload {
+                session_id: session_id.to_string(),
+                relay_url: None,
+                cols,
+                rows,
+                needs_bootstrap: None,
+                size_known,
+                subscription_id: None,
+            },
+        );
+        let request_id = request.id.clone();
+        let encoded = serde_json::to_string(&request).map_err(|source| ClientError::Frame {
+            wire: wire_name.to_string(),
+            source,
+        })?;
+        self.ws
+            .send(WsMessage::Text(encoded))
+            .await
+            .map_err(|source| ClientError::Send {
+                wire: wire_name.to_string(),
+                source,
+            })?;
+
+        let deadline = tokio::time::Instant::now() + RELAY_BEGIN_TIMEOUT;
+        let mut buffered = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(RelayBeginOutcome::Unconfirmed { buffered });
+            }
+            let frame = match tokio::time::timeout(remaining, self.ws.next()).await {
+                Err(_) => return Ok(RelayBeginOutcome::Unconfirmed { buffered }),
+                Ok(None) => {
+                    return Err(ClientError::Closed {
+                        wire: wire_name.to_string(),
+                    })
+                }
+                Ok(Some(Err(source))) => {
+                    return Err(ClientError::Transport {
+                        wire: wire_name.to_string(),
+                        source,
+                    })
+                }
+                Ok(Some(Ok(frame))) => frame,
+            };
+            let text = match frame {
+                WsMessage::Text(text) => text,
+                WsMessage::Close(_) => {
+                    return Err(ClientError::Closed {
+                        wire: wire_name.to_string(),
+                    })
+                }
+                // Keepalives and binary frames are transport chatter, not
+                // relay evidence; the same rule `request` applies.
+                _ => continue,
+            };
+            let envelope: Message<serde_json::Value> =
+                serde_json::from_str(&text).map_err(|source| ClientError::Frame {
+                    wire: wire_name.to_string(),
+                    source,
+                })?;
+            match envelope.msg_type.as_str() {
+                wire::SERVER_SESSION_RELAY_READY => {
+                    let ours = envelope
+                        .payload
+                        .get("relay_request_id")
+                        .and_then(|value| value.as_str())
+                        == Some(request_id.as_str());
+                    if ours {
+                        return Ok(RelayBeginOutcome::Ready { buffered });
+                    }
+                    // A receipt for someone else's begin cannot prove ours.
+                    buffered.push(text);
+                }
+                "error" => {
+                    let message = envelope
+                        .payload
+                        .get("message")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("the relay failed")
+                        .to_string();
+                    return Ok(RelayBeginOutcome::Refused { message });
+                }
+                wire::SERVER_SESSION_RELAY_BEGIN => {
+                    // The unit's own refusal reply, sent instead of entering
+                    // forwarding.
+                    if envelope.payload.get("status").and_then(|v| v.as_str()) == Some("error") {
+                        let message = envelope
+                            .payload
+                            .get("message")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("the relay was refused")
+                            .to_string();
+                        return Ok(RelayBeginOutcome::Refused { message });
+                    }
+                    buffered.push(text);
+                }
+                // Terminal traffic — a bootstrap prefix can precede the
+                // receipt. It is the client's screen, not evidence, so it is
+                // kept for replay.
+                _ => buffered.push(text),
+            }
+        }
     }
 
     /// `server.session.create` — create a session on one agent.
