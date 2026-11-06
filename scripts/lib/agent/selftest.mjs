@@ -3,7 +3,7 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
@@ -44,6 +44,16 @@ assert.match(claude.text, /Exactly one kind: bug, requirement/);
 assert.match(claude.text, /One or more areas: terminal, web, ui, ux/);
 assert.match(claude.text, /Never include verification:\*/);
 assert.match(cursor.text, /one complete, distinct array of kind \+ area labels/);
+assert.deepEqual(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties.labels.items.enum.slice(0,2),['bug','requirement']);
+assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.additionalProperties,false);
+assert.deepEqual(JSON.parse(issueAuditStructuredEnvelope({structured_output:{labels:['bug','cli']}}).result),
+  {labels:['bug','cli']});
+assert.throws(()=>issueAuditStructuredEnvelope({result:'{"labels":["bug","cli"]}'}),/structured output unavailable/);
+assert.throws(()=>issueAuditStructuredEnvelope({structured_output:[]}),/structured output unavailable/);
+assert.throws(()=>buildClaudeCliArgs({
+  prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
+  jsonSchema:{type:'object',additionalProperties:true}
+}),/closed object/);
 assert.match(cursor.text, /missing Location/);
 assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
 assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
