@@ -237,6 +237,13 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
  */
 const P2P_PROBE_INTERVAL_MS = 15_000;
 
+/** Cumulative parser ACKs are bounded by time and output-credit pressure.
+ * The Agent owns actual issued-byte accounting; the browser's byte count is
+ * only an early-flush hint, never a credit receipt. */
+const OUTPUT_ACK_MAX_DELAY_MS = 32;
+const OUTPUT_ACK_MAX_EVENTS = 64;
+const OUTPUT_ACK_MAX_PARSED_BYTES = 256 * 1024;
+
 /**
  * How long a probe may go unanswered before the peer is declared gone.
  *
@@ -343,6 +350,9 @@ export class SessionRuntime {
    * No network ACK or recovery claim is generated here. */
   private readonly terminalAppliedCursor = new AppliedTerminalCursor();
   private terminalAppliedBinding: AppliedCursorBinding | null = null;
+  private outputAckTimer: ReturnType<typeof setTimeout> | null = null;
+  private outputAckParsedEvents = 0;
+  private outputAckParsedBytes = 0;
   /**
    * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
    * session continues through the server. Deliberately NOT part of the config
@@ -676,8 +686,7 @@ export class SessionRuntime {
    * onBootstrapApplied boolean. A failed rebind invalidates the old cursor.
    */
   setVerifiedTerminalBaseline(baseline: VerifiedTerminalBaseline): void {
-    this.terminalAppliedBinding = null;
-    this.terminalAppliedCursor.reset();
+    this.resetTerminalAppliedCursor();
     if (this.disposed) { return; }
     this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
     // The capture names the timeline this renderer is now proven against.
@@ -704,12 +713,48 @@ export class SessionRuntime {
   }
 
   /** TerminalController only emits this after its xterm callback / FIFO resize. */
-  noteStreamEventParsed(position: TerminalStreamPosition): void {
+  noteStreamEventParsed(position: TerminalStreamPosition, parsedBytes = 0): void {
     const binding = this.terminalAppliedBinding;
     if (this.disposed || !binding) { return; }
     if (this.terminalAppliedCursor.recordParsed(binding, position) !== 'advanced') {
       return;
     }
+    this.outputAckParsedEvents += 1;
+    if (Number.isSafeInteger(parsedBytes) && parsedBytes > 0) {
+      this.outputAckParsedBytes += parsedBytes;
+    }
+    // A timer caps ACK latency for quiet output. Large parser-completed
+    // bursts flush early to avoid exhausting the Agent's 1024-event/2MiB
+    // subscriber credit window; the timer must not be reset per event.
+    if (this.outputAckParsedEvents >= OUTPUT_ACK_MAX_EVENTS
+      || this.outputAckParsedBytes >= OUTPUT_ACK_MAX_PARSED_BYTES) {
+      this.flushOutputAppliedAck();
+    } else if (this.outputAckTimer === null) {
+      const generation = this.transportGeneration;
+      const expectedBinding = binding;
+      this.outputAckTimer = setTimeout(() => {
+        this.outputAckTimer = null;
+        // A stale timer can never confirm a new route or renderer.
+        if (this.transportGeneration !== generation
+          || this.terminalAppliedBinding !== expectedBinding) {
+          return;
+        }
+        this.flushOutputAppliedAck();
+      }, OUTPUT_ACK_MAX_DELAY_MS);
+    }
+  }
+
+  private clearOutputAppliedAckBatch(): void {
+    if (this.outputAckTimer !== null) {
+      clearTimeout(this.outputAckTimer);
+      this.outputAckTimer = null;
+    }
+    this.outputAckParsedEvents = 0;
+    this.outputAckParsedBytes = 0;
+  }
+
+  private flushOutputAppliedAck(): void {
+    this.clearOutputAppliedAckBatch();
     this.submitPendingAppliedAck();
   }
 
@@ -758,6 +803,7 @@ export class SessionRuntime {
       appliedThrough: snapshot.appliedSeq,
     })) {
       this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+      this.clearOutputAppliedAckBatch();
     }
   }
 
@@ -786,10 +832,12 @@ export class SessionRuntime {
       appliedThrough: snapshot.appliedSeq,
     })) {
       this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+      this.clearOutputAppliedAckBatch();
     }
   }
 
   private resetTerminalAppliedCursor(): void {
+    this.clearOutputAppliedAckBatch();
     this.terminalAppliedBinding = null;
     this.terminalAppliedCursor.reset();
   }
