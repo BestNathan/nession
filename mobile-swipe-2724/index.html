@@ -84,8 +84,8 @@ a{color:#9ed6c7}
 @media(max-width:750px){main{padding:16px 10px 32px}.layout{grid-template-columns:1fr;gap:15px}.phone{width:100%;max-width:430px;margin:auto;height:min(73dvh,720px)}.controls{padding:15px}h1{font-size:27px}}
 @media(prefers-reduced-motion:reduce){.screen,.phone,#previewTag{transition:none!important}}
 </style>
-</head>
-<body>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="../prototype-frame-2758/review-bridge.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root><header class="np-overview"><nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Requirement #2724</span></nav><span class="np-eyebrow">Nession / Product Interaction</span><div class="np-header-main"><div><h1 class="np-title">App · Swipe Ownership</h1><p class="np-subtitle">从终端边缘进入 Sessions 或 Workspace，避免抢占终端/TUI/长按等手势。</p></div><div class="np-links"><a href="https://github.com/BestNathan/nession/issues/2724" target="_blank" rel="noopener noreferrer">Issue #2724</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div></header><main><section class="np-preview"><div class="np-section-heading"><div><h2>1:1 interactive preview</h2><p>独立设备宽度；场景开关和调试工具均位于预览外。</p></div><div class="np-preview-toolbar"><button type="button" data-np-size="375" aria-pressed="true">375px</button><button type="button" data-np-size="390">390px</button><button type="button" data-np-size="430">430px</button><button type="button" data-np-reset>Reset</button></div></div><div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:375px;--np-device-height:844px"></div></div><p class="np-stage-label" data-np-current-size>375 CSS px · 1:1</p><div class="np-fixtures" data-np-fixtures><strong>Mock controls / scenario switching (not product UI)</strong></div></section><section class="np-details"><h2>Functional design &amp; verification</h2><div class="np-detail-grid"><article class="np-detail"><h3>Critical interaction</h3><ol class="np-steps"><li>从两侧边缘拖动至触发阈值</li><li>切换 TUI、方向盘和 Capsule 展开</li><li>从编辑详情返回时触发未保存确认</li></ol></article><article class="np-detail"><h3>Mock fidelity</h3><p>Touch/pointer 模拟不能证明原生系统边缘手势。</p><p>模拟数据和本地状态，不调用真正 Server/Agent。</p></article><article class="np-detail"><h3>Product baseline</h3><p>VISION / PRINCIPLE / docs/design / Issue #2724。共享审查框架来自 #2758。</p></article><article class="np-detail"><h3>Evidence</h3><p>结构检查不代表浏览器验收；需要真实 Chromium 的窄屏、键盘、滚动及 Pages manifest SHA 验证。</p></article></div><details class="np-inspector"><summary>Earlier scenario explanations</summary><div class="np-legacy-notes" data-np-legacy></div></details></section></main><footer class="np-footer">Mock-only prototype · no live side effects · not production Acceptance evidence</footer></div>
 <main>
 <div class="eyebrow">Nession / Interaction Lab · Requirement #2724</div>
 <h1>让滑动有方向，也有边界。</h1>
@@ -413,5 +413,5 @@ record('ready · edge drag left/right · center stays content');
 paint();
 })();
 </script>
-</body>
+<script type="application/json" id="np-review-config">{"surface":"#phone","external":[".controls"],"proxy":[],"hide":[]}</script><script src="../prototype-frame-2758/review-bridge.js" defer></script><script src="../prototype-frame-2758/frame.js" defer></script></body>
 </html>
