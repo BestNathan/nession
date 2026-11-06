@@ -29,10 +29,14 @@ import {preflightTrustedQwenPublisher,
   from '../publisher/qwen-source-preflight.mjs';
 import {commitQwenPublisherIntent}
   from '../publisher/store-intent.mjs';
+import {commitQwenRepairPublisherIntent,qwenRepairPublisherIntentPath}
+  from '../publisher/qwen-repair-intent.mjs';
+import {materializeQwenRepairGitTree,publishQwenRepairToSamePR,
+  readBackQwenRepairPR} from '../publisher/qwen-repair-github.mjs';
 import {materializeQwenTrustedBlobs,publishTrustedQwenGitHubPR,
   readBackQwenPublishedPR} from '../publisher/qwen-github-publish.mjs';
-import {applyQwenPublicationToRemote}
-  from '../publisher/publication-ingest.mjs';
+import {applyQwenPublicationToRemote,
+  applyQwenRepairPublicationToRemote} from '../publisher/publication-ingest.mjs';
 
 const priorNodeEnv=process.env.NODE_ENV;
 process.env.NODE_ENV='test';
@@ -628,6 +632,117 @@ try {
   assert.notEqual(shaB,commitSha);
   const repairState=readIssueWorkflowState(post,issue).state;
   const repairPublisherRun=publisherRun+500;
+  // Real disposable bare-Git Store WAL is committed before the first mock
+  // GitHub mutation. Byte-identical retry can ONLY reconcile via GET.
+  const repairIntent=commitQwenRepairPublisherIntent({
+    remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun});
+  assert.equal(repairIntent.status,'committed');
+  assert.equal(repairIntent.may_publish,true);
+  assert.equal(repairIntent.record.branch,'refs/heads/'+branch);
+  assert.equal(repairIntent.record.checkpoint_version,2);
+  assert.equal(repairIntent.record.checkpoint_commit_sha,
+    repairAccepted.checkpoint.commit_sha);
+  assert.equal(repairIntent.record.worker_sha,repairRun.head_sha);
+  const repairIntentReplay=commitQwenRepairPublisherIntent({
+    remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun});
+  assert.equal(repairIntentReplay.status,'reconcile');
+  assert.equal(repairIntentReplay.may_publish,false);
+  assert.equal(repairIntentReplay.store_commit_sha,
+    repairIntent.store_commit_sha);
+  const walLocation=qwenRepairPublisherIntentPath(repairIntent.record);
+  assert.match(walLocation,/^workflows\/issues\/[0-9]+\/results\/[0-9]+-1-[a-f0-9]{64}\.json$/);
+  assert.throws(()=>commitQwenRepairPublisherIntent({
+    remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun+1}),
+    /conflicting immutable/);
+  const materialized=materializeQwenRepairGitTree({
+    preflight:repairPreflight,intent:repairIntent,sourceCheckout:repairPubCheckout});
+  const repairBlob=git(repairSource,'rev-parse',shaB+':calc.js');
+  const repairBaseBlob=git(repairSource,'rev-parse',commitSha+':calc.js');
+  const baseTree=git(repairSource,'rev-parse',commitSha+'^{tree}');
+  const repairTree=git(repairSource,'rev-parse',shaB+'^{tree}');
+  assert.equal(materialized.expected_tree_sha,repairTree);
+  assert.equal(materialized.blobs.length,1);
+  assert.equal(materialized.blobs[0].git_blob_sha,repairBlob);
+  let liveRepairSha=commitSha;
+  const repairMutations=[];
+  const repairApi=async(method,endpoint,body)=>{
+    const prAt=(sha)=>({number:prNumber,state:'open',
+      user:{login:'nession-publisher[bot]'},
+      head:{ref:branch,sha,repo:repoIdentity},
+      base:{ref:'main',repo:repoIdentity}});
+    if(method==='GET'){
+      if(endpoint==='pulls?state=all&head=BestNathan:'+
+          encodeURIComponent(branch)+'&per_page=100')
+        return [prAt(liveRepairSha)];
+      if(endpoint==='pulls/'+prNumber)return prAt(liveRepairSha);
+      if(endpoint==='git/ref/heads/'+branch)
+        return {ref:'refs/heads/'+branch,object:{sha:liveRepairSha}};
+      if(endpoint==='git/commits/'+commitSha)
+        return {parents:[{sha:inputSha}],tree:{sha:baseTree}};
+      if(endpoint==='git/commits/'+shaB)
+        return {parents:[{sha:commitSha}],tree:{sha:repairTree}};
+      if(endpoint==='pulls/'+prNumber+'/files?per_page=100')
+        return [{filename:'calc.js',status:'modified',
+          sha:liveRepairSha===shaB?repairBlob:repairBaseBlob}];
+      throw Error('unexpected read-only Repair API '+endpoint);
+    }
+    repairMutations.push({method,endpoint,body});
+    if(method==='POST'&&endpoint==='git/blobs'){
+      assert.deepEqual(body,{content:materialized.blobs[0].content_base64,
+        encoding:'base64'});
+      return {sha:repairBlob};
+    }
+    if(method==='POST'&&endpoint==='git/trees'){
+      assert.equal(body.base_tree,baseTree);
+      assert.deepEqual(body.tree,[{path:'calc.js',mode:'100644',
+        type:'blob',sha:repairBlob}]);
+      return {sha:repairTree};
+    }
+    if(method==='POST'&&endpoint==='git/commits'){
+      assert.equal(body.tree,repairTree);
+      assert.deepEqual(body.parents,[commitSha]);
+      return {sha:shaB,tree:{sha:repairTree}};
+    }
+    if(method==='PATCH'&&endpoint==='git/refs/heads/'+branch){
+      assert.deepEqual(body,{sha:shaB,force:false});
+      assert.equal(liveRepairSha,commitSha);
+      liveRepairSha=shaB;
+      return {ref:'refs/heads/'+branch,object:{sha:shaB}};
+    }
+    throw Error('unexpected privileged Repair API '+method+' '+endpoint);
+  };
+  const repairPR=await publishQwenRepairToSamePR({
+    preflight:repairPreflight,intent:repairIntent,
+    sourceCheckout:repairPubCheckout,api:repairApi});
+  assert.equal(repairPR.head_sha,shaB);
+  assert.equal(repairPR.previous_sha,commitSha);
+  assert.equal(repairPR.pull_request,prNumber);
+  assert.equal(repairPR.expected_tree_sha,repairTree);
+  assert.deepEqual(repairMutations.map(x=>x.method+':'+x.endpoint),[
+    'POST:git/blobs','POST:git/trees','POST:git/commits',
+    'PATCH:git/refs/heads/'+branch]);
+  const repairReadback=await readBackQwenRepairPR({
+    preflight:repairPreflight,intent:repairIntentReplay,
+    sourceCheckout:repairPubCheckout,api:repairApi});
+  assert.deepEqual(repairReadback,repairPR);
+  assert.equal(repairMutations.length,4,
+    'GET-only replay may not create a new PR or retry branch update');
+  await assert.rejects(()=>publishQwenRepairToSamePR({
+    preflight:repairPreflight,intent:repairIntentReplay,
+    sourceCheckout:repairPubCheckout,api:repairApi}),
+    /write-ahead|Store-fenced|Repair PR update/);
+  assert.equal(repairMutations.length,4,
+    'ambiguous replay cannot perform another GitHub write');
+  for(const forged of [
+    {intent:{...repairIntent,record:{...repairIntent.record,
+      source_sha:inputSha}}},
+    {intent:{...repairIntent,store_commit_sha:'invalid'}},
+    {preflight:{...repairPreflight,evidence:{...repairPreflight.evidence,
+      patch_sha256:'f'.repeat(64)}}},
+  ])await assert.rejects(()=>readBackQwenRepairPR({
+    preflight:repairPreflight,intent:repairIntentReplay,
+    sourceCheckout:repairPubCheckout,api:repairApi,...forged}),
+    /Qwen Repair PR update|write-ahead/);
   const eventB={kind:'publisher',issue,run_id:repairPublisherRun,
     run_attempt:1,target_sha:shaB,outcome:'published'};
   const trustedB={role:'publisher',workflow_run_id:repairPublisherRun,
@@ -677,22 +792,25 @@ try {
     projected,projected.version,
     {...eventB,target_sha:'f'.repeat(40)},trustedB,registry),
     /Qwen Repair|Publisher/);
-  // Real Git Store CAS fixture: the repair Worker ciphertext committed
-  // independently after this checkout, so refresh before storing SHA-B.
+  // The real Store publisher handoff consumes only independently checked
+  // GitHub PR-B receipt + committed WAL. It CAS-projects one Reviewer.
+  const repairHandoff=applyQwenRepairPublicationToRemote({
+    remote,readback:repairReadback,intent:repairIntent,registry});
+  assert.equal(repairHandoff.changed,true);
+  assert.equal(repairHandoff.reviewer_agent_id,'review-qwen-01');
+  assert.equal(repairHandoff.reviewer_action_id,nextReview[0].id);
+  const repairHandoffReplay=applyQwenRepairPublicationToRemote({
+    remote,readback:repairReadback,intent:repairIntentReplay,registry});
+  assert.equal(repairHandoffReplay.changed,false);
+  assert.equal(repairHandoffReplay.replayed,true);
   git(post,'pull','--ff-only','origin','agent-store');
-  assert.equal(readIssueWorkflowState(post,issue).version,repairState.version);
-  writeIssueWorkflowState(post,projected,repairState.version);
-  git(post,'add','-A');
-  git(post,'-c','user.name=Qwen Store Case',
-    '-c','user.email=qwen@example.invalid','commit','-m',
-    'mock attested Qwen SHA-B reviewer transition');
-  publish('agent-store',post,4);
   const storedB=readIssueWorkflowState(post,issue);
   assert.equal(storedB.version,projected.version);
   assert.equal(storedB.state.target_sha,shaB);
   assert.equal(storedB.state.outbox.filter(x=>
     x.task.role==='reviewer'&&x.status==='pending').length,1);
-  assert.equal(posts,5,'projecting repaired SHA B cannot POST a new PR');
+  assert.equal(posts,5,'Repair update never creates a second GitHub PR');
+  assert.equal(repairMutations.length,4,'Store handoff never writes GitHub');
 
   console.log('Qwen signed Worker -> Store CAS -> Publisher write-ahead -> exact GitHub PR readback -> one Reviewer CAS and replay verified');
 }finally{
