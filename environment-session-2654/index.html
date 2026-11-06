@@ -52,17 +52,45 @@
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="../prototype-frame-2758/review-bridge.css"></head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root><header class="np-overview"><nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Requirement #2654</span></nav><span class="np-eyebrow">Nession / Product Interaction</span><div class="np-header-main"><div><h1 class="np-title">Session Environment · Bindings</h1><p class="np-subtitle">在当前 Session 上查看、绑定、应用与观察环境配置。</p></div><div class="np-links"><a href="https://github.com/BestNathan/nession/issues/2654" target="_blank" rel="noopener noreferrer">Issue #2654</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div></header><main><section class="np-preview"><div class="np-section-heading"><div><h2>1:1 interactive preview</h2><p>独立设备宽度；场景开关和调试工具均位于预览外。</p></div><div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">1180px</button><button type="button" data-np-size="1024">1024px</button><button type="button" data-np-size="390">390px</button><button type="button" data-np-reset>Reset</button></div></div><div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:800px"></div></div><p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p><div class="np-fixtures" data-np-fixtures><strong>Mock controls / scenario switching (not product UI)</strong></div></section><section class="np-details"><h2>Functional design &amp; verification</h2><div class="np-detail-grid"><article class="np-detail"><h3>Critical interaction</h3><ol class="np-steps"><li>选中 Environment Profile</li><li>执行绑定及 Apply 操作</li><li>切换 pending/error/offline 观察状态</li></ol></article><article class="np-detail"><h3>Mock fidelity</h3><p>ENV 绑定与 shell 观察均为本地模拟。</p><p>模拟数据和本地状态，不调用真正 Server/Agent。</p></article><article class="np-detail"><h3>Product baseline</h3><p>VISION / PRINCIPLE / docs/design / Issue #2654。共享审查框架来自 #2758。</p></article><article class="np-detail"><h3>Evidence</h3><p>结构检查不代表浏览器验收；需要真实 Chromium 的窄屏、键盘、滚动及 Pages manifest SHA 验证。</p></article></div><details class="np-inspector"><summary>Earlier scenario explanations</summary><div class="np-legacy-notes" data-np-legacy></div></details></section></main><footer class="np-footer">Mock-only prototype · no live side effects · not production Acceptance evidence</footer></div>
 <div class="shell">
-  <header class="top"><div class="brand">nession <span>/ Environment</span></div><div class="mock-controls"><button id="toggleSession">无 Session 场景</button><button id="toggleAgent">模拟 Agent 断线</button><label class="state-switch">Observed <select id="stateSelect" aria-label="模拟当前 Session 观察状态"><option value="in_sync">In sync</option><option value="pending_shell">Pending shell</option><option value="unsupported_shell">Unsupported shell</option><option value="error">Apply error</option><option value="unavailable">Unavailable</option></select></label><button id="reset">Reset</button></div></header>
-  <div class="workspace" id="workspace">
+  <div class="ia-web-layout" data-testid="web-layout">
+    <aside class="ia-session-sidebar" data-testid="sidebar"><div class="ia-sidebar-head"><strong>Agents</strong><button type="button" data-ia="collapse" aria-label="Collapse sidebar">☷</button><button type="button" data-ia="expand" aria-label="Expand sidebar" hidden>☷</button></div>
+      <div class="ia-agent-line">● devbox-01 <small>online</small></div><div class="ia-agent-line">● macbook <small>online</small></div>
+      <div class="ia-sidebar-heading">Sessions</div><div class="ia-sessions">
+        <button class="ia-session-row active" data-ia="session" type="button"><strong>dev-session</strong><small>devbox-01 · bash</small></button>
+        <button class="ia-session-row" data-ia="other-session" type="button"><strong>design-system</strong><small>macbook · codex</small></button>
+      </div><div class="ia-sidebar-foot">● Connected <span>2 nodes</span></div>
+    </aside>
+    <main class="ia-shell-main" data-testid="shell-main">
+      <section class="ia-workspace-shell" data-testid="workspace-shell">
+        <header class="ia-app-header" data-testid="app-page-header"><button type="button" id="back" aria-label="Back to Terminal">‹</button><h2 id="ia-depth-title">Environment</h2></header>
+        <div class="ia-workspace-content" data-testid="workspace-tool-content">
+  <div class="workspace" id="workspace" data-testid="env-web-layout">
     <aside class="navigator">
       <div class="nav-head"><div class="section-title">Profiles <span class="mini" id="profileCount"></span></div><input class="search" id="search" placeholder="搜索 Profile 或来源…" aria-label="搜索环境配置"></div>
       <div class="nav-list"><div class="nav-section"><div id="sessionNav"></div><div class="section-title">Available environments</div><div id="profileNav"></div></div></div>
       <div class="nav-bottom">Environment 是 Session 的上下文能力，不是文件管理导航。</div>
     </aside>
-    <main class="main" id="main" tabindex="-1"><div class="content"><button class="back" id="back">← 返回 Environment</button><div id="content"></div></div></main>
+    <main class="main" id="main" tabindex="-1"><div class="content"><div id="content"></div></div></main>
   </div>
-  <div class="foot">Interactive design mock · synthetic profiles · no network · no real process/env mutations · Requirement <a href="https://github.com/BestNathan/nession/issues/2654" target="_blank" rel="noopener">#2654</a></div>
+        </div>
+        <div class="ia-workspace-toolbar" data-testid="workspace-tool-bar">
+          <button class="ia-terminal-return" type="button" data-ia="terminal" aria-label="Open Terminal">⌁</button>
+          <nav class="ia-capability-capsule" aria-label="Workspace capabilities"><button type="button" aria-pressed="true">▣ Environment</button></nav>
+        </div>
+      </section>
+      <section class="ia-terminal-root" data-testid="terminal-surface" hidden>
+        <div class="ia-terminal-lines"><p>dev-session:~$ printenv MODE</p><p>development</p><p>dev-session:~$ ▌</p></div>
+        <div class="ia-terminal-dock">
+          <div class="ia-terminal-peek" hidden><button type="button" data-ia="workspace">▣ Environment</button></div>
+          <div class="ia-terminal-conversation"><button type="button" data-ia="toggle-capabilities" aria-label="Open capabilities">＋</button><span>Ask Nession…</span><span>↑</span></div>
+          <button class="ia-terminal-destination" type="button" data-ia="workspace" aria-label="Open Workspace">▣</button>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
+<div class="mock-controls"><button id="toggleSession">无 Session 场景</button><button id="toggleAgent">模拟 Agent 断线</button><label class="state-switch">Observed <select id="stateSelect" aria-label="模拟当前 Session 观察状态"><option value="in_sync">In sync</option><option value="pending_shell">Pending shell</option><option value="unsupported_shell">Unsupported shell</option><option value="error">Apply error</option><option value="unavailable">Unavailable</option></select></label><button id="reset">Reset</button></div>
+<div class="foot">Interactive design mock · synthetic profiles · no network · no real process/env mutations · Requirement <a href="https://github.com/BestNathan/nession/issues/2654" target="_blank" rel="noopener">#2654</a></div>
 <script>
 (function(){
 'use strict';
@@ -73,14 +101,23 @@ const profiles=[
   {id:'agent:ops.env',name:'ops.env',source:'Agent · dev-node-01',vars:{MODE:'diagnostic',LOG_LEVEL:'debug'}}
 ];
 const base={MODE:'default',LANG:'C.UTF-8'};
-const S={hasSession:true,agentOnline:true,selected:'session',mode:'view',active:['server:base.env','agent:development.env'],draft:null,revision:12,pending:false,modified:false,sourceTab:'variables',notice:'',demoState:'in_sync',detailsOpen:false};
+const S={hasSession:true,agentOnline:true,selected:'session',mode:'view',active:['server:base.env','agent:development.env'],draft:null,revision:12,pending:false,modified:false,sourceTab:'variables',notice:'',demoState:'in_sync',detailsOpen:false,surface:'workspace',collapsed:false,experience:'web',capabilitiesOpen:false};
 const byId=id=>profiles.find(p=>p.id===id);
 const el=id=>document.getElementById(id);
 const escape=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const mask=k=>/KEY|TOKEN|PASSWORD|SECRET|AUTH|CREDENTIAL/i.test(k);
 function effective(ids){const values={...base},from={};for(const id of ids){const p=byId(id);if(!p)continue;for(const k of Object.keys(p.vars)){values[k]=p.vars[k];from[k]=p.name}}return {values,from}}
 function collisions(ids){const seen={},hits=[];for(const id of ids){const p=byId(id);if(!p)continue;for(const k of Object.keys(p.vars)){if(seen[k] && !hits.includes(k))hits.push(k);seen[k]=p.name}}return hits}
-function toMain(){el('workspace').classList.add('detail');el('main').focus({preventScroll:true})}
+function syncProductIA(){
+ const shell=document.querySelector('.shell');shell.dataset.surface=S.surface;shell.dataset.experience=S.experience;
+ const pushed=el('workspace').classList.contains('detail');
+ el('ia-depth-title').textContent=S.mode==='manage'?'Manage binding':pushed?(S.selected==='session'?'Session environment':(byId(S.selected)?.name||'Environment')):'Environment';
+ el('back').setAttribute('aria-label',pushed?'Back to Environment':'Back to Terminal');
+ document.querySelector('.ia-terminal-root').hidden=S.surface!=='terminal';
+ document.querySelector('.ia-workspace-shell').hidden=S.surface!=='workspace';
+ document.querySelector('.ia-terminal-peek').hidden=!S.capabilitiesOpen;
+}
+function toMain(){el('workspace').classList.add('detail');syncProductIA();el('main').focus({preventScroll:true})}
 function open(id){S.selected=id;S.mode='view';S.sourceTab='variables';S.notice='';render();toMain()}
 
 function stateMeta(){
@@ -127,13 +164,24 @@ function renderNav(){
  const q=el('search').value.toLowerCase();
  el('profileNav').innerHTML=profiles.filter(p=>(p.name+' '+p.source).toLowerCase().includes(q)).map(p=>'<button class="item '+(S.selected===p.id?'current':'')+'" data-open="'+escape(p.id)+'"><span><strong>'+escape(p.name)+'</strong><small>'+escape(p.source)+' · '+Object.keys(p.vars).length+' keys</small></span>'+(S.active.includes(p.id)&&S.hasSession?'<span class="mini">Included</span>':'')+'</button>').join('')||'<p class="muted" style="padding:10px">No matching profiles</p>';
 }
-function render(){renderNav();let html=S.mode==='manage'?manageView():S.selected==='session'?(S.hasSession?sessionView():noSessionView()):profileView(S.selected);if(S.notice)html='<div class="callout">'+escape(S.notice)+'</div>'+html;el('content').innerHTML=html}
+function render(){renderNav();let html=S.mode==='manage'?manageView():S.selected==='session'?(S.hasSession?sessionView():noSessionView()):profileView(S.selected);if(S.notice)html='<div class="callout">'+escape(S.notice)+'</div>'+html;el('content').innerHTML=html;syncProductIA()}
 document.addEventListener('click',e=>{const t=e.target.closest('button');if(!t)return;
 if(t.dataset.open){open(t.dataset.open);return}
 if(t.dataset.profile){open(t.dataset.profile);return}
 if(t.dataset.tab){S.sourceTab=t.dataset.tab;render();return}
 if(t.id==='statusToggle'){S.detailsOpen=!S.detailsOpen;render();return}
-if(t.id==='back'){el('workspace').classList.remove('detail');return}
+if(t.id==='back'){
+ if(S.mode==='manage'){S.mode='view';S.draft=null;render();return;}
+ if(el('workspace').classList.contains('detail')){el('workspace').classList.remove('detail');S.selected='session';render();return;}
+ S.surface='terminal';S.capabilitiesOpen=false;render();return;
+}
+if(t.dataset.ia==='terminal'){S.surface='terminal';S.capabilitiesOpen=false;render();return}
+if(t.dataset.ia==='workspace'){S.surface='workspace';S.capabilitiesOpen=false;render();return}
+if(t.dataset.ia==='toggle-capabilities'){S.capabilitiesOpen=!S.capabilitiesOpen;syncProductIA();return}
+if(t.dataset.ia==='collapse'){S.collapsed=true;document.querySelector('.ia-session-sidebar').classList.add('collapsed');return}
+if(t.dataset.ia==='expand'){S.collapsed=false;document.querySelector('.ia-session-sidebar').classList.remove('collapsed');return}
+if(t.dataset.ia==='session'){S.surface='workspace';S.selected='session';S.mode='view';render();return}
+if(t.dataset.ia==='other-session'){S.surface='terminal';S.capabilitiesOpen=false;render();return}
 if(t.id==='manage'){S.mode='manage';S.draft=[...S.active];render();return}
 if(t.id==='cancel'){S.mode='view';S.draft=null;render();return}
 if(t.dataset.del){S.draft=S.draft.filter(id=>id!==t.dataset.del);render();return}
@@ -143,14 +191,15 @@ if(t.id==='prompt'){S.pending=false;S.demoState='in_sync';el('stateSelect').valu
 if(t.id==='reapply'){if(!S.agentOnline)return;S.revision++;S.modified=false;S.pending=true;S.demoState='pending_shell';el('stateSelect').value=S.demoState;S.notice='Explicit Reapply published a new snapshot revision '+S.revision+'.';render();return}
 if(t.id==='editSimulation'){S.modified=true;S.notice='Simulated Profile Save. Bound Session retains its previously materialized content until explicit Reapply.';render();return}
 if(t.id==='addThis'){S.mode='manage';S.draft=[...S.active];if(!S.draft.includes(S.selected))S.draft.push(S.selected);render();return}
-if(t.id==='toggleSession'){S.hasSession=!S.hasSession;S.selected='session';S.mode='view';t.textContent=S.hasSession?'无 Session 场景':'恢复 Session';render();el('workspace').classList.remove('detail');return}
+if(t.id==='toggleSession'){S.hasSession=!S.hasSession;S.selected='session';S.mode='view';t.textContent=S.hasSession?'无 Session 场景':'恢复 Session';render();el('workspace').classList.remove('detail');syncProductIA();return}
 if(t.id==='toggleAgent'){S.agentOnline=!S.agentOnline;t.textContent=S.agentOnline?'模拟 Agent 断线':'恢复 Agent 连接';render();return}
-if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.demoState='in_sync';S.detailsOpen=false;S.modified=false;S.notice='';el('stateSelect').value=S.demoState;el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';render();el('workspace').classList.remove('detail');return}
+if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.demoState='in_sync';S.detailsOpen=false;S.modified=false;S.notice='';S.surface='workspace';S.collapsed=false;S.capabilitiesOpen=false;el('stateSelect').value=S.demoState;el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';render();el('workspace').classList.remove('detail');return}
 });
 document.addEventListener('change',e=>{const t=e.target;if(t.matches('[data-add]')){if(t.checked&&!S.draft.includes(t.dataset.add))S.draft.push(t.dataset.add);render()}});
 el('search').addEventListener('input',renderNav);
 el('stateSelect').addEventListener('change',e=>{S.demoState=e.target.value;S.pending=S.demoState==='pending_shell';S.detailsOpen=false;S.notice='';render()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.mode==='manage'){S.mode='view';S.draft=null;render()}else if(e.key==='Escape'&&el('workspace').classList.contains('detail')){el('workspace').classList.remove('detail')}});
+document.querySelector('[data-np-root]')?.addEventListener('np:resize',e=>{S.experience=e.detail.width<=430?'app':'web';syncProductIA();});
 render();
 })();
 </script>
