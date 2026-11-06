@@ -8,7 +8,7 @@
 
   var state = {
     fixture:"normal", tab:"overview", revision:1, published:1,
-    mobile:false, list:true, surface:"workspace", capability:"work", expanded:null, compare:false, confirm:false,
+    mobile:false, sidebarCollapsed:false, selectedSession:"dev-session", list:true, surface:"workspace", capability:"work", expanded:null, compare:false, confirm:false,
     draft:"", message:"",
     events:[
       {id:"evt-01",actor:"Nession",initial:"N",when:"Contract published · v1",body:"Initial work definition and two acceptance criteria were established.",origin:"Contract revision"},
@@ -55,16 +55,17 @@
   /* Nession owns the Workspace shell and capability capsule. The Work view
      only renders WorkContract content, never app-wide navigation. */
   function top() {
-    if (!state.mobile || state.surface!=="workspace") return "";
-    var inWorkDetail=state.capability==="work" && !state.list && state.fixture!=="unbound";
-    return '<header class="wc-top" aria-label="Workspace App depth">'+
-      '<button type="button" class="wc-back" data-action="back" aria-label="'+(inWorkDetail?'Back to Work capability':'Back to Terminal')+'">'+
-      (inWorkDetail?'← Work contracts':'← Terminal')+'</button>'+
-      '<span class="wc-workspace">Workspace</span></header>';
+    if (!state.mobile || state.surface!=="workspace")return "";
+    var detail=state.capability==="work"&&!state.list&&state.fixture!=="unbound";
+    var title=detail?"Terminal reconnect content mismatch":state.capability==="work"?"Work":state.capability==="files"?"Files":"Git";
+    var back=detail?"Back to Work":"Back to Terminal";
+    return '<header class="wc-top" data-testid="app-page-header" aria-label="Workspace navigation">'+
+      '<button type="button" class="wc-back" data-action="back" aria-label="'+back+'">‹</button>'+
+      '<h1 class="wc-app-title">'+safe(title)+'</h1></header>';
   }
   function workList() {
-    return '<div class="wc-body"><div class="wc-kicker">WORKSPACE / WORK CAPABILITY</div>'+
-      '<h1>Work</h1><p class="wc-subhead">Work contracts associated with this Workspace. Select one to inspect its immutable definition, criteria, discussion and evidence.</p>'+
+    return '<div class="wc-body">'+
+      (state.mobile?'':'<h1>Work</h1>')+'<p class="wc-subhead">Work contracts associated with this Workspace. Select one to inspect its immutable definition, criteria, discussion and evidence.</p>'+
       '<section class="wc-contract-entry"><div><h2>Terminal reconnect content mismatch</h2>'+
       '<p class="wc-subhead">WorkContract · wc_demo_terminal · Published v'+state.published+'</p>'+
       '<p class="wc-section-note">Bound via '+safe(smallSource())+' · Execution pinned to v1</p></div>'+
@@ -78,7 +79,7 @@
           '<p>No eligible WorkContract or authorized source binding is present. The Work entry is hidden from the Workspace Capsule. Previously opened content stays explanatory until you select another capability.</p>'+
           action("Open Files","capability","", ' data-value="files"')+'</div></div>';
       return state.list?workList():
-        '<div class="wc-body"><div class="wc-local-back"><button type="button" data-action="back">← Work contracts</button></div>'+
+        '<div class="wc-body">'+(state.mobile?'':'<div class="wc-local-back"><button type="button" data-action="back">← Work contracts</button></div>')+
         intro()+banner()+nav()+
         '<div class="wc-layout"><div class="wc-main" role="tabpanel" aria-label="'+safe(state.tab)+'">'+content()+'</div>'+
         sidePanel()+'</div><p class="wc-footnote">Work is one Workspace capability. External source text is not permission; definition v'+state.revision+' is read-only.</p></div>';
@@ -87,7 +88,7 @@
     return '<div class="wc-body"><div class="wc-kicker">WORKSPACE / '+(isFiles?'FILES':'GIT')+' CAPABILITY</div>'+
       '<h1>'+(isFiles?'Files':'Git')+'</h1>'+
       '<p class="wc-subhead">'+(isFiles?'Files in the current Workspace location.':'Repository context for the current Workspace.')+
-      ' This is a bounded placeholder for capability switching, not an implementation of the existing production '+(isFiles?'Files':'Git')+' view.</p>'+
+      ' Opened in this Workspace.</p>'+
       '<div class="wc-definition" style="margin-top:25px"><h3>Current Workspace</h3>'+
       '<p>Session: dev-session · Location: development host · Repository: example/nession</p>'+
       '<p>Return to the Work capability using the Workspace Capsule. Its selected Contract and revision are preserved.</p></div></div>';
@@ -250,18 +251,28 @@
       default:return overview();
     }
   }
+  function webSidebar() {
+    var sessions=["dev-session","design-system","production-shell"];
+    if(state.sidebarCollapsed)return '<aside class="wc-web-sidebar collapsed" data-testid="sidebar" data-collapsed="true"><div class="wc-sidebar-top">'+action("☷","sidebar-expand","",' aria-label="Expand sidebar"')+'</div><div class="wc-rail-count">3 Agents</div><div class="wc-rail-count">3 Sessions</div></aside>';
+    return '<aside class="wc-web-sidebar" data-testid="sidebar"><div class="wc-sidebar-top"><strong>Agents</strong>'+action("☷","sidebar-collapse","",' aria-label="Collapse sidebar"')+'</div><div class="wc-agent-row">● devbox-01 <small>online</small></div><div class="wc-agent-row">● macbook <small>online</small></div><div class="wc-agent-row">○ sg-prod <small>offline</small></div><div class="wc-session-title">Sessions</div><div class="wc-session-list">'+sessions.map(function(name){return '<button type="button" data-action="select-session" data-value="'+safe(name)+'" class="wc-session-row'+(name===state.selectedSession?' selected':'')+'"><strong>'+safe(name)+'</strong><small>devbox-01 · '+(name==="dev-session"?"claude":"zsh")+'</small></button>';}).join("")+'</div><div class="wc-sidebar-status">● Connected <small>3 nodes</small></div></aside>';
+  }
   function render(preserve) {
     var previous=product.querySelector?product.querySelector(".wc-surface"):null;
     var oldScroll=preserve===false?0:(previous?previous.scrollTop:0);
     product.classList.toggle("is-mobile",state.mobile);
-    product.innerHTML=(state.surface==="terminal"?terminalSurface():
-      top()+'<div class="wc-surface">'+workspaceCapability()+'</div>'+workspaceDock())+
+    var inner=state.surface==="terminal"?terminalSurface():
+      '<section class="wc-shell" data-testid="workspace-shell">'+top()+
+      '<div class="wc-surface" data-testid="workspace-tool-content">'+workspaceCapability()+'</div>'+workspaceDock()+'</section>';
+    product.innerHTML=(state.mobile?inner:'<div class="wc-web-layout" data-testid="web-layout">'+webSidebar()+'<main class="wc-web-main" data-testid="shell-main">'+inner+'</main></div>')+
       (state.message?'<div class="wc-pop" role="status" aria-live="polite"><span>'+safe(state.message)+'</span></div>':"");
     var surface=product.querySelector?product.querySelector(".wc-surface"):null;
     if(surface)surface.scrollTop=oldScroll;
   }
   function apply(actionName,value) {
     state.message="";
+    if(actionName==="sidebar-collapse"){state.sidebarCollapsed=true;return render(true);}
+    if(actionName==="sidebar-expand"){state.sidebarCollapsed=false;return render(true);}
+    if(actionName==="select-session"){state.selectedSession=value;state.surface="terminal";return render(false);}
     if(actionName==="terminal") {state.surface="terminal";return render(false);}
     if(actionName==="open-workspace") {
       state.surface="workspace";
