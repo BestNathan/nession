@@ -1,34 +1,8 @@
 # Nession
 
-**Explore [Nession Pages](https://bestnathan.github.io/nession/)** — an independently designed, read-only project site introducing Nession and showing public AI workflow Agent activity, active engineering work, repository metrics, and evidence-source metadata. Pages (`pages/`) is separate from the authenticated product Web workspace (`web/`); it does not reuse its design system or runtime components.
+[Pages](https://bestnathan.github.io/nession/) · [Vision](VISION.md) · [Principles](PRINCIPLE.md) · [Product](PRODUCT.md) · [0.x — Remote Control](docs/product/0.x.md) · [1.x — Session & Workspace](docs/product/1.x.md)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-dark.svg?sanitize=true&v=2">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
-  <img alt="Nession Repository Telemetry — repository health and rolling engineering efficiency" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">
-</picture>
-
-<sub>Generated every 4 hours from <code>main</code> · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/metrics.json">raw metrics</a></sub>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-dark.svg?sanitize=true&v=1">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
-  <img alt="Nession Agent Workflow Telemetry — rolling 7d and 30d runs, turns, tools, tokens, duration and cost" src="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics-light.svg?sanitize=true&v=1">
-</picture>
-
-<sub>Agent workflow telemetry · rolling 7d / 30d · <a href="https://raw.githubusercontent.com/BestNathan/nession/metrics/agent-metrics.json">aggregate JSON</a> · immutable raw runs under <code>raw/workflows/</code> on the <code>metrics</code> branch</sub>
-
-> An intelligent workspace for continuous work across devices, environments, and compute nodes.
-
-Nession connects local machines, remote servers, cloud environments, terminals, coding agents, and other execution contexts into one continuous working experience. The infrastructure may be distributed and complex; the product should remain coherent, quiet, and extensible.
-
-Product direction, principles, and version-specific product positioning are documented in:
-
-- [`VISION.md`](VISION.md) — what problem Nession exists to solve and where the product is going.
-- [`PRINCIPLE.md`](PRINCIPLE.md) — the durable design principles used to decide how Nession should grow.
-- [`PRODUCT.md`](PRODUCT.md) — product generations: **0.x Remote Control** (existing product line) and **1.x Session & Workspace** (in development), with a dedicated definition for each.
-
-In short: Nession should absorb infrastructure complexity instead of exposing it, organize the experience around the work rather than a feature catalog, let relevant capabilities emerge from context, and reveal deeper complexity progressively. Vision and Principles remain the highest-level direction and decision constraints; Product defines the target experience for each major generation.
+## Overview
 
 Today, Nession provides distributed `tmux` session management across many machines. A central **server** tracks every **agent** (one per node), and clients attach to live sessions from the **Web UI** or **CLI** — over a relay through the server, or peer-to-peer directly to an agent for lower latency.
 
