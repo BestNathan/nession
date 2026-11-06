@@ -153,6 +153,16 @@ try {
   assert.equal(replay.checkpoint.ciphertext_sha256,
     accepted.checkpoint.ciphertext_sha256);
   assert.equal(readIssueWorkflowState(cloned,issue).version,record.version);
+  // A second RSA envelope is not an idempotent original Run, even if the
+  // signed Action, native UUID and proposed source patch are unchanged.
+  const forgedReplay=sealQwenDevelopmentProposal({
+    admission,snapshot,patch,sessionId,configDir:nativeDir,publicKeyPem});
+  assert.notEqual(forgedReplay.ciphertext.ciphertext_sha256,
+    candidate.ciphertext.ciphertext_sha256);
+  await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,
+    result:forgedReplay.result,proof:forgedReplay.proof,
+    ciphertext:forgedReplay.ciphertext}),
+    /Qwen replay differs from immutable native ciphertext or patch/);
   // The Publisher independently reads the exact signed source Run, immutable
   // native checkpoint, and applies the Worker patch to a CLEAN isolated Git
   // checkout, even though the model's disposable source is now modified.
