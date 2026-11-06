@@ -288,9 +288,10 @@ function otherCapability(){
 function renderWorkspace(){
  // The Workspace shell owns the App page title/Back; Claude Code owns its
  // internal Conversations / Memory / Configuration and Markdown links.
- const detail=state.capability==="claude"&&state.tab==="memory"&&state.detail;
- $("workspace-page-title").textContent=detail?state.file:(state.capability==="claude"?"Claude Code":state.capability==="git"?"Git":"Files");
- $("workspace-page-back").setAttribute("aria-label",detail?"Back to Memory list":"Back to Terminal");
+ $("workspace-page-title").textContent=state.capability==="claude"?"Claude Code":state.capability==="git"?"Git":"Files";
+ // Current main MemoryView does NOT register a pushed App shell depth for a
+ // selected Markdown file. The Shell leaves Workspace; Memory owns file links.
+ $("workspace-page-back").setAttribute("aria-label","Back to Terminal");
  $("workspace-inner").innerHTML=state.capability==="claude"?claudeContent():otherCapability();
  renderDock();
 }
@@ -335,7 +336,7 @@ $("intent-input").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDe
 $("sessions-open").addEventListener("click",returnOneDepth);
 $("rail-expand").addEventListener("click",()=>{state.sidebarCollapsed=!state.sidebarCollapsed;renderSessions();});
 $("sessions-close").addEventListener("click",()=>showPage("terminal"));
-$("workspace-page-back").addEventListener("click",returnOneDepth);
+$("workspace-page-back").addEventListener("click",()=>showPage("terminal"));
 $("ia-session-nav").addEventListener("click",e=>{const button=e.target.closest("[data-session]");if(button)switchSession(button.dataset.session);});
 $("reset").addEventListener("click",reset);
 $("session-list").addEventListener("click",e=>{const b=e.target.closest("[data-session]");if(b)switchSession(b.dataset.session);});
