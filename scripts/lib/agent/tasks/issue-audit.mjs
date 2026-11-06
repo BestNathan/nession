@@ -7,6 +7,35 @@ import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
 import { createVerificationTierTool } from '../tools/gh/issue/verification-tier.mjs';
 import { createTreeAuditTools } from '../issue-audit-tree.mjs';
 
+// The model-facing output shape is constrained at the Claude CLI boundary.
+// Trusted update tools still own canonical kind/area cardinality, no-duplicate
+// checks, fixed-target authorization and immutable E2E/Acceptance evidence.
+export const ISSUE_AUDIT_PROPOSAL_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    body: { type: 'string' },
+    labels: { type: 'array', items: { type: 'string', enum: [...KIND_LABELS, ...AREA_LABELS] } },
+    comment: { type: 'string' },
+    verification_tier: { type: 'string',
+      enum: ['verification:scoped', 'verification:integration', 'verification:full'] },
+    tier_reason: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+
+// The CLI's --json-schema returns structured_output separately from its
+// human-readable result. Never silently fall back to unconstrained result
+// when the configured Gateway failed to honor this output contract.
+export function issueAuditStructuredEnvelope(envelope) {
+  if (!envelope || !Object.hasOwn(envelope, 'structured_output') ||
+      !envelope.structured_output || typeof envelope.structured_output !== 'object' ||
+      Array.isArray(envelope.structured_output)) {
+    throw new Error('Issue Audit structured output unavailable; selected Gateway must support the configured schema');
+  }
+  return { ...envelope, result: JSON.stringify(envelope.structured_output) };
+}
+
 export function renderIssueAuditPrompt(issue, audit, provider, repository = process.env.GITHUB_REPOSITORY, mode = 'single') {
   if(!['single','tree'].includes(mode)) throw Error('Unsupported Issue Audit mode');
   if(mode==='tree' && provider!=='cursor') throw Error('Tree Audit requires Cursor custom tools (no unsafe shell fallback)');
