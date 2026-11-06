@@ -41,12 +41,63 @@ describe('auth token storage', () => {
       setToken('test-token', false);
       expect(sessionStorage.getItem('token')).toBe('test-token');
       expect(localStorage.getItem('token')).toBeNull();
+      expect(getToken()).toBe('test-token');
     });
 
     it('stores token in both storages when remember=true', () => {
       setToken('test-token', true);
       expect(sessionStorage.getItem('token')).toBe('test-token');
       expect(localStorage.getItem('token')).toBe('test-token');
+    });
+
+    // #2822: the persistence policy is a transition on every Connect, not an
+    // additive write. Leaving the previously durable copy behind would let a
+    // fresh browser session auto-connect with a credential the user just
+    // opted out of persisting.
+    it('revokes the durable token when remember=false replaces a remembered one', () => {
+      localStorage.setItem('token', 'durable-a');
+
+      setToken('session-b', false);
+
+      expect(sessionStorage.getItem('token')).toBe('session-b');
+      expect(localStorage.getItem('token')).toBeNull();
+      expect(getToken()).toBe('session-b');
+
+      // A fresh tab/browser session has no sessionStorage. Nothing durable
+      // may remain for it to auto-connect with.
+      sessionStorage.clear();
+      expect(getToken()).toBeNull();
+    });
+
+    it('synchronizes both storages when a remembered token replaces an older one', () => {
+      localStorage.setItem('token', 'older-durable-a');
+      sessionStorage.setItem('token', 'older-session-a');
+
+      setToken('remembered-b', true);
+
+      expect(sessionStorage.getItem('token')).toBe('remembered-b');
+      expect(localStorage.getItem('token')).toBe('remembered-b');
+      expect(getToken()).toBe('remembered-b');
+    });
+  });
+
+  // #354 semantics must survive the #2822 transition: Disconnect is not a
+  // logout, so the remembered copy stays and a reload restores the session.
+  describe('disconnect and reload (#354)', () => {
+    it('keeps both copies across a Disconnect and restores from the durable copy', () => {
+      setRememberPreference(true);
+      setToken('remembered-a', true);
+
+      // handleDisconnect only tears down the transport; it never calls the
+      // auth-storage owner, so both copies remain for the next visit.
+      expect(sessionStorage.getItem('token')).toBe('remembered-a');
+      expect(localStorage.getItem('token')).toBe('remembered-a');
+
+      // A reload starts a fresh browser session: sessionStorage is gone while
+      // the remembered copy remains, which is what arms auto-connect.
+      sessionStorage.clear();
+      expect(getToken()).toBe('remembered-a');
+      expect(getRememberPreference()).toBe(true);
     });
   });
 
