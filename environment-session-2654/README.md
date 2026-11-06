@@ -88,3 +88,21 @@ No new global Workspace navigation, no third permanent panel, no new secret stor
 - **Fidelity:** Environment 绑定、revision、shell 会合是模拟，不修改真实进程环境。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
 - **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
 - **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/environment-session-2654/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
+
+## 2026-11-06 · Current-product information architecture alignment
+
+**The prior mock's product shell was wrong despite its 1:1 CSS pixel sizing.** The old `nession / Environment` brand bar, mock scenario controls, 290px self-owned navigator and internal App Back are **superseded** by this revision. This addresses product **information architecture**, not just visual tokens.
+
+**Source baseline:** `main` at `944a08b12553`: `WebLayout`, `Sidebar`, `WorkspacePanel`, `WorkspaceShell`, `EnvWebLayout.tsx`, `EnvAppLayout.tsx`. Environment remains a registered Workspace capability, not a separate application or global navigation surface.
+
+| Product context | Ownership and navigation now expressed in the prototype |
+|---|---|
+| Web complete product | `WebLayout → Sidebar(Agents + Sessions + collapse rail) + ShellMain → WorkspaceShell → Environment`. The Environment-local content alone owns `208px Profile navigator + flexible Session/Profile/ordered draft surface`; no mock global brand/title bar |
+| App root | No desktop sidebar. `WorkspaceShell → one AppPageHeader(Environment; Back to Terminal) → Session summary + Profile navigator` |
+| App pushed Profile / Manage binding | The same single App Shell header updates its title and Back target; Environment owns content/selection, not a duplicate App navigation bar |
+| Terminal | Separate Terminal root with conversation Capsule/contextual `+` and reciprocal Workspace destination; no fake Workspace-specific global top bar |
+| Review harness | Scenario toggles, observed status and Reset are outside the product device; production has no simulator controls |
+
+The actual `index.html` DOM and state transitions were changed, not merely hidden with CSS. `product-ia.css` is scoped to the simulated product and does not modify `prototype-frame-2758`. The Profile/Session selection, one ordered binding draft, cancellation, Apply → pending next prompt, Reapply, offline and simulated shell-sync states are retained. This does **not** imply live Agent/mount behavior or production UI implementation.
+
+**Regression:** `node --test environment-session-2654/ia-smoke.test.mjs` defines two deterministic owner/interaction scenarios; the actual checked-in test and inline JS passed in an isolated V8/DOM-stub harness. A separate directed execution checked 15 concrete branch/state assertions. **Not performed:** complete Node CLI execution, real Chromium/Playwright screenshots, pixel comparison to current React fixtures, native touch, live Session ENV/ACL or trusted production Acceptance. Publisher SHA readback is an independent requirement.
