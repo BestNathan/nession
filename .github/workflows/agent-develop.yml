@@ -433,24 +433,53 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          QWEN_RESUME_PUBLIC_KEY_B64: ${{ vars.QWEN_RESUME_PUBLIC_KEY_B64 }}
+          # The trusted host derives the public sealing key from the
+          # already-existing private Restore key; Docker never receives it.
+          QWEN_RESUME_PRIVATE_KEY_B64: ${{ secrets.QWEN_RESUME_PRIVATE_KEY_B64 }}
+          CONFIGURED_QWEN_PUBLIC_KEY_B64: ${{ vars.QWEN_RESUME_PUBLIC_KEY_B64 }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          import {createPublicKey} from 'node:crypto';
+          import {createPrivateKey,createPublicKey} from 'node:crypto';
           import {bindQwenDeveloper} from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
           const admission=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/qwen-admission.json'));
           const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json'));
           bindQwenDeveloper(admission,registry,process.env,
             {cliVersion:process.env.CLAUDE_CODE_VERSION});
-          const pem=Buffer.from(process.env.QWEN_RESUME_PUBLIC_KEY_B64||'','base64').toString('utf8');
-          const key=createPublicKey(pem);
-          if(key.asymmetricKeyType!=='rsa'||
-              (key.asymmetricKeyDetails?.modulusLength??0)<2048)
-            throw Error('Qwen native public key must be RSA >= 2048-bit');
-          console.log('Qwen identity and public-only model Session key pinned');
+          // A Provider must never produce an encrypted native checkpoint
+          // that the trusted Restore job cannot decrypt. Fail before model
+          // invocation if the matching dedicated private key is absent.
+          const encoded=process.env.QWEN_RESUME_PRIVATE_KEY_B64;
+          if(typeof encoded!=='string'||!encoded.trim())
+            throw Error('Qwen native Restore private key is not configured');
+          let privateKey;
+          try {
+            privateKey=createPrivateKey(Buffer.from(encoded,'base64').toString('utf8'));
+          } catch {
+            throw Error('Qwen native Restore private key is invalid');
+          }
+          const pub=createPublicKey(privateKey);
+          if(pub.asymmetricKeyType!=='rsa'||
+              (pub.asymmetricKeyDetails?.modulusLength??0)<2048)
+            throw Error('Qwen native Restore key must be RSA >= 2048-bit');
+          const pem=pub.export({format:'pem',type:'spki'});
+          const configured=process.env.CONFIGURED_QWEN_PUBLIC_KEY_B64;
+          if(configured){
+            let declared;
+            try{
+              declared=createPublicKey(Buffer.from(configured,'base64').toString('utf8'));
+            }catch{
+              throw Error('configured Qwen public key is invalid');
+            }
+            if(!declared.export({format:'der',type:'spki'}).equals(
+                pub.export({format:'der',type:'spki'})))
+              throw Error('configured Qwen public key differs from Restore private key');
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            'QWEN_RESUME_PUBLIC_KEY_B64='+Buffer.from(pem).toString('base64')+'\n');
+          console.log('Qwen identity verified and matching public-only Session key derived');
           NODE
       - name: Prepare disposable exact-SHA tracked source without executing it
         run: |
@@ -513,7 +542,8 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
-          QWEN_RESUME_PUBLIC_KEY_B64: ${{ vars.QWEN_RESUME_PUBLIC_KEY_B64 }}
+          # QWEN_RESUME_PUBLIC_KEY_B64 is populated by the earlier trusted
+          # host preflight through GITHUB_ENV, not a separate unverified var.
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/qwen-resume" "$RUNNER_TEMP/qwen-output"
