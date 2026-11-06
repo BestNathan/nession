@@ -168,6 +168,11 @@ export function attestIssueAuditReadback({
     source_job_id:job.id, provider:'qwen', model:env.ISSUE_AUDIT_CLAUDE_MODEL,
     status:historical?'authenticated-historical-repair-readback':'authenticated-repair-readback',
     source_event:run.event,
+    // These are identity checks that already passed above, not additional
+    // claims by the model or a generic source_ancestry discovery list.
+    owner_trigger_verified:historical && run.actor?.login==='BestNathan',
+    source_main_ancestry_confirmed:run.head_sha===targetSha||ancestorConfirmed,
+    verified_risk_tier:labels.find(label=>label.startsWith('verification:'))??null,
     kinds,areas, labels,
     protected_e2e_digest:e2e.digest,
     protected_e2e_selected_ids:e2e.selectedIds,
@@ -315,6 +320,9 @@ export async function selfTestIssueAuditReadback(){
   const witnessed=attestIssueAuditReadback(verified);
   assert.equal(witnessed.source_event,'issues');
   assert.equal(witnessed.status,'authenticated-historical-repair-readback');
+  assert.equal(witnessed.owner_trigger_verified,true);
+  assert.equal(witnessed.source_main_ancestry_confirmed,true);
+  assert.equal(witnessed.verified_risk_tier,'verification:scoped');
   assert.deepEqual(witnessed.protected_e2e_selected_ids.sort(),
     [...recipe.expectedE2EIds].sort());
   for(const [patch,reason] of [
