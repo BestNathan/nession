@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42254362154,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2869-cli-command-ownership",
+    "target_sha": "5b319a6640144e386143acc4888ac15b5f16c79e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42254362154",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "5f5289389e60aa949d28adf158f29ef114b093718382065af2d443dbba148b57"
+  },
+  "record": "runs/2026-11-06/42254362154-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "3903374d32b8e062f5d71a0e2b8beac5ad98d572ee60747d8ab41a059b0f3034"
+}
