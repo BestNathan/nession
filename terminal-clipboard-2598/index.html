@@ -45,8 +45,8 @@ footer{margin-top:26px;font-size:12px;color:#7b8694;line-height:1.6}
 footer a{color:#335b9d}
 @media (max-width:760px){.workspace{grid-template-columns:1fr}.screen{min-height:260px}}
 </style>
-</head>
-<body>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="../prototype-frame-2758/review-bridge.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root><header class="np-overview"><nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Requirement #2598</span></nav><span class="np-eyebrow">Interactive design / Nession</span><div class="np-header-main"><div><h1 class="np-title">Terminal · Clipboard States</h1><p class="np-subtitle">成功时安静；复制/图片粘贴受限时只显示必要的临时反馈。</p></div><div class="np-links"><a href="https://github.com/BestNathan/nession/issues/2598" target="_blank" rel="noopener noreferrer">Issue #2598</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div></header><main><section class="np-preview"><div class="np-section-heading"><div><h2>1:1 interactive product preview</h2><p>画面外切换测试状态和设备尺寸；保留原有场景交互。</p></div><div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">1180px</button><button type="button" data-np-size="390">390px</button><button type="button" data-np-size="375">375px</button><button type="button" data-np-reset>Reset</button></div></div><div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"></div></div><p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p><div class="np-fixtures" data-np-fixtures><strong>Scenario controls · Not part of product UI</strong></div></section><section class="np-details"><h2>Functional design &amp; verification</h2><div class="np-detail-grid"><article class="np-detail"><h3>Interactive walkthrough</h3><ol class="np-steps"><li>模拟 OSC 52 文本复制</li><li>测试浏览器写入受阻时的手势按钮</li><li>切换图片协议/只读观察者状态</li></ol></article><article class="np-detail"><h3>Fidelity limits</h3><p>终端内容是 DOM 模拟，没有真实 xterm、PTY、Clipboard API。</p><p>所有操作都是 mock / 静态 fixture，不触发生产服务副作用。</p></article><article class="np-detail"><h3>Visual reference</h3><p>VISION.md / PRINCIPLE.md / docs/design 和相关 Issue。复用 #2758 的审查外框，未复制生产组件。</p></article><article class="np-detail"><h3>Verification status</h3><p>源代码与状态迁移需独立浏览器验证。真实 Chromium、窄屏和 Pages manifest SHA 未因此结构迁移自动成立。</p></article></div><details class="np-inspector"><summary>Original scenario documentation / compatibility</summary><div class="np-legacy-notes" data-np-legacy></div></details></section></main><footer class="np-footer">Interactive public mock · design discussion only · not production Acceptance evidence</footer></div>
 <main class="wrap">
   <header>
     <div class="eyebrow">Nession · Requirement #2598 · Terminal Clipboard Protocols</div>
@@ -233,5 +233,5 @@ footer a{color:#335b9d}
   render();
 })();
 </script>
-</body>
+<script type="application/json" id="np-review-config">{"surface":".terminal-card","external":[".controls"]}</script><script src="../prototype-frame-2758/review-bridge.js" defer></script><script src="../prototype-frame-2758/frame.js" defer></script></body>
 </html>
