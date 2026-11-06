@@ -42,22 +42,37 @@
     for (const element of [...document.body.children]) {
       if (element !== page && element.tagName !== "SCRIPT" && element.tagName !== "STYLE") older.appendChild(element);
     }
-    // Legacy CSS is viewport-media based. The review canvas is a fixed-width
-    // element inside a potentially wide browser, so mirror width-only media
-    // rules as container queries. Preserve the original CSS for standalone use.
-    device.style.containerType = "inline-size";
+    // Legacy mock @media queries read the REVIEWER WINDOW, not the device.
+    // Merely appending @container copies leaves the original @media active:
+    // a narrow reviewer can then render an App-style 1180px Web preview.
+    // Replace width/height media ownership for product stylesheets only.
+    // This bridge is never installed in the standalone legacy pages.
+    device.style.containerType = "size";
     const responsive = [];
     for (const sheet of document.styleSheets) {
+      const href = sheet.href || "";
+      if (/\/prototype-frame-2758\/(?:frame|review-bridge)\.css(?:[?#]|$)/.test(href)) continue;
       try {
         for (const rule of sheet.cssRules) {
           if (rule.type !== 4) continue; // CSSMediaRule
           const condition = rule.conditionText;
-          if (!/\((?:max|min)-width\s*:/i.test(condition) ||
+          if (!/\((?:max|min)-(?:width|height)\s*:/i.test(condition) ||
               /(?:prefers-|orientation|print|screen|hover|pointer)/i.test(condition)) continue;
-          responsive.push("@container " + condition + " { " +
-            [...rule.cssRules].map(item => item.cssText).join("\n") + " }");
+          const original = rule.media.mediaText;
+          const replacement = "@container " + condition + " { " +
+            [...rule.cssRules].map(item => item.cssText).join("\n") + " }";
+          // Only add the replacement once the original no longer matches the
+          // outer browser viewport. Never silently leave both active.
+          rule.media.mediaText = "not all";
+          if (rule.media.mediaText !== "not all") {
+            console.warn("Prototype: cannot isolate outer responsive rule", original);
+            continue;
+          }
+          responsive.push(replacement);
         }
-      } catch (_) { /* cross-origin sheets: no read access */ }
+      } catch (error) {
+        console.warn("Prototype: unable to scope responsive stylesheet", href || "inline", error);
+      }
     }
     if (responsive.length) {
       const adaptive = document.createElement("style");
