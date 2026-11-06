@@ -9,6 +9,8 @@ import {readCommittedQwenRunReceipt}
   from '../orchestration/qwen-development-commit.mjs';
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {preflightAgentPatch} from './patch-preflight.mjs';
+import {assertQwenControlledPublisherSource}
+  from '../orchestration/qwen-development-source.mjs';
 
 const HEX=/^[0-9a-f]{64}$/;
 const SHA=/^[0-9a-f]{40}$/;
@@ -59,6 +61,11 @@ export async function preflightTrustedQwenPublisher({
   const before=preflightAgentPatch({checkout:sourceCheckout,
     source_sha:admission.input_sha,patch,
     allowed_paths:candidate.proposal.changed_paths});
+  // The Worker cannot authorize its own source scope. Independently
+  // recheck the signed disposable Canary's exact bytes after Git applies
+  // the real candidate patch, before any Store Intent or GitHub write.
+  assertQwenControlledPublisherSource({issue:admission.issue,
+    sourceCheckout,sourceSha:admission.input_sha,checked:before});
   const changed=before.files.map(file=>file.path).sort();
   if(before.source_sha!==admission.input_sha||
       before.patch_sha256!==candidate.proposal.patch_sha256||
