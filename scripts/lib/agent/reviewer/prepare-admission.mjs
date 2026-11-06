@@ -88,6 +88,9 @@ export async function prepareQwenReviewAdmission({
     catch{fail('invalid immutable Issue publication result');}
     if(doc?.kind==='trusted_qwen_publisher_write_ahead_intent'&&
        doc.issue===issue&&doc.publisher_run_id===publisher[0].run_id){
+      if(entry.name!==doc.worker_run_id+'-'+doc.worker_run_attempt+
+          '-'+doc.action_id+'.json')
+        fail('Qwen Publisher Intent path does not match immutable identity');
       candidates.push(validateQwenPublisherIntent(doc));
     }
   }
