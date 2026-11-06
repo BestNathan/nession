@@ -25,7 +25,7 @@ describe('TerminalRuntimeAdapter', () => {
     events.onTransportReady?.(true);
     events.onInputModeChange?.('sess-1', { type: 'command' });
     events.onResize?.('sess-1', 120, 40);
-    events.onStreamEventParsed?.({ streamEpoch: 7, streamSeq: 8 });
+    events.onStreamEventParsed?.({ streamEpoch: 7, streamSeq: 8 }, 4096);
     events.onStreamTruncated?.();
     events.onRendererReplaced?.();
     events.onStreamBaseline?.({ kind: 'verified', streamEpoch: 7, appliedThrough: 6 });
@@ -34,7 +34,7 @@ describe('TerminalRuntimeAdapter', () => {
     // they used to round-trip through are gone.
     expect(runtime.setTransportReady).toHaveBeenCalledWith(true);
     expect(runtime.updateViewportSize).toHaveBeenCalledWith({ cols: 120, rows: 40 });
-    expect(runtime.noteStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 8 });
+    expect(runtime.noteStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 8 }, 4096);
     expect(runtime.setVerifiedTerminalBaseline).toHaveBeenCalledWith({
       kind: 'verified', streamEpoch: 7, appliedThrough: 6,
     });

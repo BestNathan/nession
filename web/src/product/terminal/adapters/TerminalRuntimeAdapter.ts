@@ -40,8 +40,8 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     onStreamBaseline: (baseline) => {
       runtime.setVerifiedTerminalBaseline(baseline);
     },
-    onStreamEventParsed: (position) => {
-      runtime.noteStreamEventParsed(position);
+    onStreamEventParsed: (position, parsedBytes) => {
+      runtime.noteStreamEventParsed(position, parsedBytes);
     },
     onStreamTruncated: () => {
       runtime.noteStreamTruncated();

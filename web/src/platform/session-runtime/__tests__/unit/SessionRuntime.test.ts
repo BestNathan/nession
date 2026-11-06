@@ -318,6 +318,7 @@ describe('SessionRuntime', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     globalThis.WebSocket = OriginalWebSocket;
   });
@@ -385,6 +386,7 @@ describe('SessionRuntime', () => {
     });
     await flushMicrotasks();
     expect(rt.attachState.phase).toBe('attached');
+    vi.useFakeTimers();
     const outputAcks = () => sentFrames()
       .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
     // Socket receipt and an attach cursor cannot establish parser progress.
@@ -394,6 +396,8 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap, do not ACK
     expect(outputAcks()).toHaveLength(0);
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(outputAcks()).toHaveLength(0); // contiguous progress is batched
+    await vi.advanceTimersByTimeAsync(32);
     expect(outputAcks()).toHaveLength(1);
     expect(outputAcks()[0].payload).toEqual({
       session_name: 's1',
@@ -406,6 +410,8 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // duplicate
     expect(outputAcks()).toHaveLength(1);
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+    expect(outputAcks()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(32);
     expect(outputAcks()).toHaveLength(2);
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(3);
     rt.noteStreamTruncated(); // revoked proof, no phantom future ACK
@@ -414,6 +420,108 @@ describe('SessionRuntime', () => {
     rt.dispose();
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
     expect(outputAcks()).toHaveLength(2);
+  });
+
+  it('bounds parser ACK chatter and flushes early at byte or event pressure (#2867)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 200, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    vi.useFakeTimers();
+    const acks = () => sentFrames()
+      .filter((f) => f.msg_type === 'agent.terminal.output.applied');
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+
+    for (let seq = 1; seq <= 63; seq += 1) {
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: seq }, 1);
+    }
+    expect(acks()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(31);
+    expect(acks()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(acks()).toHaveLength(1);
+    expect(acks()[0].payload).toMatchObject({ applied_through: 63 });
+
+    // A 256 KiB parsed output frame must not wait behind the timer.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 64 }, 256 * 1024);
+    expect(acks()).toHaveLength(2);
+    expect(acks()[1].payload).toMatchObject({ applied_through: 64 });
+
+    // Similarly, many tiny output/resize positions cannot exhaust the
+    // Agent's 1024-event credit ledger while a timer waits.
+    for (let seq = 65; seq <= 128; seq += 1) {
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: seq }, 0);
+    }
+    expect(acks()).toHaveLength(3);
+    expect(acks()[2].payload).toMatchObject({ applied_through: 128 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(3); // no trailing duplicate timer
+    rt.dispose();
+  });
+
+  it('revokes queued parser ACKs across generation changes and retries only real send failures (#2867)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 10, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    vi.useFakeTimers();
+    const acks = () => sentFrames()
+      .filter((f) => f.msg_type === 'agent.terminal.output.applied');
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 12);
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(0); // old renderer's timer cannot flush
+
+    const api = rt.getAgentTerminalApi()!;
+    const send = api.sendOutputApplied;
+    api.sendOutputApplied = () => false;
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 10);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0);
+    api.sendOutputApplied = send;
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }, 10);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+    expect(acks()[0].payload).toMatchObject({ applied_through: 2 });
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(2);
+
+    // A stream hole revokes the queued prefix.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 }, 1);
+    rt.noteStreamTruncated();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A replaced renderer cannot let the old timer confirm its prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.noteRendererReplaced();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A route-intent change retires the old batch before its timer fires.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // Disposal cancels a final queued prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.dispose();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1); // disposed runtime never sends
   });
 
   it('defers the atomic-bootstrap ACK until the attach reply states its identity (#2120)', async () => {
@@ -981,9 +1089,12 @@ describe('SessionRuntime', () => {
       expect(ack).not.toHaveBeenCalled();
 
       rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      vi.useFakeTimers();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap
       expect(ack).not.toHaveBeenCalled();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }); // contiguous parser completed
+      expect(ack).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(32);
       expect(ack).toHaveBeenCalledWith('s1', {
         subscriberGeneration: 41, streamEpoch: 7,
         rendererGeneration: rt.terminalAppliedSnapshot?.generation, appliedThrough: 2,
