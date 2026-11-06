@@ -141,3 +141,44 @@
 .np-fixtures button[aria-pressed="true"]{background:#222629;color:#fff;border-color:#222629}
 .np-fixtures button:focus-visible{outline:2px solid #008450;outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.work-product *{scroll-behavior:auto!important}}
+
+
+/* Corrected #2541 product placement: Work is one Workspace capability,
+   not an independently navigated product surface. The shell and navigation
+   below are deliberately Nession-owned, not owned by the Work view. */
+.work-product{position:relative;display:flex;flex-direction:column;overflow:hidden}
+.work-product .wc-surface{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.work-product .wc-body{padding-bottom:38px}
+.work-product .wc-local-back{display:flex;margin:-11px 0 20px}
+.work-product .wc-local-back button{font-size:12px;color:var(--nession-text-secondary);padding:6px 0}
+.work-product .wc-local-back button:hover{text-decoration:underline;text-underline-offset:3px}
+.work-product .wc-contract-entry{border-top:1px solid var(--nession-border);border-bottom:1px solid var(--nession-border);padding:22px 0;display:flex;justify-content:space-between;align-items:center;gap:18px;margin-top:29px}
+.work-product .wc-contract-entry .wc-subhead{margin-top:7px}
+.work-product .wc-contract-entry .wc-section-note{margin:8px 0 0}
+.work-product .wc-dock-zone{flex:none;height:85px;display:flex;align-items:center;justify-content:center;z-index:5;pointer-events:none;background:linear-gradient(transparent,#ffffffb8 42%,#fff 100%);padding:4px 20px 12px}
+.work-product .wc-dock-pair{max-width:calc(100% - 18px);display:flex;align-items:center;gap:10px;pointer-events:auto}
+.work-product .wc-capability-capsule{display:flex;align-items:center;gap:5px;padding:5px;max-width:min(450px,80vw);min-height:47px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;border:1px solid var(--nession-border);background:#ffffffed;box-shadow:0 6px 24px #24262813;border-radius:999px}
+.work-product .wc-capability-capsule::-webkit-scrollbar{display:none}
+.work-product .wc-capability-entry{height:37px;flex:none;display:flex;align-items:center;gap:7px;border-radius:999px;padding:0 13px;font-size:12px;font-weight:570;white-space:nowrap;color:var(--nession-text-secondary);transition:background .12s ease}
+.work-product .wc-capability-entry[aria-current="page"]{background:var(--nession-foreground);color:#fff}
+.work-product .wc-capability-entry:hover:not([aria-current="page"]){background:var(--nession-surface)}
+.work-product .wc-capability-symbol{display:inline-grid;place-items:center;font-size:15px;line-height:1;width:16px}
+.work-product .wc-terminal-link{border-radius:999px;flex:none;padding:11px 14px;white-space:nowrap;border:1px solid var(--nession-border);background:#fff;box-shadow:0 6px 24px #24262813;font-size:12px;font-weight:560}
+.work-product .wc-terminal-link:hover{background:var(--nession-surface)}
+.work-product .wc-pop{position:absolute;bottom:83px;left:7%;right:7%}
+.work-product .wc-terminal{flex:1;min-height:0;background:#fff;padding:26px 32px;display:flex;flex-direction:column}
+.work-product .wc-terminal-head{display:flex;justify-content:space-between;border-bottom:1px solid var(--nession-border);padding:0 0 16px}
+.work-product .wc-terminal-output{flex:1;margin-top:20px;min-height:0;font:13px/1.8 ui-monospace,Menlo,monospace;color:var(--nession-text-secondary)}
+.work-product .wc-terminal-output p:first-child{color:var(--nession-foreground)}
+.work-product .wc-terminal .wc-btn{align-self:flex-start}
+.work-product.is-mobile .wc-top{flex:none;position:relative}
+.work-product.is-mobile .wc-top .wc-workspace{display:block;font-size:13px}
+.work-product.is-mobile .wc-body{padding:22px 18px 26px}
+.work-product.is-mobile .wc-local-back{display:none}
+.work-product.is-mobile .wc-contract-entry{align-items:flex-start;flex-direction:column}
+.work-product.is-mobile .wc-dock-zone{height:84px;padding:3px 14px 12px}
+.work-product.is-mobile .wc-dock-pair{width:100%;max-width:100%;justify-content:center}
+.work-product.is-mobile .wc-capability-capsule{max-width:100%;width:min(100%,430px);justify-content:space-around}
+.work-product.is-mobile .wc-capability-entry{flex:1;min-width:75px;justify-content:center;flex-direction:column;gap:1px;height:52px;border-radius:21px;font-size:10px;padding:2px 12px}
+.work-product.is-mobile .wc-capability-symbol{font-size:16px;height:18px}
+.work-product.is-mobile .wc-terminal{padding:20px 17px}
