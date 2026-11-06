@@ -95,14 +95,26 @@ a{color:inherit}.mast{display:flex;align-items:center;justify-content:space-betw
 <main class="canvas">
   <div class="intro"><div><div class="eyebrow">Agent capability / Workspace</div><h1>当前工作，清晰的运行上下文。</h1><p>只看当前 Session 的进程，不展示其他工作上下文或底层执行细节。桌面并排查看，移动端从进程列表进入详情。</p></div><div class="fixture"><label for="scenario">MOCK SCENARIO</label><select id="scenario" aria-label="选择模拟运行环境"><option value="linux">Linux · 独立资源域</option><option value="shared">Linux · 共享容器域</option><option value="mac">macOS · 进程树降级</option><option value="offline">Agent · 离线</option><option value="no-session">无当前 Session</option></select></div></div>
   <section class="shell" aria-label="Agent capability workspace">
-    <div class="shellbar"><div class="crumb">Workspace <span aria-hidden="true">›</span> <strong>Agent</strong></div><div><span class="crumb" id="snapshot">模拟快照 · T+0</span>　<button type="button" class="refresh" id="refresh">↻ 刷新</button></div></div>
+    <div class="ia-web-layout" data-testid="web-layout">
+      <aside class="ia-session-sidebar" data-testid="sidebar">
+        <div class="ia-sidebar-head"><strong>Agents</strong><button type="button" data-ia="collapse" aria-label="Collapse sidebar">☷</button><button type="button" data-ia="expand" aria-label="Expand sidebar">☷</button></div>
+        <div class="ia-agent-line">● dev-linux-01 <small>online</small></div>
+        <div class="ia-agent-line">● macbook <small>online</small></div>
+        <div class="ia-sidebar-section">Sessions</div>
+        <div class="ia-session-list"><button type="button" class="ia-session-row active" data-ia="current-session"><strong>nession-dev</strong><small>dev-linux-01 · claude</small></button><button type="button" class="ia-session-row" data-ia="other-session"><strong>infra</strong><small>dev-linux-01 · bash</small></button></div>
+        <div class="ia-sidebar-footer">● Connected <span>2 nodes</span></div>
+      </aside>
+      <main class="ia-shell-main" data-testid="shell-main">
+        <section class="ia-workspace-shell" data-testid="workspace-shell">
+          <header class="ia-app-page-header" data-testid="app-page-header"><button id="ia-app-back" type="button" aria-label="Back to Terminal">‹</button><h2>Agent</h2></header>
+          <div class="ia-workspace-content" data-testid="workspace-tool-content">
     <div class="agent"><div class="agent-identity"><span class="agent-icon" aria-hidden="true">⌘</span><div><h2 id="host">dev-linux-01</h2><p id="subhost">Ubuntu · Connected</p></div></div><span id="status" class="status">Online</span></div>
     <details class="agent-meta" id="agent-details">
       <summary><span class="details-entry"><span class="details-entry-title">Agent details</span><span class="details-entry-description">身份 · 连接 · 运行环境 · 发现能力</span></span><span class="details-disclosure" aria-hidden="true">⌄</span></summary>
       <div class="agent-detail-body" id="agent-detail-content" aria-label="Agent details information"></div>
     </details>
     <div class="stage">
-      <div class="session-head"><div><div class="eyebrow">CURRENT SESSION</div><h3 id="session-name">nession-dev</h3></div><span class="session-activity" id="session-summary">8 processes · T+0</span></div>
+      <div class="session-head"><div><h3>Processes</h3><div class="ia-session-identity">Current Session · <span id="session-name">nession-dev</span></div><span class="session-activity" id="session-summary">8 processes · T+0</span></div><div class="ia-process-refresh"><span id="snapshot">模拟快照 · T+0</span><button type="button" class="refresh" id="refresh" aria-label="Refresh process snapshot">↻</button></div></div>
       <p class="notice" id="notice" hidden></p>
       <div id="empty" class="empty" hidden></div>
       <div id="split" class="split">
@@ -111,7 +123,22 @@ a{color:inherit}.mast{display:flex;align-items:center;justify-content:space-betw
       </div>
       <details class="diagnostics" id="diagnostics"><summary>发现依据与诊断</summary><div id="diag-body" class="diag-body"></div></details>
     </div>
-    <div class="bottom"><div class="capsule" aria-label="Workspace capabilities"><button type="button" data-other="Files">Files</button><button type="button" data-other="Session">Session</button><button type="button" class="active" id="agent-capability" aria-current="page">● Agent</button><button type="button" data-other="Environment">Env</button></div></div>
+          </div>
+          <div class="bottom" data-testid="workspace-tool-bar">
+            <button type="button" class="ia-terminal-return" data-ia="terminal" aria-label="Open Terminal">⌁</button>
+            <nav class="capsule" aria-label="Workspace capabilities"><button type="button" class="active" id="agent-capability" aria-current="page">● Agent</button></nav>
+          </div>
+        </section>
+        <section class="ia-terminal-root" data-testid="terminal-surface" hidden>
+          <div class="ia-terminal-lines"><p>nession-dev:~$ ps -ef</p><p>Current Session processes observed in Agent Workspace.</p><p>nession-dev:~$ ▌</p></div>
+          <div class="ia-terminal-dock">
+            <div class="ia-terminal-context" hidden><button type="button" data-ia="workspace">◎ Agent</button></div>
+            <div class="ia-terminal-conversation"><button type="button" data-ia="context" aria-label="Open capabilities">＋</button><span>Ask Nession…</span><span>↑</span></div>
+            <button class="ia-terminal-destination" type="button" data-ia="workspace" aria-label="Open Workspace">▣</button>
+          </div>
+        </section>
+      </main>
+    </div>
   </section>
   <p class="footnote">交互原型 · 合成脱敏数据 · 无真实 Agent、OS、网络请求或进程控制 · 不构成生产验收证据。</p>
 </main>
@@ -155,7 +182,13 @@ var mockAgentDetails={
  mac:{agentId:'mock-mac-agent',endpoint:'192.0.2.55:9010',heartbeat:'8s ago',osVersion:'macOS / arm64',nessionVersion:'0.0.0-mock',tmuxVersion:'3.5a (mock)',image:'Not reported'},
  offline:{agentId:'mock-edge-agent',endpoint:'Unknown (last seen)',heartbeat:'Unavailable · offline',osVersion:'Last known Linux',nessionVersion:'Unknown',tmuxVersion:'Unknown',image:'Unknown'}
 };
-var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0,processDetailsOpen:false};
+var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0,processDetailsOpen:false,surface:'workspace',collapsed:false,experience:'web',contextOpen:false};
+function syncIA(){
+ const shell=document.querySelector('.shell');shell.dataset.surface=state.surface;shell.dataset.experience=state.experience;
+ document.querySelector('.ia-workspace-shell').hidden=state.surface!=='workspace';
+ document.querySelector('.ia-terminal-root').hidden=state.surface!=='terminal';
+ document.querySelector('.ia-terminal-context').hidden=!state.contextOpen;
+}
 function byId(id){return document.getElementById(id);}
 function el(tag,cls,value){var n=document.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n;}
 function add(parent,tag,cls,value){var n=el(tag,cls,value);parent.appendChild(n);return n;}
@@ -314,6 +347,7 @@ function renderInspector(items,p,d,session){
  evidence.addEventListener('toggle',function(){state.processDetailsOpen=evidence.open;});
 }
 function render(){
+ syncIA();
  var d=getFixture(),s=getSession(d),items=uniqueProcesses(s),unavailable=d.coverage==='unavailable',none=!s;
  byId('host').textContent=d.host;byId('subhost').textContent=d.sub;
  var status=byId('status');status.textContent=unavailable?'Offline':'Online';status.className='status'+(unavailable?' offline':'');
@@ -356,6 +390,22 @@ byId('back').addEventListener('click',function(){
  if(selected){selected.focus({preventScroll:true});selected.scrollIntoView({block:'nearest'});}
 });
 byId('agent-capability').addEventListener('click',function(){state.mobileDetail=false;render();});
+document.querySelector('[data-np-root]')?.addEventListener('np:resize',e=>{state.experience=e.detail.width<=430?'app':'web';syncIA();});
+document.addEventListener('click',function(e){
+ const btn=e.target.closest('[data-ia]');if(!btn)return;
+ const action=btn.dataset.ia;
+ if(action==='terminal'||action==='other-session'||action==='app-back'){
+   if(action==='other-session')state.currentSessionId=null;
+   state.surface='terminal';state.contextOpen=false;render();return;
+ }
+ if(action==='workspace'){state.surface='workspace';state.contextOpen=false;render();return;}
+ if(action==='context'){state.contextOpen=!state.contextOpen;syncIA();return;}
+ if(action==='collapse'){state.collapsed=true;document.querySelector('.ia-session-sidebar').classList.add('collapsed');return;}
+ if(action==='expand'){state.collapsed=false;document.querySelector('.ia-session-sidebar').classList.remove('collapsed');return;}
+ if(action==='current-session'){state.currentSessionId='dev';state.surface='workspace';state.selectedPid=null;render();return;}
+});
+byId('ia-app-back').dataset.ia='app-back';
+
 document.querySelectorAll('[data-other]').forEach(function(b){b.addEventListener('click',function(){toast(b.dataset.other+' 不在此原型范围内；Agent 焦点未改变');});});
 render();
 })();
