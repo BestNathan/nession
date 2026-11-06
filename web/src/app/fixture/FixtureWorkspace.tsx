@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router-dom';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
@@ -18,6 +18,14 @@ import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import {
+  FIXTURE_AGENT_PROCESS_SESSIONS,
+  fixtureAgentProcessSessionId,
+  fixtureAgentProcessesAgents,
+  fixtureAgentProcessesScenario,
+  installFixtureAgentProcessSurface,
+  subscribeFixtureAgentProcessSession,
+} from './fixtureAgentProcesses';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 
 // Module-stable — the stub is immutable and stateless, so a single instance
@@ -46,22 +54,37 @@ export function FixtureWorkspace() {
     installConversationSurface,
   );
   const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
-  const selectedSession =
-    FIXTURE_SESSIONS.find((s) => s.session_id === FIXTURE_SELECTED_ID) ?? null;
-  const selectedAgent = FIXTURE_AGENTS.find(
-    (a) => a.agent_id === selectedSession?.agent_id,
+  // #2803: the Agent capability's two-Agent same-name process scenario. The
+  // route names the environment input, and the mounted capability observes the
+  // Session change like a real Workspace move.
+  const agentProcessScenario = fixtureAgentProcessesScenario(search);
+  const agentProcessReady = useFixtureSurface(
+    capability === 'agent' && agentProcessScenario !== null,
+    search,
+    installFixtureAgentProcessSurface,
   );
+  const agentProcessSessionId = useSyncExternalStore(
+    subscribeFixtureAgentProcessSession,
+    fixtureAgentProcessSessionId,
+  );
+  const sessions = agentProcessScenario ? FIXTURE_AGENT_PROCESS_SESSIONS : FIXTURE_SESSIONS;
+  const agents = agentProcessScenario
+    ? fixtureAgentProcessesAgents(agentProcessScenario)
+    : FIXTURE_AGENTS;
+  const selectedId = agentProcessScenario ? agentProcessSessionId : FIXTURE_SELECTED_ID;
+  const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
+  const selectedAgent = agents.find((a) => a.agent_id === selectedSession?.agent_id);
   const domain = selectedSession
     ? mapDomainState({
         session: selectedSession,
         agent: selectedAgent,
         staleAgentIds: [],
-        clientSessionId: FIXTURE_SELECTED_ID,
+        clientSessionId: selectedSession.session_id,
         attachInFlightId: null,
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !conversationReady || !envReady) {
+  if (!gitReady || !conversationReady || !envReady || !agentProcessReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -69,7 +92,7 @@ export function FixtureWorkspace() {
   const ctx: WorkspaceContext = {
     session: selectedSession,
     agent: selectedAgent,
-    agents: FIXTURE_AGENTS,
+    agents,
     domain,
     fileOps,
     experience: 'web',
@@ -99,7 +122,7 @@ export function FixtureWorkspace() {
 /**
  * Which capability the route opens, defaulting to Files.
  *
- * Git, Claude Code, and Environment have canned backends installed below;
+ * Git, Claude Code, Environment and Agent have canned backends installed below;
  * every other capability keeps the canonical route exactly as the golden
  * screenshots capture it.
  */
@@ -113,6 +136,9 @@ function openedCapability(search: string): CapabilityId {
   }
   if (requested === 'env') {
     return 'env';
+  }
+  if (requested === 'agent') {
+    return 'agent';
   }
   return requested === 'session' ? 'session' : 'files';
 }

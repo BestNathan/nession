@@ -42,6 +42,21 @@ function sessionNameOf(sessionId: string | null): string | null {
   return name.length > 0 ? name : null;
 }
 
+/**
+ * Everything a read produced, bound to the full Session identity that asked.
+ *
+ * Session identity is `agent_id:session_name`, not the display name: two Agents
+ * can each have a Session called `dev`, and one of them must never answer for
+ * the other. Binding the whole result — not only the snapshot — is what lets a
+ * render expose `null` for a previous identity before any effect has run.
+ */
+interface BoundSnapshot {
+  sessionId: string;
+  snapshot: ProcessSnapshot | null;
+  error: string | null;
+  stale: boolean;
+}
+
 function useConnectionRevision(): number {
   const [revision, setRevision] = useState(() => sessionsApi.connectionRevision());
   useEffect(
@@ -59,61 +74,81 @@ function useSnapshot(
   sessionId: string | null,
   connectionRevision: number,
 ) {
-  const [snapshot, setSnapshot] = useState<ProcessSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
+  const [result, setResult] = useState<BoundSnapshot | null>(null);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const snapshotRef = useRef<ProcessSnapshot | null>(null);
+  const resultRef = useRef<BoundSnapshot | null>(null);
   const request = useRef(0);
 
   useEffect(() => {
     const current = ++request.current;
     if (!sessionId) {
-      snapshotRef.current = null;
-      setSnapshot(null);
-      setError(null);
-      setStale(false);
-      setLoading(false);
+      resultRef.current = null;
+      setResult(null);
+      setLoadingSessionId(null);
       return;
     }
-    // A refresh of the same Session may keep the last snapshot while the new
-    // read is in flight; a different Session never inherits it. Keeping it
-    // would label another Session's processes as this one's.
-    if (snapshotRef.current?.session_name !== sessionNameOf(sessionId)) {
-      snapshotRef.current = null;
-      setSnapshot(null);
-      setStale(false);
+    // A refresh of the same full Session may keep the last snapshot while the
+    // new read is in flight; a different Session never inherits it. The full
+    // id is the identity — `agent-a:dev` and `agent-b:dev` are different
+    // Sessions that happen to share a name.
+    const retained = resultRef.current?.sessionId === sessionId ? resultRef.current : null;
+    if (!retained) {
+      resultRef.current = null;
+      setResult(null);
     }
     if (agent.status !== 'online') {
-      // Do not pretend the Agent answered. A previous snapshot may still be
-      // useful, but it is explicitly stale.
-      setLoading(false);
-      setError('Agent offline — no new process snapshot can be read');
-      setStale(snapshotRef.current !== null);
+      // Do not pretend the Agent answered. Only this Session's own previous
+      // snapshot may still be useful, and it is explicitly stale.
+      const next: BoundSnapshot = {
+        sessionId,
+        snapshot: retained?.snapshot ?? null,
+        error: 'Agent offline — no new process snapshot can be read',
+        stale: retained !== null && retained.snapshot !== null,
+      };
+      resultRef.current = next;
+      setLoadingSessionId(null);
+      setResult(next);
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (retained) {
+      // Keep the last-known snapshot visible while the refresh is in flight,
+      // without carrying a previous attempt's error into it.
+      const next: BoundSnapshot = { ...retained, error: null };
+      resultRef.current = next;
+      setResult(next);
+    }
+    setLoadingSessionId(sessionId);
     sessionsApi
       .fetchProcessSnapshot(sessionId)
       .then((next) => {
         if (current === request.current) {
-          snapshotRef.current = next;
-          setSnapshot(next);
-          setStale(false);
+          const bound: BoundSnapshot = {
+            sessionId,
+            snapshot: next,
+            error: null,
+            stale: false,
+          };
+          resultRef.current = bound;
+          setResult(bound);
         }
       })
       .catch((failure: unknown) => {
         if (current === request.current) {
-          setError(errorMessage(failure));
-          setStale(snapshotRef.current !== null);
+          const bound: BoundSnapshot = {
+            sessionId,
+            snapshot: retained?.snapshot ?? null,
+            error: errorMessage(failure),
+            stale: retained !== null && retained.snapshot !== null,
+          };
+          resultRef.current = bound;
+          setResult(bound);
         }
       })
       .finally(() => {
         if (current === request.current) {
-          setLoading(false);
+          setLoadingSessionId(null);
         }
       });
   }, [sessionId, refreshNonce, agent.status, connectionRevision]);
@@ -122,7 +157,18 @@ function useSnapshot(
     setRefreshNonce((nonce) => nonce + 1);
   }, []);
 
-  return { snapshot, loading, error, stale, refresh };
+  // Expose a read only for the identity that asked for it. Deriving here, in
+  // render, closes the interval between the visible Session change and the
+  // effect above: no frame can label one Session's data as another's.
+  const bound = result !== null && result.sessionId === sessionId ? result : null;
+
+  return {
+    snapshot: bound?.snapshot ?? null,
+    loading: sessionId !== null && loadingSessionId === sessionId,
+    error: bound?.error ?? null,
+    stale: bound?.stale ?? false,
+    refresh,
+  };
 }
 
 export function useAgentProcesses(
