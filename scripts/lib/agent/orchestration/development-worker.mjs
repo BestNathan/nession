@@ -405,7 +405,7 @@ async function main(){
     }
     throw error;
   }finally{
-    if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{
+    if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{}
     fs.rmSync(CURSOR_LOCAL_ROOT,{recursive:true,force:true});
     if(workspace!==CURSOR_WORKSPACE_PATH){
       try{fs.rmdirSync(path.dirname(workspace));}catch{}
