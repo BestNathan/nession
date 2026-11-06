@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::{oneshot, RwLock};
+use std::sync::Arc;
+use tokio::sync::{oneshot, Mutex, OwnedMutexGuard, RwLock};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, info, warn};
 
@@ -57,11 +58,22 @@ struct ActiveControl {
 /// generation" — the question every state-writing message asks, and the one
 /// there was no way to ask before `#960`.
 struct AgentControl {
-    /// The newest generation that has ever claimed this agent.
+    /// The newest generation that has ever registered or claimed this agent.
     high_water_generation: ConnectionGeneration,
     /// The connection currently serving this agent's control channel, if any.
     active: Option<ActiveControl>,
     pub pending_commands: HashMap<String, oneshot::Sender<serde_json::Value>>,
+}
+
+/// Proof that a registration holds its agent's registration gate, and so is
+/// the only registration of that agent currently publishing state.
+///
+/// Produced by [`CommandBroker::begin_registration`] and held by the
+/// registration handler across every registry, SQLite and session write it
+/// makes. Dropping it releases the gate for the next registration of the same
+/// agent — which then either proceeds (it is newer) or is refused (it is not).
+pub struct RegistrationGuard {
+    _gate: OwnedMutexGuard<()>,
 }
 
 /// Bridges client requests to agent control connections.
@@ -75,6 +87,12 @@ struct AgentControl {
 /// a working reconnect and an agent nobody can reach.
 pub struct CommandBroker {
     agents: RwLock<HashMap<String, AgentControl>>,
+    /// One lock per agent, held for the whole of that agent's registration
+    /// transition — see [`Self::begin_registration`]. Kept beside the records
+    /// because it orders *registrations*, while `agents` protects the records
+    /// they read and write; conflating the two would mean holding the map lock
+    /// across SQLite and session-registry awaits.
+    registration_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Source of [`ConnectionGeneration`]s; see that type for why they order.
     generations: AtomicU64,
 }
@@ -89,6 +107,7 @@ impl CommandBroker {
     pub fn new() -> Self {
         Self {
             agents: RwLock::new(HashMap::new()),
+            registration_gates: Mutex::new(HashMap::new()),
             generations: AtomicU64::new(0),
         }
     }
@@ -99,6 +118,82 @@ impl CommandBroker {
     /// decision afterwards is a comparison against this number.
     pub fn new_connection_generation(&self) -> ConnectionGeneration {
         ConnectionGeneration(self.generations.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Begin registering `agent_id` at `generation`, or refuse it because a
+    /// newer connection has already done so.
+    ///
+    /// Registration is not just a claim: it is where an agent's **current
+    /// generation authority is created**, publishing its advertised endpoint,
+    /// metadata and manifest into the registry (and through to SQLite) and
+    /// clearing the sessions a previous instance left behind. So the
+    /// generation check and those writes have to be **one ordered transition
+    /// per agent**, not a check placed before an await:
+    ///
+    /// * A check alone is a TOCTOU. An older registration can pass it, then a
+    ///   newer registration can complete in full — registry, SQLite, sessions
+    ///   — and the older one's writes can still land afterwards, restoring
+    ///   state the newer registration had just replaced.
+    /// * The per-agent gate below is held from the check until the caller has
+    ///   finished its writes, so registrations of one agent are serialized.
+    ///   The invariant is therefore **the newest generation wins regardless
+    ///   of which one reaches the gate first**:
+    ///   - older acquires first — it writes first, the newer one then waits,
+    ///     and writes last, so the newer state is the final state;
+    ///   - newer acquires first — the older one waits, then finds the higher
+    ///     high-water mark and is refused here, before it can write anything.
+    ///
+    /// The high-water mark is written under the registry lock before the
+    /// caller's writes begin, so a registration holding this guard is already
+    /// the agent's current generation for [`Self::is_current_generation`]. A
+    /// later [`Self::claim_agent`] with the same generation is still an
+    /// ordinary claim (it is not newer, so it takes the active-sender arm);
+    /// a stale connection's claim is still refused by the same mark.
+    ///
+    /// Returns `None` — with the gate released — when this registration is
+    /// stale. The caller must then make no registry, database or session
+    /// mutation at all, and must not bind its connection to the agent.
+    ///
+    /// Dropping the returned guard releases the gate; it must be kept alive
+    /// until the last publication write has completed.
+    #[must_use = "the guard releases the per-agent registration gate when dropped; hold it until the registration writes are complete"]
+    pub async fn begin_registration(
+        &self,
+        agent_id: &str,
+        generation: ConnectionGeneration,
+    ) -> Option<RegistrationGuard> {
+        // Look up (or create) this agent's gate without holding the map lock
+        // across a wait on it: the gate itself is the ordering primitive, and
+        // holding the map lock while waiting would serialize unrelated agents.
+        let gate = {
+            let mut gates = self.registration_gates.lock().await;
+            Arc::clone(gates.entry(agent_id.to_string()).or_default())
+        };
+        let gate_guard = gate.lock_owned().await;
+
+        let mut agents = self.agents.write().await;
+        let control = agents
+            .entry(agent_id.to_string())
+            .or_insert_with(|| AgentControl {
+                high_water_generation: generation,
+                active: None,
+                pending_commands: HashMap::new(),
+            });
+
+        if control.high_water_generation > generation {
+            debug!(
+                "CommandBroker: refusing registration of agent {} by {} — {} has taken it over",
+                agent_id, generation, control.high_water_generation
+            );
+            return None;
+        }
+
+        control.high_water_generation = generation;
+        debug!(
+            "CommandBroker: registration gate held for agent {} by {}",
+            agent_id, generation
+        );
+        Some(RegistrationGuard { _gate: gate_guard })
     }
 
     /// Point an agent's control channel at this connection's sender.
@@ -184,13 +279,13 @@ impl CommandBroker {
     /// * after a liveness eviction there is no active owner, and the generation
     ///   that was evicted is still the agent's current one — it recovers by
     ///   re-claiming, and until it does, its reports are still its own;
-    /// * an agent's entry being absent means no connection has ever claimed it in
-    ///   this process, so there is no newer generation to have been superseded
-    ///   by, and the connection's own registration is the only authority there
-    ///   is. (Registration is where that authority is created — see
-    ///   `handler::ConnectionHandler::authorized_agent_id` for the identity half,
-    ///   which is checked first and is what makes this arm unreachable for a
-    ///   connection that never registered.)
+    /// * an agent's entry being absent means no connection has ever registered
+    ///   or claimed it in this process, so there is no newer generation to have
+    ///   been superseded by, and the connection's own registration is the only
+    ///   authority there is. (Registration is where that authority is created —
+    ///   see `handler::ConnectionHandler::authorized_agent_id` for the identity
+    ///   half, which is checked first and is what makes this arm unreachable
+    ///   for a connection that never registered.)
     pub async fn is_current_generation(
         &self,
         agent_id: &str,
@@ -292,10 +387,19 @@ impl CommandBroker {
     /// registry no longer knows the agent, so its heartbeats, session updates
     /// and address updates are refused there (`handler::ConnectionHandler`).
     pub async fn forget_agent(&self, agent_id: &str) {
-        let mut agents = self.agents.write().await;
-        if agents.remove(agent_id).is_some() {
+        let removed = {
+            let mut agents = self.agents.write().await;
+            agents.remove(agent_id).is_some()
+        };
+        if removed {
             info!("CommandBroker: forgot agent {}", agent_id);
         }
+        // The registration gate goes with the record: a deleted agent has no
+        // generation left for it to order. A registration already holding the
+        // gate keeps its own `Arc`, so it still finishes its writes — this is
+        // the deletion-versus-registration boundary, which the delete path's
+        // "agent is offline" precondition owns, not the gate.
+        self.registration_gates.lock().await.remove(agent_id);
     }
 
     /// Send a command to an agent and return a oneshot receiver for the response.
@@ -776,6 +880,103 @@ mod tests {
         assert!(
             second_rx.try_recv().is_err(),
             "and the record that was dropped is not still serving anyone"
+        );
+    }
+
+    /// #960, the registration boundary: registering publishes an agent's state
+    /// as well as deciding which connection owns it, so a newer registration
+    /// must never have to race an older one's writes.
+    ///
+    /// The gate is held from the generation check until the handler's writes
+    /// are done, so an older registration that arrives while a newer one is
+    /// applying waits here — and then finds the newer high-water mark and is
+    /// refused, before its own writes could land.
+    #[tokio::test]
+    async fn an_older_registration_waits_for_a_newer_one_to_finish() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let broker = CommandBroker::new();
+        let older = broker.new_connection_generation();
+        let newer = broker.new_connection_generation();
+
+        let newer_guard = broker
+            .begin_registration("a1", newer)
+            .await
+            .expect("the newest generation registers");
+        let mut waiting = Box::pin(broker.begin_registration("a1", older));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(
+            waiting.as_mut().poll(&mut cx).is_pending(),
+            "an older registration must wait for the in-flight newer one, not write beside it"
+        );
+
+        // The newer registration finishes its writes and releases the gate.
+        drop(newer_guard);
+        assert!(
+            waiting.await.is_none(),
+            "the older generation must be refused once the newer one has published"
+        );
+        assert!(
+            broker.is_current_generation("a1", newer).await,
+            "the newest generation remains the agent's current one"
+        );
+    }
+
+    /// The other legal arrival order: the older registration writes first, and
+    /// the newer one writes after it. The final authority is the newer one,
+    /// and its later claim is an ordinary claim.
+    #[tokio::test]
+    async fn a_newer_registration_takes_over_from_an_older_one() {
+        let broker = CommandBroker::new();
+        let older = broker.new_connection_generation();
+        let newer = broker.new_connection_generation();
+
+        assert!(
+            broker.begin_registration("a1", older).await.is_some(),
+            "the first registration is accepted"
+        );
+        assert!(
+            broker.begin_registration("a1", newer).await.is_some(),
+            "a newer generation may register over it"
+        );
+
+        assert!(broker.is_current_generation("a1", newer).await);
+        assert!(!broker.is_current_generation("a1", older).await);
+
+        // Registration raised the mark; the later claim by the same generation
+        // is not refused by it.
+        let (sender, mut rx) = WsMessageSender::new();
+        broker.claim_agent("a1", newer, sender).await;
+        let _waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        assert!(
+            rx.try_recv().is_ok(),
+            "the registered and claimed generation receives the agent's commands"
+        );
+    }
+
+    /// A liveness eviction keeps the high-water mark, and registration reads
+    /// the same mark: a stale generation cannot register its way back in
+    /// through the gap an eviction opens, while the evicted generation — still
+    /// the newest — can register again.
+    #[tokio::test]
+    async fn a_stale_registration_cannot_reclaim_after_a_liveness_eviction() {
+        let broker = CommandBroker::new();
+        let stale = broker.new_connection_generation();
+        let current = broker.new_connection_generation();
+
+        assert!(broker.begin_registration("a1", current).await.is_some());
+        broker.evict_agent("a1").await;
+
+        assert!(
+            broker.begin_registration("a1", stale).await.is_none(),
+            "the eviction keeps the mark, so a stale registration is still refused"
+        );
+        assert!(
+            broker.begin_registration("a1", current).await.is_some(),
+            "the evicted generation is still the newest one and may recover"
         );
     }
 
