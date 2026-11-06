@@ -1,5 +1,5 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
-import { KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
+import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool, completeIssueUpdateProposal } from '../tools/gh/issue/update.mjs';
