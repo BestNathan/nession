@@ -160,6 +160,7 @@
         '<p>SC-01 · Reconnect restores consistent visible Terminal content.</p>'+
         '<p>SC-02 · TUI input works correctly after reconnect.</p>'+
         '<p class="added">+ SC-03 · Desktop/mobile viewport transitions remain consistent.</p></div>'+
+        (state.compare?'<div class="wc-definition"><h3>Version comparison</h3><p>Published v1: 2 criteria, SHA a3e71c9…; proposed v2: 3 criteria, unpublished. Existing executions and evidence remain pinned to v1.</p></div>':'')+
         (state.confirm?'<div class="wc-confirm"><h3>Adopt new Contract revision?</h3><p class="wc-section-note">v1 remains immutable. Existing executions and verification stay pinned to v1. This simulated action creates published v2 only in memory.</p>'+
           '<div class="wc-actions">'+action("Cancel","cancel")+
           action("Confirm adoption","adopt","dark")+'</div></div>':
