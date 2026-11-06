@@ -38,3 +38,11 @@ Open `index.html` in a browser. Try scenarios 1–7 above; reset returns the fix
 ## Artifact location
 
 Shared orphan `prototype` branch: `files-workspace-2751/index.html`. Canonical Pages route after verified publish: https://bestnathan.github.io/nession/prototypes/files-workspace-2751/index.html . Direct source: https://github.com/BestNathan/nession/tree/prototype/files-workspace-2751 .
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` is a directly accessible interactive review page using the shared `../prototype-frame-2758/frame.css`, `frame.js` and `review-bridge.*`. Its order is Requirement overview → 1:1 CSS-pixel product mock → interaction/fidelity details. Use the original [Requirement](https://github.com/BestNathan/nession/issues/2751) for the current design contract.
+- **Behavior:** preserves this directory's existing state transitions; moves fixture controls, reset, test inspectors, and scenario narratives outside the product viewport wherever they are static. Device width controls and full-page Reset belong to the external harness.
+- **Fidelity:** 源选择、目录创建、冲突恢复均为本地 FileRef 逻辑；深色原型配色尚需与当前 token 对照。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
+- **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
+- **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/files-workspace-2751/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
