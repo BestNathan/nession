@@ -229,8 +229,7 @@ document.getElementById("app").addEventListener("input",function(e){if(e.target.
 document.getElementById("app").addEventListener("change",function(e){if(e.target.id==="source-picker"){getDraft();state.source=e.target.value;state.selected=null;state.currentDir="src";state.open=null;state.expanded={"src":true};state.stack=[""];state.mobileView="browser";state.editing=false;state.form=null;state.sheet=null;state.context=null;state.offline=false;notify("Switched source. FileRefs and selection were not retargeted.");render();}});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(state.dialog){state.dialog=null;state.pending=null;render();}else if(state.form){state.form=null;render();}else if(state.context){state.context=null;render();}else if(state.sheet){state.sheet=null;render();}}if(e.key==="Enter"&&e.target&&e.target.id==="filename"){e.preventDefault();submitForm();}});
 render();
-var link=document.getElementById("source-link");
-fetch("../manifest.json",{cache:"no-store"}).then(function(r){if(!r.ok)throw Error("no manifest");return r.json();}).then(function(m){var sha=m.source_sha||m.prototype_sha||m.sha||m.commit_sha;if(/^[0-9a-f]{40}$/.test(sha)){var a=document.getElementById("source-link");if(a)a.href="https://github.com/BestNathan/nession/blob/"+sha+"/files-workspace-2751/index.html";}}).catch(function(){});
+// The trusted Pages publisher alone pins the external review-page Source link.
 })();
 </script>
 <script type="application/json" id="np-review-config">{"surface":"#app","external":[],"proxy":[["Reset fixture","[data-action='reset']"]],"hide":["#app > .top","#app > .hint"]}</script><script src="../prototype-frame-2758/review-bridge.js" defer></script><script src="../prototype-frame-2758/frame.js" defer></script></body>
