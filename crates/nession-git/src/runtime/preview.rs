@@ -582,6 +582,17 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_permission_error_is_a_denied_answer_not_a_content_answer() {
+        for error in [rustix::io::Errno::ACCESS, rustix::io::Errno::PERM] {
+            match map_open_error(error) {
+                OpenFailure::Denied(message) => assert!(message.contains("Permission denied")),
+                other => panic!("expected a denied answer, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn detects_a_path_replaced_after_the_handle_was_opened() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("note.txt"), "original").unwrap();

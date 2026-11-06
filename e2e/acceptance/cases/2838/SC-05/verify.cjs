@@ -24,6 +24,7 @@ run(({ evidence }) => {
     'runtime::preview::tests::refuses_a_final_symlink_instead_of_following_it',
     'runtime::preview::tests::refuses_a_symlinked_parent_instead_of_following_it',
     'runtime::preview::tests::a_fifo_cannot_block_the_open_and_is_not_a_regular_file',
+    'runtime::preview::tests::a_permission_error_is_a_denied_answer_not_a_content_answer',
     'runtime::preview::tests::detects_a_path_replaced_after_the_handle_was_opened',
     'runtime::preview::tests::detects_a_repository_root_replaced_after_the_read_started',
   ]);
@@ -75,8 +76,8 @@ run(({ evidence }) => {
     value:
       'exact SHA ' + sha + ': the real nession-git extension answered git.preview through the ' +
       'erased provider boundary; the runtime rejected a tracked/missing/traversing path and a ' +
-      'symlink, returned the actual conflict bytes once, and bounded text with an exact omitted-' +
-      'byte count including a multi-byte cap boundary',
+      'symlink, mapped permission errors to a denied answer, returned the actual conflict bytes ' +
+      'once, and bounded text with an exact omitted-byte count including a multi-byte cap boundary',
   });
   evidence.push({
     type: 'test',
