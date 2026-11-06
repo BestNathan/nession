@@ -15,7 +15,11 @@ test('SC-04: narrow Web drawer and the independent App shell', async ({ page }) 
   await expect(page.getByTestId('sidebar-column')).toHaveCount(0);
   await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
   await expect(page.getByTestId('sidebar-drawer-close')).toHaveAccessibleName('Close sessions');
-  expect(await page.getByTestId('session-drawer-panel').evaluate((element) => element.getBoundingClientRect().x)).toBe(0);
+  // The panel animates in with `slide-in-from-left`; assert its settled
+  // position rather than a frame captured while the entrance is running.
+  await expect.poll(async () =>
+    page.getByTestId('session-drawer-panel').evaluate((element) => element.getBoundingClientRect().x),
+  ).toBe(0);
 
   await page.getByTestId('sidebar-drawer-close').click();
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);

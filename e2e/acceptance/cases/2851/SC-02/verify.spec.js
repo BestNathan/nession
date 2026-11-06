@@ -96,7 +96,10 @@ test('SC-02: search, unified row actions, metadata ownership and offline states'
   await page.reload();
   await page.getByTestId('session-drawer-panel').waitFor();
   const narrowActions = page.getByTestId('session-actions-devbox-01:design-system');
-  expect(await narrowActions.boundingBox()).toMatchObject({ width: 44, height: 44 });
+  // The drawer slides in from the left. A single bounding-box read taken
+  // between the visibility and animation frames can observe a composited
+  // size mid-transition; poll for the settled 44px target instead.
+  await expect.poll(async () => narrowActions.boundingBox()).toMatchObject({ width: 44, height: 44 });
   await narrowActions.click();
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveCount(4);
   await page.keyboard.press('Escape');
