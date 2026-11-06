@@ -42,3 +42,9 @@ Find one canonical **column count** for the same Nession Session that remains un
 - **Mock fidelity:** DOM 字形尺寸测量不等同于 xterm renderer 精度，且这里是双端几何实验。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
 - **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
 - **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/terminal-fixed-cols-2487/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
+
+## 2026-11-06 review and fixes
+
+The original standalone simulator imported the JetBrains Mono variable font from a third-party CDN. The trusted Pages prototype CSP allows local/data fonts and Google Fonts but **not** this CDN, so the measurement was already silently relying on a fallback while pretending to prefer the named font. The prototype no longer attempts the unsupported download: it measures and labels the selected browser's local system-monospace fallback explicitly.
+
+This is only deterministic DOM text-cell sizing. It is **not** evidence of JetBrains Mono glyph parity, the generated production xterm theme, or the real xterm measured-cell fitting algorithm. A true font-specific comparison requires an approved local asset and a current `FixtureTerminal` browser check; do not restore the prohibited CDN dependency.

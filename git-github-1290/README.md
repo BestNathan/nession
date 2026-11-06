@@ -93,3 +93,9 @@ Snapshot metadata: number, title, author login, public labels, state/draft/merge
 - **Mock fidelity:** GitHub Issues、PR、Actions 和 Diff 数据为匿名 fixture，未联网。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
 - **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
 - **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/git-github-1290/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
+
+## 2026-11-06 review and fixes
+
+The mock was rendering its Scenario/Reset/Inspector bar **inside** the product `#app` on each `render()`, despite the review-page rule that fixtures must be external. It now draws all fixture controls and state inspector into `#np-git-fixture-controls` under `[data-np-fixtures]`, including after scenario changes. The product height and GitHub issue reader follow the actual device size rather than reserving space for the former 74px in-product fixture toolbar or relying on host `100dvh`.
+
+Source code and a current JS VM DOM-stub exercised Terminal → Capsule → Git Workspace → Issues, mock refresh count, external inspector, and Reset (8 focused checks passed). The checked-in smoke harness was updated to validate external controls. Source-only evidence is **not** a live browser walkthrough or confirmation against current Git/Workspace production layout and tokens.

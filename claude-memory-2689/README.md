@@ -106,3 +106,9 @@ Source: https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689
 - **Fidelity:** Claude Memory Markdown 与 Frontmatter 使用公开脱敏 fixture。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
 - **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
 - **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/claude-memory-2689/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
+
+## 2026-11-06 review and fixes
+
+The Memory App's edge-swipe handler previously checked `window.innerWidth` and compared touch positions with the host browser's left/right edges. At an embedded App 390 device inside a desktop browser, swipe navigation was incorrectly disabled. The handler now uses the `#app` bounding rect and device-local touch coordinates. The review bridge also constrains the contextual capsule, Sessions layer and capability widths using device-relative `cqw`, rather than host `100vw`.
+
+The mock smoke test includes a 1440px reviewer / 390px App edge-swipe case. Current source was executed under a V8 DOM stub: left swipe opened Sessions, returning to Terminal worked, right-edge swipe opened Workspace, and returning to Terminal worked (5/5 focused state checks). Physical touch/gesture ownership and production React/App visual consistency remain unverified.
