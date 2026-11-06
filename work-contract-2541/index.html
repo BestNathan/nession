@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · WorkContract · Interactive Prototype #2541</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+  <header class="np-overview">
+    <nav class="np-breadcrumb" aria-label="Prototype navigation">
+      <a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>WorkContract</span>
+    </nav>
+    <span class="np-eyebrow">WORK / DOMAIN DESIGN</span>
+    <div class="np-header-main">
+      <div>
+        <h1 class="np-title">WorkContract · Immutable work agreement</h1>
+        <p class="np-subtitle">把工作定义为不可随意变更的契约。查看明确的目标与验收条件、独立的 Thread/Execution、来源变化产生的修订提案以及每个执行结果所依据的契约版本。</p>
+      </div>
+      <div class="np-links">
+        <a href="https://github.com/BestNathan/nession/issues/2541" target="_blank" rel="noopener noreferrer">Issue #2541</a>
+        <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+      </div>
+    </div>
+    <div class="np-meta">
+      <span>Surface: <strong>AI Workspace → Work detail</strong></span>
+      <span>Model: <strong>WorkContract v1 / candidate v2</strong></span>
+      <span>Fidelity: <strong>Interactive mock, no API</strong></span>
+    </div>
+  </header>
+  <main>
+    <section class="np-preview" aria-label="Interactive WorkContract mock">
+      <div class="np-section-heading">
+        <div>
+          <h2>1:1 interactive product preview</h2>
+          <p>仅预览区域属于产品模拟。调整宽度不会缩放像素；测试场景在下方独立切换。</p>
+        </div>
+        <div class="np-preview-toolbar" aria-label="Viewport controls">
+          <button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button>
+          <button type="button" data-np-size="1024">Web 1024</button>
+          <button type="button" data-np-size="430">App 430</button>
+          <button type="button" data-np-size="390">App 390</button>
+          <button type="button" data-np-size="375">App 375</button>
+          <button type="button" data-np-reset>Reset</button>
+        </div>
+      </div>
+      <div class="np-stage">
+        <div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:720px">
+          <div id="contract-product" class="work-product" aria-label="Nession contextual WorkContract detail"></div>
+        </div>
+      </div>
+      <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+      <div class="np-fixtures" aria-label="External scenario controls">
+        <span class="np-fixtures-title">Source scenarios (mock only)</span>
+        <button type="button" data-fixture="normal" aria-pressed="true">GitHub current</button>
+        <button type="button" data-fixture="changed">Source changed</button>
+        <button type="button" data-fixture="denied">Access denied</button>
+        <button type="button" data-fixture="unavailable">Source offline</button>
+        <button type="button" data-fixture="feishu">Feishu block fixture</button>
+      </div>
+    </section>
+    <section class="np-details" aria-label="Functional design and verification">
+      <h2>Function design &amp; verification</h2>
+      <p class="np-details-lede">这是用于讨论 WorkContract 领域概念的交互设计，不是一个已实现的 Work 业务页面；产品区域不含原型开关、状态调试或假权限。</p>
+      <div class="np-detail-grid">
+        <article class="np-detail">
+          <h3>关键体验路径</h3>
+          <ol class="np-steps">
+            <li>打开当前工作 → 查看发布的 v1 契约，切换 Criteria，展开 SC 的验证依据。</li>
+            <li>切换 Thread，发送模拟评论；v1 版本和目标不应发生变化。</li>
+            <li>选择下方 Source changed，打开 Source 或 Compare；检查源内容变更不会直接覆盖发布版本。</li>
+            <li>Review proposal → 确认模拟采用 v2；回到 Revision history 仍可查看 v1，执行与验收继续固定在原版本。</li>
+            <li>切换 Access denied / Source offline / Feishu block fixture；切换 Web 与 App 真实 CSS 宽度；Reset 重播。</li>
+          </ol>
+        </article>
+        <article class="np-detail">
+          <h3>领域边界</h3>
+          <p><code>WorkContract</code> 是统一名词，替代 WorkItem。发布的 Definition + Criteria 不可修改；<code>WorkThread</code>、ExecutionRef、Verification/Evidence 是关联对象，而不是不可变定义的一部分。</p>
+          <p>Author checkbox、可信验证结果和外部 Source Revision 互不等同；SourceAdapter 的获取/授权与 ContractParser 的语义解析也必须分离。</p>
+        </article>
+        <article class="np-detail">
+          <h3>产品视觉与尺寸</h3>
+          <p>复用共享 #2758 三段式框架；内容区域采用 <code>design/generated/web.css</code> 的语义中性色、字号关系，参考 WorkspaceShell 的工作主体优先与 App 单列深度。外部 Width/Reset/Fixtures 严禁进入产品屏幕。</p>
+          <p>1:1 指 CSS 真实像素，非生产 React / shadcn 像素完全一致。尚需与真实 Nession Web/App Fixture 在 Chromium 中并排比较。</p>
+        </article>
+        <article class="np-detail">
+          <h3>证据与限制</h3>
+          <p>所有合同、修订、评论、权限和 GitHub / 飞书内容是安全的内存模拟。模拟 “Adopt v2” 不向任何远端写入，不调度 Agent，不发布知识，也不产生可信 Acceptance。</p>
+          <p>静态解析、浏览器交互、Pages SHA 及生产 E2E 是四种不同证据；仅在完成各自检查后分别记录。发布后核对 <code>prototypes/manifest.json</code> 的 SHA。</p>
+          <details class="np-inspector"><summary>Inspect semantic mapping (design only)</summary><pre>WorkContract: contract_id + published revision + definition_digest
+WorkCriterion: criterion_id + contract_revision + source_ref
+WorkThread: events/comments + origin/actor + source_revision
+WorkExecutionRef: contract_id + pinned_revision + task/run/session
+WorkVerification: criterion_id + pinned_revision + trusted evidence
+WorkSourceBinding: provider + host/tenant + document key + auth scope + source_revision
+Change: Source revision != Contract revision; candidate needs explicit adoption</pre></details>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer class="np-footer">Nession design prototype · Deterministic UI mock · No network or production permissions · Not Acceptance evidence</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body>
+</html>
