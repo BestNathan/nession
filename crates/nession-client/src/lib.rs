@@ -51,4 +51,4 @@ pub use connection::{open_ws, ClientConfig, ClientConnection, WsStream, DEFAULT_
 pub use error::ClientError;
 pub use p2p::{attach_frame, P2pConnection};
 pub use unit::{proto_msg, UnitRequest};
-pub use units::AttachMode;
+pub use units::{AttachMode, RelayBeginOutcome};

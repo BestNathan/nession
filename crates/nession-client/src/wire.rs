@@ -47,6 +47,13 @@ pub const SERVER_SESSION_LIST: &str = "server.session.list";
 /// `server.session.attach` — ask the Server how to reach a session.
 pub const SERVER_SESSION_ATTACH: &str = "server.session.attach";
 
+/// `server.session.relay.begin` — start the relay stream after a relay attach.
+pub const SERVER_SESSION_RELAY_BEGIN: &str = "server.session.relay.begin";
+
+/// `server.session.relay.ready` — the Server's receipt that the relay's Agent
+/// attach was accepted, correlated by the begin request's id.
+pub const SERVER_SESSION_RELAY_READY: &str = "server.session.relay.ready";
+
 /// `server.session.create` — create a session on one agent.
 pub const SERVER_SESSION_CREATE: &str = "server.session.create";
 
