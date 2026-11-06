@@ -4,7 +4,7 @@
 
 ## Built-in visual UI specification (primary review experience)
 - **Open this prototype's index.html and click “查看 UI 设计标注”** in the preview toolbar, or scroll directly to `index.html#ui-spec`. The visual specification lives **on the same page**; there is no requirement to open GitHub Markdown to see it.
-- Select **Sidebar / top actions / toggle / New Session / search / Session row / title / metadata / footer / status dot / drawer / work surface** to inspect the live computed width, height, padding, radius, font weight/size/line height and the canonical token bindings.
+- Select **Sidebar / top actions / toggle / New Session / search / Session row / actions trigger / menu / title / metadata / footer / status dot / drawer / work surface** to inspect the live computed width, height, padding, radius, font weight/size/line height and the canonical token bindings.
 - The responsive ruler shows measured navigation/work widths for desktop expanded/collapsed and narrow Web. The color swatches and typography samples are rendered in the review region using the pinned Nession token snapshot.
 - “在预览中点选元素” temporarily switches clicks on the product preview to inspection; turn it off to continue using the mock normally. Highlights are **review-only**, never a persistent product chrome.
 - Missing elements (collapsed Sidebar, an explicit create form, drawer closed) are marked hidden/unavailable; the inspector never fabricates measurements or claims parity to the production site.
@@ -37,29 +37,30 @@ Claude / ChatGPT-inspired, Session-first recent-work navigation. This is a **can
 1. Click another Session; the right work surface adopts its selected identity and sanitized Terminal lines.
 2. Search \`sandbox\`, clear input and verify empty-match feedback with \`no-such-session\`.
 3. Click **New session**, try empty name and offline \`runner-02\` (negative paths), then explicitly submit a title on online \`devbox-01\`. The local fixture adds/selects it; no remote creation.
-4. **Wide Web**: on a selected/hovered/focused Session row, use the existing inline gear **Configure attach settings** or trash **Kill session** icons. The desktop row does **not** acquire a `···` button or switch to a custom Session-actions page.
-5. **Narrow Web drawer**: activate the `···` overflow to open the **anchored** menu containing only `Attach settings` and `Kill session`. Outside click / Escape / scroll close it; the Session list remains visible.
-6. Configure mode and renderer in the local preview shell-dialog approximation; for Kill, type the **exact tmux Session name** (not the optional display title) to enable the destructive confirmation, following current main `KillConfirmDialog`. No backend/session termination occurs.
-7. Collapse wide sidebar: column returns all width to work, and selected Session stays. Reopen with the floating control.
-8. Click Agents / locations; observe Agent connectivity independent of Server status.
-9. Select Narrow 390 or 375: open the drawer, close with scrim/button, select a Session. Switch back to desktop Web to retain layout.
-10. Switch Terminal/Workspace via the shell surface switcher; Workspace remains only an approximation.
+4. On **wide Web or narrow Web**, open a Session row's **`···` anchored dropdown**. A row's selection stays unchanged merely by opening the menu; the list remains visible. The trigger is revealed by hover/focus/selection on desktop and stays touch-operable in the narrow drawer.
+5. Choose **Session details** to inspect runtime identity (immutable tmux name, Agent/location, workload and state) plus its local metadata.
+6. Choose **Edit details** to edit a display title, description and tags (existing #2789 metadata fields). Saving changes the displayed Session title but never `session_name` or `session_id`. Try a blank title (reverts to tmux name), a tag, and the offline Agent (edit unavailable).
+7. Choose **Attach settings** to configure local-preview Auto/P2P/Relay mode and renderer. This corresponds to the existing configure intent, not a terminal reconnect.
+8. Choose **Kill session**, type its **exact tmux Session name** (not the display title), then confirm. No backend/session termination occurs; this only removes a local fixture.
+9. Dismiss the dropdown using Escape, clicking outside or scrolling the list; then collapse and reopen the wide sidebar without losing selected work.
+10. Open Agents/locations and check disconnected state independent of Server connectivity. Switch to Narrow 390/375; open/close the drawer and repeat the dropdown flow.
+11. Switch between Terminal/Workspace in the mock shell; the Workspace remains illustrative.
 
 ### Fidelity and limitations
 - **Business fixtures**: sanitized local hardcoded Sessions, Agents, command lines; no credentials or real host addresses.
 - **State**: in-browser memory only. Refresh / external Reset resets all changes. No database/Server/WebSocket/tmux/multi-client.
 - **Terminal**: plain CSS monospace text representing a shell; **not xterm.js**, not authoritative fixed-col fit, not a PTY. Visual approximation of current light shell. No real attach, recovery, paste, or executable commands.
 - **Layout**: outer review frame supplies 1:1 CSS pixel width at 1280, 1440, 1180, 1024, 390, 375; responsive behavior reacts to \`np:resize\` and the **internal** selected width. No CSS transform or zoom. Real browser measured dimensions/pixel parity have **not** been verified.
-- **Session action fidelity**: **Unchanged** from main `web/src/product/session/patterns/SessionItem.tsx`: wide-Web hover/focus/selected inline configure/kill icons; narrow-Web `···` anchored `DropdownMenu` with Attach settings / Kill session. `ShellDialogs` owns the attach-configure and kill-confirmation outcomes; the latter requires exact tmux Session name input. The former custom action panel and mock Open/Rename/End action vocabulary were wrong and have been removed.
+- **Session actions / approved candidate:** Both wide and narrow Web use **one anchored `···` menu** with `Session details`, `Edit details`, `Attach settings`, `Kill session`. This **changes the current desktop entry point** (main ships inline icons) and adds direct navigation to existing Session metadata workflows (#2789), but does not add an Agent operation or rename tmux. `SessionDetails` / `SessionMetadataSection` remain the canonical data/editing owner; `ShellDialogs` / `AttachDialog` / `KillConfirmDialog` own configure and irreversible operations. The mock uses scoped local overlays for inspectable scenarios; production must reuse existing feature components and state rather than duplicating metadata save logic. No full-sidebar action page.
 - **IA delta**: Agent section removed from top by design; a recency-only grouping added to a still-flat Session list; old static summary rail intentionally replaced with full tuck-away. Real product adoption requires updating the canonical design docs/contracts and E2E in a production PR, *not* copying this mock into app.
 - **Production owner**: \`web/src/app/experiences/web/WebLayout.tsx\`, \`web/src/app/Sidebar.tsx\`, \`web/src/product/session/patterns/SessionList.tsx\`; product rules in \`docs/design/interaction/web.md\`, \`information-architecture.md\`, \`design-system/patterns/session-list.md\`.
 - **Browser**: actual Chromium/Playwright click/keyboard/visual checks **not executed** in authoring environment. The presence of HTML or a publication link is not a browser test.
 - **Publication**: \`prototype\` source commit must be pinned after write. Pages URL is **unverified** until HTTPS response and \`prototypes/manifest.json\` record the same SHA. Do not present a constructed preview as live.
 
 ### Verification matrix (to be executed)
-- Full Web 1180, 1024: Session select/search/inline configure/kill actions/Agent disclosure; expand/collapse actual bounding widths; keyboard focus, no lost current work.
-- Narrow Web 390, 375: drawer, scrim, full list scrolling and no rail; same page Web → narrow → Web round trip.
+- Full Web 1280, 1440, 1180, 1024: Session select/search, single row `···` menu, view/edit details, configure and typed-name kill flows, Agent disclosure; expand/collapse actual bounding widths; keyboard focus, no lost current work.
+- Narrow Web 390, 375: drawer, scrim, the same anchored four-action menu, 44px menu trigger, full list scrolling and no rail; same page Web → narrow → Web round trip.
 - Reviewer browser narrower than 1180: horizontally scroll stage to both edges without scaled/cropped 1:1 viewport; read computed product CSS dimensions.
-- Escape closes local dropdown/action confirmation/drawer; empty Session list after ending all rows is represented without crashing.
+- Escape/outside-click/list-scroll closes the anchored dropdown; Escape closes local details/configuration/confirmation overlays and drawer; empty Session list after ending all rows is represented without crashing.
 - Console/resource load, CSP publish, gallery link, source pin / manifest SHA and static source checks.
 - No claim of production E2E or real multi-client Terminal integrity.

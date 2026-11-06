@@ -44,9 +44,11 @@ The canonical **review experience is the interactive `index.html#ui-spec` region
 | Component | Rest | Hover / focus | Selected / active | Disabled / error / empty |
 | --- | --- | --- | --- | --- |
 | Sidebar toggle | single 36px control | focus ring / subtle fill | expanded or fully tucked away | always discoverable; no duplicate Rail controls |
-| Session row (wide Web) | title + metadata, no extra menu | **Inline gear + trash icons** on hover/focus | selected row keeps both icons visible | offline Agent: row remains discoverable |
-| Session row (narrow Web) | title + metadata + one `···` affordance | tap/keyboard opens **anchored** menu | `Attach settings` and `Kill session` only | Escape/outside click/scroll closes menu without replacing list |
-| Configure / Kill outcome | existing `ShellDialogs` modal boundary | configuration only on explicit request | Kill confirmation requires typing the exact tmux Session name (not the display alias) | mock-only state, no backend side effect |
+| Session row (wide Web) | title + metadata + one `···` action trigger | trigger appears on hover/focus/selection | **anchored four-item dropdown**, not inline gear/trash | offline Agent: row still discoverable |
+| Session row (narrow Web) | title + metadata + one touch-safe `···` trigger | tap/keyboard opens same **anchored** menu | menu keeps list and active Session visible | Escape/outside click/scroll closes menu |
+| Session menu | `Session details`, `Edit details`, `Attach settings`, `Kill session` | 13px body role, 16px icons, minimum 34px row; separator before destructive item | menu anchored to its own Session trigger | no full-sidebar action screen, no unsupported tmux rename |
+| View / edit details | existing SessionDetails / SessionMetadataSection owns data | read immutable tmux name; edit display title, description and tags | editing may clear alias to fall back to tmux name | offline Agent blocks edit; preserve metadata validation |
+| Configure / Kill outcome | existing `ShellDialogs` action ownership | connection settings open only on explicit request | Kill confirmation requires typing the exact tmux Session name (not display title) | mock-only state, no backend side effect |
 | Search | quiet input, empty text | focus ring, text entry | filter applied without redefining global total | no matches: query-specific message and clear affordance |
 | New Session | explicit button, 36px desktop | hover / focus | opens scoped form, no creation yet | online Agent needed for submit; invalid name and offline Agent produce text errors |
 | Agent entry | bottom secondary row | hover/focus | explicitly reveal Agent detail | offline node does not turn Server status into failure |
@@ -77,14 +79,20 @@ The canonical **review experience is the interactive `index.html#ui-spec` region
 1. **Static token parity:** pin the exact `main` revision and compare all referenced source variable names/values against `design/generated/web.css`. A local mock snapshot is *not* a production token change.
 2. **Real Chromium geometry:** at 1280×800 and 1440×900 measure computed Sidebar width (246px), toggle bbox (36px), Session title/metadata computed fonts/line heights, row pad/radius, 5px status dot, and expanded/collapsed main bbox delta.
 3. **Responsive:** at 390×844/375×812 test drawer overlay, scroll ownership, no rail, no body overflow; switch Web → narrow Web → Web without reload, and inspect selected work persistence. Test real **AppLayout** separately in production regression.
-4. **Interaction:** search/select/empty/error, inline gear/trash on wide Web hover/focus/selection, anchored `···` dropdown on narrow Web, explicit create, configure and typed-name kill confirmation, keyboard focus, ESC and scrim close.
+4. **Interaction:** search/select/empty/error, one anchored `···` dropdown on both wide and narrow Web, details read-only view, metadata title/description/tags edit, attach settings, typed-name kill confirmation, keyboard focus, Escape/outside click/list-scroll dismissal, and drawer scrim close.
 5. **Visual:** compare screenshot crops to the current Nession production fixture for unchanged patterns. Mark **candidate** differences as purposeful; do not update golden images solely because a new mock looks different.
 6. **Terminal boundary:** the HTML prototype still shows plain text rather than xterm, so terminal glyph size/fit, 96 fixed columns or tmux resize are **not** established by the mock. Production attach/resize must be tested separately.
 7. **Publication evidence:** verified GitHub commit is source proof; only a Pages HTTPS readback and matching `prototypes/manifest.json` SHA establishes live preview. Mock checks do not count as product Acceptance.
 
-### Review correction: preserve shipped Session row actions
+### Revised design decision: unified Session overflow menu
 
-This is a Sidebar **information architecture** redesign, not a Session action redesign. Current main `web/src/product/session/patterns/SessionItem.tsx` renders two inline icons (Configure attach settings + Kill Session) at `lg+` when a row is hovered/focused/selected. Below `lg` it renders one anchored `DropdownMenu` trigger, with only Attach settings and Kill session. Current `ShellDialogs.tsx` owns the corresponding `AttachDialog` (configure mode saves profile only) and `KillConfirmDialog` (type the exact Session name before irreversible termination). The prototype now follows those entry points and preserves the Session list. It does not include the earlier mock-only Open/Rename/End full-sidebar action page.
+After further UI review, `#2851` **intentionally changes the desktop SessionItem action presentation** to match the narrow Web interaction: one `···` trigger on each Session row, anchored dropdown. No permanent inline Settings/Kill icon pair on desktop. The menu contains `Session details`, `Edit details`, `Attach settings` and `Kill session`, with a separator before destructive Kill. Only the entry point is new; backend semantics and UX ownership must remain canonical.
+
+- **Read/edit**: `SessionDetails.tsx` and `SessionMetadataSection.tsx` from #2789 already own display title / description / tags. This is an existing capability newly surfaced from the row menu; do not implement a second metadata protocol. Display title is an alias, never a tmux rename. Validate title ≤120 Unicode code points, description ≤2000, at most 12 case-insensitively unique tags ≤32 characters; offline Agent prevents save.
+- **Configure**: existing `AttachDialog` with `intent="configure"` via `ShellDialogs`. No new attach semantics.
+- **Kill**: existing `KillConfirmDialog` requires typing the **exact tmux Session name**, not the display alias, before confirming.
+- **Menu dismissal**: Escape, click outside, scroll; focus restoration and keyboard navigation. The menu must overlay the current list, not replace it.
+- **Mock gap**: prototype detail/editor/settings overlays use in-memory fixtures for direct review; production should route to the existing metadata editor or reuse it, not copy the mock modal implementation.
 
 ### Changed since initial #2851 prototype
 Initial mock used Sidebar **272px**, icon button **37px**, Session title **13px**, metadata **11px**, row radius **11px**, status mark **7px**, and a drawer width of **272px**. Those values were **not authorized design changes**; the updated source corrects those mismatches to the relevant Nession values.
