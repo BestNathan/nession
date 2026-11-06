@@ -634,28 +634,28 @@ try {
   const repairPublisherRun=publisherRun+500;
   // Real disposable bare-Git Store WAL is committed before the first mock
   // GitHub mutation. Byte-identical retry can ONLY reconcile via GET.
-  const repairIntent=commitQwenRepairPublisherIntent({
+  const repairWalIntent=commitQwenRepairPublisherIntent({
     remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun});
-  assert.equal(repairIntent.status,'committed');
-  assert.equal(repairIntent.may_publish,true);
-  assert.equal(repairIntent.record.branch,'refs/heads/'+branch);
-  assert.equal(repairIntent.record.checkpoint_version,2);
-  assert.equal(repairIntent.record.checkpoint_commit_sha,
+  assert.equal(repairWalIntent.status,'committed');
+  assert.equal(repairWalIntent.may_publish,true);
+  assert.equal(repairWalIntent.record.branch,'refs/heads/'+branch);
+  assert.equal(repairWalIntent.record.checkpoint_version,2);
+  assert.equal(repairWalIntent.record.checkpoint_commit_sha,
     repairAccepted.checkpoint.commit_sha);
-  assert.equal(repairIntent.record.worker_sha,repairRun.head_sha);
+  assert.equal(repairWalIntent.record.worker_sha,repairRun.head_sha);
   const repairIntentReplay=commitQwenRepairPublisherIntent({
     remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun});
   assert.equal(repairIntentReplay.status,'reconcile');
   assert.equal(repairIntentReplay.may_publish,false);
   assert.equal(repairIntentReplay.store_commit_sha,
-    repairIntent.store_commit_sha);
-  const walLocation=qwenRepairPublisherIntentPath(repairIntent.record);
+    repairWalIntent.store_commit_sha);
+  const walLocation=qwenRepairPublisherIntentPath(repairWalIntent.record);
   assert.match(walLocation,/^workflows\/issues\/[0-9]+\/results\/[0-9]+-1-[a-f0-9]{64}\.json$/);
   assert.throws(()=>commitQwenRepairPublisherIntent({
     remote,preflight:repairPreflight,publisher_run_id:repairPublisherRun+1}),
     /conflicting immutable/);
   const materialized=materializeQwenRepairGitTree({
-    preflight:repairPreflight,intent:repairIntent,sourceCheckout:repairPubCheckout});
+    preflight:repairPreflight,intent:repairWalIntent,sourceCheckout:repairPubCheckout});
   const repairBlob=git(repairSource,'rev-parse',shaB+':calc.js');
   const repairBaseBlob=git(repairSource,'rev-parse',commitSha+':calc.js');
   const baseTree=git(repairSource,'rev-parse',commitSha+'^{tree}');
@@ -712,7 +712,7 @@ try {
     throw Error('unexpected privileged Repair API '+method+' '+endpoint);
   };
   const repairPR=await publishQwenRepairToSamePR({
-    preflight:repairPreflight,intent:repairIntent,
+    preflight:repairPreflight,intent:repairWalIntent,
     sourceCheckout:repairPubCheckout,api:repairApi});
   assert.equal(repairPR.head_sha,shaB);
   assert.equal(repairPR.previous_sha,commitSha);
@@ -734,9 +734,9 @@ try {
   assert.equal(repairMutations.length,4,
     'ambiguous replay cannot perform another GitHub write');
   for(const forged of [
-    {intent:{...repairIntent,record:{...repairIntent.record,
+    {intent:{...repairWalIntent,record:{...repairWalIntent.record,
       source_sha:inputSha}}},
-    {intent:{...repairIntent,store_commit_sha:'invalid'}},
+    {intent:{...repairWalIntent,store_commit_sha:'invalid'}},
     {preflight:{...repairPreflight,evidence:{...repairPreflight.evidence,
       patch_sha256:'f'.repeat(64)}}},
   ])await assert.rejects(()=>readBackQwenRepairPR({
@@ -795,7 +795,7 @@ try {
   // The real Store publisher handoff consumes only independently checked
   // GitHub PR-B receipt + committed WAL. It CAS-projects one Reviewer.
   const repairHandoff=applyQwenRepairPublicationToRemote({
-    remote,readback:repairReadback,intent:repairIntent,registry});
+    remote,readback:repairReadback,intent:repairWalIntent,registry});
   assert.equal(repairHandoff.changed,true);
   assert.equal(repairHandoff.reviewer_agent_id,'review-qwen-01');
   assert.equal(repairHandoff.reviewer_action_id,nextReview[0].id);
