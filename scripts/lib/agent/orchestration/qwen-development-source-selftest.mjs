@@ -196,6 +196,54 @@ try{
   assert.deepEqual(observed.paths,['src/calc.js']);
   assert.equal(observed.action_id,admission.action_id);
   git('reset','--hard','HEAD');
+  // #2817 is an actual owner/main Qwen Task, not a synthetic broad
+  // tracked-file edit. Its signed Issue identity selects precisely one
+  // existing tracked regular file and one byte-for-byte replacement.
+  const fixtureFile='e2e/fixtures/agent-development/qwen-source.md';
+  const fixtureOriginal='# Qwen integration fixture\n\n'+
+    'implementation: pending\nreview: pending\n';
+  fs.mkdirSync(path.dirname(path.join(root,fixtureFile)),{recursive:true});
+  write(fixtureFile,fixtureOriginal);
+  git('add','--',fixtureFile);
+  git('commit','-m','prepare controlled Qwen source');
+  const fixtureSha=git('rev-parse','HEAD');
+  const fixtureAdmission={...admission,issue:2817,input_sha:fixtureSha,
+    action_id:'b'.repeat(64),run_id:505};
+  const fixtureRequest={admission:fixtureAdmission,registry,
+    environment:env,cliVersion:'2.1.34',workspace:root};
+  const fixtureSnapshot=prepareQwenTrackedSource(fixtureRequest);
+  assert.deepEqual(fixtureSnapshot.allowed_files,[fixtureFile]);
+  assert.equal(fixtureSnapshot.scope,'controlled-qwen-fixture-v1');
+  assert.throws(()=>prepareQwenTrackedSource({
+    ...fixtureRequest,admission:{...fixtureAdmission,input_sha:sha}}),
+    /not the clean signed|missing allowlisted source path/);
+  write(fixtureFile,fixtureOriginal.replace(
+    'implementation: pending\n','implementation: qwen-verified\n'));
+  const fixturePatch=collectQwenDevelopmentPatch(fixtureSnapshot,{
+    events:native(['Read','Edit'])});
+  assert.deepEqual(fixturePatch.paths,[fixtureFile]);
+  assert.equal(fixturePatch.issue,2817);
+  assert.ok(fixturePatch.patch.includes('+implementation: qwen-verified'));
+  git('reset','--hard','HEAD');
+  write(fixtureFile,fixtureOriginal.replace('review: pending','review: approved'));
+  assert.throws(()=>collectQwenDevelopmentPatch(fixtureSnapshot,{
+    events:native(['Read','Edit'])}),/replace exactly one verified line/);
+  git('reset','--hard','HEAD');
+  write(fixtureFile,fixtureOriginal.replace(
+    'implementation: pending\n','implementation: qwen-verified\n')+
+    'model-added: extra\n');
+  assert.throws(()=>collectQwenDevelopmentPatch(fixtureSnapshot,{
+    events:native(['Read','Edit'])}),/replace exactly one verified line/);
+  git('reset','--hard','HEAD');
+  write(fixtureFile,fixtureOriginal.replace(
+    'implementation: pending\n','implementation: qwen-verified\n'));
+  write('src/other.js','const other = false;\n');
+  assert.throws(()=>collectQwenDevelopmentPatch(fixtureSnapshot,{
+    events:native(['Read','Edit'])}),/missing or unbounded|outside approved/);
+  git('reset','--hard','HEAD');
+  assert.equal(prepareQwenTrackedSource({
+    ...fixtureRequest,admission:{...fixtureAdmission,issue:2274},
+  }).scope,'tracked-safe-v1');
   // The fixture is itself a real Git commit and the result is a real diff;
   // no model text or self-reported "success" can replace those checks.
   console.log('Qwen bounded Developer source: exact Git SHA, real patch, native tool evidence, drift/extra edits/symlink/index/credential/model negatives passed');

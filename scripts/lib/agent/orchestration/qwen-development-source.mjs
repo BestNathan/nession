@@ -16,6 +16,14 @@ const FILE=/^(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/;
 // member budget after base64 encoding and provenance metadata.
 const MAX_PATCH=32*1024;
 const MAX_SOURCE_FILE=1024*1024;
+// This one Owner-only Qwen canary has a precise, non-production edit target.
+// Derive authority from the signed, Store-admitted Issue identity, never the
+// model prompt or its patch manifest; all other Issues retain tracked-safe-v1.
+const QWEN_CANARY=Object.freeze({
+  issue:2817,path:'e2e/fixtures/agent-development/qwen-source.md',
+  before:'implementation: pending\n',
+  after:'implementation: qwen-verified\n',
+});
 function fail(s){throw Error('Qwen Developer source: '+s);}
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 function git(root,...args){
@@ -122,11 +130,13 @@ export function prepareQwenTrackedSource({
   admission,registry,environment,cliVersion,workspace,
 }){
   const plan=bindQwenDeveloper(admission,registry,environment,{cliVersion});
-  const root=verifyCheckout(workspace,plan.source_sha,[]);
+  const fixture=admission.issue===QWEN_CANARY.issue;
+  const allowed=fixture?[QWEN_CANARY.path]:[];
+  const root=verifyCheckout(workspace,plan.source_sha,allowed);
   const origin=Object.freeze({issue:admission.issue,action_id:admission.action_id,
     run_id:admission.run_id,task:admission.task});
-  return Object.freeze({plan,origin,workspace:root,allowed_files:[],
-    scope:'tracked-safe-v1'});
+  return Object.freeze({plan,origin,workspace:root,allowed_files:allowed,
+    scope:fixture?'controlled-qwen-fixture-v1':'tracked-safe-v1'});
 }
 function expectedWorkspace(snapshot){
   if(!snapshot||!SHA.test(snapshot.plan?.source_sha??'')||
@@ -168,6 +178,18 @@ function checkedGitPatch(snapshot){
       fail('edit outside approved source paths');
     ordinaryFile(root,name);
     changed.add(name);
+  }
+  // The dedicated real Qwen integration fixture has one exact edit, not
+  // only a path constraint: a valid-looking model diff cannot rewrite any
+  // other source bytes, the Reviewer marker, or the original instructions.
+  if(snapshot.origin.issue===QWEN_CANARY.issue){
+    if(changed.size!==1||!changed.has(QWEN_CANARY.path))
+      fail('controlled Qwen fixture changed a different source');
+    const initial=git(root,'show',snapshot.plan.source_sha+':'+QWEN_CANARY.path);
+    if(initial.split(QWEN_CANARY.before).length!==2||
+        fs.readFileSync(ordinaryFile(root,QWEN_CANARY.path),'utf8')!==
+          initial.replace(QWEN_CANARY.before,QWEN_CANARY.after))
+      fail('controlled Qwen fixture must replace exactly one verified line');
   }
   // Verify that the index is still the originally admitted source. The
   // Publisher must re-check the patch/target, not trust this worker receipt.
