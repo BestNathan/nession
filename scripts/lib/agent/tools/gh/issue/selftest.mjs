@@ -293,6 +293,25 @@ try {
   assert.equal(readFileSync(filename,'utf8'),validSnapshot);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
 
+  // Reject illegal risk or comment metadata before any body mutation.
+  const tierLocked={...preE2eIssue,
+    labels:[...preE2eIssue.labels,{name:'verification:full'}]};
+  writeFileSync(filename,JSON.stringify(tierLocked));
+  const lockedSnapshot=readFileSync(filename,'utf8');
+  const validTierReason='Risk assessed for this bounded audit; no downgrade is authorized.';
+  for(const proposal of [
+    {title:'Requirement: rejected tier reason',verification_tier:'verification:integration',tier_reason:'too short'},
+    {title:'Requirement: rejected downgrade',verification_tier:'verification:scoped',tier_reason:validTierReason},
+    {title:'Requirement: rejected comment',comment:'x'.repeat(8001)},
+  ]){
+    await assert.rejects(applyIssueAuditProposal(issue,{
+      result:JSON.stringify(proposal),
+    },'example/repo'),/invalid Issue verification-tier proposal|downgrade|invalid Issue Audit comment/);
+    assert.equal(readFileSync(filename,'utf8'),lockedSnapshot,
+      'invalid metadata cannot partially update the Issue');
+  }
+  writeFileSync(filename,JSON.stringify(preE2eIssue));
+
   console.log('gh issue tools self-test: malformed E2E repair and immutable evidence passed');
 } finally {
   process.env.PATH = oldPath;
