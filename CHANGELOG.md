@@ -296,3 +296,10 @@
 - Categories: app, interaction, navigation, ownership, terminal, touch
 - Reason: Cross-link the new #2851 Web Session-first navigation article and state that the explicit Web experience route is not the App's narrow spatial shell or its collapse state
 - Source: https://github.com/BestNathan/nession/issues/2851
+
+## 2026-11-06T15:00:56Z | update | Web Session-first navigation, full tuck-away and explicit experience mode
+- Path: topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md
+- Topic: web
+- Categories: web, navigation, sidebar, interaction, ownership, responsive
+- Reason: Record the approved unified four-action row menu (details, edit, attach, typed-name kill), its details-without-selection behavior, offline edit unavailability and scroll/Escape/outside dismissal; align implementation sources to the final feature commit
+- Source: https://github.com/BestNathan/nession/issues/2851

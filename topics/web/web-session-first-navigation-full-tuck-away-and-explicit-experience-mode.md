@@ -5,8 +5,8 @@ topic: web
 categories: ["web", "navigation", "sidebar", "interaction", "ownership", "responsive"]
 status: verified
 created_at: 2026-11-06T14:33:00Z
-updated_at: 2026-11-06T14:33:00Z
-sources: ["https://github.com/BestNathan/nession/issues/2851", "https://github.com/BestNathan/nession/pull/2866", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/docs/design/interaction/web.md", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/docs/design/design-system/patterns/session-list.md", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/web/src/app/experiences/web/WebLayout.tsx", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/web/src/app/Sidebar.tsx", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/web/src/app/patterns/SidebarTopActions.tsx", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/web/src/app/patterns/SidebarAgentsEntry.tsx", "https://github.com/BestNathan/nession/blob/57f3227c2e022c286397be64e6bac7acf99e2bab/e2e/tests/browser/sidebar-session-first.spec.ts"]
+updated_at: 2026-11-06T15:00:56Z
+sources: ["https://github.com/BestNathan/nession/issues/2851", "https://github.com/BestNathan/nession/pull/2866", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/docs/design/interaction/web.md", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/docs/design/design-system/patterns/session-list.md", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/experiences/web/WebLayout.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/Sidebar.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/patterns/SidebarTopActions.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/patterns/SidebarAgentsEntry.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/product/session/patterns/SessionItem.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/product/session/components/SessionMetadataSection.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/e2e/tests/browser/sidebar-session-first.spec.ts"]
 ---
 
 # Web Session-first navigation, full tuck-away and explicit experience mode
@@ -68,6 +68,26 @@ selection; the lower `SidebarAgentsEntry` reveals the existing inert
 `SidebarAgents` rows. The canonical design owners are the Web interaction model
 and the Session list pattern.
 
+## One anchored row-action menu
+
+Every Web Session row opens the same anchored `···` menu on wide and narrow
+viewports:
+
+| Action | Owner |
+|---|---|
+| Session details | read the target Session without selecting it |
+| Edit details | `SessionDetails` / `SessionMetadataSection` alias editor |
+| Attach settings | existing `AttachDialog` configure intent |
+| Kill session | existing `KillConfirmDialog`, separated from the non-destructive actions |
+
+Wide Web reveals the trigger on hover/focus/selection; narrow Web keeps a 44px
+target visible. The menu overlays the list and never selects the row by itself;
+Escape, outside click and list scroll dismiss it. Details resolve their own
+DomainState, so an offline Agent's Session remains readable while its metadata
+editor is explicitly unavailable. Editing writes title/description/tags through
+the existing revision-guarded metadata owner and never renames tmux or changes
+`session_id`. Kill keeps the existing typed exact-tmux-name confirmation.
+
 ## Explicit experience mode
 
 The default composition remains a viewport decision: wide is Web, narrow is the
@@ -83,7 +103,7 @@ model and never inherits Web collapse state.
 
 - Requirement: [#2851](https://github.com/BestNathan/nession/issues/2851);
   implementation PR [#2866](https://github.com/BestNathan/nession/pull/2866).
-- Implementation commit: `57f3227c2e022c286397be64e6bac7acf99e2bab`.
+- Implementation commit: `cba6fd3665a6dcefc05759164654761fb5dde97c`.
 - Source-aligned pre-merge Cases SC-01…SC-06 cover Session-first composition,
   search/actions/empty states, 0px collapse and state preservation, narrow Web
   versus App, Server/Agent separation, and the measured 246/36/14/11.5/7/5
