@@ -18,6 +18,11 @@ on:
         description: Exact pending 64-char Outbox action ID
         required: true
         type: string
+      recovery_run_id:
+        description: '0 = normal dispatch; 42187623195 = exact #2817 preflight recovery'
+        required: false
+        default: 0
+        type: number
 
 permissions:
   contents: read
@@ -118,7 +123,8 @@ jobs:
             tee "$RUNNER_TEMP/agent-controller-dispatch-receipt.json"
           jq -e '.issue > 0 and (.status == "dispatched" or
             .status == "ambiguous" or .status == "reconcile" or
-            .status == "bound" or .status == "replayed")' \
+            .status == "bound" or .status == "replayed" or
+            .status == "recovered")' \
             "$RUNNER_TEMP/agent-controller-dispatch-receipt.json" >/dev/null
           {
             echo "## Authenticated Developer dispatch"
