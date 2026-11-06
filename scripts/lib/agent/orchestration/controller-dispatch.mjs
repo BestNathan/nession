@@ -121,7 +121,7 @@ function sourceStillAllowed(sha,role,task,context){
 // publication, so require the target to descend from the original published
 // main SHA instead. Exported for deterministic fixtures.
 export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', args,
-  { stdio: 'ignore', timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
+  { stdio: ['ignore','pipe','ignore'], timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
   publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha,
   task = null,context = null } = {}) {
   if (!HEX40.test(sha ?? '')) fail('invalid dispatch source SHA');
@@ -155,10 +155,11 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
       task?.repair_checkpoint?.source_run_id!==39448549052))
     fail('Repair target is not the exact authenticated published PR source');
   try {
-    if(role==='reviewer'||repair)
+    if(qwenSource)
+      run(['merge-base','--is-ancestor',qwenSource.base_sha,sha]);
+    else if(role==='reviewer'||repair)
       run(['merge-base','--is-ancestor',publishedMainSha,sha]);
-    if(qwenSource)run(['merge-base','--is-ancestor',qwenSource.base_sha,sha]);
-    else run(['merge-base', '--is-ancestor', sha, mainSha]);
+    else run(['merge-base','--is-ancestor',sha,mainSha]);
   } catch {
     if(role==='reviewer'||repair)
       fail('Reviewer/Repair target is not on the published branch history');
