@@ -125,6 +125,40 @@ so a Session that changes repository cannot display a page from the old one.
 Entering the Memory view re-reads the snapshot; nothing is fetched while the
 view is not active.
 
+## Web reader and link navigation
+
+The Memory view renders through the shared Markdown pipeline
+(`web/src/shared/markdown`): GFM, code highlighting, links and YAML/TOML
+frontmatter are the same sanitized renderer the File Browser preview uses. The
+capability owns only the document context around it.
+
+A Markdown link is a navigation candidate only when it resolves to a file in the
+**current snapshot's listed files**:
+
+- `#fragment` scrolls within the current document;
+- a relative `file.md`, `./file.md` or `topics/file.md#fragment` is resolved
+  against the source file's directory, percent-decoded, normalised segment by
+  segment and matched against the listing (exact path first, then NFC-normalised
+  equality for Unicode names);
+- traversal above the Memory root, absolute paths, queries, backslashes,
+  non-Markdown targets and any scheme other than `http(s)` are refused with a
+  non-destructive notice;
+- `http(s)` links use the shared external-link policy (`target="_blank"`,
+  `rel="noopener noreferrer"`).
+
+Navigation never bypasses the provider: opening a listed file calls
+`claude-code.memory-read` again, so the read boundary above remains the final
+authority. The link resolver is a narrowing layer, not a second authorization
+system.
+
+Fragments are deferred until the target path's content has rendered. A heading
+absent from a partially loaded file is reported as not yet available; the reader
+keeps the target pending across `hasMore` continuation and scrolls only when the
+heading actually appears. A different selected file, memory directory or Session
+drops the pending fragment and notice, so an old link cannot scroll the new
+context. Partial content carries no promise that its truncated tail is complete
+Markdown or frontmatter.
+
 ## Not part of this design
 
 - no global scan of `~/.claude/projects`, no repository picker;

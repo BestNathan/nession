@@ -306,18 +306,27 @@ function timelineForScenario(
 }
 
 const MEMORY_FILES = [
-  { path: 'MEMORY.md', size: 84, content_type: 'markdown' },
+  { path: 'MEMORY.md', size: 720, content_type: 'markdown' },
+  { path: 'architecture.md', size: 560, content_type: 'markdown' },
+  { path: 'interaction.md', size: 420, content_type: 'markdown' },
+  { path: 'topics/recovery.md', size: 520, content_type: 'markdown' },
   { path: 'feedback_testing.md', size: 72, content_type: 'markdown' },
+  { path: 'malformed.md', size: 54, content_type: 'markdown' },
 ];
 
 /**
- * The fixture's Auto Memory, by scenario (#2689).
+ * The fixture's Auto Memory, by scenario (#2689 / #2742).
  *
  * `?memory=` names the provider state, never the screen: `ready` is the richest
  * answer, and every other arm is a state the resolver can really produce. The
  * disclosure fields are present wherever the provider has them — a `no_memory`
  * answer that hid where it looked would render the same as one that never
  * resolved.
+ *
+ * `?memory=partial` keeps every file listed but makes `topics/recovery.md`
+ * answer in two chunks, so the reader can be driven through the incomplete
+ * document, its load-more continuation, and a fragment that only exists after
+ * the second chunk.
  */
 function memoryForScenario(scenario: string): MemoryResponse {
   switch (scenario) {
@@ -370,26 +379,129 @@ function memoryForScenario(scenario: string): MemoryResponse {
   }
 }
 
-function memoryContent(path: unknown): ReadResponseV1 {
+const MEMORY_INDEX = [
+  '# Nession project memory',
+  '',
+  '> The current Session\'s **Claude Code Auto Memory**.',
+  '',
+  '## Topics',
+  '',
+  '- [Architecture constraints](architecture.md#session-boundary) — Session, tmux and runtime boundaries',
+  '- [Interaction principles](interaction.md#mobile-ux) — Web and App reading',
+  '- [Recovery record](topics/recovery.md#retry-strategy) — chunked reads',
+  '- [Testing feedback](feedback_testing.md)',
+  '- [Malformed metadata](malformed.md)',
+  '',
+  '### Link safety examples',
+  '',
+  '- [Missing topic](missing.md)',
+  '- [Escape attempt](../private.md)',
+  '- [Unsafe scheme](javascript:alert(1))',
+  '- [Claude docs](https://code.claude.com/docs/en/memory)',
+].join('\n');
+
+const ARCHITECTURE = [
+  '---',
+  'title: Architecture constraints',
+  'owner: nession',
+  'tags:',
+  '  - session',
+  '  - tmux',
+  '---',
+  '',
+  '# Architecture',
+  '',
+  '## Session boundary',
+  '',
+  'The Session owns context; `tmux` runs the terminal.',
+  '',
+  '| Concept | Owner |',
+  '| --- | --- |',
+  '| Repository | Session |',
+  '| Terminal | tmux |',
+  '',
+  '```rust',
+  'fn main() {}',
+  '```',
+  '',
+  '[Back to index](MEMORY.md#topics)',
+].join('\n');
+
+const INTERACTION = [
+  '+++',
+  'title = "Interaction principles"',
+  'status = "approved"',
+  '+++',
+  '',
+  '# Interaction principles',
+  '',
+  '## Mobile UX',
+  '',
+  'Memory opens in place; Back returns to the file index.',
+  '',
+  '[Recovery](topics/recovery.md#retry-strategy) · [Index](MEMORY.md)',
+].join('\n');
+
+const RECOVERY_HEAD = [
+  '---',
+  'title: Recovery playbook',
+  '---',
+  '',
+  '# Recovery record',
+  '',
+  'The first chunk stops before the target heading.',
+  '',
+].join('\n');
+
+const RECOVERY_TAIL = [
+  '## Retry strategy',
+  '',
+  'Continue the read, then the target heading exists.',
+  '',
+  '[Back](../architecture.md#session-boundary)',
+].join('\n');
+
+const RECOVERY_FULL = RECOVERY_HEAD + RECOVERY_TAIL;
+
+function memoryContent(path: unknown, offset: unknown, scenario: string): ReadResponseV1 {
+  const requestedOffset = typeof offset === 'number' && offset > 0 ? offset : 0;
+  const file = (content: string): ReadResponseV1 => ({
+    content: requestedOffset === 0 ? content : '',
+    content_type: 'markdown',
+    total_size: new TextEncoder().encode(content).length,
+    offset: requestedOffset,
+    has_more: false,
+  });
   if (path === 'MEMORY.md') {
-    const content = '# Memory\n\n- [Testing feedback](feedback_testing.md) — tests must fail on the defect first.';
-    return {
-      content,
-      content_type: 'markdown',
-      total_size: content.length,
-      offset: 0,
-      has_more: false,
-    };
+    return file(MEMORY_INDEX);
+  }
+  if (path === 'architecture.md') {
+    return file(ARCHITECTURE);
+  }
+  if (path === 'interaction.md') {
+    return file(INTERACTION);
   }
   if (path === 'feedback_testing.md') {
-    const content = '# Testing feedback\n\nA green test can assert nothing; check that the witness can fail.';
-    return {
-      content,
-      content_type: 'markdown',
-      total_size: content.length,
-      offset: 0,
-      has_more: false,
-    };
+    return file(
+      '# Testing feedback\n\nA green test can assert nothing; check that the witness can fail.',
+    );
+  }
+  if (path === 'malformed.md') {
+    return file('---\ntitle: unclosed\n# Body still readable');
+  }
+  if (path === 'topics/recovery.md') {
+    if (scenario === 'partial') {
+      const totalSize = new TextEncoder().encode(RECOVERY_FULL).length;
+      const head = RECOVERY_HEAD;
+      return {
+        content: requestedOffset === 0 ? head : RECOVERY_TAIL,
+        content_type: 'markdown',
+        total_size: totalSize,
+        offset: requestedOffset,
+        has_more: requestedOffset === 0,
+      };
+    }
+    return file(RECOVERY_FULL);
   }
   return { error: 'not_found' };
 }
@@ -454,7 +566,9 @@ export function fixtureTranscriptsSurface(search: string): PluginSurface {
         return Promise.resolve(memoryForScenario(memoryScenario) as T);
       }
       if (type === MEMORY_READ_PROTOCOL) {
-        return Promise.resolve(memoryContent(payload.path) as T);
+        return Promise.resolve(
+          memoryContent(payload.path, payload.offset, memoryScenario) as T,
+        );
       }
       // Everything else belongs to the conversation surface — delegation
       // rather than rejection, so one install answers the whole capability.

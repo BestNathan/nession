@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { FileText, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Markdown } from '@/shared/markdown';
 import { cn } from '@/shared/lib/utils';
 import {
   chromeLabelRole,
@@ -8,6 +10,8 @@ import {
 } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { MemoryState } from '../hooks/useMemory';
+import { resolveMemoryLink, type MemoryLinkResolution } from '../model/memoryLink';
+import { useMemoryFragmentScroll } from '../hooks/useMemoryFragmentScroll';
 import { formatSize } from '../format';
 
 /**
@@ -171,6 +175,7 @@ function MemoryReady({
         <main className="flex min-h-0 flex-col">
           <MemoryContent
             memory={memory}
+            onOpenFile={onOpenFile}
             onLoadMore={onLoadMore}
             onRetryRead={onRetryRead}
           />
@@ -216,36 +221,155 @@ function MemoryNotice({
   );
 }
 
-function MemoryContent({
+/**
+ * The reading surface for one Memory file (#2742).
+ *
+ * It owns the two pieces the shared renderer must not know: which Markdown
+ * links are Memory navigation, and when a fragment can safely scroll (after the
+ * target document has rendered). Every transition is keyed by the path and the
+ * snapshot directory, so a pending fragment from an earlier file cannot fire
+ * into a later one.
+ */
+function MemoryReader({
   memory,
+  onOpenFile,
   onLoadMore,
   onRetryRead,
 }: {
   memory: MemoryState;
+  onOpenFile: (path: string) => void;
   onLoadMore: () => void;
   onRetryRead: () => void;
 }) {
-  if (!memory.selectedPath) {
-    return (
-      <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>
-        Select a memory file to read it.
-      </p>
-    );
-  }
+  const [mode, setMode] = useState<'preview' | 'raw'>('preview');
+  const contentRef = useRef<HTMLDivElement>(null);
+  const nonce = useRef(0);
+  const selectedPath = memory.selectedPath;
+  const directory = memory.response?.memory_directory ?? '';
+  const { setPending, notice, setNotice, beginLinkNavigation } = useMemoryFragmentScroll(
+    memory,
+    contentRef,
+    mode === 'preview',
+  );
 
-  const file = memory.files.find((candidate) => candidate.path === memory.selectedPath);
+  // A different document context resets the raw/preview choice.
+  useEffect(() => {
+    setMode('preview');
+  }, [directory]);
+
+  const navigate = useCallback(
+    (path: string, fragment: string | null) => {
+      setMode('preview');
+      setNotice(null);
+      if (fragment === null) {
+        setPending(null);
+      } else {
+        beginLinkNavigation(path, selectedPath);
+        setPending({ path, fragment, nonce: (nonce.current += 1) });
+      }
+      if (path !== selectedPath) {
+        void onOpenFile(path);
+      }
+    },
+    [beginLinkNavigation, onOpenFile, selectedPath, setPending, setNotice],
+  );
+
+  const handleLink = useCallback(
+    (href: string | undefined): boolean => {
+      if (!selectedPath) {
+        return true;
+      }
+      const resolution = resolveMemoryLink(href, selectedPath, memory.files);
+      if (resolution.kind === 'external') {
+        return false;
+      }
+      if (resolution.kind === 'fragment') {
+        navigate(selectedPath, resolution.fragment);
+        return true;
+      }
+      if (resolution.kind === 'file') {
+        navigate(resolution.path, resolution.fragment);
+        return true;
+      }
+      setMode('preview');
+      setPending(null);
+      setNotice(blockedMessage(resolution));
+      return true;
+    },
+    [memory.files, navigate, selectedPath, setPending, setNotice],
+  );
+
+  const file = memory.files.find((candidate) => candidate.path === selectedPath);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-        <div className="min-w-0">
-          <p className={cn('truncate', chromeMonoRole('code'))} title={memory.selectedPath}>
-            {memory.selectedPath}
-          </p>
-          <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-            {memory.contentType || file?.content_type || 'markdown'} ·{' '}
-            {formatSize(memory.totalSize || file?.size || 0)}
-          </p>
+      <MemoryDocumentHeader
+        memory={memory}
+        fileSize={memory.totalSize || file?.size || 0}
+        contentType={memory.contentType || file?.content_type || 'markdown'}
+        mode={mode}
+        onModeChange={setMode}
+        onLoadMore={onLoadMore}
+      />
+      <MemoryDocument
+        memory={memory}
+        mode={mode}
+        notice={notice}
+        contentRef={contentRef}
+        onLink={handleLink}
+        onRetryRead={onRetryRead}
+      />
+    </div>
+  );
+}
+
+function MemoryDocumentHeader({
+  memory,
+  fileSize,
+  contentType,
+  mode,
+  onModeChange,
+  onLoadMore,
+}: {
+  memory: MemoryState;
+  fileSize: number;
+  contentType: string;
+  mode: 'preview' | 'raw';
+  onModeChange: (mode: 'preview' | 'raw') => void;
+  onLoadMore: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+      <div className="min-w-0">
+        <p className={cn('truncate', chromeMonoRole('code'))} title={memory.selectedPath ?? undefined}>
+          {memory.selectedPath}
+        </p>
+        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
+          {contentType} · {formatSize(fileSize)}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Memory display mode" className="flex gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'preview' ? 'default' : 'outline'}
+            aria-pressed={mode === 'preview'}
+            data-testid="claude-code-memory-mode-preview"
+            onClick={() => onModeChange('preview')}
+          >
+            Preview
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'raw' ? 'default' : 'outline'}
+            aria-pressed={mode === 'raw'}
+            data-testid="claude-code-memory-mode-raw"
+            onClick={() => onModeChange('raw')}
+          >
+            Raw
+          </Button>
         </div>
         {memory.hasMore ? (
           <Button
@@ -259,6 +383,48 @@ function MemoryContent({
           </Button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function MemoryDocument({
+  memory,
+  mode,
+  notice,
+  contentRef,
+  onLink,
+  onRetryRead,
+}: {
+  memory: MemoryState;
+  mode: 'preview' | 'raw';
+  notice: string | null;
+  contentRef: RefObject<HTMLDivElement | null>;
+  onLink: (href: string | undefined) => boolean;
+  onRetryRead: () => void;
+}) {
+  return (
+    <div
+      ref={contentRef}
+      data-testid="claude-code-memory-content"
+      className={cn('min-h-0 flex-1 overflow-y-auto py-4', workspaceScrollClearanceClass)}
+    >
+      {notice ? (
+        <p
+          role="status"
+          data-testid="claude-code-memory-link-notice"
+          className={cn('mb-3 text-muted-foreground', chromeSansRole('secondary'))}
+        >
+          {notice}
+        </p>
+      ) : null}
+      {memory.hasMore ? (
+        <p
+          data-testid="claude-code-memory-partial"
+          className={cn('mb-3 text-muted-foreground', chromeSansRole('metadata'))}
+        >
+          Partial content — this file is not fully loaded. Use Load more to continue.
+        </p>
+      ) : null}
       {memory.readLoading ? (
         <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>
           Loading memory...
@@ -280,16 +446,68 @@ function MemoryContent({
           </Button>
         </div>
       ) : null}
-      <pre
-        data-testid="claude-code-memory-content"
-        className={cn(
-          'min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4',
-          chromeMonoRole('code'),
-          workspaceScrollClearanceClass,
-        )}
-      >
-        {memory.content || (memory.readLoading ? '' : '(empty)')}
-      </pre>
+      {mode === 'raw' ? (
+        <pre
+          data-testid="claude-code-memory-raw"
+          className={cn('whitespace-pre-wrap', chromeMonoRole('code'))}
+        >
+          {memory.content || (memory.readLoading ? '' : '(empty)')}
+        </pre>
+      ) : memory.content ? (
+        <Markdown variant="document" onLink={onLink} className="pb-4">
+          {memory.content}
+        </Markdown>
+      ) : memory.readLoading ? null : (
+        <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>(empty)</p>
+      )}
     </div>
+  );
+}
+
+type BlockedLink = Extract<MemoryLinkResolution, { kind: 'blocked' }>;
+
+function blockedMessage(resolution: BlockedLink): string {
+  switch (resolution.reason) {
+    case 'unlisted':
+    case 'unsupported-target':
+      return `“${resolution.target}” is not a Markdown file in this Memory snapshot.`;
+    case 'traversal':
+      return 'That link tries to leave the Memory directory and was not opened.';
+    case 'absolute-path':
+      return 'That link points outside the Memory directory and was not opened.';
+    case 'unsafe-scheme':
+      return 'That link uses an unsupported or unsafe scheme and was not opened.';
+    case 'query':
+      return 'That link is not a Memory file path.';
+    default:
+      return 'That link is not a valid Memory path.';
+  }
+}
+
+function MemoryContent({
+  memory,
+  onOpenFile,
+  onLoadMore,
+  onRetryRead,
+}: {
+  memory: MemoryState;
+  onOpenFile: (path: string) => void;
+  onLoadMore: () => void;
+  onRetryRead: () => void;
+}) {
+  if (!memory.selectedPath) {
+    return (
+      <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>
+        Select a memory file to read it.
+      </p>
+    );
+  }
+  return (
+    <MemoryReader
+      memory={memory}
+      onOpenFile={onOpenFile}
+      onLoadMore={onLoadMore}
+      onRetryRead={onRetryRead}
+    />
   );
 }

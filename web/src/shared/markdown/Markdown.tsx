@@ -1,13 +1,16 @@
 // The math stylesheet, for the same reason `CodeBlock` owns the syntax theme:
 // `rehype-katex` runs in this pipeline, so this is where its output is styled.
 import 'katex/dist/katex.min.css';
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { cn } from '@/shared/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import type { HastElement } from './hast';
 import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from './previewPlugins';
-import { markdownMessageRootClass } from './markdownVisualGrammar';
+import {
+  markdownDocumentRootClass,
+  markdownMessageRootClass,
+} from './markdownVisualGrammar';
 
 /**
  * Markdown, rendered — the primitive, without a surface around it.
@@ -36,25 +39,53 @@ import { markdownMessageRootClass } from './markdownVisualGrammar';
  * *relative* structure — which is the part that carries meaning — while keeping
  * the message's headings inside the region that contains them.
  */
+/**
+ * Called on every rendered link before navigation runs.
+ *
+ * Returning `true` means the consumer handled the link and the browser must not
+ * follow the `href`; `false` keeps the shared behaviour (safe `http(s)` links
+ * open externally, everything else is a normal anchor). A capability uses this
+ * to resolve links against its own document context without the shared
+ * renderer learning that capability's path rules.
+ */
+export type MarkdownLinkHandler = (href: string | undefined) => boolean;
+
 export function Markdown({
   children,
   className,
+  variant = 'message',
+  onLink,
 }: {
   children: string;
   className?: string;
+  /** Message prose for chat; document prose for a reading surface. */
+  variant?: 'message' | 'document';
+  onLink?: MarkdownLinkHandler;
 }) {
+  const components = useMemo<Components>(
+    () => ({
+      ...markdownComponents,
+      a: ({ href, children: linkChildren }) => (
+        <MarkdownLink href={href} onLink={onLink}>
+          {linkChildren}
+        </MarkdownLink>
+      ),
+    }),
+    [onLink],
+  );
+  const rootClass = variant === 'document' ? markdownDocumentRootClass : markdownMessageRootClass;
   return (
     // `min-w-0` because a Markdown surface must never be what widens its
     // container. Its default `min-width: auto` resolves to the min-content
     // width, which for a document containing a code fence is the longest
     // unwrapped line — so without this the block below forces the whole column
     // to that width instead of letting the fence scroll inside itself.
-    <div className={cn(markdownMessageRootClass, className)}>
+    <div className={cn(rootClass, className)}>
       <ReactMarkdown
         remarkPlugins={getRemarkPlugins()}
         rehypePlugins={getRehypePlugins()}
         remarkRehypeOptions={getRemarkRehypeOptions()}
-        components={markdownComponents}
+        components={components}
       >
         {children}
       </ReactMarkdown>
@@ -86,11 +117,43 @@ const markdownComponents: Components = {
  * URLs: a relative href is Nession's own routing territory, and forcing it into
  * a new tab would take that decision away from wherever routing lives.
  */
-function ExternalLink({ href, children }: { href?: string; children?: ReactNode }) {
+export function ExternalLink({
+  href,
+  onLink,
+  children,
+}: {
+  href?: string;
+  onLink?: MarkdownLinkHandler;
+  children?: ReactNode;
+}) {
   const external = typeof href === 'string' && /^https?:\/\//i.test(href);
   return (
-    <a href={href} {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
+    <a
+      href={href}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      onClick={(event) => {
+        if (onLink?.(href)) {
+          event.preventDefault();
+        }
+      }}
+    >
       {children}
     </a>
+  );
+}
+
+function MarkdownLink({
+  href,
+  onLink,
+  children,
+}: {
+  href?: string;
+  onLink?: MarkdownLinkHandler;
+  children?: ReactNode;
+}) {
+  return (
+    <ExternalLink href={href} onLink={onLink}>
+      {children}
+    </ExternalLink>
   );
 }

@@ -656,7 +656,7 @@ describe('ClaudeCodeWorkspace', () => {
 
     await user.click(await screen.findByRole('tab', { name: 'Memory' }));
 
-    expect(await screen.findByText('# Index')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Index' })).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeMemory).toHaveBeenCalledWith({
       agent_id: 'agent-1',
       session_id: 'agent-1:work',
@@ -729,11 +729,11 @@ describe('ClaudeCodeWorkspace', () => {
     mockLists();
     rerender(<ClaudeCodeWorkspace ctx={makeContext({ session: otherSession })} />);
 
-    expect(await screen.findByText('# Other')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Other' })).toBeInTheDocument();
     firstSnapshot.resolve(memoryResponse);
 
     await waitFor(() => expect(screen.queryByText('stale')).not.toBeInTheDocument());
-    expect(screen.getByText('# Other')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Other' })).toBeInTheDocument();
   });
 
   it('re-lists when the provider reports the repository moved', async () => {
@@ -760,7 +760,7 @@ describe('ClaudeCodeWorkspace', () => {
 
     await user.click(await screen.findByRole('tab', { name: 'Memory' }));
 
-    expect(await screen.findByText('# Moved')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Moved' })).toBeInTheDocument();
     expect(screen.queryByText('stale_memory')).not.toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeMemory).toHaveBeenCalledTimes(2);
     expect(
@@ -799,7 +799,7 @@ describe('ClaudeCodeWorkspace', () => {
     });
     await user.click(screen.getByRole('tab', { name: 'Memory' }));
 
-    expect(await screen.findByText('# New repository')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'New repository' })).toBeInTheDocument();
     firstRead.resolve({
       content: 'stale repository content',
       content_type: 'markdown',
@@ -811,6 +811,6 @@ describe('ClaudeCodeWorkspace', () => {
     await waitFor(() =>
       expect(screen.queryByText('stale repository content')).not.toBeInTheDocument(),
     );
-    expect(screen.getByText('# New repository')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New repository' })).toBeInTheDocument();
   });
 });
