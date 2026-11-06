@@ -134,7 +134,7 @@ for(const bad of [
     target_sha:'f'.repeat(40)}]})},
 ]){
   assert.throws(()=>attestQwenRepairIssueReview({...context,...bad}),
-    /Qwen Reviewer Issue context|untrusted authenticated/);
+    /Qwen Reviewer Issue context|untrusted authenticated|untrusted original Reviewer findings source/);
 }
 console.log('Qwen Reviewer Issue-thread repair: signed Store transition, exact bot projection, native prompt synchronization and forgery denials pass');
 
