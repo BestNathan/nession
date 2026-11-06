@@ -143,9 +143,9 @@ export function buildCursorFailureTelemetry({admission,model,meta=null,
         admission.resume_from.checkpoint_version:null,
       model:model&&typeof model.id==='string'?{
         id:model.id,fast:model.fast===true}:null,
-      run_id:typeof meta?.run_id==='string'&&
-        /^[A-Za-z0-9._:-]{1,128}$/.test(meta.run_id)?meta.run_id:null,
-      status:'error'},
+      // Failed SDK result identifiers are not independently authenticated
+      // and may contain arbitrary Provider text; GitHub Run/Action is enough.
+      run_id:null,status:'error'},
     execution:{turns:Number.isSafeInteger(meta?.turns)?meta.turns:null,
       model_requests:null,
       tool_calls:observed?meta.tool_calls.map(t=>t.toLowerCase()):[],
