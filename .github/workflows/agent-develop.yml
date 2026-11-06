@@ -305,11 +305,15 @@ jobs:
             node scripts/lib/agent/orchestration/development-worker.mjs \
               /admission.json /output
       - name: Upload canonical immutable Agent telemetry
+        # A real Cursor Provider failure is still a model execution. Preserve
+        # the sanitized canonical outcome even when the Docker step exits 1.
+        # A failure before model invocation has no telemetry; do not invent it.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-developer-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/development-output/agent-telemetry.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
       - name: Upload only encrypted native Session and bounded sanitized result
         uses: actions/upload-artifact@v4
