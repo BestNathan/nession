@@ -42,6 +42,12 @@ function click(action, attrs = {}) { const el = { getAttribute(name) { return na
 function fixture(name) { buttons.find(b => b.f === name).cb(); }
 
 check('initial title', root.innerHTML.includes('Terminal reconnect reliability'));
+check('WebLayout owns sibling Sidebar and ShellMain',root.innerHTML.includes('data-testid="web-layout"')&&root.innerHTML.includes('data-testid="sidebar"')&&root.innerHTML.includes('data-testid="shell-main"'));
+check('WorkspaceShell owns Session capability content and dock',root.innerHTML.includes('data-testid="workspace-shell"')&&root.innerHTML.includes('data-testid="workspace-tool-content"')&&root.innerHTML.includes('data-testid="workspace-tool-bar"')&&root.innerHTML.includes('data-testid="workspace-tool-session"'));
+click('collapse');
+check('Web sidebar collapses without replacing Workspace',root.innerHTML.includes('data-collapsed="true"')&&root.innerHTML.includes('data-testid="workspace-shell"'));
+click('expand');
+check('Web sidebar expands',!root.innerHTML.includes('data-collapsed="true"'));
 click('edit');
 check('edit form', root.innerHTML.includes('data-testid="session-metadata-editor"'));
 fields['#n-title'].value = 'Reconnect redesign';
@@ -86,9 +92,24 @@ fixture('reused');
 check('same name new instance resets metadata', !root.innerHTML.includes('Terminal reconnect reliability') && root.innerHTML.includes('terminal-reconnect'));
 page.events['np:resize']({ detail: { width: 390 } });
 check('App 390 1:1 height', device['--np-device-height'] === '844px');
-check('App header', root.innerHTML.includes('n-app-top'));
+check('App Workspace owns one AppPageHeader',root.innerHTML.includes('data-testid="app-layer-workspace"')&&root.innerHTML.includes('data-testid="app-page-header"'));
+check('App has no Web sidebar or Web return circle',!root.innerHTML.includes('data-testid="sidebar"')&&!root.innerHTML.includes('aria-label="Open terminal"'));
+check('App only one page header', (root.innerHTML.match(/data-testid="app-page-header"/g)||[]).length===1);
 click('terminal');
 check('App Terminal return', root.innerHTML.includes('Last login'));
+check('App Terminal is root without Workspace page header',root.innerHTML.includes('data-testid="app-layer-terminal"')&&!root.innerHTML.includes('data-testid="app-page-header"'));
+check('Terminal uses conversation Capsule + reciprocal Workspace circle',root.innerHTML.includes('data-testid="terminal-capsule-zone"')&&root.innerHTML.indexOf('n-conversation-capsule')<root.innerHTML.indexOf('n-terminal-destination'));
+click('toggle-context');
+check('Contextual capability emerges after +',root.innerHTML.includes('class="n-context-peek"'));
+click('toggle-context');
+check('Closed context removes Peek',!root.innerHTML.includes('class="n-context-peek"'));
+click('app-sessions');
+check('App Sessions is separate navigator layer',root.innerHTML.includes('data-testid="app-layer-sessions"')&&!root.innerHTML.includes('data-testid="workspace-shell"'));
+click('terminal');
+check('Sessions leave returns to Terminal root',root.innerHTML.includes('data-testid="app-layer-terminal"'));
 click('workspace');
 check('App Workspace reentry', root.innerHTML.includes('data-testid="session-details"'));
+page.events['np:resize']({ detail: { width: 1180 } });
+check('App → Web returns full WebLayout without App layers',root.innerHTML.includes('data-testid="web-layout"')&&!root.innerHTML.includes('data-testid="app-layer-root"'));
+check('metadata unchanged after Web/App round trip',root.innerHTML.includes('terminal-reconnect'));
 console.log('Session Metadata prototype mock assertions: ' + cases + '/' + cases + ' passed.');
