@@ -40,6 +40,10 @@ assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
+assert.match(claude.text, /Exactly one kind: bug, requirement/);
+assert.match(claude.text, /One or more areas: terminal, web, ui, ux/);
+assert.match(claude.text, /Never include verification:\*/);
+assert.match(cursor.text, /one complete, distinct array of kind \+ area labels/);
 assert.match(cursor.text, /missing Location/);
 assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
 assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
@@ -49,7 +53,8 @@ assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', varian
 assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1',
   context: {scopeInstructions:'scope',riskInstructions:'risk',mode:'single',
     issueUrl:'https://example.test/17',repository:'example/repo',
-    issueNumber:17,labels:'web',findings:'none',issueBodyJson:'""'} }),
+    issueNumber:17,labels:'web',kindLabels:'bug, requirement',areaLabels:'ci',
+    findings:'none',issueBodyJson:'""'} }),
   /Missing required Prompt variant/);
 
 const acceptance = renderAcceptancePrompt({

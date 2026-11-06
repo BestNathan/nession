@@ -5,6 +5,25 @@ import { fetchGitHubIssue } from './read.mjs';
 
 const CONTRACT_LABELS = new Set([...KIND_LABELS, ...AREA_LABELS]);
 
+// One contract for proposal completion and the final trusted mutation tool.
+// Diagnostics expose only violation classes, never raw model output or labels.
+export function validateContractLabels(labels) {
+  if (!Array.isArray(labels)) {
+    throw new Error('Issue labels must be distinct canonical kind/area labels (not_array)');
+  }
+  const violations = [];
+  if (labels.some((label) => typeof label !== 'string')) violations.push('non_string');
+  if (new Set(labels).size !== labels.length) violations.push('duplicate');
+  if (labels.some((label) => typeof label === 'string' && !CONTRACT_LABELS.has(label))) {
+    violations.push('noncanonical');
+  }
+  if (labels.filter((label) => KIND_LABELS.has(label)).length !== 1) violations.push('kind_count');
+  if (!labels.some((label) => AREA_LABELS.has(label))) violations.push('missing_area');
+  if (violations.length) {
+    throw new Error('Issue labels must be distinct canonical kind/area labels (' + violations.join(', ') + ')');
+  }
+}
+
 export function issueLabelNames(issue) {
   return (issue.labels ?? []).map((item) => typeof item === 'string' ? item : item?.name).filter(Boolean);
 }
@@ -15,10 +34,14 @@ export function issueLabelNames(issue) {
 // never from prompt text or guessed model defaults. Noncontract labels remain
 // owned/preserved by candidateIssue at the downstream tool boundary.
 export function completeIssueUpdateProposal(current, proposal) {
+  const labels = proposal.labels ?? issueLabelNames(current).filter(name => CONTRACT_LABELS.has(name));
+  // Reject invalid explicit proposals rather than quietly stripping unsupported
+  // labels or inventing labels for an Issue that has none.
+  validateContractLabels(labels);
   return {
     title: proposal.title ?? current.title,
     body: proposal.body ?? current.body,
-    labels: proposal.labels ?? issueLabelNames(current).filter(name => CONTRACT_LABELS.has(name)),
+    labels,
   };
 }
 
@@ -61,10 +84,7 @@ export function createIssueUpdateTool(issue, repository = process.env.GITHUB_REP
       if (typeof title !== 'string' || !title.trim() || typeof body !== 'string' || !body.trim()) {
         throw new Error('Issue title and body must be non-empty strings');
       }
-      if (!Array.isArray(labels) || new Set(labels).size !== labels.length ||
-          labels.some((label) => typeof label !== 'string' || !CONTRACT_LABELS.has(label))) {
-        throw new Error('Issue labels must be distinct canonical kind/area labels');
-      }
+      validateContractLabels(labels);
       const current = fetchGitHubIssue(issue.number, repository);
       if (String(current.state).toUpperCase() !== 'OPEN') throw new Error('Target Issue is no longer open');
       enforceE2EReadOnly(current.body, body);
