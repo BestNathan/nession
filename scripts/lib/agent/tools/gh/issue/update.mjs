@@ -55,10 +55,42 @@ export function enforceE2EReadOnly(currentBody, candidateBody) {
   const before = parseIssueE2E(currentBody);
   const after = parseIssueE2E(candidateBody);
   if (!before && !after) return;
-  if (!before || !after || before.errors.length || after.errors.length ||
-      before.digest !== after.digest ||
-      JSON.stringify([...before.rows]) !== JSON.stringify([...after.rows])) {
+
+  const denied = () => {
     throw new Error('Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
+  };
+  // A structurally invalid source is an audit input, not proof of an
+  // unauthorized write. The candidate, however, MUST be fully valid.
+  // Do not let the Agent delete an invalid declaration to evade validation
+  // or add an entirely new E2E plan to a legacy Issue that had none.
+  if (!before || !after || after.errors.length) denied();
+
+  if (before.errors.length === 0) {
+    // Once the declaration is valid, all E2E selection and result changes
+    // belong to the trusted proposal / evidence projector, not Issue Audit.
+    if (before.digest !== after.digest ||
+        JSON.stringify([...before.rows]) !== JSON.stringify([...after.rows])) denied();
+    return;
+  }
+
+  // Allow repair of malformed declarations / Pending placeholders, but never
+  // silently drop already parseable obligations or rewrite completed evidence.
+  // Ill-formed IDs can be canonicalized (e.g. foo.spec.ts -> foo), whereas
+  // valid existing IDs cannot be replaced to alter test scope.
+  for (const id of before.newIds) if (!after.newIds.includes(id)) denied();
+  for (const id of before.regressionIds) if (!after.regressionIds.includes(id)) denied();
+  if (before.newNone !== null && before.newNone !== after.newNone) denied();
+  if (before.regressionNone !== null && before.regressionNone !== after.regressionNone) denied();
+
+  // Neither downgrade/delete an existing completed row nor mint a new
+  // Pass/Fail/Error receipt. Canonical Pending evidence may become "-".
+  for (const [id, row] of before.rows) {
+    if (row.result !== 'Pending' &&
+        JSON.stringify(row) !== JSON.stringify(after.rows.get(id))) denied();
+  }
+  for (const [id, row] of after.rows) {
+    if (row.result !== 'Pending' &&
+        JSON.stringify(row) !== JSON.stringify(before.rows.get(id))) denied();
   }
 }
 
