@@ -20,6 +20,7 @@ use nession_agent::server::websocket::{
     msg_types as agent_msg_types, new_message, AgentServer, AgentServerContext,
     ClientAttachPayload, ClientDetachPayload, SessionCreatePayload, SessionKillPayload,
 };
+use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
@@ -168,6 +169,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
+            session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },
