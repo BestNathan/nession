@@ -3,6 +3,10 @@
 // and fail-closed rejections. This is NOT a real production PR/Run Case.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {writeIssueWorkflowState} from '../orchestration/state-store.mjs';
+import {prepareQwenReviewAdmission} from './prepare-admission.mjs';
 import {startDevelopment,validateDevelopmentState,
   acceptAttestedQwenPublication} from '../orchestration/outbox.mjs';
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
@@ -81,7 +85,7 @@ assert.equal(verdict.issue,ISSUE);
 assert.equal(verdict.pr_number,541);
 assert.equal(verdict.target_sha,HEAD);
 const rejects=[
-  [{state:{...published,phase:'ready'}},/Outbox/],
+  [{state:{...published,phase:'ready'}},/outbox|Outbox/],
   [{actionId:action},/Outbox/],
   [{state:{...published,assignments:{...published.assignments,
       reviewer:'review-cursor-01'}}},/Outbox/],
@@ -109,3 +113,46 @@ assert.throws(()=>assertReviewerAdmission({...accepted,
 assert.throws(()=>assertReviewerAdmission({...accepted,
   publisher_branch:'agent/3001/qwen-forged'}),/Qwen Reviewer admission/);
 console.log('Qwen Reviewer: authenticated published multi-file PR/Outbox model view and 18 negative source/role/branch/files cases pass');
+
+
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-review-store-'));
+try{
+  writeIssueWorkflowState(root,initial,0);
+  writeIssueWorkflowState(root,dispatched,1);
+  writeIssueWorkflowState(root,published,2);
+  const directory=path.join(root,'workflows/issues',String(ISSUE),'results');
+  fs.mkdirSync(directory,{recursive:true});
+  fs.writeFileSync(path.join(directory,'301-1-'+action+'.json'),
+    JSON.stringify(intent)+'\n');
+  const endpoints={
+    ['actions/runs/401']:publisherRun,
+    ['pulls?state=all&head=BestNathan:'+encodeURIComponent(intent.branch)+
+      '&per_page=100']:[pr],
+    ['pulls/541']:pr,
+    ['git/ref/heads/'+intent.branch]:ref,
+    ['git/commits/'+HEAD]:commit,
+    ['pulls/541/files?per_page=100']:files,
+    ['git/trees/'+TREE+'?recursive=1']:tree,
+  };
+  const fetcher=async name=>{
+    if(!Object.hasOwn(endpoints,name))
+      throw Error('unexpected independent GitHub source '+name);
+    return endpoints[name];
+  };
+  const prepared=await prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher});
+  assert.deepEqual(prepared,accepted);
+  await assert.rejects(()=>prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:action,fetcher}),/Outbox/);
+  await assert.rejects(()=>prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:reviewerAction,
+    fetcher:async name=>name.startsWith('pulls?')?[pr,pr]:fetcher(name),
+  }),/unique published/);
+  fs.writeFileSync(path.join(directory,'302-1-'+'0'.repeat(64)+'.json'),
+    JSON.stringify({...intent,action_id:'0'.repeat(64),
+      branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
+  await assert.rejects(()=>prepareQwenReviewAdmission({
+    storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
+  /unique committed Qwen Publisher Intent/);
+}finally{fs.rmSync(root,{recursive:true,force:true});}
+console.log('Qwen Reviewer: trusted Store readback, live GitHub source routing, duplicate intent and PR rejection verified');
