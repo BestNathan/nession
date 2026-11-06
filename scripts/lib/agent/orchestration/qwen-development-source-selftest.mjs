@@ -229,6 +229,9 @@ try{
   // The main-owned Publisher independently applies the actual Git patch
   // and reuses the same code-owned Issue fixture byte policy. A forged
   // Worker result with a safe-looking same-file diff must be rejected.
+  // Unlike the unprivileged Worker, Publisher reads a clean, pinned Git
+  // checkout, never the Worker's modified source directory.
+  git('reset','--hard','HEAD');
   const checked=preflightAgentPatch({checkout:root,source_sha:fixtureSha,
     patch:fixturePatch.patch,allowed_paths:[fixtureFile]});
   assert.doesNotThrow(()=>assertQwenControlledPublisherSource({
