@@ -72,6 +72,9 @@ export function reviewModelResult(admission,raw,identity){
       evidence:singleLine(item.evidence,'finding evidence',MAX_EVIDENCE),
     });
   });
+  if(admission.kind==='authenticated_qwen_reviewer_admission_only'&&
+     findings.some(f=>!admission.expected_files.some(file=>file.path===f.path)))
+    fail('finding is outside the authenticated Qwen PR diff');
   if(parsed.outcome==='changes_requested'&&findings.length===0)
     fail('changes_requested requires at least one finding');
   return Object.freeze({
