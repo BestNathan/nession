@@ -18,6 +18,48 @@ const REQUIRED_STEPS=[
 const ENV_KEYS=['ISSUE_NUMBER','ISSUE_AUDIT_PROVIDER','ISSUE_AUDIT_ALLOW_AGENT','ISSUE_AUDIT_CLAUDE_MODEL'];
 const MAX_LOG_BYTES=2*1024*1024;
 
+// Retrospective proof locator, NOT a claim that a neighboring successful
+// workflow ran this Issue's Agent. All values are re-authenticated from GitHub.
+export const SIDEBAR_AUDIT_REPAIR_PROOF=Object.freeze({
+  acceptanceIssue:2855,criterion:'SC-03',
+  sourceRunId:42218594977,sourceAttempt:1,targetIssueNumber:2851,
+  event:'issues',historical:true,
+  requiredLabels:['requirement','web','ui','verification:scoped'],
+  requiredWriteLabels:['requirement','verification:scoped'],
+  expectedE2EIds:['sidebar-session-first','ui-contract-web','fixture-visual','fixture-visual-app'],
+});
+
+export function verifiedIssueAuditCriterion(context, normalized) {
+  if(Number(context?.issue?.number)!==SIDEBAR_AUDIT_REPAIR_PROOF.acceptanceIssue||
+     context?.stage!=='post-merge') return normalized;
+  const selected=normalized.criteria?.find(item=>item.criterion===SIDEBAR_AUDIT_REPAIR_PROOF.criterion);
+  if(!selected||selected.result!=='Pass')return normalized;
+  const proof=context?.ci_evidence?.authenticated_issue_audit_repair_readback;
+  if(!proof||proof.status!=='authenticated-historical-repair-readback'||
+     proof.source_run_id!==SIDEBAR_AUDIT_REPAIR_PROOF.sourceRunId||
+     proof.source_attempt!==SIDEBAR_AUDIT_REPAIR_PROOF.sourceAttempt||
+     proof.target_issue!==SIDEBAR_AUDIT_REPAIR_PROOF.targetIssueNumber||
+     proof.source_event!==SIDEBAR_AUDIT_REPAIR_PROOF.event||
+     proof.provider!=='qwen'||proof.issue_contract_pass!==true||
+     !Number.isSafeInteger(proof.source_job_id)||proof.source_job_id<1||
+     !Array.isArray(proof.label_event_ids)||proof.label_event_ids.length!==2||
+     !Array.isArray(proof.protected_e2e_selected_ids)||
+     JSON.stringify([...proof.protected_e2e_selected_ids].sort())!==JSON.stringify([...SIDEBAR_AUDIT_REPAIR_PROOF.expectedE2EIds].sort()))
+    throw Error('SC-03 Issue Audit Pass lacks authenticated exact-target Agent execution/readback');
+  // Never let model prose attribute this Pass to the wrong run or a skipped
+  // sibling. The trusted exact-run receipt owns the evidence and summary.
+  return {...normalized,criteria:normalized.criteria.map(item=>
+    item.criterion!==SIDEBAR_AUDIT_REPAIR_PROOF.criterion ? item : {
+      ...item,
+      evidence:[{type:'authenticated-issue-audit',value:
+        'run '+proof.source_run_id+'/'+proof.source_attempt+
+        ', agent job '+proof.source_job_id+
+        ', target #'+proof.target_issue+', source '+proof.source_sha+
+        ', verified canonical Issue/E2E and bot label writes'}],
+      summary:'Historical Qwen Issue Audit produced a valid persistent repair and risk-tier classification for target #2851',
+    })};
+}
+
 export function parseAuditEnvironmentLog(log) {
   if(typeof log!=='string'||Buffer.byteLength(log)>MAX_LOG_BYTES)
     throw Error('invalid or oversized Issue Audit job log');
