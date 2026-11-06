@@ -82,6 +82,12 @@ function check(label, condition) {
   process.stdout.write('✓ ' + label + '\n');
 }
 
+check('AI candidate starts composer-only, no welcome heading or persistent topbar before a Scene',
+  html.includes('class="app entry-only .topbar')===false &&
+  html.includes('.app.entry-only .topbar {display:none!important}') &&
+  !html.includes('class="empty-caption"') &&
+  html.includes('class="empty-subhint" id="emptySubhint" hidden') &&
+  html.includes("$('app').classList.toggle('entry-only',!hasScenes)"));
 inspect();
 await ask('查看 Agent 列表');
 check('opens exactly one Agent Scene', state().scenes.length === 1);
