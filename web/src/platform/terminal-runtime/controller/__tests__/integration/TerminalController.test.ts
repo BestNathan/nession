@@ -450,7 +450,7 @@ describe('TerminalController', () => {
     second.onOutput!(new Uint8Array([51]), undefined, { streamEpoch: 7, streamSeq: 3 });
     h.finish();
     expect(onStreamEventParsed).toHaveBeenCalledOnce();
-    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 });
+    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 }, 1);
     second.onOutput!(new Uint8Array([52]), undefined, { streamEpoch: 7, streamSeq: 4 });
     controller.dispose();
     h.finish(); // disposed instance ignores even a previously queued callback
