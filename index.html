@@ -28,7 +28,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <small>Nession / Prototype Branch</small>
 <h1>Explore ideas before implementation.</h1>
 <p>独立于生产代码的交互设计原型集合。每个原型放在独立目录，并由对应的 GitHub Issue 跟踪需求与讨论。</p>
-<p><strong>审查状态：</strong>“1:1”只保证 CSS 像素不缩放，不自动代表与当前 Nession Web/App 的信息架构一致。Files、Git、WorkContract、Session Metadata、Environment 和 Agent Process 已按当前产品的 Shell/能力职责重组；其余原型的 IA 仍待独立验证。</p>
+<p><strong>审查状态：</strong>“1:1”只保证 CSS 像素不缩放，不自动代表与当前 Nession Web/App 的信息架构一致。Files、Git、WorkContract、Session Metadata、Environment、Agent Process 和 Claude Memory 已按当前 Shell/能力职责核对；#2221/#2254 是独立候选 AI 模式/协议，不应伪装成已上线页面；其余原型的 IA 仍待独立验证。</p>
 <a class="card" href="./work-contract-2541/index.html" aria-label="打开 WorkContract 不可变版本与来源适配原型">
 <small>Requirement #2541 · Work semantics</small>
 <h2>Workspace / Work · Immutable contracts <span aria-hidden="true">↗</span></h2>
@@ -58,7 +58,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>AI Workspace <span aria-hidden="true">↗</span></h2>
 <p>场景即主体：接近全屏的交互画布，左右只露出相邻场景提示，可点击和横向滑动切换。AI 按当前 View 的动作空间逐步推进目标。</p>
 <span class="tag">Interactive HTML · Mock data · Desktop & Mobile</span>
-<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
+<span class="ia-status">候选 System One / Scene 信息架构 · 非当前生产页面</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/ai-workspace-2221" target="_blank" rel="noopener noreferrer">View AI Workspace source (GitHub) ↗</a>
 <a class="card" href="./ai-conversation-2254/index.html" aria-label="打开 AI Conversation Text UI 交互原型">
@@ -66,7 +66,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>AI Conversation <span aria-hidden="true">↗</span></h2>
 <p>从空白对话开始：流式 Text → 业务组件浮现 → 交互选择 → 组件作为 Text 再发送给 AI → 嵌入式 Session 创建。可检查 JSON Schema、原始消息和运行时状态。</p>
 <span class="tag">Interactive HTML · Text-only Protocol · Mock Agent / Session · Mobile</span>
-<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
+<span class="ia-status">候选 Text→UI 对话扩展 · 非当前生产渲染器</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/ai-conversation-2254" target="_blank" rel="noopener noreferrer">View AI Conversation source (GitHub) ↗</a>
 <a class="card" href="./terminal-fixed-cols-2487/index.html" aria-label="打开固定列数跨端真实字号模拟器">
@@ -127,7 +127,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Claude Memory · Markdown reader <span aria-hidden="true">↗</span></h2>
 <p>Session → Context Capsule → Claude Code Peek → Memory。可点击 MEMORY.md 的 Markdown 主题链接，浏览 Frontmatter、表格、代码、任务列表，跳转文件内标题，并测试分块读取、失败链接及手机端返回。</p>
 <span class="tag">Interactive HTML · Read-only mock · Session-first · Web &amp; Mobile</span>
-<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
+<span class="ia-status">结构已按当前 main 核对 · 浏览器视觉对比未完成</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689" target="_blank" rel="noopener noreferrer">View Memory prototype source (GitHub) ↗</a>
 <a class="replay-link" href="./ai-workspace-2221/index.html#jev-replay" aria-label="直接查看 AI Workspace 真实 Jev 测试过程">查看真实 Jev 测试过程 · 32 次请求回放 ↗</a>
