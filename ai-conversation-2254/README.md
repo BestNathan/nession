@@ -42,3 +42,11 @@ Run node ai-conversation-2254/smoke-test.mjs from the branch root. A passing par
 ## Design follow-ups
 
 The real implementation needs a production mdast-aware fence parser, two-stage JSON Schema validation (envelope + component), scoped instance identity across history/devices, permissions and stale-reference rules, ChatMarkdown/MessageScroller integration, a business-component adapter layer owned by App composition, responsive/keyboard/browser tests, and trust-bounded component state/action projections. Production Nession business APIs remain the single source of authority.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` is a directly accessible interactive review page using the shared `../prototype-frame-2758/frame.css`, `frame.js` and `review-bridge.*`. Its order is Requirement overview → 1:1 CSS-pixel product mock → interaction/fidelity details. Use the original [Requirement](https://github.com/BestNathan/nession/issues/2254) for the current design contract.
+- **Behavior:** preserves this directory's existing state transitions; moves fixture controls, reset, test inspectors, and scenario narratives outside the product viewport wherever they are static. Device width controls and full-page Reset belong to the external harness.
+- **Fidelity:** Text UI 指令与交互、状态检查器模拟；不连接大模型或 Session 后端。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
+- **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
+- **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/ai-conversation-2254/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
