@@ -1,4 +1,5 @@
-import { MoreHorizontal, Settings, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Info, MoreHorizontal, Pencil, Settings, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -6,9 +7,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -24,68 +25,63 @@ function agentCopyClass(channel: AgentChannel): string {
   }
 }
 
-// The row's secondary actions have two presentations, and the breakpoint owns
-// the switch — not React, which cannot read one.
-//
-// At lg+ they are the inline icons below: hidden until group hover/focus, and
-// held visible on the selected row. That reveal is the Web shell's shipped
-// behaviour and this change does not touch it.
-//
-// Below lg they are one `…` trigger (`SessionRowActionsMenu`). There is no
-// hover down there — that band is the App's Sessions surface and the Web
-// shell's narrow drawer — so icons visible by default sit in the row
-// permanently, as peers of the row's own tap target. `session-item.md` answers
-// both halves ("Secondary actions: Web hover/focus/overflow, App
-// overflow/swipe/context action") and lists exactly this state as an
-// anti-pattern ("Permanent destructive controls").
-//
-// So both presentations are in the DOM and the media query picks one.
-// `display: none` keeps the undisplayed one out of the accessibility tree and
-// the tab order, so only one is ever reachable. The duplicate markup is asked
-// for by the switch being a breakpoint: choosing in React would need a prop
-// threaded from the App down through SessionList, and the App and Web share
-// this component.
-//
-// The hiding rule has to stay `lg:`-prefixed so the unprefixed default is
-// visible, and the selected override has to carry that same prefix, or
-// tailwind-merge keeps both classes and the later media-query rule wins the
-// real cascade — which would hide the icons on selected rows at lg+. jsdom
-// applies neither media query nor group-hover, so tests assert this class
-// composition.
-const iconReveal = cn(
-  'mt-0.5 size-8 shrink-0 text-muted-foreground',
-  'max-lg:hidden',
+// Web reveals the one row action on hover/focus/selection; the App has no
+// hover band, so the same control is permanently visible there. Choosing that
+// with a breakpoint keeps one control in the DOM instead of an inline pair plus
+// an overflow menu, and `session-item.md` accepts overflow as the Web and App
+// disclosure for secondary actions.
+const menuReveal = cn(
+  'text-muted-foreground hover:text-foreground',
   'lg:opacity-0 lg:pointer-events-none',
   'lg:group-hover:opacity-100 lg:group-hover:pointer-events-auto',
   'lg:group-focus-within:opacity-100 lg:group-focus-within:pointer-events-auto',
 );
 
 /**
- * The two row actions as one `…` menu — the sub-`lg` presentation.
+ * The row's secondary actions as one anchored `…` menu.
  *
- * `Button`'s `icon` size is `--control-md`, and that is the point rather than a
- * default left in place: under the Web shell that token is 32px, inside the App
- * it is 44px — the App's own touch floor (`experience.app.touchTarget.min`).
- * So the trigger is the experience's control band without this row restating a
- * number, and it is the one control the App row now exposes as a tap target
- * (the inline icons it replaces hardcode `size-8` in both experiences).
- *
- * The `…` is the disclosure `session-item.md` prefers for App; swipe and
- * long-press are the alternatives it also allows and neither has a keyboard
- * path. The popup is `base-ui`'s menu, so the trigger carries its own
- * accessible name and the whole thing is operable from the keyboard.
+ * The same menu is used on wide and narrow Web: wide reveals the trigger on
+ * hover/focus/selection, while narrow keeps a 44px touch target visible. App
+ * receives the same primitive without Web's details entry, so its existing
+ * attach/kill actions do not gain a new surface. The menu is a floating
+ * overlay; it never selects the row or replaces the list. Base UI owns
+ * click-outside, Escape and focus movement; an explicit scroll listener
+ * dismisses it when the Session list moves under the anchor.
  */
 function SessionRowActionsMenu({
   session,
+  selected,
+  onViewDetails,
+  onEditDetails,
   onConfigure,
   onKill,
 }: {
   session: Session;
+  selected: boolean;
+  onViewDetails?: (session: Session) => void;
+  onEditDetails?: (session: Session) => void;
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const viewport = document.querySelector(
+      '[data-testid="sidebar"] [data-slot="scroll-area-viewport"]',
+    );
+    if (!viewport) {
+      return;
+    }
+    const close = () => setOpen(false);
+    viewport.addEventListener('scroll', close, { passive: true });
+    return () => viewport.removeEventListener('scroll', close);
+  }, [open]);
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -94,13 +90,35 @@ function SessionRowActionsMenu({
             variant="ghost"
             data-testid={`session-actions-${session.session_id}`}
             aria-label={`Session actions for ${session.session_name}`}
-            className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground lg:hidden"
+            className={cn(
+              'mt-0.5 shrink-0 max-lg:size-11',
+              menuReveal,
+              selected && 'lg:opacity-100 lg:pointer-events-auto',
+            )}
           >
             <MoreHorizontal className="size-4" />
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
+        {onViewDetails ? (
+          <DropdownMenuItem
+            data-testid={`session-actions-details-${session.session_id}`}
+            onClick={() => onViewDetails(session)}
+          >
+            <Info />
+            Session details
+          </DropdownMenuItem>
+        ) : null}
+        {onEditDetails ? (
+          <DropdownMenuItem
+            data-testid={`session-actions-edit-${session.session_id}`}
+            onClick={() => onEditDetails(session)}
+          >
+            <Pencil />
+            Edit details
+          </DropdownMenuItem>
+        ) : null}
         {onConfigure ? (
           <DropdownMenuItem
             data-testid={`session-actions-settings-${session.session_id}`}
@@ -111,14 +129,17 @@ function SessionRowActionsMenu({
           </DropdownMenuItem>
         ) : null}
         {onKill ? (
-          <DropdownMenuItem
-            variant="destructive"
-            data-testid={`session-actions-kill-${session.session_id}`}
-            onClick={() => onKill(session)}
-          >
-            <Trash2 />
-            Kill session
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              data-testid={`session-actions-kill-${session.session_id}`}
+              onClick={() => onKill(session)}
+            >
+              <Trash2 />
+              Kill session
+            </DropdownMenuItem>
+          </>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -156,6 +177,10 @@ export interface SessionItemProps {
   /** Open the attach-settings (configure) dialog for this session. */
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
+  /** Open the read-only Session details surface without selecting the row. */
+  onViewDetails?: (session: Session) => void;
+  /** Open the same details surface directly in its metadata editor. */
+  onEditDetails?: (session: Session) => void;
   /**
    * The Session's user-facing display identity (#2789): its metadata title when
    * set, otherwise the tmux name. The row keeps rendering `session_name` as
@@ -246,6 +271,8 @@ export function SessionItem({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
   showRecency = true,
   displayTitle,
 }: SessionItemProps) {
@@ -309,66 +336,15 @@ export function SessionItem({
           </span>
         )}
       </button>
-      {onConfigure || onKill ? (
+      {onViewDetails || onEditDetails || onConfigure || onKill ? (
         <SessionRowActionsMenu
           session={session}
+          selected={selected}
+          onViewDetails={onViewDetails}
+          onEditDetails={onEditDetails}
           onConfigure={onConfigure}
           onKill={onKill}
         />
-      ) : null}
-      {onConfigure ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                data-testid={`session-settings-${session.session_id}`}
-                aria-label={`Configure attach settings for ${title}`}
-                className={cn(
-                  iconReveal,
-                  'hover:text-foreground',
-                  selected && 'lg:opacity-100 lg:pointer-events-auto',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onConfigure(session);
-                }}
-              >
-                <Settings className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">Configure attach settings</TooltipContent>
-        </Tooltip>
-      ) : null}
-      {onKill ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                data-testid={`session-kill-${session.session_id}`}
-                aria-label="Kill session"
-                className={cn(
-                  iconReveal,
-                  'hover:text-destructive',
-                  selected && 'lg:opacity-100 lg:pointer-events-auto',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onKill(session);
-                }}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">Kill session</TooltipContent>
-        </Tooltip>
       ) : null}
     </div>
   );

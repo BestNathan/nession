@@ -149,9 +149,6 @@
     "iconButtonSize": {
       "ref": "experience.web.control.lg"
     },
-    "railWidth": {
-      "value": "50px"
-    },
     "sidebarWidth": {
       "$description": "Expanded sidebar column. The mockup draws 246px; the shell's grid is `246px 1fr`.",
       "value": "246px"
@@ -192,7 +189,7 @@
       "value": "7px"
     },
     "statusDotSize": {
-      "$description": "The sidebar's status mark, shared by the foot's service dot, the collapsed rail's and the agent/node rows — one object in three places. Small on purpose: the mockup's comment on the foot is 'Healthy stays quiet; degraded may gain emphasis', so a steady state is a 5px mark beside quiet text rather than a badge.",
+      "$description": "The sidebar's status mark, shared by the Server footer's service dot and the Agent/node rows — one object in two places. Small on purpose: the mockup's comment on the foot is 'Healthy stays quiet; degraded may gain emphasis', so a steady state is a 5px mark beside quiet text rather than a badge.",
       "value": "5px"
     },
     "footFontSize": {
@@ -206,10 +203,6 @@
     "sectionHeadPadBottom": {
       "$description": "Sidebar section label bottom padding. The mockup draws 7px, tighter than the sides so the label sits with the rows it names rather than floating between sections.",
       "value": "7px"
-    },
-    "sectionSepMargin": {
-      "$description": "Inset separator between sidebar sections. The mockup draws `margin: 8px`, so the rule does not run edge to edge — it reads as a division inside the column, not as another panel edge.",
-      "value": "8px"
     }
   },
   "focus": {

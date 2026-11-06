@@ -11,6 +11,8 @@ import { SessionMetadataSection } from '@/product/session/components/SessionMeta
 export interface SessionDetailsProps {
   session: Session;
   state: DomainState;
+  /** The row menu's Edit details action opens the editor directly. */
+  initialEditing?: boolean;
 }
 
 /**
@@ -22,7 +24,7 @@ export interface SessionDetailsProps {
  * through the Agent-owned metadata store. The tmux name and `session_id` are
  * never part of the edit: the title is a display alias.
  */
-export function SessionDetails({ session, state }: SessionDetailsProps) {
+export function SessionDetails({ session, state, initialEditing = false }: SessionDetailsProps) {
   const entry = useSessionMetadata(session.session_id);
 
   return (
@@ -57,7 +59,12 @@ export function SessionDetails({ session, state }: SessionDetailsProps) {
         ) : null}
       </dl>
 
-      <SessionMetadataSection session={session} entry={entry} />
+      <SessionMetadataSection
+        session={session}
+        entry={entry}
+        initialEditing={initialEditing}
+        editingDisabled={state.agent.channel !== 'online'}
+      />
     </div>
   );
 }

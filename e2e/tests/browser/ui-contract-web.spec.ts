@@ -185,15 +185,17 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
       await expect(search).toBeFocused();
       await expectQuietPointerFocus(search, optsFor(SESSION_LIST, 'web', row.id), { border: 'ring' });
 
-      // A real Tab step: the next primitive must show the token inset outline,
-      // not an outer ring or a duplicate ring+outline.
+      // A real Tab step: the next primitive is the search field's filter action,
+      // which must show the token inset outline, not an outer ring or a
+      // duplicate ring+outline.
       await page.keyboard.press('Tab');
-      const newSession = page.getByTestId('create-session');
-      await expect(newSession).toBeFocused();
-      await expectInsetFocusOutline(newSession, optsFor(SESSION_LIST, 'web', row.id));
-
-      // Pointer focus on a button paints no focus chrome at all.
       const filters = page.getByTestId('session-list-filters');
+      await expect(filters).toBeFocused();
+      await expectInsetFocusOutline(filters, optsFor(SESSION_LIST, 'web', row.id));
+
+      // Pointer focus on a button paints no focus chrome at all. Return to the
+      // text field by pointer first so the button's focus modality is fresh.
+      await search.click();
       await filters.click();
       await expect(filters).toBeFocused();
       await expectQuietPointerFocus(filters, optsFor(SESSION_LIST, 'web', row.id));

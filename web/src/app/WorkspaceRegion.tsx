@@ -1,6 +1,7 @@
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
 import { WebLayout, type MainProps } from '@/app/experiences/web/WebLayout';
+import type { ExperienceMode } from '@/app/experienceMode';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -42,9 +43,16 @@ export interface WorkspaceRegionProps {
   onOpenWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
+  onViewSessionDetails?: (session: Session) => void;
+  onEditSessionDetails?: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
   isWide: boolean;
+  /**
+   * Explicit experience route (`?experience=web|app`). Absent keeps the
+   * viewport default; a narrow viewport may explicitly keep the Web drawer.
+   */
+  experienceOverride?: ExperienceMode;
   showList: boolean;
   /** Mobile: leave the list overlay and return to the session detail. */
   onCloseDrawer: () => void;
@@ -65,18 +73,17 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
-    showList, onBackToSessions, onCloseDrawer, terminal,
+    onConfigure, onKill, onViewSessionDetails, onEditSessionDetails,
+    onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
+    experienceOverride, showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
-  // Which experience renders is a **viewport** fact, not a fact about the work
-  // (#1082). It used to additionally require `selectedId !== null`, which meant
-  // the App's composition — and everything that only exists inside it, the
-  // Sessions layer and the top-level gesture included — was absent until work
-  // already existed. Narrow viewports get the App experience; what the App
-  // shows *inside* it is then a question about the Session, not about whether
-  // the experience is on.
-  const isApp = !isWide;
+  // Which experience renders is a **viewport** fact by default (#1082), with
+  // an explicit URL override for the one composition the viewport default
+  // cannot reach: Web's narrow overlay drawer (#2851). The override selects
+  // which composition renders; `isWide` still decides its geometry, so a
+  // narrow Web remains a drawer rather than a squeezed column.
+  const isApp = experienceOverride === undefined ? !isWide : experienceOverride === 'app';
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
     surface,
@@ -89,7 +96,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
-    onConfigure, onKill,
+    onConfigure, onKill, onViewDetails: onViewSessionDetails, onEditDetails: onEditSessionDetails,
   };
 
   const mainShared = {

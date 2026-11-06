@@ -319,7 +319,8 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
     // is the surface capsule.
     await expect(page.getByTestId('session-header-line')).toHaveCount(0);
     await expect(page.getByTestId('sidebar-column')).toBeVisible();
-    await expect(page.getByTestId('sidebar-agents')).toBeVisible();
+    await expect(page.getByTestId('sidebar-agents-entry')).toBeVisible();
+    await expect(page.getByTestId('sidebar-agents')).toHaveCount(0);
 
     // Healthy infrastructure is not permanent chrome — a member that carries
     // nothing actionable must not occupy space.
@@ -351,8 +352,10 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
 
     await page.getByTestId('sidebar-collapse').click();
     await expect.poll(width).toBeGreaterThan(expanded);
+    await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
+    await expect(page.getByTestId('sidebar-open')).toBeVisible();
 
-    await page.getByTestId('sidebar-rail-expand').click();
+    await page.getByTestId('sidebar-open').click();
     await expect.poll(width).toBe(expanded);
     expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });

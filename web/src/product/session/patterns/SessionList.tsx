@@ -54,6 +54,8 @@ export interface SessionListProps {
   onSelect: (session: Session) => void;
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
+  onViewDetails?: (session: Session) => void;
+  onEditDetails?: (session: Session) => void;
   /**
    * Rows split into labelled stretches. Absent renders `sessions` as one flat
    * list — today's behaviour, and Web's.
@@ -100,6 +102,8 @@ export function SessionList({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
   groups,
   showRowRecency = true,
   footer,
@@ -183,6 +187,8 @@ export function SessionList({
                   onSelect={onSelect}
                   onConfigure={onConfigure}
                   onKill={onKill}
+                  onViewDetails={onViewDetails}
+                  onEditDetails={onEditDetails}
                   showRecency={showRowRecency}
                 />
               );

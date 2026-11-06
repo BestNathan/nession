@@ -28,7 +28,7 @@ import {
 } from '@/app/shellStyles';
 import { bodyAppClass, secondaryAppClass, titleAppClass } from './appTypography';
 import { APP_START_SESSION_COPY } from './AppHome';
-import { bucketSessions, type SessionBucket } from './sessionHistory';
+import { bucketSessions, type SessionBucket } from '@/product/session/model/sessionHistory';
 import type { SidebarProps } from '@/app/Sidebar';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 

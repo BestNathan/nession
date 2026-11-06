@@ -11,28 +11,30 @@ export interface SidebarAgentsProps {
   activeAgentId: string | null;
   /**
    * Optional trailing control in the section head (`SidebarSectionHead`'s
-   * `action` slot). The Web sidebar's Collapse control lives here (#1196 §1) —
-   * the head is the sidebar's top navigation zone.
+   * `action` slot). A caller that owns a disclosure head may use it for that
+   * disclosure's control.
    */
   action?: ReactNode;
   /**
    * Whether to draw the section's own "Agents" head.
    *
    * `false` for a caller that owns the head because it is also the section's
-   * disclosure trigger — the App's Sessions surface (#1050). Drawing it in both
-   * places would put two "Agents" labels in one disclosure. Defaults to `true`,
-   * which is what the Web sidebar renders and has always rendered.
+   * disclosure trigger — both current callers pass it: the Web entry (#2851)
+   * and the App's Sessions surface (#1050). Drawing it in both places would put
+   * two "Agents" labels in one disclosure. Defaults to `true` for a standalone
+   * caller that has not supplied its own head.
    */
   showSectionHead?: boolean;
 }
 
 /**
- * Infrastructure identity, at the top of the sidebar.
+ * Infrastructure identity, revealed on demand.
  *
  * This is where location context lives now that the Web shell has no header
- * (#748). It is deliberately *not* a navigation parent: Sessions stay flat and
- * never group under an Agent (`session-list.md`, anti-pattern 1). The list is
- * here so the user can see what the work is running on.
+ * (#748). Web reveals it from the lower Agents / locations entry (#2851); the App
+ * uses it inside its own Sessions disclosure. It is deliberately *not* a
+ * navigation parent: Sessions stay flat and never group under an Agent
+ * (`session-list.md`, anti-pattern 1).
  *
  * **Rows are not controls.** #748 settles that this section exists and carries
  * the active-node marker, but leaves its actions undecided (its Open Question 3
@@ -69,9 +71,9 @@ export function SidebarAgents({
   showSectionHead = true,
 }: SidebarAgentsProps) {
   // With no head and no rows there is nothing to show; but when a head (or a
-  // head action, like the Web Collapse control) is present it must not vanish
-  // with the Agent count — a shell control that disappears based on data is
-  // exactly the "jumping control" #1196 removes.
+  // caller-supplied head action) is present it must not vanish with the Agent
+  // count — a shell control that disappears based on data is exactly the
+  // "jumping control" #1196 removes.
   if (agents.length === 0 && (!showSectionHead || action === undefined)) {
     return null;
   }
