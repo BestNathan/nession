@@ -6,6 +6,7 @@ import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal 
 import { applyIssueAuditProposal } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
+import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
 
 const tmp = mkdtempSync(path.join(tmpdir(), 'nession-agent-gh-'));
 const filename = path.join(tmp, 'issue.json');
@@ -155,7 +156,68 @@ try {
     e2eContract.replace('- terminal-attach','- terminal-replay')
       .replace('| terminal-attach | Regression','| terminal-replay | Regression')),/Unauthorized E2E/);
   assert.throws(() => enforceE2EReadOnly(issue.body,issue.body+'\n'+e2eContract),/Unauthorized E2E/);
-  console.log('gh issue tools self-test: canonical proposal regressions passed');
+
+  // #2851: invalid source format must enter repair, never be treated as an
+  // unauthorized write. The fixed proposal must still pass full validation.
+  const malformedE2e=e2eContract
+    .replace('- terminal-attach','- `terminal-attach.spec.ts` — existing regression')
+    .replace('| terminal-attach | Regression | Pending | - |',
+      '| terminal-attach.spec.ts | Regression | Pending | not run |');
+  assert.ok(parseIssueE2E(malformedE2e).errors.length>0);
+  assert.deepEqual(parseIssueE2E(e2eContract).errors,[]);
+  enforceE2EReadOnly(malformedE2e,e2eContract);
+  assert.throws(()=>enforceE2EReadOnly(malformedE2e,malformedE2e),/Unauthorized E2E/);
+  assert.throws(()=>enforceE2EReadOnly(malformedE2e,'no E2E sections'),/Unauthorized E2E/);
+  assert.throws(()=>enforceE2EReadOnly(malformedE2e,
+    e2eContract.replace('| Pending | - |','| Pending | not run |')),/Unauthorized E2E/);
+  const badPending=e2eContract.replace('| Pending | - |','| Pending | not run |');
+  enforceE2EReadOnly(badPending,e2eContract);
+  assert.throws(()=>enforceE2EReadOnly(badPending,e2eContract
+    .replace('- terminal-attach','- terminal-replay')
+    .replace('| terminal-attach | Regression','| terminal-replay | Regression')),/Unauthorized E2E/);
+
+  // Already-authenticated results must survive any repair of a different bad
+  // Pending row, and an Agent cannot mint a new completed result as a side
+  // effect of normalizing a malformed Report.
+  const twoIds=e2eContract.replace('- terminal-attach','- terminal-attach\n- terminal-replay')
+    .replace('| terminal-attach | Regression | Pending | - |',
+      '| terminal-attach | Regression | Pending | - |\n| terminal-replay | Regression | Pending | - |');
+  const digest=parseIssueE2E(twoIds).digest;
+  const receipt='run 1/1, SHA '+ 'a'.repeat(40)+', contract '+digest+
+    ', plan '+ 'b'.repeat(64)+', tests 1/1 (https://github.com/BestNathan/nession/actions/runs/1)';
+  const completed=twoIds.replace('| terminal-attach | Regression | Pending | - |',
+    '| terminal-attach | Regression | Pass | '+receipt+' |');
+  assert.deepEqual(parseIssueE2E(completed).errors,[]);
+  const malformedWithReceipt=completed.replace('| terminal-replay | Regression | Pending | - |',
+    '| terminal-replay | Regression | Pending | not run |');
+  enforceE2EReadOnly(malformedWithReceipt,completed);
+  assert.throws(()=>enforceE2EReadOnly(malformedWithReceipt,completed.replace(
+    '| terminal-attach | Regression | Pass | '+receipt+' |',
+    '| terminal-attach | Regression | Pending | - |')),/Unauthorized E2E/);
+  assert.throws(()=>enforceE2EReadOnly(malformedWithReceipt,completed.replace(
+    '| terminal-replay | Regression | Pending | - |',
+    '| terminal-replay | Regression | Pass | '+receipt+' |')),/Unauthorized E2E/);
+
+  // Exercise the exact Qwen-style body proposal via the fixed-target trusted
+  // updater, including no-write rejection and revalidated persisted readback.
+  const preE2eIssue=JSON.parse(readFileSync(filename,'utf8'));
+  writeFileSync(filename,JSON.stringify({
+    ...preE2eIssue,body:preE2eIssue.body+'\n\n'+malformedE2e,
+  }));
+  const malformedSnapshot=readFileSync(filename,'utf8');
+  await assert.rejects(applyIssueAuditProposal(issue,{
+    result:JSON.stringify({body:preE2eIssue.body+'\n\n'+badPending}),
+  },'example/repo'),/Unauthorized E2E/);
+  assert.equal(readFileSync(filename,'utf8'),malformedSnapshot,
+    'invalid proposed E2E repairs must not write the Issue');
+  await applyIssueAuditProposal(issue,{
+    result:JSON.stringify({body:preE2eIssue.body+'\n\n'+e2eContract}),
+  },'example/repo');
+  const repairedE2e=JSON.parse(readFileSync(filename,'utf8'));
+  assert.ok(repairedE2e.body.endsWith(e2eContract));
+  assert.deepEqual(parseIssueE2E(repairedE2e.body).errors,[]);
+  writeFileSync(filename,JSON.stringify(preE2eIssue));
+  console.log('gh issue tools self-test: malformed E2E repair and immutable evidence passed');
 } finally {
   process.env.PATH = oldPath;
   if (oldFile == null) delete process.env.FAKE_GH_ISSUE_FILE;
