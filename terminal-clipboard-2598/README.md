@@ -53,3 +53,10 @@ Keyboard/focus: all controls are native buttons/checkboxes with visible focus. C
 ## Non-goals
 
 No real clipboard integration, no Files/upload path, no app-specific adapter, no production component extraction. Production ownership stays with `web/src/platform/terminal-runtime/clipboard/` and `TerminalSurface`.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` now uses the shared `../prototype-frame-2758/` presentation frame (Requirement overview → 1:1 CSS-pixel interactive viewport → functional design and verification). Scenario/debug controls stay outside the product preview; original interactions remain in the owning directory.
+- **Mock fidelity:** OSC 52/5522 协商与系统剪贴板完全模拟，终端是 DOM 文本。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
+- **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
+- **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/terminal-clipboard-2598/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
