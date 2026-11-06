@@ -17,6 +17,7 @@ a{color:inherit}
 .card:hover{transform:translateY(-2px);border-color:light-dark(#858e99,#9ba6b7)}
 .card h2{font-size:24px;margin:8px 0}
 .tag{display:inline-block;margin-top:20px;color:light-dark(#3a4655,#abb8ca);font-size:13px}
+.ia-status{display:block;margin-top:9px;color:light-dark(#5f6470,#adb3bd);font-size:12px;line-height:1.4}
 .source-link{display:inline-block;margin:9px 4px 2px;color:light-dark(#64748b,#c8d5e2);font-size:12px;font-weight:650;text-decoration:underline;text-underline-offset:3px}\n.replay-link{display:inline-flex;margin-top:15px;border:1px solid light-dark(#d6dce4,#525b66);border-radius:10px;padding:11px 14px;text-decoration:none;font-size:13px;font-weight:700;background:light-dark(#fff,#20252a)}
 .replay-link:hover{border-color:light-dark(#64748b,#bcc9d9)}
 footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
@@ -27,11 +28,13 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <small>Nession / Prototype Branch</small>
 <h1>Explore ideas before implementation.</h1>
 <p>独立于生产代码的交互设计原型集合。每个原型放在独立目录，并由对应的 GitHub Issue 跟踪需求与讨论。</p>
+<p><strong>审查状态：</strong>“1:1”只保证 CSS 像素不缩放，不自动代表与当前 Nession Web/App 的信息架构一致。Files、Git、WorkContract 已按当前 main 的 Shell 职责重新组织；其余原型的 IA 仍待独立验证。</p>
 <a class="card" href="./work-contract-2541/index.html" aria-label="打开 WorkContract 不可变版本与来源适配原型">
 <small>Requirement #2541 · Work semantics</small>
 <h2>Workspace / Work · Immutable contracts <span aria-hidden="true">↗</span></h2>
 <p>Work 是 Workspace 能力胶囊中的一个情境能力，不是独立页面；在 Work 内查看不可变 WorkContract、Criteria、Thread、Revision。可切换 Files/Git 并保留契约上下文，支持显式来源修订与无 Work 绑定状态。</p>
 <span class="tag">Interactive HTML · Source adapters · Revision proposals · Web &amp; App mock</span>
+<span class="ia-status">结构已按当前 main 核对 · 浏览器视觉对比未完成</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/work-contract-2541" target="_blank" rel="noopener noreferrer">View WorkContract prototype source (GitHub) ↗</a>
 <a class="card" href="./prototype-frame-2758/index.html" aria-label="Open shared prototype review frame">
@@ -39,6 +42,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Shared Prototype Review Frame <span aria-hidden="true">↗</span></h2>
 <p>统一三段式原型文档：需求概览 + 1:1 交互预览 + 功能说明/验证。共享 CSS 和 JS 控件，不侵入业务产品 UI。</p>
 <span class="tag">Interactive HTML · Reusable frame · CSS-pixel 1:1 · Mock only</span>
+<span class="ia-status">独立展示/阅读页面 · 不适用完整 Session Shell</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/prototype-frame-2758" target="_blank" rel="noopener noreferrer">View shared frame source (GitHub) ↗</a>
 <a class="card" href="./files-workspace-2751/index.html" aria-label="打开 Files Workspace 文件浏览与创建交互原型">
@@ -46,6 +50,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Files Workspace <span aria-hidden="true">↗</span></h2>
 <p>桌面目录树的选中、展开和浏览路径各自独立；创建文件始终使用明确的目标目录。移动端逐级进入目录，文件只读优先、显式编辑；重名、未保存修改、外部更新冲突及来源不可用均可交互模拟。</p>
 <span class="tag">Interactive HTML · Web &amp; App · Source-aware FileRef · Conflict states · Mock only</span>
+<span class="ia-status">结构已按当前 main 核对 · 浏览器视觉对比未完成</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/files-workspace-2751" target="_blank" rel="noopener noreferrer">View Files prototype source (GitHub) ↗</a>
 <a class="card" href="./ai-workspace-2221/index.html" aria-label="打开 AI Workspace 交互原型">
@@ -53,6 +58,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>AI Workspace <span aria-hidden="true">↗</span></h2>
 <p>场景即主体：接近全屏的交互画布，左右只露出相邻场景提示，可点击和横向滑动切换。AI 按当前 View 的动作空间逐步推进目标。</p>
 <span class="tag">Interactive HTML · Mock data · Desktop & Mobile</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/ai-workspace-2221" target="_blank" rel="noopener noreferrer">View AI Workspace source (GitHub) ↗</a>
 <a class="card" href="./ai-conversation-2254/index.html" aria-label="打开 AI Conversation Text UI 交互原型">
@@ -60,6 +66,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>AI Conversation <span aria-hidden="true">↗</span></h2>
 <p>从空白对话开始：流式 Text → 业务组件浮现 → 交互选择 → 组件作为 Text 再发送给 AI → 嵌入式 Session 创建。可检查 JSON Schema、原始消息和运行时状态。</p>
 <span class="tag">Interactive HTML · Text-only Protocol · Mock Agent / Session · Mobile</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/ai-conversation-2254" target="_blank" rel="noopener noreferrer">View AI Conversation source (GitHub) ↗</a>
 <a class="card" href="./terminal-fixed-cols-2487/index.html" aria-label="打开固定列数跨端真实字号模拟器">
@@ -67,6 +74,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Fixed-column Terminal Lab <span aria-hidden="true">↗</span></h2>
 <p>同一列数下实时比较 Web / iPhone 的真实 CSS 字号、字形测量、内容宽度及行数。可调整 80/88/96/100/120 列、Web 侧栏和最大字号、iPhone 机型及软键盘。</p>
 <span class="tag">Interactive HTML · Actual CSS font-size · Desktop & iPhone · Mock Terminal</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/terminal-fixed-cols-2487" target="_blank" rel="noopener noreferrer">View Terminal Lab source (GitHub) ↗</a>
 <a class="card" href="./terminal-clipboard-2598/index.html" aria-label="打开终端剪贴板协议瞬时状态原型">
@@ -74,6 +82,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Transient clipboard states <span aria-hidden="true">↗</span></h2>
 <p>OSC 52 / OSC 5522 成功时保持安静；仅在需要时出现三种瞬时状态：浏览器阻止异步写入时的用户手势复制、被拒绝的写入、以及 TUI 未协商图像协议时的一句诚实提示。包含只读观察者状态与窄屏布局。</p>
 <span class="tag">Interactive HTML · Mock clipboard &amp; TUI · Desktop &amp; Narrow · No upload</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/terminal-clipboard-2598" target="_blank" rel="noopener noreferrer">View clipboard prototype source (GitHub) ↗</a>
 <a class="card" href="./agent-process-discovery-2514/index.html" aria-label="打开 Agent 能力诊断与 Session 进程交互原型">
@@ -81,6 +90,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Agent Capability · Process Discovery <span aria-hidden="true">↗</span></h2>
 <p>当前 Session 进程树与资源详情为主体；Agent details 默认收起，展开后分组展示身份、连接、环境和能力，Process details 同样按需展开。桌面并排、移动端分层查看；不暴露其他 Session 或底层执行层级。</p>
 <span class="tag">Interactive HTML · Mock Agent &amp; Processes · Web &amp; Mobile</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/agent-process-discovery-2514" target="_blank" rel="noopener noreferrer">View Agent capability prototype source (GitHub) ↗</a>
 
@@ -89,6 +99,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Git Workspace / GitHub Context <span aria-hidden="true">↗</span></h2>
 <p>从胶囊直达 Git Workspace，无 Peek。完整体验 Repository / GitHub 分层，Issues、Pull Requests、Actions、fork/upstream、鉴权失败与离线等交互场景。</p>
 <span class="tag">Interactive HTML · Read-only mock · Desktop & Mobile · No network</span>
+<span class="ia-status">结构已按当前 main 核对 · 浏览器视觉对比未完成</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/git-github-1290" target="_blank" rel="noopener noreferrer">View Git prototype source (GitHub) ↗</a>
 <a class="card" href="./environment-session-2654/index.html" aria-label="打开 Session Environment Workspace 交互原型">
@@ -96,16 +107,19 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Session Environment Binding <span aria-hidden="true">↗</span></h2>
 <p>当前 Session 优先的 Environment 工作区：无全宽状态栏、轻量状态摘要与按需 Revision 详情；可切换 In sync、Pending、Unsupported、Error、Unavailable，保留有序 Profile 绑定、Apply 和移动端推入详情。</p>
 <span class="tag">Interactive HTML · Mock binding / shell · Web &amp; Mobile · No network</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/environment-session-2654" target="_blank" rel="noopener noreferrer">View Environment prototype source (GitHub) ↗</a>
 
-<a class="card" href="./terminal-direction-2657/index.html" aria-label="打开移动终端长按方向手势原型"><small>Requirement #2657 · Mobile Terminal</small><h2>Mobile Terminal · Touch Direction <span aria-hidden="true">↗</span></h2><p>长按终端后四方向操作、1 / 2 / 4 / 8 次/秒四档低速、死区与方向防抖；支持模拟只读、断线和取消。</p><span class="tag">Interactive HTML · Mobile · Mock Terminal</span></a>
+<a class="card" href="./terminal-direction-2657/index.html" aria-label="打开移动终端长按方向手势原型"><small>Requirement #2657 · Mobile Terminal</small><h2>Mobile Terminal · Touch Direction <span aria-hidden="true">↗</span></h2><p>长按终端后四方向操作、1 / 2 / 4 / 8 次/秒四档低速、死区与方向防抖；支持模拟只读、断线和取消。</p><span class="tag">Interactive HTML · Mobile · Mock Terminal</span><span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
+</a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/terminal-direction-2657" target="_blank" rel="noopener noreferrer">View mobile direction source (GitHub) ↗</a>
 <a class="card" href="./pages-knowledge-2664/index.html" aria-label="Open public Knowledge Explorer prototype">
 <small>Requirement #2664 · Pages / Knowledge</small>
 <h2>Knowledge Explorer <span aria-hidden="true">↗</span></h2>
 <p>Stand-alone Pages 的公开 Knowledge 阅读入口：Topic/Tag 搜索、完整文章与证据跳转、全局 CHANGELOG 时间线，桌面三栏与手机列表→正文流程；全部使用已公开的固定样例。</p>
 <span class="tag">Interactive HTML · Public recorded fixture · Desktop &amp; Mobile · Read-only</span>
+<span class="ia-status">独立展示/阅读页面 · 不适用完整 Session Shell</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/pages-knowledge-2664" target="_blank" rel="noopener noreferrer">View Knowledge Explorer source (GitHub) ↗</a>
 <a class="card" href="./claude-memory-2689/index.html" aria-label="打开 Claude Code 当前 Session Memory 原型">
@@ -113,6 +127,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Claude Memory · Markdown reader <span aria-hidden="true">↗</span></h2>
 <p>Session → Context Capsule → Claude Code Peek → Memory。可点击 MEMORY.md 的 Markdown 主题链接，浏览 Frontmatter、表格、代码、任务列表，跳转文件内标题，并测试分块读取、失败链接及手机端返回。</p>
 <span class="tag">Interactive HTML · Read-only mock · Session-first · Web &amp; Mobile</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/claude-memory-2689" target="_blank" rel="noopener noreferrer">View Memory prototype source (GitHub) ↗</a>
 <a class="replay-link" href="./ai-workspace-2221/index.html#jev-replay" aria-label="直接查看 AI Workspace 真实 Jev 测试过程">查看真实 Jev 测试过程 · 32 次请求回放 ↗</a>
@@ -121,6 +136,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Terminal Keys &amp; Quick Commands <span aria-hidden="true">↗</span></h2>
 <p>组合键一次触达，Ctrl/Alt/Shift 单次修饰，快捷命令区分 Insert 与 Run；上层面板与输入胶囊同一视觉语言。</p>
 <span class="tag">Interactive HTML · Mock terminal · Mobile</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/terminal-keys-commands-2710" target="_blank" rel="noopener noreferrer">View Terminal Keys source (GitHub) ↗</a>
 <a class="card" href="./mobile-swipe-2724/index.html" aria-label="打开 Mobile App Swipe 手势交互原型">
@@ -128,6 +144,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Mobile App · Swipe Navigation <span aria-hidden="true">↗</span></h2>
 <p>Sessions ← Terminal → Workspace：边缘滑动跟手预览、短距离回弹、快速滑动提交；终端滚动、TUI、长按方向、胶囊展开和 Workspace 深层返回互不抢手势。</p>
 <span class="tag">Interactive HTML · Touch &amp; Pointer · Mobile mock</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724" target="_blank" rel="noopener noreferrer">View Mobile Swipe prototype source (GitHub) ↗</a>
 <a class="card" href="./session-metadata-2789/index.html" aria-label="打开 Session Metadata Workspace 原型">
@@ -135,6 +152,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>Session metadata · Workspace <span aria-hidden="true">↗</span></h2>
 <p>为 Session 增加标题、描述与 Tags：桌面 Workspace 和 App 内联编辑、列表标题同步、取消/未保存确认、Legacy 空元信息、版本冲突与离线状态；不含 History 与 MCP I/O。</p>
 <span class="tag">Interactive HTML · Session context · Web &amp; App · Mock only</span>
+<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/session-metadata-2789" target="_blank" rel="noopener noreferrer">View Session Metadata source (GitHub) ↗</a>
 <footer>Workspace 操作仍为 Mock；测试回放显示历史真实模型决策，打开页面不会再次调用 TypeSafe API。</footer>
