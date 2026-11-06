@@ -105,6 +105,51 @@ export function originalCursorWorkspace(agentsJsonl,agentId){
   return cwd;
 }
 
+// The provider may error before returning any tool/tokens data. Emit only a
+// bounded, public-safe execution outcome; never serialize SDK error text,
+// streamed messages, prompts, native JSONL, tools' arguments or secrets.
+export function buildCursorFailureTelemetry({admission,model,meta=null,
+  started,finished,category,harnessDigest=null}){
+  if(!['provider-call-failed','provider-outcome-unverified',
+      'worker-postcondition-failed'].includes(category)||
+      !Number.isSafeInteger(started)||!Number.isSafeInteger(finished)||
+      finished<started||admission?.issue!==1997||
+      admission.agent_id!=='dev-cursor-01'||!HEX40.test(admission.input_sha??''))
+    fail('invalid sanitized Developer failure telemetry source');
+  const observed=Number.isSafeInteger(meta?.turns)&&meta.turns>0&&
+    Array.isArray(meta.tool_calls);
+  const resumed=Object.hasOwn(admission,'resume_from');
+  return buildAgentWorkflowTelemetry({
+    workflow_id:'agent-develop',github_workflow:'Agent / Development',
+    github_run_id:admission.run_id,
+    github_run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+    repository:REPO,event:'workflow_dispatch',job:'developer',
+    task:{id:'issue-1997-development',type:'development',
+      issue:admission.issue,target_ref:admission.input_sha,
+      action_id:admission.action_id,
+      native_resumed:meta?.resumed===true?true:null,
+      restored_checkpoint_version:resumed?
+        admission.resume_from.checkpoint_version:null,
+      restored_checkpoint_commit_sha:resumed?
+        admission.resume_from.checkpoint_commit_sha:null},
+    agent:{provider:'cursor',id:admission.agent_id,role:'developer',
+      harness_sha256:harnessDigest,
+      checkpoint_id:resumed?'agent-store:'+
+        admission.resume_from.checkpoint_commit_sha+':v'+
+        admission.resume_from.checkpoint_version:null,
+      model:meta?.model??(model?{id:model}:null),
+      run_id:meta?.run_id??null,status:'error'},
+    execution:{turns:Number.isSafeInteger(meta?.turns)?meta.turns:null,
+      model_requests:null,
+      tool_calls:observed?meta.tool_calls:[],
+      tools_observed:observed},
+    tokens:meta?.usage??{},cost:meta?.cost??{},
+    timing:{started_at:new Date(started).toISOString(),
+      finished_at:new Date(finished).toISOString(),
+      agent_duration_ms:finished-started},
+    result:{status:'error',failure_category:category},
+  });
+}
 export function assertUnprivilegedDeveloperEnvironment(env){
   for(const key of ['STORE_APP_TOKEN','STORE_WRITER_PRIVATE_KEY','ACTIONS_DISPATCH_TOKEN',
     'GITHUB_TOKEN','GH_TOKEN','AGENT_STORE_CONTROLLER_REMOTE','CURSOR_RESUME_PRIVATE_KEY_B64'])
@@ -149,6 +194,7 @@ async function main(){
   const expected=resuming?complete+'Previous value: pending\n':complete;
   const expectedRepairSha=sha('Durable Worker fixture: complete\nPrevious value: pending\n');
   let added=false;
+  let invokedAt=null,providerResult=null,providerMeta=null,telemetryWritten=false;
   try{
     fs.mkdirSync(nativeStore,{mode:0o700});
     if(resuming){
@@ -240,12 +286,15 @@ async function main(){
     if(!/^ripgrep [0-9]+\.[0-9]+\.[0-9]+/.test(ripgrep))
       fail('unrecognized isolated Cursor SDK ripgrep binary');
     console.log('Cursor SDK local file-search runtime verified: '+ripgrep);
-    const {result,meta}=await runCursorSession({
+    invokedAt=Date.now();
+    const response=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
       tools:['read','grep','edit'],sandbox:false,prompt,
       resumeAgentId:resuming?'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6':null,
     });
+    providerResult=response.result;providerMeta=response.meta;
+    const {result,meta}=response;
     // Only bounded status/tool *metadata* is logged. Never emit model text,
     // prompts, tool arguments, native JSONL or credentials on error.
     console.log('Developer Provider outcome metadata '+JSON.stringify({
@@ -333,9 +382,30 @@ async function main(){
         resuming?'native-resume-checkpoint-proposed':'native-checkpoint-proposed'},
     });
     writeAgentWorkflowTelemetry(path.join(out,'agent-telemetry.json'),telemetry);
+    telemetryWritten=true;
     console.log(repairing?'Real Developer original Session resumed and PR bytes checked unchanged; no PR published':'Real Developer read/edit and encrypted native checkpoint verified; no PR published');
+  }catch(error){
+    // Only an attempted Provider invocation gets an Agent telemetry record.
+    // Earlier preflight/credential failures did not call the model and must
+    // not fabricate tool usage or an Agent execution.
+    if(invokedAt!==null&&!telemetryWritten){
+      const category=providerResult==null?'provider-call-failed':
+        providerResult.status==='finished'&&providerMeta?.status==='finished'?
+          'worker-postcondition-failed':'provider-outcome-unverified';
+      try{
+        const telemetry=buildCursorFailureTelemetry({admission:a,model,
+          meta:providerMeta,started:invokedAt,finished:Date.now(),category,
+          harnessDigest:developmentHarnessDigest(a.input_sha,sdkPkg.version,model)});
+        fs.mkdirSync(out,{recursive:true,mode:0o700});
+        writeAgentWorkflowTelemetry(path.join(out,'agent-telemetry.json'),telemetry);
+        console.error('::error::Cursor Developer execution failed; sanitized canonical telemetry saved');
+      }catch{
+        console.error('::error::Cursor Developer failure telemetry could not be persisted');
+      }
+    }
+    throw error;
   }finally{
-    if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{}
+    if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{
     fs.rmSync(CURSOR_LOCAL_ROOT,{recursive:true,force:true});
     if(workspace!==CURSOR_WORKSPACE_PATH){
       try{fs.rmdirSync(path.dirname(workspace));}catch{}
