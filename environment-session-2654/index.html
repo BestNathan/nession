@@ -193,12 +193,12 @@ if(t.id==='editSimulation'){S.modified=true;S.notice='Simulated Profile Save. Bo
 if(t.id==='addThis'){S.mode='manage';S.draft=[...S.active];if(!S.draft.includes(S.selected))S.draft.push(S.selected);render();return}
 if(t.id==='toggleSession'){S.hasSession=!S.hasSession;S.selected='session';S.mode='view';t.textContent=S.hasSession?'无 Session 场景':'恢复 Session';render();el('workspace').classList.remove('detail');syncProductIA();return}
 if(t.id==='toggleAgent'){S.agentOnline=!S.agentOnline;t.textContent=S.agentOnline?'模拟 Agent 断线':'恢复 Agent 连接';render();return}
-if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.demoState='in_sync';S.detailsOpen=false;S.modified=false;S.notice='';S.surface='workspace';S.collapsed=false;S.capabilitiesOpen=false;el('stateSelect').value=S.demoState;el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';render();el('workspace').classList.remove('detail');return}
+if(t.id==='reset'){S.hasSession=true;S.agentOnline=true;S.selected='session';S.mode='view';S.active=['server:base.env','agent:development.env'];S.draft=null;S.revision=12;S.pending=false;S.demoState='in_sync';S.detailsOpen=false;S.modified=false;S.notice='';S.surface='workspace';S.collapsed=false;S.capabilitiesOpen=false;el('stateSelect').value=S.demoState;el('search').value='';el('toggleSession').textContent='无 Session 场景';el('toggleAgent').textContent='模拟 Agent 断线';document.querySelector('.ia-session-sidebar').classList.remove('collapsed');render();el('workspace').classList.remove('detail');syncProductIA();return}
 });
 document.addEventListener('change',e=>{const t=e.target;if(t.matches('[data-add]')){if(t.checked&&!S.draft.includes(t.dataset.add))S.draft.push(t.dataset.add);render()}});
 el('search').addEventListener('input',renderNav);
 el('stateSelect').addEventListener('change',e=>{S.demoState=e.target.value;S.pending=S.demoState==='pending_shell';S.detailsOpen=false;S.notice='';render()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.mode==='manage'){S.mode='view';S.draft=null;render()}else if(e.key==='Escape'&&el('workspace').classList.contains('detail')){el('workspace').classList.remove('detail')}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.mode==='manage'){S.mode='view';S.draft=null;render()}else if(e.key==='Escape'&&el('workspace').classList.contains('detail')){el('workspace').classList.remove('detail');S.selected='session';render()}});
 document.querySelector('[data-np-root]')?.addEventListener('np:resize',e=>{S.experience=e.detail.width<=430?'app':'web';syncProductIA();});
 render();
 })();
