@@ -127,7 +127,7 @@ var files1=[
 ];
 function makeStore(entries){var out={};entries.forEach(function(e){out[e[0]]={path:e[0],kind:e[1],content:e[2]||"",version:1};});return out;}
 var initialStores=function(){return {host:makeStore(files0),sandbox:makeStore(files1)};};
-var state={mode:"web",surface:"workspace",source:"host",offline:false,stores:initialStores(),selected:null,currentDir:"src",expanded:{"src":true},open:"src/App.tsx",docs:{},editing:false,stack:[""],mobileView:"browser",form:null,dialog:null,pending:null,context:null,sheet:null,notice:"",noticeError:false,remoteConflict:false};
+var state={mode:"web",surface:"workspace",sidebarCollapsed:false,selectedSession:"fix-terminal-reconnect",source:"host",offline:false,stores:initialStores(),selected:null,currentDir:"src",expanded:{"src":true},open:"src/App.tsx",docs:{},editing:false,stack:[""],mobileView:"browser",form:null,dialog:null,pending:null,context:null,sheet:null,notice:"",noticeError:false,remoteConflict:false};
 function esc(v){return String(v===null||v===undefined?"":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function slash(p){return p?p+"/":"/";}
 function parent(p){return p.indexOf("/")<0?"":p.slice(0,p.lastIndexOf("/"));}
@@ -203,14 +203,24 @@ function capabilityDock(){
   '<nav class="ia-capability-capsule" aria-label="Workspace capabilities"><button type="button" aria-pressed="true" data-testid="workspace-tool-files">▤ <span>Files</span></button></nav></div>';
 }
 function terminalSurface(){
-  return '<div class="ia-terminal-surface" data-testid="terminal-surface"><div class="ia-terminal-output"><p>nession@dev-session:~$</p><p>Session attached · dev-session</p><p>nession@dev-session:~$ ▌</p></div><div class="ia-terminal-capsule">'+button("open-workspace","Workspace","btn",'aria-label="Open Workspace"')+'</div></div>';
+  return '<div class="ia-terminal-surface" data-testid="terminal-surface"><div class="ia-terminal-output"><p>nession@dev-session:~$</p><p>Session attached · '+esc(state.selectedSession)+'</p><p>nession@dev-session:~$ ▌</p></div><div class="ia-terminal-capsule">'+button("open-workspace","Workspace","btn",'aria-label="Open Workspace"')+'</div></div>';
+}
+function webSidebar(){
+  var sessions=["fix-terminal-reconnect","design-system","production-shell"];
+  if(state.sidebarCollapsed)return '<aside class="ia-session-sidebar collapsed" data-testid="sidebar" data-collapsed="true"><div class="ia-sidebar-top">'+button("sidebar-expand","☷","ia-side-toggle",'aria-label="Expand sidebar"')+'</div><div class="ia-rail-count">3 Agents</div><div class="ia-rail-count">3 Sessions</div></aside>';
+  return '<aside class="ia-session-sidebar" data-testid="sidebar"><div class="ia-sidebar-top"><span>Agents</span>'+button("sidebar-collapse","☷","ia-side-toggle",'aria-label="Collapse sidebar"')+'</div><div class="ia-agent-summary"><span class="ia-agent-dot"></span> devbox-01 <small>online</small></div><div class="ia-agent-summary"><span class="ia-agent-dot"></span> macbook <small>online</small></div><div class="ia-agent-summary"><span class="ia-agent-dot off"></span> sg-prod <small>offline</small></div><div class="ia-side-section"><span>Sessions</span></div><div class="ia-session-list">'+sessions.map(function(name){
+    return '<button type="button" data-action="select-session" data-path="'+esc(name)+'" class="ia-session-item'+(state.selectedSession===name?" active":"")+'"><strong>'+esc(name)+'</strong><small>'+(name==="production-shell"?"sg-prod · zsh":name==="design-system"?"macbook · codex":"devbox-01 · claude")+'</small></button>';
+  }).join("")+'</div><div class="ia-sidebar-footer"><span class="ia-agent-dot"></span> Connected <span>3 nodes</span></div></aside>';
+}
+function webShell(inner){
+  return '<div class="ia-web-layout" data-testid="web-layout">'+webSidebar()+'<main class="ia-web-main" data-testid="shell-main">'+inner+'</main></div>';
 }
 function render(){
   var product=state.surface==="terminal"?terminalSurface():
     '<section class="ia-workspace-shell" data-testid="workspace-shell">'+appPageHeader()+
     '<div class="ia-workspace-content" data-testid="workspace-tool-content">'+(state.mode==="web"?desktop():mobile())+'</div>'+
     capabilityDock()+'</section>';
-  document.getElementById("app").innerHTML=product+menu()+form()+dialog();
+  document.getElementById("app").innerHTML=(state.mode==="web"?webShell(product):product)+menu()+form()+dialog();
   if(state.form){var inp=document.getElementById("filename");if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}}
   if(state.editing){var ed=document.getElementById("editor");if(ed){ed.focus();}}
 }
@@ -223,9 +233,12 @@ function openForm(kind,explicit){var target=explicit===undefined?state.mode==="a
 function submitForm(){var f=state.form;if(!f)return;var nm=(document.getElementById("filename")||{}).value||f.name;f.name=nm;var name=nm.trim();if(!isValidName(name)){f.error="Use a single filename, not a path. '/' , '\\' , '.' and '..' are not valid.";render();return;}if(f.source!==state.source||state.offline){f.error="The selected source is unavailable or has changed. Cancel and try again.";render();return;}var path=f.target?f.target+"/"+name:name;if(node(path)){f.error="Already exists: "+path+". Nothing was overwritten.";render();return;}if(f.target&&(!node(f.target)||node(f.target).kind!=="dir")){f.error="Destination no longer exists.";render();return;}repo()[path]={path:path,kind:f.kind==="file"?"file":"dir",content:"",version:1};state.form=null;state.selected=path;var p=f.target;while(p){state.expanded[p]=true;p=parent(p);}if(f.kind==="file"){state.open=path;state.editing=false;doc(path);if(state.mode==="app")state.mobileView="viewer";}else if(state.mode==="app"){state.stack.push(path);}notify("Created "+path+" in "+sourceShort()+" · no overwrite");render();}
 function save(){getDraft();if(!state.open)return;var n=node(state.open),d=doc(state.open);if(!n||!d)return;if(n.version!==d.version){state.dialog={type:"conflict"};render();return;}n.content=d.draft;n.version++;d.baseline=d.draft;d.version=n.version;state.editing=false;notify("Saved "+n.path+" at version "+n.version);render();}
 function externalUpdate(){getDraft();var n=node(state.open);if(!n)return;n.content=n.content+"\n// Simulated external Agent edit (version "+(n.version+1)+")\n";n.version++;notify("Remote file advanced to v"+n.version+". Try Save to inspect conflict.");render();}
-function reset(){state.stores=initialStores();state.surface="workspace";state.source="host";state.offline=false;state.selected=null;state.currentDir="src";state.expanded={"src":true};state.open="src/App.tsx";state.docs={};state.editing=false;state.stack=[""];state.mobileView="browser";state.searchQuery="";state.form=null;state.dialog=null;state.pending=null;state.context=null;state.sheet=null;notify("Mock fixture reset to initial state");render();}
+function reset(){state.stores=initialStores();state.surface="workspace";state.sidebarCollapsed=false;state.selectedSession="fix-terminal-reconnect";state.source="host";state.offline=false;state.selected=null;state.currentDir="src";state.expanded={"src":true};state.open="src/App.tsx";state.docs={};state.editing=false;state.stack=[""];state.mobileView="browser";state.searchQuery="";state.form=null;state.dialog=null;state.pending=null;state.context=null;state.sheet=null;notify("Mock fixture reset to initial state");render();}
 function click(action,path,el,event){switch(action){
 case "reset":reset();break;
+case "sidebar-collapse":state.sidebarCollapsed=true;render();break;
+case "sidebar-expand":state.sidebarCollapsed=false;render();break;
+case "select-session":getDraft();state.selectedSession=path;state.surface="terminal";render();break;
 case "open-terminal":getDraft();guard(function(){state.surface="terminal";render();});break;
 case "open-workspace":state.surface="workspace";render();break;
 case "shell-back":
