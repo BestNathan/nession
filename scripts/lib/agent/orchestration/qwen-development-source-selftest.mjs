@@ -249,11 +249,15 @@ try{
   write(fixtureFile,fixtureOriginal.replace('review: pending','review: approved'));
   const forgedPatch=execFileSync('git',['-C',root,'diff','--',fixtureFile],
     {encoding:'utf8'});
+  // The Publisher always applies the supplied patch to its own clean
+  // checkout, not to the Worker's dirty source tree.
+  git('reset','--hard','HEAD');
   const forged=preflightAgentPatch({checkout:root,source_sha:fixtureSha,
     patch:forgedPatch,allowed_paths:[fixtureFile]});
   assert.throws(()=>assertQwenControlledPublisherSource({
     issue:2817,sourceCheckout:root,sourceSha:fixtureSha,checked:forged}),
     /controlled Publisher fixture patch changed unauthorized bytes/);
+  write(fixtureFile,fixtureOriginal.replace('review: pending','review: approved'));
   assert.throws(()=>collectQwenDevelopmentPatch(fixtureSnapshot,{
     events:native(['Read','Edit'])}),/replace exactly one verified line/);
   git('reset','--hard','HEAD');
