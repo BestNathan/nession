@@ -116,8 +116,12 @@ export function buildCursorFailureTelemetry({admission,model,meta=null,
       finished<started||admission?.issue!==1997||
       admission.agent_id!=='dev-cursor-01'||!HEX40.test(admission.input_sha??''))
     fail('invalid sanitized Developer failure telemetry source');
+  // Cursor tool names are native metadata but are not an authorization
+  // boundary. Unknown/malformed SDK event names are unobserved, not public
+  // telemetry labels that could accidentally contain tool arguments.
   const observed=Number.isSafeInteger(meta?.turns)&&meta.turns>0&&
-    Array.isArray(meta.tool_calls);
+    Array.isArray(meta.tool_calls)&&
+    meta.tool_calls.every(t=>typeof t==='string'&&/^(read|grep|edit)$/i.test(t));
   const resumed=Object.hasOwn(admission,'resume_from');
   return buildAgentWorkflowTelemetry({
     workflow_id:'agent-develop',github_workflow:'Agent / Development',
@@ -137,11 +141,14 @@ export function buildCursorFailureTelemetry({admission,model,meta=null,
       checkpoint_id:resumed?'agent-store:'+
         admission.resume_from.checkpoint_commit_sha+':v'+
         admission.resume_from.checkpoint_version:null,
-      model:meta?.model??(model?{id:model}:null),
-      run_id:meta?.run_id??null,status:'error'},
+      model:model&&typeof model.id==='string'?{
+        id:model.id,fast:model.fast===true}:null,
+      run_id:typeof meta?.run_id==='string'&&
+        /^[A-Za-z0-9._:-]{1,128}$/.test(meta.run_id)?meta.run_id:null,
+      status:'error'},
     execution:{turns:Number.isSafeInteger(meta?.turns)?meta.turns:null,
       model_requests:null,
-      tool_calls:observed?meta.tool_calls:[],
+      tool_calls:observed?meta.tool_calls.map(t=>t.toLowerCase()):[],
       tools_observed:observed},
     tokens:meta?.usage??{},cost:meta?.cost??{},
     timing:{started_at:new Date(started).toISOString(),
