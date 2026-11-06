@@ -42,6 +42,28 @@
     for (const element of [...document.body.children]) {
       if (element !== page && element.tagName !== "SCRIPT" && element.tagName !== "STYLE") older.appendChild(element);
     }
+    // Legacy CSS is viewport-media based. The review canvas is a fixed-width
+    // element inside a potentially wide browser, so mirror width-only media
+    // rules as container queries. Preserve the original CSS for standalone use.
+    device.style.containerType = "inline-size";
+    const responsive = [];
+    for (const sheet of document.styleSheets) {
+      try {
+        for (const rule of sheet.cssRules) {
+          if (rule.type !== 4) continue; // CSSMediaRule
+          const condition = rule.conditionText;
+          if (!/\\((?:max|min)-width\\s*:/i.test(condition) ||
+              /(?:prefers-|orientation|print|screen|hover|pointer)/i.test(condition)) continue;
+          responsive.push("@container " + condition + " { " +
+            [...rule.cssRules].map(item => item.cssText).join("\\n") + " }");
+        }
+      } catch (_) { /* cross-origin sheets: no read access */ }
+    }
+    if (responsive.length) {
+      const adaptive = document.createElement("style");
+      adaptive.textContent = responsive.join("\\n");
+      document.head.appendChild(adaptive);
+    }
     device.addEventListener("np:resize", () => window.dispatchEvent(new Event("resize")));
     window.dispatchEvent(new Event("resize"));
   }
