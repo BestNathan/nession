@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
 const app={innerHTML:''};
+const fixtureSurface={innerHTML:''};
 const listeners=new Map();
 const document={
-  getElementById:id=>{assert.equal(id,'app');return app},
+  getElementById:id=>{assert.ok(['app','np-git-fixture-controls'].includes(id),'Unexpected DOM id '+id);return id==='app'?app:fixtureSurface},
   addEventListener:(name,fn)=>listeners.set(name,fn),
   querySelector:()=>({focus(){},setSelectionRange(){}})
 };
@@ -75,7 +76,9 @@ check('authentication failure',app.innerHTML.includes('Authentication required')
 click('to-local');
 check('local Git fallback',app.innerHTML.includes('Local repository'));
 click('refresh');
-check('mock snapshot counter',app.innerHTML.includes('Snapshot #2'));
+check('mock snapshot counter',fixtureSurface.innerHTML.includes('Snapshot #2'));
+check('fixture controls outside product',!app.innerHTML.includes('fixture-panel') && fixtureSurface.innerHTML.includes('fixture-panel'));
+check('fixture inspector outside product',!app.innerHTML.includes('class="inspector"'));
 click('reset');
 check('reset original Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
 console.log(total+' / '+total+' deterministic prototype assertions passed (VM only, no browser/live API)');
