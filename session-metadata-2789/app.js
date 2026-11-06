@@ -9,15 +9,15 @@ var normal=[
  {uid:'ses-c1',id:'agent-cloud:ci-analysis',name:'ci-analysis',title:'CI performance review',description:'分析核心工作流耗时及缓存命中情况。',tags:['ci'],agent:'cloud-agent',command:'bash',cwd:'/workspace/nession',activity:'1h',revision:2}
 ];
 function clone(x){return JSON.parse(JSON.stringify(x))}
-var state={sessions:clone(normal),selected:0,width:1180,screen:'workspace',mode:'web',edit:false,draft:null,tagInput:'',notice:'',noticeKind:'',fixture:'normal',offline:false,conflict:false,conflictResolved:false,modal:null,collapsed:false,appSessions:false};
+var state={sessions:clone(normal),selected:0,width:1180,screen:'workspace',mode:'web',edit:false,draft:null,tagInput:'',notice:'',noticeKind:'',fixture:'normal',offline:false,conflict:false,conflictResolved:false,modal:null,collapsed:false,appSessions:false,terminalContext:false};
 function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]})}
 function active(){return state.sessions[state.selected]}
 function display(s){return s.title&&s.title.trim()?s.title:s.name}
 function icon(label,action,extra){return '<button type="button" class="n-btn is-ghost is-icon" data-action="'+action+'" aria-label="'+label+'" title="'+label+'" '+(extra||'')+'>'+esc(label==='Collapse sidebar'?'‹':label==='Expand sidebar'?'›':'⋯')+'</button>'}
 function sessionRow(s,i){return '<button class="n-session" type="button" data-action="select" data-index="'+i+'" aria-current="'+(i===state.selected)+'"><span class="n-session-title">'+esc(display(s))+'</span><span class="n-session-sub">'+esc(s.command)+' · '+esc(s.agent)+' · '+esc(s.activity)+'</span></button>'}
 function sidebar(){
-if(state.collapsed)return '<aside class="n-sidebar is-collapsed">'+icon('Expand sidebar','expand')+'<div class="n-rail-note">Agents<br>2</div><div class="n-rail-note">Sessions<br>3</div><div class="n-bottom">●</div></aside>';
-return '<aside class="n-sidebar"><div class="n-side-head"><h2>Agents</h2>'+icon('Collapse sidebar','collapse')+'</div><div class="n-agent">◉ <b>devbox-01</b></div><div class="n-agent">◉ <b>cloud-agent</b></div><div class="n-separator"></div><h2>Sessions</h2><div class="n-sessions">'+state.sessions.map(sessionRow).join('')+'</div><div class="n-bottom">Connected · 2 Agents</div></aside>'}
+if(state.collapsed)return '<aside class="n-sidebar is-collapsed" data-testid="sidebar" data-collapsed="true">'+icon('Expand sidebar','expand')+'<div class="n-rail-note">Agents<br>2</div><div class="n-rail-note">Sessions<br>3</div><div class="n-bottom">●</div></aside>';
+return '<aside class="n-sidebar" data-testid="sidebar"><div class="n-side-head"><h2>Agents</h2>'+icon('Collapse sidebar','collapse')+'</div><div class="n-agent">◉ <b>devbox-01</b></div><div class="n-agent">◉ <b>cloud-agent</b></div><div class="n-separator"></div><h2>Sessions</h2><div class="n-sessions">'+state.sessions.map(sessionRow).join('')+'</div><div class="n-bottom">Connected · 2 Agents</div></aside>'}
 function notice(){return state.notice?'<div class="n-notice '+(state.noticeKind==='error'?'is-error':state.noticeKind==='success'?'is-success':'')+'" role="status">'+esc(state.notice)+'</div>':''}
 function tagsView(tags){
 if(!tags.length)return '<div class="n-tags"><span class="n-inline-subtle">未添加标签</span></div>';
@@ -40,21 +40,52 @@ return '<div class="n-content" data-testid="session-metadata-editor"><div class=
 '<div class="n-field"><label for="n-new-tag">Tags</label>'+editorTags()+'</div>'+
 '<div class="n-edit-actions"><button class="n-btn is-primary" type="button" data-action="save">保存</button><button class="n-btn" type="button" data-action="cancel">取消</button>'+(state.conflict&&state.noticeKind==='error'?'<button type="button" class="n-btn" data-action="refresh-conflict">放弃草稿并加载最新版本</button>':'')+'</div>'+
 '<section class="n-data-list" aria-label="Immutable Session identifiers">'+datum('tmux 名称（不可编辑）',s.name,true)+datum('Session ID（不可编辑）',s.id,true)+'</section></div>'}
-function dock(){return '<div class="n-dock" aria-label="Workspace navigation"><button class="n-dock-circle" data-action="terminal" type="button" aria-label="Open terminal" title="Open terminal">⌁</button><div class="n-dock-pill"><button type="button" data-action="workspace" aria-current="page">▤ &nbsp; Session</button></div></div>'}
+// Product owner tree: WebLayout( Sidebar + ShellMain ), WorkspacePanel/WorkspaceShell,
+// AppLayout/AppLayers( Terminal root, Sessions layer, Workspace layer with ONE page header ).
+function dock(){
+ return '<div class="n-dock" data-testid="workspace-tool-bar" aria-label="Workspace capabilities">'+
+   (state.mode==='web'?'<button class="n-dock-circle" data-action="terminal" type="button" aria-label="Open terminal" title="Open terminal">⌁</button>':'')+
+   '<nav class="n-dock-pill" aria-label="Workspace capabilities"><button type="button" data-testid="workspace-tool-session" data-action="workspace" aria-current="page">▤ &nbsp; Session</button></nav></div>';
+}
 function terminal(){
-var s=active();return '<div class="n-terminal" aria-label="Terminal simulation"><p>Last login: 2026-11-05 on '+esc(s.agent)+'</p><p><span class="n-prompt">'+esc(s.name)+' $</span> pwd</p><p>'+esc(s.cwd)+'</p><p><span class="n-prompt">'+esc(s.name)+' $</span> git status --short</p><p> M web/src/product/session/components/SessionDetails.tsx</p><p><span class="n-prompt">'+esc(s.name)+' $</span> █</p></div>'}
-function appHeader(title,back){return '<div class="n-app-top"><button type="button" class="n-btn is-ghost" data-action="'+back+'" aria-label="Back">‹</button><strong>'+esc(title)+'</strong><span style="width:42px"></span></div>'}
-function appSessionList(){return appHeader('Sessions','terminal')+'<div class="n-sessions-page">'+state.sessions.map(sessionRow).join('')+'</div>'}
-function appContent(){if(state.appSessions)return appSessionList(); if(state.screen==='terminal')return appHeader('Terminal','app-sessions')+'<div class="n-main">'+terminal()+'<div class="n-dock"><button class="n-dock-circle" data-action="app-sessions" aria-label="Open sessions" title="Sessions">☰</button><div class="n-dock-pill"><button data-action="workspace">▤ &nbsp; Workspace</button></div></div></div>';return appHeader('Session','terminal')+'<div class="n-main"><div class="n-view">'+detail()+'</div>'+dock()+'</div>'}
-function webContent(){return sidebar()+'<div class="n-main">'+(state.screen==='workspace'?'<div class="n-view">'+detail()+'</div>'+dock():terminal()+'<div class="n-dock"><button class="n-dock-circle" type="button" data-action="workspace" aria-label="Open workspace" title="Open workspace">▤</button><div class="n-dock-pill"><button type="button" data-action="workspace">+ &nbsp; Ask Nession…</button></div></div>')+'</div>'}
+ var s=active();return '<div class="n-terminal" aria-label="Terminal simulation" data-testid="terminal-surface"><p>Last login: 2026-11-05 on '+esc(s.agent)+'</p><p><span class="n-prompt">'+esc(s.name)+' $</span> pwd</p><p>'+esc(s.cwd)+'</p><p><span class="n-prompt">'+esc(s.name)+' $</span> git status --short</p><p> M web/src/product/session/components/SessionDetails.tsx</p><p><span class="n-prompt">'+esc(s.name)+' $</span> █</p></div>';
+}
+function terminalCapsule(){
+ return '<div class="n-terminal-dock" data-testid="terminal-capsule-zone">'+
+   (state.terminalContext?'<div class="n-context-peek"><strong>Available for this Session</strong><button type="button" data-action="workspace">▤ Session</button></div>':'')+
+   '<div class="n-conversation-capsule"><button type="button" data-action="toggle-context" aria-label="Open capabilities">＋</button><span>Ask Nession…</span><span class="n-send-mark">↑</span></div>'+
+   '<button class="n-dock-circle n-terminal-destination" type="button" data-action="workspace" aria-label="Open workspace" title="Open workspace">▣</button></div>';
+}
+function appHeader(title,back){
+ return '<header class="n-app-top" data-testid="app-page-header"><button type="button" class="n-btn is-ghost" data-action="'+back+'" aria-label="Back to terminal">‹</button><strong>'+esc(title)+'</strong></header>';
+}
+function appSessionList(){
+ return '<section class="n-app-session-layer" data-testid="app-layer-sessions"><header class="n-app-top" data-testid="app-sessions-header"><button type="button" class="n-btn is-ghost" data-action="terminal" aria-label="Back to terminal">‹</button><strong>Sessions</strong></header><div class="n-sessions-page">'+state.sessions.map(sessionRow).join('')+'</div></section>';
+}
+function workspaceShell(content){
+ return '<section class="n-workspace-shell" data-testid="workspace-shell">'+
+   (state.mode==='app'?appHeader('Session','terminal'):'')+
+   '<div class="n-workspace-content" data-testid="workspace-tool-content"><div class="n-view">'+content+'</div></div>'+dock()+'</section>';
+}
+function appContent(){
+ if(state.appSessions)return appSessionList();
+ if(state.screen==='terminal')return '<section class="n-terminal-layer" data-testid="app-layer-terminal">'+terminal()+terminalCapsule()+'</section>';
+ return '<section class="n-app-workspace-layer" data-testid="app-layer-workspace">'+workspaceShell(detail())+'</section>';
+}
+function webContent(){
+ return '<div class="n-web-layout" data-testid="web-layout">'+sidebar()+
+   '<main class="n-main" data-testid="shell-main">'+
+   (state.screen==='workspace'?workspaceShell(detail()):terminal()+terminalCapsule())+
+   '</main></div>';
+}
 function dialog(){if(!state.modal)return '';return '<div class="n-modal-backdrop"><div class="n-dialog" role="dialog" aria-modal="true" aria-label="Unsaved changes"><h2>放弃未保存的修改？</h2><p>当前 Session 的 Title、Description 或 Tags 尚未保存。继续将丢弃这些更改。</p><div class="n-actions"><button class="n-btn" data-action="stay">继续编辑</button><button class="n-btn is-primary" data-action="discard">放弃更改</button></div></div></div>'}
 function render(){
 state.mode=state.width<=430?'app':'web';
 root.className='n-product '+(state.mode==='app'?'n-app':'n-web');
-root.innerHTML='<div class="n-shell">'+(state.mode==='app'?'<div class="n-main">'+appContent()+'</div>':webContent())+dialog()+'</div>';
+root.innerHTML='<div class="n-shell">'+(state.mode==='app'?'<div class="n-app-layers" data-testid="app-layer-root">'+appContent()+'</div>':webContent())+dialog()+'</div>';
 }
 function resetFixture(which){
-state.sessions=clone(normal);state.selected=0;state.screen='workspace';state.edit=false;state.draft=null;state.notice='';state.noticeKind='';state.conflict=false;state.offline=false;state.conflictResolved=false;state.modal=null;state.appSessions=false;state.collapsed=false;state.tagInput='';state.fixture=which;
+state.sessions=clone(normal);state.selected=0;state.screen='workspace';state.edit=false;state.draft=null;state.notice='';state.noticeKind='';state.conflict=false;state.offline=false;state.conflictResolved=false;state.modal=null;state.appSessions=false;state.collapsed=false;state.terminalContext=false;state.tagInput='';state.fixture=which;
 if(which==='legacy')state.selected=1;
 if(which==='offline')state.offline=true;
 if(which==='conflict')state.conflict=true;
@@ -80,11 +111,12 @@ if(action==='cancel'){state.edit=false;state.draft=null;state.notice='修改已�
 if(action==='refresh-conflict'){var current=active();current.title='Terminal reconnect — updated elsewhere';current.description='另一台设备刚刚更新了这项工作说明。';current.tags=['nession','terminal'];current.revision++;state.draft=null;state.edit=false;state.tagInput='';state.conflict=false;state.conflictResolved=false;state.notice='已加载其他设备的最新信息，之前的草稿已按选择放弃。';state.noticeKind='';render();return}
 if(action==='stay'){state.modal=null;render();return}
 if(action==='discard'){var next=state.modal.after;state.modal=null;state.edit=false;state.draft=null;state.notice='';state.noticeKind='';next();render();return}
+if(action==='toggle-context'){state.terminalContext=!state.terminalContext;render();return}
 if(action==='collapse'){state.collapsed=true;render();return}
 if(action==='expand'){state.collapsed=false;render();return}
 if(action==='select'){var index=Number(el.getAttribute('data-index'));transition(function(){state.selected=index;state.appSessions=false;state.notice='';state.noticeKind='';state.screen='workspace'});return}
-if(action==='workspace'){transition(function(){state.appSessions=false;state.screen='workspace'});return}
-if(action==='terminal'){transition(function(){state.appSessions=false;state.screen='terminal'});return}
+if(action==='workspace'){transition(function(){state.terminalContext=false;state.appSessions=false;state.screen='workspace'});return}
+if(action==='terminal'){transition(function(){state.terminalContext=false;state.appSessions=false;state.screen='terminal'});return}
 if(action==='app-sessions'){transition(function(){state.appSessions=true});return}
 }
 root.addEventListener('click',function(e){var el=e.target.closest('[data-action]');if(el&&root.contains(el))eventAction(el.getAttribute('data-action'),el)});
