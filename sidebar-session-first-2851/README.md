@@ -2,6 +2,13 @@
 
 **Requirement:** https://github.com/BestNathan/nession/issues/2851
 
+## High-fidelity UI specification
+- [UI-SPEC.md](UI-SPEC.md) defines the per-component metrics, canonical token owner, proposed changes, state matrix and browser measurements required for #2851.
+- The sidebar CSS now consumes a **pinned, local read-only token snapshot** from `design/generated/web.css` at main `0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0`. It is not another token generator or new Nession palette.
+- Screen sizes include canonical Web 1280×800 and 1440×900, App-sized **narrow Web drawer** simulations 390×844 and 375×812, plus exploratory Web 1180 and 1024. A phone-sized **Web** preview is not the native App.
+- The Terminal/Workspace portions remain illustrative and must not be called high-fidelity or production-matched without real xterm and product fixture comparison.
+- **Verification status:** GitHub source/static checks only; real Chromium computed-style/viewport and screenshot comparison not yet performed.
+
 ## Design decision to explore
 
 Claude / ChatGPT-inspired, Session-first recent-work navigation. This is a **candidate Web sidebar replacement**, not a screenshot/claim about production. Current main gives the top of \`WebLayout → Sidebar\` to \`SidebarAgents\`, then \`SessionListHeader → SessionList\`, and retains a static-summary collapsed rail. Candidate reverses the emphasis: one toggle, explicit New Session, Search, flat time-grouped Sessions, on-demand Agent context, and a completely tucked-away sidebar.
@@ -14,7 +21,7 @@ Claude / ChatGPT-inspired, Session-first recent-work navigation. This is a **can
 - The candidate Agent entry opens secondary information *in the sidebar*, while Sessions remain a flat return-to-work list.
 
 ### Initial state, user goal, end state
-- Entry: active \`Fix terminal reconnect\` Session on \`devbox-01\`, Nession Web Shell at 1180 CSS px, sidebar expanded.
+- Entry: active \`Fix terminal reconnect\` Session on \`devbox-01\`, Nession Web Shell at 1280×800 CSS px, sidebar expanded.
 - Goal: switch work, find a Session, create a new Session, collapse, reopen and explore network/offline infrastructure without treating an Agent as a required Session parent.
 - End: same selected Session, with prior search/scroll/list preserved after collapse and re-open. In narrow Web, drawer closes on selection/scrim/explicit close.
 
@@ -32,7 +39,7 @@ Claude / ChatGPT-inspired, Session-first recent-work navigation. This is a **can
 - **Business fixtures**: sanitized local hardcoded Sessions, Agents, command lines; no credentials or real host addresses.
 - **State**: in-browser memory only. Refresh / external Reset resets all changes. No database/Server/WebSocket/tmux/multi-client.
 - **Terminal**: plain CSS monospace text representing a shell; **not xterm.js**, not authoritative fixed-col fit, not a PTY. Visual approximation of current light shell. No real attach, recovery, paste, or executable commands.
-- **Layout**: outer review frame supplies 1:1 CSS pixel width at 1180, 1024, 390, 375; responsive behavior reacts to \`np:resize\` and the **internal** selected width. No CSS transform or zoom. Real browser measured dimensions/pixel parity have **not** been verified.
+- **Layout**: outer review frame supplies 1:1 CSS pixel width at 1280, 1440, 1180, 1024, 390, 375; responsive behavior reacts to \`np:resize\` and the **internal** selected width. No CSS transform or zoom. Real browser measured dimensions/pixel parity have **not** been verified.
 - **IA delta**: Agent section removed from top by design; a recency-only grouping added to a still-flat Session list; old static summary rail intentionally replaced with full tuck-away. Real product adoption requires updating the canonical design docs/contracts and E2E in a production PR, *not* copying this mock into app.
 - **Production owner**: \`web/src/app/experiences/web/WebLayout.tsx\`, \`web/src/app/Sidebar.tsx\`, \`web/src/product/session/patterns/SessionList.tsx\`; product rules in \`docs/design/interaction/web.md\`, \`information-architecture.md\`, \`design-system/patterns/session-list.md\`.
 - **Browser**: actual Chromium/Playwright click/keyboard/visual checks **not executed** in authoring environment. The presence of HTML or a publication link is not a browser test.

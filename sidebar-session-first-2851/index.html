@@ -19,11 +19,11 @@
   </header>
   <main>
     <section class="np-preview" aria-label="Interactive full Web shell preview">
-      <div class="np-section-heading"><div><h2>Interactive preview</h2><p>Switch Web viewport widths, navigate Sessions, search, create, open infrastructure, collapse and reopen. Mock-only state.</p></div>
-        <div class="np-preview-toolbar"><button data-np-size="1180" aria-pressed="true">Web 1180</button><button data-np-size="1024">Web 1024</button><button data-np-size="390">Narrow 390</button><button data-np-size="375">Narrow 375</button><button data-np-reset>Reset</button></div>
+      <div class="np-section-heading"><div><h2>Interactive preview</h2><p>Switch Nession canonical Web sizes and exploratory/narrow widths. Navigation metrics follow main tokens; the Terminal is a simplified mock.</p></div>
+        <div class="np-preview-toolbar"><button data-np-size="1280" aria-pressed="true">Web 1280</button><button data-np-size="1440">Web 1440</button><button data-np-size="1180">Web 1180</button><button data-np-size="1024">Web 1024</button><button data-np-size="390">Narrow 390</button><button data-np-size="375">Narrow 375</button><button data-np-reset>Reset</button></div>
       </div>
       <div class="np-stage">
-        <div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:730px">
+        <div class="np-device" data-np-device style="--np-device-width:1280px;--np-device-height:800px">
           <div class="n-shell" id="n-shell" data-mode="wide" data-collapsed="false">
             <aside class="n-sidebar" id="n-sidebar" aria-label="Session navigation">
               <div class="n-top-actions">
@@ -69,7 +69,7 @@
           </div>
         </div>
       </div>
-      <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+      <p class="np-stage-label" data-np-current-size>1280 CSS px · 1:1</p>
     </section>
     <section class="np-details" aria-label="Design and verification">
       <h2>Function and verification</h2>
@@ -78,7 +78,7 @@
         <article class="np-detail"><h3>Proposed hierarchy</h3><ol class="np-steps"><li>Top: shell toggle, New Session, Search.</li><li>Middle: flat Session history, time labels, local item overflow.</li><li>Bottom: on-demand Agents/location context and independent Server state.</li></ol></article>
         <article class="np-detail"><h3>Try the critical path</h3><ol class="np-steps"><li>Select a different Session, then search for one.</li><li>Create a Session with explicit submit; try the offline Agent.</li><li>Collapse/reopen and inspect the work width.</li><li>Switch to Narrow 390; open/close the drawer.</li></ol></article>
         <article class="np-detail"><h3>Candidate vs shipped</h3><p>On current main, Agents occupy the sidebar top; collapse uses a static-summary rail. Here Sessions lead, Agent details are revealed on request, and collapse fully tucks away the column. These changes have not been integrated into production Web.</p></article>
-        <article class="np-detail"><h3>Evidence / gaps</h3><p>Plain HTML + sanitized fixtures, CSS terminal-text approximation, no live tmux, no persistent Server/Agent state, no real Session creation. Viewport 1:1 is not screenshot/pixel parity. Browser/Pages publish and exact-SHA production Acceptance must be verified independently.</p><span class="np-status">Prototype only · not production Acceptance</span></article>
+        <article class="np-detail"><h3>Visual specification</h3><p>The Sidebar uses a pinned snapshot of canonical Web tokens (width, controls, type, row spacing, radius, colors and motion). See <a href="https://github.com/BestNathan/nession/tree/prototype/sidebar-session-first-2851" target="_blank" rel="noopener noreferrer">UI-SPEC.md in the source directory</a> for dimensions and deviation notes. Main Terminal remains a visual approximation.</p></article><article class="np-detail"><h3>Evidence / gaps</h3><p>Plain HTML + sanitized fixtures, CSS terminal-text approximation, no live tmux, no persistent Server/Agent state, no real Session creation. Viewport 1:1 is not screenshot/pixel parity. Browser/Pages publish and exact-SHA production Acceptance must be verified independently.</p><span class="np-status">Prototype only · not production Acceptance</span></article>
       </div>
     </section>
   </main>

@@ -9,7 +9,7 @@
     {id:"sess-05",title:"Environment proposal",kind:"Claude Code",agent:"devbox-01",group:"Earlier",state:"idle",lines:["nession / session-05","Workspace: /work/env","Proposal ready for review."]}
   ];
   let sessions = fixtures.map(s=>({...s,lines:s.lines.slice()}));
-  let selectedId="sess-01", search="", collapsed=false, width=1180, drawerOpen=false, section="sessions", dialog=null, surface="terminal";
+  let selectedId="sess-01", search="", collapsed=false, width=1280, drawerOpen=false, section="sessions", dialog=null, surface="terminal";
   const agents=[{name:"devbox-01",online:true,count:2},{name:"macbook-demo",online:true,count:1},{name:"runner-02",online:false,count:2}];
   const shell=q("n-shell"), sidebar=q("n-sidebar"), list=q("session-list"), input=q("session-search");
   const escapeText = (s) => { const el=document.createElement("span");el.textContent=String(s);return el.textContent; };
@@ -94,7 +94,7 @@
   q("surface-terminal").addEventListener("click",()=>{surface="terminal";renderWork();});
   q("surface-workspace").addEventListener("click",()=>{surface="workspace";renderWork();});
   q("capsule-form").addEventListener("submit",e=>{e.preventDefault();const v=q("capsule-input").value.trim();if(!v)return;const s=selected();if(s)s.lines.push("› "+v,"Local preview input recorded. No Agent or model call was made.");q("capsule-input").value="";renderWork();});
-  const root=q("review-root");root.addEventListener("np:resize",e=>{width=Number(e.detail.width)||1180;drawerOpen=false;render();});
+  const root=q("review-root");root.addEventListener("np:resize",e=>{width=Number(e.detail.width)||1280;drawerOpen=false;const h=({1280:800,1440:900,1180:760,1024:768,390:844,375:812})[width]||800;q("n-shell").parentElement.style.setProperty("--np-device-height",h+"px");render();});
   root.addEventListener("keydown",e=>{if(e.key==="Escape"&&dialog){closeDialog();return;}if(e.key==="Escape"&&drawerOpen){drawerOpen=false;render();}});
   render();
 })();
