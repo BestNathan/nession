@@ -6,10 +6,11 @@ import assert from 'node:assert/strict';
 const app={innerHTML:''};
 const fixtureSurface={innerHTML:''};
 const listeners=new Map();
+const previewListeners=new Map();
 const document={
   getElementById:id=>{assert.ok(['app','np-git-fixture-controls'].includes(id),'Unexpected DOM id '+id);return id==='app'?app:fixtureSurface},
   addEventListener:(name,fn)=>listeners.set(name,fn),
-  querySelector:()=>({focus(){},setSelectionRange(){}})
+  querySelector:selector=>selector==='[data-np-root]'?{addEventListener:(name,fn)=>previewListeners.set(name,fn)}:{focus(){},setSelectionRange(){}}
 };
 const fixtures=readFileSync(new URL('./fixtures.js',import.meta.url),'utf8');
 const source=readFileSync(new URL('./app.js',import.meta.url),'utf8');
@@ -28,6 +29,11 @@ const click=(action,value)=>{
 const change=(select,value)=>listeners.get('change')({target:{dataset:{select},value}});
 const input=value=>listeners.get('input')({target:{dataset:{input:'search'},value,selectionStart:value.length}});
 check('initial current Session Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
+check('WebLayout shell and flat Session navigation',app.innerHTML.includes('data-testid="web-layout"')&&app.innerHTML.includes('data-testid="sidebar"')&&app.innerHTML.includes('data-testid="shell-main"'));
+click('sidebar-collapse');
+check('sidebar collapse takes real width',app.innerHTML.includes('data-collapsed="true"'));
+click('sidebar-expand');
+check('sidebar expand restores Session navigation',!app.innerHTML.includes('data-collapsed="true"'));
 check('no extra product brand',!app.innerHTML.includes('class="topbar"'));
 check('no prototype walkthrough inside Terminal',!app.innerHTML.includes('Select Git from the Capsule'));
 check('product-only stylesheet linked',html.includes('href="./product-fidelity.css"'));
@@ -38,6 +44,8 @@ click('toggle-context');
 check('Context Capsule',app.innerHTML.includes('data-testid="context-capsule"'));
 click('choose-git');
 check('direct Git Workspace',app.innerHTML.includes('data-testid="workspace-surface"'));
+check('WorkspaceShell owns content and capsule',app.innerHTML.includes('data-testid="workspace-shell"')&&app.innerHTML.includes('data-testid="workspace-tool-content"')&&app.innerHTML.includes('data-testid="workspace-tool-bar"'));
+check('only the active Git capability is advertised',app.innerHTML.includes('data-testid="workspace-tool-git"')&&!app.innerHTML.includes('This prototype focuses on'));
 check('compact Git branch header',app.innerHTML.includes('class="git-branch"')&&app.innerHTML.includes('feature/git-context'));
 check('no duplicate Workspace breadcrumb',!app.innerHTML.includes('class="workspace-top"'));
 check('no intermediate Git Peek',!app.innerHTML.includes('data-testid="git-peek-body"'));
@@ -53,6 +61,15 @@ check('recorded source link',app.innerHTML.includes('github.com/BestNathan/nessi
 click('select-gh','issue-2514');
 check('select Issue #2514',app.innerHTML.includes('cross-platform tmux Session process discovery'));
 check('mobile detail pushed',app.innerHTML.includes('mobile-detail-open'));
+previewListeners.get('np:resize')({detail:{width:390}});
+check('App has no Web sidebar',!app.innerHTML.includes('data-testid="sidebar"'));
+check('App page header owns Issue title',app.innerHTML.includes('data-testid="app-page-header"')&&app.innerHTML.includes('Issue #2514'));
+check('App does not render a second Issue Back',!app.innerHTML.includes('data-action="back-gh-list"'));
+click('app-page-back');
+check('App page Back closes pushed Issue',!app.innerHTML.includes('Issue #2514</h1>'));
+previewListeners.get('np:resize')({detail:{width:1180}});
+check('Web shell restored',app.innerHTML.includes('data-testid="sidebar"'));
+click('select-gh','issue-2514');
 click('toggle-reading');
 check('desktop focus reading',app.innerHTML.includes('is-reading'));
 click('toggle-reading');
@@ -91,4 +108,5 @@ check('fixture controls outside product',!app.innerHTML.includes('fixture-panel'
 check('fixture inspector outside product',!app.innerHTML.includes('class="inspector"'));
 click('reset');
 check('reset original Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
+check('Reset preserves full Web Session shell',app.innerHTML.includes('data-testid="web-layout"'));
 console.log(total+' / '+total+' deterministic prototype assertions passed (VM only, no browser/live API)');
