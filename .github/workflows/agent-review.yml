@@ -18,6 +18,11 @@ on:
         description: 64-hex Outbox reviewer action ID
         required: true
         type: string
+      issue_number:
+        description: 'Optional Qwen published Issue; 0 preserves the historical #1997 Reviewer admission'
+        required: false
+        default: 0
+        type: number
       dispatch_ticket:
         description: Optional signed dispatcher ticket for trusted result ingest
         required: false
@@ -80,7 +85,8 @@ jobs:
           ' >> "$GITHUB_OUTPUT"
       - name: Verify deterministic Reviewer contracts
         run: ./gates/run agent-provider-contract
-      - name: Fetch the admitted PR commit (trusted read)
+      - name: Fetch historical controlled PR commit (legacy source only)
+        if: inputs.issue_number == 0
         run: git fetch --quiet --no-tags origin refs/pull/2176/head
       - name: Clone the public agent-store for the immutable intent
         run: |
@@ -91,12 +97,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEWER: ${{ steps.identity.outputs.reviewer }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          REVIEW_ACTION_ID: ${{ inputs.action_id }}
+        shell: bash
         run: |
           set -euo pipefail
-          node scripts/lib/agent/reviewer/prepare-admission.mjs \
-            --store "$RUNNER_TEMP/agent-store" \
-            --out "$RUNNER_TEMP/review-admission.json" \
-            --reviewer "$REVIEWER"
+          args=(--store "$RUNNER_TEMP/agent-store"
+                --out "$RUNNER_TEMP/review-admission.json"
+                --reviewer "$REVIEWER")
+          if [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            [[ "$REVIEW_ACTION_ID" =~ ^[a-f0-9]{64}$ ]]
+            args+=(--issue "$ISSUE_NUMBER" --action "$REVIEW_ACTION_ID")
+          else
+            test "$ISSUE_NUMBER" = '0'
+          fi
+          node scripts/lib/agent/reviewer/prepare-admission.mjs "${args[@]}"
       - name: Upload the verified admission
         uses: actions/upload-artifact@v4
         with:
@@ -139,13 +154,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Fetch the admitted PR commit (trusted read)
-        run: git fetch --quiet --no-tags origin refs/pull/2176/head
       - name: Download the verified admission
         uses: actions/download-artifact@v4
         with:
           name: review-admission-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/admission
+      - name: Fetch exactly the admitted PR HEAD as inert Git data
+        shell: bash
+        run: |
+          set -euo pipefail
+          admission="$RUNNER_TEMP/admission/review-admission.json"
+          pr="$(jq -er .pr_number "$admission")"
+          sha="$(jq -er .target_sha "$admission")"
+          [[ "$pr" =~ ^[1-9][0-9]*$ ]]
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+          git fetch --quiet --no-tags origin "refs/pull/$pr/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$sha"
       - name: Install the pinned Claude Code CLI for the claude-code provider
         if: needs.prepare.outputs.reviewer == 'review-qwen-01'
         env:
