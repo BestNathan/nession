@@ -2,7 +2,8 @@
 // #2010 deterministic attested Worker claim / HMAC / fork / replay boundary.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {startDevelopment,recordDispatch,recordSliceYield} from './outbox.mjs';
+import {startDevelopment,recordDispatch,recordSliceYield,
+  bindVerifiedRepairCheckpoint} from './outbox.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
 import {authenticateWorkerClaimRun,inspectWorkerClaimZip,verifyWorkerClaimForAck,
@@ -117,3 +118,36 @@ assert.equal((await verifyWorkerClaimForAck(nativeValid)).source_run_id,22023);
 await assert.rejects(()=>verifyWorkerClaimForAck({...nativeValid,claim:{...nativeClaim,
   inputs:{...nativeClaim.inputs,resume_from:'e30'}}}),/claim/);
 console.log('Worker reconciliation rejects native resume input that differs from its HMAC-signed commitment');
+
+// Cross-phase Worker claim requires HMAC schema-v3 native source and a PR
+// work SHA distinct from the encrypted Session's original source.
+const publishedSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const repairAction='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const repairState={...state,version:22,phase:'repair',target_sha:publishedSha,
+  repair_attempts:1,transitions:[
+    {kind:'publisher',outcome:'published',run_id:39609600546,attempt:1,
+      target_sha:publishedSha},
+    {kind:'reviewer',outcome:'changes_requested',run_id:41962609841,attempt:1,
+      target_sha:publishedSha}],
+  outbox:[{id:repairAction,status:'pending',attempts:0,receipt:null,
+    task:{type:'dispatch',role:'developer',task:'repair',sha:publishedSha,
+      agent_id:'dev-cursor-01',resume:true}}]};
+const proof={verified:true,checkpoint_version:3,
+  checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf',
+  ciphertext_sha256:'7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0',
+  source_sha:'220266b9233ec97b1beacbc54e5cc7f82d3cece2',
+  source_run_id:39448549052};
+const bound=bindVerifiedRepairCheckpoint(repairState,22,repairAction,proof);
+const signedRepair=planGitHubDispatch(bound,repairAction,registry,{
+  key,key_id:'main-controller',issuer_run_id:9001,now,ttl_ms:600000});
+const repairClaim=createWorkerClaim(signedRepair.inputs,{...context,run_id:22024});
+const repairRun={...run,id:22024,created_at:new Date(now+2500).toISOString()};
+assert.equal((await verifyWorkerClaimForAck({
+  run:repairRun,claim:repairClaim,key,reader})).action_id,repairAction);
+for(const bad of [
+  {...repairClaim.inputs,resume_from:'e30'},
+  {...repairClaim.inputs,task:'implement'},
+  {...repairClaim.inputs,input_sha:proof.source_sha},
+])await assert.rejects(()=>verifyWorkerClaimForAck({run:repairRun,
+  claim:{...repairClaim,inputs:bad},key,reader}),/claim/);
+console.log('Cross-phase Repair Worker claim remains signed, Run-bound and separate from native source');

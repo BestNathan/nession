@@ -104,7 +104,9 @@ Do not copy the live design-rule list from `design/scripts/design-gate.mjs`.
 
 ## 9. Browser proof
 
-UI/interaction changes require real browser inspection at the actual affected flow.
+**All Web/App interaction and visual acceptance is Chromium + Playwright only**, using the canonical E2E browser runner and viewport matrix. This includes App/mobile gestures: emulate viewport, touch/pointer, landscape, focus, scroll, keyboard/IME-related app state and accessibility; use snapshots and deterministic assertions when visual output matters. Physical mobile devices, Mobile Safari and installed iOS Apps are not acceptance prerequisites or alternative SC proof methods. If an OS-only behavior cannot be emulated, specify a Nession-owned observable contract and note the simulator limit instead of introducing a real-device Pending gate; do not claim to have tested native Safari behavior.
+
+UI/interaction changes require real Chromium browser inspection at the actual affected flow.
 
 Verify:
 

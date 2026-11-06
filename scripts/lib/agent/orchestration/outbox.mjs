@@ -22,6 +22,10 @@ const NATIVE_FAILURE_CODE='native_cursor_agent_not_found_before_send';
 const CONTROLLED_REVIEW_ACTION='555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434';
 const CONTROLLED_SKIPPED_REVIEW_RUN=39943178597;
 const CONTROLLED_REVIEW_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+const CONTROLLED_REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+const CONTROLLED_REPAIR_FAILED_RUN=42020432271;
+const CONTROLLED_REPAIR_FAILURE='cursor_native_read_missing_uncommitted';
+const CONTROLLED_REPAIR_SUCCESSOR='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
 
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -84,7 +88,36 @@ export function validateDevelopmentState(state) {
     }
     ids.add(item.id);
     onlyKeys(item.task, ['type','role','task','sha','resume','gate','when','reason','agent_id',
-      'continuation'], 'outbox action');
+      'continuation','repair_checkpoint'], 'outbox action');
+    if(item.task.repair_checkpoint != null){
+      // A Review/Quality-induced Repair is a different task and work SHA
+      // from the original Developer Slice. Its immutable native checkpoint
+      // comes from the previously published, already retired Developer chain,
+      // not a synthetic yielded parent in the current Outbox.
+      const c=item.task.repair_checkpoint;
+      onlyKeys(c,['checkpoint_version','checkpoint_commit_sha',
+        'ciphertext_sha256','source_sha','source_run_id'], 'Repair checkpoint');
+      const historicalFailedRepair=item.status==='failed'&&
+        item.id===CONTROLLED_REPAIR_ACTION&&
+        item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE&&
+        item.task.sha===CONTROLLED_REVIEW_SHA;
+      if(Object.keys(c).length!==5||
+          item.task.type!=='dispatch'||item.task.role!=='developer'||
+          item.task.task!=='repair'||item.task.resume!==true||
+          item.task.continuation!=null||
+          ((item.task.sha!==state.target_sha||state.phase!=='repair')&&
+            !historicalFailedRepair)||
+          !positive(c.checkpoint_version)||
+          !SHA.test(c.checkpoint_commit_sha??'')||
+          !HEX64.test(c.ciphertext_sha256??'')||
+          !SHA.test(c.source_sha??'')||c.source_sha===item.task.sha||
+          !positive(c.source_run_id)||
+          !state.transitions.some(t=>t.kind==='publisher'&&
+            t.outcome==='published'&&t.target_sha===item.task.sha)||
+          !state.transitions.some(t=>t.kind==='reviewer'&&
+            t.outcome==='changes_requested'&&t.target_sha===item.task.sha))
+        reject('unbound or invalid cross-phase Repair checkpoint');
+    }
     if (item.task.continuation != null) {
       const c=item.task.continuation;
       onlyKeys(c,['parent_action_id','ordinal','checkpoint_version','checkpoint_commit_sha',
@@ -162,7 +195,14 @@ export function validateDevelopmentState(state) {
         'failure_code'],'attested failed Run');
       if(Object.keys(r).length!==5||r.status!=='failed'||
           r.dispatch_id!==item.id||
-          !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE].includes(r.failure_code)||
+          !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE,
+            CONTROLLED_REPAIR_FAILURE].includes(r.failure_code)||
+          (r.failure_code===CONTROLLED_REPAIR_FAILURE&&(
+            item.id!==CONTROLLED_REPAIR_ACTION||
+            r.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+            item.task.task!=='repair'||
+            item.task.sha!==CONTROLLED_REVIEW_SHA||
+            item.task.repair_checkpoint?.checkpoint_version!==3))||
           (r.failure_code===NATIVE_FAILURE_CODE &&
             (item.id!==NATIVE_FAILED_RESUME||r.source_run_id!==NATIVE_FAILED_RUN||
              item.task.continuation?.checkpoint_version!==1))||
@@ -362,6 +402,110 @@ export function acceptPublisherPublication(state, expectedVersion, event, truste
     ...advanced.state, schema_version: 1, version, outbox: [...outbox, ...spawned],
   });
 }
+// #2274: The Qwen Developer produced a REAL authenticated Worker Run and
+// immutable Store checkpoint, then the independently credentialed Publisher
+// published its exact original patch. Unlike historical #1997 yielded Slices,
+// the original Qwen Action stays dispatched until this publication is checked.
+// Keep the canonical publisher->review transition (including the publisher
+// transition required by native Repair); never fabricate a pending Developer.
+export function acceptAttestedQwenPublication(state,expectedVersion,event,trusted,registry){
+  validateDevelopmentState(state);
+  validateRegistry(registry);
+  if(state.version!==expectedVersion)reject('stale Qwen publication state CAS');
+  if(event?.kind!=='publisher'||event.outcome!=='published'||
+      event.issue!==state.issue||!positive(event.run_id)||
+      event.run_attempt!==1||!SHA.test(event.target_sha??'')||
+      trusted?.role!=='publisher'||trusted.workflow_run_id!==event.run_id||
+      trusted.attempt!==1||trusted.issue!==event.issue||
+      trusted.source_sha!==event.target_sha||
+      !HEX64.test(trusted.developer_action_id??'')||
+      !positive(trusted.developer_run_id)||trusted.developer_attempt!==1||
+      !SHA.test(trusted.developer_source_sha??'')||
+      !SHA.test(trusted.checkpoint_commit_sha??'')||
+      typeof trusted.pr_number!=='number'||!positive(trusted.pr_number)||
+      event.reviewer_agent_id!=null)
+    reject('untrusted signed Qwen publication and PR/Checkpoint origin');
+  const already=state.transitions.find(t=>t.kind==='publisher'&&
+    t.run_id===event.run_id&&t.attempt===event.run_attempt);
+  if(already){
+    if(already.target_sha!==event.target_sha||
+        already.outcome!=='published'||state.target_sha!==event.target_sha)
+      reject('conflicting authenticated Qwen publication replay');
+    return state;
+  }
+  if(state.phase!=='ready'||state.target_sha!=null||
+      state.transitions.some(t=>t.kind==='publisher'))
+    reject('Qwen publication requires unconsumed ready phase');
+  const actions=state.outbox.filter(x=>x.task.type==='dispatch'&&
+    x.task.role==='developer'&&x.status==='dispatched');
+  if(actions.length!==1||actions[0].id!==trusted.developer_action_id||
+      actions[0].task.task!=='implement'||
+      actions[0].task.agent_id!=='dev-qwen-01'||
+      state.assignments.developer!=='dev-qwen-01'||
+      actions[0].task.sha!==trusted.developer_source_sha||
+      actions[0].receipt?.status!=='verified'||
+      actions[0].receipt?.source_run_id!==trusted.developer_run_id||
+      actions[0].receipt?.dispatch_id!==actions[0].id||
+      state.outbox.some(x=>x!==actions[0]&&
+        ['dispatching','dispatched'].includes(x.status))||
+      state.outbox.some(x=>x.task.role==='reviewer'))
+    reject('Qwen Publisher source is not one signed in-flight Developer Run');
+  const advanced=advanceWorkflow(state,event,{
+    role:'publisher',workflow_run_id:event.run_id,attempt:1,
+    issue:event.issue,source_sha:event.target_sha});
+  if(advanced.duplicate||advanced.actions.length!==1||
+      advanced.actions[0].role!=='reviewer'||
+      advanced.state.phase!=='review'||
+      advanced.state.target_sha!==event.target_sha)
+    reject('Publisher did not produce one canonical Reviewer action');
+  const outbox=advanced.state.outbox.filter(x=>x.id!==actions[0].id);
+  if(outbox.length+1>MAX_OUTBOX)reject('Outbox exhausted');
+  const child=makeAction(state.issue,state.version+1,advanced.actions[0],
+    state.assignments,0);
+  boundRole(registry,child.task.agent_id,child.task.role,child.task.task);
+  return validateDevelopmentState({...advanced.state,version:state.version+1,
+    outbox:[...outbox,child]});
+}
+// Bind an independently verified immutable Developer checkpoint to a pending
+// cross-phase Repair. Do not create a new Action or alter its identity: the
+// signed ticket must refer to this exact Store-persisted origin and PR target.
+// This is the only state transition allowed before a Repair dispatch intent.
+const REPAIR_PROOF_FIELDS=['verified','checkpoint_version','checkpoint_commit_sha',
+  'ciphertext_sha256','source_sha','source_run_id'];
+export function bindVerifiedRepairCheckpoint(state,expectedVersion,actionId,proof){
+  validateDevelopmentState(state);
+  if(state.version!==expectedVersion)reject('stale Repair checkpoint CAS');
+  onlyKeys(proof,REPAIR_PROOF_FIELDS,'authenticated Repair checkpoint proof');
+  if(Object.keys(proof).length!==REPAIR_PROOF_FIELDS.length||
+     proof.verified!==true||
+     !positive(proof.checkpoint_version)||
+     !SHA.test(proof.checkpoint_commit_sha??'')||
+     !HEX64.test(proof.ciphertext_sha256??'')||
+     !SHA.test(proof.source_sha??'')||!positive(proof.source_run_id))
+    reject('missing independently authenticated Repair checkpoint');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(!item||item.status!=='pending'||item.task.type!=='dispatch'||
+     item.task.role!=='developer'||item.task.task!=='repair'||
+     item.task.resume!==true||item.task.sha!==state.target_sha||
+     state.phase!=='repair'||state.outbox.filter(x=>
+       x.status==='pending'&&x.task.role==='developer').length!==1)
+    reject('Repair checkpoint can bind only one pending Developer Action');
+  const origin={checkpoint_version:proof.checkpoint_version,
+    checkpoint_commit_sha:proof.checkpoint_commit_sha,
+    ciphertext_sha256:proof.ciphertext_sha256,
+    source_sha:proof.source_sha,source_run_id:proof.source_run_id};
+  if(item.task.repair_checkpoint){
+    if(JSON.stringify(item.task.repair_checkpoint)!==JSON.stringify(origin))
+      reject('conflicting Repair checkpoint origin');
+    return state;
+  }
+  if(item.task.continuation!=null)
+    reject('cross-phase Repair must not reuse a same-task Slice continuation');
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:state.outbox.map(x=>x.id===actionId?
+      {...x,task:{...x.task,repair_checkpoint:origin}}:x)});
+}
+
 // Persist this transition *before* any non-idempotent workflow_dispatch API
 // call. A crash after GitHub accepts but before its HTTP response is ambiguous:
 // reconciliation must authenticate the original downstream Run, NEVER replay
@@ -594,6 +738,56 @@ export function recordSliceYield(state,expectedVersion,actionId,checkpoint,sourc
     ...state,version:state.version+1,
     outbox:[...state.outbox.map(item=>item.id===actionId?{...item,status:'yielded',receipt}:item),next],
   });
+}
+
+// A Reviewer-originated Repair is a separate task from the original
+// Developer Slice. This exact failed Run restored the committed v3 native
+// state, but produced NO accepted result/checkpoint/PR change. A model call
+// may have occurred, so this is not represented as a "pre-send" failure.
+// The disposable Worker cannot commit a PR or Store result. Authorize one
+// new, independently attested, bounded Repair action; never resend the old.
+export function repairRuntimeSuccessorId(issue,actionId,runId){
+  if(issue!==1997||actionId!==CONTROLLED_REPAIR_ACTION||
+     runId!==CONTROLLED_REPAIR_FAILED_RUN)
+    reject('unsupported native Repair runtime recovery');
+  const next=hash([issue,actionId,runId,'native-repair-uncommitted-runtime-recovery-v1']);
+  if(next!==CONTROLLED_REPAIR_SUCCESSOR)reject('Repair successor identity drift');
+  return next;
+}
+export function recordAttestedRepairRuntimeFailure(state,expectedVersion,actionId,source){
+  validateDevelopmentState(state);
+  onlyKeys(source,['verified','issue','run_id','attempt','failure_code'],
+    'attested Repair runtime failure');
+  if(state.issue!==1997||state.version!==25||expectedVersion!==25||
+     state.phase!=='repair'||state.target_sha!==CONTROLLED_REVIEW_SHA||
+     actionId!==CONTROLLED_REPAIR_ACTION||source.verified!==true||
+     source.issue!==1997||source.run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+     source.attempt!==1||source.failure_code!==CONTROLLED_REPAIR_FAILURE)
+    reject('stale or unauthenticated Repair failure');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(item?.status!=='dispatched'||item.attempts!==1||
+     item.task.type!=='dispatch'||item.task.role!=='developer'||
+     item.task.agent_id!=='dev-cursor-01'||item.task.task!=='repair'||
+     item.task.sha!==CONTROLLED_REVIEW_SHA||item.task.resume!==true||
+     item.task.repair_checkpoint?.checkpoint_version!==3||
+     item.task.repair_checkpoint?.checkpoint_commit_sha!==
+       'eb891ee2154d02ddb758d50f0f694e70a343ffdf'||
+     item.task.repair_checkpoint?.source_run_id!==39448549052||
+     item.receipt?.status!=='verified'||
+     item.receipt?.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
+     item.receipt?.dispatch_id!==actionId||
+     state.outbox.some(x=>x.id!==actionId&&x.status==='pending'&&
+       x.task.role==='developer')||state.outbox.length>=MAX_OUTBOX)
+    reject('Repair Action is not one uniquely failed Run');
+  const nextId=repairRuntimeSuccessorId(1997,actionId,source.run_id);
+  if(state.outbox.some(x=>x.id===nextId))reject('Repair successor collision');
+  const failed={...item,status:'failed',receipt:{
+    status:'failed',dispatch_id:actionId,source_run_id:source.run_id,
+    source_attempt:1,failure_code:CONTROLLED_REPAIR_FAILURE}};
+  const successor={id:nextId,task:{...item.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:[...state.outbox.map(x=>x.id===actionId?failed:x),successor]});
 }
 
 // A conclusively FAILED Worker may be retried only as a NEW Action ID with

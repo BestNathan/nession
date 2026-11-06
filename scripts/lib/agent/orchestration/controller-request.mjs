@@ -35,10 +35,16 @@ export function buildControllerRequest(input,run,registry,defaults={}) {
     configured:defaults.developer??'',override:input.developer??'',
     legacy:'dev-cursor-01',
   });
-  // The production Developer worker still has authenticated Cursor-only
-  // #1997 native-state semantics; fail before Store initialization on Qwen.
-  if(developer.agent_id!=='dev-cursor-01')
-    fail('non-Cursor durable Developer requires #2274 production Worker proof');
+  // The Qwen Worker/Publisher/Reviewer path is now on trusted main.
+  // Enable only an explicitly chosen, owner/main Qwen canary so real
+  // production Run/Store evidence can be obtained for #2274 SC-05. Merely
+  // setting AGENT_DEFAULT_DEVELOPER must NOT enable Qwen before that proof;
+  // legacy Cursor and existing immutable Issue assignments remain unchanged.
+  // The Run/actor authority is checked below before publishing any request.
+  if(developer.agent_id!=='dev-cursor-01'&&
+      !(developer.agent_id==='dev-qwen-01'&&
+        input.developer==='dev-qwen-01'))
+    fail('non-Cursor durable Developer requires #2274 production Worker proof or explicit owner Qwen canary');
   const reviewer=resolveAgentDefault(registry,'reviewer',{
     configured:defaults.reviewer??'',override:input.reviewer??'',
     legacy:qwenDefaultAgent('reviewer'),

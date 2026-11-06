@@ -11,6 +11,14 @@ Audit constraints:
 2. Keep uncertain root causes explicitly unverified and preserve SC/E2E/Acceptance evidence.
 3. Every claimed review must use trusted relation-bound Issue tools and pass the existing Issue Contract validator.
 
+Canonical Issue labels (the only values allowed in a structural repair's "labels" field):
+- Exactly one kind: {{kindLabels}}
+- One or more areas: {{areaLabels}}
+- Supply one complete, distinct array of kind + area labels, not the Issue's entire visible label list.
+- Never include verification:*, ai:enabled, progress, or other noncontract labels in that array. The trusted Issue tool preserves existing noncontract labels; verification_tier is a separate operation/field.
+- If the Issue is missing its kind or area labels, explicitly supply a valid labels array even when title/body do not need changes. Do not guess unsupported names or invent a second kind.
+- If you cannot determine a valid kind and at least one area from the Issue evidence, do not invent labels; report inability to repair.
+
 {{scopeInstructions}}
 
 Risk evaluation: classify verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Do not claim tests passed, remove ai:enabled, change Worker authorization, or downgrade an established higher verification tier.
