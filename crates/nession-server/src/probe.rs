@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::stream::{self, StreamExt};
 use nession_protocol::contracts::agent::v1::AddressStatus;
 use tokio::net::TcpStream;
 
@@ -17,6 +18,47 @@ use crate::registry::AgentRegistry;
 const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 /// Per-address TCP connect timeout.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How many address probes may be in flight across one sweep.
+///
+/// The bound is **global to the sweep**, not per Agent: the documented limit is
+/// ten addresses per Agent, not ten in total, so a per-Agent bound would still
+/// let the sweep duration grow with the deployment. With this many in flight,
+/// a wave of blackholed endpoints costs one timeout instead of one per
+/// endpoint, and the periodic sweep keeps its 30-second intent (#2839).
+pub const PROBE_CONCURRENCY: usize = 32;
+
+/// The dial behind one probe. Production uses [`TcpProbeDialer`]; tests supply
+/// a controllable one so a blackholed endpoint and an in-flight registration
+/// replacement are deterministic rather than network- and timing-dependent.
+#[async_trait::async_trait]
+pub trait ProbeDialer: Send + Sync {
+    /// Whether `url`'s host answers a TCP connect within `timeout`, with its
+    /// round-trip time on success.
+    async fn dial(&self, url: &str, timeout: Duration) -> (AddressStatus, Option<u64>);
+}
+
+/// The real TCP dialer. No handshake, no data sent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TcpProbeDialer;
+
+#[async_trait::async_trait]
+impl ProbeDialer for TcpProbeDialer {
+    async fn dial(&self, url: &str, timeout: Duration) -> (AddressStatus, Option<u64>) {
+        probe_once(url, timeout).await
+    }
+}
+
+/// What one sweep did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProbeSweepReport {
+    /// Addresses dialled.
+    pub probed: usize,
+    /// Results written into the registry.
+    pub applied: usize,
+    /// Results discarded because the Agent re-registered, or the address was
+    /// removed, while the probe was in flight.
+    pub stale: usize,
+}
 
 /// Extract `host:port` from a WebSocket URL for TCP dialling.
 ///
@@ -57,13 +99,13 @@ pub fn dial_target(url: &str) -> Option<String> {
 }
 
 /// Probe a single address once. Returns its status and RTT on success.
-async fn probe_once(url: &str) -> (AddressStatus, Option<u64>) {
+async fn probe_once(url: &str, timeout: Duration) -> (AddressStatus, Option<u64>) {
     let Some(target) = dial_target(url) else {
         return (AddressStatus::Unreachable, None);
     };
 
     let start = std::time::Instant::now();
-    match tokio::time::timeout(PROBE_TIMEOUT, TcpStream::connect(&target)).await {
+    match tokio::time::timeout(timeout, TcpStream::connect(&target)).await {
         Ok(Ok(_stream)) => {
             let rtt = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
             (AddressStatus::Reachable, Some(rtt))
@@ -73,18 +115,59 @@ async fn probe_once(url: &str) -> (AddressStatus, Option<u64>) {
     }
 }
 
-/// Run one full sweep: probe every address of every registered agent and write
+/// Run one full sweep: probe every address of every registered Agent and write
 /// results back into the registry.
-pub async fn run_probe_sweep(registry: &AgentRegistry) {
+pub async fn run_probe_sweep(registry: &AgentRegistry) -> ProbeSweepReport {
+    run_probe_sweep_with(registry, PROBE_TIMEOUT, PROBE_CONCURRENCY, &TcpProbeDialer).await
+}
+
+/// Run one sweep with an explicit timeout, concurrency bound and dialer.
+///
+/// Every address is dialled through the same bounded stream: at most
+/// `concurrency` probes are in flight, no task per address is spawned, and a
+/// slow endpoint costs its own timeout rather than the whole sweep's
+/// completion (#2839). Each result carries the registration generation the
+/// snapshot observed, so a result that lands after the Agent re-registered is
+/// counted as `stale` and writes nothing.
+pub async fn run_probe_sweep_with<D: ProbeDialer>(
+    registry: &AgentRegistry,
+    timeout: Duration,
+    concurrency: usize,
+    dialer: &D,
+) -> ProbeSweepReport {
     let targets = registry.list_probe_targets().await;
-    for (agent_id, urls) in targets {
-        for url in urls {
-            let (status, rtt_ms) = probe_once(&url).await;
+    let concurrency = concurrency.max(1);
+
+    let probes = targets.into_iter().flat_map(|target| {
+        let agent_id = target.agent_id;
+        let generation = target.generation;
+        target
+            .urls
+            .into_iter()
+            .map(move |url| (agent_id.clone(), generation, url))
+    });
+
+    let mut results = stream::iter(probes)
+        .map(|(agent_id, generation, url)| async move {
+            let (status, rtt_ms) = dialer.dial(&url, timeout).await;
             registry
-                .update_address_status(&agent_id, &url, status, rtt_ms)
-                .await;
+                .update_address_status(&agent_id, generation, &url, status, rtt_ms)
+                .await
+        })
+        // Polls at most `concurrency` futures; it does not spawn a task per
+        // address.
+        .buffer_unordered(concurrency);
+
+    let mut report = ProbeSweepReport::default();
+    while let Some(applied) = results.next().await {
+        report.probed += 1;
+        if applied {
+            report.applied += 1;
+        } else {
+            report.stale += 1;
         }
     }
+    report
 }
 
 /// Spawn the periodic probe task. Sweeps every [`PROBE_INTERVAL`]; the first
@@ -95,7 +178,13 @@ pub fn spawn_probe_task(registry: Arc<AgentRegistry>) {
         ticker.tick().await; // consume the immediate first tick
         loop {
             ticker.tick().await;
-            run_probe_sweep(&registry).await;
+            let report = run_probe_sweep(&registry).await;
+            tracing::debug!(
+                probed = report.probed,
+                applied = report.applied,
+                stale = report.stale,
+                "address probe sweep complete"
+            );
         }
     });
 }
@@ -192,7 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn probe_once_invalid_url() {
-        let (status, rtt) = probe_once("not-a-url").await;
+        let (status, rtt) = probe_once("not-a-url", PROBE_TIMEOUT).await;
         assert_eq!(status, AddressStatus::Unreachable);
         assert!(rtt.is_none());
     }
@@ -200,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn probe_once_unreachable_address() {
         // Reserved address (TEST-NET-1, RFC 5737) that should always be unreachable
-        let (status, rtt) = probe_once("ws://192.0.2.1:12345/ws").await;
+        let (status, rtt) = probe_once("ws://192.0.2.1:12345/ws", PROBE_TIMEOUT).await;
         assert_eq!(status, AddressStatus::Unreachable);
         assert!(rtt.is_none());
     }
