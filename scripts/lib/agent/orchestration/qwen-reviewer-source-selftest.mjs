@@ -69,7 +69,8 @@ try{
     'refs/heads/'+intent.branch]);
   assert.deepEqual(args[1],['rev-parse','FETCH_HEAD']);
   assert.ok(args.some(x=>x[0]==='cat-file'&&x[2]===B+'^{commit}'));
-  assert.equal(args.filter(x=>x[0]==='merge-base').length,2);
+  assert.deepEqual(args.filter(x=>x[0]==='merge-base'),[
+    ['merge-base','--is-ancestor',A,B]]);
   assert.throws(()=>qwenReviewerPublishedSource({...source,sha:A}),
     /authentic|Outbox/);
   assert.throws(()=>qwenReviewerPublishedSource({...source,
