@@ -11,7 +11,81 @@
   let sessions = fixtures.map(s=>({...s,lines:s.lines.slice()}));
   let selectedId="sess-01", search="", collapsed=false, width=1280, drawerOpen=false, section="sessions", dialog=null, surface="terminal";
   const agents=[{name:"devbox-01",online:true,count:2},{name:"macbook-demo",online:true,count:1},{name:"runner-02",online:false,count:2}];
+
   const shell=q("n-shell"), sidebar=q("n-sidebar"), list=q("session-list"), input=q("session-search");
+  const rowMenu=q("session-row-menu"), actionOverlay=q("session-action-overlay");
+  let menuId=null, menuTrigger=null, actionTarget=null;
+  const glyph=(name)=>{
+    const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+    svg.setAttribute("viewBox","0 0 24 24");svg.setAttribute("aria-hidden","true");
+    svg.innerHTML=name==="settings"
+      ? '<circle cx="12" cy="12" r="3"/><path d="M9.5 3.8 10.2 2h3.6l.7 1.8 1.9.8 1.8-.8 2.5 2.5-.8 1.8.8 1.9 1.8.7v3.6l-1.8.7-.8 1.9.8 1.8-2.5 2.5-1.8-.8-1.9.8-.7 1.8h-3.6l-.7-1.8-1.9-.8-1.8.8-2.5-2.5.8-1.8-.8-1.9L2 13.8v-3.6l1.8-.7.8-1.9-.8-1.8 2.5-2.5 1.8.8z"/>'
+      : '<path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6M10 10v7m4-7v7"/>';
+    return svg;
+  };
+  function closeMenu(restoreFocus=false){
+    const prior=menuTrigger;
+    if(prior?.isConnected)prior.setAttribute("aria-expanded","false");
+    menuId=null;menuTrigger=null;rowMenu.hidden=true;rowMenu.replaceChildren();
+    if(restoreFocus&&prior?.isConnected)prior.focus();
+  }
+  function openModal(type,s,origin){
+    closeMenu(false);actionTarget=origin;
+    actionOverlay.replaceChildren();actionOverlay.hidden=false;
+    const cover=element("button","n-action-backdrop");cover.type="button";cover.setAttribute("aria-label","Close dialog");cover.addEventListener("click",closeModal);
+    const panel=element("div","n-action-panel");
+    panel.setAttribute("role",type==="kill"?"alertdialog":"dialog");panel.setAttribute("aria-modal","true");
+    const heading=element("h2","",type==="kill"?"Kill Session":"Attach settings");
+    heading.id="n-session-action-heading";panel.setAttribute("aria-labelledby",heading.id);panel.append(heading);
+    panel.append(element("p","n-action-description",type==="kill"
+      ?"This will terminate session "+s.title+" on "+s.agent+" and cannot be undone."
+      :"Configure attach settings for "+s.title+". Preview only; no backend calls."));
+    if(type==="kill"){
+      const label=element("label","n-action-label","Type "+s.title+" to confirm");
+      const field=element("input","n-action-field");field.type="text";field.autocomplete="off";field.placeholder=s.title;
+      label.append(field);panel.append(label);
+      const hint=element("p","n-action-hint","");panel.append(hint);
+      const buttons=element("div","n-action-buttons");const confirm=button("Kill Session","n-action-danger",()=>{
+        if(field.value.trim()!==s.title)return;
+        sessions=sessions.filter(v=>v.id!==s.id);
+        if(selectedId===s.id)selectedId=sessions[0]?.id||null;
+        closeModal();render();
+      });confirm.disabled=true;
+      field.addEventListener("input",()=>{const valid=field.value.trim()===s.title;confirm.disabled=!valid;hint.textContent=field.value&&!valid?"Name doesn't match yet.":"";field.setAttribute("aria-invalid",String(Boolean(field.value&&!valid)));});
+      buttons.append(button("Cancel","",closeModal),confirm);panel.append(buttons);
+      actionOverlay.append(cover,panel);field.focus();return;
+    }
+    const modeLabel=element("label","n-action-label","Connection mode");
+    const mode=element("select","n-action-field");
+    for(const name of ["Auto","P2P","Relay"]){const opt=element("option","",name);opt.value=name.toLowerCase();mode.append(opt);}
+    mode.value=s.attachMode||"auto";modeLabel.append(mode);panel.append(modeLabel);
+    const rendererLabel=element("label","n-action-label","Renderer");
+    const renderer=element("select","n-action-field");
+    for(const name of ["WebGL","Canvas"]){const opt=element("option","",name);opt.value=name.toLowerCase();renderer.append(opt);}
+    renderer.value=s.renderer||"webgl";rendererLabel.append(renderer);panel.append(rendererLabel);
+    const buttons=element("div","n-action-buttons");
+    buttons.append(button("Cancel","",closeModal),button("Save settings","n-action-primary",()=>{s.attachMode=mode.value;s.renderer=renderer.value;closeModal();}));
+    panel.append(buttons);actionOverlay.append(cover,panel);mode.focus();
+  }
+  function closeModal(){
+    actionOverlay.hidden=true;actionOverlay.replaceChildren();
+    const origin=actionTarget;actionTarget=null;if(origin?.isConnected)origin.focus();
+  }
+  function openMenu(s,trigger){
+    if(menuId===s.id){closeMenu(true);return;}
+    closeMenu(false);menuId=s.id;menuTrigger=trigger;trigger.setAttribute("aria-expanded","true");
+    rowMenu.replaceChildren();rowMenu.setAttribute("role","menu");rowMenu.setAttribute("aria-label","Session actions for "+s.title);
+    for(const a of [{type:"settings",label:"Attach settings"},{type:"kill",label:"Kill session"}]){
+      const item=element("button","n-row-menu-item"+(a.type==="kill"?" n-row-menu-danger":""));
+      item.type="button";item.setAttribute("role","menuitem");item.tabIndex=-1;item.append(glyph(a.type),document.createTextNode(a.label));
+      item.addEventListener("click",()=>openModal(a.type,s,trigger));rowMenu.append(item);
+    }
+    rowMenu.hidden=false;
+    const r=trigger.getBoundingClientRect(),host=shell.getBoundingClientRect(),w=rowMenu.offsetWidth,h=rowMenu.offsetHeight;
+    rowMenu.style.left=Math.max(8,Math.min(host.width-w-8,r.right-host.left-w))+"px";
+    rowMenu.style.top=(r.bottom-host.top+h+8>host.height?Math.max(8,r.top-host.top-h-4):r.bottom-host.top+4)+"px";
+    rowMenu.querySelector('[role="menuitem"]')?.focus();
+  }
   const escapeText = (s) => { const el=document.createElement("span");el.textContent=String(s);return el.textContent; };
   const element=(tag,cl,content) => {const e=document.createElement(tag);if(cl)e.className=cl;if(content!==undefined)e.textContent=content;return e;};
   const selected = () => sessions.find(s=>s.id===selectedId) || sessions[0];
@@ -31,7 +105,17 @@
         copy.append(element("span","n-session-name",s.title),element("span","n-session-sub",s.kind+" · "+s.agent));
         open.append(copy);open.addEventListener("click",()=>{selectedId=s.id;drawerOpen=false;section="sessions";dialog=null;render();});
         row.append(open);
-        const more=element("button","n-more","···");more.type="button";more.title="Session actions";more.setAttribute("aria-label","Actions for "+s.title);more.addEventListener("click",()=>{dialog={type:"actions",sessionId:s.id};section="sessions";render();});row.append(more);list.append(row);
+        const controls=element("div","n-inline-actions");
+        for(const a of [{type:"settings",label:"Configure attach settings"},{type:"kill",label:"Kill session"}]){
+          const icon=element("button","n-row-action"+(a.type==="kill"?" n-row-action-kill":""));
+          icon.type="button";icon.title=a.label;icon.setAttribute("aria-label",a.label+" for "+s.title);
+          icon.setAttribute("data-testid","session-"+a.type+"-"+s.id);icon.append(glyph(a.type));
+          icon.addEventListener("click",e=>{e.stopPropagation();openModal(a.type,s,icon);});controls.append(icon);
+        }
+        row.append(controls);
+        const more=element("button","n-more","···");more.type="button";more.title="Session actions";
+        more.setAttribute("aria-label","Session actions for "+s.title);more.setAttribute("aria-haspopup","menu");more.setAttribute("aria-expanded","false");
+        more.addEventListener("click",e=>{e.stopPropagation();openMenu(s,more);});row.append(more);list.append(row);
       }
     }
   }
@@ -55,10 +139,6 @@
       const em=element("p","n-error","");box.append(em);
       const actions=element("div","n-button-row");actions.append(button("Cancel","",closeDialog),button("Create session","n-primary",()=>{const title=name.e.value.trim();if(!title){error(box,"Enter a name.");name.e.focus();return;}if(!agents.find(a=>a.name===select.value)?.online){error(box,"This Agent is offline. Choose an online Agent.");return;}const id="mock-"+(sessions.length+1);sessions.unshift({id,title,kind:"shell",agent:select.value,group:"Today",state:"active",lines:["nession / "+id,"Session created in local preview.","No backend process has been launched."]});selectedId=id;search="";input.value="";dialog=null;render();}));box.append(actions);name.e.focus();return;
     }
-    const s=sessions.find(v=>v.id===dialog.sessionId);if(!s){closeDialog();return;}
-    if(dialog.type==="actions"){box.append(element("h3","",s.title),element("p","","Session actions"));box.append(button("Open session","",()=>{selectedId=s.id;closeDialog();}),button("Rename…","",()=>{dialog={type:"rename",sessionId:s.id};render();}),button("End session…","",()=>{dialog={type:"end",sessionId:s.id};render();}),button("Back to sessions","",closeDialog));return;}
-    if(dialog.type==="rename"){box.append(element("h3","","Rename session"));const f=field("Display title","text",s.title);box.append(f.l,element("p","n-error",""));const a=element("div","n-button-row");a.append(button("Cancel","",closeDialog),button("Save","n-primary",()=>{const v=f.e.value.trim();if(!v){error(box,"Title must not be empty.");return;}s.title=v;closeDialog();}));box.append(a);f.e.focus();return;}
-    if(dialog.type==="end"){box.append(element("h3","","End session?"),element("p","","This mock action removes the Session from the local preview. Real Nession must request explicit confirmation before ending a live Session."));const a=element("div","n-button-row");a.append(button("Cancel","",closeDialog),button("End session","n-danger",()=>{sessions=sessions.filter(v=>v.id!==s.id);if(selectedId===s.id)selectedId=sessions[0]?.id||null;closeDialog();}));box.append(a);}
   }
   function renderWork(){
     const s=selected();q("terminal-command").textContent=s?"nession status":"";
@@ -72,6 +152,7 @@
     q("workspace-surface").hidden=surface!=="workspace";
   }
   function render(){
+    closeMenu(false);
     shell.dataset.mode=width>=1024?"wide":"narrow";
     shell.dataset.collapsed=String(collapsed);
     shell.dataset.drawerOpen=String(drawerOpen);
@@ -88,6 +169,18 @@
   q("work-open").addEventListener("click",()=>{if(width>=1024)collapsed=false;else drawerOpen=true;render();});
   q("drawer-close").addEventListener("click",()=>{drawerOpen=false;render();});
   q("drawer-scrim").addEventListener("click",()=>{drawerOpen=false;render();});
+  rowMenu.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){e.preventDefault();closeMenu(true);return;}
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+      e.preventDefault();const items=[...rowMenu.querySelectorAll('[role="menuitem"]')];
+      const i=items.indexOf(document.activeElement),step=e.key==="ArrowDown"?1:-1;
+      items[(i+step+items.length)%items.length]?.focus();
+    }
+  });
+  document.addEventListener("pointerdown",e=>{
+    if(menuId&&!rowMenu.contains(e.target)&&!menuTrigger?.contains(e.target))closeMenu(false);
+  },true);
+  shell.addEventListener("scroll",e=>{if(menuId&&e.target.closest(".n-scroll"))closeMenu(false);},true);
   q("new-session").addEventListener("click",()=>{dialog={type:"new"};section="sessions";render();});
   q("agent-entry").addEventListener("click",()=>{section=section==="agents"?"sessions":"agents";dialog=null;render();});
   q("agent-back").addEventListener("click",()=>{section="sessions";render();});
@@ -96,6 +189,12 @@
   q("surface-workspace").addEventListener("click",()=>{surface="workspace";renderWork();});
   q("capsule-form").addEventListener("submit",e=>{e.preventDefault();const v=q("capsule-input").value.trim();if(!v)return;const s=selected();if(s)s.lines.push("› "+v,"Local preview input recorded. No Agent or model call was made.");q("capsule-input").value="";renderWork();});
   const root=q("review-root");root.addEventListener("np:resize",e=>{width=Number(e.detail.width)||1280;drawerOpen=false;const h=({1280:800,1440:900,1180:760,1024:768,390:844,375:812})[width]||800;q("n-shell").parentElement.style.setProperty("--np-device-height",h+"px");render();});
-  root.addEventListener("keydown",e=>{if(e.key==="Escape"&&dialog){closeDialog();return;}if(e.key==="Escape"&&drawerOpen){drawerOpen=false;render();}});
+  root.addEventListener("keydown",e=>{
+    if(e.key!=="Escape")return;
+    if(!actionOverlay.hidden){closeModal();return;}
+    if(menuId){closeMenu(true);return;}
+    if(dialog){closeDialog();return;}
+    if(drawerOpen){drawerOpen=false;render();}
+  });
   render();
 })();
