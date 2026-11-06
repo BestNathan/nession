@@ -108,3 +108,66 @@
 .np-fixtures-title{font-size:11px;color:var(--np-dim);margin-right:6px}
 .np-fixtures button{background:#fff;border:1px solid var(--np-line);border-radius:9px;padding:6px 10px;min-height:32px;font-size:11px;color:var(--np-ink);cursor:pointer}
 .np-fixtures button[aria-pressed="true"]{background:#f1f3f4;border-color:#959ca4}
+
+/* Product IA owner map (not prototype frame):
+ * WebLayout = Sidebar + ShellMain; WorkspaceShell owns capability navigation;
+ * AppLayout/AppLayers = Sessions / Terminal / Workspace depth;
+ * WorkspacePanel owns exactly one AppPageHeader when Workspace is visible. */
+.n-product .n-web-layout{display:flex;width:100%;height:100%;min-height:0;min-width:0;overflow:hidden}
+.n-product .n-web-layout>.n-main{flex:1;min-width:0;min-height:0}
+.n-product .n-workspace-shell{
+  position:relative;display:flex;flex-direction:column;flex:1;min-height:0;
+  min-width:0;height:100%;overflow:hidden;background:var(--nession-background)
+}
+.n-product .n-workspace-content{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}
+.n-product .n-workspace-content .n-view{flex:1;min-height:0;overflow-y:auto}
+.n-product .n-workspace-shell .n-dock{bottom:14px;max-width:calc(100% - 20px)}
+.n-product .n-workspace-shell .n-dock-pill{max-width:100%;min-width:0;padding:4px}
+.n-product .n-workspace-shell .n-dock-pill button{border-radius:999px;white-space:nowrap}
+.n-product .n-app-layers{display:flex;flex-direction:column;flex:1;width:100%;height:100%;min-height:0;overflow:hidden}
+.n-product .n-app-session-layer,.n-product .n-app-workspace-layer,
+.n-product .n-terminal-layer{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;height:100%;overflow:hidden;position:relative}
+.n-product .n-app-workspace-layer>.n-workspace-shell{height:100%}
+.n-product .n-terminal-layer .n-terminal{flex:1;min-height:0}
+.n-product .n-terminal-dock{
+  display:flex;align-items:center;gap:8px;position:absolute;
+  z-index:4;bottom:15px;left:50%;transform:translateX(-50%);
+  width:min(550px,calc(100% - 26px))
+}
+.n-product .n-conversation-capsule{
+  display:flex;align-items:center;gap:9px;flex:1;min-width:0;
+  border:1px solid var(--nession-border);border-radius:999px;
+  height:42px;padding:5px 11px 5px 6px;background:var(--nession-background);
+  color:var(--nession-muted-foreground);font-size:12px;
+  box-shadow:0 1px 2px #0000000f,0 8px 24px #00000012
+}
+.n-product .n-conversation-capsule button{
+  flex:0 0 30px;width:30px;height:30px;border:0;border-radius:50%;
+  background:var(--nession-muted);color:var(--nession-foreground);font-size:18px
+}
+.n-product .n-send-mark{margin-left:auto;color:var(--nession-foreground);font-size:16px}
+.n-product .n-terminal-destination{flex:0 0 42px;cursor:pointer}
+.n-product .n-context-peek{
+  position:absolute;bottom:calc(100% + 9px);left:0;
+  display:flex;flex-direction:column;gap:8px;min-width:215px;
+  padding:12px;border-radius:11px;border:1px solid var(--nession-border);
+  background:var(--nession-background);box-shadow:0 8px 24px #0000001f
+}
+.n-product .n-context-peek strong{font-size:11.5px;font-weight:550}
+.n-product .n-context-peek button{
+  padding:7px 9px;border:0;border-radius:6px;background:var(--nession-muted);
+  text-align:left;color:var(--nession-foreground)
+}
+.n-product.n-app .n-app-top{
+  flex:0 0 auto;position:relative;min-height:46px;height:46px;
+  gap:5px;padding:6px 8px 4px;border-bottom:0;justify-content:flex-start
+}
+.n-product.n-app .n-app-top strong{text-align:left;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.n-product.n-app .n-app-top .n-btn{min-height:36px;min-width:36px;width:36px;height:36px;font-size:22px;padding:0}
+.n-product.n-app .n-workspace-shell .n-dock{
+  bottom:9px;max-width:calc(100% - 20px);width:calc(100% - 20px)
+}
+.n-product.n-app .n-workspace-shell .n-dock-pill{flex:1;height:44px}
+.n-product.n-app .n-workspace-shell .n-dock-pill button{height:36px}
+.n-product.n-app .n-terminal-dock{bottom:9px;width:calc(100% - 20px)}
+.n-product.n-app .n-conversation-capsule{height:44px}
