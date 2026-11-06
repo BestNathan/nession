@@ -1067,10 +1067,10 @@ describe('SessionRuntime', () => {
       expect(ack).not.toHaveBeenCalled();
 
       rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      vi.useFakeTimers();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap
       expect(ack).not.toHaveBeenCalled();
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }); // contiguous parser completed
-      vi.useFakeTimers();
       expect(ack).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(32);
       expect(ack).toHaveBeenCalledWith('s1', {
