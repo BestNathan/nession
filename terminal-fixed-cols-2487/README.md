@@ -35,3 +35,10 @@ Find one canonical **column count** for the same Nession Session that remains un
 - Prototype/design evidence only. None of this marks #2487 production SC or E2E Acceptance Pass.
 
 **Owner:** terminal geometry/design; canonical production implementation remains on main's development workflow, not this orphan branch.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` now uses the shared `../prototype-frame-2758/` presentation frame (Requirement overview → 1:1 CSS-pixel interactive viewport → functional design and verification). Scenario/debug controls stay outside the product preview; original interactions remain in the owning directory.
+- **Mock fidelity:** DOM 字形尺寸测量不等同于 xterm renderer 精度，且这里是双端几何实验。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
+- **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
+- **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/terminal-fixed-cols-2487/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
