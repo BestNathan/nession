@@ -344,7 +344,7 @@ export async function preflightTrustedQwenRepairPublisher({
     schema_version:1,kind:'trusted_qwen_repair_preflight_only',
     status:'preflight_only',issue:admission.issue,
     action_id:admission.action_id,developer_run_id:run.id,
-    source_sha:admission.input_sha,
+    worker_sha:run.head_sha,source_sha:admission.input_sha,
     original_pr_branch:origin.branch,
     original_main_sha:origin.original_main_sha,
     original_publisher_run_id:origin.original_publisher_run_id,
