@@ -15,6 +15,7 @@
   --nession-radius-control:0.625rem;
   --nession-shell-sidebar-width:246px;
   --nession-shell-icon-button-size:36px;
+  --nession-icon-md:16px;
   --nession-shell-space-1:0.25rem;
   --nession-shell-space-2:0.5rem;
   --nession-shell-space-3:0.75rem;
@@ -49,15 +50,15 @@
 .n-shell button,.n-shell input,.n-shell select{font:inherit}
 .n-shell button{cursor:pointer}
 .n-shell button:focus-visible,.n-shell input:focus-visible,.n-shell select:focus-visible{outline:var(--nession-focus-ring-width) solid var(--nession-ring);outline-offset:var(--nession-focus-ring-offset)}
-.n-shell button svg,.n-shell label svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.n-shell button svg,.n-shell label svg{width:var(--nession-icon-md);height:var(--nession-icon-md);fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 .n-sidebar{flex:0 0 var(--nession-shell-sidebar-width);width:var(--nession-shell-sidebar-width);min-width:0;display:flex;flex-direction:column;background:var(--nession-sidebar);overflow:hidden;transition:flex-basis var(--nession-motion-shell-duration) var(--nession-motion-shell-ease),width var(--nession-motion-shell-duration) var(--nession-motion-shell-ease);z-index:5}
 .n-shell[data-collapsed="true"][data-mode="wide"] .n-sidebar{flex-basis:0;width:0}
 .n-top-actions{min-height:52px;display:flex;gap:var(--nession-shell-space-1);align-items:center;padding:var(--nession-shell-space-2);flex-shrink:0}
 .n-icon-button{width:var(--nession-shell-icon-button-size);height:var(--nession-shell-icon-button-size);display:grid;place-items:center;border:0;border-radius:var(--nession-radius-control);background:transparent;color:var(--nession-text-secondary)}
 .n-icon-button:hover,.n-foot-entry:hover,.n-back:hover{background:var(--nession-sidebar-accent)}
 .n-new{display:flex;align-items:center;gap:var(--nession-shell-space-2);height:var(--nession-shell-icon-button-size);padding:0 var(--nession-shell-space-3);margin-left:auto;color:var(--nession-foreground);font-size:var(--nession-typography-body-size)!important;font-weight:var(--nession-typography-body-weight)!important;background:var(--nession-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);box-shadow:none}
-.n-new:hover{background:#fdfdfd;border-color:#c8ccd0}
-.n-new svg{width:17px;height:17px}
+.n-new:hover{background:var(--nession-sidebar-accent);border-color:var(--nession-border)}
+.n-new svg{width:var(--nession-icon-md);height:var(--nession-icon-md)}
 .n-only-drawer{display:none}
 .n-navigation{min-height:0;display:flex;flex:1;flex-direction:column}
 .n-navigation[hidden],.n-dialog[hidden],.n-scrim[hidden],.n-workspace[hidden],.n-terminal[hidden]{display:none!important}
@@ -80,12 +81,12 @@
 .n-session-copy{display:block;min-width:0}
 .n-session-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--nession-typography-primary-size);font-weight:var(--nession-typography-primary-weight);line-height:var(--nession-typography-primary-line-height)}
 .n-session-sub{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--nession-typography-metadata-size);font-weight:var(--nession-typography-metadata-weight);line-height:var(--nession-typography-metadata-line-height);color:var(--nession-muted-foreground);margin-top:3px}
-.n-more{flex:none;border:0;background:transparent;border-radius:8px;width:29px;height:31px;color:var(--nession-muted-foreground);font-size:21px;line-height:1;opacity:0}
+.n-more{flex:none;border:0;background:transparent;border-radius:var(--nession-radius-control);width:32px;height:32px;color:var(--nession-muted-foreground);font-size:21px;line-height:1;opacity:0}
 .n-session-item:hover .n-more,.n-session-item:focus-within .n-more,.n-session-item[data-active="true"] .n-more{opacity:1}
 .n-more:hover{background:#dde0df}
 .n-empty{padding:24px 12px;text-align:center;color:var(--nession-muted-foreground);font-size:13px}
 .n-sidebar-footer{margin-top:auto;padding:7px 11px 15px;border-top:1px solid var(--nession-border);flex-shrink:0}
-.n-foot-entry{border:0;background:transparent;display:flex;align-items:center;gap:10px;width:100%;height:39px;text-align:left;padding:0 8px;border-radius:10px;font-size:13px;color:var(--nession-text-secondary)}
+.n-foot-entry{border:0;background:transparent;display:flex;align-items:center;gap:var(--nession-shell-space-2);width:100%;height:36px;text-align:left;padding:0 8px;border-radius:10px;font-size:13px;color:var(--nession-text-secondary)}
 .n-foot-entry svg{width:17px;height:17px}
 .n-foot-meta{margin-left:auto;font-size:11px;color:var(--nession-muted-foreground)}
 .n-connection{display:flex;align-items:center;gap:var(--nession-shell-space-2);margin-top:7px;padding:3px var(--nession-shell-space-2);color:var(--nession-muted-foreground);font-size:var(--nession-typography-caption-size)}
@@ -109,7 +110,7 @@
 .n-dialog .n-button-row{display:flex;gap:7px;margin-top:8px}
 .n-dialog .n-error{color:var(--nession-danger);font-size:11px;min-height:16px}
 .n-work{min-width:0;flex:1;position:relative;background:var(--nession-background);overflow:hidden}
-.n-floating-open{display:none;position:absolute;left:19px;top:16px;width:37px;height:37px;z-index:3;background:#fff;border:1px solid #e9e9e8;border-radius:11px;box-shadow:0 2px 10px #1010100d;color:var(--nession-text-secondary);place-items:center}
+.n-floating-open{display:none;position:absolute;left:19px;top:16px;width:var(--nession-shell-icon-button-size);height:var(--nession-shell-icon-button-size);z-index:3;background:#fff;border:1px solid #e9e9e8;border-radius:11px;box-shadow:0 2px 10px #1010100d;color:var(--nession-text-secondary);place-items:center}
 .n-shell[data-collapsed="true"][data-mode="wide"] .n-floating-open{display:grid}
 .n-surface-switcher{position:absolute;z-index:3;right:21px;top:17px;display:flex;padding:3px;gap:3px;border:1px solid #ededeb;border-radius:13px;box-shadow:0 2px 10px #0a0a0a0d;background:white}
 .n-surface-switcher button{background:transparent;border:0;border-radius:9px;width:32px;height:31px;color:#757b80;font-size:19px}
