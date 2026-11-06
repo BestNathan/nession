@@ -9,6 +9,9 @@ import { admitOriginalControlledReviewerTarget } from './pr-admission.mjs';
 import { CONTROLLED_PUBLISHER_INTENT_PATH,
   validateControlledPublisherIntent } from '../publisher/store-intent.mjs';
 import { githubFetcher } from '../github-read.mjs';
+import {readIssueWorkflowState} from '../orchestration/state-store.mjs';
+import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
+import {admitQwenPublishedReview} from './qwen-pr-admission.mjs';
 
 const PUBLISH_RUN=39609600546;
 const OWNER_COMMENT=6317468284;
@@ -52,6 +55,65 @@ export async function prepareReviewAdmission({
   },reviewerAgentId);
 }
 
+// The generic Qwen path reads the same orphan Store and the real Publisher PR
+// independently. No Issue text, model output, or workflow input may select a
+// different PR/SHA after the signed Outbox Reviewer action is committed.
+export async function prepareQwenReviewAdmission({
+  storeRoot,issue,actionId,reviewerAgentId='review-qwen-01',fetcher,
+}){
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !/^[a-f0-9]{64}$/.test(actionId??'')||
+      reviewerAgentId!=='review-qwen-01'||typeof fetcher!=='function'||
+      typeof storeRoot!=='string'||!storeRoot)
+    fail('invalid Qwen Reviewer source request');
+  const {state}=readIssueWorkflowState(storeRoot,issue);
+  if(!state||state.issue!==issue||state.phase!=='review')
+    fail('no committed Qwen Reviewer phase');
+  const publisher=state.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published'&&t.target_sha===state.target_sha);
+  if(publisher.length!==1)fail('missing unique Publisher transition');
+  const directory=path.join(storeRoot,'workflows/issues',String(issue),'results');
+  const entries=fs.readdirSync(directory,{withFileTypes:true});
+  if(entries.length>512)fail('unbounded Issue publication history');
+  const candidates=[];
+  for(const entry of entries){
+    if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\.json$/.test(entry.name))continue;
+    if(!entry.isFile()||entry.isSymbolicLink())
+      fail('unsafe immutable Qwen Publisher Intent path');
+    const file=path.join(directory,entry.name),st=fs.lstatSync(file);
+    if(!st.isFile()||st.size>8192||st.size<1)
+      fail('unsafe immutable Qwen Publisher Intent bytes');
+    let doc;
+    try{doc=JSON.parse(fs.readFileSync(file,'utf8'));}
+    catch{fail('invalid immutable Issue publication result');}
+    if(doc?.kind==='trusted_qwen_publisher_write_ahead_intent'&&
+       doc.issue===issue&&doc.publisher_run_id===publisher[0].run_id){
+      candidates.push(validateQwenPublisherIntent(doc));
+    }
+  }
+  if(candidates.length!==1)
+    fail('missing unique committed Qwen Publisher Intent');
+  const intent=candidates[0];
+  const publisherRun=await fetcher('actions/runs/'+intent.publisher_run_id);
+  const pullRequests=await fetcher('pulls?state=all&head=BestNathan:'+
+    encodeURIComponent(intent.branch)+'&per_page=100');
+  if(!Array.isArray(pullRequests)||pullRequests.length!==1||
+      !Number.isSafeInteger(pullRequests[0]?.number)||
+      pullRequests[0].number<1)
+    fail('no unique published Qwen PR');
+  const pr=await fetcher('pulls/'+pullRequests[0].number);
+  if(!/^[a-f0-9]{40}$/.test(pr?.head?.sha??''))
+    fail('untrusted Qwen PR HEAD SHA');
+  const ref=await fetcher('git/ref/heads/'+intent.branch);
+  const commit=await fetcher('git/commits/'+pr.head.sha);
+  if(!/^[a-f0-9]{40}$/.test(commit?.tree?.sha??''))
+    fail('untrusted Qwen Git tree SHA');
+  const files=await fetcher('pulls/'+pr.number+'/files?per_page=100');
+  const tree=await fetcher('git/trees/'+commit.tree.sha+'?recursive=1');
+  return admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
+    pr,ref,commit,files,tree,actionId,reviewerAgentId});
+}
+
 async function main(){
   const args=process.argv.slice(2);
   const value=(name)=>{const index=args.indexOf('--'+name);return index>=0?args[index+1]:null;};
@@ -59,10 +121,14 @@ async function main(){
   const storeRoot=value('store');
   const out=value('out');
   if(!storeRoot||!out)fail('usage: --store DIR --out FILE [--reviewer ID]');
-  const admission=await prepareReviewAdmission({
-    reviewerAgentId:reviewer,storeRoot,
-    fetcher:githubFetcher(process.env.GH_TOKEN||process.env.GITHUB_TOKEN),
-  });
+  const issue=value('issue'),action=value('action');
+  if((issue&&!action)||(!issue&&action))
+    fail('Qwen Reviewer source requires both Issue number and signed Action');
+  const fetcher=githubFetcher(process.env.GH_TOKEN||process.env.GITHUB_TOKEN);
+  const admission=issue
+    ?await prepareQwenReviewAdmission({storeRoot,issue:Number(issue),
+       actionId:action,reviewerAgentId:reviewer,fetcher})
+    :await prepareReviewAdmission({reviewerAgentId:reviewer,storeRoot,fetcher});
   fs.writeFileSync(out,JSON.stringify(admission,null,2)+'\n',{flag:'wx',mode:0o600});
   console.log('Reviewer admission prepared for '+admission.agent_id+' at '+admission.target_sha);
 }
