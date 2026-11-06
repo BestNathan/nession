@@ -19,6 +19,7 @@ test('Web/App product shell ownership is real markup, mock controls remain exter
   assert.match(html, /data-testid="workspace-tool-bar"/);
   assert.match(html, /data-testid="app-page-header"/);
   assert.match(html, /data-testid="terminal-surface"/);
+  assert.match(html, /data-testid="env-dirty-guard"/);
   assert.match(html, /data-testid="env-web-layout"/);
   assert.match(html, /href="\.\/product-ia\.css"/);
   assert.match(html, /"external":\["\.mock-controls","\.foot"\]/);
@@ -55,7 +56,7 @@ test('session/profile/binding and Terminal→Workspace/App depth preserve flow',
   }
   const ids = {};
   for (const id of [
-    'workspace','ia-depth-title','back','main','profileCount',
+    'workspace','ia-depth-title','back','ia-dirty-guard','main','profileCount',
     'sessionNav','search','profileNav','content','stateSelect',
     'toggleSession','toggleAgent'
   ]) ids[id] = element(id);
@@ -96,6 +97,16 @@ test('session/profile/binding and Terminal→Workspace/App depth preserve flow',
   assert.ok(!ids.workspace.classList.contains('detail'));
   click('manage');
   assert.equal(ids['ia-depth-title'].textContent, 'Manage binding');
+  click('',{move:'0',step:'1'});
+  click('back');
+  assert.equal(ids['ia-dirty-guard'].hidden,false,'dirty Shell Back opens confirmation');
+  assert.equal(ids['ia-depth-title'].textContent,'Manage binding','dirty draft is retained');
+  click('ia-guard-stay');
+  assert.equal(ids['ia-dirty-guard'].hidden,true,'Keep editing closes guard');
+  click('back');
+  click('ia-guard-discard');
+  assert.equal(ids['ia-dirty-guard'].hidden,true);
+  click('manage');
   click('apply');
   assert.match(ids.content.innerHTML, /Waiting for next shell prompt/);
   click('prompt');
