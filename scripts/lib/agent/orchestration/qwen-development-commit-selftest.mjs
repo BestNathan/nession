@@ -7,8 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash,generateKeyPairSync} from 'node:crypto';
-import {startDevelopment,recordDispatchIntent,recordDispatch}
-  from './outbox.mjs';
+import {startDevelopment,recordDispatchIntent,recordDispatch,
+  acceptTaskResult,bindVerifiedRepairCheckpoint} from './outbox.mjs';
+import {attestQwenPublishedRepairCheckpoint}
+  from './qwen-repair-checkpoint.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {writeIssueWorkflowState,readIssueWorkflowState}
   from './state-store.mjs';
@@ -304,6 +306,85 @@ try {
   assert.equal(after.state.outbox.filter(x=>x.task.role==='reviewer').length,1);
   assert.equal(after.state.outbox.filter(x=>x.task.role==='developer').length,0);
   assert.equal(after.state.transitions.filter(x=>x.kind==='publisher').length,1);
+  // Independently attested Reviewer changes_requested must select the exact
+  // same Qwen Developer's immutable native checkpoint, not an Issue/model
+  // selected origin. The original published Developer Action is retired.
+  const reviewAction=after.state.outbox.find(x=>x.task.role==='reviewer');
+  const reviewRun=991177;
+  const reviewPrepared=recordDispatchIntent(after.state,after.version,
+    reviewAction.id,{status:'prepared',dispatch_id:reviewAction.id,
+      issuer_run_id:publisherRun+1,ticket_sha256:'b'.repeat(64)});
+  const reviewDispatched=recordDispatch(reviewPrepared,
+    reviewPrepared.version,reviewAction.id,{
+      status:'verified',dispatch_id:reviewAction.id,source_run_id:reviewRun});
+  const reviewAccepted=acceptTaskResult(reviewDispatched,
+    reviewDispatched.version,{
+      kind:'reviewer',issue,run_id:reviewRun,run_attempt:1,
+      target_sha:commitSha,outcome:'changes_requested',
+      task_id:reviewAction.id,
+    },{
+      repository:'BestNathan/nession',path:'.github/workflows/agent-review.yml',
+      name:'Agent / Review',run_id:reviewRun,attempt:1,
+      event:'workflow_dispatch',ref:'refs/heads/main',issue,
+      task_id:reviewAction.id,agent_id:'review-qwen-01',
+      input_sha:commitSha,output_sha:commitSha,verified:true,
+    },registry);
+  assert.equal(reviewAccepted.phase,'repair');
+  const originalRepair=reviewAccepted.outbox.find(x=>
+    x.task.role==='developer'&&x.task.task==='repair');
+  assert.equal(originalRepair.status,'pending');
+  for(const next of [reviewPrepared,reviewDispatched,reviewAccepted]){
+    const old=readIssueWorkflowState(post,issue);
+    writeIssueWorkflowState(post,next,old.version);
+    git(post,'add','-A');
+    git(post,'-c','user.name=Qwen Store Case',
+      '-c','user.email=qwen@example.invalid','commit',
+      '-m','verified Qwen Review and Repair v'+next.version);
+    publish('agent-store',post,4);
+  }
+  const immutableOrigin=attestQwenPublishedRepairCheckpoint({
+    storeRoot:post,state:reviewAccepted,actionId:originalRepair.id});
+  assert.deepEqual(immutableOrigin,{verified:true,
+    checkpoint_version:accepted.checkpoint.version,
+    checkpoint_commit_sha:accepted.checkpoint.commit_sha,
+    ciphertext_sha256:accepted.checkpoint.ciphertext_sha256,
+    source_sha:inputSha,source_run_id:workerId});
+  const boundRepair=bindVerifiedRepairCheckpoint(reviewAccepted,
+    reviewAccepted.version,originalRepair.id,immutableOrigin);
+  assert.equal(boundRepair.version,reviewAccepted.version+1);
+  assert.deepEqual(boundRepair.outbox.find(x=>x.id===originalRepair.id)
+    .task.repair_checkpoint,{
+      checkpoint_version:accepted.checkpoint.version,
+      checkpoint_commit_sha:accepted.checkpoint.commit_sha,
+      ciphertext_sha256:accepted.checkpoint.ciphertext_sha256,
+      source_sha:inputSha,source_run_id:workerId});
+  assert.equal(bindVerifiedRepairCheckpoint(boundRepair,boundRepair.version,
+    originalRepair.id,immutableOrigin),boundRepair,'exact replay is a no-op');
+  for(const forgedState of [
+    {...reviewAccepted,phase:'review'},
+    {...reviewAccepted,target_sha:'f'.repeat(40)},
+    {...reviewAccepted,assignments:{...reviewAccepted.assignments,
+      developer:'dev-cursor-01'}},
+    {...reviewAccepted,transitions:reviewAccepted.transitions.slice(0,-1)},
+  ])assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+    storeRoot:post,state:forgedState,actionId:originalRepair.id}),
+    /trusted Qwen Repair origin|agent outbox/);
+  assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+    storeRoot:post,state:reviewAccepted,actionId:'f'.repeat(64)}),
+    /trusted Qwen Repair origin/);
+  const cpPath='roles/developer/dev-qwen-01/issues/'+issue+
+    '/checkpoints/00000001.json';
+  const originalCheckpointBytes=fs.readFileSync(path.join(post,cpPath));
+  try{
+    fs.writeFileSync(path.join(post,cpPath),
+      originalCheckpointBytes.toString('utf8').replace(
+        accepted.checkpoint.ciphertext_sha256,'f'.repeat(64)));
+    assert.throws(()=>attestQwenPublishedRepairCheckpoint({
+      storeRoot:post,state:reviewAccepted,actionId:originalRepair.id}),
+      /trusted Qwen Repair origin/);
+  }finally{fs.writeFileSync(path.join(post,cpPath),originalCheckpointBytes);}
+  assert.equal(posts,5,
+    'Qwen repair origin reads only immutable Store and never retries GitHub POST');
   for(const wrong of [
     {...readback,head_sha:'0'.repeat(40)},
     {...readback,source_run_id:workerId+1},
