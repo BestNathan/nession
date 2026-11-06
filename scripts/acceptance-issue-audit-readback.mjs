@@ -37,19 +37,31 @@ export function parseAuditEnvironmentLog(log) {
 export function attestIssueAuditReadback({
   repo, targetSha, sourceRun, jobs, log, issue, events,
   targetIssueNumber, ancestorConfirmed, sourceCodeUnchanged,
+  proof = null,
 }) {
   if(repo!==REPO||!SHA.test(String(targetSha))||
      !Number.isSafeInteger(targetIssueNumber)||targetIssueNumber<1)
     throw Error('invalid Issue Audit readback scope');
   const run=sourceRun;
+  const expectedEvent=proof?.event??'issue_comment';
+  const historical=proof?.historical===true;
+  const requiredLabels=proof?.requiredLabels??['bug','cli','terminal'];
+  const requiredWriteLabels=proof?.requiredWriteLabels??['bug','cli','terminal'];
+  if(!['issues','issue_comment'].includes(expectedEvent) ||
+     !Array.isArray(requiredLabels)||!requiredLabels.length||
+     !Array.isArray(requiredWriteLabels)||!requiredWriteLabels.length||
+     requiredLabels.some(x=>typeof x!=='string'||!x)||
+     requiredWriteLabels.some(x=>typeof x!=='string'||!x))
+    throw Error('invalid Issue Audit proof requirements');
   if(!run||!Number.isSafeInteger(run.id)||run.id<1||
      !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
      !SHA.test(String(run.head_sha))||
      run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
      run.name!=='Agent / Issue Audit'||run.path!==WORKFLOW||
-     run.event!=='issue_comment'||run.head_branch!=='main'||
+     run.event!==expectedEvent||run.head_branch!=='main'||
      run.status!=='completed'||run.conclusion!=='success'||
-     (run.head_sha!==targetSha&&(!ancestorConfirmed||!sourceCodeUnchanged)))
+     (historical && run.actor?.login!=='BestNathan')||
+     (run.head_sha!==targetSha&&(!ancestorConfirmed||(!historical&&!sourceCodeUnchanged))))
     throw Error('unverified Issue Audit source run identity or ancestry');
   if(!Array.isArray(jobs)||jobs.length>100)
     throw Error('invalid Issue Audit exact-attempt jobs');
@@ -83,8 +95,14 @@ export function attestIssueAuditReadback({
   const kinds=labels.filter(l=>KIND_LABELS.has(l));
   const areas=labels.filter(l=>AREA_LABELS.has(l));
   if(kinds.length!==1||areas.length===0||
-     !labels.includes('bug')||!labels.includes('cli')||!labels.includes('terminal'))
+     requiredLabels.some(label=>!labels.includes(label)))
     throw Error('Issue Audit target missing repaired canonical labels');
+  if (proof?.expectedE2EIds != null) {
+    if(!Array.isArray(proof.expectedE2EIds)||!proof.expectedE2EIds.length||
+       JSON.stringify([...e2e.selectedIds].sort()) !==
+       JSON.stringify([...proof.expectedE2EIds].sort()))
+      throw Error('Issue Audit target E2E selection differs from required repair');
+  }
   // No label event may be inferred from the Issue's current labels alone.
   // Require explicit GitHub-authenticated writer events during this exact job.
   if(!Array.isArray(events)||events.length>100||!job.started_at||!job.completed_at)
@@ -95,7 +113,7 @@ export function attestIssueAuditReadback({
   const changes=events.filter(e=>e?.event==='labeled'&&
     e.actor?.login==='github-actions[bot]'&&
     Date.parse(e.created_at)>=start&&Date.parse(e.created_at)<=end);
-  for(const label of ['bug','cli','terminal']){
+  for(const label of requiredWriteLabels){
     if(changes.filter(e=>e.label?.name===label).length!==1)
       throw Error('missing/ambiguous authenticated Issue Audit label write: '+label);
   }
@@ -106,14 +124,15 @@ export function attestIssueAuditReadback({
     source_run_id:run.id, source_attempt:run.run_attempt,
     source_sha:run.head_sha, target_sha:targetSha, target_issue:targetIssueNumber,
     source_job_id:job.id, provider:'qwen', model:env.ISSUE_AUDIT_CLAUDE_MODEL,
-    status:'authenticated-repair-readback',
+    status:historical?'authenticated-historical-repair-readback':'authenticated-repair-readback',
+    source_event:run.event,
     kinds,areas, labels,
     protected_e2e_digest:e2e.digest,
     protected_e2e_selected_ids:e2e.selectedIds,
     protected_e2e_rows:e2e.rows.size,
     issue_contract_pass:true,
     trusted_steps:REQUIRED_STEPS,
-    label_event_ids:changes.filter(e=>['bug','cli','terminal'].includes(e.label?.name)).map(e=>e.id),
+    label_event_ids:changes.filter(e=>requiredWriteLabels.includes(e.label?.name)).map(e=>e.id),
     provenance:'GitHub exact Run/Attempt/Job, runner env, label events, canonical target Issue Contract and E2E parser',
     source_url:run.html_url,
   };
@@ -121,7 +140,7 @@ export function attestIssueAuditReadback({
 
 export async function collectIssueAuditReadback({
   repo,targetSha,sourceRunId,targetIssueNumber,request,readLog,
-  isAncestor=()=>false,sourceUnchanged=()=>false,
+  isAncestor=()=>false,sourceUnchanged=()=>false,proof=null,
 }){
   if(repo!==REPO||!SHA.test(String(targetSha))||
      !Number.isSafeInteger(sourceRunId)||sourceRunId<1||
@@ -142,7 +161,9 @@ export async function collectIssueAuditReadback({
   return attestIssueAuditReadback({repo,targetSha,sourceRun,jobs:exactJobs,log,
     issue,events,targetIssueNumber,
     ancestorConfirmed:sourceRun.head_sha===targetSha||isAncestor(sourceRun.head_sha,targetSha),
-    sourceCodeUnchanged:sourceRun.head_sha===targetSha||sourceUnchanged(sourceRun.head_sha,targetSha),
+    sourceCodeUnchanged:sourceRun.head_sha===targetSha||
+      (proof?.historical===true ? false : sourceUnchanged(sourceRun.head_sha,targetSha)),
+    proof,
   });
 }
 
