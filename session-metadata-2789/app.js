@@ -23,23 +23,35 @@ function tagsView(tags){
 if(!tags.length)return '<div class="n-tags"><span class="n-inline-subtle">未添加标签</span></div>';
 return '<div class="n-tags">'+tags.map(t=>'<span class="n-tag">#'+esc(t)+'</span>').join('')+'</div>'}
 function detail(){
-var s=active();
-var disabled=state.offline?'<div class="n-notice is-error" role="status">Agent unreachable · 当前展示已知的 Session 信息，无法保存更改。</div>':'';
-if(state.edit)return editDetail(s,disabled);
-return '<div class="n-content" data-testid="session-details"><div class="n-identity"><div><h1 class="n-heading" data-testid="session-title">'+esc(display(s))+'</h1><p class="n-description '+(!s.description?'is-empty':'')+'">'+esc(s.description||'还没有工作描述。')+'</p>'+tagsView(s.tags)+'</div><button class="n-btn" type="button" data-action="edit">编辑信息</button></div>'+notice()+disabled+
-'<section class="n-data-list" aria-label="Session context">'+datum('运行位置',s.agent)+datum('工作目录',s.cwd,true)+datum('运行程序',s.command,true)+datum('上次活动',s.activity)+datum('tmux 名称',s.name,true)+datum('Session ID',s.id,true)+'</section><div class="n-meta-foot">标题仅用于展示；Session ID 与 tmux 名称保持不变。</div></div>'}
-function datum(label,val,mono){return '<div class="n-data"><div class="n-data-label">'+esc(label)+'</div><div class="n-data-value '+(mono?'n-mono':'')+'">'+esc(val)+'</div></div>'}
+ var s=active();
+ var disabled=state.offline?'<div class="n-notice is-error" role="status">Agent unreachable · 当前展示已知的 Session 信息，无法保存更改。</div>':'';
+ // Match staging SessionDetails → SessionMetadataSection content ownership.
+ // Work-context fields are not the global Session heading, nor a second App page.
+ var summary='<div class="n-session-overview"><h2 class="n-heading" data-testid="session-title">'+esc(display(s))+'</h2>'+
+  '<p class="n-session-id n-mono">'+esc(s.id)+'</p></div>'+
+  '<div class="n-session-connection" data-testid="session-connection">'+(state.offline?'○ Agent offline':'● Connected')+'</div>'+
+  '<dl class="n-runtime-facts" aria-label="Session runtime facts">'+datum('Windows','1')+datum('Last activity',s.activity)+'</dl>';
+ var body=state.edit?editDetail(s,disabled):
+  '<div data-testid="session-metadata-view"><p class="n-description '+(!s.description?'is-empty':'')+'">'+esc(s.description||'This Session has no saved details yet.')+'</p>'+
+  tagsView(s.tags)+'</div>'+notice()+disabled;
+ return '<div class="n-content" data-testid="session-details">'+summary+
+  '<section class="n-metadata-section" data-testid="session-metadata" aria-labelledby="n-work-context">'+
+  '<div class="n-metadata-head"><h3 id="n-work-context">Work context</h3>'+
+  (state.edit?'':'<button class="n-btn" type="button" data-action="edit" data-testid="session-metadata-edit">Edit details</button>')+'</div>'+
+  body+'</section></div>';
+}
+function datum(label,val,mono){return '<div class="n-data"><dt class="n-data-label">'+esc(label)+'</dt><dd class="n-data-value '+(mono?'n-mono':'')+'">'+esc(val)+'</dd></div>'}
 function editorTags(){
 var tags=state.draft.tags;
 var chips=tags.map((tag,i)=>'<span class="n-tag is-editing">#'+esc(tag)+' <button class="n-tag-remove" type="button" data-action="remove-tag" data-index="'+i+'" aria-label="Remove '+esc(tag)+' tag">×</button></span>').join('');
 return '<div class="n-tags">'+(chips||'<span class="n-inline-subtle">尚无标签</span>')+'</div><div class="n-tag-edit"><input id="n-new-tag" data-testid="tag-entry" aria-label="Add tag" value="'+esc(state.tagInput)+'" placeholder="添加标签…" maxlength="64"><button class="n-btn" type="button" data-action="add-tag">添加</button></div><div class="n-help">最多 12 个标签，大小写不区分重复，每个标签不超过 32 字。</div>'}
 function editDetail(s,disabled){
-return '<div class="n-content" data-testid="session-metadata-editor"><div class="n-edit-head"><h2>编辑 Session 信息</h2><div class="n-help">只是展示信息，不会修改正在运行的终端或 Session 名称。</div></div>'+notice()+disabled+
-'<div class="n-field"><label for="n-title">Title</label><input id="n-title" data-testid="title-input" value="'+esc(state.draft.title)+'" maxlength="160" autocomplete="off" placeholder="'+esc(s.name)+'"><div class="n-help">留空时显示 tmux 名称 · 不超过 120 字</div></div>'+
-'<div class="n-field"><label for="n-description">Description</label><textarea id="n-description" data-testid="description-input" maxlength="2200" placeholder="记录当前工作目标或说明…">'+esc(state.draft.description)+'</textarea><div class="n-help">纯文本 · 不超过 2000 字</div></div>'+
-'<div class="n-field"><label for="n-new-tag">Tags</label>'+editorTags()+'</div>'+
-'<div class="n-edit-actions"><button class="n-btn is-primary" type="button" data-action="save">保存</button><button class="n-btn" type="button" data-action="cancel">取消</button>'+(state.conflict&&state.noticeKind==='error'?'<button type="button" class="n-btn" data-action="refresh-conflict">放弃草稿并加载最新版本</button>':'')+'</div>'+
-'<section class="n-data-list" aria-label="Immutable Session identifiers">'+datum('tmux 名称（不可编辑）',s.name,true)+datum('Session ID（不可编辑）',s.id,true)+'</section></div>'}
+ return '<div class="n-editor" data-testid="session-metadata-editor">'+notice()+disabled+
+ '<div class="n-field"><label for="n-title">Title</label><input id="n-title" data-testid="title-input" value="'+esc(state.draft.title)+'" maxlength="160" autocomplete="off" placeholder="'+esc(s.name)+'"><div class="n-help">Shown in navigation. The tmux name is not renamed. · 120 characters max</div></div>'+
+ '<div class="n-field"><label for="n-description">Description</label><textarea id="n-description" data-testid="description-input" maxlength="2200" placeholder="What is this work about?">'+esc(state.draft.description)+'</textarea><div class="n-help">Plain text · 2,000 characters max</div></div>'+
+ '<div class="n-field"><label for="n-new-tag">Tags</label>'+editorTags()+'</div>'+
+ '<div class="n-edit-actions"><button class="n-btn is-primary" type="button" data-action="save">保存</button><button class="n-btn" type="button" data-action="cancel">取消</button>'+(state.conflict&&state.noticeKind==='error'?'<button type="button" class="n-btn" data-action="refresh-conflict">放弃草稿并加载最新版本</button>':'')+'</div></div>';
+}
 // Product owner tree: WebLayout( Sidebar + ShellMain ), WorkspacePanel/WorkspaceShell,
 // AppLayout/AppLayers( Terminal root, Sessions layer, Workspace layer with ONE page header ).
 function dock(){
