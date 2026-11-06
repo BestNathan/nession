@@ -39,7 +39,7 @@ return '<div class="terminal" data-testid="terminal-surface"><div class="termina
 '<div class="term-gap"><span class="term-prompt">nession</span> <span class="term-muted">git status --short</span></div>'+
 '<div> M web/src/capabilities/git/GitPlugin.ts</div><div> M web/src/capabilities/git/components/GitWorkspace.tsx</div>'+
 '<div>?? crates/nession-git/src/runtime/remote.rs</div><div class="term-gap"><span class="term-prompt">❯</span> <span class="cursor">▌</span></div>'+
-'<p class="terminal-hint">Select Git from the Capsule. It opens Git Workspace directly — no Peek.</p></div></div>';
+'</div></div>';
 }
 function context(){
 if(!S.context)return '';
