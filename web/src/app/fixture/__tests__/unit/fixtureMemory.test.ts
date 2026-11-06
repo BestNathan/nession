@@ -28,7 +28,11 @@ describe('fixture Auto Memory surface', () => {
     expect(memory.repository_kind).toBe('git');
     expect(memory.files.map((file) => file.path)).toEqual([
       'MEMORY.md',
+      'architecture.md',
+      'interaction.md',
+      'topics/recovery.md',
       'feedback_testing.md',
+      'malformed.md',
     ]);
 
     const index = await surface.request<ReadResponseV1>('claude-code.memory-read', {
@@ -36,7 +40,8 @@ describe('fixture Auto Memory surface', () => {
     });
     expect('error' in index).toBe(false);
     if (!('error' in index)) {
-      expect(index.content).toContain('# Memory');
+      expect(index.content).toContain('# Nession project memory');
+      expect(index.content).toContain('[Architecture constraints](architecture.md#session-boundary)');
       expect(index.content_type).toBe('markdown');
     }
 
@@ -44,6 +49,29 @@ describe('fixture Auto Memory surface', () => {
       path: 'missing.md',
     });
     expect(unknown).toEqual({ error: 'not_found' });
+  });
+
+  it('serves a partial topic in chunks whose continuation completes the heading', async () => {
+    const partial = fixtureTranscriptsSurface('?memory=partial');
+    const head = await partial.request<ReadResponseV1>('claude-code.memory-read', {
+      path: 'topics/recovery.md',
+      offset: 0,
+    });
+    expect('error' in head).toBe(false);
+    if (!('error' in head)) {
+      expect(head.has_more).toBe(true);
+      expect(head.content).toContain('The first chunk stops before the target heading.');
+      expect(head.content).not.toContain('Retry strategy');
+      const tail = await partial.request<ReadResponseV1>('claude-code.memory-read', {
+        path: 'topics/recovery.md',
+        offset: head.offset + new TextEncoder().encode(head.content).length,
+      });
+      expect('error' in tail).toBe(false);
+      if (!('error' in tail)) {
+        expect(tail.has_more).toBe(false);
+        expect(tail.content).toContain('## Retry strategy');
+      }
+    }
   });
 
   it('models every provider state as its own input', async () => {
