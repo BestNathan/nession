@@ -237,6 +237,16 @@ impl ServerClientHandle {
         self.sync_needed.store(true, Ordering::SeqCst);
     }
 
+    /// Whether a full session re-sync is required, without clearing the intent.
+    ///
+    /// The [`SessionWatcher`] peeks before querying tmux and clears the flag
+    /// with [`Self::take_sync_needed`] only after a successful query: an
+    /// enumeration failure leaves the Server's view just as unknown as it was,
+    /// so it must not consume the intent that says so.
+    pub fn is_sync_needed(&self) -> bool {
+        self.sync_needed.load(Ordering::SeqCst)
+    }
+
     /// Check and clear the sync-needed flag. Returns `true` if a full
     /// session re-sync is required (server-side registry may be stale).
     pub fn take_sync_needed(&self) -> bool {
@@ -365,6 +375,37 @@ impl ServerClientHandle {
             .send(())
             .await
             .context("failed to send shutdown signal")
+    }
+}
+
+#[cfg(test)]
+impl ServerClientHandle {
+    /// A handle detached from any supervisor, with the frames it publishes into.
+    ///
+    /// The receiver comes back with the handle because dropping it is what
+    /// *closes* the outbox — a test that wants a live publisher has to hold it.
+    /// `connected` is the connection-liveness flag the watcher and heartbeat
+    /// read; no socket is involved either way.
+    pub(crate) fn test_handle(connected: bool) -> (Self, OutboxFrames) {
+        let sync_needed = Arc::new(AtomicBool::new(false));
+        let (outbox, frames) = Outbox::new(Arc::clone(&sync_needed));
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+        (
+            Self {
+                outbox,
+                shutdown_tx,
+                agent_id: "test-agent".to_string(),
+                metadata: AgentMetadata {
+                    tmux_version: String::new(),
+                    os_version: String::new(),
+                    nession_version: String::new(),
+                    image_tag: String::new(),
+                },
+                sync_needed,
+                connected: Arc::new(AtomicBool::new(connected)),
+            },
+            frames,
+        )
     }
 }
 
@@ -2099,24 +2140,7 @@ mod tests {
     /// The receiver comes back with the handle because dropping it is what
     /// *closes* the outbox — a test that wants a live publisher has to hold it.
     fn handle_with_outbox() -> (ServerClientHandle, OutboxFrames) {
-        let (outbox, frames) = Outbox::new(Arc::new(AtomicBool::new(false)));
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
-        (
-            ServerClientHandle {
-                outbox,
-                shutdown_tx,
-                agent_id: "test".to_string(),
-                metadata: AgentMetadata {
-                    tmux_version: String::new(),
-                    os_version: String::new(),
-                    nession_version: String::new(),
-                    image_tag: String::new(),
-                },
-                sync_needed: Arc::new(AtomicBool::new(false)),
-                connected: Arc::new(AtomicBool::new(false)),
-            },
-            frames,
-        )
+        ServerClientHandle::test_handle(false)
     }
 
     #[test]
@@ -2125,13 +2149,21 @@ mod tests {
 
         // Initially not sync needed
         assert!(!handle.take_sync_needed());
+        assert!(!handle.is_sync_needed());
 
-        // Mark and take
+        // Mark; a peek observes the intent without consuming it, so a caller
+        // that fails before re-deriving the view can leave it pending.
         handle.mark_sync_needed();
+        assert!(handle.is_sync_needed());
+        assert!(
+            handle.is_sync_needed(),
+            "peeking must not consume the intent"
+        );
         assert!(handle.take_sync_needed());
 
         // Take clears the flag
         assert!(!handle.take_sync_needed());
+        assert!(!handle.is_sync_needed());
     }
 
     #[test]

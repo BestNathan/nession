@@ -41,13 +41,23 @@ function checked(command, args, timeout, extraEnv = {}) {
 }
 
 /**
+ * Run one or more filters in one cargo package's test target.
+ *
+ * The package is named rather than assumed: a criterion that spans the Agent
+ * and the Server must run each side's exact tests in the same target checkout.
+ */
+function crateTests(pkg, args, timeout, extraEnv = {}) {
+  return checked('cargo', ['test', '-p', pkg, ...args, '--', '--nocapture'], timeout, extraEnv);
+}
+
+/**
  * Run one or more filters in the nession-agent cargo test target.
  *
  * `extraEnv` lets a Case own its isolation: a tmux-backed test must not inherit
  * whatever socket the Case runtime happens to use.
  */
 function cargoTests(args, timeout, extraEnv = {}) {
-  return checked('cargo', ['test', '-p', 'nession-agent', ...args, '--', '--nocapture'], timeout, extraEnv);
+  return crateTests('nession-agent', args, timeout, extraEnv);
 }
 
 /** Assert every named test actually ran and passed. */
@@ -86,4 +96,4 @@ function run(fn) {
   }
 }
 
-module.exports = { run, targetSha, checked, cargoTests, assertRan, tmuxVersion };
+module.exports = { run, targetSha, checked, crateTests, cargoTests, assertRan, tmuxVersion };

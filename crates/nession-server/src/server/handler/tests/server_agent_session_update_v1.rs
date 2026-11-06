@@ -235,3 +235,76 @@ async fn session_update_without_an_agent_id_uses_the_connection_identity() {
         "the bound identity must be enough to place the update"
     );
 }
+
+/// The Server half of #2804's binding-preservation contract.
+///
+/// Only a `gone` update clears the durable desired Environment Binding. The
+/// Agent watcher must therefore never turn a failed tmux enumeration into
+/// `gone` (its own tests assert that); a normal snapshot update is what a
+/// successful poll sends, and it must leave the user's desired binding intact.
+#[tokio::test]
+async fn a_non_gone_update_keeps_the_desired_environment_binding() {
+    let mut h = test_handler("").await;
+    register_agent_connection(&mut h, "a1").await;
+    bind_for_test(
+        &h,
+        "a1:dev",
+        &[EnvFileRef {
+            name: "base.env".to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+        }],
+    )
+    .await;
+    assert!(
+        h.env_service
+            .bindings
+            .get("a1:dev")
+            .await
+            .unwrap()
+            .is_some(),
+        "the fixture established a desired binding"
+    );
+
+    // What a successful poll sends for a still-live Session.
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({
+            "agent_id": "a1",
+            "session_name": "dev",
+            "status": "detached",
+            "window_count": 1,
+            "attached_clients": 0,
+        }),
+    ))
+    .await
+    .unwrap();
+    assert!(
+        h.env_service
+            .bindings
+            .get("a1:dev")
+            .await
+            .unwrap()
+            .is_some(),
+        "a non-gone update must not clear the desired binding"
+    );
+    assert!(h.session_registry.get("a1:dev").await.is_some());
+
+    // Genuine deletion is the one path that clears it.
+    h.handle_message(proto_msg(
+        "server.agent.session-update",
+        json!({ "agent_id": "a1", "session_name": "dev", "status": "gone" }),
+    ))
+    .await
+    .unwrap();
+    assert!(
+        h.env_service
+            .bindings
+            .get("a1:dev")
+            .await
+            .unwrap()
+            .is_none(),
+        "a genuine gone clears the desired binding"
+    );
+    assert!(h.session_registry.get("a1:dev").await.is_none());
+}

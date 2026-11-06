@@ -106,7 +106,20 @@ impl HeartbeatLoop {
             return Ok(());
         }
 
-        let sessions = self.tmux.list_sessions().await.unwrap_or_default();
+        let sessions = match self.tmux.list_sessions().await {
+            Ok(sessions) => sessions,
+            Err(e) => {
+                // The count is a level, not a sample: publishing zero would
+                // tell the Server this Agent has no Sessions, which is a false
+                // claim about live ones. Skip this beat; the next one reports
+                // the real counts.
+                tracing::warn!(
+                    "Skipping heartbeat — tmux session enumeration failed: {:#}",
+                    e
+                );
+                return Ok(());
+            }
+        };
         let session_count = u32::try_from(sessions.len()).unwrap_or(0);
         let active_sessions =
             u32::try_from(sessions.iter().filter(|s| s.attached_clients > 0).count()).unwrap_or(0);
@@ -210,5 +223,37 @@ mod tests {
         assert!(load[0] >= 0.0);
         assert!(load[1] >= 0.0);
         assert!(load[2] >= 0.0);
+    }
+
+    /// A failed tmux enumeration is not an observed zero-session snapshot.
+    ///
+    /// The Server treats heartbeat counts as this Agent's session level, so
+    /// publishing `0` after a failed query would overwrite a true count with a
+    /// fabricated one. The beat is skipped until the next successful query.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_enumeration_skips_the_heartbeat_instead_of_reporting_zero_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut manager = SessionManager::new();
+        manager.with_tmux_cmd(crate::tmux::cmd::TmuxCmd::new(
+            dir.path().join("tmux").to_string_lossy().into_owned(),
+            dir.path().join("tmux.sock"),
+        ));
+        manager.with_timeouts(
+            crate::test_support::FAKE_TIMEOUT,
+            crate::test_support::FAKE_TIMEOUT,
+            crate::test_support::FAKE_TIMEOUT,
+        );
+        let (handle, mut frames) = ServerClientHandle::test_handle(true);
+        let heartbeat = HeartbeatLoop::new(handle, Arc::new(manager), 10);
+
+        heartbeat
+            .send_heartbeat()
+            .await
+            .expect("an enumeration failure is not a heartbeat failure");
+        assert!(
+            frames.try_next().is_none(),
+            "a failed enumeration must not be published as zero sessions"
+        );
     }
 }
