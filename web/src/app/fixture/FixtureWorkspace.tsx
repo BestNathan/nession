@@ -18,6 +18,7 @@ import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 
 // Module-stable — the stub is immutable and stateless, so a single instance
 // is safe to share across renders (same pattern as fixtureRoute).
@@ -32,6 +33,10 @@ export function FixtureWorkspace() {
   // exactly the canonical screen the golden screenshots capture.
   const search = useLocation().search;
   const facts = fixtureCapabilityFacts(search);
+  // The Session metadata stub (#2789): the Session Workspace view reads the
+  // Agent-owned store through the product plugin, so the fixture answers that
+  // wire. The route's `?sessionMetadata=` selects the state; absent is legacy.
+  useFixtureSessionMetadata(search);
   const capability = openedCapability(search);
   const fileOps = new URLSearchParams(search).get('files') === 'unavailable' ? null : fixtureOps;
   const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
@@ -106,7 +111,10 @@ function openedCapability(search: string): CapabilityId {
   if (requested === 'claude-code') {
     return 'claude-code';
   }
-  return requested === 'env' ? 'env' : 'files';
+  if (requested === 'env') {
+    return 'env';
+  }
+  return requested === 'session' ? 'session' : 'files';
 }
 
 /** Bind the Git stub to the shared singleton. */

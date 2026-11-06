@@ -110,7 +110,17 @@ vi.mock('@/shared/hooks/useWebSocket', () => ({
 // Data sources behind the REAL AttachDialog and the profile resolver: the
 // attach-info request and the env-file list never touch the socket singleton.
 vi.mock('@/product/session', () => ({
-  sessionsApi: { requestAttach: vi.fn() },
+  sessionsApi: {
+    requestAttach: vi.fn(),
+    // Rows read metadata through the same plugin (#2789); these cases never
+    // exercise it, so the stub reports an unreachable answer and each row
+    // keeps its tmux-name fallback.
+    getMetadata: vi.fn(() =>
+      Promise.resolve({ success: false, error_kind: 'unavailable', error: 'unused' }),
+    ),
+    connectionRevision: vi.fn(() => 0),
+    onConnectionChange: vi.fn(() => () => {}),
+  },
 }));
 // Partial mock — see CreateSessionDialog.test.tsx.
 vi.mock('@/capabilities/env', async (importOriginal) => ({

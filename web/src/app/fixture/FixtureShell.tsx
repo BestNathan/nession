@@ -11,6 +11,7 @@ import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { fixtureGitSurface } from './fixtureGit';
+import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import { fixturePaneCommand } from './fixturePaneCommand';
 
 /**
@@ -31,6 +32,11 @@ export function FixtureShell() {
   // router context.
   const queryIndex = window.location.hash.indexOf('?');
   const search = queryIndex >= 0 ? window.location.hash.slice(queryIndex) : '';
+
+  // The Session metadata stub (#2789), installed for the route's lifetime so
+  // the sidebar's Session rows resolve their display titles through the same
+  // product path the shipped app uses. Absent `?sessionMetadata=` is legacy.
+  useFixtureSessionMetadata(search);
 
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the

@@ -347,3 +347,119 @@ fn test_client_session_kill_response_payload() {
     let decoded: ClientSessionKillResponsePayload = serde_json::from_str(&json).unwrap();
     assert!(decoded.success);
 }
+
+// ---------------------------------------------------------------------------
+// Session metadata (#2789)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn absent_metadata_is_revision_zero_and_old_payloads_stay_readable() {
+    // A legacy Session has no file; the wire still answers the contract. A
+    // payload written before the optional fields existed must decode, not
+    // become an error the caller reads as "save failed".
+    let empty: SessionMetadata = serde_json::from_str("{\"revision\":0}").unwrap();
+    assert_eq!(empty.revision, 0);
+    assert!(empty.title.is_none());
+    assert!(empty.description.is_none());
+    assert!(empty.tags.is_empty());
+    assert!(empty.created_at.is_none());
+    assert!(empty.updated_at.is_none());
+    assert_eq!(empty.display_title("agent:work"), "agent:work");
+
+    let update: SessionMetadataUpdatePayload =
+        serde_json::from_str("{\"name\":\"work\",\"expected_revision\":0}").unwrap();
+    assert!(update.title.is_none());
+    assert!(update.description.is_none());
+    assert!(update.tags.is_empty());
+    assert_eq!(update.expected_revision, 0);
+}
+
+#[test]
+fn metadata_round_trips_and_display_title_prefers_a_nonempty_title() {
+    let metadata = SessionMetadata {
+        revision: 3,
+        title: Some("Release triage".to_string()),
+        description: Some("Triage the failing staging run".to_string()),
+        tags: vec!["release".to_string(), "staging".to_string()],
+        created_at: Some(1_700_000_000),
+        updated_at: Some(1_700_000_100),
+    };
+    let json = serde_json::to_string(&metadata).unwrap();
+    let decoded: SessionMetadata = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, metadata);
+    assert_eq!(decoded.display_title("agent:work"), "Release triage");
+
+    let blank = SessionMetadata {
+        title: Some("   ".to_string()),
+        ..metadata
+    };
+    assert_eq!(blank.display_title("agent:work"), "agent:work");
+}
+
+#[test]
+fn metadata_validation_trims_and_counts_unicode_codepoints() {
+    let normalized = validate_session_metadata(
+        Some("  Release triage  "),
+        Some("  Fix the staging run  "),
+        &[" release ".to_string(), "Staging".to_string()],
+    )
+    .unwrap();
+    assert_eq!(normalized.title.as_deref(), Some("Release triage"));
+    assert_eq!(
+        normalized.description.as_deref(),
+        Some("Fix the staging run")
+    );
+    assert_eq!(normalized.tags, vec!["release", "Staging"]);
+
+    // An empty title is absence, not a 0-length title: navigation falls back.
+    let empty = validate_session_metadata(Some("   "), None, &[]).unwrap();
+    assert!(empty.title.is_none());
+    assert!(empty.description.is_none());
+
+    // 120 scalars pass; 121 do not, even when the bytes are four per scalar.
+    let at_limit = "𝄞".repeat(SESSION_METADATA_TITLE_MAX_CHARS);
+    assert!(validate_session_metadata(Some(&at_limit), None, &[]).is_ok());
+    let over = "𝄞".repeat(SESSION_METADATA_TITLE_MAX_CHARS + 1);
+    assert_eq!(
+        validate_session_metadata(Some(&over), None, &[]).unwrap_err(),
+        SessionMetadataValidationError::TitleTooLong {
+            max: SESSION_METADATA_TITLE_MAX_CHARS
+        }
+    );
+    let description = "a".repeat(SESSION_METADATA_DESCRIPTION_MAX_CHARS + 1);
+    assert_eq!(
+        validate_session_metadata(None, Some(&description), &[]).unwrap_err(),
+        SessionMetadataValidationError::DescriptionTooLong {
+            max: SESSION_METADATA_DESCRIPTION_MAX_CHARS
+        }
+    );
+}
+
+#[test]
+fn metadata_validation_rejects_invalid_tags() {
+    assert_eq!(
+        validate_session_metadata(None, None, &["  ".to_string()]).unwrap_err(),
+        SessionMetadataValidationError::EmptyTag { index: 0 }
+    );
+    assert_eq!(
+        validate_session_metadata(None, None, &["ok".to_string(), " OK ".to_string()]).unwrap_err(),
+        SessionMetadataValidationError::DuplicateTag { index: 1 }
+    );
+    let too_long = "x".repeat(SESSION_METADATA_TAG_MAX_CHARS + 1);
+    assert_eq!(
+        validate_session_metadata(None, None, &[too_long]).unwrap_err(),
+        SessionMetadataValidationError::TagTooLong {
+            index: 0,
+            max: SESSION_METADATA_TAG_MAX_CHARS
+        }
+    );
+    let many: Vec<String> = (0..=SESSION_METADATA_TAG_LIMIT)
+        .map(|index| format!("tag-{index}"))
+        .collect();
+    assert_eq!(
+        validate_session_metadata(None, None, &many).unwrap_err(),
+        SessionMetadataValidationError::TooManyTags {
+            max: SESSION_METADATA_TAG_LIMIT
+        }
+    );
+}

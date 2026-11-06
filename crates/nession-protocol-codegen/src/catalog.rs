@@ -1165,6 +1165,92 @@ wires: &["agent.session.kill"],
         },
         Unit {
             owner: "core",
+            id: "server.session.metadata.get",
+            version: 1,
+            wires: &["server.session.metadata.get"],
+            // Typed. `SessionMetadataResponse` is shared with the Agent unit and
+            // the update unit, so the Web reads one shape on every path.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataGetCall",
+                nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload>,
+            )),
+            response: Some((
+                "SessionMetadataGetReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.metadata.update",
+            version: 1,
+            wires: &["server.session.metadata.update"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataUpdateCall",
+                nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload>,
+            )),
+            response: Some((
+                "SessionMetadataUpdateReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.metadata.get",
+            version: 1,
+            wires: &["agent.session.metadata.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataGetCall",
+                nession_protocol::contracts::session::v1::SessionMetadataGetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataGetPayload>,
+            )),
+            response: Some((
+                "SessionMetadataGetReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.metadata.update",
+            version: 1,
+            wires: &["agent.session.metadata.update"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataUpdateCall",
+                nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload>,
+            )),
+            response: Some((
+                "SessionMetadataUpdateReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "server.session.attach",
             version: 1,
 wires: &["server.session.attach"],
