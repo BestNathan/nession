@@ -93,3 +93,113 @@ test('the sessions sidebar is present in the resting shell', async ({ page }) =>
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);
   await expect(page.locator('[data-selected="true"]')).toHaveCount(1);
 });
+
+/**
+ * Claude Code Memory reader (#2742).
+ *
+ * The fixture answers the same `claude-code.memory` snapshot and bounded read
+ * units as the provider, so these cases exercise the production `MemoryView` and
+ * the shared Markdown pipeline, not a mock renderer. `?memory=` selects the
+ * provider input; the screen is the product's.
+ */
+test('Memory renders linked Markdown, frontmatter and in-snapshot navigation', async ({ page }) => {
+  await page.goto('/#/fixture/workspace?capability=claude-code&memory=ready');
+  await page.getByRole('tab', { name: 'Memory' }).click();
+
+  await expect(page.getByTestId('claude-code-memory')).toHaveAttribute('data-state', 'ready');
+  await expect(page.getByTestId('claude-code-memory-source')).toContainText('/work/nession');
+  await expect(page.getByRole('heading', { name: 'Nession project memory' })).toBeVisible();
+
+  // The index is a document: list, links, headings — never a raw <pre>.
+  await expect(
+    page.getByRole('link', { name: 'Architecture constraints' }),
+  ).toBeVisible();
+  await expect(page.getByTestId('claude-code-memory-raw')).toHaveCount(0);
+
+  // A relative Markdown link selects the topic, renders YAML frontmatter as
+  // metadata, and renders the body (table + code) with the shared pipeline.
+  await page.getByRole('link', { name: 'Architecture constraints' }).click();
+  await expect(page.getByTestId('claude-code-memory-content')).toContainText(
+    'Architecture constraints',
+  );
+  await expect(page.locator('table.nession-frontmatter')).toContainText('owner');
+  await expect(page.locator('table.nession-frontmatter')).toContainText('nession');
+  await expect(page.getByRole('heading', { name: 'Session boundary' })).toBeInViewport();
+  await expect(page.getByText('Repository', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('claude-code-memory-content')).toContainText('fn main');
+
+  // Back to the index through the existing list entry.
+  await page.getByRole('button', { name: 'MEMORY.md' }).click();
+  await expect(page.getByRole('heading', { name: 'Nession project memory' })).toBeVisible();
+
+  // TOML frontmatter uses the same metadata treatment.
+  await page.getByRole('link', { name: 'Interaction principles' }).click();
+  await expect(page.locator('table.nession-frontmatter')).toContainText('status');
+  await expect(page.getByRole('heading', { name: 'Interaction principles' })).toBeVisible();
+
+  // Raw/preview is an explicit reading choice, not the default.
+  await page.getByTestId('claude-code-memory-mode-raw').click();
+  await expect(page.getByTestId('claude-code-memory-raw')).toContainText('+++');
+  await page.getByTestId('claude-code-memory-mode-preview').click();
+  await expect(page.getByRole('heading', { name: 'Interaction principles' })).toBeVisible();
+
+  // Missing and escaping links stay in the reader with a truthful notice.
+  await page.getByRole('button', { name: 'MEMORY.md' }).click();
+  await page.getByRole('link', { name: 'Missing topic' }).click();
+  await expect(page.getByTestId('claude-code-memory-link-notice')).toContainText(
+    'not a Markdown file in this Memory snapshot',
+  );
+  await expect(page.getByRole('heading', { name: 'Nession project memory' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Escape attempt' }).click();
+  await expect(page.getByTestId('claude-code-memory-link-notice')).toContainText(
+    'leave the Memory directory',
+  );
+
+  // Safe web links keep the shared external-link policy.
+  const docs = page.getByRole('link', { name: 'Claude docs' });
+  await expect(docs).toHaveAttribute('href', 'https://code.claude.com/docs/en/memory');
+  await expect(docs).toHaveAttribute('target', '_blank');
+  await expect(docs).toHaveAttribute('rel', 'noopener noreferrer');
+});
+
+test('Memory reports incomplete content and never guesses a fragment heading', async ({ page }) => {
+  await page.goto('/#/fixture/workspace?capability=claude-code&memory=partial');
+  await page.getByRole('tab', { name: 'Memory' }).click();
+  await expect(page.getByTestId('claude-code-memory')).toHaveAttribute('data-state', 'ready');
+
+  await page.getByRole('link', { name: 'Recovery record' }).click();
+  await expect(page.getByTestId('claude-code-memory-partial')).toContainText(
+    'not fully loaded',
+  );
+  await expect(page.getByTestId('claude-code-memory-link-notice')).toContainText(
+    'not in the loaded part',
+  );
+  await expect(page.getByRole('heading', { name: 'Retry strategy' })).toHaveCount(0);
+
+  // The deferred fragment survives the continuation and scrolls once the
+  // heading actually renders — no guess, and no second click.
+  await page.getByTestId('claude-code-memory-load-more').click();
+  await expect(page.getByTestId('claude-code-memory-partial')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Retry strategy' })).toBeInViewport();
+  await expect(page.getByTestId('claude-code-memory-link-notice')).toHaveCount(0);
+});
+
+test('Memory keeps readable wrapping and bounded scroll at a phone width', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#/fixture/workspace?capability=claude-code&memory=ready');
+  await page.getByRole('tab', { name: 'Memory' }).click();
+  await expect(page.getByTestId('claude-code-memory')).toHaveAttribute('data-state', 'ready');
+
+  await page.getByRole('link', { name: 'Architecture constraints' }).click();
+  await expect(page.getByRole('heading', { name: 'Session boundary' })).toBeVisible();
+  const content = page.getByTestId('claude-code-memory-content');
+  const overflow = await content.evaluate((element) => getComputedStyle(element).overflowY);
+  expect(['auto', 'scroll']).toContain(overflow);
+
+  // Long code and tables scroll inside the document, never the page.
+  const pageOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(pageOverflow).toBeLessThanOrEqual(1);
+});
