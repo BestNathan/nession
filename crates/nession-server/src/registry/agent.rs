@@ -45,6 +45,16 @@ pub struct AgentInfo {
     /// before this server was upgraded and has not reconnected since. The relay
     /// refuses those too.
     pub protocol_manifest: Option<ProtocolManifest>,
+    /// Monotonic registration generation, assigned by
+    /// [`AgentRegistry::register`].
+    ///
+    /// A probe sweep snapshots this beside the address list and carries it
+    /// back with each result. A probe that completes after the Agent
+    /// re-registered must not write into the successor's fresh status: the
+    /// result would match the same URL but describe a registration that no
+    /// longer exists (#2839). Callers constructing an `AgentInfo` for
+    /// registration may leave this at zero — `register` overwrites it.
+    pub probe_generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +62,18 @@ pub enum AgentStatus {
     Online,
     Offline,
     Degraded,
+}
+
+/// One Agent's probe work, captured with the registration generation it
+/// belongs to.
+///
+/// The generation travels with the URLs so a result cannot be applied to a
+/// registration that replaced the one the sweep observed (#2839).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeTarget {
+    pub agent_id: String,
+    pub generation: u64,
+    pub urls: Vec<String>,
 }
 
 pub struct AgentRegistry {
@@ -107,6 +129,10 @@ impl AgentRegistry {
                         // Restored agents have no manifest until they register
                         // again — see the field's note on why it is not stored.
                         protocol_manifest: None,
+                        // Zero until the first live registration; a restored
+                        // Agent is not a registration a stale probe could
+                        // overwrite.
+                        probe_generation: 0,
                     };
                     agents.insert(row.agent_id, info);
                 }
@@ -118,7 +144,7 @@ impl AgentRegistry {
         }
     }
 
-    pub async fn register(&self, info: AgentInfo) {
+    pub async fn register(&self, mut info: AgentInfo) {
         // Write-through to SQLite so addresses/connect_url survive restarts.
         let metadata_json =
             serde_json::to_string(&info.metadata).unwrap_or_else(|_| "{}".to_string());
@@ -144,6 +170,12 @@ impl AgentRegistry {
         }
 
         let mut agents = self.agents.write().await;
+        // Assigned under the same write lock as the insertion, so the
+        // generation a probe snapshot reads and the addresses it read with it
+        // always belong to the same registration.
+        info.probe_generation = agents
+            .get(&info.agent_id)
+            .map_or(1, |current| current.probe_generation.saturating_add(1));
         agents.insert(info.agent_id.clone(), info);
     }
 
@@ -226,40 +258,51 @@ impl AgentRegistry {
         agents.values().cloned().collect()
     }
 
-    /// Snapshot of every (agent_id, address url) pair the probe task should
-    /// dial. Cloned out so the probe runs without holding the registry lock.
-    pub async fn list_probe_targets(&self) -> Vec<(String, Vec<String>)> {
+    /// Snapshot of the (agent_id, registration generation, address URLs) work
+    /// one sweep should dial. Cloned out so the probe runs without holding the
+    /// registry lock.
+    pub async fn list_probe_targets(&self) -> Vec<ProbeTarget> {
         let agents = self.agents.read().await;
         agents
             .values()
-            .map(|a| {
-                (
-                    a.agent_id.clone(),
-                    a.addresses.iter().map(|p| p.address.url.clone()).collect(),
-                )
+            .map(|a| ProbeTarget {
+                agent_id: a.agent_id.clone(),
+                generation: a.probe_generation,
+                urls: a.addresses.iter().map(|p| p.address.url.clone()).collect(),
             })
             .collect()
     }
 
-    /// Record a probe result for one of an agent's addresses (matched by URL).
-    /// No-op if the agent or address no longer exists (e.g. re-registered).
+    /// Record a probe result for one of an Agent's addresses (matched by URL).
+    ///
+    /// Returns `false` — and writes nothing — when the Agent or the address no
+    /// longer exists, **or** when `generation` is not the one that was current
+    /// when the sweep snapshotted it. The last case is a delayed result from a
+    /// registration a newer one has replaced: the URL may match, but the status
+    /// belongs to an Agent incarnation that is gone (#2839).
     pub async fn update_address_status(
         &self,
         agent_id: &str,
+        generation: u64,
         url: &str,
         status: AddressStatus,
         rtt_ms: Option<u64>,
-    ) {
+    ) -> bool {
         let mut agents = self.agents.write().await;
-        if let Some(agent) = agents.get_mut(agent_id) {
-            for probed in &mut agent.addresses {
-                if probed.address.url == url {
-                    probed.status = status;
-                    probed.rtt_ms = rtt_ms;
-                    break;
-                }
+        let Some(agent) = agents.get_mut(agent_id) else {
+            return false;
+        };
+        if agent.probe_generation != generation {
+            return false;
+        }
+        for probed in &mut agent.addresses {
+            if probed.address.url == url {
+                probed.status = status;
+                probed.rtt_ms = rtt_ms;
+                return true;
             }
         }
+        false
     }
 
     pub async fn check_offline_agents(&self) -> Vec<String> {
@@ -606,6 +649,7 @@ mod tests {
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: None,
+            probe_generation: 0,
         }
     }
 
