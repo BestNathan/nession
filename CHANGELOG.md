@@ -282,3 +282,17 @@
 - Categories: app, files, ownership, protocol, safety, web
 - Reason: Cross-link the new #2838 Git Changes preview article and distinguish its Session/repository-bound read from the Agent-host Files browse-root authority
 - Source: https://github.com/BestNathan/nession/issues/2838
+
+## 2026-11-06T14:33:00Z | create | Web Session-first navigation, full tuck-away and explicit experience mode
+- Path: topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md
+- Topic: web
+- Categories: web, navigation, sidebar, interaction, ownership, responsive
+- Reason: Record #2851's Session-first Web hierarchy, 0px tuck-away with a mounted column, 246/36/14/11.5/7/5 metric ownership, lower Agent disclosure and server-only footer, plus the explicit `experience=web|app` route that makes narrow Web reachable without changing App's default
+- Source: https://github.com/BestNathan/nession/issues/2851
+
+## 2026-11-06T14:33:00Z | update | App mobile spatial navigation and Terminal touch ownership
+- Path: topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md
+- Topic: app
+- Categories: app, interaction, navigation, ownership, terminal, touch
+- Reason: Cross-link the new #2851 Web Session-first navigation article and state that the explicit Web experience route is not the App's narrow spatial shell or its collapse state
+- Source: https://github.com/BestNathan/nession/issues/2851

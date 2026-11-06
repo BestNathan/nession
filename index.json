@@ -15,7 +15,7 @@
           "terminal",
           "touch"
         ],
-        "updated_at": "2026-11-05T18:11:33Z"
+        "updated_at": "2026-11-06T14:33:00Z"
       }
     ],
     "engineering": [
@@ -150,6 +150,21 @@
           "ownership"
         ],
         "updated_at": "2026-11-05T08:36:00Z"
+      },
+      {
+        "title": "Web Session-first navigation, full tuck-away and explicit experience mode",
+        "description": "The Web sidebar leads with flat Session history and explicit creation, reveals Agent context below it, returns its full 246px to the work surface on collapse, and keeps the App's narrow spatial shell independent through an explicit experience route",
+        "path": "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md",
+        "status": "verified",
+        "categories": [
+          "web",
+          "navigation",
+          "sidebar",
+          "interaction",
+          "ownership",
+          "responsive"
+        ],
+        "updated_at": "2026-11-06T14:33:00Z"
       }
     ],
     "workflows": [
@@ -252,7 +267,8 @@
     "interaction": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
-      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
     ],
     "knowledge": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -263,7 +279,8 @@
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
     ],
     "navigation": [
-      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
+      "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
     ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
@@ -272,7 +289,8 @@
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
-      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
@@ -293,6 +311,9 @@
     "research": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
     ],
+    "responsive": [
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
+    ],
     "safety": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
@@ -307,6 +328,9 @@
     ],
     "session": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
+    ],
+    "sidebar": [
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
     ],
     "skills": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -325,7 +349,8 @@
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
-      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
+      "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
+      "topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md"
     ],
     "workflows": [
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"

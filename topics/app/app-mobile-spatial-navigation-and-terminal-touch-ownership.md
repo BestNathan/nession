@@ -5,7 +5,7 @@ topic: app
 categories: ["app","interaction","navigation","ownership","terminal","touch"]
 status: candidate
 created_at: 2026-11-05T03:28:50Z
-updated_at: 2026-11-05T18:11:33Z
+updated_at: 2026-11-06T14:33:00Z
 sources: ["https://github.com/BestNathan/nession/issues/2724","https://github.com/BestNathan/nession/pull/2753","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/docs/design/interaction/app.md","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/gesture.ts","https://github.com/BestNathan/nession/blob/1b12f77884669d2ef795287e51cb5e00186a583c/web/src/app/experiences/app/swipeGesture.ts","https://github.com/BestNathan/nession/blob/3ba12b8de09e7d608501c14797e505082dcc8a13/mobile-swipe-2724/index.html"]
 ---
 
@@ -105,6 +105,7 @@ regression is the App block of `ui-contract-matrix`, run at 375/390/430 and
 - [Web terminal emulator engine and component ownership](../terminal/web-terminal-emulator-engine-and-component-ownership.md) — the xterm engine, mode-owned touch scrolling and the boundary the App band must not steal from.
 - [Terminal tools capsule chord and command ownership](../terminal/terminal-tools-capsule-chord-and-command-ownership.md) — the upper Capsule slot and the Terminal tools that the composer/Peek owners protect from shell swipes.
 - [Session metadata and display identity ownership](../engineering/session-metadata-and-display-identity-ownership.md) — the Workspace Session view edited at App depth; its display title is an alias, and its bounded scrolling and Back belong to the App push path described here.
+- [Web Session-first navigation, full tuck-away and explicit experience mode](../web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md) — the separate Web composition and its explicit `experience=web` route; App narrow navigation is not its collapse state.
 
 ## Limits / when to revisit
 
