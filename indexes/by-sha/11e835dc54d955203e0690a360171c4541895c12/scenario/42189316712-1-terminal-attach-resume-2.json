@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42189316712,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2839-probe-concurrency",
+    "target_sha": "11e835dc54d955203e0690a360171c4541895c12",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42189316712",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "564d4819ad583ac8b2a245006d4f225c9506ae1a9555727910a7fd4bfe327d16"
+  },
+  "record": "runs/2026-11-06/42189316712-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ee6171b61860a644d22d1251fb588f1a2a3cca8f8853c7ea74bd78d6311d962e"
+}
