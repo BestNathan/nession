@@ -57,3 +57,10 @@ body[data-nession-prototype-frame="v1"] .np-device > #app .conversation-capsule,
 body[data-nession-prototype-frame="v1"] .np-device > #app .context-surface{width:min(460px,calc(100cqw - 90px))}
 body[data-nession-prototype-frame="v1"] .np-device > #app .capability-dock{max-width:min(450px,calc(100cqw - 82px))}
 body[data-nession-prototype-frame="v1"] .np-device > #app .sessions-layer{width:min(360px,calc(100cqw - 45px))}
+
+/* Git no longer reserves a 74px fixture toolbar INSIDE the simulated device. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .app-stage{height:calc(100% - 66px);min-height:0}
+@container (max-width:760px){body[data-nession-prototype-frame="v1"] .np-device > #app .app-stage{height:calc(100% - 54px)}}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader{height:clamp(420px,65cqh,830px);min-height:0}
+@container (max-width:900px){body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader{height:clamp(345px,calc(100cqh - 330px),700px)}}
+@container (max-width:480px){body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader{height:clamp(330px,calc(100cqh - 306px),680px)}}
