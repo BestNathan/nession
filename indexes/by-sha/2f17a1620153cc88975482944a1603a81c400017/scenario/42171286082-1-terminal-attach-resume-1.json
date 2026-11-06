@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42171286082,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2791-pierre-diffs",
+    "target_sha": "2f17a1620153cc88975482944a1603a81c400017",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42171286082",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "dc6d319f412f6e04a40e69ff4230d92411fed0ffe6304870611819867496f7e6"
+  },
+  "record": "runs/2026-11-06/42171286082-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "579fd3b92c726d093be516342a7f1c4a3a962c54c56d7665c1b3ec1602bd03fb"
+}
