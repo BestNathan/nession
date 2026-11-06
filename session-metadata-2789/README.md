@@ -43,3 +43,10 @@ node session-metadata-2789/smoke-test.mjs
 ```
 
 This uses only built-in Node APIs, exercises the HTML entry, shared-frame relative assets, Session title fallback, editing, tag validation, unsaved confirmation, offline/conflict/recreated states and App size switch. It does not run a browser, which still requires separate Chromium verification.
+
+
+## Web 1:1 review frame regression — 2026-11-06
+
+The Web 1180px preview could lose its left side when the centered device exceeded the review stage's padded content width. In addition, the App 390px selector updated only the outside device because the shared `np:resize` event did not bubble to this prototype's page-level listener. Both were **shared frame bugs**, not Session Metadata domain changes. Fixed in `prototype-frame-2758/frame.css` and `frame.js`: overflow-safe centering, wider reviewer frame, outline outside exact content width, event bubbling. The product still derives Web/App from the target width and preserves Session semantics. A local Chromium CSS-geometry reproduction covered browser widths 1440, 1280 and 960; an exact live deployment and interactive Chromium click-through are still separate checks.
+
+Regression: `node --test prototype-frame-2758/frame-geometry.test.mjs` plus existing `node session-metadata-2789/smoke-test.mjs` (the latter uses a DOM stub, not a browser). Recheck the published `prototypes/manifest.json` SHA before describing the Pages URL as refreshed.
