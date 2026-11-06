@@ -45,3 +45,12 @@
 - **Updated smoke:** `node --test work-contract-2541/smoke.test.mjs` should check Workspace Work list → Contract, Files/Git switching, depth/back, no binding, published revisions, Thread, and source errors. Record the actual execution environment and count separately.
 - **Actual Chromium desktop/mobile comparison and Pages HTTPS/manifest SHA:** remain unverified until checked. GitHub `prototype` branch source publication is not a Pages deployment receipt; check `https://bestnathan.github.io/nession/prototypes/manifest.json`.
 - **Source:** `work-contract-2541/index.html`, `styles.css`, `app.js` and tests in the shared `prototype` branch. Do not claim pixel-perfect matching of React WorkspaceShell or CapabilityCapsule based on this HTML mock.
+
+## 2026-11-06 · Product shell information-architecture correction
+
+The original prototype already treated **Work as a Workspace capability**, but that *domain-level assertion* was insufficient for correct **product navigation structure**. Current main `bb48ea565be2` owners `WebLayout`, `Sidebar`, `WorkspacePanel`, `AppPageHeader`, `WorkspaceShell` and `CapabilityCapsule` now determine the example shell.
+
+- **Web full product:** Agents/flat Sessions sidebar with collapse/rail is the WebLayout sibling of ShellMain; Work is presented **inside** WorkspaceShell as a candidate capability, not as a new Nession product route or global tab. The Web Work list may offer a local Contract detail Back.
+- **App:** no desktop sidebar. Exactly **one AppPageHeader Back/title** belongs to WorkspacePanel and responds to Work list vs pushed Contract detail. A second Work-owned Back has been removed from App content. Workspace Capsule continues to own available capability switches throughout.
+- **Candidate distinction:** Work/WorkContract provider registration is not shipped in production, other capability stub content is not a replacement for current Files/Git, Contract versioning and source adoption remain in-memory mock decisions.
+- **Validation:** the actual updated `smoke.test.mjs` passed **10/10 tests** under a V8 DOM-stub harness (full semantic owner check plus Work/Thread/Source/Revision scenarios). This is not a Node/Playwright/real API verification; Chromium screenshot parity with current production fixture remains unverified.
