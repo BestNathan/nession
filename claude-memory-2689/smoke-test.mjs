@@ -37,6 +37,7 @@ assert.match(html, /data-testid="app-page-header"/);
 assert.match(htmlIA, /@container \(max-width:430px\)/);
 assert.match(htmlIA, /\.ia-app-page-header/);
 assert.match(htmlIA, /\.ia-web-session/);
+assert.match(htmlIA,/\.memory-layout\.show-detail \.memory-list/);
 
 const nodes = {};
 for (const id of requiredIds) {
@@ -98,13 +99,11 @@ check(()=>{
   assert.equal(nodes['workspace-page-back'].attrs['aria-label'],'Back to Terminal');
   api.openFile('architecture.md');
   flush();
-  assert.equal(nodes['workspace-page-title'].textContent,'architecture.md');
-  assert.equal(nodes['workspace-page-back'].attrs['aria-label'],'Back to Memory list');
+  assert.equal(nodes['workspace-page-title'].textContent,'Claude Code','file choice stays within Claude Code');
+  assert.equal(nodes['workspace-page-back'].attrs['aria-label'],'Back to Terminal');
+  assert.match(nodes['workspace-inner'].innerHTML,/class="reader-index"/,'Memory owns index navigation');
   nodes['workspace-page-back'].handlers.click();
-  assert.equal(state().page,'workspace');
-  assert.equal(state().detail,false);
-  nodes['workspace-page-back'].handlers.click();
-  assert.equal(state().page,'terminal');
+  assert.equal(state().page,'terminal','Shell Back leaves Workspace directly');
 });
 
 check(()=>{
