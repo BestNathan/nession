@@ -118,7 +118,8 @@ jobs:
             tee "$RUNNER_TEMP/agent-controller-dispatch-receipt.json"
           jq -e '.issue > 0 and (.status == "dispatched" or
             .status == "ambiguous" or .status == "reconcile" or
-            .status == "bound" or .status == "replayed")' \
+            .status == "bound" or .status == "recovered" or
+            .status == "replayed")' \
             "$RUNNER_TEMP/agent-controller-dispatch-receipt.json" >/dev/null
           {
             echo "## Authenticated Developer dispatch"
