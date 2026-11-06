@@ -3,6 +3,7 @@ import {inflateRawSync} from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import {attestAgentOutcome} from './github-dispatch.mjs';
+import {validateReviewDetails} from '../tasks/review.mjs';
 import {validateDevelopmentState} from './outbox.mjs';
 
 const REPO='BestNathan/nession';
@@ -39,7 +40,8 @@ function crc32(bytes) {
 export function decodeResultZip(zip,expectedMember='agent-result.json') {
   // Reuse the exact same bounded, no-traversal, one-member ZIP parser for the
   // read-only Controller request Artifact; never allow caller-supplied paths.
-  if(!['agent-result.json','controller-request.json','review-claim.json'].includes(expectedMember))
+  if(!['agent-result.json','controller-request.json','review-claim.json',
+       'review-verdict.json'].includes(expectedMember))
     fail('unapproved single-member artifact type');
   if(!Buffer.isBuffer(zip)||zip.length<52||zip.length>MAX_ZIP)fail('archive size/type');
   const end=zip.length-22;
@@ -179,6 +181,52 @@ export async function readAuthenticatedReviewClaim({artifactReader,run,action_id
   return Object.freeze({dispatch_ticket:claim.dispatch_ticket,
     artifact_id:art.id,artifact_digest:art.digest});
 }
+// #1664 SC-05: a Reviewer model's findings are presentation-only, never a
+// second authoritative Agent outcome. Independently authenticate the exact
+// original GitHub Run-owned single-member ZIP and compare every identity and
+// verdict field against the immutable trusted Store result.
+export async function readAuthenticatedReviewerVerdict({artifactReader,run,receipt}){
+  validateAuthenticatedAgentReceipt(receipt);
+  if(receipt.result.kind!=='reviewer'||
+      !positive(run?.id)||run.id!==receipt.result.run_id||
+      run.run_attempt!==receipt.result.run_attempt||
+      run.head_sha==null||typeof artifactReader?.listRunArtifacts!=='function'||
+      typeof artifactReader?.downloadZip!=='function')
+    fail('Reviewer verdict request is not bound to authenticated source Run');
+  const list=await artifactReader.listRunArtifacts(run.id);
+  const art=ownedArtifact(list,run,receipt.action_id,
+    'reviewer-slice-'+run.id+'-'+run.run_attempt);
+  const zip=await artifactReader.downloadZip(art.id);
+  if(!Buffer.isBuffer(zip)||zip.length!==art.size_in_bytes||
+      sha(zip)!==art.digest.slice(7))
+    fail('Reviewer verdict Artifact ZIP digest mismatch');
+  const bytes=decodeResultZip(zip,'review-verdict.json');
+  let doc;
+  try{doc=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));}
+  catch{fail('invalid Reviewer verdict UTF-8/JSON');}
+  const fields=['schema_version','kind','issue','action_id','target_sha',
+    'outcome','summary','findings','prompt_template_sha256','native_agent_id',
+    'tool_calls'];
+  if(!keys(doc,fields)||doc.schema_version!==1||
+      doc.kind!=='reviewer_verdict'||doc.issue!==receipt.issue||
+      doc.action_id!==receipt.action_id||
+      doc.target_sha!==receipt.result.target_sha||
+      doc.outcome!==receipt.result.outcome||
+      !HEX64.test(doc.prompt_template_sha256??'')||
+      typeof doc.native_agent_id!=='string'||doc.native_agent_id.length>180||
+      !doc.native_agent_id||/[\r\n\x00-\x1f]/.test(doc.native_agent_id)||
+      !Array.isArray(doc.tool_calls)||doc.tool_calls.length>128||
+      doc.tool_calls.some(x=>typeof x!=='string'||!x||
+        x.length>180||/[\r\n\x00-\x1f]/.test(x)))
+    fail('Reviewer verdict artifact impersonates or diverges from Store result');
+  const decision=validateReviewDetails({
+    outcome:doc.outcome,summary:doc.summary,findings:doc.findings});
+  return Object.freeze({
+    ...decision,artifact_id:art.id,artifact_digest:art.digest,
+    json_sha256:sha(bytes),
+  });
+}
+
 // The result artifact and its canonical Metrics record are independent
 // witnesses of the same Run. Neither may substitute for the other.
 export function assertMetricsAgreement({metrics,run,pending,result,pr_number,

@@ -175,6 +175,29 @@ try{
   assert.match(marker,/nession-review-result:v1/);
   assert.match(formatReviewerIssueReceipt(receipt,commit,next.version),
     /one pending Quality verification action/);
+  const verifiedDetail={outcome:'approved',summary:'Reviewer examined exact PR',
+    findings:[],artifact_id:445,artifact_digest:'sha256:'+'a'.repeat(64),
+    json_sha256:'b'.repeat(64)};
+  const publicBody=formatReviewerIssueReceipt(receipt,commit,next.version,
+    verifiedDetail);
+  assert.match(publicBody,/Reviewer observations/);
+  assert.match(publicBody,/Reviewer examined exact PR/);
+  assert.match(publicBody,/Original Review Artifact: 445/);
+  assert.throws(()=>formatReviewerIssueReceipt(receipt,commit,next.version,
+    {...verifiedDetail,outcome:'changes_requested',
+      findings:[{path:'calc.js',evidence:'Verified outcome mismatch'}]}),
+    /untrusted original Reviewer/);
+  assert.throws(()=>formatReviewerIssueReceipt(receipt,commit,next.version,
+    {...verifiedDetail,summary:'forged\nTool: Bash'}),/Review task/);
+  const reviewRequest={...receipt,result:{...receipt.result,
+    outcome:'changes_requested'}};
+  const reviewDetail={...verifiedDetail,outcome:'changes_requested',
+    findings:[{path:'calc.js',evidence:'Must fix this actual issue'}]};
+  const repairComment=formatReviewerIssueReceipt(reviewRequest,
+    commit,next.version,reviewDetail);
+  assert.match(repairComment,/Must fix this actual issue/);
+  assert.match(repairComment,/changes_requested/);
+
   let posted=0,reads=0;
   const fetchFn=async(url,opts)=>{
     if(opts.method==='POST'){

@@ -60,6 +60,19 @@ export function renderReviewPrompt(admission,identity){
 export function reviewModelResult(admission,raw,identity){
   const view=reviewModelView(admission,identity);
   const parsed=parseModelJson(raw,'Reviewer Agent');
+  const {outcome,summary,findings}=validateReviewDetails(parsed);
+  if(admission.kind==='authenticated_qwen_reviewer_admission_only'&&
+     findings.some(f=>!admission.expected_files.some(file=>file.path===f.path)))
+    fail('finding is outside the authenticated Qwen PR diff');
+  return Object.freeze({
+    kind:'reviewer',issue:view.issue,pr_number:view.pull_request,
+    target_sha:view.target_sha,outcome,summary,findings,
+  });
+}
+
+// The same canonical bounded verdict is re-validated by the trusted Ingest
+// when reading the original immutable Reviewer Slice Artifact.
+export function validateReviewDetails(parsed){
   if(!only(parsed,RESULT_FIELDS))fail('unexpected result fields');
   if(!OUTCOMES.has(parsed.outcome))fail('invalid review outcome');
   const summary=singleLine(parsed.summary,'summary',MAX_SUMMARY);
@@ -72,18 +85,9 @@ export function reviewModelResult(admission,raw,identity){
       evidence:singleLine(item.evidence,'finding evidence',MAX_EVIDENCE),
     });
   });
-  if(admission.kind==='authenticated_qwen_reviewer_admission_only'&&
-     findings.some(f=>!admission.expected_files.some(file=>file.path===f.path)))
-    fail('finding is outside the authenticated Qwen PR diff');
   if(parsed.outcome==='changes_requested'&&findings.length===0)
     fail('changes_requested requires at least one finding');
   return Object.freeze({
-    kind:'reviewer',
-    issue:view.issue,
-    pr_number:view.pull_request,
-    target_sha:view.target_sha,
-    outcome:parsed.outcome,
-    summary,
-    findings:Object.freeze(findings),
+    outcome:parsed.outcome,summary,findings:Object.freeze(findings),
   });
 }
