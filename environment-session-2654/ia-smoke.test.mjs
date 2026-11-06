@@ -116,6 +116,10 @@ test('session/profile/binding and Terminal→Workspace/App depth preserve flow',
   click('', {open:'session'});
   assert.ok(ids.workspace.classList.contains('detail'));
   assert.equal(ids.back.attributes['aria-label'], 'Back to Environment');
+  listeners.keydown({key:'Escape'});
+  assert.ok(!ids.workspace.classList.contains('detail'),'Escape leaves the pushed profile depth');
+  assert.equal(ids['ia-depth-title'].textContent,'Environment','Shell title follows Escape');
+  click('', {open:'session'});
   click('back');
   assert.ok(!ids.workspace.classList.contains('detail'));
   click('back');
@@ -124,4 +128,8 @@ test('session/profile/binding and Terminal→Workspace/App depth preserve flow',
   assert.match(ids.content.innerHTML, /Agent is unreachable/);
   listeners['page-np:resize']({detail:{width:1180}});
   assert.equal(root.dataset.experience, 'web');
+  click('',{ia:'collapse'});
+  click('reset');
+  assert.equal(root.dataset.surface,'workspace');
+  assert.ok(!selectors['.ia-session-sidebar'].classList.contains('collapsed'),'Reset restores Web navigation width');
 });
