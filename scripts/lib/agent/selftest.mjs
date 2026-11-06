@@ -53,7 +53,8 @@ assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', varian
 assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1',
   context: {scopeInstructions:'scope',riskInstructions:'risk',mode:'single',
     issueUrl:'https://example.test/17',repository:'example/repo',
-    issueNumber:17,labels:'web',findings:'none',issueBodyJson:'""'} }),
+    issueNumber:17,labels:'web',kindLabels:'bug, requirement',areaLabels:'ci',
+    findings:'none',issueBodyJson:'""'} }),
   /Missing required Prompt variant/);
 
 const acceptance = renderAcceptancePrompt({
