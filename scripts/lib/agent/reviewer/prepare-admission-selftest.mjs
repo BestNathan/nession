@@ -91,3 +91,6 @@ try{
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }
+
+// Keep the canonical reviewer Gate authoritative for the Qwen source tests.
+await import('./qwen-pr-admission-selftest.mjs');
