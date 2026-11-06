@@ -205,6 +205,12 @@ try {
     ...preE2eIssue,body:preE2eIssue.body+'\n\n'+malformedE2e,
   }));
   const malformedSnapshot=readFileSync(filename,'utf8');
+  const previousComment=readFileSync(filename+'.comment','utf8');
+  await assert.rejects(applyIssueAuditProposal(issue,{
+    result:JSON.stringify({comment:'invalid source must not be annotated as audited'}),
+  },'example/repo'),/left the invalid Issue Contract unrepaired/);
+  assert.equal(readFileSync(filename,'utf8'),malformedSnapshot);
+  assert.equal(readFileSync(filename+'.comment','utf8'),previousComment);
   await assert.rejects(applyIssueAuditProposal(issue,{
     result:JSON.stringify({body:preE2eIssue.body+'\n\n'+badPending}),
   },'example/repo'),/Unauthorized E2E/);
