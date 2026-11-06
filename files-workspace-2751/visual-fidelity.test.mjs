@@ -59,6 +59,13 @@ test('WebLayout + WorkspaceShell + AppPageHeader own navigation through every de
   click('close-form');
   click('open-terminal');
   assert.match(app.innerHTML,/data-testid="terminal-surface"/);
+  assert.match(app.innerHTML,/class="ia-terminal-conversation"/);
+  assert.match(app.innerHTML,/aria-label="Open Workspace"/);
+  click('toggle-terminal-context');
+  assert.match(app.innerHTML,/aria-label="Open Files capability"/);
+  click('open-files');
+  assert.match(app.innerHTML,/data-testid="workspace-shell"/);
+  click('open-terminal');
   click('open-workspace');
   assert.match(app.innerHTML,/data-testid="workspace-shell"/);
   page.handlers['np:resize']({detail:{width:390}});
