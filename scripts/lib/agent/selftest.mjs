@@ -12,7 +12,7 @@ import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.m
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { createIssueReadTool } from './tools/gh/issue/read.mjs';
 import { normalizeCursorUsage, normalizeCursorCost, selectCursorModel, runCursorSession } from './providers/cursor.mjs';
-import { normalizeClaudeUsage, parseClaudeJson } from './providers/claude-code.mjs';
+import { normalizeClaudeUsage, parseClaudeJson, buildClaudeCliArgs } from './providers/claude-code.mjs';
 
 const issue = {
   number: 17,
