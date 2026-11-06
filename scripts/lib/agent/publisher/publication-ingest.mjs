@@ -12,8 +12,11 @@ import { CONTROLLED_ORIGINAL_PUBLICATION as P,
 import { CONTROLLED_PUBLISHER_INTENT_PATH, validateQwenPublisherIntent,
   qwenPublisherIntentPath } from './store-intent.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState } from '../orchestration/state-store.mjs';
-import { acceptPublisherPublication, acceptAttestedQwenPublication }
+import { acceptPublisherPublication, acceptAttestedQwenPublication,
+  acceptAttestedQwenRepairPublication }
   from '../orchestration/outbox.mjs';
+import { validateQwenRepairPublisherIntent, qwenRepairPublisherIntentPath }
+  from './qwen-repair-intent.mjs';
 import { githubFetcher } from '../github-read.mjs';
 import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
 import { publish } from '../../../run-store-cas-push.mjs';
@@ -313,6 +316,107 @@ export function applyQwenPublicationToRemote({remote,readback,intent,registry,
     git(work,['-c','user.name=nession-agent-controller',
       '-c','user.email=nession-agent-controller@users.noreply.github.com',
       'commit','-m','agent-store: Qwen Publisher Review handoff Issue '+
+        applied.issue]);
+    if(onCandidate!==null){
+      if(process.env.NODE_ENV!=='test')fail('test injection outside fixture');
+      onCandidate();
+    }
+    const committed=publishStore(STORE_REF,work,4);
+    return {...applied,replayed:committed.replayed,
+      commit_sha:committed.commit_sha};
+  }finally{fs.rmSync(temp,{recursive:true,force:true});}
+}
+
+
+// A Repair is a verified non-force HEAD update of the ORIGINAL Qwen PR, not
+// another PR or a model-selected SHA. Recheck immutable Store Intent before
+// projecting the canonical same-Reviewer transition at SHA B.
+export function applyQwenRepairPublisherReviewHandoff({
+  storeRoot,readback,intent,registry,
+}){
+  const record=validateQwenRepairPublisherIntent(intent?.record);
+  if(readback?.schema_version!==1||
+      readback.kind!=='authenticated_qwen_repair_pr_receipt'||
+      readback.status!=='same_pr_nonforce_update_readback_verified'||
+      readback.issue!==record.issue||
+      readback.action_id!==record.action_id||
+      readback.worker_run_id!==record.worker_run_id||
+      readback.worker_sha!==record.worker_sha||
+      readback.publisher_run_id!==record.publisher_run_id||
+      readback.intent_store_sha!==intent.store_commit_sha||
+      readback.original_publisher_run_id!==record.original_publisher_run_id||
+      readback.original_main_sha!==record.original_main_sha||
+      readback.previous_sha!==record.source_sha||
+      readback.branch!==record.branch||
+      readback.patch_sha256!==record.patch_sha256||
+      readback.checkpoint_commit_sha!==record.checkpoint_commit_sha||
+      !Number.isSafeInteger(readback.pull_request)||
+      readback.pull_request<1||!SHA.test(readback.head_sha??'')||
+      readback.head_sha===record.source_sha||
+      !SHA.test(readback.expected_tree_sha??'')||
+      !Array.isArray(readback.files)||
+      readback.files.length!==record.file_count)
+    fail('Repair Store handoff needs exact independently read PR-B receipt');
+  const loc=qwenRepairPublisherIntentPath(record);
+  const full=path.join(storeRoot,loc);
+  const stat=fs.lstatSync(full,{throwIfNoEntry:false});
+  if(!stat?.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>8192)
+    fail('Repair Store Intent is not a committed canonical file');
+  let saved;
+  try{saved=JSON.parse(fs.readFileSync(full,'utf8'));}
+  catch{fail('invalid immutable Repair Intent');}
+  if(JSON.stringify(saved)!==JSON.stringify(record)||
+      !SHA.test(intent.store_commit_sha??''))
+    fail('Repair Store Intent changed after original write-ahead');
+  git(storeRoot,['merge-base','--is-ancestor',intent.store_commit_sha,'HEAD']);
+  if(git(storeRoot,['log','-1','--format=%H','HEAD','--',loc])!==
+      intent.store_commit_sha)
+    fail('Repair Intent is not the exact committed Store author');
+  const current=readIssueWorkflowState(storeRoot,record.issue);
+  if(!current.state)fail('Repair source Issue State is absent');
+  const event={kind:'publisher',issue:record.issue,outcome:'published',
+    run_id:record.publisher_run_id,run_attempt:1,
+    target_sha:readback.head_sha};
+  const trusted={role:'publisher',workflow_run_id:record.publisher_run_id,
+    attempt:1,issue:record.issue,source_sha:readback.head_sha,
+    developer_action_id:record.action_id,
+    developer_run_id:record.worker_run_id,developer_attempt:1,
+    developer_source_sha:record.source_sha,
+    checkpoint_commit_sha:record.checkpoint_commit_sha,
+    original_publisher_run_id:record.original_publisher_run_id,
+    pr_number:readback.pull_request,pr_previous_sha:record.source_sha};
+  const next=acceptAttestedQwenRepairPublication(
+    current.state,current.version,event,trusted,registry);
+  if(next===current.state)return {changed:false,issue:record.issue,
+    version:current.version,target_sha:current.state.target_sha};
+  const written=writeIssueWorkflowState(storeRoot,next,current.version);
+  const reviewer=next.outbox.filter(x=>x.status==='pending'&&
+    x.task?.type==='dispatch'&&x.task?.role==='reviewer');
+  if(reviewer.length!==1||reviewer[0].task.agent_id!=='review-qwen-01'||
+      reviewer[0].task.sha!==readback.head_sha)
+    fail('Repair publication did not yield one signed same-Reviewer Action');
+  return {changed:written.changed,issue:record.issue,version:written.version,
+    target_sha:next.target_sha,reviewer_action_id:reviewer[0].id,
+    reviewer_agent_id:reviewer[0].task.agent_id};
+}
+export function applyQwenRepairPublicationToRemote({
+  remote,readback,intent,registry,publishStore=publish,onCandidate=null,
+}){
+  if(typeof remote!=='string'||!remote||
+      (process.env.NODE_ENV!=='test'&&
+       !remote.startsWith('https://x-access-token:')))
+    fail('Qwen Repair requires separately scoped trusted Store writer');
+  const {temp,work}=openStoreRemote(remote);
+  try{
+    const applied=applyQwenRepairPublisherReviewHandoff({
+      storeRoot:work,readback,intent,registry});
+    if(!applied.changed)return {...applied,replayed:true,commit_sha:null};
+    git(work,['add','-A']);
+    if(auditStagedRunStore(work,STORE_REF).checked_changes!==2)
+      fail('Repair Publisher may CAS only one Issue state and head');
+    git(work,['-c','user.name=nession-agent-controller',
+      '-c','user.email=nession-agent-controller@users.noreply.github.com',
+      'commit','-m','agent-store: Qwen Repair same PR reviewer Issue '+
         applied.issue]);
     if(onCandidate!==null){
       if(process.env.NODE_ENV!=='test')fail('test injection outside fixture');
