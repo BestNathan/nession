@@ -198,8 +198,13 @@ impl WebSocketServer {
             });
         }
 
-        // Background sweep: periodically clean up orphaned sessions whose
-        // agent has been unreachable for more than 24 hours.
+        // Background sweep: periodically clean up recovering Sessions whose
+        // Agent has not restored them within the retention window.
+        //
+        // Selection and deletion are deliberately separate: the selection is
+        // only a candidate list, and the reclamation re-checks that same
+        // stale-recovering predicate at the destructive boundary while holding
+        // the Session's lifecycle guard (#2848).
         {
             let session_registry = Arc::clone(&self.session_registry);
             let env_service = Arc::clone(&self.env_service);
@@ -211,24 +216,29 @@ impl WebSocketServer {
                 ticker.tick().await; // consume the immediate first tick
                 loop {
                     ticker.tick().await;
-                    // 24 hours in seconds
-                    let cutoff = 24 * 3600i64;
-                    match db.list_sessions_older_than(cutoff).await {
-                        Ok(rows) => {
+                    match super::orphan_sweep::select_stale_recovering(
+                        &db,
+                        super::orphan_sweep::RECOVERING_RETENTION,
+                    )
+                    .await
+                    {
+                        Ok((cutoff, rows)) => {
                             if rows.is_empty() {
                                 continue;
                             }
-                            for row in &rows {
-                                info!(
-                                    "Cleaning orphaned session {} (agent: {}, last activity: {})",
-                                    row.session_id, row.agent_id, row.last_activity
-                                );
-                                session_registry.remove(&row.session_id).await;
-                                // The Session is gone; its desired binding and
-                                // observed cache are no longer a live claim.
-                                env_service.clear_session_state(&row.session_id).await;
-                            }
-                            tracing::info!("Cleaned {} orphaned sessions", rows.len());
+                            let outcome = super::orphan_sweep::reclaim_selected(
+                                &rows,
+                                cutoff,
+                                &session_registry,
+                                &env_service,
+                            )
+                            .await;
+                            info!(
+                                selected = outcome.selected,
+                                reclaimed = outcome.reclaimed,
+                                skipped = outcome.skipped,
+                                "recovering Session sweep complete"
+                            );
                         }
                         Err(e) => {
                             error!("Orphan session sweep failed: {:#}", e);
