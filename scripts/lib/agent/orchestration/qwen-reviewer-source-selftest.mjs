@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {startDevelopment,validateDevelopmentState,
+import {startDevelopment,validateDevelopmentState,recordDispatch,
   acceptAttestedQwenPublication} from './outbox.mjs';
 import {writeIssueWorkflowState} from './state-store.mjs';
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
@@ -57,6 +57,22 @@ try{
   assert.equal(verified.branch,'refs/heads/'+intent.branch);
   assert.equal(verified.base_sha,A);
   assert.equal(verified.review_sha,B);
+  const qwenPr={number:541,head:{ref:intent.branch,sha:B}};
+  const {reviewerPublishedPrBinding}=await import('./github-dispatch.mjs');
+  assert.equal(reviewerPublishedPrBinding(reviewed,qwenPr),true);
+  for(const wrong of [
+    {...qwenPr,head:{...qwenPr.head,ref:'agent/'+ISSUE+'/qwen-'+
+       '0'.repeat(16)}},
+    {...qwenPr,head:{...qwenPr.head,ref:'agent/3002/qwen-'+
+       developerAction.id.slice(0,16)}},
+    {...qwenPr,head:{...qwenPr.head,sha:A}},
+  ])assert.equal(reviewerPublishedPrBinding(reviewed,wrong),
+    wrong.head.sha!==B?false:
+    wrong.head.ref.startsWith('agent/'+ISSUE+'/qwen-'));
+  const reviewDispatched=recordDispatch(reviewed,reviewed.version,action.id,
+    {status:'verified',dispatch_id:action.id,source_run_id:601});
+  writeIssueWorkflowState(root,reviewDispatched,reviewed.version);
+  assert.equal(qwenReviewerPublishedSource(source).branch,verified.branch);
   const args=[];
   const run=parts=>{
     args.push(parts);
