@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42252033932,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2867-terminal-output-ack-coalescing",
+    "target_sha": "9a28bed5923926668d8aac1d79756a0dd2507f87",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42252033932",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0d1999f551ba2c697d15d14339c824ca8a02726ca1d5833c68a33293c8f70eb6"
+  },
+  "record": "runs/2026-11-06/42252033932-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ae71fa2ca0ea032cd39864b73b66dcdeeef97a315a51671709f63b2c2e28ba14"
+}
