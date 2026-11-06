@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a14d51eb22e190e92b22763bc112f7e47f0484190966263e1093335dae82b7e8",
+  "run_id": 42259549325,
+  "run_attempt": 1,
+  "issue": 2864,
+  "criterion": "SC-01",
+  "criterion_text": "With two directory loads deliberately resolved newest-first, only the newest snapshot is visible after both complete; a stale success or failure cannot revert the tree, load state, selection or active node.",
+  "stage": "staging",
+  "target_sha": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+  "contract_sha256": "36bc678dd433bcdc18cd4225efacb758f8d05c1fd4a09e3196ca081e7e03139b",
+  "case_revision": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+  "case_tree_sha": "209a720ccf783f9903aca2de78fed383d087b4b8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-06T17:14:58.523Z",
+  "finished_at": "2026-11-06T17:14:59.280Z",
+  "duration_ms": 757,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Only the newest directory snapshot commits; stale success and failure are inert",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA b52d57cce4a740cc1c96367d50333894c8d688a5: ExplorerStore.test.ts \"commits only the newest load when responses resolve newest-first (#2864)\" passed; the older response is inert after a newer snapshot commits, and a stale failure or success cannot change children, load state, selection or the active node"
+        }
+      ],
+      "duration_ms": 733,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42259549325,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42259549325",
+    "record_path": "runs/2026-11-06/42259549325-1/2864/SC-01.json",
+    "source_result_sha256": "8031dcbbde078fb5306af9e98da7077d785e5dd3fdb25eefff8bf5f1009e748a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42259549325-1",
+    "sha256": "8031dcbbde078fb5306af9e98da7077d785e5dd3fdb25eefff8bf5f1009e748a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42259549325",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cd461f5787fb948c4d972b3f2fe8600bb235bfba06d0188d552c4fc16f6db9cc",
+  "run_id": 42259549325,
+  "run_attempt": 1,
+  "issue": 2864,
+  "criterion": "SC-02",
+  "criterion_text": "A create/delete/rename event committed while a directory load is pending is not undone by an older response; a subsequent explicit fresh refresh still converges to the provider's authoritative contents.",
+  "stage": "staging",
+  "target_sha": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+  "contract_sha256": "36bc678dd433bcdc18cd4225efacb758f8d05c1fd4a09e3196ca081e7e03139b",
+  "case_revision": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+  "case_tree_sha": "22e8eb092cc63649983d86f5d22222104848cb0a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-06T17:14:59.280Z",
+  "finished_at": "2026-11-06T17:15:00.186Z",
+  "duration_ms": 906,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Events committed during a pending load survive the older response and a fresh refresh converges",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA b52d57cce4a740cc1c96367d50333894c8d688a5: ExplorerStore.test.ts create/delete/rename replay tests passed while a directory load was pending; an older response cannot undo the event, and an explicit fresh refresh converges to the provider snapshot"
+        }
+      ],
+      "duration_ms": 892,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42259549325,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b52d57cce4a740cc1c96367d50333894c8d688a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42259549325",
+    "record_path": "runs/2026-11-06/42259549325-1/2864/SC-02.json",
+    "source_result_sha256": "4713215cfca6544aada65ce10ad46f5d179895b7f58461f29335dc01fa289c0f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42259549325-1",
+    "sha256": "4713215cfca6544aada65ce10ad46f5d179895b7f58461f29335dc01fa289c0f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42259549325",
+    "durability": "time-limited; object archival not configured"
+  }
+}
