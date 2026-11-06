@@ -425,11 +425,11 @@ try {
   const storedBound=readIssueWorkflowState(post,issue);
   assert.equal(storedBound.version,boundRepair.version);
   const boundAction=storedBound.state.outbox.find(x=>x.id===originalRepair.id);
-  const repairSource=qwenRepairPublishedSource({
+  const repairPublishedSource=qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:originalRepair.id,sha:commitSha});
-  assert.equal(repairSource.review_sha,commitSha);
-  assert.equal(repairSource.base_sha,inputSha);
-  assert.equal(repairSource.branch,'refs/heads/'+branch);
+  assert.equal(repairPublishedSource.review_sha,commitSha);
+  assert.equal(repairPublishedSource.base_sha,inputSha);
+  assert.equal(repairPublishedSource.branch,'refs/heads/'+branch);
   assert.throws(()=>qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:originalRepair.id,sha:'f'.repeat(40)}),
     /trusted Qwen Repair origin/);
