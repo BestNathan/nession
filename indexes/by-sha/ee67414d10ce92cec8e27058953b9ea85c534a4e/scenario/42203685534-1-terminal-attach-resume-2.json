@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42203685534,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2848-stale-session-sweep",
+    "target_sha": "ee67414d10ce92cec8e27058953b9ea85c534a4e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42203685534",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "387313d8b9e3eea6681cb6d9ec1b4c6f6965a2add3239c6cfd834eb18d3908d7"
+  },
+  "record": "runs/2026-11-06/42203685534-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "bf9c5f4a232590ee90cdbba7658b97e8d81f4c4a41d3e82077fe0c736c7b76c2"
+}
