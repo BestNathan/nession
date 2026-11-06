@@ -119,7 +119,7 @@ export function planQwenRepairPublisherIntent({preflight,publisher_run_id}){
 export function qwenRepairPublisherIntentPath(record){
   const x=validateQwenRepairPublisherIntent(record);
   return 'workflows/issues/'+x.issue+'/results/'+x.worker_run_id+
-    '-1-'+x.action_id+'-repair.json';
+    '-1-'+x.action_id+'.json';
 }
 function confirmStore(root,record){
   const {state}=readIssueWorkflowState(root,record.issue);
