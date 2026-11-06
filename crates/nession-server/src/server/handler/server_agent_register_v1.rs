@@ -188,6 +188,7 @@ impl ConnectionHandler {
             // reconnected since — and for that straggler the relay gate refuses
             // rather than guesses.
             protocol_manifest: Some(protocol_manifest),
+            probe_generation: 0,
         };
 
         self.agent_registry.register(agent_info).await;

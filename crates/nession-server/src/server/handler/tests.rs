@@ -169,6 +169,7 @@ async fn register_agent_id(
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: manifest,
+            probe_generation: 0,
         })
         .await;
 }
