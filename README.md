@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Session-first Web Sidebar (Claude/ChatGPT-inspired; candidate) | [#2851](https://github.com/BestNathan/nession/issues/2851) | [Interactive HTML](sidebar-session-first-2851/index.html) · [Scenario & fidelity](sidebar-session-first-2851/README.md) |
+
+
 | Workspace Work capability / WorkContract, revisions, Criteria, Thread and source adapters | [#2541](https://github.com/BestNathan/nession/issues/2541) | [Interactive HTML](work-contract-2541/index.html) · [Scenario & fidelity](work-contract-2541/README.md) |
 
 | Session Metadata / editable title, description and tags | [#2789](https://github.com/BestNathan/nession/issues/2789) | [Interactive HTML](session-metadata-2789/index.html) · [Scenario & fidelity](session-metadata-2789/README.md) |

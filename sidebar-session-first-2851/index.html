@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Session-first Sidebar</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review-root">
+  <header class="np-overview">
+    <nav class="np-breadcrumb" aria-label="Review navigation"><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a><span>·</span><span>Issue #2851</span></nav>
+    <span class="np-eyebrow">NESSSION / WEB SHELL · CANDIDATE REDESIGN</span>
+    <div class="np-header-main">
+      <div><h1 class="np-title">Session-first Sidebar</h1><p class="np-subtitle">Inspired by Claude and ChatGPT navigation: a quiet place to return to work, not an Agent directory or feature catalog. This is a candidate interaction, not the shipped layout.</p></div>
+      <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/2851" target="_blank" rel="noopener noreferrer">Requirement #2851</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
+    </div>
+    <div class="np-meta"><span>Surface: <strong>Full Web shell</strong></span><span>Fidelity: <strong>1:1 viewport, mock data</strong></span><span>Baseline: <strong>main WebLayout / Sidebar</strong></span></div>
+  </header>
+  <main>
+    <section class="np-preview" aria-label="Interactive full Web shell preview">
+      <div class="np-section-heading"><div><h2>Interactive preview</h2><p>Switch Web viewport widths, navigate Sessions, search, create, open infrastructure, collapse and reopen. Mock-only state.</p></div>
+        <div class="np-preview-toolbar"><button data-np-size="1180" aria-pressed="true">Web 1180</button><button data-np-size="1024">Web 1024</button><button data-np-size="390">Narrow 390</button><button data-np-size="375">Narrow 375</button><button data-np-reset>Reset</button></div>
+      </div>
+      <div class="np-stage">
+        <div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:730px">
+          <div class="n-shell" id="n-shell" data-mode="wide" data-collapsed="false">
+            <aside class="n-sidebar" id="n-sidebar" aria-label="Session navigation">
+              <div class="n-top-actions">
+                <button class="n-icon-button" id="sidebar-toggle" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+                </button>
+                <button class="n-new" id="new-session" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New session</span></button>
+                <button class="n-icon-button n-only-drawer" id="drawer-close" type="button" aria-label="Close sessions" title="Close sessions">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <div id="session-navigation" class="n-navigation">
+                <label class="n-search-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg><input id="session-search" type="search" autocomplete="off" placeholder="Search sessions…" aria-label="Search sessions" title="Search sessions" /></label>
+                <div class="n-scroll"><div class="n-list-title"><span>Sessions</span><span class="n-list-count" id="session-count"></span></div><div id="session-list" class="n-session-list" role="list" aria-label="Sessions"></div><p class="n-empty" id="session-empty" hidden>No matching sessions.</p></div>
+              </div>
+              <div id="agent-navigation" class="n-navigation n-agent-view" hidden>
+                <button id="agent-back" class="n-back" type="button">← &nbsp; Sessions</button>
+                <div class="n-scroll"><div class="n-list-title">Agents / locations</div><p class="n-agent-intro">Infrastructure context. A Session remains accessible even when its Agent is offline.</p><div id="agent-list"></div></div>
+              </div>
+              <div id="session-dialog" class="n-dialog" hidden aria-live="polite"></div>
+              <div class="n-sidebar-footer">
+                <button type="button" id="agent-entry" class="n-foot-entry">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 14h7"/></svg><span>Agents / locations</span><span class="n-foot-meta">3</span>
+                </button>
+                <div class="n-connection"><span class="n-status-dot" aria-hidden="true"></span><span id="server-status">Server connected</span><span class="n-small-meta">Nession</span></div>
+              </div>
+            </aside>
+            <button id="drawer-scrim" class="n-scrim" type="button" aria-label="Close sessions" hidden></button>
+            <main class="n-work">
+              <button id="work-open" class="n-floating-open" type="button" aria-label="Open sessions" title="Open sessions">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+              </button>
+              <div class="n-surface-switcher" role="group" aria-label="Work surface">
+                <button id="surface-terminal" type="button" aria-pressed="true" title="Terminal">⌁</button>
+                <button id="surface-workspace" type="button" aria-pressed="false" title="Workspace">▦</button>
+              </div>
+              <div class="n-terminal" id="terminal-surface" role="region" aria-label="Current Session terminal">
+                <div class="n-terminal-history" id="terminal-history"><div class="n-terminal-prompt">~/work <span>❯</span> <span id="terminal-command">nession status</span></div><div id="terminal-lines" class="n-terminal-lines"></div><div class="n-terminal-prompt">~/work <span>❯</span> <span class="n-cursor" aria-hidden="true">▍</span></div></div>
+                <form id="capsule-form" class="n-capsule"><span aria-hidden="true" class="n-capsule-plus">+</span><input id="capsule-input" placeholder="Ask Nession…" aria-label="Session input" autocomplete="off" /><button type="submit" aria-label="Send text to local preview">↑</button></form>
+              </div>
+              <div class="n-workspace" id="workspace-surface" hidden><p class="n-workspace-eyebrow">CURRENT SESSION / WORKSPACE</p><h2 id="workspace-title">Current Session</h2><p>Contextual depth for the selected Session. Files, Git and other capabilities emerge in this workspace, rather than occupying Sidebar navigation.</p><div class="n-workspace-card"><strong>Resources and capabilities</strong><p>Open a capability from the Session's context. This preview intentionally does not implement capability internals.</p></div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+    </section>
+    <section class="np-details" aria-label="Design and verification">
+      <h2>Function and verification</h2>
+      <p class="np-details-lede">The proposal changes sidebar information architecture only; the full Web work surface and Shell ownership remain recognizable.</p>
+      <div class="np-detail-grid">
+        <article class="np-detail"><h3>Proposed hierarchy</h3><ol class="np-steps"><li>Top: shell toggle, New Session, Search.</li><li>Middle: flat Session history, time labels, local item overflow.</li><li>Bottom: on-demand Agents/location context and independent Server state.</li></ol></article>
+        <article class="np-detail"><h3>Try the critical path</h3><ol class="np-steps"><li>Select a different Session, then search for one.</li><li>Create a Session with explicit submit; try the offline Agent.</li><li>Collapse/reopen and inspect the work width.</li><li>Switch to Narrow 390; open/close the drawer.</li></ol></article>
+        <article class="np-detail"><h3>Candidate vs shipped</h3><p>On current main, Agents occupy the sidebar top; collapse uses a static-summary rail. Here Sessions lead, Agent details are revealed on request, and collapse fully tucks away the column. These changes have not been integrated into production Web.</p></article>
+        <article class="np-detail"><h3>Evidence / gaps</h3><p>Plain HTML + sanitized fixtures, CSS terminal-text approximation, no live tmux, no persistent Server/Agent state, no real Session creation. Viewport 1:1 is not screenshot/pixel parity. Browser/Pages publish and exact-SHA production Acceptance must be verified independently.</p><span class="np-status">Prototype only · not production Acceptance</span></article>
+      </div>
+    </section>
+  </main>
+  <footer class="np-footer">Nession UI exploration · Issue #2851 · Candidate Web navigation, not the shipped product.</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body></html>
