@@ -32,3 +32,10 @@ body[data-nession-prototype-frame="v1"] .np-fixtures :focus-visible{outline:2px 
 
 /* The surrounding outline is review chrome, not part of the target CSS viewport. */
 body[data-nession-prototype-frame="v1"] .np-device{border:0;outline:1px solid #d9dee3}
+
+/* Debug and fixtures must never float over the interactive product viewport. */
+body[data-nession-prototype-frame="v1"] .np-fixtures #debugOverlay{display:none!important}
+body[data-nession-prototype-frame="v1"] .np-fixtures #debugPanel{position:static!important;inset:auto!important;transform:none!important;display:none;float:none;width:100%;max-width:100%;height:auto;max-height:470px;box-shadow:none;border:1px solid var(--np-line);border-radius:10px;overflow:auto}
+body[data-nession-prototype-frame="v1"] .np-fixtures #debugPanel.open{display:flex!important}
+body[data-nession-prototype-frame="v1"] .np-fixtures #inspector{position:static!important;inset:auto!important;width:100%;max-width:none;flex:1 1 auto;min-height:280px;max-height:460px;border:1px solid var(--np-line);border-radius:10px;box-shadow:none;overflow:auto}
+body[data-nession-prototype-frame="v1"] .np-fixtures #inspector[hidden]{display:none!important}
