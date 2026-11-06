@@ -182,3 +182,96 @@
 .work-product.is-mobile .wc-capability-entry{flex:1;min-width:75px;justify-content:center;flex-direction:column;gap:1px;height:52px;border-radius:21px;font-size:10px;padding:2px 12px}
 .work-product.is-mobile .wc-capability-symbol{font-size:16px;height:18px}
 .work-product.is-mobile .wc-terminal{padding:20px 17px}
+
+/* IA ownership baseline (main WebLayout / Sidebar / WorkspacePanel /
+ * AppPageHeader / WorkspaceShell), not a distinct Work application. */
+.work-product { overflow:hidden; }
+.work-product .wc-web-layout {
+  display:flex;width:100%;height:100%;min-height:0;overflow:hidden;
+}
+.work-product .wc-web-main {
+  display:flex;flex:1;min-width:0;min-height:0;overflow:hidden;
+}
+.work-product .wc-web-sidebar {
+  display:flex;flex-direction:column;flex:0 0 246px;width:246px;
+  min-width:0;min-height:0;overflow:hidden;
+  background:var(--nession-surface);color:var(--nession-foreground);
+}
+.work-product .wc-web-sidebar.collapsed{flex:0 0 50px;width:50px}
+.work-product .wc-sidebar-top{
+  min-height:42px;display:flex;justify-content:space-between;align-items:center;
+  padding:7px 10px;font-size:12.5px;
+}
+.work-product .wc-sidebar-top .wc-btn{border:0;padding:4px 8px;background:transparent}
+.work-product .wc-agent-row{
+  display:flex;align-items:center;gap:7px;padding:6px 12px;
+  font-size:11.5px;color:var(--nession-text-secondary);
+}
+.work-product .wc-agent-row small{margin-left:auto;color:var(--nession-muted-foreground);font-size:10px}
+.work-product .wc-session-title{
+  border-top:1px solid var(--nession-border);margin:9px 8px 4px;
+  padding:10px 4px 6px;font-size:12.5px;font-weight:600;
+}
+.work-product .wc-session-list{flex:1;min-height:0;overflow-y:auto;padding:4px 8px}
+.work-product .wc-session-row{
+  display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;
+  padding:9px;margin:0 0 2px;border:0;border-radius:7px;background:transparent;
+}
+.work-product .wc-session-row.selected,.work-product .wc-session-row:hover{background:var(--nession-muted)}
+.work-product .wc-session-row strong{font-size:12px;font-weight:550;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.work-product .wc-session-row small{color:var(--nession-muted-foreground);font-size:10.5px}
+.work-product .wc-sidebar-status{
+  display:flex;justify-content:space-between;gap:5px;min-height:41px;
+  border-top:1px solid var(--nession-border);
+  padding:11px;color:var(--nession-muted-foreground);font-size:11px;
+}
+.work-product .wc-rail-count{
+  writing-mode:vertical-rl;padding:10px;color:var(--nession-muted-foreground);font-size:11px;
+}
+.work-product .wc-shell{
+  display:flex;flex-direction:column;position:relative;
+  flex:1;width:100%;min-width:0;min-height:0;height:100%;overflow:hidden;
+  background:var(--nession-background);
+}
+.work-product .wc-shell .wc-surface{
+  flex:1;min-height:0;overflow-y:auto;
+  padding-bottom:86px;
+}
+.work-product .wc-shell .wc-dock-zone{
+  position:absolute;z-index:8;bottom:12px;left:50%;
+  transform:translateX(-50%);width:max-content;max-width:calc(100% - 20px);
+  height:auto;padding:0;background:transparent;pointer-events:none;
+}
+.work-product .wc-shell .wc-dock-zone .wc-dock-pair{pointer-events:auto}
+.work-product .wc-shell .wc-terminal-link{
+  display:grid;place-items:center;
+  width:36px;height:36px;padding:0;border-radius:50%;
+}
+.work-product .wc-shell .wc-terminal-link span{display:none}
+.work-product.is-mobile .wc-top{
+  display:flex;align-items:center;justify-content:flex-start;
+  gap:5px;flex:0 0 auto;position:relative;top:auto;
+  height:46px;padding:6px 8px 4px;
+  background:var(--nession-background);
+  border:0;backdrop-filter:none;
+}
+.work-product.is-mobile .wc-top .wc-back {
+  flex:0 0 36px;width:36px;height:36px;min-width:36px;
+  display:grid;place-items:center;
+  padding:0;margin:0;border-radius:7px;
+  background:transparent;font-size:24px;
+}
+.work-product.is-mobile .wc-top .wc-app-title {
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  font-size:16px;font-weight:600;line-height:1.25;
+}
+.work-product.is-mobile .wc-intro h1 {
+  /* AppPageHeader already gives the pushed WorkContract its one title. */
+  display:none;
+}
+.work-product.is-mobile .wc-shell .wc-dock-zone{
+  width:calc(100% - 20px);bottom:9px;
+}
+.work-product.is-mobile .wc-shell .wc-capability-capsule{
+  width:100%;max-width:none;justify-content:space-around;
+}
