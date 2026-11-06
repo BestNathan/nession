@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox,bindVerifiedRepairCheckpoint} from './outbox.mjs';
+import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox,bindVerifiedRepairCheckpoint,validateDevelopmentState,acceptAttestedQwenPublication} from './outbox.mjs';
 import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,prepareGitHubDispatch,
   createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome,
   reviewerPublishedPrBinding,planControlledReviewerRecovery,verifyPersistedDispatchIntent} from './github-dispatch.mjs';
@@ -295,4 +295,43 @@ for(const wrong of [
 ])assert.throws(()=>planControlledReviewerRecovery(wrong,
   originalReviewAction,registry,recoverySigner),
   /controlled Reviewer recovery|no longer recoverable/);
+// New Qwen-published Reviewer work uses its signed Issue/Action identity.
+// The original #1997 Qwen Reviewer rescue above MUST retain legacy inputs.
+const qIssue=3001,qSource='7'.repeat(40),qTarget='8'.repeat(40);
+const qInit=startDevelopment(registry,{issue:qIssue,sha:qSource,
+  developer:'dev-qwen-01',reviewer:'review-qwen-01',
+  acceptor:'accept-qwen-01'},authority);
+const qDev=qInit.outbox[0];
+const qDispatched=validateDevelopmentState({...qInit,version:2,
+  outbox:[{...qDev,status:'dispatched',attempts:1,
+    receipt:{status:'verified',dispatch_id:qDev.id,source_run_id:301}}]});
+const qReview=acceptAttestedQwenPublication(qDispatched,2,{
+  kind:'publisher',outcome:'published',issue:qIssue,
+  run_id:401,run_attempt:1,target_sha:qTarget,
+},{role:'publisher',workflow_run_id:401,attempt:1,issue:qIssue,
+  source_sha:qTarget,developer_action_id:qDev.id,developer_run_id:301,
+  developer_attempt:1,developer_source_sha:qSource,
+  checkpoint_commit_sha:'9'.repeat(40),pr_number:541},registry);
+const qAction=qReview.outbox.find(x=>x.task.role==='reviewer');
+assert.ok(qAction&&qAction.status==='pending');
+const qPlan=planGitHubDispatch(qReview,qAction.id,registry,signer);
+assert.equal(qPlan.workflow_id,'agent-review.yml');
+assert.equal(qPlan.inputs.issue_number,String(qIssue));
+assert.equal(qPlan.inputs.reviewer,'review-qwen-01');
+assert.equal(qPlan.inputs.action_id,qAction.id);
+assert.equal(verifyDispatchTicket(qPlan.ticket,keyring,{now}).issue,qIssue);
+const qPrepared=prepareGitHubDispatch(qReview,qAction.id,registry,signer);
+assert.equal(verifyPersistedDispatchIntent({state:qPrepared.prepared,
+  plan:qPrepared.plan,keyring,now}).action_id,qAction.id);
+await assert.rejects(()=>api200({...qPlan,
+  inputs:{...qPlan.inputs,issue_number:'1997'}}),
+  /signed Outbox ticket/);
+await assert.rejects(()=>api200({...qPlan,
+  inputs:{...qPlan.inputs,reviewer:'review-cursor-01'}}),
+  /signed Outbox ticket/);
+await assert.rejects(()=>api200({...qPlan,
+  inputs:{...qPlan.inputs,extra:'untrusted'}}),
+  /signed Outbox ticket/);
+assert.equal(recoveredPlan.inputs.issue_number,undefined);
+
 console.log('Agent signed dispatch, GitHub REST attestation and spoof/replay fixtures passed');
