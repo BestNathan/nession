@@ -266,5 +266,86 @@ export async function selfTestIssueAuditReadback(){
   assert.equal(proof.source_run_id,901);
   await assert.rejects(collectIssueAuditReadback({repo,targetSha:target,sourceRunId:901,
     targetIssueNumber:2811,request,readLog:async()=>log,isAncestor:()=>false}),/ancestry/);
+  // #2860: a completed Issue Audit WORKFLOW whose agent job is skipped or
+  // whose fixed target is not #2851 must never become proof for #2855 SC-03.
+  const recipe=SIDEBAR_AUDIT_REPAIR_PROOF;
+  const reqBody=[
+    '## Requirements: sidebar repaired', 'A work-first Web sidebar',
+    '### Success Criteria', '- [ ] SC-01 preserve Session navigation',
+    '## Acceptance Plan',
+    '\x60\x60\x60yaml','acceptance:','  SC-01:','    when: pr','    method: case','\x60\x60\x60',
+    '## Acceptance Report','| Criterion | Result | Evidence |',
+    '|---|---|---|','| SC-01 | Pending | Browser Case at PR head |',
+    '## E2E Verification','### New','- sidebar-session-first',
+    '### Regression','- ui-contract-web','- fixture-visual','- fixture-visual-app',
+    '## E2E Report','| ID | Type | Result | Evidence |',
+    '|---|---|---|---|',
+    '| sidebar-session-first | New | Pending | - |',
+    '| ui-contract-web | Regression | Pending | - |',
+    '| fixture-visual | Regression | Pending | - |',
+    '| fixture-visual-app | Regression | Pending | - |',
+    '### Knowledge Impact','- Decision: Update',
+    '- Related knowledge: docs/design/interaction/web.md',
+    '- Reason: Shell structure changed',
+    '- Owner and timing: Web owner during PR',
+    '- Evidence: source-based audit run',
+    '## Product alignment','- [x] work first','**Status:** In Discussion',
+  ].join('\n');
+  const auditedIssue={
+    number:recipe.targetIssueNumber,title:'Requirement: Sidebar repaired',
+    state:'open',created_at:'2026-11-06T10:31:22Z',
+    labels:recipe.requiredLabels.map(name=>({name})),body:reqBody,
+  };
+  assert.deepEqual(auditIssue(auditedIssue).errors,[],
+    'the authenticated sample must pass the full Issue Contract');
+  const historicalRun={...sourceRun,id:recipe.sourceRunId,run_attempt:recipe.sourceAttempt,
+    event:'issues',actor:{login:'BestNathan'}};
+  const historicalJob={...agent,id:918,run_id:recipe.sourceRunId};
+  const historicalLog=log.replace('ISSUE_NUMBER: 2811','ISSUE_NUMBER: 2851');
+  const historicalEvents=recipe.requiredWriteLabels.map((name,i)=>({
+    id:201+i,event:'labeled',label:{name},
+    actor:{login:'github-actions[bot]'},created_at:'2026-11-06T06:44:20Z',
+  }));
+  const verified={
+    repo,targetSha:target,sourceRun:historicalRun,jobs:[historicalJob],
+    log:historicalLog,issue:auditedIssue,events:historicalEvents,
+    targetIssueNumber:recipe.targetIssueNumber,ancestorConfirmed:true,
+    sourceCodeUnchanged:false,proof:recipe,
+  };
+  const witnessed=attestIssueAuditReadback(verified);
+  assert.equal(witnessed.source_event,'issues');
+  assert.equal(witnessed.status,'authenticated-historical-repair-readback');
+  assert.deepEqual(witnessed.protected_e2e_selected_ids.sort(),
+    [...recipe.expectedE2EIds].sort());
+  for(const [patch,reason] of [
+    [{sourceRun:{...historicalRun,event:'workflow_dispatch'}},/identity/],
+    [{sourceRun:{...historicalRun,actor:{login:'github-actions[bot]'}}},/identity/],
+    [{ancestorConfirmed:false},/ancestry/],
+    [{jobs:[{...historicalJob,conclusion:'skipped'}]},/agent job identity/],
+    [{jobs:[{...historicalJob,name:'contract'}]},/trusted Issue Audit agent job/],
+    [{jobs:[{...historicalJob,run_attempt:2}]},/agent job identity/],
+    [{jobs:[{...historicalJob,steps:historicalJob.steps.map(s=>
+      s.name==='Audit and repair issue'?{...s,conclusion:'skipped'}:s)}]},/trusted step/],
+    [{log:historicalLog.replace('ISSUE_NUMBER: 2851','ISSUE_NUMBER: 2855')},/fixed target/],
+    [{issue:{...auditedIssue,number:2855}},/target readback/],
+    [{events:[]},/label write/],
+    [{events:historicalEvents.map(e=>({...e,actor:{login:'BestNathan'}}))},/label write/],
+    [{events:historicalEvents.map(e=>({...e,created_at:'2026-11-06T07:00:00Z'}))},/label write/],
+    [{issue:{...auditedIssue,body:reqBody.replace('- sidebar-session-first','- substituted-test')}},/E2E selection|Issue Contract/],
+  ])assert.throws(()=>attestIssueAuditReadback({...verified,...patch}),reason);
+  const historicalRequest=async path=>{
+    if(path.endsWith('/actions/runs/'+recipe.sourceRunId))return historicalRun;
+    if(path.includes('/attempts/1/jobs?'))return {jobs:[historicalJob]};
+    if(path.endsWith('/issues/'+recipe.targetIssueNumber))return auditedIssue;
+    if(path.includes('/issues/'+recipe.targetIssueNumber+'/events'))return historicalEvents;
+    throw Error('unexpected Issue Audit source '+path);
+  };
+  const fetched=await collectIssueAuditReadback({
+    repo,targetSha:target,sourceRunId:recipe.sourceRunId,
+    targetIssueNumber:recipe.targetIssueNumber,proof:recipe,
+    request:historicalRequest,readLog:async()=>historicalLog,
+    isAncestor:()=>true,
+  });
+  assert.equal(fetched.source_run_id,recipe.sourceRunId);
   console.log('Issue Audit authenticated readback: exact run, target, model, GitHub writes, E2E contract and negative fixtures passed');
 }
