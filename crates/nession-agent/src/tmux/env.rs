@@ -377,11 +377,13 @@ impl EnvManager {
         }
 
         // A key whose restoration failed keeps its baseline so a later binding
-        // can still restore it; a key that was restored releases it.
-        for key in &restored_ok {
-            baseline.remove(key);
-        }
-        baseline.retain(|key, _| new_keys.contains(key.as_str()));
+        // can still restore it; a key that was restored releases it. A key the
+        // binding still manages keeps its baseline too: it is still the value
+        // to restore whenever the key is eventually released. The exact base
+        // value — including `None` for an originally absent key — is durable,
+        // so a later apply retries it even when the desired binding no longer
+        // names the key.
+        baseline.retain(|key, _| new_keys.contains(key.as_str()) || !restored_ok.contains(key));
 
         // The shell overlay contains only this binding's own operations, plus
         // restoration for keys the previous revision managed. The adapter
@@ -1163,6 +1165,74 @@ mod tests {
         }
     }
 
+    /// A fake tmux with a *stateful* session environment: `show-environment`
+    /// reads it, `set-environment` writes it (or removes a key with `-u`), and
+    /// every mutation is refused while `fail_marker` exists.
+    ///
+    /// The restoration path under test needs to know what tmux still holds
+    /// after a failed command; an "accept everything" fake cannot show that.
+    /// The failure is controlled by a file rather than a sleep so the failure
+    /// and its removal are deterministic.
+    #[cfg(unix)]
+    fn fake_with_a_durable_environment(
+        dir: &std::path::Path,
+    ) -> (crate::test_support::FakeTmux, PathBuf, PathBuf) {
+        let env_dir = dir.join("fake-tmux-environment");
+        std::fs::create_dir_all(&env_dir).unwrap();
+        let fail_marker = dir.join("fail-tmux-restore");
+        let script = format!(
+            r#"case "$1" in
+show-environment)
+  __key="$4"
+  if [ -f "{env_dir}/$__key" ]; then
+    printf '%s=%s\n' "$__key" "$(cat "{env_dir}/$__key")"
+    exit 0
+  fi
+  printf 'unknown variable: %s\n' "$__key" >&2
+  exit 1
+  ;;
+set-environment)
+  if [ -f "{fail_marker}" ]; then
+    printf 'transient restore failure\n' >&2
+    exit 1
+  fi
+  if [ "$2" = "-u" ]; then
+    rm -f "{env_dir}/$5"
+  else
+    printf '%s' "$5" > "{env_dir}/$4"
+  fi
+  exit 0
+  ;;
+*) exit 0 ;;
+esac"#,
+            env_dir = env_dir.display(),
+            fail_marker = fail_marker.display(),
+        );
+        (
+            crate::test_support::FakeTmux::new(dir, &script),
+            env_dir,
+            fail_marker,
+        )
+    }
+
+    #[cfg(unix)]
+    fn fake_environment_value(env_dir: &Path, key: &str) -> Option<String> {
+        std::fs::read_to_string(env_dir.join(key)).ok()
+    }
+
+    fn matching_calls<'a>(calls: &'a [Vec<String>], expected: &[&str]) -> Vec<&'a Vec<String>> {
+        calls
+            .iter()
+            .filter(|call| {
+                call.len() == expected.len()
+                    && call
+                        .iter()
+                        .zip(expected)
+                        .all(|(actual, expected)| actual == expected)
+            })
+            .collect()
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn replacing_a_binding_restores_the_captured_base_value_and_unsets_absent_keys() {
@@ -1295,6 +1365,275 @@ mod tests {
             .last_error
             .as_deref()
             .is_some_and(|error| error.contains("refused by fake")));
+    }
+
+    /// #2781: a failed restore-to-base keeps the exact base value durably and
+    /// retries it on the next apply, including from a reconstructed manager.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_restore_keeps_the_base_value_and_a_later_apply_retries_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let state_dir = dir.path().join("state");
+        let session = "nession-restore-sess";
+
+        let mut mgr = EnvManager::new(state_dir.clone());
+        mgr.with_tmux(fake.dep());
+        let applied = mgr
+            .apply_binding(
+                session,
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile")])],
+            )
+            .await
+            .expect("the overlay applies");
+        assert_eq!(applied.observed.managed_keys, vec!["MODE".to_string()]);
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("profile")
+        );
+
+        // Only the clear's restore mutation fails.
+        std::fs::write(&fail_marker, b"").unwrap();
+        let err = mgr
+            .apply_binding(session, 2, &[], &[])
+            .await
+            .expect_err("a failed restoration is not success");
+        assert!(
+            format!("{err:#}").contains("transient restore failure"),
+            "{err:#}"
+        );
+
+        let pending = mgr
+            .load_state(session)
+            .await
+            .expect("the failed apply is recorded");
+        assert_eq!(
+            pending.baseline.get("MODE"),
+            Some(&Some("default".to_string())),
+            "a failed restoration must keep the exact base value: {pending:?}"
+        );
+        assert_eq!(pending.status, STATUS_ERROR);
+        assert!(pending
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("transient restore failure")));
+        let observed = mgr
+            .observe(session)
+            .await
+            .expect("the failed apply is observable");
+        assert_eq!(observed.status, STATUS_ERROR);
+        assert!(
+            observed.managed_keys.contains(&"MODE".to_string()),
+            "the pending restoration stays visible until it is released: {observed:?}"
+        );
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("profile"),
+            "the failed restoration left the profile value in tmux"
+        );
+
+        std::fs::remove_file(&fail_marker).unwrap();
+
+        // A new Agent process has only the durable state directory, the same
+        // tmux dependency, and no in-memory baseline.
+        let mut restarted = EnvManager::new(state_dir);
+        restarted.with_tmux(fake.dep());
+        let recovered = restarted
+            .apply_binding(session, 3, &[], &[])
+            .await
+            .expect("the pending restoration retries");
+        assert!(recovered.observed.managed_keys.is_empty());
+        assert_eq!(recovered.observed.status, STATUS_UNSUPPORTED_SHELL);
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("default"),
+            "the retry must restore the captured base value in tmux"
+        );
+
+        let released = restarted
+            .load_state(session)
+            .await
+            .expect("the state is durable");
+        assert!(
+            !released.baseline.contains_key("MODE"),
+            "a confirmed restoration releases the baseline: {released:?}"
+        );
+        assert_eq!(released.status, STATUS_UNSUPPORTED_SHELL);
+        assert!(released.last_error.is_none());
+
+        let calls = fake.calls();
+        assert_eq!(
+            matching_calls(
+                &calls,
+                &["set-environment", "-t", session, "MODE", "default"]
+            )
+            .len(),
+            2,
+            "one failed restore and one successful retry: {calls:#?}"
+        );
+    }
+
+    /// #2781: an originally absent key that fails to unset keeps its `None`
+    /// baseline and is unset on the next healthy apply.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_unset_keeps_the_absent_baseline_and_a_later_apply_unsets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, fail_marker) = fake_with_a_durable_environment(dir.path());
+        let state_dir = dir.path().join("state");
+        let session = "nession-unset-sess";
+
+        let mut mgr = EnvManager::new(state_dir.clone());
+        mgr.with_tmux(fake.dep());
+        let applied = mgr
+            .apply_binding(
+                session,
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("ABSENT", "profile")])],
+            )
+            .await
+            .expect("the overlay applies");
+        assert_eq!(applied.observed.managed_keys, vec!["ABSENT".to_string()]);
+        assert_eq!(
+            fake_environment_value(&env_dir, "ABSENT").as_deref(),
+            Some("profile")
+        );
+
+        std::fs::write(&fail_marker, b"").unwrap();
+        let err = mgr
+            .apply_binding(session, 2, &[], &[])
+            .await
+            .expect_err("a failed unset is not success");
+        assert!(
+            format!("{err:#}").contains("transient restore failure"),
+            "{err:#}"
+        );
+
+        let pending = mgr
+            .load_state(session)
+            .await
+            .expect("the failed apply is recorded");
+        assert_eq!(
+            pending.baseline.get("ABSENT"),
+            Some(&None),
+            "a key that was absent before the binding must keep its absent marker: {pending:?}"
+        );
+        assert_eq!(pending.status, STATUS_ERROR);
+        let observed = mgr
+            .observe(session)
+            .await
+            .expect("the failed apply is observable");
+        assert!(observed.managed_keys.contains(&"ABSENT".to_string()));
+        assert_eq!(
+            fake_environment_value(&env_dir, "ABSENT").as_deref(),
+            Some("profile"),
+            "the failed unset left the profile value behind"
+        );
+
+        std::fs::remove_file(&fail_marker).unwrap();
+        let mut restarted = EnvManager::new(state_dir);
+        restarted.with_tmux(fake.dep());
+        let recovered = restarted
+            .apply_binding(session, 3, &[], &[])
+            .await
+            .expect("the pending unset retries");
+        assert!(recovered.observed.managed_keys.is_empty());
+        assert_eq!(
+            fake_environment_value(&env_dir, "ABSENT"),
+            None,
+            "the retry must unset the originally absent key"
+        );
+        assert!(!restarted
+            .load_state(session)
+            .await
+            .expect("the state is durable")
+            .baseline
+            .contains_key("ABSENT"));
+
+        let calls = fake.calls();
+        assert_eq!(
+            matching_calls(&calls, &["set-environment", "-u", "-t", session, "ABSENT"]).len(),
+            2,
+            "one failed unset and one successful retry: {calls:#?}"
+        );
+    }
+
+    /// #2781: retrying while tmux is still unhealthy stays an explicit error
+    /// with the pending baseline, never a converged revision.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_repeated_restore_failure_stays_pending_and_never_reports_convergence() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let session = "nession-repeat-sess";
+
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            session,
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile")])],
+        )
+        .await
+        .expect("the overlay applies");
+
+        std::fs::write(&fail_marker, b"").unwrap();
+        for revision in [2, 3] {
+            let err = mgr
+                .apply_binding(session, revision, &[], &[])
+                .await
+                .expect_err("a failed restoration is never convergence");
+            assert!(
+                format!("{err:#}").contains("transient restore failure"),
+                "{err:#}"
+            );
+
+            let state = mgr
+                .load_state(session)
+                .await
+                .expect("the failed apply is recorded");
+            assert_eq!(
+                state.baseline.get("MODE"),
+                Some(&Some("default".to_string())),
+                "revision {revision} dropped the pending base value: {state:?}"
+            );
+            assert_eq!(state.status, STATUS_ERROR);
+            let observed = mgr
+                .observe(session)
+                .await
+                .expect("the failed apply is observable");
+            assert_eq!(observed.status, STATUS_ERROR);
+            assert_ne!(observed.status, STATUS_IN_SYNC);
+            assert_ne!(observed.status, STATUS_PENDING_SHELL);
+            assert!(observed.managed_keys.contains(&"MODE".to_string()));
+            assert_eq!(
+                fake_environment_value(&env_dir, "MODE").as_deref(),
+                Some("profile")
+            );
+        }
+
+        // Once tmux is healthy, the same reapply converges and releases the
+        // pending baseline: the failure was pending, not permanent.
+        std::fs::remove_file(&fail_marker).unwrap();
+        mgr.apply_binding(session, 4, &[], &[])
+            .await
+            .expect("the restore succeeds once tmux is healthy");
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("default")
+        );
+        assert!(mgr
+            .load_state(session)
+            .await
+            .expect("the state is durable")
+            .baseline
+            .is_empty());
     }
 
     #[cfg(unix)]
@@ -1791,5 +2130,78 @@ mod tests {
 
         drop(stdin);
         let _ = child.wait().await;
+    }
+
+    /// #2781 SC-03: a pending restoration is Session-local. A required restore
+    /// failing in one Session must not disturb another Session's durable
+    /// baseline, status, or simulated tmux environment.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_pending_restore_in_one_session_does_not_touch_another_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        std::fs::write(env_dir.join("OTHER"), "base-other").unwrap();
+
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            "nession-isolation-a",
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile-a")])],
+        )
+        .await
+        .expect("session A applies");
+        mgr.apply_binding(
+            "nession-isolation-b",
+            1,
+            &[profile_ref("b.env")],
+            &[snapshot("b.env", &[("OTHER", "profile-b")])],
+        )
+        .await
+        .expect("session B applies");
+
+        // A's required restore fails; B has no mutation in flight.
+        std::fs::write(&fail_marker, b"").unwrap();
+        mgr.apply_binding("nession-isolation-a", 2, &[], &[])
+            .await
+            .expect_err("A's failed restore is an error");
+
+        let a = mgr
+            .observe("nession-isolation-a")
+            .await
+            .expect("A is observable");
+        assert_eq!(a.status, STATUS_ERROR);
+        assert!(a.managed_keys.contains(&"MODE".to_string()));
+
+        let b = mgr
+            .observe("nession-isolation-b")
+            .await
+            .expect("B is observable");
+        assert_ne!(
+            b.status, STATUS_ERROR,
+            "A's failure must not become B's: {b:?}"
+        );
+        assert!(b.managed_keys.contains(&"OTHER".to_string()));
+        assert_eq!(
+            fake_environment_value(&env_dir, "OTHER").as_deref(),
+            Some("profile-b")
+        );
+
+        // B still restores on its own successful path once tmux is healthy.
+        std::fs::remove_file(&fail_marker).unwrap();
+        mgr.apply_binding("nession-isolation-b", 2, &[], &[])
+            .await
+            .expect("B's clear succeeds independently");
+        assert_eq!(
+            fake_environment_value(&env_dir, "OTHER").as_deref(),
+            Some("base-other")
+        );
+        let b = mgr
+            .observe("nession-isolation-b")
+            .await
+            .expect("B is observable");
+        assert!(b.managed_keys.is_empty());
     }
 }
