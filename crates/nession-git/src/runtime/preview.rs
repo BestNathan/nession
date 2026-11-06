@@ -376,7 +376,9 @@ fn same_root_still_at(root: &Path, opened: &std::fs::Metadata) -> bool {
 
 #[cfg(not(unix))]
 fn same_root_still_at(_root: &Path, _opened: &std::fs::Metadata) -> bool {
-    false
+    // The read itself is refused on this platform; this preflight must not turn
+    // the unsupported answer into a misleading "changed".
+    true
 }
 
 #[derive(Debug)]
