@@ -458,3 +458,50 @@ fn status_reports_the_recorded_config_source_not_a_default_file() {
         stdout(&unknown)
     );
 }
+
+/// SC-01: omitting `--config` selects the documented default path. Point the
+/// default file at invalid TOML: the start command must read it and fail on
+/// it, which distinguishes implicit selection from no selection at all.
+#[test]
+fn start_reads_the_default_agent_config_when_no_explicit_path_is_named() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let default = dir.path().join("agent-config.toml");
+    std::fs::write(&default, "this is not = valid [toml\n").expect("seed invalid default");
+
+    let output = nession(&dir)
+        .args(["agent", "start", "--foreground"])
+        .output()
+        .expect("run nession");
+
+    assert!(!output.status.success());
+    let error = stderr(&output);
+    assert!(
+        error.contains("failed to parse agent config"),
+        "the implicit default was not loaded: {error}"
+    );
+    assert!(
+        error.contains(&default.display().to_string()),
+        "the error must name the default path: {error}"
+    );
+    assert!(
+        error.contains("selected by the default path"),
+        "the source must be identified as implicit: {error}"
+    );
+}
+
+#[test]
+fn start_reads_the_default_server_config_when_no_explicit_path_is_named() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let default = dir.path().join("server-config.toml");
+    std::fs::write(&default, "this is not = valid [toml\n").expect("seed invalid default");
+
+    let output = nession(&dir)
+        .args(["server", "start", "--foreground"])
+        .output()
+        .expect("run nession");
+
+    assert!(!output.status.success());
+    let error = stderr(&output);
+    assert!(error.contains("failed to parse server config"), "{error}");
+    assert!(error.contains(&default.display().to_string()), "{error}");
+}
