@@ -346,21 +346,21 @@ $("workspace-inner").addEventListener("click",e=>{
  else if(btn.dataset.action==="load-more"){state.loadedMore=true;state.notice="";renderWorkspace();scrollToPendingHeading();}
 });
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(state.context!=="closed"){state.context="closed";renderContext();}else if(state.page!=="terminal")returnOneDepth();});
-let x0=0,y0=0,edge=false;
+let x0=0,y0=0,edgeX=0,edge=false;
 $("app").addEventListener("touchstart",e=>{
- if(window.innerWidth>700)return;
+ if($("app").getBoundingClientRect().width>700)return;
  const t=e.target;
  if(t.closest(".conversation-capsule,.context-surface,.workspace-dock,.sessions-layer") || (state.page==="workspace" && state.detail)){edge=false;return;}
- x0=e.touches[0].clientX;y0=e.touches[0].clientY;edge=x0<28||x0>window.innerWidth-28;
+ x0=e.touches[0].clientX;y0=e.touches[0].clientY;const rect=$("app").getBoundingClientRect();edgeX=x0-rect.left;edge=edgeX<28||edgeX>rect.width-28;
 },{passive:true});
 $("app").addEventListener("touchend",e=>{
- if(!edge||window.innerWidth>700)return;
+ if(!edge||$("app").getBoundingClientRect().width>700)return;
  edge=false;
  const dx=e.changedTouches[0].clientX-x0,dy=e.changedTouches[0].clientY-y0;
  if(Math.abs(dx)<85||Math.abs(dx)<Math.abs(dy)*1.6)return;
- if(state.page==="terminal"&&dx>0&&x0<28)showPage("sessions");
- else if(state.page==="terminal"&&dx<0&&x0>window.innerWidth-28)toWorkspace("claude","memory");
- else if(state.page==="workspace"&&!state.detail&&dx>0&&x0<28)showPage("terminal");
+ if(state.page==="terminal"&&dx>0&&edgeX<28)showPage("sessions");
+ else if(state.page==="terminal"&&dx<0&&edgeX>$("app").getBoundingClientRect().width-28)toWorkspace("claude","memory");
+ else if(state.page==="workspace"&&!state.detail&&dx>0&&edgeX<28)showPage("terminal");
 },{passive:true});
 window.__nessionMemoryMock={state:()=>({session:state.session,repo:S().repo,phase:state.phase,page:state.page,context:state.context,tab:state.tab,file:state.file,detail:state.detail,generation:state.generation,raw:state.raw,loadedMore:state.loadedMore,pendingFragment:state.pendingFragment,scrolledFragment:state.scrolledFragment,notice:state.notice}),setSession:switchSession,openFile,followMemoryLink,openWorkspace:()=>toWorkspace("claude","memory"),reset};
 render();
