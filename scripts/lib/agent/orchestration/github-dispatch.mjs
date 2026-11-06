@@ -176,8 +176,7 @@ function planMatchesBody(plan, body, ticket) {
     const dynamic=body.issue!==1997&&body.agent_id==='review-qwen-01';
     const fields=['action_id','reviewer','dispatch_ticket',
       ...(dynamic?['issue_number']:[])];
-    return
-      own(plan.inputs,fields)&&
+    return own(plan.inputs,fields)&&
       Object.keys(plan.inputs).length===fields.length&&
       plan.inputs.action_id===body.action_id&&
       plan.inputs.reviewer===body.agent_id&&
