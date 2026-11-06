@@ -461,8 +461,10 @@ try {
   }};
   assert.equal(qwenCheckpointNextVersion(repairAdmission,{version:1}),2);
   for(const change of [
-    {resume_from:{...immutableOrigin,source_sha:commitSha}},
-    {resume_from:{...immutableOrigin,checkpoint_version:2}},
+    {resume_from:{...repairedOrigin,source_sha:commitSha}},
+    {resume_from:{...repairedOrigin,checkpoint_version:2}},
+    {resume_from:{...repairedOrigin,ciphertext_sha256:'invalid'}},
+    {resume_from:{...repairedOrigin,source_run_id:0}},
     {resume_from:null},
   ])assert.throws(()=>qwenCheckpointNextVersion({
     ...repairAdmission,...change},{version:1}),
