@@ -3,7 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorkspace } from '../../GitWorkspace';
 import { gitApi } from '../../../GitPlugin';
-import type { GitDiffResponse, GitStatusResponse } from '../../../types';
+import type {
+  GitDiffResponse,
+  GitFilePreview,
+  GitPreviewResponse,
+  GitStatusResponse,
+} from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -12,6 +17,7 @@ vi.mock('../../../GitPlugin', () => ({
   gitApi: {
     gitStatus: vi.fn(),
     gitDiff: vi.fn(),
+    gitPreview: vi.fn(),
     gitRoot: vi.fn(),
     onInvalidated: vi.fn(() => () => {}),
   },
@@ -19,6 +25,7 @@ vi.mock('../../../GitPlugin', () => ({
 
 const mockedStatus = vi.mocked(gitApi.gitStatus);
 const mockedDiff = vi.mocked(gitApi.gitDiff);
+const mockedPreview = vi.mocked(gitApi.gitPreview);
 
 const agent: Agent = {
   agent_id: 'agent-1',
@@ -85,6 +92,22 @@ function diffResponse(text: string, overrides: Partial<GitDiffResponse & { state
   } as GitDiffResponse;
 }
 
+function previewResponse(preview: Partial<GitFilePreview> = {}) {
+  return {
+    state: 'ok',
+    preview: {
+      path: 'notes.txt',
+      state: 'ready',
+      text: 'hello\n',
+      binary: false,
+      size: 6,
+      truncated: false,
+      truncated_bytes: 0,
+      ...preview,
+    },
+  } as GitPreviewResponse;
+}
+
 describe('GitWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -125,7 +148,7 @@ describe('GitWorkspace', () => {
     expect(screen.getByTestId('git-summary')).toHaveTextContent('2 ahead, 1 behind');
   });
 
-  it('groups modified and untracked, and gives untracked no expander (SC2)', async () => {
+  it('groups every status kind and makes every row an opener (#2838)', async () => {
     mockedStatus.mockResolvedValue(
       statusResponse({
         status: {
@@ -147,12 +170,11 @@ describe('GitWorkspace', () => {
     expect(await screen.findByTestId('git-group-modified')).toHaveTextContent('Modified (1)');
     expect(screen.getByTestId('git-group-untracked')).toHaveTextContent('Untracked (1)');
 
-    // The tracked row is a control; the untracked one is not a control at all.
-    // Not a disabled control — nothing for the user to press and nothing that
-    // could open onto an empty diff.
+    // Both rows are controls now, but they open different resources: the
+    // tracked row has a diff, the untracked row's kind selects a file preview.
     expect(screen.getByTestId('git-row-tracked')).toBeInstanceOf(HTMLButtonElement);
-    expect(screen.getByTestId('git-row-untracked')).not.toBeInstanceOf(HTMLButtonElement);
-    expect(screen.queryByRole('button', { name: 'notes.txt' })).toBeNull();
+    expect(screen.getByTestId('git-row-untracked')).toBeInstanceOf(HTMLButtonElement);
+    expect(screen.getByRole('button', { name: 'notes.txt' })).toBeInTheDocument();
   });
 
   it('does not repeat the group heading on every row, but keeps what it omits', async () => {
@@ -192,6 +214,215 @@ describe('GitWorkspace', () => {
 
     // The heading already says untracked, so the row repeats nothing.
     expect(screen.getByTestId('git-row-untracked')).not.toHaveTextContent('untracked');
+  });
+
+  it('opens an untracked row as a bounded file preview, not a diff (#2838 SC-01)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: ['notes.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+    mockedPreview.mockResolvedValue(previewResponse());
+
+    render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+
+    await waitFor(() => expect(mockedPreview).toHaveBeenCalledTimes(1));
+    expect(mockedPreview).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session: 'agent-1:work',
+      path: 'notes.txt',
+      expected: 'untracked',
+    });
+    expect(mockedDiff).not.toHaveBeenCalled();
+
+    expect(await screen.findByTestId('git-file-preview-status')).toHaveTextContent(
+      'Untracked · File preview (no Git baseline)',
+    );
+    expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('hello');
+    // The row is a reader, not a staging affordance.
+    expect(screen.queryByRole('button', { name: /stage|commit|push/i })).toBeNull();
+  });
+
+  it('opens an unmerged row with its actual worktree bytes (#2838 SC-02)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: [],
+          unmerged: ['both.ts'],
+        },
+      }),
+    );
+    mockedPreview.mockResolvedValue(
+      previewResponse({
+        path: 'both.ts',
+        text: '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
+        size: 44,
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    await expect(screen.findByTestId('git-row-unmerged')).resolves.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-row-unmerged'));
+
+    expect(await screen.findByTestId('git-file-preview-status')).toHaveTextContent(
+      'Unresolved conflict · File preview',
+    );
+    expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('<<<<<<< HEAD');
+    expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('>>>>>>> other');
+  });
+
+  it('shows binary, truncation, missing and changed file states truthfully (#2838 SC-02/05)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: ['assets/logo.bin', 'large.txt', 'gone.txt', 'moved.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    const rows = await screen.findAllByTestId('git-row-untracked');
+
+    mockedPreview.mockResolvedValueOnce(
+      previewResponse({
+        path: 'assets/logo.bin',
+        binary: true,
+        text: '',
+        size: 4096,
+      }),
+    );
+    await userEvent.click(rows[0]);
+    expect(await screen.findByTestId('git-file-preview-message')).toHaveTextContent(
+      'Binary file — no text preview.',
+    );
+    expect(screen.getByTestId('git-file-preview-size')).toHaveTextContent('4.0 KB');
+    expect(screen.queryByTestId('git-file-preview-text')).toBeNull();
+
+    mockedPreview.mockResolvedValueOnce(
+      previewResponse({
+        path: 'large.txt',
+        text: 'prefix\n',
+        size: 4102,
+        truncated: true,
+        truncated_bytes: 4096,
+      }),
+    );
+    await userEvent.click(rows[1]);
+    expect(await screen.findByTestId('git-file-preview-truncated')).toHaveTextContent('4.0 KB');
+    expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('prefix');
+
+    mockedPreview.mockResolvedValueOnce(
+      previewResponse({ path: 'gone.txt', state: 'missing', text: '', size: 0 }),
+    );
+    await userEvent.click(rows[2]);
+    expect(await screen.findByTestId('git-file-preview-message')).toHaveTextContent(
+      'no longer present',
+    );
+
+    mockedPreview.mockResolvedValueOnce(
+      previewResponse({
+        path: 'moved.txt',
+        state: 'changed',
+        text: '',
+        size: 0,
+        message: 'The file changed while it was being read. Refresh Git Changes.',
+      }),
+    );
+    await userEvent.click(rows[3]);
+    expect(await screen.findByTestId('git-file-preview-message')).toHaveTextContent(
+      'Refresh Git Changes',
+    );
+  });
+
+  it('drops a stale preview when another file is selected (#2838 SC-05)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: ['a.txt', 'b.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+    const resolvers = new Map<string, (value: GitPreviewResponse) => void>();
+    mockedPreview.mockImplementation(
+      (request) =>
+        new Promise<GitPreviewResponse>((resolve) => {
+          resolvers.set(request.path, resolve);
+        }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    const rows = await screen.findAllByTestId('git-row-untracked');
+    await userEvent.click(rows[0]);
+    await userEvent.click(rows[1]);
+
+    await act(async () => {
+      resolvers.get('b.txt')?.(previewResponse({ path: 'b.txt', text: 'B\n' }));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('B'),
+    );
+
+    await act(async () => {
+      resolvers.get('a.txt')?.(previewResponse({ path: 'a.txt', text: 'A\n' }));
+    });
+    expect(screen.getByTestId('git-file-preview-path')).toHaveTextContent('b.txt');
+    expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('B');
+    expect(screen.getByTestId('git-file-preview-text')).not.toHaveTextContent('A');
+  });
+
+  it('opens the handed-over path in the mode its status row has (#2838 SC-01)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: ['notes.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+    mockedPreview.mockResolvedValue(previewResponse());
+
+    render(
+      <GitWorkspace
+        ctx={context({ focus: { capabilityId: 'git', resourceId: 'notes.txt' } })}
+      />,
+    );
+
+    await waitFor(() => expect(mockedPreview).toHaveBeenCalledTimes(1));
+    expect(mockedPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'notes.txt', expected: 'untracked' }),
+    );
+    expect(await screen.findByTestId('git-file-preview-text')).toHaveTextContent('hello');
   });
 
   it('opens a modified file’s diff, and shows the truncation notice (SC3)', async () => {
@@ -381,7 +612,13 @@ describe('GitWorkspace', () => {
     const labels = screen.getAllByRole('button').map(
       (button) => button.getAttribute('aria-label') ?? button.textContent ?? '',
     );
-    expect(labels.sort()).toEqual(['Refresh repository state', 'src/a.ts', 'src/b.ts']);
+    expect(labels.sort()).toEqual([
+      'Refresh repository state',
+      'both.ts',
+      'notes.txt',
+      'src/a.ts',
+      'src/b.ts',
+    ]);
     expect(screen.queryByRole('button', { name: /commit|stage|push|pull|checkout|discard/i })).toBeNull();
   });
 

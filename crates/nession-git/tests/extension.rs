@@ -204,6 +204,45 @@ fn diff_refuses_a_path_outside_the_repository() {
 }
 
 #[test]
+fn preview_returns_the_worktree_text_for_an_untracked_file() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "hello\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let result = run(
+        &ext,
+        "git.preview",
+        json!({"session": "agent:s", "path": "notes.txt", "expected": "untracked"}),
+    )
+    .unwrap();
+
+    assert_eq!(result["state"], "ok");
+    assert_eq!(result["preview"]["path"], "notes.txt");
+    assert_eq!(result["preview"]["state"], "ready");
+    assert_eq!(result["preview"]["text"], "hello\n");
+    assert_eq!(result["preview"]["binary"], false);
+    assert_eq!(result["preview"]["truncated"], false);
+}
+
+#[test]
+fn preview_refuses_a_path_that_is_not_the_selected_status_kind() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let result = run(
+        &ext,
+        "git.preview",
+        json!({"session": "agent:s", "path": "a.txt", "expected": "untracked"}),
+    )
+    .unwrap();
+
+    assert_eq!(result["state"], "ok");
+    assert_eq!(result["preview"]["state"], "changed");
+    assert_eq!(result["preview"]["text"], "");
+}
+
+#[test]
 fn root_reports_the_repository_toplevel() {
     let dir = repo().unwrap();
     let ext = extension(Some(dir.path().to_path_buf()));
@@ -242,6 +281,7 @@ fn the_extension_declares_the_wire_types_the_registry_routes_on() {
     for expected in [
         "git.status",
         "git.diff",
+        "git.preview",
         "git.root",
         "git.log",
         "git.branches",

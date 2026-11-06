@@ -20,6 +20,7 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
   protocols: {
     'git.status': { versions: [1], wire: ['git.status'] },
     'git.diff': { versions: [1], wire: ['git.diff'] },
+    'git.preview': { versions: [1], wire: ['git.preview'] },
     'git.root': { versions: [1], wire: ['git.root'] },
     'git.log': { versions: [1], wire: ['git.log'] },
     'git.commit': { versions: [1], wire: ['git.commit'] },

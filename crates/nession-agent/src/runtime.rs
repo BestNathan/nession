@@ -652,7 +652,7 @@ mod tests {
             .expect("the runtime's own providers must compose");
         let manifest = registry.manifest();
 
-        for wire in ["git.status", "git.diff"] {
+        for wire in ["git.status", "git.diff", "git.preview"] {
             assert!(
                 manifest.carries(wire),
                 "the git provider is part of the Agent product; {wire} is missing"

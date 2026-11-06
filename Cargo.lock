@@ -2084,6 +2084,7 @@ dependencies = [
  "nession-protocol",
  "notify 7.0.0",
  "notify-debouncer-mini",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",

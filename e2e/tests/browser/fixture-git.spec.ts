@@ -1,8 +1,8 @@
 // e2e/tests/browser/fixture-git.spec.ts
 //
-// #750 SC2 and SC5, asserted against real DOM rather than a jsdom mock: the
-// listing groups changes and gives an untracked entry no expander, and the view
-// carries no control that could ask git to write. #826's History section is
+// #750 SC5, asserted against real DOM rather than a jsdom mock: the view carries
+// no control that could ask git to write. #2838 extends the same listing to
+// preview untracked and conflicted worktree bytes; #826's History section is
 // asserted here too — it reads the log through the same fixture surface.
 //
 // The assertions are shape-based, not copy-based. A test that looked for the
@@ -43,7 +43,9 @@ test('a registered capability holds a slot without becoming the opened one', asy
   await expect(page.getByTestId('git-workspace')).toBeVisible();
 });
 
-test('changes are grouped, and an untracked entry has no expander (SC2)', async ({ page }) => {
+test('changes are grouped, and every row is an opener (#2838 supersedes #750 SC2)', async ({
+  page,
+}) => {
   await gotoGit(page);
 
   const modified = page.getByTestId('git-group-modified');
@@ -51,12 +53,126 @@ test('changes are grouped, and an untracked entry has no expander (SC2)', async 
   await expect(modified).toBeVisible();
   await expect(untracked).toBeVisible();
 
-  // Tracked changes are controls; untracked entries are not — they have no
-  // diff to open, so nothing pressable is offered for them.
+  // Both groups are controls. The tracked row opens a diff; the untracked row
+  // opens a worktree preview. It is still not pretending an untracked file has
+  // a Git baseline.
   await expect(modified.getByTestId('git-row-tracked').first()).toBeVisible();
   await expect(untracked.getByTestId('git-row-untracked').first()).toBeVisible();
-  await expect(untracked.locator('button')).toHaveCount(0);
+  await expect(untracked.locator('button')).toHaveCount(2);
   await expect(untracked.getByTestId('git-row-tracked')).toHaveCount(0);
+});
+
+test('untracked and conflicted rows open their worktree bytes (#2838 SC-01/02)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=git&git=preview-states');
+  await page.getByTestId('git-change-list').waitFor();
+
+  const untracked = page.getByTestId('git-row-untracked').filter({ hasText: 'notes/new.ts' });
+  await untracked.click();
+  await expect(page.getByTestId('git-file-preview')).toBeVisible();
+  await expect(page.getByTestId('git-file-preview-path')).toHaveText('notes/new.ts');
+  await expect(page.getByTestId('git-file-preview-status')).toContainText(
+    'Untracked · File preview (no Git baseline)',
+  );
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('untracked');
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+
+  // One conflicted path is one row; it is not also a modified row.
+  const conflict = page.getByTestId('git-row-unmerged').filter({ hasText: 'src/conflict.ts' });
+  await expect(conflict).toHaveCount(1);
+  await conflict.click();
+  await expect(page.getByTestId('git-file-preview-status')).toContainText(
+    'Unresolved conflict · File preview',
+  );
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('<<<<<<< HEAD');
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('>>>>>>> other');
+  await expect(page.getByTestId('git-file-preview')).toBeVisible();
+});
+
+test('preview failures and limits are visible and never fake content (#2838 SC-02/05)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=git&git=preview-states');
+  await page.getByTestId('git-change-list').waitFor();
+
+  const row = (path: string) => page.getByTestId('git-row-untracked').filter({ hasText: path });
+
+  await row('assets/logo.bin').click();
+  await expect(page.getByTestId('git-file-preview-message')).toContainText(
+    'Binary file — no text preview.',
+  );
+  await expect(page.getByTestId('git-file-preview-size')).toContainText('4.0 KB');
+  await expect(page.getByTestId('git-file-preview-text')).toHaveCount(0);
+
+  await row('src/large.txt').click();
+  await expect(page.getByTestId('git-file-preview-truncated')).toContainText('4.0 KB');
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('first line');
+
+  await row('src/missing.txt').click();
+  await expect(page.getByTestId('git-file-preview-message')).toContainText('no longer present');
+  await expect(page.getByTestId('git-file-preview-text')).toHaveCount(0);
+
+  await row('src/moved.txt').click();
+  await expect(page.getByTestId('git-file-preview-message')).toContainText(
+    'Refresh Git Changes',
+  );
+  await expect(page.getByTestId('git-file-preview-text')).toHaveCount(0);
+
+  await row('src/link').click();
+  await expect(page.getByTestId('git-file-preview-message')).toContainText(
+    'symbolic link',
+  );
+  await expect(page.getByTestId('git-file-preview-text')).toHaveCount(0);
+
+  // A tracked path that vanished between listing and selection reports an
+  // explicit error instead of a blank or stale diff.
+  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/deleted.ts' }).click();
+  await expect(page.getByTestId('git-diff-unavailable')).toContainText('no longer available');
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+});
+
+test('an untracked preview is readable at phone width without page clipping (#2838 SC-06)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#/fixture/workspace?capability=git&git=preview-states');
+  await page.getByTestId('git-change-list').waitFor();
+
+  const row = page.getByTestId('git-row-untracked').filter({ hasText: 'notes/new.ts' });
+  await row.click();
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await expect(row).toBeFocused();
+  await expect(page.getByTestId('git-file-preview-path')).toHaveText('notes/new.ts');
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('untracked');
+  const body = page.getByTestId('git-file-preview-body');
+  await expect(body).toHaveCSS('overflow-y', 'auto');
+  expect(
+    await body.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)),
+  ).toBeGreaterThan(0);
+
+  // A long preview is scrollable inside its own body, not by moving the shell.
+  await page.getByTestId('git-row-untracked').filter({ hasText: 'src/long-preview.txt' }).click();
+  await expect(page.getByTestId('git-file-preview-text')).toContainText('line 120');
+  const scroll = await body.evaluate((element) => {
+    element.scrollTop = 200;
+    return {
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+  expect(scroll.scrollTop).toBeGreaterThan(0);
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+  const workspace = await page.getByTestId('git-workspace').boundingBox();
+  expect(workspace).not.toBeNull();
+  expect(workspace?.x ?? 0).toBeGreaterThanOrEqual(0);
+  expect((workspace?.x ?? 0) + (workspace?.width ?? 0)).toBeLessThanOrEqual(391);
 });
 
 test('opening a changed file renders its patch with line semantics (SC3, #2791 SC-01)', async ({
@@ -239,10 +355,10 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   // Counted whole rather than grepped for keywords. A test that looked for the
   // word "Commit" would pass the moment someone labelled the button "Stage
   // all"; counting cannot be worded around. The archetype is fixed by the
-  // fixture: three tracked changes, each an opener, plus the header's controls —
-  // the four section tabs and Refresh.
-  await expect(openers).toHaveCount(3);
-  await expect(controls).toHaveCount(8);
+  // fixture: three tracked changes and two untracked rows, each an opener, plus
+  // the header's controls — the four section tabs and Refresh.
+  await expect(openers).toHaveCount(5);
+  await expect(controls).toHaveCount(10);
 
   // Naming the five that are not file openers is what keeps the count honest.
   // A write affordance cannot hide by being counted as one of them, because
@@ -255,7 +371,7 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   // count is what would notice a third control appearing beside them.
   await view.getByTestId('git-row-tracked').first().click();
   await expect(view.getByTestId('git-diff-layout')).toBeVisible();
-  await expect(controls).toHaveCount(10);
+  await expect(controls).toHaveCount(12);
   await expect(view.getByRole('button', { name: 'Unified' })).toHaveCount(1);
   await expect(view.getByRole('button', { name: 'Split' })).toHaveCount(1);
   await expect(
@@ -263,7 +379,7 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   ).toHaveCount(0);
 
   await view.getByTestId('git-refresh').click();
-  await expect(controls).toHaveCount(10);
+  await expect(controls).toHaveCount(12);
 });
 
 test('History bounds what it offers, and unmounts the section it replaced (#826)', async ({

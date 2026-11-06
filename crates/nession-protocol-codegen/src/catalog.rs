@@ -206,6 +206,30 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "git",
+            id: "git.preview",
+            version: 1,
+            wires: &["git.preview"],
+            decls: vec![
+                decl_of::<nession_git::protocol::preview::v1::PreviewRequestV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::PreviewOkV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::FilePreview>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::FilePreviewStateV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::PreviewExpectedV1>(cfg),
+                decl_of::<nession_git::protocol::SessionTargetV1>(cfg),
+            ],
+            request: Some((
+                "PreviewRequest",
+                nession_git::protocol::preview::v1::PreviewRequestV1::inline,
+                schema_of::<nession_git::protocol::preview::v1::PreviewRequestV1>,
+            )),
+            response: Some((
+                "PreviewResponse",
+                nession_git::protocol::preview::v1::PreviewResponseV1::inline,
+                schema_of::<nession_git::protocol::preview::v1::PreviewResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "git",
             id: "git.root",
             version: 1,
             wires: &["git.root"],

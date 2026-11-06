@@ -28,6 +28,7 @@ pub mod cmd;
 pub mod commit;
 pub mod diff;
 pub mod log;
+pub mod preview;
 pub mod security;
 pub mod status;
 pub mod worktrees;

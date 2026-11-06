@@ -20,6 +20,7 @@ const AGENT_MANIFEST: ProtocolManifest = {
   protocols: {
     'git.status': { versions: [1] },
     'git.diff': { versions: [1] },
+    'git.preview': { versions: [1] },
     'git.root': { versions: [1] },
     'git.log': { versions: [1] },
     'git.commit': { versions: [1] },
@@ -119,6 +120,31 @@ describe('GitPlugin', () => {
       surface.resolveNext('git.diff', {
         state: 'ok',
         diff: { path: 'src/a.ts', text: '+x', binary: false, truncatedBytes: 0, truncated: false },
+      });
+      await expect(pending).resolves.toMatchObject({ state: 'ok' });
+    });
+
+    it('gitPreview forwards the selected row kind with the path', async () => {
+      const req = {
+        agent_id: 'a1',
+        session: 'a1:work',
+        path: 'notes/new.ts',
+        expected: 'untracked',
+      } as const;
+      const pending = plugin.gitPreview(req);
+      expect(surface.requests[0]).toMatchObject({ type: 'git.preview', payload: req });
+
+      surface.resolveNext('git.preview', {
+        state: 'ok',
+        preview: {
+          path: 'notes/new.ts',
+          state: 'ready',
+          text: 'hello',
+          binary: false,
+          size: 5,
+          truncated: false,
+          truncated_bytes: 0,
+        },
       });
       await expect(pending).resolves.toMatchObject({ state: 'ok' });
     });

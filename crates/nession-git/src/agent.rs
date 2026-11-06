@@ -45,6 +45,7 @@ use crate::protocol::branches::{BranchesOkV1, BranchesRequestV1};
 use crate::protocol::commit::{CommitOkV1, CommitRequestV1};
 use crate::protocol::diff::{DiffOkV1, DiffRequestV1};
 use crate::protocol::log::{LogOkV1, LogRequestV1};
+use crate::protocol::preview::{PreviewOkV1, PreviewRequestV1};
 use crate::protocol::root::{RootOkV1, RootRequestV1};
 use crate::protocol::status::{StatusOkV1, StatusRequestV1};
 use crate::protocol::worktrees::{WorktreesOkV1, WorktreesRequestV1};
@@ -54,6 +55,7 @@ use crate::runtime::cmd::GitCmd;
 use crate::runtime::commit;
 use crate::runtime::diff;
 use crate::runtime::log;
+use crate::runtime::preview as preview_runtime;
 use crate::runtime::security::MAX_STATUS_BYTES;
 use crate::runtime::status;
 use crate::runtime::worktrees;
@@ -200,6 +202,22 @@ impl GitAgentExtension {
         })
     }
 
+    /// Current worktree bytes for an untracked or unmerged row (#2838).
+    ///
+    /// This is not a diff and not a filesystem browser: the path is checked
+    /// against the selected status kind before and after the read, and the
+    /// runtime opens it component-by-component without following links.
+    async fn worktree_preview(&self, payload: Value) -> Result<PreviewOkV1, GitFailure> {
+        let request: PreviewRequestV1 = decode(payload)?;
+        let cmd = self.cmd_for(&request.target.session).await?;
+        let root = self.ready(&cmd).await?;
+
+        Ok(PreviewOkV1 {
+            preview: preview_runtime::file_preview(&cmd, &root, &request.path, request.expected)
+                .await?,
+        })
+    }
+
     /// Recent commits on the current branch (#826 §4: History).
     ///
     /// `try_from` rather than `as`: the client picks this number, and a cast
@@ -273,6 +291,10 @@ impl GitAgentExtension {
         respond_with(self.file_diff(payload).await)
     }
 
+    async fn handle_preview(&self, payload: Value) -> anyhow::Result<Value> {
+        respond_with(self.worktree_preview(payload).await)
+    }
+
     async fn handle_log(&self, payload: Value) -> anyhow::Result<Value> {
         respond_with(self.history(payload).await)
     }
@@ -315,6 +337,7 @@ impl AgentExtension for GitAgentExtension {
         match command {
             protocol::status::ID => self.handle_status(payload).await,
             protocol::diff::ID => self.handle_diff(payload).await,
+            protocol::preview::ID => self.handle_preview(payload).await,
             protocol::root::ID => self.handle_root(payload).await,
             protocol::log::ID => self.handle_log(payload).await,
             protocol::commit::ID => self.handle_commit(payload).await,
@@ -334,6 +357,7 @@ mod tests {
         vec![
             (crate::protocol::status::v1::WIRE, protocol::status::ID),
             (crate::protocol::diff::v1::WIRE, protocol::diff::ID),
+            (crate::protocol::preview::v1::WIRE, protocol::preview::ID),
             (crate::protocol::root::v1::WIRE, protocol::root::ID),
             (crate::protocol::log::v1::WIRE, protocol::log::ID),
             (crate::protocol::commit::v1::WIRE, protocol::commit::ID),
@@ -412,6 +436,7 @@ mod tests {
         [
             protocol::status::ID,
             protocol::diff::ID,
+            protocol::preview::ID,
             protocol::root::ID,
             protocol::log::ID,
             protocol::commit::ID,
