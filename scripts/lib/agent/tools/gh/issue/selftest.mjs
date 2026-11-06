@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal } from './update.mjs';
-import { applyIssueAuditProposal } from '../../../tasks/issue-audit.mjs';
+import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
@@ -223,6 +223,76 @@ try {
   assert.ok(repairedE2e.body.endsWith(e2eContract));
   assert.deepEqual(parseIssueE2E(repairedE2e.body).errors,[]);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
+  // Live #42216764125: the original may have both malformed E2E and
+  // Knowledge Impact. A Qwen first pass fixing only E2E must NOT be written.
+  // One bounded continuation receives the canonical validation findings.
+  const originalWithTwoDefects={
+    ...preE2eIssue,
+    createdAt:'2026-11-06T12:00:00Z',
+    body:preE2eIssue.body+'\n\n'+malformedE2e,
+  };
+  const firstDraft=preE2eIssue.body+'\n\n'+e2eContract;
+  const repairedKnowledge=[
+    '### Knowledge Impact',
+    '- Decision: Update',
+    '- Related knowledge: docs/architecture/acceptance-sc-format.md',
+    '- Reason: clarify the Issue Audit validation and model repair boundary',
+    '- Owner and timing: Agent infrastructure owner before merge',
+    '- Evidence: deterministic Issue Audit regression at exact PR SHA',
+  ].join('\n');
+  const secondDraft=firstDraft+'\n\n'+repairedKnowledge;
+  writeFileSync(filename,JSON.stringify(originalWithTwoDefects));
+  const originalSnapshot=readFileSync(filename,'utf8');
+  let contractCalls=0;
+  const outcome=await applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:firstDraft}),
+  },'example/repo',{
+    contractRepair:async(previous,error)=>{
+      contractCalls++;
+      assert.match(error.message,/Knowledge Impact missing decision/);
+      assert.equal(readFileSync(filename,'utf8'),originalSnapshot,
+        'first rejected draft must NEVER partially write');
+      const prompt=renderIssueAuditContractRepairPrompt(
+        originalWithTwoDefects,previous.result,error.message);
+      assert.match(prompt,/Knowledge Impact MUST use five literal bullet keys/);
+      assert.match(prompt,/Knowledge Impact missing decision/);
+      assert.match(prompt,/no tools/);
+      return {result:JSON.stringify({body:secondDraft})};
+    },
+  });
+  assert.equal(contractCalls,1);
+  assert.equal(outcome.contract_repair_attempted,true);
+  const twoFixed=JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(twoFixed.body,secondDraft);
+  assert.deepEqual(parseIssueE2E(twoFixed.body).errors,[]);
+
+  // A second invalid draft fails closed after exactly one retry; no writes.
+  writeFileSync(filename,originalSnapshot);
+  let rejectedCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:firstDraft}),
+  },'example/repo',{
+    contractRepair:async()=>{rejectedCalls++;return {result:JSON.stringify({body:firstDraft})};},
+  }),/Knowledge Impact missing decision/);
+  assert.equal(rejectedCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),originalSnapshot);
+
+  // A valid input cannot be silently re-scoped. E2E privilege violations
+  // on already-valid sources are not eligible for contract retry.
+  writeFileSync(filename,JSON.stringify({...preE2eIssue,body:preE2eIssue.body+'\n\n'+e2eContract}));
+  const validSnapshot=readFileSync(filename,'utf8');
+  let unsafeCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:preE2eIssue.body+'\n\n'+e2eContract
+      .replace('- terminal-attach','- terminal-replay')
+      .replace('| terminal-attach | Regression','| terminal-replay | Regression')}),
+  },'example/repo',{
+    contractRepair:async()=>{unsafeCalls++;return {result:JSON.stringify({body:firstDraft})};},
+  }),/Unauthorized E2E/);
+  assert.equal(unsafeCalls,0);
+  assert.equal(readFileSync(filename,'utf8'),validSnapshot);
+  writeFileSync(filename,JSON.stringify(preE2eIssue));
+
   console.log('gh issue tools self-test: malformed E2E repair and immutable evidence passed');
 } finally {
   process.env.PATH = oldPath;
