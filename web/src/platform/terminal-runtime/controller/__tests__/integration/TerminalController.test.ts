@@ -414,6 +414,7 @@ describe('TerminalController', () => {
     expect(h.spy).toHaveBeenCalledTimes(2);
     h.finish();
     expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized, last]);
+    expect(onStreamEventParsed.mock.calls.map((call) => call[1])).toEqual([1, 0, 1]);
 
     // Legacy frames and local display bytes are not Agent timeline events.
     transport.onOutput!(new Uint8Array([67]));
