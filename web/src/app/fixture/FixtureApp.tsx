@@ -6,6 +6,7 @@ import { filterSessions } from '@/app/useDashboard';
 import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
+import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import type { TerminalChrome } from '@/app/ShellMain';
 import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -56,6 +57,8 @@ const fixtureOps = fixtureFileOps();
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
+  // #2789: rows and the Workspace Session view read the Agent-owned store.
+  useFixtureSessionMetadata(search);
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
@@ -103,7 +106,6 @@ export function FixtureApp() {
   // the surface decides what to draw. It has to be reachable from here or it is
   // in no golden image at all — producing a live one needs an Agent to restart
   // mid-session, which no fixture route can do.
-  const inputDrop = fixtureInputDrop(search);
   // The other three status inputs (#2621), on the same rule: the route names
   // what the runtime answered and the surface decides what to draw.
   const { historyDegraded, terminalControl, clipboardNotice } = fixtureStatusInputs(search);
@@ -217,7 +219,7 @@ export function FixtureApp() {
           <FixtureTerminal
             chrome={chrome}
             experience="app"
-            inputDrop={inputDrop}
+            inputDrop={fixtureInputDrop(search)}
             historyDegraded={historyDegraded}
             terminalControl={terminalControl}
             clipboardNotice={clipboardNotice}

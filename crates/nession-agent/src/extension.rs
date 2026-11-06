@@ -899,18 +899,18 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // The core and peer-to-peer lists share three ids
-        // (`session.create`, `session.kill`, `session.capture-preview`), so the
-        // union is one entry per id — the derived assertion below states that
-        // relation.
+        // The core and peer-to-peer lists share five ids (`session.create`,
+        // `session.kill`, `session.capture-preview`, and since #2789
+        // `session.metadata.get` / `session.metadata.update`), so the union is
+        // one entry per id — the derived assertion below states that relation.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 3,
-            "the union is by id, so the three shared units are counted once"
+            core.len() + p2p.len() - 5,
+            "the union is by id, so the five shared units are counted once"
         );
         // Three, not four: `session.list` stopped being shared when the core
         // side became `session.report`. The two arms answer different questions
@@ -945,9 +945,12 @@ mod tests {
         // binding units (`session.env.binding.get|set`) arrived. The binding is
         // Session state, so it is asked for by Session name; the removed units
         // were client-attachment state.
+        // Up by two for #2789: `session.metadata.get` / `session.metadata.update`
+        // are served on both sockets, because the Agent is the owner whether a
+        // browser reads through the Server or directly over P2P.
         assert_eq!(
             manifest.protocols.len(),
-            32,
+            34,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

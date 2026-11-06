@@ -1563,6 +1563,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -1645,6 +1653,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -1744,6 +1760,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
