@@ -3,6 +3,7 @@
  // No PR review, provider call, Store write, Issue comment, or model-chosen
 // next role is authorized by this module.
 import {createHash} from 'node:crypto';
+import {assertQwenReviewerAdmission} from './qwen-pr-admission.mjs';
 import {readFileSync} from 'node:fs';
 import {CONTROLLED_1997_POLICY as POLICY} from '../publisher/controlled-proposal.mjs';
 import {CONTROLLED_PUBLISHER_BRANCH,
@@ -63,8 +64,10 @@ export function resolveReviewerIdentity(agentId='review-cursor-01'){
 // model or caller choose the reviewed target. The identity fields are
 // parameterized only for an explicitly-labeled smoke admission; the target,
 // file and Publisher facts are always the same authenticated #2176 facts.
-export function assertReviewerAdmission(task,identity=CANONICAL_ADMISSION_IDENTITY){
-  const expected={...CANONICAL_ADMISSION_IDENTITY,...identity};
+export function assertReviewerAdmission(task,identity=null){
+  if(task?.kind==='authenticated_qwen_reviewer_admission_only')
+    return assertQwenReviewerAdmission(task,identity??{agent_id:'review-qwen-01'});
+  const expected={...CANONICAL_ADMISSION_IDENTITY,...(identity??{})};
   if(!only(task,ADMISSION_FIELDS)||task.schema_version!==1||
      task.kind!==expected.kind||task.status!==expected.status||
      task.repository!==REPO||task.issue!==1997||
