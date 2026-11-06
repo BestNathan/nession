@@ -84,6 +84,10 @@ const verdict=reviewModelResult(accepted,JSON.stringify({
 assert.equal(verdict.issue,ISSUE);
 assert.equal(verdict.pr_number,541);
 assert.equal(verdict.target_sha,HEAD);
+assert.throws(()=>reviewModelResult(accepted,JSON.stringify({
+  outcome:'changes_requested',summary:'Untrusted path',
+  findings:[{path:'src/unrelated.ts',evidence:'Not part of admitted PR'}],
+})),/outside the authenticated Qwen PR diff/);
 const rejects=[
   [{state:{...published,phase:'ready'}},/outbox|Outbox/],
   [{actionId:action},/Outbox/],
