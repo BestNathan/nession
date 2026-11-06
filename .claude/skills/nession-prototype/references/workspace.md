@@ -19,6 +19,12 @@ Workspace is **contextual depth around the user's work**, not a permanent landin
 - Product-native empty/unavailable/error/confirmation feedback belongs **inside** the UI. Debug events, mock failure selectors, requirement explanations, and test notes are **outside** in the prototype harness.
 - Keep return-to-Session, selection and appropriate scroll/dirty state consistent. Do not conflate unavailable FileSource, detached client, exited Session and offline Agent.
 
+## Mandatory information-architecture ownership checks
+
+Do not equate Files' own `tree/editor` with Workspace navigation. In the current product, `WebLayout` owns Sessions/Agents navigation; `WorkspacePanel` owns App page Back/title; `WorkspaceShell` owns capability dock/Terminal return; `FilesWebLayout` owns its Files-only tree/editor, and `FilesAppLayout` owns its directory navigator/file viewer. `GitWorkspace` owns Git-local branch, section tabs and diff; a proposed GitHub extension lives **inside Git**, never as an extra global capability or independent dashboard.
+
+Before changing or accepting an existing mock, compare and record the **rendered semantic tree** for root, directory, file detail/search, capability switch, Web↔App, and unavailable source. Explicitly check no duplicate `AppPageHeader`/Back, no product wordmark band in Web work region, no Web sidebar nested in Workspace, and no capability-local shell/capsule duplication. Web fixture-only screenshots may omit the full Session sidebar but must be labeled as a crop. Changes that only alter palette, dimensions, borders or `display:none` without changing incorrect ownership **do not** close IA gaps.
+
 ## Visual comparison checklist
 
 Compare against current Workspace fixture and product code for background/surface treatment, typography, controls, selection, navigation depth, Web/App differences and spacing. Exercise a complete capability interaction plus empty/error states. If the Issue proposes a different Workspace model, record what differs from the baseline in README and mark it as a *candidate* design externally.
