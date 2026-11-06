@@ -53,3 +53,10 @@ How should the independent Pages observatory expose the public, source-backed Kn
 - Choose a small safe Markdown representation (build-time AST-to-allowlisted block JSON, or vetted renderer with strict sanitization), avoiding arbitrary raw HTML.
 - Treat `candidate` distinctly from `verified`, and source-unavailable distinctly from zero search results.
 - Preserve current history based on actual Git commits and the global log; do not silently invent per-article revisions.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` now uses the shared `../prototype-frame-2758/` presentation frame (Requirement overview → 1:1 CSS-pixel interactive viewport → functional design and verification). Scenario/debug controls stay outside the product preview; original interactions remain in the owning directory.
+- **Mock fidelity:** Pages 有独立视觉系统，不能沿用 Nession Web token；导航演示固定，非实时。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
+- **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
+- **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/pages-knowledge-2664/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
