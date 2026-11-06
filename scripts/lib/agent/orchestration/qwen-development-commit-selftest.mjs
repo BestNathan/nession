@@ -416,7 +416,7 @@ try {
   const acceptedGit=(args)=>{
     calls.push(args);
     if(args[0]==='fetch')return '';
-    if(args[0]==='rev-parse')return commitSha+'\\n';
+    if(args[0]==='rev-parse')return commitSha;
     if(args[0]==='cat-file')return '';
     if(args[0]==='merge-base')return '';
     throw Error('unexpected Controller Git operation');
