@@ -6,7 +6,7 @@ use crate::update::replace;
 use crate::update::version::{compare_versions, VersionStatus};
 use crate::update::BinaryStatus;
 
-pub async fn run_update(
+pub async fn run(
     check_only: bool,
     target_version: Option<String>,
     dry_run: bool,

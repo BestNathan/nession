@@ -29,7 +29,7 @@ use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::sync::heartbeat::HeartbeatLoop;
 use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
-use nession_cli::commands::client::{resolve_attach_route, AttachPolicy};
+use nession_cli::commands::sessions::attach::{resolve_attach_route, AttachPolicy};
 use nession_client::{ClientConfig, ClientConnection};
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::{AgentAddress, AgentMetadata, NetworkType};

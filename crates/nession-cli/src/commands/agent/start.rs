@@ -1,0 +1,294 @@
+//! `nession agent start` — start the Agent daemon.
+//!
+//! The background branch re-executes this same command as a detached
+//! foreground child. `--config` and `--pid-file` are forwarded, so the child
+//! loads the file the parent resolved and records its identity where every
+//! later `stop`/`status` looks. The credential travels over stdin, never argv
+//! (#2269).
+
+use crate::configuration::{self, ConfigSelection, ConfigTarget};
+use crate::lifecycle::{pid_file, secret_handoff, startup};
+use anyhow::{Context, Result};
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use tracing::info;
+
+/// Run the leaf command.
+pub async fn run(
+    config: Option<String>,
+    foreground: bool,
+    pid_file_path: Option<String>,
+    server_url_override: Option<String>,
+    auth_token_override: Option<String>,
+    auth_token_stdin: bool,
+) -> Result<()> {
+    let selection = ConfigSelection::resolve(ConfigTarget::Agent, config)?;
+    let pid_file = pid_file::resolve_path(pid_file_path, pid_file::Component::Agent);
+
+    // Child half of the background credential handoff (#2269). The parent that
+    // re-executed us resolved the effective token and wrote it to our stdin;
+    // its value wins over whatever this process parsed for itself, because the
+    // parent already applied flag > env > config precedence. Reading it here,
+    // first, also means a child that fails for another reason has still taken
+    // the credential out of the pipe rather than leaving it there.
+    let auth_token_override = if auth_token_stdin {
+        if !foreground {
+            anyhow::bail!(
+                "{} is only valid for the foreground child of a background start",
+                secret_handoff::AUTH_TOKEN_STDIN_ARG
+            );
+        }
+        Some(secret_handoff::read_auth_token()?)
+    } else {
+        auth_token_override
+    };
+
+    // Ensure component directories exist before any file operations (PID file)
+    nession_common::paths::ensure_component_dirs()
+        .context("failed to create nession component directories")?;
+
+    // Already running, decided by ownership rather than by pid (#1016). A stale
+    // file whose pid was reused must not read as "already running" — and must
+    // not survive to make the *next* start think so.
+    match pid_file::ownership(&pid_file) {
+        Ok(pid_file::Ownership::Alive(identity)) => {
+            anyhow::bail!("Agent is already running with PID {}", identity.pid);
+        }
+        // Stale, reused, or no record at all: nothing of ours is running.
+        Ok(_) | Err(_) => {
+            let _ = fs::remove_file(&pid_file);
+        }
+    }
+
+    let config = configuration::load_agent(&selection, &server_url_override, &auth_token_override)?;
+    let config_path = selection.path.to_string_lossy().into_owned();
+
+    if foreground {
+        info!("Starting agent in foreground mode");
+        println!("Starting nession-agent with config: {config_path}");
+        println!("Agent ID: {}", config.agent_id);
+        println!("Press Ctrl+C to stop");
+
+        // Record this process's identity (foreground mode) together with the
+        // config file it actually loaded, so `status` can report a verified
+        // source instead of presenting a default file as live state.
+        pid_file::write_identity(&pid_file, pid_file::Component::Agent, Some(&selection.path))?;
+
+        let result = run_agent_foreground(config).await;
+
+        let _ = fs::remove_file(&pid_file);
+
+        result?;
+    } else {
+        info!("Starting agent in background mode");
+        let exe = std::env::current_exe()?;
+
+        // The token is not an argument (#2269): see `background_child_command`
+        // and `lifecycle::secret_handoff` for the channel it travels over.
+        let mut cmd = background_child_command(
+            &exe,
+            &config_path,
+            &pid_file,
+            server_url_override.as_deref(),
+            auth_token_override.as_deref(),
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                });
+            }
+        }
+
+        // A path only this start knows, so a marker left by an earlier run
+        // cannot be mistaken for this child's announcement.
+        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        marker.arm(&mut cmd);
+
+        let mut child = cmd.spawn().context("failed to spawn agent process")?;
+
+        // Hand the credential over after spawn, then close the pipe. The child
+        // blocks on this read before it can load its config, so the write must
+        // not wait for readiness. A failed write leaves a child that can never
+        // start, so it is reaped rather than abandoned.
+        if let Some(token) = auth_token_override.as_deref() {
+            if let Err(error) = secret_handoff::write_auth_token(&mut child, token) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+
+        match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
+            startup::Startup::Serving => {
+                let pid = startup::announced_pid(&pid_file)?;
+                println!("Agent started in background with PID {pid}");
+                println!("PID file: {pid_file}");
+            }
+            startup::Startup::Exited(status) => {
+                anyhow::bail!("Agent exited before it was serving ({status}); check the logs");
+            }
+            startup::Startup::TimedOut => {
+                anyhow::bail!(
+                    "Agent did not report itself serving within {}s; check the logs",
+                    startup::STARTUP_TIMEOUT.as_secs()
+                );
+            }
+        }
+        println!("Config: {config_path}");
+    }
+
+    Ok(())
+}
+
+/// The command a background start re-executes itself with.
+///
+/// Extracted from [`run`] so the invariant #2269 fixes — the resolved
+/// credential is not in the child's argument vector — is asserted against the
+/// same vector the parent actually spawns, rather than a parallel copy built
+/// for a test.
+pub(crate) fn background_child_command(
+    exe: &Path,
+    config_path: &str,
+    pid_file: &str,
+    server_url_override: Option<&str>,
+    auth_token_override: Option<&str>,
+) -> Command {
+    let mut cmd = Command::new(exe);
+    let mut child_args: Vec<String> = vec![
+        "agent".to_string(),
+        "start".to_string(),
+        "--config".to_string(),
+        config_path.to_string(),
+        "--foreground".to_string(),
+        // Forwarded, so the child records its identity where this parent —
+        // and every later `stop`/`status` — looks for it (#1016).
+        "--pid-file".to_string(),
+        pid_file.to_string(),
+    ];
+    if let Some(url) = server_url_override {
+        child_args.push("--server-url".to_string());
+        child_args.push(url.to_string());
+    }
+    let hands_off_token = auth_token_override.is_some();
+    if hands_off_token {
+        child_args.push(secret_handoff::AUTH_TOKEN_STDIN_ARG.to_string());
+    }
+    cmd.args(&child_args)
+        .stdin(if hands_off_token {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd
+}
+
+/// Run the Agent runtime in foreground mode (blocks until shutdown).
+async fn run_agent_foreground(config: nession_agent::config::AgentConfig) -> Result<()> {
+    // The composition is owned by `nession_agent::runtime` (#1014), not this
+    // entrypoint. A background start re-execs this path with the readiness
+    // variable set, so this one call serves both a foreground start a user
+    // typed and the child of a daemon parent waiting to be told it serves
+    // (#1016).
+    nession_agent::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The credential these tests use. Distinctive enough that a substring
+    /// search over the child's vector cannot pass by accident.
+    const SECRET: &str = "fake-auth-token-for-2269";
+
+    fn background_command(auth_token_override: Option<&str>) -> Command {
+        background_child_command(
+            Path::new("/bin/true"),
+            "agent-config.toml",
+            "agent.pid",
+            None,
+            auth_token_override,
+        )
+    }
+
+    fn argv(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// #2269 at the vector both flag- and env-sourced credentials feed: the
+    /// credential selects the *channel*, and the value itself never appears in
+    /// the re-executed child's argument vector or environment.
+    #[test]
+    fn a_resolved_credential_is_carried_by_the_channel_not_the_argv() {
+        let command = background_command(Some(SECRET));
+        let argv = argv(&command);
+
+        assert!(
+            !argv.iter().any(|arg| arg.contains(SECRET)),
+            "the re-exec child's argv must not carry the credential: {argv:?}"
+        );
+        assert!(
+            argv.iter()
+                .any(|arg| arg == secret_handoff::AUTH_TOKEN_STDIN_ARG),
+            "the child must be pointed at the handoff channel instead: {argv:?}"
+        );
+        let env: Vec<_> = command.get_envs().collect();
+        assert!(
+            !env.iter()
+                .any(|(_, value)| value
+                    .is_some_and(|value| value.to_string_lossy().contains(SECRET))),
+            "the re-exec child's environment must not carry the credential: {env:?}"
+        );
+    }
+
+    #[test]
+    fn a_start_without_an_override_has_no_handoff_channel() {
+        let command = background_command(None);
+
+        let argv = argv(&command);
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg == secret_handoff::AUTH_TOKEN_STDIN_ARG),
+            "no credential, no channel: {argv:?}"
+        );
+    }
+
+    /// SC-03: the background child receives both the resolved config file and
+    /// the resolved PID file. A child that wrote the default path would leave
+    /// every later `stop`/`status` looking at a file nothing wrote (#1016).
+    #[test]
+    fn the_background_child_receives_the_resolved_config_and_pid_file() {
+        let command = background_child_command(
+            Path::new("/bin/true"),
+            "/custom/agent.toml",
+            "/custom/agent.pid",
+            Some("ws://server:1"),
+            None,
+        );
+        let argv = argv(&command);
+        for expected in [
+            "--config",
+            "/custom/agent.toml",
+            "--pid-file",
+            "/custom/agent.pid",
+            "--server-url",
+            "ws://server:1",
+        ] {
+            assert!(
+                argv.iter().any(|arg| arg == expected),
+                "missing {expected}: {argv:?}"
+            );
+        }
+    }
+}

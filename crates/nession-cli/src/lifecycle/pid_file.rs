@@ -135,6 +135,25 @@ impl Component {
     }
 }
 
+/// Resolve a state-file path: the explicit value, else the component's
+/// documented default.
+pub fn resolve_path(explicit: Option<String>, component: Component) -> String {
+    if let Some(path) = explicit {
+        return path;
+    }
+    let (resolved, fallback) = match component {
+        Component::Agent => (
+            nession_common::paths::agent_pid_path(),
+            std::path::PathBuf::from("agent.pid"),
+        ),
+        Component::Server => (
+            nession_common::paths::server_pid_path(),
+            std::path::PathBuf::from("server.pid"),
+        ),
+    };
+    resolved.unwrap_or(fallback).to_string_lossy().into_owned()
+}
+
 /// What a daemon state file records about the process that wrote it.
 ///
 /// A bare pid is **not** an identity (#1016): operating systems reuse PIDs, so
@@ -148,12 +167,17 @@ impl Component {
 /// can *verify* a nonce — it could only be recorded, which proves no more than
 /// the start time already does. A field that looks like evidence and isn't is
 /// worse than not having it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessIdentity {
     pub pid: u32,
     /// When the process started, in seconds since the Unix epoch.
     pub started_at: u64,
     pub kind: Component,
+    /// The `--config` file the process actually loaded, recorded by the
+    /// process itself. `None` means it started without an explicit selection
+    /// (or predates this record); `status` must then say the running source is
+    /// unknown instead of presenting a default file as live state.
+    pub config_path: Option<String>,
 }
 
 impl ProcessIdentity {
@@ -167,6 +191,7 @@ impl ProcessIdentity {
             pid,
             started_at,
             kind,
+            config_path: None,
         })
     }
 }
@@ -202,13 +227,24 @@ fn start_time_of(pid: u32) -> Option<u64> {
 }
 
 /// Record the identity of the current process at `path`.
-pub fn write_identity(path: &str, kind: Component) -> Result<ProcessIdentity> {
-    let identity = ProcessIdentity::of_current_process(kind)?;
+pub fn write_identity(
+    path: &str,
+    kind: Component,
+    config_path: Option<&Path>,
+) -> Result<ProcessIdentity> {
+    let mut identity = ProcessIdentity::of_current_process(kind)?;
+    identity.config_path = config_path.map(|path| path.to_string_lossy().into_owned());
+    let config_line = identity
+        .config_path
+        .as_ref()
+        .map(|path| format!("config_path={path}\n"))
+        .unwrap_or_default();
     let body = format!(
-        "pid={}\nstarted_at={}\nkind={}\n",
+        "pid={}\nstarted_at={}\nkind={}\n{}",
         identity.pid,
         identity.started_at,
-        identity.kind.as_str()
+        identity.kind.as_str(),
+        config_line
     );
     fs::write(path, body).with_context(|| format!("Failed to write state file: {path}"))?;
     Ok(identity)
@@ -222,6 +258,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     let mut pid = None;
     let mut started_at = None;
     let mut kind = None;
+    let mut config_path = None;
     for line in content.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -230,6 +267,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             "pid" => pid = value.trim().parse::<u32>().ok(),
             "started_at" => started_at = value.trim().parse::<u64>().ok(),
             "kind" => kind = Component::parse(value.trim()),
+            "config_path" => config_path = Some(value.trim().to_string()),
             _ => {}
         }
     }
@@ -239,6 +277,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             pid,
             started_at,
             kind,
+            config_path,
         }),
         // A file the old format wrote — a bare pid — reads as a missing record
         // rather than as an identity, because a bare pid is what this replaces.
@@ -247,7 +286,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
 }
 
 /// What the state file at `path` says about the process it names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ownership {
     /// The recorded instance is running: safe to signal.
     Alive(ProcessIdentity),
@@ -368,7 +407,7 @@ mod tests {
         let path = dir.path().join("agent.pid");
         let path = path.to_str().unwrap();
 
-        let written = write_identity(path, Component::Agent).unwrap();
+        let written = write_identity(path, Component::Agent, None).unwrap();
         let read = read_identity(path).unwrap();
 
         assert_eq!(read, written);
@@ -377,12 +416,29 @@ mod tests {
     }
 
     #[test]
+    fn an_identity_records_the_config_file_the_process_loaded() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+
+        write_identity(
+            path,
+            Component::Agent,
+            Some(std::path::Path::new("/custom/agent.toml")),
+        )
+        .unwrap();
+        let read = read_identity(path).unwrap();
+
+        assert_eq!(read.config_path.as_deref(), Some("/custom/agent.toml"));
+    }
+
+    #[test]
     fn the_current_process_is_recognised_as_ours() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("agent.pid");
         let path = path.to_str().unwrap();
 
-        write_identity(path, Component::Agent).unwrap();
+        write_identity(path, Component::Agent, None).unwrap();
 
         assert!(matches!(ownership(path).unwrap(), Ownership::Alive(_)));
     }

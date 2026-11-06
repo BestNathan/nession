@@ -1,147 +1,15 @@
-//! Client-facing CLI commands implementation.
+//! `nession sessions attach` — resolve a route and run the terminal.
+//!
+//! Route selection (auto P2P candidate failover, then relay), credential
+//! guarding and the relay begin all live here; the shared `nession-client`
+//! boundary stays the transport owner.
+
+use crate::connection::connect;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use nession_client::{AttachMode, ClientConfig, ClientConnection, RelayBeginOutcome};
-use nession_protocol::contracts::agent::v1::{AgentListReply, WebAgentInfo};
-use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
-
-/// Connect to the server, with this CLI's own failure sentence attached.
-///
-/// The boundary reports typed errors and no prose for the shell; where the
-/// sentence lives here is a CLI decision, which is why `nession-client` has no
-/// `anyhow` and this function does.
-async fn connect(server_url: &str, auth_token: &str) -> Result<ClientConnection> {
-    ClientConnection::connect(ClientConfig::new(server_url, auth_token))
-        .await
-        .with_context(|| "Failed to connect to server. Is the server running?")
-}
-
-/// List agents from the server and display them in a formatted table.
-pub async fn list_agents(server_url: &str, auth_token: &str) -> Result<()> {
-    // Connect to the server
-    let mut client = connect(server_url, auth_token).await?;
-
-    // Fetch agents. The reply is the contract's union — the list, or the
-    // server's refusal — and the refusal's own sentence is what a reader needs,
-    // so it is printed rather than described.
-    let agents = match client.list_agents().await? {
-        AgentListReply::Listed(list) => list.agents,
-        AgentListReply::Refused(refusal) => {
-            anyhow::bail!("Server refused to list agents: {}", refusal.message)
-        }
-    };
-
-    // Close connection
-    client.close().await.ok();
-
-    // Display results
-    if agents.is_empty() {
-        println!("No agents registered.");
-        return Ok(());
-    }
-
-    println!();
-    println!("Agents:");
-    println!(
-        "{:<16}{:<18}{:<10}{:<12}{:<10}{:<15}",
-        "ID", "HOSTNAME", "STATUS", "SESSIONS", "PROTOCOLS", "LAST HEARTBEAT"
-    );
-
-    for agent in &agents {
-        let heartbeat_ago = format_time_ago(&agent.last_heartbeat);
-        println!(
-            "{:<16}{:<18}{:<10}{:<12}{:<10}{:<15}",
-            agent.agent_id,
-            agent.hostname,
-            agent.status,
-            agent.session_count,
-            protocol_summary(agent),
-            heartbeat_ago,
-        );
-    }
-    println!();
-    println!("{} agent(s) total", agents.len());
-
-    Ok(())
-}
-
-/// How an agent's advertised protocol set reads in one column (`#678`).
-///
-/// `no manifest` rather than `0`: a peer this server has no manifest for is not
-/// a peer that serves nothing, and printing `0` would report the second as the
-/// first — they resolve differently.
-///
-/// Since `#678` became a breaking upgrade, registration refuses an agent that
-/// advertises nothing, so this is a straggler that has not reconnected since
-/// the server was upgraded. It is worth naming rather than hiding: every call
-/// to that agent will come back `contract_not_supported`, and a reader looking
-/// at this column should be able to see why.
-fn protocol_summary(agent: &WebAgentInfo) -> String {
-    match &agent.protocols {
-        Some(manifest) => format!("{} units", manifest.protocols.len()),
-        None => "no manifest".to_string(),
-    }
-}
-
-/// List sessions from the server and display them in a formatted table.
-pub async fn list_sessions(
-    server_url: &str,
-    auth_token: &str,
-    agent_id: Option<&str>,
-) -> Result<()> {
-    // Connect to the server
-    let mut client = connect(server_url, auth_token).await?;
-
-    // Fetch sessions. Reading the contract's union is also what fixes a refusal
-    // here: the consumer this replaces pulled `payload["sessions"]` out and ran
-    // it through `Vec<SessionInfo>`, so a refusal — which has no `sessions` key
-    // at all — surfaced as a serde error about a missing field rather than as
-    // the sentence the server actually sent.
-    let sessions = match client.list_sessions(agent_id).await? {
-        ServerSessionListReply::Listed(list) => list.sessions,
-        ServerSessionListReply::Refused(refusal) => {
-            anyhow::bail!("Server refused to list sessions: {}", refusal.message)
-        }
-    };
-
-    // Close connection
-    client.close().await.ok();
-
-    // Display results
-    if sessions.is_empty() {
-        if let Some(aid) = agent_id {
-            println!("No sessions found for agent '{aid}'.");
-        } else {
-            println!("No sessions found.");
-        }
-        return Ok(());
-    }
-
-    println!();
-    println!("Sessions:");
-    println!(
-        "{:<34}{:<16}{:<14}{:<12}{:<10}ATTACHED",
-        "SESSION ID", "AGENT", "NAME", "STATUS", "WINDOWS"
-    );
-
-    for session in &sessions {
-        println!(
-            "{:<34}{:<16}{:<14}{:<12}{:<10}{}",
-            session.session_id,
-            session.agent_id,
-            session.session_name,
-            session.status,
-            session.window_count,
-            session.attached_clients,
-        );
-    }
-    println!();
-    println!("{} session(s) total", sessions.len());
-
-    Ok(())
-}
+use nession_client::{AttachMode, ClientConnection, RelayBeginOutcome};
+use nession_protocol::contracts::session::v1::ClientSessionAttachReply;
 
 /// How the CLI chooses a route to the Agent (`#2811`).
 ///
@@ -483,7 +351,7 @@ async fn enter_relay(
 /// * `auth_token` - Authentication token
 /// * `session_id` - Session ID in format "agent_id:session_name"
 /// * `force_mode` - Optional mode override ("auto", "p2p" or "relay")
-pub async fn attach_session(
+pub async fn run(
     server_url: &str,
     auth_token: &str,
     session_id: &str,
@@ -566,155 +434,12 @@ async fn attach_and_run<T: crate::terminal::TerminalTransport>(
     Ok(())
 }
 
-/// Seconds since the Unix epoch, for the agent-facing envelopes built here.
-/// Create a new tmux session on an agent.
-///
-/// **One request on one authenticated connection.** It used to be three steps
-/// over two sockets: list every agent on the Server connection, pick this one
-/// out of the reply, *close* that connection, then dial the agent directly and
-/// speak a management command to it. That is the Server's job — authenticate,
-/// authorize, resolve the target, route — performed by a client that had
-/// already authenticated, which is why #1015 removes it rather than patches it.
-///
-/// It is also what makes the operation expressible at all now: the direct dial
-/// carried no credential, and the Agent refuses an uncredentialed connection
-/// (#1013). A consumer that never contacts the Server has nothing to present.
-///
-/// Creation takes no dimensions (#2268). Every session starts at
-/// `SESSION_WIDTH` × `SESSION_HEIGHT` (200×60) and the first client to attach
-/// states the size it ends up with; a create-time size was accepted and
-/// ignored on every path since the sizing decision of 2026-08-15, so the
-/// options have been removed rather than kept as phantom controls. The
-/// `session create` command now rejects them instead of silently succeeding
-/// with a size it does not apply.
-///
-/// # Arguments
-///
-/// * `server_url` - URL of the nession server
-/// * `auth_token` - Authentication token
-/// * `agent_id` - ID of the agent to create the session on
-/// * `session_name` - Name for the new session
-pub async fn create_session(
+/// Source-aligned entry point used by the CLI integration tests.
+pub async fn attach_session(
     server_url: &str,
     auth_token: &str,
-    agent_id: &str,
-    session_name: &str,
+    session_id: &str,
+    force_mode: Option<&str>,
 ) -> Result<()> {
-    let mut client = connect(server_url, auth_token).await?;
-    println!("Creating session '{session_name}' on agent '{agent_id}'...");
-
-    let reply = client
-        .create_session(agent_id, session_name)
-        .await
-        .with_context(|| {
-            format!("Failed to create session '{session_name}' on agent '{agent_id}'")
-        })?;
-    client.close().await.ok();
-
-    if !reply.success {
-        // The Server's own sentence, not a paraphrase of it. It knows which of
-        // the cases this is — an unknown agent, an offline one, a name already
-        // taken — and a client that restates it can only be less specific.
-        let reason = reply.error.unwrap_or_else(|| "no reason given".to_string());
-        anyhow::bail!("Server refused to create session '{session_name}': {reason}");
-    }
-
-    println!(
-        "Session '{}' created successfully.",
-        reply.session_id.as_deref().unwrap_or(session_name)
-    );
-
-    Ok(())
-}
-
-/// Kill a tmux session on an agent.
-///
-/// Parses the session_id (format: `agent_id:session_name`) and asks the Server,
-/// which resolves the agent and routes the kill. The parse stays because the
-/// wire takes a whole `session_id` and a malformed one is worth naming here
-/// rather than sending for the Server to reject.
-///
-/// # Arguments
-///
-/// * `server_url` - URL of the nession server
-/// * `auth_token` - Authentication token
-/// * `session_id` - Session ID in format "agent_id:session_name"
-pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) -> Result<()> {
-    let (agent_id, session_name) = session_id.split_once(':').with_context(|| {
-        format!("Invalid session ID '{session_id}'. Expected format: agent_id:session_name")
-    })?;
-
-    let mut client = connect(server_url, auth_token).await?;
-    println!("Killing session '{session_name}' on agent '{agent_id}'...");
-
-    let reply = client.kill_session(session_id).await.with_context(|| {
-        format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
-    })?;
-    client.close().await.ok();
-
-    if !reply.success {
-        let reason = reply.error.unwrap_or_else(|| "no reason given".to_string());
-        anyhow::bail!("Server refused to kill session '{session_name}': {reason}");
-    }
-
-    println!("Session '{session_name}' killed successfully.");
-
-    Ok(())
-}
-
-/// Format a timestamp string (ISO 8601 or Unix seconds) into "Xs ago" or "Xm ago".
-fn format_time_ago(timestamp: &str) -> String {
-    // Try to parse as a datetime
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-        let now = chrono::Utc::now();
-        let dt_utc = dt.with_timezone(&chrono::Utc);
-        let elapsed = now.signed_duration_since(dt_utc);
-        let secs = elapsed.num_seconds();
-
-        if secs < 0 {
-            return "just now".to_string();
-        }
-        if secs < 60 {
-            return format!("{secs}s ago");
-        }
-        let mins = secs / 60;
-        if mins < 60 {
-            return format!("{mins}m ago");
-        }
-        let hours = mins / 60;
-        if hours < 24 {
-            return format!("{hours}h ago");
-        }
-        let days = hours / 24;
-        return format!("{days}d ago");
-    }
-
-    // Try to parse as unix timestamp (seconds)
-    if let Ok(unix_secs) = timestamp.parse::<i64>() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let elapsed = now - unix_secs;
-
-        if elapsed < 0 {
-            return "just now".to_string();
-        }
-        if elapsed < 60 {
-            return format!("{elapsed}s ago");
-        }
-        let mins = elapsed / 60;
-        if mins < 60 {
-            return format!("{mins}m ago");
-        }
-        let hours = mins / 60;
-        if hours < 24 {
-            return format!("{hours}h ago");
-        }
-        let days = hours / 24;
-        return format!("{days}d ago");
-    }
-
-    // Fallback: return the original string
-    timestamp.to_string()
+    run(server_url, auth_token, session_id, force_mode).await
 }
