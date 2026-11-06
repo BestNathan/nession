@@ -27,8 +27,9 @@ body[data-nession-prototype-frame="v1"] *{box-sizing:border-box}
 .np-preview-toolbar button:focus-visible,.np-overview a:focus-visible,.np-details a:focus-visible{outline:2px solid #5a6a78;outline-offset:2px}
 /* A wide true-size viewport may exceed the review stage: safe centering must never hide its left edge. */
 .np-stage{display:flex;align-items:flex-start;justify-content:safe center;overflow:auto;max-width:100%;min-height:420px;padding:30px clamp(8px,2vw,24px);border:1px solid var(--np-line);border-radius:var(--np-radius);background:repeating-linear-gradient(0deg,#f1f2f4,#f1f2f4 1px,#f7f8f9 1px,#f7f8f9 20px);overscroll-behavior-x:contain}
-/* Outline lives outside the measured viewport; the product content retains the full labeled CSS width. */
-.np-device{width:var(--np-device-width,390px);height:var(--np-device-height,844px);max-width:none;max-height:none;min-height:0;flex:0 0 var(--np-device-width,390px);position:relative;overflow:hidden;background:#fff;border:0;outline:1px solid #d9dee3;border-radius:0;box-shadow:0 5px 24px #20252a0d;isolation:isolate}
+/* Outline lives outside the measured viewport. Paint containment also anchors
+   old position:fixed dialogs/toasts to the simulated screen, not the reviewer window. */
+.np-device{width:var(--np-device-width,390px);height:var(--np-device-height,844px);max-width:none;max-height:none;min-height:0;flex:0 0 var(--np-device-width,390px);position:relative;overflow:hidden;background:#fff;border:0;outline:1px solid #d9dee3;border-radius:0;box-shadow:0 5px 24px #20252a0d;isolation:isolate;contain:paint}
 .np-stage-label{color:var(--np-dim);font-size:11px;margin:9px 0 0;text-align:center}
 .np-details{margin-top:36px;border-top:1px solid var(--np-line);padding-top:28px}
 .np-details h2{font-weight:630;letter-spacing:-.025em;font-size:20px;margin:0 0 8px}
