@@ -9,8 +9,10 @@ import {openClaudeNativeSession} from '../providers/claude-native-store.mjs';
 import {sealQwenDevelopmentProposal,assertQwenModelHasNoStoreAuthority}
   from './qwen-development-evidence.mjs';
 import {prepareQwenDevelopmentSource,prepareQwenTrackedSource,
-  allowedQwenTrackedPath,collectQwenDevelopmentPatch}
+  allowedQwenTrackedPath,collectQwenDevelopmentPatch,
+  assertQwenControlledPublisherSource}
   from './qwen-development-source.mjs';
+import {preflightAgentPatch} from '../publisher/patch-preflight.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const native=names=>names.map((name,i)=>({type:'assistant',message:{
@@ -224,8 +226,31 @@ try{
   assert.deepEqual(fixturePatch.paths,[fixtureFile]);
   assert.equal(fixturePatch.issue,2817);
   assert.ok(fixturePatch.patch.includes('+implementation: qwen-verified'));
+  // The main-owned Publisher independently applies the actual Git patch
+  // and reuses the same code-owned Issue fixture byte policy. A forged
+  // Worker result with a safe-looking same-file diff must be rejected.
+  const checked=preflightAgentPatch({checkout:root,source_sha:fixtureSha,
+    patch:fixturePatch.patch,allowed_paths:[fixtureFile]});
+  assert.doesNotThrow(()=>assertQwenControlledPublisherSource({
+    issue:2817,sourceCheckout:root,sourceSha:fixtureSha,checked}));
+  assert.doesNotThrow(()=>assertQwenControlledPublisherSource({
+    issue:2274,sourceCheckout:root,sourceSha:fixtureSha,checked}));
+  assert.throws(()=>assertQwenControlledPublisherSource({
+    issue:2817,sourceCheckout:root,sourceSha:'f'.repeat(40),checked}),
+    /controlled Qwen fixture|Git source/);
+  assert.throws(()=>assertQwenControlledPublisherSource({
+    issue:2817,sourceCheckout:root,sourceSha:fixtureSha,
+    checked:{...checked,files:[{...checked.files[0],path:'src/other.js'}]}}),
+    /controlled Publisher fixture/);
   git('reset','--hard','HEAD');
   write(fixtureFile,fixtureOriginal.replace('review: pending','review: approved'));
+  const forgedPatch=execFileSync('git',['-C',root,'diff','--',fixtureFile],
+    {encoding:'utf8'});
+  const forged=preflightAgentPatch({checkout:root,source_sha:fixtureSha,
+    patch:forgedPatch,allowed_paths:[fixtureFile]});
+  assert.throws(()=>assertQwenControlledPublisherSource({
+    issue:2817,sourceCheckout:root,sourceSha:fixtureSha,checked:forged}),
+    /controlled Publisher fixture patch changed unauthorized bytes/);
   assert.throws(()=>collectQwenDevelopmentPatch(fixtureSnapshot,{
     events:native(['Read','Edit'])}),/replace exactly one verified line/);
   git('reset','--hard','HEAD');
