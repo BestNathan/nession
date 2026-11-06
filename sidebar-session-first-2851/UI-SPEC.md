@@ -3,6 +3,10 @@
 > Source of existing tokens: `BestNathan/nession` main `0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0`, `design/tokens/experience/web.json`, `design/generated/web.css`, `design/contracts/`, `docs/design/visual-language.md`, `web/src/app/Sidebar.tsx`, `web/src/app/experiences/web/WebLayout.tsx`.
 > Prototype revision: see shared `prototype` branch. This is a **candidate design** whose measured browser fidelity is pending.
 
+## Visible UI spec inside the prototype page
+
+The canonical **review experience is the interactive `index.html#ui-spec` region**, not this Markdown file. The reviewer can select components and see visual annotations, real computed dimensions, design-token bindings, typography specimens, color swatches and sidebar/work width relationship without leaving the prototype. The optional “在预览中点选元素” mode temporarily highlights a chosen product element without modifying production chrome. This document remains the rationale and acceptance reference behind that visual inspection layer.
+
 ## Spec ownership / priority
 1. **Existing Nession design grammar is authoritative.** In production, consume the generated `--nession-*` variables; never copy these reference values as new magic numbers in the Web app.
 2. **Candidate IA** (Session-first top, Agent on demand, rail removed) belongs to Issue #2851 and its future `docs/design/interaction/web.md` / pattern update. This mock has not changed the production contract.

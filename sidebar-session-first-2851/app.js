@@ -82,6 +82,7 @@
     q("agent-entry").setAttribute("aria-pressed",String(section==="agents"));
     q("sidebar-toggle").title=collapsed?"Expand sidebar":"Collapse sidebar";
     renderList();renderAgents();renderDialog();renderWork();
+    shell.dispatchEvent(new CustomEvent("nession:prototype-render",{bubbles:true}));
   }
   q("sidebar-toggle").addEventListener("click",()=>{collapsed=!collapsed;render();});
   q("work-open").addEventListener("click",()=>{if(width>=1024)collapsed=false;else drawerOpen=true;render();});

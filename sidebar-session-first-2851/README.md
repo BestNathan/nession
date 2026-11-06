@@ -2,6 +2,14 @@
 
 **Requirement:** https://github.com/BestNathan/nession/issues/2851
 
+## Built-in visual UI specification (primary review experience)
+- **Open this prototype's index.html and click “查看 UI 设计标注”** in the preview toolbar, or scroll directly to `index.html#ui-spec`. The visual specification lives **on the same page**; there is no requirement to open GitHub Markdown to see it.
+- Select **Sidebar / top actions / toggle / New Session / search / Session row / title / metadata / footer / status dot / drawer / work surface** to inspect the live computed width, height, padding, radius, font weight/size/line height and the canonical token bindings.
+- The responsive ruler shows measured navigation/work widths for desktop expanded/collapsed and narrow Web. The color swatches and typography samples are rendered in the review region using the pinned Nession token snapshot.
+- “在预览中点选元素” temporarily switches clicks on the product preview to inspection; turn it off to continue using the mock normally. Highlights are **review-only**, never a persistent product chrome.
+- Missing elements (collapsed Sidebar, dialog in place of session list, drawer closed) are marked hidden/unavailable; the inspector never fabricates measurements or claims parity to the production site.
+- Browser interaction/cross-viewport verification is still pending; source/static checks are not runtime proof.
+
 ## High-fidelity UI specification
 - [UI-SPEC.md](UI-SPEC.md) defines the per-component metrics, canonical token owner, proposed changes, state matrix and browser measurements required for #2851.
 - The sidebar CSS now consumes a **pinned, local read-only token snapshot** from `design/generated/web.css` at main `0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0`. It is not another token generator or new Nession palette.

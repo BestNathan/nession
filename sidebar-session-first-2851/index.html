@@ -5,6 +5,7 @@
 <title>Nession · Session-first Sidebar</title>
 <link rel="stylesheet" href="../prototype-frame-2758/frame.css">
 <link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./ui-inspector.css">
 </head>
 <body data-nession-prototype-frame="v1">
 <div class="np-page" data-np-root id="review-root">
@@ -20,7 +21,7 @@
   <main>
     <section class="np-preview" aria-label="Interactive full Web shell preview">
       <div class="np-section-heading"><div><h2>Interactive preview</h2><p>Switch Nession canonical Web sizes and exploratory/narrow widths. Navigation metrics follow main tokens; the Terminal is a simplified mock.</p></div>
-        <div class="np-preview-toolbar"><button data-np-size="1280" aria-pressed="true">Web 1280</button><button data-np-size="1440">Web 1440</button><button data-np-size="1180">Web 1180</button><button data-np-size="1024">Web 1024</button><button data-np-size="390">Narrow 390</button><button data-np-size="375">Narrow 375</button><button data-np-reset>Reset</button></div>
+        <div class="np-preview-toolbar"><a class="np-spec-jump" href="#ui-spec">查看 UI 设计标注</a><button data-np-size="1280" aria-pressed="true">Web 1280</button><button data-np-size="1440">Web 1440</button><button data-np-size="1180">Web 1180</button><button data-np-size="1024">Web 1024</button><button data-np-size="390">Narrow 390</button><button data-np-size="375">Narrow 375</button><button data-np-reset>Reset</button></div>
       </div>
       <div class="np-stage">
         <div class="np-device" data-np-device style="--np-device-width:1280px;--np-device-height:800px">
@@ -71,6 +72,53 @@
       </div>
       <p class="np-stage-label" data-np-current-size>1280 CSS px · 1:1</p>
     </section>
+    <section class="np-visual-spec" id="ui-spec" aria-label="Interactive high fidelity UI specifications">
+      <div class="np-spec-head">
+        <div>
+          <span class="np-spec-eyebrow">VISUAL DESIGN / COMPONENT GEOMETRY</span>
+          <h2>UI 设计标注 <span>· Live measurements</span></h2>
+          <p>在原型页面直接查看组件尺寸、间距、字体、颜色及其 Nession Token。指标从上方真实渲染的 DOM 读取，而不是另一份独立设计稿。</p>
+        </div>
+        <button type="button" class="np-spec-inspect-switch" id="spec-inspect-toggle" aria-pressed="false">在预览中点选元素</button>
+      </div>
+      <div class="np-spec-layout">
+        <div class="np-spec-nav">
+          <p class="np-spec-nav-title">选择设计组件</p>
+          <div id="spec-component-picker" class="np-spec-picker" role="group" aria-label="Choose component to inspect"></div>
+          <div class="np-spec-note">点击组件名称后，规格立即切换。开启右上角点选模式，可直接在上方预览里选中元素；再次点击可恢复正常产品交互。</div>
+        </div>
+        <div class="np-spec-panel">
+          <div class="np-spec-component-head">
+            <div><span id="spec-component-kind">SHELL LAYOUT</span><h3 id="spec-component-name">Sidebar column</h3><p id="spec-component-description">Web shell layout</p></div>
+            <span class="np-spec-visibility" id="spec-component-visibility" role="status">Measuring preview</span>
+          </div>
+          <div class="np-spec-ruler-heading"><strong>布局尺寸图</strong><span id="spec-viewport-label">Web · 1280 × 800</span></div>
+          <div class="np-spec-ruler" aria-label="Measured navigation and work surface widths">
+            <div id="spec-ruler-nav" class="np-spec-ruler-nav"></div>
+            <div id="spec-ruler-main" class="np-spec-ruler-main"></div>
+          </div>
+          <div class="np-spec-ruler-foot"><span id="spec-ruler-note">SIDEBAR / WORK WIDTH</span><span>↔ 1:1 CSS px · measured</span></div>
+          <div class="np-spec-metrics" aria-live="polite">
+            <div><span>宽度 WIDTH</span><strong id="spec-width">—</strong></div>
+            <div><span>高度 HEIGHT</span><strong id="spec-height">—</strong></div>
+            <div><span>内边距 PADDING</span><strong id="spec-padding">—</strong></div>
+            <div><span>圆角 RADIUS</span><strong id="spec-radius">—</strong></div>
+            <div><span>字号 FONT</span><strong id="spec-font">—</strong></div>
+            <div><span>字重 / 行高</span><strong id="spec-type-detail">—</strong></div>
+          </div>
+          <div class="np-spec-ownership">
+            <div><p class="np-spec-subtitle">DESIGN TOKEN / SOURCE</p><div id="spec-token-list" class="np-spec-tokens"></div></div>
+            <div><p class="np-spec-subtitle">设计状态 / NOTES</p><p id="spec-state-notes" class="np-spec-state-notes"></p></div>
+          </div>
+        </div>
+      </div>
+      <div class="np-spec-reference">
+        <div class="np-spec-reference-head"><h3>视觉语言预览 / Color &amp; Type</h3><p>直接使用当前原型快照的 Nession 语义 Token；切换 viewport 不会改变设计系统归属。</p></div>
+        <div class="np-spec-swatches" id="spec-swatches" aria-label="Nession color swatches"></div>
+        <div class="np-spec-type-samples" id="spec-type-samples" aria-label="Nession chrome typography samples"></div>
+      </div>
+      <p class="np-spec-fidelity">设计标注针对本次 Sidebar 提案，和预览一起可操作。尺寸来自模拟产品 DOM 的实际计算结果；不是与生产 Web 的截图逐像素一致性证明。Terminal 与 Workspace 部分仍为近似。完整变更依据见 <a href="https://github.com/BestNathan/nession/blob/main/design/generated/web.css" target="_blank" rel="noopener noreferrer">Nession Design Tokens</a>。</p>
+    </section>
     <section class="np-details" aria-label="Design and verification">
       <h2>Function and verification</h2>
       <p class="np-details-lede">The proposal changes sidebar information architecture only; the full Web work surface and Shell ownership remain recognizable.</p>
@@ -78,12 +126,13 @@
         <article class="np-detail"><h3>Proposed hierarchy</h3><ol class="np-steps"><li>Top: shell toggle, New Session, Search.</li><li>Middle: flat Session history, time labels, local item overflow.</li><li>Bottom: on-demand Agents/location context and independent Server state.</li></ol></article>
         <article class="np-detail"><h3>Try the critical path</h3><ol class="np-steps"><li>Select a different Session, then search for one.</li><li>Create a Session with explicit submit; try the offline Agent.</li><li>Collapse/reopen and inspect the work width.</li><li>Switch to Narrow 390; open/close the drawer.</li></ol></article>
         <article class="np-detail"><h3>Candidate vs shipped</h3><p>On current main, Agents occupy the sidebar top; collapse uses a static-summary rail. Here Sessions lead, Agent details are revealed on request, and collapse fully tucks away the column. These changes have not been integrated into production Web.</p></article>
-        <article class="np-detail"><h3>Visual specification</h3><p>The Sidebar uses a pinned snapshot of canonical Web tokens (width, controls, type, row spacing, radius, colors and motion). See <a href="https://github.com/BestNathan/nession/tree/prototype/sidebar-session-first-2851" target="_blank" rel="noopener noreferrer">UI-SPEC.md in the source directory</a> for dimensions and deviation notes. Main Terminal remains a visual approximation.</p></article><article class="np-detail"><h3>Evidence / gaps</h3><p>Plain HTML + sanitized fixtures, CSS terminal-text approximation, no live tmux, no persistent Server/Agent state, no real Session creation. Viewport 1:1 is not screenshot/pixel parity. Browser/Pages publish and exact-SHA production Acceptance must be verified independently.</p><span class="np-status">Prototype only · not production Acceptance</span></article>
+        <article class="np-detail"><h3>Visual specification</h3><p>The live annotated <a href="#ui-spec">UI Design section</a> above is the primary visual handoff: choose a Sidebar element to inspect computed dimensions, typography and tokens. <a href="https://github.com/BestNathan/nession/blob/main/design/generated/web.css" target="_blank" rel="noopener noreferrer">Canonical tokens</a> remain authoritative. The separate UI-SPEC.md file is supporting detail, not the only way to see the design.</p></article><article class="np-detail"><h3>Evidence / gaps</h3><p>Plain HTML + sanitized fixtures, CSS terminal-text approximation, no live tmux, no persistent Server/Agent state, no real Session creation. Viewport 1:1 is not screenshot/pixel parity. Browser/Pages publish and exact-SHA production Acceptance must be verified independently.</p><span class="np-status">Prototype only · not production Acceptance</span></article>
       </div>
     </section>
   </main>
   <footer class="np-footer">Nession UI exploration · Issue #2851 · Candidate Web navigation, not the shipped product.</footer>
 </div>
 <script src="./app.js"></script>
+<script src="./ui-inspector.js"></script>
 <script src="../prototype-frame-2758/frame.js"></script>
 </body></html>
