@@ -29,3 +29,6 @@ body[data-nession-prototype-frame="v1"] .np-device .composer-caption{display:non
 body[data-nession-prototype-frame="v1"] .np-device .app-stage{height:calc(100% - 140px);min-height:0}
 body[data-nession-prototype-frame="v1"] .np-device .stage-rail{overflow:auto}
 body[data-nession-prototype-frame="v1"] .np-fixtures :focus-visible{outline:2px solid #596a7d;outline-offset:2px}
+
+/* The surrounding outline is review chrome, not part of the target CSS viewport. */
+body[data-nession-prototype-frame="v1"] .np-device{border:0;outline:1px solid #d9dee3}
