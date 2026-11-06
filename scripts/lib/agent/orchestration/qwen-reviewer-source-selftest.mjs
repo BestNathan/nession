@@ -97,10 +97,10 @@ try{
     /signed source-ref context/);
   assert.throws(()=>sourceAllowed(B,'reviewer',{task:action.task,context,
     run:parts=>parts[0]==='rev-parse'?'0'.repeat(40):''}),
-    /published Qwen Reviewer source ref unavailable/);
+    /published Qwen PR source ref unavailable or changed/);
   assert.throws(()=>sourceAllowed(B,'reviewer',{task:action.task,context,
     run:parts=>{if(parts[0]==='fetch')throw Error('missing');return B;}}),
-    /published Qwen Reviewer source ref unavailable/);
+    /published Qwen PR source ref unavailable or changed/);
   fs.writeFileSync(file,JSON.stringify({...intent,publisher_run_id:402}));
   assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen publication Intent/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}

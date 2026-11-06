@@ -9,8 +9,10 @@ import {execFileSync} from 'node:child_process';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {startDevelopment,recordDispatchIntent,recordDispatch,
   acceptTaskResult,bindVerifiedRepairCheckpoint} from './outbox.mjs';
-import {attestQwenPublishedRepairCheckpoint}
+import {attestQwenPublishedRepairCheckpoint,qwenRepairPublishedSource}
   from './qwen-repair-checkpoint.mjs';
+import {bindQwenRepairCheckpoint} from './dispatch-store.mjs';
+import {sourceAllowed} from './controller-dispatch.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {writeIssueWorkflowState,readIssueWorkflowState}
   from './state-store.mjs';
@@ -383,8 +385,57 @@ try {
       storeRoot:post,state:reviewAccepted,actionId:originalRepair.id}),
       /trusted Qwen Repair origin/);
   }finally{fs.writeFileSync(path.join(post,cpPath),originalCheckpointBytes);}
+  // Owner/main Controller binds exactly once through the canonical
+  // versioned Store CAS, then fetches ONLY the signed original PR ref.
+  const boundRemote=bindQwenRepairCheckpoint({
+    remote,issue,actionId:originalRepair.id});
+  assert.equal(boundRemote.status,'bound');
+  assert.equal(boundRemote.state_version,boundRepair.version);
+  assert.equal(bindQwenRepairCheckpoint({
+    remote,issue,actionId:originalRepair.id}).status,'replayed');
+  // The reviewed action was consumed and pruned by the canonical
+  // transition; a stale Reviewer ID cannot be resurrected as a Repair.
+  assert.throws(()=>bindQwenRepairCheckpoint({
+    remote,issue,actionId:reviewAction.id}),/pending Action not found/);
+  assert.throws(()=>bindQwenRepairCheckpoint({
+    remote,issue,actionId:'f'.repeat(64)}),
+    /pending Action not found/);
+  git(post,'pull','--ff-only','origin','agent-store');
+  const storedBound=readIssueWorkflowState(post,issue);
+  assert.equal(storedBound.version,boundRepair.version);
+  const boundAction=storedBound.state.outbox.find(x=>x.id===originalRepair.id);
+  const repairSource=qwenRepairPublishedSource({
+    storeRoot:post,issue,actionId:originalRepair.id,sha:commitSha});
+  assert.equal(repairSource.review_sha,commitSha);
+  assert.equal(repairSource.base_sha,inputSha);
+  assert.equal(repairSource.branch,'refs/heads/'+branch);
+  assert.throws(()=>qwenRepairPublishedSource({
+    storeRoot:post,issue,actionId:originalRepair.id,sha:'f'.repeat(40)}),
+    /trusted Qwen Repair origin/);
+  const calls=[];
+  const acceptedGit=(args)=>{
+    calls.push(args);
+    if(args[0]==='fetch')return '';
+    if(args[0]==='rev-parse')return commitSha;
+    if(args[0]==='cat-file')return '';
+    if(args[0]==='merge-base')return '';
+    throw Error('unexpected Controller Git operation');
+  };
+  assert.doesNotThrow(()=>sourceAllowed(commitSha,'developer',{
+    task:boundAction.task,context:{storeRoot:post,issue,actionId:originalRepair.id},
+    mainSha:inputSha,run:acceptedGit}));
+  assert.deepEqual(calls,[
+    ['fetch','--quiet','--no-tags','origin','refs/heads/'+branch],
+    ['rev-parse','FETCH_HEAD'],
+    ['cat-file','-e',commitSha+'^{commit}'],
+    ['merge-base','--is-ancestor',inputSha,commitSha],
+  ]);
+  assert.throws(()=>sourceAllowed(commitSha,'developer',{
+    task:boundAction.task,context:{storeRoot:post,issue,actionId:originalRepair.id},
+    mainSha:inputSha,run:args=>args[0]==='rev-parse'?'f'.repeat(40):''}),
+    /published Qwen PR source ref unavailable or changed/);
   assert.equal(posts,5,
-    'Qwen repair origin reads only immutable Store and never retries GitHub POST');
+    'Owner Repair binding and ref readback never call GitHub PR POST');
   for(const wrong of [
     {...readback,head_sha:'0'.repeat(40)},
     {...readback,source_run_id:workerId+1},
