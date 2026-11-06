@@ -26,6 +26,13 @@ const CONTROLLED_REPAIR_ACTION='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0
 const CONTROLLED_REPAIR_FAILED_RUN=42020432271;
 const CONTROLLED_REPAIR_FAILURE='cursor_native_read_missing_uncommitted';
 const CONTROLLED_REPAIR_SUCCESSOR='ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5';
+const QWEN_PREFLIGHT_FAILURE=Object.freeze({
+  issue:2817,
+  action_id:'61bced6ae498054e883d8a52d7398e7877852ef6a3c41e93644138a4b47dacb3',
+  run_id:42187623195,
+  source_sha:'149df703ff383e7bb6958eb6d1448f6ad7248ca6',
+  failure_code:'qwen_native_sealing_public_key_missing',
+});
 
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -196,7 +203,14 @@ export function validateDevelopmentState(state) {
       if(Object.keys(r).length!==5||r.status!=='failed'||
           r.dispatch_id!==item.id||
           !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE,
-            CONTROLLED_REPAIR_FAILURE].includes(r.failure_code)||
+            CONTROLLED_REPAIR_FAILURE,
+            QWEN_PREFLIGHT_FAILURE.failure_code].includes(r.failure_code)||
+          (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
+            state.issue!==QWEN_PREFLIGHT_FAILURE.issue||
+            item.id!==QWEN_PREFLIGHT_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.task!=='implement'||item.task.sha!==QWEN_PREFLIGHT_FAILURE.source_sha||
+            r.source_run_id!==QWEN_PREFLIGHT_FAILURE.run_id))||
           (r.failure_code===CONTROLLED_REPAIR_FAILURE&&(
             item.id!==CONTROLLED_REPAIR_ACTION||
             r.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
@@ -826,6 +840,49 @@ export function recordAttestedDeveloperFailure(state,expectedVersion,actionId,so
   const next={id:nextId,task:{...old.task},status:'pending',attempts:0,receipt:null};
   return validateDevelopmentState({...state,version:state.version+1,
     outbox:[...state.outbox.map(x=>x.id===actionId?failed:x),next]});
+}
+
+// A single source-attested, pre-model Qwen canary setup failure can be
+// retired in Store with an immutable successor. It never re-POSTs the
+// already acknowledged Worker Run, grants model authority or reuses a
+// ciphertext checkpoint. Generalizing failures requires new evidence.
+export function qwenPreflightSuccessorId(issue,actionId,runId){
+  if(issue!==QWEN_PREFLIGHT_FAILURE.issue||
+     actionId!==QWEN_PREFLIGHT_FAILURE.action_id||
+     runId!==QWEN_PREFLIGHT_FAILURE.run_id)
+    reject('unrecognized Qwen preflight recovery identity');
+  return hash([issue,actionId,runId,'qwen-native-key-preflight-recovery-v1']);
+}
+export function recordAttestedQwenPreflightFailure(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','failure_code'],'Qwen preflight failure evidence');
+  const source=QWEN_PREFLIGHT_FAILURE;
+  const old=state.outbox.find(x=>x.id===source.action_id);
+  if(state.version!==version||state.version!==3||
+     state.issue!==source.issue||state.phase!=='ready'||
+     state.target_sha!==null||state.transitions.length!==0||
+     state.outbox.length!==1||state.assignments.developer!=='dev-qwen-01'||
+     proof.verified!==true||proof.issue!==source.issue||
+     proof.action_id!==source.action_id||proof.run_id!==source.run_id||
+     proof.attempt!==1||proof.source_sha!==source.source_sha||
+     proof.failure_code!==source.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.role!=='developer'||old.task.task!=='implement'||
+     old.task.agent_id!=='dev-qwen-01'||old.task.sha!==source.source_sha||
+     old.receipt?.status!=='verified'||
+     old.receipt?.dispatch_id!==source.action_id||
+     old.receipt?.source_run_id!==source.run_id)
+    reject('Qwen preflight recovery lacks exact failed Run/Store lineage');
+  const nextId=qwenPreflightSuccessorId(source.issue,source.action_id,source.run_id);
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:old.id,source_run_id:source.run_id,
+    source_attempt:1,failure_code:source.failure_code,
+  }};
+  const successor={id:nextId,task:{...old.task},
+    status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[failed,successor]});
 }
 
 export function failedDispatch(state, expectedVersion, actionId) {

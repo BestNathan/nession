@@ -9,6 +9,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
+  recordAttestedQwenPreflightFailure,qwenPreflightSuccessorId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
@@ -23,6 +24,7 @@ import {attestQwenPublishedRepairCheckpoint}
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
+import {SOURCE as QWEN_KEY_FAILURE} from './qwen-preflight-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -397,6 +399,54 @@ export function recoverConfirmedFailedDeveloperDispatch({
     return {status:'recovered',issue,
       action_id:failedDeveloperRetryActionId(issue,actionId,runId),
       state_version:next.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// One real, independently authenticated #2817 Qwen *pre-model* failure.
+// The original 204 was already ACKed, so it can NEVER be POSTed again.
+// This only CAS-retires the old Action and creates a fresh pending successor;
+// it does not call the model, create a PR or dispatch that successor.
+export function recoverAttestedQwenPreflight({remote,source}){
+  const original=QWEN_KEY_FAILURE;
+  if(source?.verified!==true||source.issue!==original.issue||
+     source.action_id!==original.action_id||
+     source.run_id!==original.run_id||source.attempt!==1||
+     source.source_sha!==original.source_sha||
+     source.failure_code!==original.failure_code)
+    fail('Qwen key recovery requires the exact independently attested failed Run');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,original.issue);
+    if(!record.state)fail('missing Qwen canary issue state');
+    const old=record.state.outbox.find(x=>x.id===original.action_id);
+    const successorId=qwenPreflightSuccessorId(original.issue,
+      original.action_id,original.run_id);
+    if(old?.status==='failed'){
+      const next=record.state.outbox.find(x=>x.id===successorId);
+      if(old.receipt?.source_run_id!==original.run_id||
+         old.receipt?.failure_code!==original.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting previously recovered Qwen preflight Run');
+      return {status:'replayed',issue:original.issue,
+        action_id:successorId,state_version:record.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==3||old?.status!=='dispatched'||
+       old.receipt?.status!=='verified'||
+       old.receipt.source_run_id!==original.run_id||
+       old.task.role!=='developer'||old.task.task!=='implement'||
+       old.task.agent_id!=='dev-qwen-01'||old.task.sha!==original.source_sha)
+      fail('Qwen Store state no longer matches authenticated Worker');
+    const folder=path.join(dir,'roles/developer/dev-qwen-01/issues/2817');
+    if(fs.existsSync(path.join(folder,'head.json'))||
+       fs.existsSync(path.join(folder,'runs/'+original.run_id+'-1.json'))||
+       fs.existsSync(path.join(folder,'checkpoints')))
+      fail('cannot recover Qwen Worker with a committed native checkpoint');
+    const state=recordAttestedQwenPreflightFailure(record.state,record.version,source);
+    const published=persist(dir,state,record.version,original.issue);
+    if(published.replayed)fail('unexpected Qwen recovery CAS replay');
+    return {status:'recovered',issue:original.issue,
+      action_id:successorId,state_version:state.version,
+      store_commit_sha:published.commit_sha};
   });
 }
 
