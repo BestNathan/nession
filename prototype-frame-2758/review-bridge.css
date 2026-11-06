@@ -39,3 +39,21 @@ body[data-nession-prototype-frame="v1"] .np-fixtures #debugPanel{position:static
 body[data-nession-prototype-frame="v1"] .np-fixtures #debugPanel.open{display:flex!important}
 body[data-nession-prototype-frame="v1"] .np-fixtures #inspector{position:static!important;inset:auto!important;width:100%;max-width:none;flex:1 1 auto;min-height:280px;max-height:460px;border:1px solid var(--np-line);border-radius:10px;box-shadow:none;overflow:auto}
 body[data-nession-prototype-frame="v1"] .np-fixtures #inspector[hidden]{display:none!important}
+
+/* Legacy Files: the original page wrapper is not part of the device. */
+body[data-nession-prototype-frame="v1"] .np-device > #app{position:relative}
+body[data-nession-prototype-frame="v1"] .np-device > #app > .frame{height:100%;min-height:0;max-width:none;margin:0;padding:0}
+body[data-nession-prototype-frame="v1"] .np-device > #app > .frame > .workspace{height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}
+
+/* Git: re-rendered mock controls and inspection must stay in the review harness. */
+body[data-nession-prototype-frame="v1"] .np-fixtures #np-git-fixture-controls{width:100%;min-width:0;max-width:none;margin:0}
+body[data-nession-prototype-frame="v1"] .np-fixtures #np-git-fixture-controls .fixture-panel{height:auto;min-height:0;display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-start;gap:10px;padding:10px 0;border:0;background:transparent}
+body[data-nession-prototype-frame="v1"] .np-fixtures #np-git-fixture-controls .inspector{position:static;inset:auto;transform:none;width:100%;max-width:none;max-height:400px;margin:9px 0 0;z-index:auto;box-shadow:none;overflow:auto}
+body[data-nession-prototype-frame="v1"] .np-fixtures #np-git-fixture-controls select{min-height:36px}
+
+/* Keep viewport-relative legacy widths tied to the simulated device. The
+   shared bridge sets a size-query container on the np-device itself. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .conversation-capsule,
+body[data-nession-prototype-frame="v1"] .np-device > #app .context-surface{width:min(460px,calc(100cqw - 90px))}
+body[data-nession-prototype-frame="v1"] .np-device > #app .capability-dock{max-width:min(450px,calc(100cqw - 82px))}
+body[data-nession-prototype-frame="v1"] .np-device > #app .sessions-layer{width:min(360px,calc(100cqw - 45px))}
