@@ -104,7 +104,7 @@ try {
   const savedIssue=readFileSync(filename,'utf8');
   const unlabelled={
     number:17,state:'OPEN',title:'Bug: missing labels',labels:[],
-    body:'## Description\\nObserved.\\n\\n## Reproduction\\n1. Reproduce.\\n\\n## Investigation Status\\nPending investigation.\\n\\n## Impact\\nAffected.\\n\\n## Fix Direction\\nRepair metadata.\\n\\n## Location\\n- scripts/issue-audit-agent.mjs',
+    body:'## Description\nObserved.\n\n## Reproduction\n1. Reproduce.\n\n## Investigation Status\nPending investigation.\n\n## Impact\nAffected.\n\n## Fix Direction\nRepair metadata.\n\n## Location\n- scripts/issue-audit-agent.mjs',
   };
   writeFileSync(filename,JSON.stringify(unlabelled));
   const absentLabelSnapshot=readFileSync(filename,'utf8');
