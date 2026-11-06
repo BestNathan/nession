@@ -19,6 +19,7 @@
     "jsonl-preview-geometry.spec.ts",
     "login.spec.ts",
     "session-lifecycle.spec.ts",
+    "sidebar-session-first.spec.ts",
     "terminal-io.spec.ts",
     "transcript-geometry.spec.ts",
     "ui-contract-assertions.spec.ts",

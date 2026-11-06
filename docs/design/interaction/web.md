@@ -24,7 +24,9 @@ Terminal remains the default live surface for the current Session implementation
 
 Sessions are the primary way to return to work, but a persistent full-width navigation column is not an invariant.
 
-On Web, Session navigation may use a drawer, collapsible rail, compact sidebar, command/search entry, or another pattern that preserves fast switching while letting the active work surface dominate.
+On Web, Session navigation may use a drawer, collapsible sidebar, compact switcher,
+command/search entry, or another pattern that preserves fast switching while letting
+the active work surface dominate.
 
 The product rule is stronger than the exact control:
 
@@ -33,28 +35,43 @@ The product rule is stronger than the exact control:
 - navigation does not consume permanent space merely because it can;
 - current work receives the majority of the frame.
 
-When the Web sidebar is tucked away it becomes a **rail: one action plus information
-summaries** (#1196, revising #748's rail anatomy):
+The current Web column is **Session-first** (#2851):
 
-- **Exactly one interactive control — Expand.** Agents and Sessions appear as static
-  summaries (icon plus a compact count, with tooltip/aria detail): they are not buttons,
-  take no tab focus, show no action hover, and expand nothing when clicked. A rail that
-  keeps hidden navigation behind its summaries is a collapsed menu, not a summary.
-- **The summaries quote truthful totals.** Agents reports the fleet ("3 agents ·
-  2 online"); one offline Agent does not color the summary unhealthy. Sessions reports
-  the unfiltered total — a hidden filter must not silently redefine the number, so when
-  a filter is active the summary says so ("2 shown · 8 total").
-- **Server status stays a separate static signal** — never a roll-up of Agent, Session,
-  or attachment health (`session-list.md` names that collapse an anti-pattern).
-- **Collapse state is owned by the shell composition, once** (#1195/#1196 §5). The same
-  single state drives both the rail rendering and the column's reserved width, so the
+- **Top:** one stable sidebar toggle and one explicit New Session action, then one search
+  field. This row is the sidebar's own top action group, not a permanent work-surface
+  header.
+- **Middle:** flat Session history, optionally separated by when the work last happened
+  (Today / Previous 7 days / Older). Sessions are never filed under an Agent.
+- **Bottom:** one compact Agents / locations entry that reveals Agent detail on request,
+  followed by Server connection status alone. An offline Agent does not recolor the
+  Server mark, and the footer does not aggregate Session or attachment state.
+- Filter, sort and refresh live behind one disclosure in the search field. A chosen
+  status filter remains visible as a removable chip. Creation is not repeated as a list
+  toolbar row.
+
+When the Web sidebar is tucked away it **fully returns its column width to the work
+surface** (#2851, superseding the #1196 static rail):
+
+- **0px, not a rail.** No clickable rail icons, no icon-strip summaries and no 52px
+  navigation bar remain. One minimal floating reopen control sits at the work surface's
+  top edge; that control is not a new permanent header.
+- **Collapse state is owned by the shell composition, once** (#1195/#1196 §5). The
+  same single state drives the column's reserved width and the reopen affordance. The
   work surface reclaims the freed width through the normal resize pipeline — no
-  detach/reconnect — and expanding restores selection, search, and scroll. Collapse and
-  Expand live in the same top navigation zone across the two states (the Agents section
-  head expanded, the rail's one control collapsed); the service footer keeps only
-  service status.
-- The rail reads as *navigation tucked away with lightweight context* — no active
-  fills, badges, or per-Agent colors that would make it a vertical toolbar.
+  detach/reconnect.
+- **The column stays mounted at 0px**, so selection, search and the Session list's scroll
+  position survive the round trip. The clipped controls are inert while tucked away.
+- **Server status stays a separate signal** — never a roll-up of Agent, Session, or
+  attachment health (`session-list.md` names that collapse an anti-pattern).
+
+### Narrow Web and explicit experience mode
+
+The default narrow viewport is the App spatial experience. The Web composition may also
+be selected explicitly with `experience=web` in the URL; its narrow form is the existing
+overlay SessionDrawer, not a squeezed column. The drawer closes on selection, its Close
+action, Escape or the scrim, and leaves a visible floating control to reopen it. The App
+keeps its own `Sessions ← Terminal → Workspace` model and never inherits this collapse
+state. `experience=app` is the symmetric explicit override for a wide viewport.
 
 ## Terminal and Workspace
 

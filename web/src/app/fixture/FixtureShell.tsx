@@ -1,29 +1,39 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import type { TerminalChrome } from '@/app/ShellMain';
-import {
-  FIXTURE_AGENTS,
-  FIXTURE_CLIENT_SESSION_ID,
-  FIXTURE_SELECTED_ID,
-  FIXTURE_SESSIONS,
-} from '@/app/fixture/fixtureData';
+import { FIXTURE_CLIENT_SESSION_ID, FIXTURE_SELECTED_ID } from '@/app/fixture/fixtureData';
 import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
+import { experienceFromSearch } from '@/app/experienceMode';
+import {
+  filterSessions,
+  type SortDirection,
+  type SortField,
+  type StatusFilter,
+} from '@/app/useDashboard';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
+import { fixtureAgents } from './fixtureAgents';
+import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
-import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import { fixturePaneCommand } from './fixturePaneCommand';
+import { fixtureSessions } from './fixtureSessions';
+import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 /**
- * Canonical Active Terminal screen (#561 Phase 2A): the real
- * shell composition rendered with deterministic data and a
- * static terminal. No network, no auth. Also the Phase 6 baseline source.
+ * Canonical Active Terminal screen (#561 Phase 2A): the real shell composition
+ * rendered with deterministic data and a static terminal. No network, no auth.
+ * Also the Phase 6 baseline source.
  *
- * Above `lg` the shell is two columns, so the canonical wide screen shows the
- * sidebar in its own column. It used to render a forced-open overlay drawer on
- * top of the content, which is a state the shipped shell no longer has at this
- * width — the baseline moves with it rather than preserving a screen no user
- * can reach (docs/design/migration.md).
+ * The fixture is interactive where the shell is: search, status filter, sort
+ * and selection are the route's real inputs rather than a screenshot with no
+ * controls behind it. Its repository/session data still stays deterministic, so
+ * the golden screenshots only move when the shell does.
+ *
+ * A narrow viewport follows the product's default App experience unless the
+ * route asks for Web explicitly (`?experience=web`); that explicit route is
+ * what makes the Web overlay drawer a reachable screen at 390px (#2851).
  */
 export function FixtureShell() {
   // FixtureShell is also mounted directly by component tests without a Router.
@@ -41,34 +51,52 @@ export function FixtureShell() {
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
   // App route had this while the Web route did not — so the Web screen could
-  // show the capability entry but not a Peek behind it, which is
-  // why `#1046`'s second depth had no Web baseline at all (#1102).
-  //
-  // Installed for the route's lifetime and released on unmount. Nothing
-  // emerges by default, so the canonical screenshots are unaffected unless a
-  // case opens one — the entry itself already renders here, because Terminal
-  // Keys earns disclosure without a stub. Carrying the route's scenario keeps
-  // this install equivalent to the fixture App's when it is the one that
-  // remains bound (#2787).
+  // show the capability entry but not a Peek behind it, which is why #1046's
+  // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
-  const selectedId = FIXTURE_SELECTED_ID;
-  const paneCommand = fixturePaneCommand(search);
-  const baseSelectedSession =
-    FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
-  // Keep Web and App fixture inputs symmetric: ?pane=... represents the
-  // foreground command reported by the agent. WorkspaceRegion then resolves
-  // work-awareness through the same production path on both experiences.
-  const selectedSession =
-    baseSelectedSession && paneCommand
-      ? { ...baseSelectedSession, foreground_command: paneCommand }
-      : baseSelectedSession;
-  const selectedAgent = FIXTURE_AGENTS.find(
-    (a) => a.agent_id === selectedSession?.agent_id,
+  const agents = useMemo(() => fixtureAgents(search), [search]);
+  const sessions = useMemo(() => fixtureSessions(search), [search]);
+  const staleAgents = useMemo(() => fixtureStaleAgents(search), [search]);
+  const connectionStatus = fixtureConnection(search);
+  const experienceOverride = experienceFromSearch(search);
+
+  const [selectedId, setSelectedId] = useState(FIXTURE_SELECTED_ID);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [listOpen, setListOpen] = useState(true);
+
+  const mediaWide = useMediaQuery('(min-width: 1024px)');
+  // jsdom has no matchMedia. Component tests mount this fixture as the wide
+  // screen they have always described; a real browser uses its actual width.
+  const isWide = typeof window.matchMedia === 'function' ? mediaWide : true;
+
+  const filteredSessions = useMemo(
+    () =>
+      filterSessions(sessions, agents, {
+        statusFilter,
+        searchQuery,
+        sortField,
+        sortDirection,
+      }),
+    [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
   );
-  const domain = selectedSession
+  const isSearchActive = searchQuery.trim().length > 0 || statusFilter !== 'all';
+
+  const selectedSession = sessions.find((session) => session.session_id === selectedId) ?? null;
+  const paneCommand = fixturePaneCommand(search);
+  const selectedSessionWithCommand =
+    selectedSession && paneCommand
+      ? { ...selectedSession, foreground_command: paneCommand }
+      : selectedSession;
+  const selectedAgent = agents.find(
+    (agent) => agent.agent_id === selectedSessionWithCommand?.agent_id,
+  );
+  const domain = selectedSessionWithCommand
     ? mapDomainState({
-        session: selectedSession,
+        session: selectedSessionWithCommand,
         agent: selectedAgent,
         staleAgentIds: [],
         clientSessionId: FIXTURE_CLIENT_SESSION_ID,
@@ -85,22 +113,29 @@ export function FixtureShell() {
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <WorkspaceRegion
-          agents={FIXTURE_AGENTS}
-          filteredSessions={FIXTURE_SESSIONS}
-          totalSessionCount={FIXTURE_SESSIONS.length}
-          staleAgents={[]}
+          agents={agents}
+          filteredSessions={filteredSessions}
+          totalSessionCount={sessions.length}
+          staleAgents={staleAgents}
           selectedId={selectedId}
           clientSessionId={FIXTURE_CLIENT_SESSION_ID}
           loadingSessions={false}
-          searchQuery=""
-          setSearchQuery={() => {}}
-          statusFilter="all"
-          setStatusFilter={() => {}}
-          sortField="name"
-          sortDirection="desc"
-          toggleSort={() => {}}
-          isSearchActive={false}
-          selectedSession={selectedSession}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          toggleSort={(field) => {
+            if (field === sortField) {
+              setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'));
+            } else {
+              setSortField(field);
+              setSortDirection('desc');
+            }
+          }}
+          isSearchActive={isSearchActive}
+          selectedSession={selectedSessionWithCommand}
           selectedAgent={selectedAgent}
           domain={domain}
           surface="terminal"
@@ -108,17 +143,18 @@ export function FixtureShell() {
           fileOps={null}
           onCreate={() => {}}
           onRefresh={() => {}}
-          onSelect={() => {}}
+          onSelect={(session) => setSelectedId(session.session_id)}
           onConfigure={() => {}}
           onKill={() => {}}
           onSurfaceChange={() => {}}
           onToolChange={() => {}}
-          onCloseDrawer={() => {}}
-          isWide
-          showList
+          onCloseDrawer={() => setListOpen(false)}
+          isWide={isWide}
+          experienceOverride={experienceOverride}
+          showList={isWide || listOpen}
           showDetail
-          onBackToSessions={() => {}}
-          connectionStatus="connected"
+          onBackToSessions={() => setListOpen(true)}
+          connectionStatus={connectionStatus}
           terminal={(chrome: TerminalChrome) => (
             <FixtureTerminal chrome={chrome} experience="web" />
           )}

@@ -37,66 +37,6 @@ describe('SessionItem', () => {
     expect(onSelect).toHaveBeenCalledWith(session);
   });
 
-  // jsdom does not apply group-hover; hover here exercises the row wrapper, click asserts behavior.
-  it('calls onKill without selecting when kill is clicked', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    const onKill = vi.fn();
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={onSelect}
-        onKill={onKill}
-      />,
-    );
-    const row = screen.getByTestId('session-item-row');
-    await user.hover(row);
-    const kill = screen.getByTestId('session-kill-a1:fix');
-    await user.click(kill);
-    expect(onKill).toHaveBeenCalledWith(session);
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it('shows kill when selected even without hover', () => {
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected
-        onSelect={vi.fn()}
-        onKill={vi.fn()}
-      />,
-    );
-    const kill = screen.getByTestId('session-kill-a1:fix');
-    expect(kill).toBeInTheDocument();
-    expect(kill.className).toMatch(/opacity-100/);
-    expect(kill.className).toMatch(/pointer-events-auto/);
-  });
-
-  it('keeps kill in DOM when not selected or hovered', () => {
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={vi.fn()}
-        onKill={vi.fn()}
-      />,
-    );
-    const kill = screen.getByTestId('session-kill-a1:fix');
-    expect(kill).toBeInTheDocument();
-    // Hidden state is lg+-only now: icons stay visible below the breakpoint.
-    expect(kill.className).toMatch(/lg:opacity-0/);
-    expect(kill.className).toMatch(/lg:pointer-events-none/);
-    expect(kill.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
-    expect(kill.className).not.toMatch(/(^|\s)pointer-events-none(\s|$)/);
-  });
-
   /**
    * #1050 stage 4 — one line, three slots, two families.
    *
@@ -208,100 +148,6 @@ describe('SessionItem', () => {
   });
 });
 
-describe('SessionItem settings action', () => {
-  it('renders no settings button when onConfigure is absent', () => {
-    const onSelect = vi.fn();
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={onSelect}
-      />,
-    );
-    expect(screen.queryByTestId(`session-settings-${session.session_id}`)).toBeNull();
-  });
-
-  it('calls onConfigure with the session and never selects the row', async () => {
-    const onSelect = vi.fn();
-    const onConfigure = vi.fn();
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={onSelect}
-        onConfigure={onConfigure}
-      />,
-    );
-    const button = screen.getByTestId(`session-settings-${session.session_id}`);
-    expect(button).toHaveAccessibleName(
-      `Configure attach settings for ${session.session_name}`,
-    );
-    await userEvent.click(button);
-    expect(onConfigure).toHaveBeenCalledWith(session);
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  // jsdom does not apply group-hover; class composition is the assertable contract.
-  it('is always interactive below lg and revealed on hover at lg+ (kill parity)', () => {
-    const onSelect = vi.fn();
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected={false}
-        onSelect={onSelect}
-        onConfigure={vi.fn()}
-        onKill={vi.fn()}
-      />,
-    );
-    const settings = screen.getByTestId(`session-settings-${session.session_id}`);
-    const kill = screen.getByTestId(`session-kill-${session.session_id}`);
-    // No unprefixed hidden state: icons are visible by default below lg. A bare
-    // /opacity-0/ regex would also match inside lg:opacity-0, so negatives use
-    // token boundaries.
-    expect(settings.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
-    expect(settings.className).not.toMatch(/(^|\s)pointer-events-none(\s|$)/);
-    expect(kill.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
-    expect(kill.className).not.toMatch(/(^|\s)pointer-events-none(\s|$)/);
-    // The lg+ reveal chain is gated behind the breakpoint.
-    expect(settings.className).toMatch(/lg:opacity-0/);
-    expect(settings.className).toMatch(/lg:pointer-events-none/);
-    expect(settings.className).toMatch(/lg:group-hover:opacity-100/);
-    expect(settings.className).toMatch(/lg:group-hover:pointer-events-auto/);
-    expect(kill.className).toMatch(/lg:opacity-0/);
-    expect(kill.className).toMatch(/lg:pointer-events-none/);
-  });
-
-  it('keeps the icon visible while selected', () => {
-    render(
-      <SessionItem
-        session={session}
-        domain={domain}
-        agentLabel="devbox-01"
-        selected
-        onSelect={vi.fn()}
-        onConfigure={vi.fn()}
-        onKill={vi.fn()}
-      />,
-    );
-    const settings = screen.getByTestId(`session-settings-${session.session_id}`);
-    const kill = screen.getByTestId(`session-kill-${session.session_id}`);
-    expect(settings.className).toMatch(/opacity-100/);
-    expect(settings.className).toMatch(/pointer-events-auto/);
-    // The selected override is lg:-prefixed so tailwind-merge drops the lg:
-    // hidden rules — otherwise the hidden state would win the cascade at lg+.
-    expect(settings.className).not.toMatch(/lg:opacity-0/);
-    expect(kill.className).toMatch(/opacity-100/);
-    expect(kill.className).toMatch(/pointer-events-auto/);
-    expect(kill.className).not.toMatch(/lg:opacity-0/);
-  });
-});
-
 /**
  * The sub-`lg` presentation (#1050 stage 2).
  *
@@ -372,35 +218,34 @@ describe('SessionItem row actions overflow', () => {
     // `--nession-control-md` is the row's own band: 32px under the Web shell, 44px
     // inside the App, whose value is `experience.app.touchTarget.min`. A
     // literal here would be right in one experience and a sub-floor tap target
-    // in the other — which is what `size-8` on the inline icons is.
+    // in the other.
     expect(trigger.className).toMatch(/var\(--nession-control-md\)/);
     expect(trigger.className).not.toMatch(/(^|\s)size-\d/);
   });
 
-  it('hands the row from the inline icons to the trigger at lg', () => {
-    renderRow({ onConfigure: vi.fn(), onKill: vi.fn() });
+  it('reveals the one trigger on hover/focus at lg and holds it while selected', () => {
+    const { rerender } = renderRow({ onConfigure: vi.fn(), onKill: vi.fn() });
     const trigger = screen.getByTestId(`session-actions-${session.session_id}`);
-    const settings = screen.getByTestId(`session-settings-${session.session_id}`);
-    const kill = screen.getByTestId(`session-kill-${session.session_id}`);
-    // Exactly one of the two presentations is displayed at any width: the
-    // trigger below lg, the icons at lg+.
-    expect(trigger.className).toMatch(/(^|\s)lg:hidden(\s|$)/);
-    for (const icon of [settings, kill]) {
-      expect(icon.className).toMatch(/(^|\s)max-lg:hidden(\s|$)/);
-      expect(icon.className).toMatch(/lg:opacity-0/);
-    }
-  });
+    expect(trigger.className).toMatch(/lg:opacity-0/);
+    expect(trigger.className).toMatch(/lg:pointer-events-none/);
+    expect(trigger.className).toMatch(/lg:group-hover:opacity-100/);
+    expect(trigger.className).toMatch(/lg:group-hover:pointer-events-auto/);
+    expect(trigger.className).toMatch(/lg:group-focus-within:opacity-100/);
 
-  it('keeps the icons hidden below lg on the selected row too', () => {
-    // The selected row overrides the lg+ hidden state with another lg: class.
-    // tailwind-merge drops one of two classes only when their modifiers match,
-    // so `max-lg:hidden` has to survive that override — if it did not, a
-    // selected row would show both presentations at once.
-    renderRow({ selected: true, onConfigure: vi.fn(), onKill: vi.fn() });
-    const settings = screen.getByTestId(`session-settings-${session.session_id}`);
-    const kill = screen.getByTestId(`session-kill-${session.session_id}`);
-    expect(settings.className).toMatch(/(^|\s)max-lg:hidden(\s|$)/);
-    expect(kill.className).toMatch(/(^|\s)max-lg:hidden(\s|$)/);
+    rerender(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected
+        onSelect={vi.fn()}
+        onConfigure={vi.fn()}
+        onKill={vi.fn()}
+      />,
+    );
+    const selectedTrigger = screen.getByTestId(`session-actions-${session.session_id}`);
+    expect(selectedTrigger.className).toMatch(/lg:opacity-100/);
+    expect(selectedTrigger.className).not.toMatch(/lg:opacity-0/);
   });
 
   it('opens attach settings without selecting the row', async () => {

@@ -73,7 +73,7 @@ the honest answer to "where does this go today" until the row moves.
 | `app/experiences/web/` — Web experience: the frame, list column vs overlay | **done** | 2 |
 | `app/workspace/` | `app/` | 2 |
 | `app/patterns/` — canonical patterns | `product/<concept>/patterns/` | **done** | 3 |
-| `app/patterns/` — app chrome (`SidebarRail`, `AppToolHeader`, …) | `app/` chrome | **done** | 3 |
+| `app/patterns/` — app chrome (`SidebarAgentsEntry`, `AppToolHeader`, …) | `app/` chrome | **done** | 3 |
 | `product/session/` — the Session concept (model, state, UI, hooks) | **done** | 3 |
 | `product/agent/` — the Agent concept | **done** | 3 |
 | `product/terminal/` — the Terminal concept, incl. the capsule subsystem | **done** | 3 |
@@ -253,7 +253,7 @@ src/
 │   ├── SessionDrawer.tsx, TerminalWell.tsx, shellStyles.ts
 │   ├── useShellState.ts     # shell state composer
 │   ├── patterns/            # shell chrome: SessionHeader, SessionListHeader,
-│   │                        #   SidebarRail, AppToolHeader, AppBackButton, …
+│   │                        #   SidebarAgentsEntry, AppToolHeader, AppBackButton, …
 │   │                        #   NOTE: the name is now wider than its contents —
 │   │                        #   every Product Pattern moved to product/*/patterns/,
 │   │                        #   so this holds chrome only. A rename to `chrome/`

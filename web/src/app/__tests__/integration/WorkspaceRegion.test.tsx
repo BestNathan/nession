@@ -193,12 +193,15 @@ describe('WorkspaceRegion app layer composition', () => {
     await user.click(screen.getByTestId('sidebar-collapse'));
 
     expect(column).toHaveAttribute('data-collapsed', 'true');
-    expect(column.className).toContain('--nession-shell-rail-width');
+    expect(column.className).toContain('w-0');
     expect(column.className).not.toContain('--nession-shell-sidebar-width');
     // The work surface stays mounted — collapse is geometry, not a remount.
     expect(screen.getByTestId('terminal')).toBeInTheDocument();
+    // The sidebar itself also stays mounted so its search and scroll survive.
+    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-rail')).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId('sidebar-rail-expand'));
+    await user.click(screen.getByTestId('sidebar-open'));
 
     expect(column).not.toHaveAttribute('data-collapsed');
     expect(column.className).toContain('--nession-shell-sidebar-width');
@@ -265,6 +268,48 @@ describe('WorkspaceRegion app layer composition', () => {
     await waitFor(() => {
       expect(screen.getByTestId('file-workspace')).toBeInTheDocument();
     });
+  });
+
+  it('honours an explicit Web mode at a narrow viewport (#2851 SC-04)', () => {
+    render(
+      <WorkspaceRegion
+        {...baseProps({
+          isWide: false,
+          experienceOverride: 'web',
+          selectedId: sess.session_id,
+          selectedSession: sess,
+          selectedAgent: agent,
+          domain,
+          showList: true,
+          showDetail: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('session-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('session-drawer-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-column')).not.toBeInTheDocument();
+  });
+
+  it('honours an explicit App mode at a wide viewport', () => {
+    render(
+      <WorkspaceRegion
+        {...baseProps({
+          isWide: true,
+          experienceOverride: 'app',
+          selectedId: sess.session_id,
+          selectedSession: sess,
+          selectedAgent: agent,
+          domain,
+          showList: false,
+          showDetail: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('app-layer-root')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-column')).not.toBeInTheDocument();
   });
 
   // Capsule V2 (#1347): removed test that navigated to Claude Code via disclosure menu.

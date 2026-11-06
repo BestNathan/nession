@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bucketSessions, sessionBucketOf } from '../../sessionHistory';
+import { bucketSessions, sessionBucketOf } from '../../model/sessionHistory';
 import type { Session } from '@/types';
 
 /**

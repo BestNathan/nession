@@ -9,7 +9,7 @@ SessionHeader is optional compact chrome for the **active Session**. It provides
 > the marked node in the Agents section, service status and ⌘K to the sidebar footer. This is the "optional" in
 > the first sentence being exercised, not the pattern being deleted: the anatomy, presence rules and acceptance
 > criteria below still govern any header that is rendered. One consequence is accepted knowingly — with the
-> sidebar collapsed to a rail, nothing on screen shows the Session name.
+> sidebar fully tucked away, nothing on screen shows the Session name.
 
 > Existing contract: `design/contracts/patterns/session-header.json` ([contracts.md](../contracts.md)). Any contract that requires permanently visible healthy metadata should be reviewed as implementation convergence debt.
 

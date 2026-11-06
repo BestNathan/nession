@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
+import { currentExperienceMode } from '@/app/experienceMode';
 import type { ConnectionState } from '@/platform/socket';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -17,6 +18,7 @@ export interface ShellProps {
 export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const state = useShellState();
   const { data } = state;
+  const experienceOverride = currentExperienceMode();
 
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard
@@ -125,6 +127,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             onSurfaceChange={state.setSurface}
             onToolChange={state.setTool}
             isWide={state.isWide}
+            experienceOverride={experienceOverride}
             showList={state.showList}
             showDetail={state.showDetail}
             onBackToSessions={state.openList}

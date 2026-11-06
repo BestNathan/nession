@@ -47,13 +47,13 @@ Session navigation must remain fast and discoverable while yielding space to the
 Preferred composition families include:
 
 - overlay drawer;
-- collapsible rail/sidebar;
+- collapsible sidebar (full tuck-away);
 - compact Session switcher;
 - search/command entry with a visible navigation affordance.
 
 A wide permanent sidebar is not an invariant. On a layout where it materially helps repeated Session switching, it must still remain visually secondary and should collapse when space or focus requires it.
 
-The collapsed form is a rail with **one action (Expand) plus static Agent/Session summaries** whose counts are truthful totals — its anatomy and interaction rules are specified in [interaction/web.md](interaction/web.md) (#1196). What this layer owns is the composition rule behind it: **collapse is one state, held by the shell composition** (#1195). The composition decides both what the navigation column renders (sidebar or rail) and how much width it reserves; a navigation component must not privately know it is collapsed while the frame around it keeps reserving the expanded width — that split is what made collapse free no space for the work surface.
+The collapsed form is a **full tuck-away**: the navigation column reserves 0px and one minimal floating control returns it — its anatomy and interaction rules are specified in [interaction/web.md](interaction/web.md) (#2851, superseding #1196's static rail). What this layer owns is the composition rule behind it: **collapse is one state, held by the shell composition** (#1195). The composition decides both what the navigation column renders and how much width it reserves; a navigation component must not privately know it is collapsed while the frame around it keeps reserving the expanded width — that split is what made collapse free no space for the work surface.
 
 Extra viewport width belongs to the work surface before it belongs to navigation — including the width a collapse releases, which the work surface reclaims through the normal resize pipeline, not by rebuilding the surface.
 

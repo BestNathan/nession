@@ -12,6 +12,17 @@ import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
 import type { Agent, AttachMode, Session } from '@/types';
 
+async function openSessionAction(
+  id: string,
+  action: 'settings' | 'kill',
+): Promise<void> {
+  await userEvent.click(screen.getByTestId(`session-actions-${id}`));
+  const item = await screen.findByTestId(`session-actions-${action}-${id}`);
+  await waitFor(() => expect(item).not.toHaveStyle({ pointerEvents: 'none' }));
+  await userEvent.click(item);
+}
+
+
 const agent: Agent = {
   agent_id: 'a1', hostname: 'devbox-01', display_name: 'devbox-01',
   ip_address: '10.0.0.1', port: 1, status: 'offline', session_count: 1,
@@ -309,7 +320,7 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
   it('configure Save persists the new mode without attaching', async () => {
     seedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    await openSessionAction(sess.session_id, 'settings');
     const saveBtn = await screen.findByRole('button', { name: /^Save$/ });
     await waitFor(() => expect(saveBtn).toBeEnabled());
     // Configure mode never offers Attach.
@@ -337,7 +348,7 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     seedProfile({ mode: 'p2p' });
     const before = storedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    await openSessionAction(sess.session_id, 'settings');
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
@@ -355,7 +366,7 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     seedProfile({ mode: 'p2p', selectedUrl: 'ws://a/ws' });
     const before = storedProfile();
     const { store } = renderShell();
-    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    await openSessionAction(sess.session_id, 'settings');
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {

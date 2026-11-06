@@ -10,73 +10,61 @@ const baseProps = {
   setStatusFilter: vi.fn(),
   onlineCount: 1,
   offlineCount: 0,
-  onCreate: vi.fn(),
-  createDisabled: false,
   onRefresh: vi.fn(),
   loadingSessions: false,
 };
 
 describe('SessionListHeader', () => {
-  it('renders search, create, and refresh controls', async () => {
-    const onCreate = vi.fn();
+  it('keeps search visible and puts filters, sort and refresh behind one disclosure', async () => {
     const onRefresh = vi.fn();
-    render(
-      <SessionListHeader
-        {...baseProps}
-        onCreate={onCreate}
-        onRefresh={onRefresh}
-      />,
-    );
-
-    expect(screen.getByPlaceholderText('Search agents and sessions...')).toBeInTheDocument();
-    expect(screen.getByTestId('create-session')).toBeEnabled();
-
-    await userEvent.click(screen.getByTestId('create-session'));
-    expect(onCreate).toHaveBeenCalledTimes(1);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }));
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables create when no online agents', () => {
-    render(
-      <SessionListHeader
-        {...baseProps}
-        onlineCount={0}
-        createDisabled
-      />,
-    );
-    expect(screen.getByTestId('create-session')).toBeDisabled();
-  });
-
-  it('keeps search visible and hides filters until disclosure opens', async () => {
     render(
       <SessionListHeader
         {...baseProps}
         toggleSort={vi.fn()}
         sortField="name"
         sortDirection="asc"
+        onRefresh={onRefresh}
       />,
     );
-    expect(screen.getByPlaceholderText('Search agents and sessions...')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Online' })).not.toBeInTheDocument();
+
+    expect(screen.getByPlaceholderText('Search sessions...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search sessions')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Online/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh sessions' })).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByTestId('session-list-filters'));
     expect(await screen.findByRole('button', { name: /Online/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Name/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh sessions' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('uses larger create control under max-lg', () => {
-    render(<SessionListHeader {...baseProps} />);
-    expect(screen.getByTestId('create-session').className).toMatch(/max-lg:min-h-11/);
+  it('keeps an applied status filter visible as a removable chip', async () => {
+    const setStatusFilter = vi.fn();
+    render(
+      <SessionListHeader
+        {...baseProps}
+        statusFilter="offline"
+        setStatusFilter={setStatusFilter}
+      />,
+    );
+
+    const chip = screen.getByTestId('session-list-filter-chip');
+    expect(chip).toHaveTextContent('Offline');
+    await userEvent.click(chip);
+    expect(setStatusFilter).toHaveBeenCalledWith('all');
   });
 
-  it('uses design tokens for root spacing and create transition', () => {
+  it('uses the large control band for the search field and token spacing', () => {
     const { container } = render(<SessionListHeader {...baseProps} />);
     const root = container.firstElementChild;
     expect(root).not.toBeNull();
-    expect(root!.className).toMatch(/shell-space|var\(--nession-shell-space/);
-    expect(screen.getByTestId('create-session').className).toMatch(
-      /duration-\[var\(--nession-motion-shell-duration\)\]/,
+    expect(root!.className).toMatch(/var\(--nession-shell-space/);
+    expect(screen.getByLabelText('Search sessions').className).toMatch(
+      /control-lg/,
+    );
+    expect(screen.getByLabelText('Search sessions').className).toMatch(
+      /radius-control/,
     );
   });
 });
