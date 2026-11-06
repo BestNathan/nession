@@ -504,6 +504,45 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" > "$RUNNER_TEMP/qwen-context/issue.json"
           jq -e --argjson issue "$ISSUE" '.number == $issue and .state == "open" and (.pull_request == null)' \
             "$RUNNER_TEMP/qwen-context/issue.json" > /dev/null
+      # #1664 SC-05: the trusted host alone reads GitHub comments and the
+      # public orphan Store. Only one canonical Reviewer projection is passed
+      # to Docker as task context; API tokens and other comments never enter it.
+      - name: Attest latest committed Qwen Reviewer Issue comment before Repair
+        if: inputs.task == 'repair'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue="$(jq -er .issue "$RUNNER_TEMP/qwen-admission.json")"
+          [[ "$issue" =~ ^[1-9][0-9]*$ ]]
+          temp="$(mktemp -d "$RUNNER_TEMP/qwen-review-context.XXXXXX")"
+          trap 'rm -rf "$temp"' EXIT
+          printf '[]\n' > "$temp/matched.json"
+          for page in $(seq 1 20); do
+            gh api "repos/$GITHUB_REPOSITORY/issues/$issue/comments?per_page=100&page=$page" \
+              > "$temp/page.json"
+            jq -e 'type == "array" and length <= 100' "$temp/page.json" >/dev/null
+            jq -c '
+              [.[] | select(
+                .user.login == "github-actions[bot]" and
+                (.body | type) == "string" and
+                (.body | startswith("<!-- nession-review-result:v1:"))
+              ) | {id,body,issue_url,created_at,user:{login:.user.login}}]
+            ' "$temp/page.json" > "$temp/page-matched.json"
+            jq -s 'add' "$temp/matched.json" "$temp/page-matched.json" \
+              > "$temp/next.json"
+            mv "$temp/next.json" "$temp/matched.json"
+            count="$(jq -r 'length' "$temp/page.json")"
+            if (( count < 100 )); then break; fi
+            if (( page == 20 )); then
+              echo "::error::Qwen Reviewer Issue history exceeds bounded GitHub pagination"
+              exit 1
+            fi
+          done
+          node scripts/lib/agent/orchestration/qwen-review-context.mjs verify \
+            "$RUNNER_TEMP/qwen-admission.json" "$temp/matched.json" \
+            "$RUNNER_TEMP/qwen-context/review.json"
       - name: Build pinned, source-free isolated Qwen runtime
         env:
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
