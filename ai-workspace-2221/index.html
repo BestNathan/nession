@@ -173,6 +173,14 @@
     .question-progress { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); white-space: nowrap; display: flex; gap: 7px; align-items: center; color: #8b95a2; font-size: 10px; }
     .question-progress .spinner { width: 10px; height: 10px; border-width: 1.6px; }
     .empty-help { font-size: 12px; color: #8c95a1; line-height: 1.8; }
+    /* #2221 is an AI-mode candidate, not today's shipped Workspace route.
+       Its first product state must contain only the intent composer. */
+    .app.entry-only .topbar {display:none!important}
+    .app.entry-only .empty-stage {padding:24px}
+    .app.entry-only .empty-content {transform:none}
+    .app.entry-only .empty-subhint[hidden] {display:none!important}
+    .app.entry-only .composer {max-width:650px}
+
     .clarify { padding: 32px; }
     .clarify .lead { font-size: 15px; font-weight: 610; margin-bottom: 14px; }
     .clarify .sub { font-size: 12px; color: #8993a0; line-height: 1.8; max-width: 500px; }
@@ -371,7 +379,7 @@
 
   <main id="aiMain" class="ai-main">
     <section class="empty-stage" id="emptyStage">
-      <div class="empty-content"><div class="empty-caption">你想让 Nession 做什么？</div><div id="emptyAnchor" style="width:100%"></div><div class="empty-subhint" id="emptySubhint">试试输入「看看 Agent 列表」</div></div>
+      <div class="empty-content"><div id="emptyAnchor" style="width:100%"></div><div class="empty-subhint" id="emptySubhint" hidden aria-live="polite"></div></div>
     </section>
 
     <section class="work-stage hidden" id="workStage" aria-label="AI 工作区">
@@ -693,7 +701,7 @@
     state.selectedSessionId=id;bump();log('SESSION OPEN',`切换到 ${s.name} · 普通模式示意`);setMode('standard');
   }
   function setMode(mode){
-    userInteractionEpoch++;state.mode=mode;bump();$('aiMain').classList.toggle('hidden',mode!=='ai');$('standardPage').classList.toggle('hidden',mode!=='standard');
+    userInteractionEpoch++;state.mode=mode;bump();$('app').classList.toggle('entry-only',mode==='ai'&&!state.scenes.length);$('aiMain').classList.toggle('hidden',mode!=='ai');$('standardPage').classList.toggle('hidden',mode!=='standard');
     $('modeAI').setAttribute('aria-pressed',String(mode==='ai'));
     $('modeStandard').setAttribute('aria-pressed',String(mode==='standard'));
     $('resetButton').classList.toggle('hidden',mode!=='ai'||!state.scenes.length);
@@ -966,12 +974,13 @@
   function render(){
     if(state.mode!=='ai')return;
     const hasScenes=state.scenes.length>0;
+    $('app').classList.toggle('entry-only',!hasScenes);
     $('emptyStage').classList.toggle('hidden',hasScenes);
     $('workStage').classList.toggle('hidden',!hasScenes);
     $('resetButton').classList.toggle('hidden',!hasScenes);
     if(hasScenes) {if($('composerRoot').parentElement!==$('dockAnchor')) $('dockAnchor').appendChild($('composerRoot'));}
     else {if($('composerRoot').parentElement!==$('emptyAnchor'))$('emptyAnchor').appendChild($('composerRoot'));}
-    if(!hasScenes){$('emptySubhint').textContent=clarification||'试试输入「看看 Agent 列表」';renderInspector();return;}
+    if(!hasScenes){$('emptySubhint').textContent=clarification||'';$('emptySubhint').hidden=!clarification;renderInspector();return;}
     const idx=itemIndex();
     $('stageFrame').classList.toggle('has-prev',idx>0);
     $('stageFrame').classList.toggle('has-next',idx<state.scenes.length-1);
