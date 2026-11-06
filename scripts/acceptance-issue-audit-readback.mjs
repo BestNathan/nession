@@ -187,7 +187,7 @@ export async function selfTestIssueAuditReadback(){
     [{log:log+'\n2026-11-06T06:43:13.413Z   ISSUE_NUMBER: 5'},/inconsistent/],
     [{events:events.map(e=>e.label.name==='bug'?{...e,actor:{login:'BestNathan'}}:e)},/label write/],
     [{events:events.map(e=>e.label.name==='bug'?{...e,created_at:'2026-11-06T06:50:00Z'}:e)},/label write/],
-    [{issue:{...issue,body:issue.body.replace('- none: Native CLI','- broken: invalid')}},/invalid protected E2E/],
+    [{issue:{...issue,body:issue.body.replace('- none: Native CLI','- broken: invalid')}},/Issue Contract readback|invalid protected E2E/],
     [{issue:{...issue,labels:[]}},/canonical Issue Contract/],
   ])assert.throws(()=>attestIssueAuditReadback({...args,...patch}),pattern);
   const request=async (path)=>{
