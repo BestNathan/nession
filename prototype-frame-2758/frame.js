@@ -14,7 +14,8 @@
         device.style.setProperty('--np-device-width', width + 'px');
         for (const control of controls) control.setAttribute('aria-pressed', String(control === button));
         if (widthLabel) widthLabel.textContent = width + ' CSS px · 1:1';
-        device.dispatchEvent(new CustomEvent('np:resize', {detail:{width},bubbles:false}));
+        // The consuming prototype can listen on its page owner without coupling to the frame node.
+        device.dispatchEvent(new CustomEvent('np:resize', {detail:{width},bubbles:true}));
       };
       controls.forEach(button => button.addEventListener('click', () => selectSize(button)));
       const selected = controls.find(b => b.getAttribute('aria-pressed') === 'true') || controls[0];
