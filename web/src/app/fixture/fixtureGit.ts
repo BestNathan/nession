@@ -11,6 +11,20 @@ import type {
 import { FIXTURE_AGENTS } from './fixtureData';
 
 /**
+ * Deterministic controls the `git=overlap` scenario exposes to its Case.
+ *
+ * This is input, not rendering: the Case chooses when the older read settles
+ * and can assert how many reads were actually started (no polling).
+ */
+type FixtureGitOverlapWindow = Window & {
+  fixtureGitOverlap?: {
+    requests: number;
+    olderSettled: boolean;
+    releaseOlder: () => void;
+  };
+};
+
+/**
  * A canned git backend for the fixture route.
  *
  * The fixture is offline, so the git capability has nothing to talk to. This
@@ -31,10 +45,43 @@ import { FIXTURE_AGENTS } from './fixtureData';
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
+ *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
+ *     held until the Case releases it, so a manual Refresh can answer first
+ *     with the newer repository state (#2787)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
   const status = scenario === 'clean' ? CLEAN_STATUS : CHANGED_STATUS;
+  /** Every `git.status` read this surface has been asked for. */
+  let statusRequests = 0;
+  /** Resolves the held older read in the `overlap` scenario. */
+  let releaseOlderStatus: (() => void) | null = null;
+  let olderSettled = false;
+
+  /**
+   * Publish the overlap controls on the real browser window.
+   *
+   * The Case needs to say *when* the older read resolves, not wait a guessed
+   * amount of time. `olderSettled` flips only after a macrotask, so a Case that
+   * waits for it knows the stale continuation has had its chance to render.
+   * Guarded for the node-env unit project, which has no `window`.
+   */
+  const publishOverlap = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitOverlapWindow).fixtureGitOverlap = {
+      requests: statusRequests,
+      olderSettled,
+      releaseOlder: () => {
+        releaseOlderStatus?.();
+        setTimeout(() => {
+          olderSettled = true;
+          publishOverlap();
+        }, 0);
+      },
+    };
+  };
 
   // The real directory is filled by `AgentsPlugin` from the agent list; the
   // fixture has no agent list request, so it fills the same directory from the
@@ -48,6 +95,20 @@ export function fixtureGitSurface(search: string): PluginSurface {
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === 'git.status') {
+        statusRequests += 1;
+        if (scenario === 'overlap') {
+          publishOverlap();
+          if (statusRequests === 1) {
+            // The mount read: held in flight, answering with the older
+            // repository state when the Case releases it.
+            return new Promise<T>((resolve) => {
+              releaseOlderStatus = () => resolve(CLEAN_STATUS as T);
+              publishOverlap();
+            });
+          }
+          // The manual Refresh: the newer repository state, answered first.
+          return Promise.resolve(CHANGED_STATUS as T);
+        }
         return Promise.resolve(status as T);
       }
       if (type === 'git.diff') {
