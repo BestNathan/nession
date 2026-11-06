@@ -98,6 +98,47 @@ try {
     /unauthorized fields/);
   assert.equal(readFileSync(filename,'utf8'),beforeInvalid,'rejected proposals cannot edit the Issue');
 
+  // #2818: a missing-label target requires a complete canonical proposal.
+  // Exercise the real audit adapter and trusted update boundary; invalid
+  // proposals must never reach fake gh issue edit or post a model comment.
+  const savedIssue=readFileSync(filename,'utf8');
+  const unlabelled={
+    number:17,state:'OPEN',title:'Bug: missing labels',labels:[],
+    body:'## Description\\nObserved.\\n\\n## Reproduction\\n1. Reproduce.\\n\\n## Investigation Status\\nPending investigation.\\n\\n## Impact\\nAffected.\\n\\n## Fix Direction\\nRepair metadata.\\n\\n## Location\\n- scripts/issue-audit-agent.mjs',
+  };
+  writeFileSync(filename,JSON.stringify(unlabelled));
+  const absentLabelSnapshot=readFileSync(filename,'utf8');
+  for (const [labels,reason] of [
+    [['bug','ci','ci'],/duplicate/],
+    [['bug','ci','verification:scoped'],/noncanonical/],
+    [['bug',23,'ci'],/non_string/],
+    [['bug','requirement','ci'],/kind_count/],
+    [['ci'],/kind_count/],
+    [['bug'],/missing_area/],
+    ['bug',/not_array/],
+  ]) {
+    await assert.rejects(
+      applyIssueAuditProposal(issue,{result:JSON.stringify({
+        labels, comment:'must not post',verification_tier:null,
+      })},'example/repo'), reason,
+    );
+    assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot,
+      'invalid Issue Audit proposal must not mutate the target');
+  }
+  await assert.rejects(applyIssueAuditProposal(issue,
+    {result:JSON.stringify({title:'Bug: renamed without labels'})},'example/repo'),
+    /kind_count/);
+  assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
+  assert.deepEqual(completeIssueUpdateProposal(unlabelled,{labels:['bug','cli']}),
+    {title:unlabelled.title,body:unlabelled.body,labels:['bug','cli']});
+  await applyIssueAuditProposal(issue,
+    {result:JSON.stringify({labels:['bug','cli']})},'example/repo');
+  const repairedNoLabels=JSON.parse(readFileSync(filename,'utf8'));
+  assert.deepEqual(repairedNoLabels.labels.map(x=>x.name).sort(),['bug','cli']);
+  assert.equal(repairedNoLabels.title,unlabelled.title);
+  assert.equal(repairedNoLabels.body,unlabelled.body);
+  writeFileSync(filename,savedIssue);
+
   await assert.rejects(comment.execute({ body: 'ok', issue_number: 18 }), /Unauthorized/);
   await comment.execute({ body: 'investigation trail' });
   assert.equal(readFileSync(filename + '.comment', 'utf8'), 'investigation trail');
@@ -114,7 +155,7 @@ try {
     e2eContract.replace('- terminal-attach','- terminal-replay')
       .replace('| terminal-attach | Regression','| terminal-replay | Regression')),/Unauthorized E2E/);
   assert.throws(() => enforceE2EReadOnly(issue.body,issue.body+'\n'+e2eContract),/Unauthorized E2E/);
-  console.log('gh issue tools self-test: 14 assertions passed');
+  console.log('gh issue tools self-test: canonical proposal regressions passed');
 } finally {
   process.env.PATH = oldPath;
   if (oldFile == null) delete process.env.FAKE_GH_ISSUE_FILE;
