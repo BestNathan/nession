@@ -40,6 +40,8 @@ assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
+assert.match(claude.text, /Allowed top-level JSON keys only: title, body, labels, comment, verification_tier, tier_reason/);
+assert.match(claude.text, /existing E2E Verification, E2E Report, Acceptance Plan and Acceptance Report content exactly unchanged/);
 assert.match(claude.text, /Exactly one kind: bug, requirement/);
 assert.match(claude.text, /One or more areas: terminal, web, ui, ux/);
 assert.match(claude.text, /Never include verification:\*/);
