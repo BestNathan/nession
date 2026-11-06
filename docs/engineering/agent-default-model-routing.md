@@ -10,7 +10,7 @@ committed workflow and not through a user-side CLI:
 | `AGENT_DEFAULT_REVIEWER` | `review-qwen-01` | `Agent / Review` and new `Acceptance / Agent Controller` requests |
 | `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance`, acceptance orchestrator, Post-Run Waker and new Controller requests |
 | `AGENT_DEFAULT_AUDITOR` | `audit-qwen-01` | `Agent / Issue Audit`, including `/audit` comments |
-| `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | Read/validated at Controller request; Qwen deliberately rejected until #2274 |
+| `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | Default activation remains gated on #2274; explicit owner/main `developer=dev-qwen-01` canary is permitted for evidence |
 
 The registered IDs, roles, providers and credential Environment bindings live
 in [automation/agents/registry.json](../../automation/agents/registry.json).
@@ -113,13 +113,21 @@ To prepare a restricted runtime rollout, verify the GitHub Environments:
 | Trusted Store Ingest / native Restore | Existing scoped Store Writer App and AES key seed; matching `QWEN_RESUME_PRIVATE_KEY_B64` available to the trusted job, never inside the model container; the historical Cursor key remains independent |
 | Trusted Publisher | Separate Publisher App with repository-scoped Contents and Pull Request write permissions, and the independently scoped Store Writer App; no provider credential or model invocation |
 
-Current Controller requests **still intentionally reject** a Qwen Developer,
-including a configured `AGENT_DEFAULT_DEVELOPER=dev-qwen-01`, until those
-verified acceptance conditions are complete. The next step after genuine
-source-aligned staging and main evidence is to lift that specific fail-closed
-activation guard and then change the GitHub Repository Variable. Do **not**
-change the default just because the code has merged. Existing immutable
-Store assignments and historical Cursor Sessions remain unchanged.
+**Restricted owner/main Qwen canary:** the Controller may initialize a
+new, separate open fixture Issue only when the owner explicitly enters
+`developer=dev-qwen-01` in a trusted `Acceptance / Agent Controller`
+workflow_dispatch, with an exact main-ancestor source SHA. The separate
+Store Ingest must still authenticate the Request Run/Artifact and commit
+the immutable Issue state before the signed Outbox may dispatch a Worker.
+No Provider, Issue body or model can invoke this route on its own.
+
+Configuring `AGENT_DEFAULT_DEVELOPER=dev-qwen-01` **without an explicit Qwen
+override remains fail-closed** until #2274 real staging/main evidence passes.
+The controlled canary grants no privileged model credentials, migration of
+a Cursor checkpoint, PR self-merge or SC Pass. Once the authentic staging
+Cases and main handoff are accepted, the owner may enable Qwen by changing
+the GitHub Repository Variable; existing immutable Store assignments and
+historical Cursor Sessions remain unchanged.
 
 The exact runtime/Acceptance status is tracked by
 [Issue #2274](https://github.com/BestNathan/nession/issues/2274); no
