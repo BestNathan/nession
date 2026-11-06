@@ -17,6 +17,7 @@ import {createGitHubResultArtifactReader,readAuthenticatedReviewClaim,
 import {acceptTaskResult,recordReboundDispatch} from './outbox.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
+import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {validateAgentWorkflowTelemetry,telemetryStoragePath}
   from '../../../agent-workflow-telemetry.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
@@ -195,6 +196,18 @@ export async function verifyReviewerForStore({storeRoot,metricsRoot,run,reader,
   const metrics=findReviewerMetrics(metricsRoot,run);
   const pr=metrics.task?.pr; // unprivileged candidate; attestAgentOutcome checks REST.
   if(!positive(pr))fail('canonical Reviewer Metrics lack reviewed PR number');
+  if(state.assignments?.developer==='dev-qwen-01'){
+    // A Qwen Publisher's branch is an immutable Store Intent, never an
+    // unprivileged model/metrics choice or an arbitrary issue-scoped PR.
+    const published=qwenReviewerPublishedSource({storeRoot,issue:body.issue,
+      actionId,sha:body.input_sha});
+    const actual=await reader.getPullRequest(pr);
+    if(actual?.number!==pr||actual.state!=='open'||
+       actual.head?.ref!==published.branch.slice('refs/heads/'.length)||
+       actual.head?.sha!==published.review_sha||
+       actual.base?.ref!=='main'||actual.base?.repo?.full_name!==REPO)
+      fail('Reviewer source PR differs from committed Qwen Publisher Intent');
+  }
   const receipt=await ingestAgentResult({
     state,action_id:actionId,reader,artifactReader,registry,keyring,
     dispatch_ticket:claim.dispatch_ticket,pr_number:pr,
