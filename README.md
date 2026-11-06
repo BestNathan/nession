@@ -92,3 +92,23 @@ All 14 business prototypes now follow the current [Nession prototype Skill](http
 Following the cross-gallery defect repair, the next scoped iteration compares mock **product UI** against main `bb48ea565be2` rather than modifying the review frame again. Files #2751 now has a product-local semantic CSS snapshot with 208px navigation, elastic editor and App pushed-detail Back semantics. Git/GitHub #1290 now has a compact GitHeader/local tabs, neutral canvas, flat content and no duplicate global Nession header; its proposed GitHub source tabs remain explicitly candidate behavior. Both use sibling `product-fidelity.css` rather than altering `prototype-frame-2758` or production sources. Product README files identify precise fixture references and deviations.
 
 **Evidence:** targeted V8 DOM mock execution: Files 11/11; Git 16/16 checks; updated checked-in Node test files have **not** been run as the complete Node suite in this tool environment. No complete Chromium visual comparison to current production fixture, no live API, and no trusted Acceptance is claimed. The final prototype commit / Pages SHA must be verified independently.
+
+## 2026-11-06 · Product information-architecture correction (supersedes CSS-only fidelity)
+
+**Important correction:** The previous Files/Git CSS and local layout polish had **not** reproduced the current Nession information-architecture ownership tree. Its wording implying current-product parity is superseded. `1:1` on the preview selector means **actual CSS pixels only**, not product IA or React/component parity.
+
+**Current source baseline:** main `bb48ea565be2`, `WebLayout`, `Sidebar`, `ShellMain`, `WorkspacePanel`, `WorkspaceShell`, `AppPageHeader`, `FilesWebLayout`, `FilesAppLayout`, `GitWorkspace`, and current design semantics. Required full Web tree: `WebLayout → Sidebar(Agents + flat Sessions + collapse/rail) + ShellMain → WorkspacePanel → WorkspaceShell → capability`. Required App tree: `AppLayout/AppLayers → WorkspacePanel → ONE AppPageHeader per depth → WorkspaceShell → capability`, with the Terminal rooted separately and the Capsule owned by the shell.
+
+### Corrected prototypes
+
+| Prototype | Source-mapped IA correction | Evidentiary boundary |
+|---|---|---|
+| [Files #2751](files-workspace-2751/index.html) | Real WebSidebar sibling of work region; nested WorkspaceShell/Files tree+editor; one App header for Files root, directory, file viewer and search; TerminalCapsule with contextual `+`; Files source selector is local to Files | Two checked-in tests executed under a V8 DOM stub (not native Node/browser) and full navigation state round-trip |
+| [Git/GitHub #1290](git-github-1290/index.html) | WebSidebar + WorkspaceShell; Git-local branch/section; App Issue record uses shell page header with one Back; obsolete global mock chrome/capability pages removed | 52/52 deterministic smoke assertions in V8/DOM stub; GitHub source is an unshipped #1290 candidate |
+| [WorkContract #2541](work-contract-2541/index.html) | WebSidebar + WorkspaceShell → candidate Work capability; App Contract detail is one header-owned push with no second Work-owned App Back | 10/10 smoke scenarios in V8/DOM stub; Work is a candidate extension, no real provider or API |
+
+**Not source-mapped/IA accepted yet:** #2514 Agent Process, #2221 AI Workspace, #2254 AI Conversation, #2689 Claude Memory, #2654 Environment, #2724 Mobile Swipe, #2664 Knowledge Pages, #2789 Session Metadata, #2598 Terminal Clipboard, #2657 Terminal Direction, #2487 Fixed Columns, #2710 Terminal Keys. These were previously checked for **frame geometry and/or targeted interactions**, not independently proven to have today's navigation-tree ownership. #2758 is the common reviewer frame, not a business IA screen. Mark these **IA UNVERIFIED** rather than declaring them defective without reproducing an actual discrepancy.
+
+**Remaining requirement:** side-by-side Chromium/Playwright visual and interaction comparison against the canonical `FixtureShell`, `FixtureWorkspace`, `FixtureApp` and current Web/App components at Web 1180/1024, App 390/375, including scroll, focus and nested back. The GitHub Publisher's verified SHA means **publication**, not IA/browser acceptance. No such complete browser comparison is claimed here.
+
+**Testing commands recorded for a repository checkout:** `node --test files-workspace-2751/visual-fidelity.test.mjs work-contract-2541/smoke.test.mjs` and `node git-github-1290/smoke-test.mjs`. In the present environment the actual scripts were fetched through the GitHub connector and evaluated with a V8/DOM-stub harness; they were not executed as Node CLI commands.
