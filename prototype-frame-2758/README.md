@@ -41,3 +41,9 @@ The `data-nession-prototype-frame="v1"` body and one each of `data-nession-galle
 ## Verification
 
 Source-only checks: import paths are relative, CSS namespaced, no product commands/API, controls mutate only preview width/reset; browser/PAGES SHA and viewport checks must be recorded separately.
+
+## Legacy mock adoption (2026-11-06)
+
+The shared kit also provides `review-bridge.css` and `review-bridge.js`. They are narrowly scoped presentation adapters for the 12 historical demos that have their own product layout/interaction code. A migrated `index.html` contains the publisher-required static gallery/source anchors, a self-contained interactive `np-device` and a JSON `np-review-config`. The bridge moves the existing product DOM under the target device (preserving element IDs/event listeners), moves mock-only controls/inspectors to the external review surface, and mirrors width-based media rules as CSS container queries so selecting a device size does not depend solely on the outer reviewer's browser width.
+
+The review adapter is **not** a product-side feature or a substitute for a proper rewrite against current Nession patterns. For example, window-width JavaScript decisions, old CSS palettes, or fake Terminal cells may still diverge from the actual App/Web viewport. The controlling Requirement remains authoritative. Never put network/real Session behavior in this branch. Before claiming completion, run the original scenario smoke and Chromium + Playwright at each provided viewport and compare with the current fixtures. This migration has static source review but no new browser screenshots or Pages manifest proof yet.
