@@ -8,7 +8,7 @@
 
   var state = {
     fixture:"normal", tab:"overview", revision:1, published:1,
-    mobile:false, sidebarCollapsed:false, selectedSession:"dev-session", list:true, surface:"workspace", capability:"work", expanded:null, compare:false, confirm:false,
+    mobile:false, terminalContext:false, sidebarCollapsed:false, selectedSession:"dev-session", list:true, surface:"workspace", capability:"work", expanded:null, compare:false, confirm:false,
     draft:"", message:"",
     events:[
       {id:"evt-01",actor:"Nession",initial:"N",when:"Contract published · v1",body:"Initial work definition and two acceptance criteria were established.",origin:"Contract revision"},
@@ -94,9 +94,16 @@
       '<p>Return to the Work capability using the Workspace Capsule. Its selected Contract and revision are preserved.</p></div></div>';
   }
   function terminalSurface() {
-    return '<div class="wc-terminal"><div class="wc-terminal-head"><strong>dev-session</strong><span>Terminal</span></div>'+
-      '<div class="wc-terminal-output"><p>~/workspace/nession $</p><p>Session remains available when Workspace is opened.</p></div>'+
-      '<button type="button" class="wc-btn dark" data-action="open-workspace">Open Workspace</button></div>';
+    return '<section class="wc-terminal" data-testid="terminal-surface">'+
+      '<div class="wc-terminal-output"><p>~/workspace/nession $</p><p>Session '+safe(state.selectedSession)+' remains attached.</p><p>~/workspace/nession $ ▌</p></div>'+
+      '<div class="wc-terminal-dock">'+
+        (state.terminalContext?'<div class="wc-terminal-context"><strong>Contextual capabilities</strong>'+
+          (state.fixture!=="unbound"?action("▣ Work","capability","",' data-value="work"'):"")+
+          '</div>':"")+
+        '<div class="wc-terminal-conversation">'+action("＋","terminal-context","",' aria-label="Open capabilities"')+
+          '<span>Ask Nession…</span><span class="wc-terminal-send">↑</span></div>'+
+        action("▣","open-workspace","wc-terminal-destination",' aria-label="Open Workspace"')+
+      '</div></section>';
   }
   function workspaceDock() {
     if (state.surface !== "workspace") return "";
@@ -270,18 +277,19 @@
   }
   function apply(actionName,value) {
     state.message="";
+    if(actionName==="terminal-context"){state.terminalContext=!state.terminalContext;return render(true);}
     if(actionName==="sidebar-collapse"){state.sidebarCollapsed=true;return render(true);}
     if(actionName==="sidebar-expand"){state.sidebarCollapsed=false;return render(true);}
     if(actionName==="select-session"){state.selectedSession=value;state.surface="terminal";return render(false);}
     if(actionName==="terminal") {state.surface="terminal";return render(false);}
     if(actionName==="open-workspace") {
-      state.surface="workspace";
+      state.terminalContext=false;state.surface="workspace";
       if(state.fixture==="unbound" && state.capability==="work")state.capability="files";
       return render(false);
     }
     if(actionName==="capability") {
       if(["work","files","git"].indexOf(value)<0 || (value==="work" && state.fixture==="unbound"))return;
-      state.capability=value;state.surface="workspace";return render(false);
+      state.capability=value;state.terminalContext=false;state.surface="workspace";return render(false);
     }
     if(actionName==="tab") {state.tab=value;state.expanded=null;state.confirm=false;return render(false);}
     if(actionName==="back") {if(state.capability==="work"&&!state.list&&state.fixture!=="unbound")state.list=true;else state.surface="terminal";return render(false);}
