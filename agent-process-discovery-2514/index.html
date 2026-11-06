@@ -182,7 +182,7 @@ var mockAgentDetails={
  mac:{agentId:'mock-mac-agent',endpoint:'192.0.2.55:9010',heartbeat:'8s ago',osVersion:'macOS / arm64',nessionVersion:'0.0.0-mock',tmuxVersion:'3.5a (mock)',image:'Not reported'},
  offline:{agentId:'mock-edge-agent',endpoint:'Unknown (last seen)',heartbeat:'Unavailable · offline',osVersion:'Last known Linux',nessionVersion:'Unknown',tmuxVersion:'Unknown',image:'Unknown'}
 };
-var state={scenario:'linux',currentSessionId:'dev',selectedPid:2184,resourceScope:'self',mobileDetail:false,tick:0,processDetailsOpen:false,surface:'workspace',collapsed:false,experience:'web',contextOpen:false};
+var state={scenario:'linux',currentSessionId:'dev',selectedPid:null,resourceScope:'self',mobileDetail:false,tick:0,processDetailsOpen:false,surface:'workspace',collapsed:false,experience:'web',contextOpen:false};
 function syncIA(){
  const shell=document.querySelector('.shell');shell.dataset.surface=state.surface;shell.dataset.experience=state.experience;
  document.querySelector('.ia-workspace-shell').hidden=state.surface!=='workspace';
@@ -361,9 +361,10 @@ function render(){
  if(unavailable){add(empty,'strong','','当前无法读取进程');add(empty,'span','','Agent 离线，请在恢复连接后刷新；不会推断进程数为零。');}
  else if(none){add(empty,'strong','','当前没有可检查的 Session');add(empty,'span','','从一个 Session 进入 Workspace 后才展示其进程；不会自动选择本节点上的其他 Session。');}
  if(!none&&!unavailable){
+  // Actual AgentProcesses starts without a selected PID. A changed snapshot
+  // may invalidate the previous identity; never silently choose a process.
   if(!items.some(function(x){return x.pid===state.selectedPid;})){
-   var preferred=items.find(function(x){return x.name==='claude';})||items[0];
-   state.selectedPid=preferred?preferred.pid:null;state.mobileDetail=false;
+   state.selectedPid=null;state.mobileDetail=false;
   }
   byId('tree-count').textContent=items.length+' discovered';
   renderTree(items);
@@ -395,7 +396,7 @@ document.addEventListener('click',function(e){
  const btn=e.target.closest('[data-ia]');if(!btn)return;
  const action=btn.dataset.ia;
  if(action==='terminal'||action==='other-session'||action==='app-back'){
-   if(action==='other-session')state.currentSessionId=null;
+   if(action==='other-session'){state.currentSessionId=null;state.selectedPid=null;state.mobileDetail=false;}
    state.surface='terminal';state.contextOpen=false;render();return;
  }
  if(action==='workspace'){state.surface='workspace';state.contextOpen=false;render();return;}
