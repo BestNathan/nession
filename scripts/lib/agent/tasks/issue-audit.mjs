@@ -1,4 +1,5 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
+import { KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool, completeIssueUpdateProposal } from '../tools/gh/issue/update.mjs';
@@ -23,6 +24,8 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
       repository,
       issueNumber: issue.number,
       labels: labels.join(', ') || '(none)',
+      kindLabels: [...KIND_LABELS].join(', '),
+      areaLabels: [...AREA_LABELS].join(', '),
       findings: (audit.errors ?? []).map((e) => '- ' + e).join('\n') || '(none)',
       issueBodyJson: JSON.stringify(issue.body ?? ''),
       mode,
