@@ -295,8 +295,18 @@ impl Database {
         Ok(rows.into_iter().map(session_row_from_model).collect())
     }
 
-    pub async fn list_sessions_older_than(&self, duration_secs: i64) -> Result<Vec<SessionRow>> {
-        let cutoff = chrono::Utc::now().timestamp() - duration_secs;
+    pub async fn get_session(&self, session_id: &str) -> Result<Option<SessionRow>> {
+        let row = sessions::Entity::find_by_id(session_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read session")?;
+        Ok(row.map(session_row_from_model))
+    }
+
+    /// Rows still in `recovering` whose activity is older than `cutoff`
+    /// (Unix seconds). This is the sweep's **selection** half; reclamation
+    /// re-checks the same predicate at deletion (#2848).
+    pub async fn list_recovering_sessions_before(&self, cutoff: i64) -> Result<Vec<SessionRow>> {
         let rows = sessions::Entity::find()
             .filter(sessions::Column::LastActivity.lt(cutoff))
             .filter(sessions::Column::Status.eq("recovering"))
@@ -304,6 +314,50 @@ impl Database {
             .await
             .context("failed to list stale sessions")?;
         Ok(rows.into_iter().map(session_row_from_model).collect())
+    }
+
+    pub async fn list_sessions_older_than(&self, duration_secs: i64) -> Result<Vec<SessionRow>> {
+        let cutoff = chrono::Utc::now().timestamp() - duration_secs;
+        self.list_recovering_sessions_before(cutoff).await
+    }
+
+    /// Delete a Session row **only while it is still the stale recovering row**
+    /// the sweep selected. Returns whether a row was removed.
+    ///
+    /// This is the destructive boundary: a restore that commits before this
+    /// statement changes the row's status or activity, and the delete becomes
+    /// a no-op instead of erasing the restored Session (#2848).
+    pub async fn delete_recovering_session_before(
+        &self,
+        session_id: &str,
+        cutoff: i64,
+    ) -> Result<bool> {
+        let result = sessions::Entity::delete_many()
+            .filter(sessions::Column::SessionId.eq(session_id))
+            .filter(sessions::Column::Status.eq("recovering"))
+            .filter(sessions::Column::LastActivity.lt(cutoff))
+            .exec(&self.conn)
+            .await
+            .context("failed to delete stale recovering session")?;
+        Ok(result.rows_affected > 0)
+    }
+
+    /// Seed activity/status for an in-crate lifecycle test.
+    #[cfg(test)]
+    pub(crate) async fn set_session_activity_for_test(
+        &self,
+        session_id: &str,
+        status: &str,
+        last_activity: i64,
+    ) -> Result<()> {
+        sessions::Entity::update_many()
+            .col_expr(sessions::Column::Status, Expr::value(status.to_owned()))
+            .col_expr(sessions::Column::LastActivity, Expr::value(last_activity))
+            .filter(sessions::Column::SessionId.eq(session_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to seed session activity")?;
+        Ok(())
     }
 
     // ── Env files (issue #95, part 2) ─────────────────────────────────

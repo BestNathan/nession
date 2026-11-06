@@ -1,8 +1,8 @@
 use crate::db::Database;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, Mutex, Weak};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
@@ -32,6 +32,15 @@ pub enum SessionStatus {
 
 pub struct SessionRegistry {
     sessions: Arc<RwLock<HashMap<String, SessionInfo>>>,
+    /// One lifecycle lock per Session id (#2848).
+    ///
+    /// A Session's live report, creation claim, removal and stale-row
+    /// reclamation must not interleave: the reclaim path deletes a persisted
+    /// recovering row selected earlier, and a restore that commits first must
+    /// make that deletion a no-op. Weak entries so the map does not grow with
+    /// every Session id the Server has ever seen; a live guard keeps its lock
+    /// alive until every waiter has finished.
+    lifecycle_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
     db: Arc<Database>,
 }
 
@@ -39,8 +48,32 @@ impl SessionRegistry {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle_locks: Mutex::new(HashMap::new()),
             db,
         }
+    }
+
+    /// Serialize one Session's lifecycle transitions.
+    ///
+    /// Held across the in-memory replacement, the persisted write and — for
+    /// reclamation — the Environment Binding cleanup. A stale-row sweep and a
+    /// restore of the same Session therefore have one winner: whichever
+    /// acquires this guard first. Different Sessions never contend.
+    pub(crate) async fn lifecycle_guard(&self, session_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self
+                .lifecycle_locks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(existing) = locks.get(session_id).and_then(Weak::upgrade) {
+                existing
+            } else {
+                let lock = Arc::new(AsyncMutex::new(()));
+                locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        lock.lock_owned().await
     }
 
     pub async fn load_from_db(&self) {
@@ -48,37 +81,14 @@ impl SessionRegistry {
             Ok(rows) => {
                 let mut sessions = self.sessions.write().await;
                 for row in rows {
-                    let created_at =
-                        DateTime::from_timestamp(row.created_at, 0).unwrap_or(Utc::now());
-                    let last_activity =
-                        DateTime::from_timestamp(row.last_activity, 0).unwrap_or(Utc::now());
-                    let status = match row.status.as_str() {
-                        "active" => SessionStatus::Active,
-                        "detached" => SessionStatus::Detached,
-                        "zombie" => SessionStatus::Zombie,
-                        _ => SessionStatus::Recovering,
-                    };
-                    let info = SessionInfo {
-                        session_id: row.session_id.clone(),
-                        agent_id: row.agent_id,
-                        session_name: row.session_name,
-                        status,
-                        window_count: row.window_count,
-                        attached_clients: row.attached_clients,
-                        // Not persisted: it is re-reported by the agent's first
-                        // update after a reconnect.
-                        foreground_command: None,
-                        working_dir: None,
-                        created_at,
-                        last_activity,
-                    };
+                    let info = session_info_from_row(row);
                     tracing::info!(
                         "Loaded session {} (agent: {}, status: {:?})",
                         info.session_id,
                         info.agent_id,
                         info.status
                     );
-                    sessions.insert(row.session_id, info);
+                    sessions.insert(info.session_id.clone(), info);
                 }
                 tracing::info!(
                     "Loaded {} sessions from database (recovering)",
@@ -92,6 +102,10 @@ impl SessionRegistry {
     }
 
     pub async fn update_session(&self, session: SessionInfo) {
+        // Serialized with the stale-row reclaim path: a restore that acquires
+        // this guard before the sweep makes the sweep's conditional deletion a
+        // no-op (#2848).
+        let _lifecycle = self.lifecycle_guard(&session.session_id).await;
         let status = status_str(&session.status);
 
         // Update the in-memory registry first — it is the live serving path
@@ -118,6 +132,7 @@ impl SessionRegistry {
     /// Return false when the row already exists; creation still succeeded,
     /// and the caller may broadcast the existing authoritative row.
     pub async fn insert_session_if_absent(&self, session: SessionInfo) -> bool {
+        let _lifecycle = self.lifecycle_guard(&session.session_id).await;
         let inserted = {
             let mut sessions = self.sessions.write().await;
             match sessions.entry(session.session_id.clone()) {
@@ -166,11 +181,94 @@ impl SessionRegistry {
     }
 
     pub async fn remove(&self, session_id: &str) {
+        let _lifecycle = self.lifecycle_guard(session_id).await;
         if let Err(e) = self.db.delete_session(session_id).await {
             tracing::error!("Failed to delete session {} from DB: {:#}", session_id, e);
         }
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
+    }
+
+    /// Reclaim one Session selected by the stale-recovering sweep at `cutoff`.
+    ///
+    /// **The caller must hold [`Self::lifecycle_guard`] for this Session** for
+    /// the whole destructive sequence (this call and the Environment Binding
+    /// cleanup that follows). The guard is what makes the reclaim conditional:
+    /// a restore that completed first has already replaced the in-memory entry
+    /// and the persisted row, so both checks below fail and nothing is
+    /// destroyed (#2848).
+    ///
+    /// Returns `true` only when the persisted row was still the stale
+    /// recovering row and was deleted. The in-memory entry is removed in the
+    /// same decision, so the caller may then clear the Session's Environment
+    /// Binding.
+    pub(crate) async fn reclaim_stale_recovering_under_lock(
+        &self,
+        session_id: &str,
+        cutoff: i64,
+    ) -> bool {
+        // The live registry is the authority: a restore writes the fresh
+        // status and activity here before its persisted write completes.
+        let removed_from_memory = {
+            let mut sessions = self.sessions.write().await;
+            match sessions.get(session_id) {
+                Some(current)
+                    if current.status != SessionStatus::Recovering
+                        || current.last_activity.timestamp() >= cutoff =>
+                {
+                    return false;
+                }
+                Some(_) => {
+                    sessions.remove(session_id);
+                    true
+                }
+                // A persisted row with no in-memory entry (for example after
+                // a restart that has not loaded it) is decided by the row.
+                None => false,
+            }
+        };
+
+        match self
+            .db
+            .delete_recovering_session_before(session_id, cutoff)
+            .await
+        {
+            Ok(true) => true,
+            Ok(false) => {
+                // The persisted row changed while the sweep held it — the
+                // restore won. Reclaiming nothing is the only safe result.
+                // If the sweep had already removed the in-memory entry, put
+                // the current row back rather than serving a deleted view; a
+                // locking restore cannot have run here (the guard is held),
+                // but a non-locking writer may have replaced the row.
+                if removed_from_memory {
+                    match self.db.get_session(session_id).await {
+                        Ok(Some(row)) => {
+                            let info = session_info_from_row(row);
+                            let mut sessions = self.sessions.write().await;
+                            sessions.insert(session_id.to_string(), info);
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to reload session {} after a skipped reclaim: {:#}",
+                                session_id,
+                                e
+                            );
+                        }
+                    }
+                }
+                false
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to reclaim stale recovering session {}: {:#}",
+                    session_id,
+                    e
+                );
+                false
+            }
+        }
     }
 
     pub async fn remove_by_agent(&self, agent_id: &str) -> Vec<String> {
@@ -245,6 +343,36 @@ impl SessionRegistry {
         }
 
         removed
+    }
+}
+
+/// Project a persisted row into the live registry's shape.
+///
+/// One owner for the row→memory mapping: the startup load and the
+/// skipped-reclaim reload must agree, or a restored Session would come back
+/// with a different status depending on which path reloaded it.
+fn session_info_from_row(row: crate::db::SessionRow) -> SessionInfo {
+    let created_at = DateTime::from_timestamp(row.created_at, 0).unwrap_or_else(Utc::now);
+    let last_activity = DateTime::from_timestamp(row.last_activity, 0).unwrap_or_else(Utc::now);
+    let status = match row.status.as_str() {
+        "active" => SessionStatus::Active,
+        "detached" => SessionStatus::Detached,
+        "zombie" => SessionStatus::Zombie,
+        _ => SessionStatus::Recovering,
+    };
+    SessionInfo {
+        session_id: row.session_id,
+        agent_id: row.agent_id,
+        session_name: row.session_name,
+        status,
+        window_count: row.window_count,
+        attached_clients: row.attached_clients,
+        // Not persisted: it is re-reported by the agent's first update after a
+        // reconnect.
+        foreground_command: None,
+        working_dir: None,
+        created_at,
+        last_activity,
     }
 }
 
