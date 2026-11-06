@@ -171,3 +171,34 @@
 .n-product.n-app .n-workspace-shell .n-dock-pill button{height:36px}
 .n-product.n-app .n-terminal-dock{bottom:9px;width:calc(100% - 20px)}
 .n-product.n-app .n-conversation-capsule{height:44px}
+
+/* #2789 staging SessionDetails → SessionMetadataSection internal IA:
+ * title/identity, connection, runtime facts, then Work context view/editor.
+ * Main supplies shared shell anatomy; staging supplies this feature surface. */
+.n-product .n-workspace-content .n-view{padding:16px 16px 100px}
+.n-product .n-content{display:flex;flex-direction:column;gap:16px;max-width:none;width:100%;margin:0}
+.n-product .n-session-overview{display:flex;flex-direction:column;gap:3px;min-width:0}
+.n-product .n-heading{font-size:14px;line-height:1.45;font-weight:580;letter-spacing:0;margin:0}
+.n-product .n-session-id{font-size:11.5px;color:var(--nession-muted-foreground);overflow-wrap:anywhere;margin:0}
+.n-product .n-session-connection{color:var(--nession-muted-foreground);font-size:12px}
+.n-product .n-runtime-facts{display:flex;flex-direction:column;gap:8px;margin:0;font-size:12.5px}
+.n-product .n-runtime-facts .n-data{display:flex;align-items:baseline;gap:10px}
+.n-product .n-runtime-facts .n-data-label{font-size:12px;min-width:95px;margin:0}
+.n-product .n-runtime-facts .n-data-value{font-size:12.5px;margin:0}
+.n-product .n-metadata-section{display:flex;flex-direction:column;gap:12px;max-width:760px}
+.n-product .n-metadata-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.n-product .n-metadata-head h3{font-size:13px;line-height:1.35;font-weight:600;margin:0}
+.n-product .n-metadata-head .n-btn{min-height:30px;padding:5px 10px}
+.n-product .n-metadata-section .n-description{font-size:13px;max-width:none}
+.n-product .n-metadata-section .n-tags{margin-top:12px}
+.n-product .n-metadata-section .n-tag{
+  background:var(--nession-muted);border-radius:6px;padding:3px 7px;
+  font-size:11.5px;color:var(--nession-text-secondary)
+}
+.n-product .n-metadata-section .n-editor{max-width:670px}
+.n-product .n-metadata-section .n-field{margin:14px 0}
+.n-product .n-metadata-section .n-edit-actions{margin-top:22px}
+.n-product.n-app .n-workspace-content .n-view{padding:14px 12px 92px}
+.n-product.n-app .n-heading{font-size:14px}
+.n-product.n-app .n-metadata-head{align-items:center}
+.n-product.n-app .n-metadata-head .n-btn{min-height:36px}
