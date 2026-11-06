@@ -145,19 +145,25 @@
 .n-shell[data-mode="narrow"] .n-capsule{bottom:19px;width:calc(100% - 24px)}
 @media(prefers-reduced-motion:reduce){.n-sidebar{transition:none!important}}
 
-/* Row actions: current Nession SessionItem behavior, not a redesigned action page. */
-.n-inline-actions{display:flex;flex:none;gap:2px;align-items:flex-start;opacity:0;pointer-events:none}
-.n-session-item:hover .n-inline-actions,.n-session-item:focus-within .n-inline-actions,.n-session-item[data-active="true"] .n-inline-actions{opacity:1;pointer-events:auto}
-.n-row-action{display:grid;place-items:center;width:32px;height:32px;flex:none;border:0;border-radius:var(--nession-radius-control);background:transparent;color:var(--nession-muted-foreground);padding:0}
-.n-row-action:hover{color:var(--nession-foreground);background:var(--nession-sidebar-accent)}
-.n-row-action-kill:hover{color:var(--nession-danger)}
-.n-session-item .n-more{display:none}
-.n-shell[data-mode="narrow"] .n-inline-actions{display:none}
-.n-shell[data-mode="narrow"] .n-session-item .n-more{display:grid;place-items:center;opacity:1;pointer-events:auto}
+/* Approved #2851 action IA: anchored overflow menu, with existing backend capabilities. */
+/* One anchored Session menu on wide and narrow Web; no direct destructive icon. */
+.n-session-item .n-more{display:grid;place-items:center;opacity:0;pointer-events:none;transition:opacity var(--nession-motion-shell-duration) var(--nession-motion-shell-ease)}
+.n-session-item:hover .n-more,.n-session-item:focus-within .n-more,.n-session-item[data-active="true"] .n-more{opacity:1;pointer-events:auto}
+.n-shell[data-mode="narrow"] .n-session-item .n-more{width:44px;height:44px;opacity:1;pointer-events:auto;flex:none}
 .n-row-menu[hidden],.n-action-overlay[hidden]{display:none!important}
 .n-row-menu{position:absolute;z-index:15;min-width:192px;max-width:calc(100% - 16px);padding:5px;background:var(--nession-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);box-shadow:0 8px 24px #0002;display:grid;gap:2px}
 .n-row-menu-item{display:flex;align-items:center;gap:10px;background:transparent;border:0;border-radius:6px;padding:8px 9px;min-height:34px;text-align:left;color:var(--nession-foreground);font-size:var(--nession-typography-body-size);cursor:pointer}
 .n-row-menu-item:hover,.n-row-menu-item:focus-visible{background:var(--nession-sidebar-accent)}
+.n-row-menu-separator{height:1px;background:var(--nession-border);margin:4px 6px}
+.n-row-menu-item svg{width:var(--nession-icon-md);height:var(--nession-icon-md);fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.n-row-menu-item[data-action="kill"]:hover{color:var(--nession-danger);background:color-mix(in oklch,var(--nession-danger) 8%,var(--nession-background))}
+.n-action-textarea{min-height:88px;height:auto;padding:9px 10px;resize:vertical;font-family:inherit}
+.n-meta-summary{display:grid;gap:7px;padding:10px 12px;background:var(--nession-sidebar);border-radius:var(--nession-radius-control)}
+.n-meta-summary-line{display:grid;grid-template-columns:minmax(90px,38%) minmax(0,1fr);gap:10px;font-size:12px;align-items:start}
+.n-meta-summary-line span{color:var(--nession-muted-foreground)}
+.n-meta-summary-line strong{font-weight:500;overflow-wrap:anywhere}
+.n-action-error{color:var(--nession-danger);font-size:12px;line-height:1.4;margin:0}
+.n-action-error:empty{display:none}
 .n-row-menu-danger{color:var(--nession-danger)}
 .n-action-overlay{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:16px}
 .n-action-backdrop{position:absolute;inset:0;background:#14191f80;border:0}
