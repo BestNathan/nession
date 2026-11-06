@@ -30,6 +30,7 @@ for (const id of requiredIds) {
   nodes[id] = {
     id, handlers:{}, hidden:false, innerHTML:'', textContent:'', dataset:{}, attrs:{},value:'',
     addEventListener(type,fn){this.handlers[type]=fn;},
+    getBoundingClientRect(){return {left:120,top:0,width:390,height:844};},
     setAttribute(name,value){this.attrs[name]=value;},
   };
 }
@@ -53,6 +54,23 @@ function fakeClick(node, attr, value) {
 const state=()=>api.state();
 let checks=0;
 function check(test){test();checks++;}
+
+
+// App edge navigation must use the embedded 390px device, not the outer browser.
+check(()=>{
+  global.window.innerWidth=1440;
+  const target={closest(){return null}};
+  nodes['app'].handlers.touchstart({touches:[{clientX:132,clientY:460}],target});
+  nodes['app'].handlers.touchend({changedTouches:[{clientX:252,clientY:460}]});
+  assert.equal(state().page,'sessions','left edge swipe should open Sessions on desktop reviewer');
+  nodes['sessions-close'].handlers.click();
+  assert.equal(state().page,'terminal');
+  nodes['app'].handlers.touchstart({touches:[{clientX:502,clientY:460}],target});
+  nodes['app'].handlers.touchend({changedTouches:[{clientX:382,clientY:463}]});
+  assert.equal(state().page,'workspace','right edge swipe should open Workspace');
+  nodes['to-terminal'].handlers.click();
+  assert.equal(state().page,'terminal');
+});
 
 check(()=>{
   assert.equal(state().page,'terminal');
