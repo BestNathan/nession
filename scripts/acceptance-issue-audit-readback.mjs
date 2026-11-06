@@ -33,28 +33,44 @@ export function verifiedIssueAuditCriterion(context, normalized) {
   if(Number(context?.issue?.number)!==SIDEBAR_AUDIT_REPAIR_PROOF.acceptanceIssue||
      context?.stage!=='post-merge') return normalized;
   const selected=normalized.criteria?.find(item=>item.criterion===SIDEBAR_AUDIT_REPAIR_PROOF.criterion);
-  if(!selected||selected.result!=='Pass')return normalized;
+  if(!selected||selected.result==='Fail'||selected.result==='N/A')return normalized;
   const proof=context?.ci_evidence?.authenticated_issue_audit_repair_readback;
-  if(!proof||proof.status!=='authenticated-historical-repair-readback'||
-     proof.source_run_id!==SIDEBAR_AUDIT_REPAIR_PROOF.sourceRunId||
-     proof.source_attempt!==SIDEBAR_AUDIT_REPAIR_PROOF.sourceAttempt||
-     proof.target_issue!==SIDEBAR_AUDIT_REPAIR_PROOF.targetIssueNumber||
-     proof.source_event!==SIDEBAR_AUDIT_REPAIR_PROOF.event||
-     proof.provider!=='qwen'||proof.issue_contract_pass!==true||
-     !Number.isSafeInteger(proof.source_job_id)||proof.source_job_id<1||
-     !Array.isArray(proof.label_event_ids)||proof.label_event_ids.length!==2||
-     !Array.isArray(proof.protected_e2e_selected_ids)||
-     JSON.stringify([...proof.protected_e2e_selected_ids].sort())!==JSON.stringify([...SIDEBAR_AUDIT_REPAIR_PROOF.expectedE2EIds].sort()))
-    throw Error('SC-03 Issue Audit Pass lacks authenticated exact-target Agent execution/readback');
+  const valid=proof?.status==='authenticated-historical-repair-readback'&&
+     proof.source_run_id===SIDEBAR_AUDIT_REPAIR_PROOF.sourceRunId&&
+     proof.source_attempt===SIDEBAR_AUDIT_REPAIR_PROOF.sourceAttempt&&
+     proof.target_issue===SIDEBAR_AUDIT_REPAIR_PROOF.targetIssueNumber&&
+     proof.source_event===SIDEBAR_AUDIT_REPAIR_PROOF.event&&
+     proof.provider==='qwen'&&proof.issue_contract_pass===true&&
+     proof.owner_trigger_verified===true&&
+     proof.source_main_ancestry_confirmed===true&&
+     proof.verified_risk_tier==='verification:scoped'&&
+     Number.isSafeInteger(proof.source_job_id)&&proof.source_job_id>0&&
+     Array.isArray(proof.label_event_ids)&&proof.label_event_ids.length===2&&
+     Array.isArray(proof.protected_e2e_selected_ids)&&
+     JSON.stringify([...proof.protected_e2e_selected_ids].sort())===
+     JSON.stringify([...SIDEBAR_AUDIT_REPAIR_PROOF.expectedE2EIds].sort());
+  // A model's Pass is NEVER evidence. With no complete signed receipt,
+  // preserve a truthful Pending rather than accept a speculative verdict.
+  if(!valid){
+    if(selected.result==='Pass')
+      throw Error('SC-03 Issue Audit Pass lacks authenticated exact-target Agent execution/readback');
+    return normalized;
+  }
+  // An exact historical source repair (this entire SC assertion) was already
+  // proved deterministically, including source-main ancestry. A model Pending
+  // because the unrelated generic source_ancestry list is empty cannot veto
+  // this independent verified receipt. An observed Fail is never overwritten.
   // Never let model prose attribute this Pass to the wrong run or a skipped
   // sibling. The trusted exact-run receipt owns the evidence and summary.
   return {...normalized,criteria:normalized.criteria.map(item=>
     item.criterion!==SIDEBAR_AUDIT_REPAIR_PROOF.criterion ? item : {
       ...item,
+      result:'Pass',
       evidence:[{type:'authenticated-issue-audit',value:
         'run '+proof.source_run_id+'/'+proof.source_attempt+
         ', agent job '+proof.source_job_id+
         ', target #'+proof.target_issue+', source '+proof.source_sha+
+        ', owner-triggered main ancestor, tier '+proof.verified_risk_tier+
         ', verified canonical Issue/E2E and bot label writes'}],
       summary:'Historical Qwen Issue Audit produced a valid persistent repair and risk-tier classification for target #2851',
     })};
