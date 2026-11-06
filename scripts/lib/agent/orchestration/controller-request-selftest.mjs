@@ -60,6 +60,14 @@ assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01'},
   {...context,actor:'external'},registry),/untrusted/);
 assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01'},
   {...context,ref:'refs/heads/staging'},registry),/untrusted/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01',
+  reviewer:'dev-qwen-01'},context,registry),/wrong-role/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01'},
+  {...context,head_sha:'untrusted'},registry),/untrusted/);
+// An explicit Qwen request is resolved at creation. Later Repository
+// Variables may change, but cannot rewrite the immutable original request.
+assert.equal(qwen.request.developer,'dev-qwen-01');
+assert.equal(defaulted.request.developer,'dev-cursor-01');
 
 assert.throws(()=>buildControllerRequest({...inputs,developer:'review-cursor-01'},
   context,registry),/wrong-role/);
