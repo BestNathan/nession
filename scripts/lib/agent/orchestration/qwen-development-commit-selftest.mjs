@@ -425,11 +425,11 @@ try {
   const storedBound=readIssueWorkflowState(post,issue);
   assert.equal(storedBound.version,boundRepair.version);
   const boundAction=storedBound.state.outbox.find(x=>x.id===originalRepair.id);
-  const repairSource=qwenRepairPublishedSource({
+  const repairPublishedSource=qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:originalRepair.id,sha:commitSha});
-  assert.equal(repairSource.review_sha,commitSha);
-  assert.equal(repairSource.base_sha,inputSha);
-  assert.equal(repairSource.branch,'refs/heads/'+branch);
+  assert.equal(repairPublishedSource.review_sha,commitSha);
+  assert.equal(repairPublishedSource.base_sha,inputSha);
+  assert.equal(repairPublishedSource.branch,'refs/heads/'+branch);
   assert.throws(()=>qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:originalRepair.id,sha:'f'.repeat(40)}),
     /trusted Qwen Repair origin/);
@@ -470,15 +470,13 @@ try {
   // Session at the ACTUAL published PR commit in a separately authenticated
   // Worker Run and store the next immutable ciphertext checkpoint.
   // No real network/model call or Reviewer approval is simulated as Pass.
-  const binding=readIssueWorkflowState(post,issue);
-  const repairBound=bindVerifiedRepairCheckpoint(binding.state,binding.version,
-    originalRepair.id,immutableOrigin);
-  writeIssueWorkflowState(post,repairBound,binding.version);
-  git(post,'add','-A');
-  git(post,'-c','user.name=Qwen Store Case',
-    '-c','user.email=qwen@example.invalid','commit',
-    '-m','signed Qwen Repair checkpoint CAS');
-  publish('agent-store',post,4);
+  // The Owner Controller already CAS-bound this exact source above.
+  // Read the committed State rather than inventing a second identical
+  // Store commit; only an unbound original Action can be bound once.
+  const repairBound=readIssueWorkflowState(post,issue).state;
+  assert.deepEqual(repairBound.outbox.find(x=>
+    x.id===originalRepair.id).task.repair_checkpoint,
+    boundRepair.outbox.find(x=>x.id===originalRepair.id).task.repair_checkpoint);
   const repairSigner={...signer,issuer_run_id:issuerId};
   const repairSigned=planGitHubDispatch(repairBound,originalRepair.id,
     registry,repairSigner);
