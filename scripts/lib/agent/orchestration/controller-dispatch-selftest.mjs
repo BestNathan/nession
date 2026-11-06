@@ -6,6 +6,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_RETRY_COMMENT}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
+import {SOURCE as QWEN_KEY_FAILURE} from './qwen-preflight-failure.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -25,6 +26,28 @@ const run={id:runId,run_attempt:1,event:'workflow_dispatch',
   head_repository:{full_name:'BestNathan/nession'}};
 const valid={environment,event,run,issue,actionId};
 assert.equal(assertDispatchAuthority(valid).issuer_run_id,runId);
+// Explicit owner/main dispatch mode: normal requests retain the original
+// two-input contract. Only the single independently attested failed Qwen
+// Run may carry an optional recovery_run_id; no arbitrary Job retry.
+const qwenRecovery={...valid,issue:QWEN_KEY_FAILURE.issue,
+  actionId:QWEN_KEY_FAILURE.action_id,
+  event:{...event,inputs:{
+    issue_number:String(QWEN_KEY_FAILURE.issue),
+    action_id:QWEN_KEY_FAILURE.action_id,
+    recovery_run_id:String(QWEN_KEY_FAILURE.run_id),
+  }}};
+assert.equal(assertDispatchAuthority(qwenRecovery).issue,2817);
+assert.equal(assertDispatchAuthority({...valid,event:{...event,
+  inputs:{...event.inputs,recovery_run_id:'0'}}}).issue,issue);
+for(const input of [
+  {...qwenRecovery.event.inputs,recovery_run_id:'42187623196'},
+  {...qwenRecovery.event.inputs,action_id:'f'.repeat(64)},
+  {...qwenRecovery.event.inputs,unexpected:'hello'},
+])assert.throws(()=>assertDispatchAuthority({...qwenRecovery,
+  event:{...qwenRecovery.event,inputs:input}}),/authenticated owner\/main/);
+assert.throws(()=>assertDispatchAuthority({...qwenRecovery,
+  environment:{...environment,GITHUB_ACTOR:'untrusted'}}),
+  /authenticated owner\/main/);
 const commentEnvironment={...environment,GITHUB_EVENT_NAME:'issue_comment'};
 const commentEvent={
   action:'created',repository:{full_name:'BestNathan/nession'},
@@ -190,3 +213,4 @@ console.log('Controller dispatch: trusted run binding, fork/retry/role denial, H
 
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
 await import('./qwen-reviewer-source-selftest.mjs');
+await import('./qwen-preflight-recovery-selftest.mjs');
