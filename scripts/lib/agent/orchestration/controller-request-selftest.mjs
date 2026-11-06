@@ -24,8 +24,9 @@ const routed=buildControllerRequest({...inputs,reviewer:'',acceptor:''},
 assert.equal(routed.request.reviewer,'review-qwen-01');
 assert.equal(routed.request.acceptor,'accept-qwen-01');
 assert.equal(routed.request.developer,'dev-cursor-01');
-// Production Developer is pinned to Cursor native state pending migration;
-// Controller's unset Reviewer/Acceptor choices must now use Qwen.
+// An explicit owner/main dev-qwen-01 canary is admitted for authentic
+// production proof. Defaults remain pinned to the historical Cursor path;
+// other unproven provider identities never enter the Store.
 const defaulted=buildControllerRequest({...inputs,reviewer:'',acceptor:''},
   context,registry);
 assert.equal(defaulted.request.reviewer,'review-qwen-01');
@@ -35,8 +36,30 @@ assert.equal(buildControllerRequest({...inputs,reviewer:'review-cursor-01'},cont
   {reviewer:'review-qwen-01'}).request.reviewer,'review-cursor-01');
 assert.throws(()=>buildControllerRequest({...inputs,reviewer:''},context,registry,
   {reviewer:'dev-qwen-01'}),/wrong-role/);
+// The owner can opt into exactly one registered Qwen Developer identity,
+// with no default switch, source SHA change or issue-selected provider.
+const qwen=buildControllerRequest({...inputs,developer:'dev-qwen-01',
+  reviewer:'review-qwen-01',acceptor:'accept-qwen-01'},context,registry);
+assert.equal(qwen.request.developer,'dev-qwen-01');
+assert.equal(qwen.request.issue,issue);
+assert.equal(qwen.request.sha,inputs.input_sha);
+assert.deepEqual(qwen.request,{
+  issue,sha:inputs.input_sha,developer:'dev-qwen-01',
+  reviewer:'review-qwen-01',acceptor:'accept-qwen-01',
+});
+assert.equal(buildControllerRequest({...inputs,developer:'dev-qwen-01'},
+  context,registry,{developer:'dev-cursor-01'}).request.developer,'dev-qwen-01');
+// A configured Qwen default alone must not silently consume real tokens or
+// migrate an existing Cursor session. Only an explicit trusted owner override
+// can initialize a new Qwen Store task.
 assert.throws(()=>buildControllerRequest({...inputs,developer:''},context,registry,
-  {developer:'dev-qwen-01'}),/requires #2274/);
+  {developer:'dev-qwen-01'}),/explicit owner Qwen canary/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-deepseek-01'},
+  context,registry),/requires #2274/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01'},
+  {...context,actor:'external'},registry),/untrusted/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:'dev-qwen-01'},
+  {...context,ref:'refs/heads/staging'},registry),/untrusted/);
 
 assert.throws(()=>buildControllerRequest({...inputs,developer:'review-cursor-01'},
   context,registry),/wrong-role/);
@@ -90,6 +113,14 @@ try{
   const right=make(request);
   assert.deepEqual(inspectControllerRequestZip(right.bytes,right.digest,
     upstream,expected,registry),request);
+  const qwenZip=make(qwen);
+  assert.deepEqual(inspectControllerRequestZip(qwenZip.bytes,qwenZip.digest,
+    upstream,expected,registry),qwen);
+  const forgedQwen=make({...qwen,request:{...qwen.request,
+    developer:'dev-deepseek-01'}});
+  assert.throws(()=>inspectControllerRequestZip(forgedQwen.bytes,
+    forgedQwen.digest,upstream,expected,registry),/requires #2274/);
+
   // Defaults are resolved once at Task creation. A later consumer validates
   // the durable ZIP against its stored identities, so changing the current
   // Repository Variables cannot silently rewrite an already dispatched Task.
