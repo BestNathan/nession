@@ -18,6 +18,12 @@ Read when a mock displays an entire Nession product page, navigation between Ses
 
 **Both:** the active work surface dominates. Infrastructure metadata remains quiet. Workspace is contextual depth and capabilities emerge when relevant; their availability does not justify permanent chrome. Preserve Session continuity.
 
+## Semantic shell tree: compare DOM, not visual similarity
+
+The full Web mock must preserve `WebLayout → Sidebar + ShellMain` (the Sidebar holds Agents/flat Sessions/service status; collapse releases actual width); within the active Workspace the product composes `WorkspacePanel → WorkspaceShell → capability-local view`. A fixture-only `WorkspaceShell` crop is valid but **must be named a crop** instead of a full-Web 1:1 recreation. The App has **no** desktop Sidebar or rail: `AppLayout/AppLayers` owns the spatial layers and `WorkspacePanel → AppPageHeader` owns exactly one Back/title for the displayed capability depth. Capability internals own their action toolbar/breadcrumb, never a second global page header.
+
+Compare root and pushed-detail DOM structure, controls and state transitions against `FixtureShell`, `FixtureApp`, `FixtureWorkspace`, `WebLayout`, `AppLayout`, `WorkspacePanel`, `WorkspaceShell` and the relevant capability layout. A token-aligned standalone HTML screenshot is still **IA-unverified** until these owner/child relationships and the Web/App handoff are demonstrated. Log intentional deviations as candidate IA in the external review documentation.
+
 ## Visual fidelity
 
 A product viewport **must follow the current Nession design vocabulary and core component grammar**: generated `--nession-*` semantic tokens, appropriate Web/App experience values, real shell/capsule/button/row anatomy, typography roles, interactions and responsive behavior. For standalone HTML, a minimal **local snapshot** of the relevant generated values/recipes is permitted; pin the source revision and list approximations in README. Never invent an unrelated `--bg`/`--panel`/`--accent` palette and call it Nession. Do not import live application services/auth/network into public prototypes. Never hand-edit generated token outputs.
