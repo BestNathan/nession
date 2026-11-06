@@ -8,7 +8,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {startDevelopment,recordDispatchIntent,recordDispatch,
-  acceptTaskResult,bindVerifiedRepairCheckpoint} from './outbox.mjs';
+  acceptTaskResult,bindVerifiedRepairCheckpoint,
+  acceptAttestedQwenRepairPublication} from './outbox.mjs';
 import {attestQwenPublishedRepairCheckpoint,qwenRepairPublishedSource}
   from './qwen-repair-checkpoint.mjs';
 import {bindQwenRepairCheckpoint} from './dispatch-store.mjs';
@@ -23,7 +24,8 @@ import {sealQwenDevelopmentProposal}
   from './qwen-development-evidence.mjs';
 import {ingestQwenVerifiedCandidate,qwenCheckpointNextVersion}
   from './qwen-development-commit.mjs';
-import {preflightTrustedQwenPublisher}
+import {preflightTrustedQwenPublisher,
+  preflightTrustedQwenRepairPublisher,assertQwenRepairPublisherOrigin}
   from '../publisher/qwen-source-preflight.mjs';
 import {commitQwenPublisherIntent}
   from '../publisher/store-intent.mjs';
@@ -550,6 +552,56 @@ try {
   assert.equal(repairAccepted.checkpoint.version,2);
   assert.equal(repairAccepted.action_id,originalRepair.id);
   assert.equal((await ingestQwenVerifiedCandidate(repairArgs)).status,'replayed');
+  // A distinct Repair Worker/Store checkpoint is preflighted ONLY against
+  // the original signed PR-A SHA. The trusted source verifier may not create
+  // another PR, change its branch or trust model-selected file paths.
+  const repairPubCheckout=path.join(home,'repair-publisher-source');
+  git(home,'clone','--no-hardlinks',repairSource,repairPubCheckout);
+  assert.equal(git(repairPubCheckout,'rev-parse','HEAD'),commitSha);
+  const repairPreflight=await preflightTrustedQwenRepairPublisher({
+    remote,registry,run:repairRun,claim:repairArgs.claim,
+    reader:repairReader,rootKey:key,
+    result:repairCandidate.result,proof:repairCandidate.proof,
+    ciphertext:repairCandidate.ciphertext,sourceCheckout:repairPubCheckout,
+  });
+  assert.equal(repairPreflight.origin.issue,issue);
+  assert.equal(repairPreflight.origin.branch,'refs/heads/'+branch);
+  assert.equal(repairPreflight.origin.review_sha,commitSha);
+  assert.equal(repairPreflight.origin.original_main_sha,inputSha);
+  assert.equal(repairPreflight.origin.original_publisher_run_id,publisherRun);
+  assert.equal(repairPreflight.evidence.kind,'trusted_qwen_repair_preflight_only');
+  assert.equal(repairPreflight.evidence.checkpoint_version,2);
+  assert.equal(repairPreflight.evidence.checkpoint_commit_sha,
+    repairAccepted.checkpoint.commit_sha);
+  assert.equal(repairPreflight.evidence.file_manifest[0].path,'calc.js');
+  assert.equal(repairPreflight.evidence.file_manifest[0].old_sha256,
+    sha256('module.exports = (a, b) => a + b;\n'));
+  assert.equal(posts,5,'read-only Repair preflight must not POST GitHub');
+  assert.ok(!JSON.stringify(repairPreflight).includes('PRIVATE_QWEN_MARKER'));
+  const repairStored=readIssueWorkflowState(post,issue).state;
+  const receipt={...repairAccepted.checkpoint,action_status:'dispatched'};
+  const validSource={state:repairStored,admission:repairAdmission,
+    checkpoint:receipt,originalIntent:intent.record};
+  assert.equal(assertQwenRepairPublisherOrigin(validSource).branch,
+    'refs/heads/'+branch);
+  for(const bad of [
+    {state:{...repairStored,phase:'review'}},
+    {state:{...repairStored,target_sha:'f'.repeat(40)}},
+    {state:{...repairStored,transitions:repairStored.transitions.slice(0,-1)}},
+    {admission:{...repairAdmission,agent_id:'dev-cursor-01'}},
+    {admission:{...repairAdmission,
+      resume_from:{...repairedOrigin,source_run_id:999}}},
+    {checkpoint:{...receipt,version:3}},
+    {checkpoint:{...receipt,action_status:'pending'}},
+    {originalIntent:{...intent.record,publisher_run_id:999}},
+  ])assert.throws(()=>assertQwenRepairPublisherOrigin({
+    ...validSource,...bad}),/trusted Qwen Publisher|trusted Qwen Repair/i);
+  await assert.rejects(()=>preflightTrustedQwenRepairPublisher({
+    remote,registry,run:repairRun,claim:repairArgs.claim,
+    reader:repairReader,rootKey:key,
+    result:repairCandidate.result,proof:repairCandidate.proof,
+    ciphertext:repairCandidate.ciphertext,sourceCheckout:pubCheckout,
+  }),/Agent patch preflight/);
   assert.equal(readIssueWorkflowState(post,issue).state.phase,'repair');
   assert.equal(posts,5,'Qwen repair ciphertext ingest cannot issue GitHub POST');
   assert.ok(!JSON.stringify(repairAccepted).includes('PRIVATE_QWEN_MARKER'));
@@ -566,6 +618,82 @@ try {
     await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,...bad}),
       /Qwen|claim|dispatch|trusted|candidate|Store/i);
   }
+  // Source-aligned PR SHA-A→SHA-B Store projection is available ONLY after
+  // a separately authenticated same-PR GitHub publisher readback. This is a
+  // deterministic local Git/Outbox transition fixture, not a real GitHub POST.
+  assert.equal(git(repairSource,'rev-parse','HEAD'),commitSha);
+  git(repairSource,'add','--','calc.js');
+  git(repairSource,'commit','-m','mock exact PR-A to PR-B repair update');
+  const shaB=git(repairSource,'rev-parse','HEAD');
+  assert.notEqual(shaB,commitSha);
+  const repairState=readIssueWorkflowState(post,issue).state;
+  const repairPublisherRun=publisherRun+500;
+  const eventB={kind:'publisher',issue,run_id:repairPublisherRun,
+    run_attempt:1,target_sha:shaB,outcome:'published'};
+  const trustedB={role:'publisher',workflow_run_id:repairPublisherRun,
+    attempt:1,issue,source_sha:shaB,
+    developer_action_id:originalRepair.id,developer_run_id:repairWorkerId,
+    developer_attempt:1,developer_source_sha:commitSha,
+    checkpoint_commit_sha:repairAccepted.checkpoint.commit_sha,
+    original_publisher_run_id:publisherRun,pr_number:prNumber,
+    pr_previous_sha:commitSha};
+  const projected=acceptAttestedQwenRepairPublication(
+    repairState,repairState.version,eventB,trustedB,registry);
+  assert.equal(projected.phase,'review');
+  assert.equal(projected.version,repairState.version+1);
+  assert.equal(projected.target_sha,shaB);
+  assert.equal(projected.assignments.developer,'dev-qwen-01');
+  assert.equal(projected.assignments.reviewer,'review-qwen-01');
+  assert.equal(projected.outbox.filter(x=>x.task.role==='developer').length,0);
+  const nextReview=projected.outbox.filter(x=>x.task.role==='reviewer');
+  assert.equal(nextReview.length,1);
+  assert.equal(nextReview[0].status,'pending');
+  assert.equal(nextReview[0].task.sha,shaB);
+  assert.equal(nextReview[0].task.agent_id,'review-qwen-01');
+  assert.equal(acceptAttestedQwenRepairPublication(
+    projected,projected.version,eventB,trustedB,registry),projected);
+  for(const wrong of [
+    {state:repairState,version:repairState.version+1},
+    {event:{...eventB,target_sha:commitSha}},
+    {event:{...eventB,run_id:repairPublisherRun+1}},
+    {trusted:{...trustedB,developer_source_sha:inputSha}},
+    {trusted:{...trustedB,developer_run_id:repairWorkerId+1}},
+    {trusted:{...trustedB,developer_action_id:action.id}},
+    {trusted:{...trustedB,original_publisher_run_id:publisherRun+1}},
+    {trusted:{...trustedB,pr_previous_sha:inputSha}},
+    {trusted:{...trustedB,checkpoint_commit_sha:'bad'}},
+    {state:{...repairState,phase:'review'}},
+    {state:{...repairState,transitions:repairState.transitions.slice(0,-1)}},
+    {state:{...repairState,outbox:repairState.outbox.map(x=>
+      x.id===originalRepair.id?{...x,receipt:{...x.receipt,
+        source_run_id:repairWorkerId+1}}:x)}},
+  ]){
+    assert.throws(()=>acceptAttestedQwenRepairPublication(
+      wrong.state??repairState,wrong.version??repairState.version,
+      wrong.event??eventB,wrong.trusted??trustedB,registry),
+    /Qwen Repair|Publisher|agent outbox|orchestration|stale/);
+  }
+  assert.throws(()=>acceptAttestedQwenRepairPublication(
+    projected,projected.version,
+    {...eventB,target_sha:'f'.repeat(40)},trustedB,registry),
+    /Qwen Repair|Publisher/);
+  // Real Git Store CAS fixture: the repair Worker ciphertext committed
+  // independently after this checkout, so refresh before storing SHA-B.
+  git(post,'pull','--ff-only','origin','agent-store');
+  assert.equal(readIssueWorkflowState(post,issue).version,repairState.version);
+  writeIssueWorkflowState(post,projected,repairState.version);
+  git(post,'add','-A');
+  git(post,'-c','user.name=Qwen Store Case',
+    '-c','user.email=qwen@example.invalid','commit','-m',
+    'mock attested Qwen SHA-B reviewer transition');
+  publish('agent-store',post,4);
+  const storedB=readIssueWorkflowState(post,issue);
+  assert.equal(storedB.version,projected.version);
+  assert.equal(storedB.state.target_sha,shaB);
+  assert.equal(storedB.state.outbox.filter(x=>
+    x.task.role==='reviewer'&&x.status==='pending').length,1);
+  assert.equal(posts,5,'projecting repaired SHA B cannot POST a new PR');
+
   console.log('Qwen signed Worker -> Store CAS -> Publisher write-ahead -> exact GitHub PR readback -> one Reviewer CAS and replay verified');
 }finally{
   key.fill(0);aesKey.fill(0);
