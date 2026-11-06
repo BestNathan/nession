@@ -22,7 +22,7 @@ const original={
     checkpoint_commit_sha:'eb891ee2154d02ddb758d50f0f694e70a343ffdf'},
 };
 const secret='NEVER-PERSIST-RAW-NATIVE-ERROR-OR-SECRET';
-const base={admission:original,model:'cursor-default',
+const base={admission:original,model:{id:'cursor-default',fast:true},
   started:Date.parse('2026-11-06T00:00:00.000Z'),
   finished:Date.parse('2026-11-06T00:00:02.100Z'),
   category:'provider-outcome-unverified',harnessDigest:'a'.repeat(64)};
@@ -30,12 +30,14 @@ try{
   const failed=buildCursorFailureTelemetry({...base,meta:{
     status:'error',resumed:true,turns:0,tool_calls:[],
     error:secret,conversation:secret,usage:null,
-    model:{id:'cursor-default'},run_id:null}});
+    model:{id:'cursor-default',raw_prompt:secret},run_id:null}});
   validateAgentWorkflowTelemetry(failed);
   assert.equal(failed.result.status,'error');
   assert.equal(failed.result.failure_category,'provider-outcome-unverified');
   assert.equal(failed.agent.status,'error');
   assert.equal(failed.agent.provider,'cursor');
+  assert.equal(failed.agent.model.id,'cursor-default');
+  assert.equal(failed.agent.model.fast,true);
   assert.equal(failed.task.restored_checkpoint_version,3);
   assert.equal(failed.identity.github_run_id,42042826823);
   assert.equal(failed.identity.github_run_attempt,1);
@@ -65,6 +67,13 @@ try{
   assert.equal(observed.tokens.input,12);
   assert.equal(observed.cost.raw_usd,0.002);
   assert.ok(!JSON.stringify(observed).includes(secret));
+  const unsafeTool=buildCursorFailureTelemetry({...base,meta:{
+    turns:1,tool_calls:['Read '+secret],model:{prompt:secret},
+    error:secret,run_id:'run-'+secret}});
+  assert.equal(unsafeTool.execution.tools.observed,false);
+  assert.equal(unsafeTool.execution.tools.total,null);
+  assert.equal(unsafeTool.agent.run_id,null);
+  assert.ok(!JSON.stringify(unsafeTool).includes(secret));
   for(const change of [
     {category:'raw-error:'+secret},{finished:base.started-1},
     {admission:{...original,issue:2817}},
