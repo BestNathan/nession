@@ -1,0 +1,348 @@
+/* Git/GitHub #1290 product-only visual baseline.
+ * main bb48ea5: generated design roles + WorkspaceShell + GitWorkspace/GitHeader.
+ * GitHub tabs are a candidate feature of #1290, NOT shipped Git UI.
+ * Never apply these styles to the np-* review frame or other capabilities.
+ */
+body[data-nession-prototype-frame="v1"] .np-device > #app {
+  --nession-background:oklch(1 0 0);
+  --nession-foreground:oklch(0.2636 0.0063 258.359);
+  --nession-muted:oklch(0.9519 0.0013 106.424);
+  --nession-muted-foreground:oklch(0.553 0.0118 261.773);
+  --nession-text-secondary:oklch(0.4571 0.01 271.194);
+  --nession-surface:oklch(0.9782 0.0034 247.858);
+  --nession-border:oklch(0.9274 0.0027 106.451);
+  --nession-action:oklch(0.538 0.1284 157.694);
+  --nession-danger:oklch(0.572 0.189 25);
+  --nession-workspace-background:var(--nession-background);
+  --nession-workspace-navigation:var(--nession-surface);
+  --nession-terminal-background:var(--nession-background);
+  --nession-terminal-foreground:var(--nession-foreground);
+  color-scheme:light;
+  background:var(--nession-workspace-background);
+  color:var(--nession-foreground);
+  width:100%;
+  height:100%;
+  min-height:0;
+  overflow:hidden;
+  font-size:13px;
+  line-height:1.35;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .app-stage {
+  height:100%;
+  min-height:0;
+  max-height:none;
+  overflow:hidden;
+  background:var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace {
+  height:100%;
+  min-height:0;
+  overflow:auto;
+  padding:0 0 96px;
+  background:var(--nession-workspace-background);
+}
+
+/* Actual GitHeader: restrained branch identity, secondary state, local tabs. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-heading {
+  max-width:none;
+  margin:0;
+  min-height:62px;
+  padding:10px 18px;
+  align-items:center;
+  border-bottom:1px solid var(--nession-border);
+  background:var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .heading-main {
+  min-width:0;
+  flex:1;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .git-branch {
+  display:block;
+  font-size:14px;
+  line-height:1.3;
+  font-weight:550;
+  letter-spacing:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .repo-context {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:4px 0 0;
+  color:var(--nession-muted-foreground);
+  font-size:11.5px;
+  font-weight:475;
+  background:transparent;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .repo-context .context-count {
+  background:transparent;
+  border:0;
+  color:var(--nession-muted-foreground);
+  padding:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .heading-tools {
+  margin:0;
+  padding:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .heading-tools .soft {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:32px;
+  height:32px;
+  min-width:32px;
+  padding:0;
+  border:1px solid transparent;
+  border-radius:7px;
+  font-size:18px;
+  background:transparent;
+  color:var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .heading-tools .soft:hover {
+  background:var(--nession-muted);
+}
+
+/* Repository/GitHub source is local capability navigation, not two cards. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-nav {
+  display:flex;
+  gap:4px;
+  padding:5px 14px;
+  max-width:none;
+  margin:0;
+  border-bottom:1px solid var(--nession-border);
+  background:var(--nession-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button {
+  width:auto;
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  min-height:30px;
+  gap:4px;
+  padding:6px 12px;
+  border:1px solid transparent;
+  border-radius:7px;
+  box-shadow:none;
+  background:transparent;
+  color:var(--nession-text-secondary);
+  font-size:12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button:hover {
+  background:var(--nession-muted);
+  border-color:transparent;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button.active {
+  background:var(--nession-muted);
+  border-color:transparent;
+  color:var(--nession-foreground);
+  box-shadow:none;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button strong {
+  font-size:12px;
+  font-weight:550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button small,
+body[data-nession-prototype-frame="v1"] .np-device > #app .section-button .section-symbol {
+  display:none;
+}
+
+/* Content is the active work surface: no dashboard card, no blue gradients. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .content-card {
+  max-width:none;
+  width:100%;
+  margin:0;
+  padding:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .card-content {
+  min-height:0;
+  border:0;
+  border-radius:0;
+  background:var(--nession-background);
+  box-shadow:none;
+  overflow:hidden;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .panel-toolbar,
+body[data-nession-prototype-frame="v1"] .np-device > #app .github-context {
+  padding:11px 16px;
+  border-color:var(--nession-border);
+  background:var(--nession-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .panel-toolbar strong,
+body[data-nession-prototype-frame="v1"] .np-device > #app .github-context strong {
+  color:var(--nession-foreground);
+  font-size:13px;
+  font-weight:550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .eyebrow,
+body[data-nession-prototype-frame="v1"] .np-device > #app .panel-intro small {
+  color:var(--nession-muted-foreground);
+  font-size:10.5px;
+  letter-spacing:0.015em;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .host-symbol {
+  width:30px;
+  height:30px;
+  border-radius:8px;
+  background:var(--nession-surface);
+  color:var(--nession-muted-foreground);
+  font-size:16px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tabs {
+  min-height:37px;
+  gap:12px;
+  padding:0 16px;
+  background:var(--nession-background);
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tab {
+  font-size:12px;
+  font-weight:500;
+  color:var(--nession-muted-foreground);
+  padding:11px 2px 9px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tab.active {
+  color:var(--nession-foreground);
+  border-color:var(--nession-foreground);
+  font-weight:550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .split {
+  grid-template-columns:minmax(12rem,20rem) minmax(0,1fr);
+  min-height:330px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .list-panel {
+  min-width:0;
+  background:var(--nession-workspace-navigation);
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .list-head {
+  padding:10px 12px;
+  font-size:11.5px;
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .data-row {
+  padding:11px 13px;
+  min-height:43px;
+  color:var(--nession-foreground);
+  background:transparent;
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .data-row:hover,
+body[data-nession-prototype-frame="v1"] .np-device > #app .data-row.selected {
+  background:var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .row-copy strong {
+  color:var(--nession-foreground);
+  font-size:12.5px;
+  font-weight:550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .row-copy small {
+  color:var(--nession-muted-foreground);
+  font-size:11px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-panel {
+  background:var(--nession-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-head,
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-detail-top {
+  background:var(--nession-background);
+  padding:12px 16px;
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-head strong {
+  color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .diff,
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-markdown {
+  color:var(--nession-text-secondary);
+  font-size:12.5px;
+  line-height:1.75;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader {
+  grid-template-columns:minmax(12rem,20rem) minmax(0,1fr);
+  background:var(--nession-background);
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-list {
+  background:var(--nession-workspace-navigation);
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-record {
+  background:transparent;
+  color:var(--nession-foreground);
+  border-color:var(--nession-border);
+  padding:13px 14px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-record:hover,
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-record.active {
+  background:var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-markdown {
+  max-width:720px;
+  margin:0 auto;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .gh-markdown .md-code {
+  background:var(--nession-muted);
+  color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .state-panel {
+  background:var(--nession-background);
+  color:var(--nession-text-secondary);
+  border:1px solid var(--nession-border);
+}
+
+/* The Session Terminal is a flush work surface; the capsule remains contextual. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .terminal {
+  background:var(--nession-terminal-background);
+  color:var(--nession-terminal-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .terminal-top {
+  background:var(--nession-background);
+  color:var(--nession-muted-foreground);
+  border-color:var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .term-muted {
+  color:var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .term-prompt {
+  color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .term-green {
+  color:var(--nession-action);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-capsule,
+body[data-nession-prototype-frame="v1"] .np-device > #app .composer,
+body[data-nession-prototype-frame="v1"] .np-device > #app .circle {
+  background:var(--nession-background);
+  color:var(--nession-foreground);
+  border-color:var(--nession-border);
+  box-shadow:0 1px 2px oklch(0 0 0 / 6%),0 8px 24px oklch(0 0 0 / 8%);
+}
+
+/* The product's 1:1 container is the breakpoint authority, not window size. */
+@container (max-width:900px) {
+  body[data-nession-prototype-frame="v1"] .np-device > #app .split,
+  body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader {
+    display:block;
+    grid-template-columns:none;
+  }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .split .list-panel,
+  body[data-nession-prototype-frame="v1"] .np-device > #app .gh-list {
+    border-right:0;
+    border-bottom:1px solid var(--nession-border);
+  }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader.mobile-detail-open .gh-list { display:none; }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .gh-reader.mobile-detail-open .gh-detail { display:block; }
+}
+@container (max-width:480px) {
+  body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-heading {
+    padding:9px 12px;
+    min-height:61px;
+  }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .section-nav { padding:5px 9px; }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .panel-toolbar,
+  body[data-nession-prototype-frame="v1"] .np-device > #app .github-context { padding:9px 12px; }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .tab { font-size:12px; }
+  body[data-nession-prototype-frame="v1"] .np-device > #app .data-row { padding:10px 12px; }
+}
