@@ -6,6 +6,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {validateDevelopmentState} from './outbox.mjs';
 import {qwenCommittedPublisherIntent} from './qwen-reviewer-source.mjs';
+import {readIssueWorkflowState} from './state-store.mjs';
 
 const SHA=/^[0-9a-f]{40}$/,HEX=/^[0-9a-f]{64}$/;
 const positive=x=>Number.isSafeInteger(x)&&x>0;
@@ -102,4 +103,41 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
     checkpoint_commit_sha:intent.checkpoint_commit_sha,
     ciphertext_sha256:intent.checkpoint_ciphertext_sha256,
     source_sha:intent.source_sha,source_run_id:intent.worker_run_id});
+}
+
+// A Qwen Repair source is the immutable ORIGINAL published PR branch, not a
+// model-provided ref or an arbitrary commit reachable from current main.
+// The Controller uses this read-only proof immediately before signing a
+// pending, committed cross-phase Repair Dispatch.
+export function qwenRepairPublishedSource({storeRoot,issue,actionId,sha}){
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !HEX.test(actionId??'')||!SHA.test(sha??''))
+    fail('missing exact Qwen Repair source context');
+  const {state}=readIssueWorkflowState(storeRoot,issue);
+  if(!state||state.issue!==issue||state.target_sha!==sha)
+    fail('Qwen Repair source differs from immutable Store State');
+  const proof=attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId});
+  const item=state.outbox.find(x=>x.id===actionId);
+  const expected={checkpoint_version:proof.checkpoint_version,
+    checkpoint_commit_sha:proof.checkpoint_commit_sha,
+    ciphertext_sha256:proof.ciphertext_sha256,
+    source_sha:proof.source_sha,source_run_id:proof.source_run_id};
+  if(JSON.stringify(item.task.repair_checkpoint)!==JSON.stringify(expected))
+    fail('Qwen Repair origin not yet CAS-bound in Store');
+  const published=state.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published'&&t.target_sha===sha);
+  if(published.length!==1)
+    fail('ambiguous Qwen Repair Publisher origin');
+  const intent=qwenCommittedPublisherIntent({storeRoot,issue,
+    publisherRunId:published[0].run_id});
+  if(intent.checkpoint_commit_sha!==proof.checkpoint_commit_sha||
+     intent.checkpoint_ciphertext_sha256!==proof.ciphertext_sha256||
+     intent.worker_run_id!==proof.source_run_id||
+     intent.source_sha!==proof.source_sha||
+     intent.target_main_sha!==intent.source_sha||
+     intent.branch!=='agent/'+issue+'/qwen-'+intent.action_id.slice(0,16))
+    fail('Qwen Repair branch not the authenticated original publication');
+  return Object.freeze({branch:'refs/heads/'+intent.branch,
+    base_sha:intent.target_main_sha,review_sha:sha,issue,
+    repair_action_id:actionId,publisher_run_id:intent.publisher_run_id});
 }
