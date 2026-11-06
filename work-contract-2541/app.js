@@ -164,7 +164,7 @@
         (state.confirm?'<div class="wc-confirm"><h3>Adopt new Contract revision?</h3><p class="wc-section-note">v1 remains immutable. Existing executions and verification stay pinned to v1. This simulated action creates published v2 only in memory.</p>'+
           '<div class="wc-actions">'+action("Cancel","cancel")+
           action("Confirm adoption","adopt","dark")+'</div></div>':
-          '<div class="wc-actions" style="justify-content:flex-start">'+action("Compare revisions","compare")+
+          '<div class="wc-actions" style="justify-content:flex-start">'+action(state.compare?"Hide comparison":"Compare revisions","compare")+
           action("Review proposal","confirm","dark")+'</div>')+'</section>';
     } else {
       p+='<section><div class="wc-section-title"><h2>Source interpretation</h2></div>'+
