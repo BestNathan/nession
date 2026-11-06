@@ -108,7 +108,7 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
     throw new Error('Issue Audit proposal contains unauthorized fields');
   }
   const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
-  if (!hasIssueRepair) {
+  if (!hasIssueRepair && (proposal.verification_tier != null || proposal.comment != null)) {
     // An invalid source is meant to be repaired, not merely annotated.
     // Do not write a tier or comment and then report an invalid contract.
     const current = fetchGitHubIssue(issue.number, repository);
