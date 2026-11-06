@@ -12,7 +12,8 @@ const requiredIds = [
   'app','sessions-open','session-heading','rail-expand','terminal','terminal-lines',
   'terminal-dock','context-surface','context-trigger','intent-input','intent-send',
   'to-workspace','workspace','workspace-inner','to-terminal','capability-dock',
-  'sessions-layer','session-list','sessions-close','reset'
+  'sessions-layer','session-list','sessions-close','reset',
+  'ia-session-nav','workspace-page-back','workspace-page-title'
 ];
 for (const id of requiredIds) {
   assert.match(html, new RegExp('id="' + id + '"'), 'missing target ' + id);
@@ -24,6 +25,18 @@ assert.ok(css.includes('.context-surface'));
 assert.ok(css.includes('.capability-dock'));
 assert.ok(css.includes('display:none;height:27px')); // mock footer never steals Terminal height
 assert.ok(css.includes('@media(max-width:700px)'));
+const htmlIA = readFileSync(new URL('./product-ia.css', import.meta.url), 'utf8');
+assert.match(html, /href="\.\/product-ia\.css"/);
+assert.match(html, /data-testid="web-layout"/);
+assert.match(html, /data-testid="sidebar"/);
+assert.match(html, /data-testid="shell-main"/);
+assert.match(html, /data-testid="workspace-shell"/);
+assert.match(html, /data-testid="workspace-tool-content"/);
+assert.match(html, /data-testid="workspace-tool-bar"/);
+assert.match(html, /data-testid="app-page-header"/);
+assert.match(htmlIA, /@container \(max-width:430px\)/);
+assert.match(htmlIA, /\.ia-app-page-header/);
+assert.match(htmlIA, /\.ia-web-session/);
 
 const nodes = {};
 for (const id of requiredIds) {
@@ -69,6 +82,28 @@ check(()=>{
   nodes['app'].handlers.touchend({changedTouches:[{clientX:382,clientY:463}]});
   assert.equal(state().page,'workspace','right edge swipe should open Workspace');
   nodes['to-terminal'].handlers.click();
+  assert.equal(state().page,'terminal');
+});
+
+check(()=>{
+  assert.match(nodes['ia-session-nav'].innerHTML,/nession/);
+  assert.equal(nodes['app'].dataset.sidebarCollapsed,'false');
+  nodes['rail-expand'].handlers.click();
+  assert.equal(nodes['app'].dataset.sidebarCollapsed,'true','Sidebar collapse changes Web layout owner');
+  nodes['rail-expand'].handlers.click();
+  assert.equal(nodes['app'].dataset.sidebarCollapsed,'false');
+  api.openWorkspace();
+  assert.equal(state().page,'workspace');
+  assert.equal(nodes['workspace-page-title'].textContent,'Claude Code');
+  assert.equal(nodes['workspace-page-back'].attrs['aria-label'],'Back to Terminal');
+  api.openFile('architecture.md');
+  flush();
+  assert.equal(nodes['workspace-page-title'].textContent,'architecture.md');
+  assert.equal(nodes['workspace-page-back'].attrs['aria-label'],'Back to Memory list');
+  nodes['workspace-page-back'].handlers.click();
+  assert.equal(state().page,'workspace');
+  assert.equal(state().detail,false);
+  nodes['workspace-page-back'].handlers.click();
   assert.equal(state().page,'terminal');
 });
 
@@ -214,5 +249,5 @@ check(()=>{
   assert.equal(state().file,'architecture.md');
 });
 
-console.log('Memory #2689 + #2742 mock: ' + checks + ' state/interaction cases passed; static assets and DOM targets checked.');
+console.log('Memory #2689 + #2742 mock: ' + checks + ' state/interaction cases passed; product Web/App owner tree and static assets checked.');
 console.log('Not a browser/visual verification, provider integration, or production Acceptance result.');
