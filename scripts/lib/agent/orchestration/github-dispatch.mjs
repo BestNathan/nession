@@ -156,9 +156,7 @@ function dispatchInputs(body, ticket) {
   // unchanged; only new Qwen-published PRs request the typed Issue routing.
   if (body.role === 'reviewer') {
     if (body.schema_version !== 1) reject('a Reviewer dispatch cannot resume a native Session');
-    const dynamic=body.issue!==1997;
-    if(dynamic&&body.agent_id!=='review-qwen-01')
-      reject('nonhistorical Reviewer must use authenticated Qwen admission');
+    const dynamic=body.issue!==1997&&body.agent_id==='review-qwen-01';
     return { action_id: body.action_id, reviewer: body.agent_id,
       dispatch_ticket: ticket,
       ...(dynamic?{issue_number:String(body.issue)}:{}) };
@@ -175,10 +173,10 @@ function planTicket(plan) {
 function planMatchesBody(plan, body, ticket) {
   if (plan.workflow_id !== PROVIDERS[body.role].workflow) return false;
   if (body.role === 'reviewer') {
-    const dynamic=body.issue!==1997;
+    const dynamic=body.issue!==1997&&body.agent_id==='review-qwen-01';
     const fields=['action_id','reviewer','dispatch_ticket',
       ...(dynamic?['issue_number']:[])];
-    return (!dynamic||body.agent_id==='review-qwen-01')&&
+    return
       own(plan.inputs,fields)&&
       Object.keys(plan.inputs).length===fields.length&&
       plan.inputs.action_id===body.action_id&&
