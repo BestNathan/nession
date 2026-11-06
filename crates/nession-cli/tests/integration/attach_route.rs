@@ -329,9 +329,13 @@ async fn run_terminal_command(
 }
 
 /// A TCP middlebox in front of the Agent. It refuses the first `fail_first`
-/// connections (the CLI's direct dials) and forwards everything after that
-/// (the Server's relay dial). Deterministic because the CLI dials exactly one
-/// candidate at a time, in plan order, before asking for the relay.
+/// upgrade attempts (the CLI's direct dials) and forwards everything after
+/// that (the Server's relay dial). Deterministic because the CLI dials exactly
+/// one candidate at a time, in plan order, before asking for the relay.
+///
+/// Only connections that send bytes count: the Server's address probe is a
+/// bare TCP connect that sends nothing, and letting it consume a failure slot
+/// would make the fixture depend on the probe's 30-second schedule.
 struct DirectDialRefuser {
     addr: std::net::SocketAddr,
     hits: Arc<AtomicUsize>,
@@ -350,16 +354,29 @@ async fn refuse_direct_dials(target: std::net::SocketAddr, fail_first: usize) ->
             let Ok((mut client, _)) = listener.accept().await else {
                 break;
             };
-            let count = seen.fetch_add(1, Ordering::SeqCst) + 1;
-            if count <= fail_first {
-                drop(client);
-                continue;
-            }
-            let Ok(mut upstream) = tokio::net::TcpStream::connect(target).await else {
-                drop(client);
-                continue;
-            };
+            let seen = Arc::clone(&seen);
             tokio::spawn(async move {
+                // A WebSocket client writes its upgrade request immediately; a
+                // TCP reachability probe writes nothing.
+                let mut first = [0_u8; 1];
+                let is_upgrade = matches!(
+                    tokio::time::timeout(Duration::from_millis(500), client.peek(&mut first))
+                        .await,
+                    Ok(Ok(read)) if read > 0
+                );
+                if !is_upgrade {
+                    drop(client);
+                    return;
+                }
+                let count = seen.fetch_add(1, Ordering::SeqCst) + 1;
+                if count <= fail_first {
+                    drop(client);
+                    return;
+                }
+                let Ok(mut upstream) = tokio::net::TcpStream::connect(target).await else {
+                    drop(client);
+                    return;
+                };
                 let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
             });
         }
