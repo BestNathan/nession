@@ -1,11 +1,12 @@
 //! Read-only git state for a Session's working directory (#750).
 //!
-//! The capability answers five questions about the repository a Session is
+//! The capability answers six questions about the repository a Session is
 //! sitting in — *what state is it in* (`status`), *what changed in this file*
-//! (`diff`), *what happened here recently* (`log`), *what other branches are
-//! there* (`branches`), and *what other checkouts are there* (`worktrees`) —
-//! and refuses the rest. Reads only: no stage, no commit, no checkout. See
-//! `cmd.rs` for why that is enforced in code rather than by convention.
+//! (`diff`), *what do its untracked or conflicted bytes say* (`preview`), *what
+//! happened here recently* (`log`), *what other branches are there* (`branches`),
+//! and *what other checkouts are there* (`worktrees`) — and refuses the rest.
+//! Reads only: no stage, no commit, no checkout. See `cmd.rs` for why that is
+//! enforced in code rather than by convention.
 //!
 //! ## Layout
 //!
@@ -22,6 +23,8 @@
 //!   edits.
 //! - [`runtime::diff`] — one file's diff against HEAD, capped, with truncation
 //!   reported.
+//! - [`runtime::preview`] — bounded worktree bytes for an untracked or unmerged
+//!   row, opened without following links and rechecked against status.
 //! - [`runtime::log`] — recent commits, bounded by count and by bytes.
 //! - [`runtime::branches`] — local branches and their tracking state, current
 //!   first.
@@ -47,7 +50,7 @@ pub mod runtime;
 // while the *directory* says which half is the contract and which is the
 // implementation. A re-export is a path, not a second definition; there is
 // still one file behind each of these.
-pub use runtime::{branches, cmd, diff, log, security, status, worktrees};
+pub use runtime::{branches, cmd, diff, log, preview, security, status, worktrees};
 
 pub use agent::{GitAgentExtension, WorkdirResolver};
 pub use cmd::{GitCmd, GitOutput};

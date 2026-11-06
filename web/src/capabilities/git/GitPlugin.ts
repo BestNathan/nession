@@ -33,6 +33,11 @@ import {
   VERSION as WORKTREES_VERSION,
   WIRE as WORKTREES_WIRE,
 } from '@/generated/protocol/git/worktrees/v1';
+import {
+  PROTOCOL as PREVIEW_PROTOCOL,
+  VERSION as PREVIEW_VERSION,
+  WIRE as PREVIEW_WIRE,
+} from '@/generated/protocol/git/preview/v1';
 import { addressedPayload } from '@/platform/protocol';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
@@ -49,6 +54,8 @@ import type {
   GitStatusRequest,
   GitStatusResponse,
   GitWorktreesResponse,
+  GitPreviewRequest,
+  GitPreviewResponse,
 } from './types';
 
 /**
@@ -73,6 +80,7 @@ const CONSUMER_REQUIREMENTS = {
   [COMMIT_PROTOCOL]: [COMMIT_VERSION],
   [BRANCHES_PROTOCOL]: [BRANCHES_VERSION],
   [WORKTREES_PROTOCOL]: [WORKTREES_VERSION],
+  [PREVIEW_PROTOCOL]: [PREVIEW_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
@@ -169,6 +177,20 @@ export class GitPlugin implements TransportPlugin {
     return this.requireConnection().request<GitDiffResponse>(
       DIFF_WIRE,
       this.addressed(DIFF_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * Bounded worktree content for an untracked or unmerged status row (#2838).
+   *
+   * `expected` is the selected row's kind. The agent verifies it against the
+   * live repository before and after the read; this client does not turn a
+   * tracked row into a raw file reader.
+   */
+  async gitPreview(req: GitPreviewRequest): Promise<GitPreviewResponse> {
+    return this.requireConnection().request<GitPreviewResponse>(
+      PREVIEW_WIRE,
+      this.addressed(PREVIEW_PROTOCOL, req.agent_id, req),
     );
   }
 

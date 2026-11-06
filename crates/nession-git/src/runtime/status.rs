@@ -105,7 +105,10 @@ pub fn parse(bytes: &[u8]) -> anyhow::Result<RepoStatus> {
             }
             Some(b'u') => {
                 if let Some(file) = parse_unmerged(record) {
-                    status.modified.push(file.clone());
+                    // A conflicted path is one row in one group. Folding it
+                    // into `modified` as well made the same resource appear
+                    // twice in Git Changes; the UI now previews the worktree
+                    // bytes under `unmerged` alone.
                     status.unmerged.push(file.path);
                 }
             }
@@ -300,7 +303,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(out.unmerged, vec!["src/conflict.rs"]);
-        assert_eq!(out.modified[0].kind, ChangeKind::Unmerged);
+        assert!(
+            out.modified.is_empty(),
+            "a conflicted path must not also be a modified row"
+        );
+        assert_eq!(out.changed_count(), 1, "one path is one change");
         assert!(!out.is_clean(), "a conflicted tree is not clean");
     }
 

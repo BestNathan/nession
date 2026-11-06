@@ -4,6 +4,7 @@
 //! protocol/
 //!   status/v1
 //!   diff/v1
+//!   preview/v1
 //!   root/v1
 //!   log/v1
 //!   branches/v1
@@ -39,6 +40,7 @@ pub mod branches;
 pub mod commit;
 pub mod diff;
 pub mod log;
+pub mod preview;
 pub mod root;
 pub mod status;
 pub mod worktrees;
@@ -155,6 +157,7 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
     Ok(vec![
         status::descriptor()?,
         diff::descriptor()?,
+        preview::descriptor()?,
         root::descriptor()?,
         log::descriptor()?,
         commit::descriptor()?,
@@ -182,9 +185,10 @@ mod tests {
     /// These are what `v1_descriptor` validates, so asserting them here names
     /// the offending id instead of leaving it to whichever caller composes
     /// first.
-    const EXPECTED_IDS: [&str; 7] = [
+    const EXPECTED_IDS: [&str; 8] = [
         "git.status",
         "git.diff",
+        "git.preview",
         "git.root",
         "git.log",
         "git.commit",
@@ -234,12 +238,12 @@ mod tests {
 
     #[test]
     fn a_descriptor_list_is_what_a_manifest_would_advertise() {
-        // Six units, one version each — the manifest a composed git provider
+        // Eight units, one version each — the manifest a composed git provider
         // produces, and the thing the Server can route without knowing any
         // payload schema.
         let manifest =
             nession_protocol::ProtocolManifest::from_descriptors(OWNER, &descriptors().unwrap());
-        assert_eq!(manifest.protocols.len(), 7);
+        assert_eq!(manifest.protocols.len(), 8);
         for id in EXPECTED_IDS {
             let id = nession_protocol::ProtocolId::new(id).unwrap();
             assert!(manifest.offers(&id), "manifest is missing {id}");

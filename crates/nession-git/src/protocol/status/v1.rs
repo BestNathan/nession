@@ -76,10 +76,13 @@ pub struct RepoStatus {
     pub behind: u32,
     /// Tracked paths, Modified/Added/Deleted/Renamed — #750's "Modified" group.
     pub modified: Vec<ChangedFile>,
-    /// Untracked paths. No diff is available for these, which is why the view
-    /// gives them no expander (#750 SC2).
+    /// Untracked paths. Git has no baseline for these; the view opens their
+    /// bounded worktree preview instead of inventing a diff (#2838).
     pub untracked: Vec<String>,
     /// Unmerged paths, present during a conflicted merge/rebase/cherry-pick.
+    ///
+    /// A conflicted path appears here only; it is not duplicated into
+    /// `modified` (#2838).
     pub unmerged: Vec<String>,
 }
 

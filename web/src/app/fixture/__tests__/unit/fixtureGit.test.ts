@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureGitSurface } from '@/app/fixture/fixtureGit';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
-import type { GitCommitResponse, GitDiffResponse, GitLogResponse } from '@/capabilities/git';
+import type {
+  GitCommitResponse,
+  GitDiffResponse,
+  GitLogResponse,
+  GitPreviewResponse,
+} from '@/capabilities/git';
 
 /**
  * The fixture's git surface is an *input*, so it has no rendering to look wrong.
@@ -31,12 +36,45 @@ describe('fixture git surface', () => {
     for (const wire of [
       'git.status',
       'git.diff',
+      'git.preview',
       'git.log',
       'git.commit',
       'git.branches',
       'git.worktrees',
     ]) {
       expect(advertised, `${wire} is answered but not advertised`).toContain(wire);
+    }
+  });
+
+  it('answers one preview shape for every row in the preview scenario', async () => {
+    const surface = fixtureGitSurface('?capability=git&git=preview-states');
+
+    const untracked = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'notes/new.ts',
+      expected: 'untracked',
+    });
+    expect(untracked.state).toBe('ok');
+    if (untracked.state === 'ok') {
+      expect(untracked.preview.state).toBe('ready');
+      expect(untracked.preview.text).toContain('untracked');
+    }
+
+    const conflict = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'src/conflict.ts',
+      expected: 'unmerged',
+    });
+    expect(conflict.state).toBe('ok');
+    if (conflict.state === 'ok') {
+      expect(conflict.preview.text).toContain('<<<<<<< HEAD');
+    }
+
+    const missing = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'src/missing.txt',
+      expected: 'untracked',
+    });
+    expect(missing.state).toBe('ok');
+    if (missing.state === 'ok') {
+      expect(missing.preview.state).toBe('missing');
     }
   });
 

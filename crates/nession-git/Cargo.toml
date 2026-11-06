@@ -24,5 +24,8 @@ codegen = ["dep:ts-rs", "dep:schemars", "nession-protocol/codegen"]
 [dev-dependencies]
 tempfile = "3"
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [lints]
 workspace = true
