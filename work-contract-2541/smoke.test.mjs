@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 const script = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 function mount() {
   const events = new Map();
@@ -57,7 +58,12 @@ function mount() {
 
 test('Work is in Workspace Capability Capsule, not an independent global page',()=>{
   const ui=mount();
-  assert.match(ui.html(),/WORKSPACE \/ WORK CAPABILITY/);
+  assert.match(ui.html(),/data-testid="web-layout"/);
+  assert.match(ui.html(),/data-testid="sidebar"/);
+  assert.match(ui.html(),/data-testid="shell-main"/);
+  assert.match(ui.html(),/data-testid="workspace-shell"/);
+  assert.match(ui.html(),/data-testid="workspace-tool-content"/);
+  assert.match(css,/\.wc-web-sidebar/);
   assert.match(ui.html(),/<h1>Work<\/h1>/);
   assert.match(ui.capsule(),/data-value="work"/);
   assert.match(ui.capsule(),/data-value="files"/);
@@ -95,13 +101,16 @@ test('Web has separate Terminal surface return; App Back honors Work depth',()=>
   assert.ok(ui.hasClass('is-mobile'));
   assert.doesNotMatch(ui.html(),/wc-terminal-link/);
   ui.act('open');
-  assert.match(ui.html(),/Back to Work capability/);
+  assert.match(ui.html(),/Back to Work/);
+  assert.match(ui.html(),/data-testid="app-page-header"/);
+  assert.doesNotMatch(ui.html(),/data-testid="sidebar"/);
+  assert.doesNotMatch(ui.html(),/class="wc-local-back"/);
   ui.act('back');
-  assert.match(ui.html(),/<h1>Work<\/h1>/);
+  assert.match(ui.html(),/wc-app-title">Work<\/h1>/);
   ui.act('back');
   assert.match(ui.html(),/dev-session/);
   ui.act('open-workspace');
-  assert.match(ui.html(),/<h1>Work<\/h1>/);
+  assert.match(ui.html(),/wc-app-title">Work<\/h1>/);
   ui.resize(1180);
   assert.ok(!ui.hasClass('is-mobile'));
 });
@@ -119,6 +128,25 @@ test('unbound Work has no dead Capsule entry and preserves other Workspace capab
   assert.doesNotMatch(ui.capsule(),/data-value="work"/);
   ui.fixture('normal');
   assert.match(ui.capsule(),/data-value="work"/);
+});
+
+test('real owner transitions: Session sidebar is Web-only, App has exactly one page header/back',()=>{
+  const ui=mount();
+  assert.match(ui.html(),/data-testid="web-layout"/);
+  ui.act('sidebar-collapse');
+  assert.match(ui.html(),/data-collapsed="true"/);
+  ui.act('sidebar-expand');
+  assert.doesNotMatch(ui.html(),/data-collapsed="true"/);
+  ui.resize(390);
+  assert.doesNotMatch(ui.html(),/data-testid="web-layout"/);
+  assert.match(ui.html(),/data-testid="app-page-header"/);
+  ui.act('open');
+  assert.equal((ui.html().match(/data-action="back"/g)||[]).length,1);
+  assert.match(ui.html(),/aria-label="Back to Work"/);
+  ui.act('back');
+  assert.match(ui.html(),/wc-app-title">Work<\/h1>/);
+  ui.resize(1180);
+  assert.match(ui.html(),/data-testid="sidebar"/);
 });
 
 test('published criteria definition and source checklist differ from trusted verification',()=>{
