@@ -3,7 +3,8 @@
 use anyhow::{Context, Result};
 use nession_protocol::contracts::env::v1::{EnvSnapshot, SessionEnvProfile};
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use super::cmd::{self, TmuxCmd};
@@ -132,6 +133,24 @@ const TMUX_KILL_TIMEOUT: Duration = Duration::from_secs(5);
 /// Timeout for the multi-stage `create_session` (new-session + env setup).
 const TMUX_CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Timeout for reconciling a create whose deadline fired.
+///
+/// This is cleanup after the create budget is already spent; an unreconciled
+/// answer is truthful, so it must not extend the caller's wait by another full
+/// create budget.
+const TMUX_CREATE_RECONCILE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// The per-create ownership token, delivered to the Session's environment by
+/// the same `new-session` operation that creates it (#2812).
+///
+/// A create can be cancelled while `new-session` is in flight — the outer
+/// deadline drops the future, and the tmux child may still create the Session
+/// afterwards. The token is what lets the reconciliation prove that a Session
+/// appearing after the deadline is this attempt's, instead of guessing from
+/// its name and killing a Session someone else owns. It is also reserved:
+/// environment profiles cannot control `NESSON_*` keys.
+const CREATE_TOKEN_ENV: &str = "NESSON_CREATE_TOKEN";
+
 /// Variables never forwarded from the agent process into a tmux session.
 ///
 /// `TERM`/`LANG`/`LC_ALL` are forced explicitly below, whatever the host has.
@@ -141,13 +160,100 @@ const TMUX_CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 /// makes every shell in a nession session believe it belongs to *that* server,
 /// so a bare `tmux kill-server` typed inside a nession session would reach the
 /// user's real sessions. nession addresses tmux by `-S` alone and passes none of
-/// this on.
-const NEVER_FORWARDED_ENV: [&str; 5] = ["TERM", "LANG", "LC_ALL", "TMUX", "TMUX_TMPDIR"];
+/// this on. [`CREATE_TOKEN_ENV`] is withheld for the other direction: an Agent
+/// that itself runs inside a nession Session must not inherit a stale token
+/// into the create it is performing.
+const NEVER_FORWARDED_ENV: [&str; 6] = [
+    "TERM",
+    "LANG",
+    "LC_ALL",
+    "TMUX",
+    "TMUX_TMPDIR",
+    CREATE_TOKEN_ENV,
+];
 
 /// Whether an inherited env var is withheld from a new session — either
 /// forced/stripped by policy, or superseded by a caller-supplied value.
 fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
     NEVER_FORWARDED_ENV.contains(&key) || caller_keys.contains(&key)
+}
+
+/// How far one create attempt got, shared between the create future and the
+/// outer deadline that may drop it (#2812).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CreateStage {
+    /// No tmux mutation was requested yet, so a cancellation created nothing.
+    Preparing,
+    /// `new-session` is in flight; tmux may or may not have created a Session
+    /// by the time the future is dropped. Only the ownership token can decide.
+    Requested,
+    /// `new-session` returned Ok: this attempt owns the Session with this name.
+    Created,
+    /// Every post-create step finished. The warnings are the caller's result.
+    Completed(Vec<String>),
+}
+
+type CreateProgress = Arc<Mutex<CreateStage>>;
+
+fn set_create_stage(progress: &CreateProgress, stage: CreateStage) {
+    if let Ok(mut slot) = progress.lock() {
+        *slot = stage;
+    }
+}
+
+fn create_stage(progress: &CreateProgress) -> CreateStage {
+    progress
+        .lock()
+        .map(|slot| slot.clone())
+        .unwrap_or(CreateStage::Preparing)
+}
+
+/// The socket and Session name that identify one create's exclusive claim.
+type CreationKey = (PathBuf, String);
+/// The process-wide claim table, so a create holds its claim across awaits.
+type CreationRegistry = Mutex<HashMap<CreationKey, Arc<tokio::sync::Mutex<()>>>>;
+
+/// One create's exclusive claim on a Session name for one tmux socket.
+///
+/// The claim covers the pre-create presence check, the create itself, and any
+/// compensating cleanup. Without it two creates of one name could both observe
+/// "absent" and the loser's cleanup could remove the winner's Session.
+struct CreationPermit {
+    key: CreationKey,
+    slot: Arc<tokio::sync::Mutex<()>>,
+}
+
+fn creation_registry() -> &'static CreationRegistry {
+    static REGISTRY: OnceLock<CreationRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn creation_permit(socket: &Path, name: &str) -> CreationPermit {
+    let key = (socket.to_path_buf(), name.to_string());
+    let mut registry = creation_registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let slot = registry
+        .entry(key.clone())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    CreationPermit { key, slot }
+}
+
+impl Drop for CreationPermit {
+    fn drop(&mut self) {
+        let mut registry = creation_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // The registry and this permit hold the only strong references when no
+        // other create for the name is waiting (a waiter would have cloned the
+        // `Arc` before it could block on the lock). Removing under the registry
+        // lock means a new caller either sees this mutex or creates the next
+        // one after every existing holder has released it.
+        if Arc::strong_count(&self.slot) <= 2 {
+            registry.remove(&self.key);
+        }
+    }
 }
 
 // Re-exported from the Protocol Kernel (#678).
@@ -444,6 +550,23 @@ impl SessionManager {
     /// helpers). Every production create goes through
     /// [`Self::create_session_with_binding`], which is the path that owns all
     /// three binding layers.
+    ///
+    /// ## Failure and retry contract (#2812)
+    ///
+    /// Once `tmux new-session` has created the Session, a failure or timeout in
+    /// any later step removes that Session and any partially written binding
+    /// state before the error is returned. Retrying the same name therefore
+    /// means "create it", never "it already exists" because of an abandoned
+    /// attempt. A Session that existed **before** this call is never the
+    /// create's to remove: the create refuses the duplicate deterministically
+    /// and touches nothing.
+    ///
+    /// Creates of one name on one socket are serialized, so concurrent callers
+    /// cannot both observe "absent" and race one cleanup against the other's
+    /// Session. When the deadline drops the create while `new-session` is in
+    /// flight, the outcome is ambiguous; the per-create ownership token decides
+    /// whether the Session that appears is this attempt's. If ownership cannot
+    /// be proven, the Session is left untouched and the returned error says so.
     pub async fn create_session(
         &self,
         name: &str,
@@ -464,6 +587,10 @@ impl SessionManager {
     /// (reserved-key collisions, for example). The binding is recorded in the
     /// Agent's durable state before this returns, so a later Agent restart can
     /// still restore base values when the binding changes.
+    ///
+    /// The failure/retry contract is [`Self::create_session`]'s: a post-create
+    /// failure removes the Session *and* the binding state the attempt wrote,
+    /// so a retry starts from the same empty state as a first create.
     pub async fn create_session_with_binding(
         &self,
         name: &str,
@@ -490,24 +617,90 @@ impl SessionManager {
         // high, rather than letting the entire container die.
         crate::memory::check_memory_pressure(self.memory_threshold_percent)?;
 
-        match tokio::time::timeout(
-            self.create_timeout,
-            self.create_session_impl(name, width, height, working_dir, env, binding),
-        )
-        .await
-        {
-            Err(_) => Err(anyhow::anyhow!(
-                "tmux create-session timed out after {:?}",
-                self.create_timeout
-            )),
-            Ok(inner) => inner,
+        // Serialize every create of this name on this socket. The critical
+        // section covers the presence check, the tmux create, and any
+        // compensating cleanup: without it two creates could both observe
+        // "absent" and the loser's cleanup could remove the winner's Session
+        // (#2812). The claim is per name and socket, so unrelated creates stay
+        // parallel.
+        let permit = creation_permit(self.socket_path(), name);
+        let slot = permit.slot.clone();
+        let _serialized = slot.lock().await;
+
+        // Delivered by the same `new-session` that creates the Session. If the
+        // deadline drops this future while `new-session` is in flight, the
+        // reconciler uses it to prove whether the Session that appeared is
+        // this attempt's.
+        let token = uuid::Uuid::new_v4().to_string();
+        let progress: CreateProgress = Arc::new(Mutex::new(CreateStage::Preparing));
+
+        // The presence check is inside the budget as well. A same-named
+        // Session that exists before this attempt is never this attempt's to
+        // remove; `new-session` refuses the duplicate anyway, but only a check
+        // taken under the guard lets a later deadline tell "the Session I
+        // made" from "the Session that was already here". A failed question is
+        // an error: proceeding would create a Session whose ownership a
+        // timeout could not establish. tmux bounds the query itself, and the
+        // create deadline bounds the whole attempt — a server that cannot
+        // answer must not hold the per-name claim past the budget.
+        let attempt = async {
+            let sessions = self
+                .sdk_ops()
+                .list_sessions()
+                .await
+                .with_context(|| format!("check whether session {name} already exists"))?;
+            if sessions.iter().any(|session| session.name == name) {
+                anyhow::bail!("session {name} already exists; refusing to replace it");
+            }
+            self.create_session_impl(
+                name,
+                width,
+                height,
+                working_dir,
+                env,
+                binding,
+                &token,
+                &progress,
+            )
+            .await
+        };
+
+        match tokio::time::timeout(self.create_timeout, attempt).await {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                // The inner future was dropped at the deadline; `progress` is
+                // the only record of how far it got. `Completed` means it
+                // actually finished in the same tick — still a success.
+                if let CreateStage::Completed(warnings) = create_stage(&progress) {
+                    return Ok(warnings);
+                }
+                let note = match tokio::time::timeout(
+                    TMUX_CREATE_RECONCILE_TIMEOUT,
+                    self.reconcile_create_after_deadline(name, &token, &progress),
+                )
+                .await
+                {
+                    Ok(note) => note,
+                    Err(_) => {
+                        "; the interrupted create could not be reconciled in time".to_string()
+                    }
+                };
+                Err(anyhow::anyhow!(
+                    "tmux create-session timed out after {:?}{note}",
+                    self.create_timeout
+                ))
+            }
         }
     }
 
     /// The Nession policy half of create: which environment a session
-    /// inherits, and the cosmetic cleanup that only the fallback path needs.
+    /// inherits, the post-create steps that make it the Session that was
+    /// asked for, and the compensation that keeps a failure truthful.
+    ///
     /// The argv and the three-stage delivery are the SDK's
-    /// [`TmuxOps::new_session`].
+    /// [`TmuxOps::new_session`]. Everything after it runs while this attempt's
+    /// ownership of the Session is known (see [`Self::create_session_inner`]).
+    #[allow(clippy::too_many_arguments)]
     async fn create_session_impl(
         &self,
         name: &str,
@@ -516,6 +709,8 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
         binding: Option<SessionBindingInput<'_>>,
+        token: &str,
+        progress: &CreateProgress,
     ) -> Result<Vec<String>> {
         nession_common::config::validate_terminal_cols(width).map_err(anyhow::Error::msg)?;
         // History depth needs nothing here: it travels as `-f` on every tmux
@@ -577,11 +772,18 @@ impl SessionManager {
             ));
         }
         session_env.extend(claude_env);
+        // This create's ownership fence, delivered by the `new-session` below.
+        // Profiles cannot set it: `NESSON_*` keys are reserved.
+        session_env.push((CREATE_TOKEN_ENV.to_string(), token.to_string()));
         // Last, so the adapter's ZDOTDIR cannot be overwritten by the agent's
         // inherited environment.
         session_env.extend(adapter.env.iter().cloned());
 
-        let outcome = self
+        // The creation fact is recorded as soon as `new-session` returns Ok:
+        // from there on, a post-create failure or a cancelled future knows the
+        // Session is this attempt's.
+        set_create_stage(progress, CreateStage::Requested);
+        let outcome = match self
             .sdk_ops()
             .new_session(&nession_tmux::ops::NewSession {
                 name: name.to_string(),
@@ -591,85 +793,239 @@ impl SessionManager {
                 env: session_env,
                 command: adapter.command.clone(),
             })
-            .await?;
-
-        // The requested size is the Session's width, not whatever client tmux
-        // considers "latest" on a shared server. On tmux 3.4 with the default
-        // `window-size latest`, a client attached to another Session sized a
-        // newly created Session to its own 80x24 and discarded `-x 96 -y 24`
-        // (#2520). `new-session`'s flags alone are therefore not the create's
-        // size: apply the requested geometry explicitly and let a failure fail
-        // the create, because a Session at the wrong width is not the Session
-        // that was asked for.
-        self.apply_session_size(name, width, height)
-            .await
-            .with_context(|| format!("apply the requested size for session {name}"))?;
-        // tmux's `resize-window` pins `window-size` to `manual` as a side
-        // effect. Restore the dynamic policy: the controller's authorized
-        // resize path still drives rows through the attached client, and only
-        // an explicit `resize-window` (this correction) should be manual.
-        //
-        // BestEffort, like the other session options: a refused option leaves
-        // the Session at the size this create just applied (manual), which
-        // degrades later row resizes rather than the created width. Observable
-        // rather than dropped.
-        if let Err(e) = self
-            .sdk_ops()
-            .set_option(name, "window-size", "latest")
             .await
         {
-            tracing::warn!(
-                "best-effort dynamic `window-size` restore for session {name} failed: {e:#}"
-            );
-        }
+            Ok(outcome) => {
+                set_create_stage(progress, CreateStage::Created);
+                outcome
+            }
+            Err(error) => {
+                // A failed `new-session` is not proof that nothing was created:
+                // the legacy fallback creates the Session and then types the
+                // environment, and that second stage can fail. Reconcile only a
+                // Session this attempt can prove is its own, then report the
+                // original failure — plus, when a Session was left behind that
+                // this attempt cannot prove it made, the fact that it is there.
+                let note = self.reconcile_ambiguous_create(name, token).await;
+                return if note.is_empty() {
+                    Err(error)
+                } else {
+                    Err(anyhow::anyhow!("{error:#}{note}"))
+                };
+            }
+        };
 
-        if !outcome.used_e {
-            // BestEffort cosmetic cleanup: hides the `export …` line the
-            // fallback typed from the pane's scrollback. The environment was
-            // delivered by that statement, so a scrollback that could not be
-            // cleared is still a session that has it.
-            crate::tmux::env::clear_history(&self.tmux_dep(), name).await;
-        }
+        // Post-create steps run in their own bounded phase, while ownership is
+        // known. A required step's failure or this phase's deadline removes the
+        // Session before the error is returned, so a retry of the same name is
+        // not refused by a Session nobody is tracking.
+        let post_create = async move {
+            // The requested size is the Session's width, not whatever client
+            // tmux considers "latest" on a shared server. On tmux 3.4 with the
+            // default `window-size latest`, a client attached to another
+            // Session sized a newly created Session to its own 80x24 and
+            // discarded `-x 96 -y 24` (#2520). `new-session`'s flags alone are
+            // therefore not the create's size: apply the requested geometry
+            // explicitly and let a failure fail the create, because a Session
+            // at the wrong width is not the Session that was asked for.
+            self.apply_session_size(name, width, height)
+                .await
+                .with_context(|| format!("apply the requested size for session {name}"))?;
+            // tmux's `resize-window` pins `window-size` to `manual` as a side
+            // effect. Restore the dynamic policy: the controller's authorized
+            // resize path still drives rows through the attached client, and
+            // only an explicit `resize-window` (this correction) should be
+            // manual.
+            //
+            // BestEffort, like the other session options: a refused option
+            // leaves the Session at the size this create just applied (manual),
+            // which degrades later row resizes rather than the created width.
+            // Observable rather than dropped.
+            if let Err(e) = self
+                .sdk_ops()
+                .set_option(name, "window-size", "latest")
+                .await
+            {
+                tracing::warn!(
+                    "best-effort dynamic `window-size` restore for session {name} failed: {e:#}"
+                );
+            }
 
-        // Enable tmux mouse mode so mouse events reach tmux as SGR sequences
-        // (copy-mode scroll, pane selection, and forwarding to TUI apps). The
-        // web client lets xterm.js use its default behaviour.
-        //
-        // **BestEffort**: a failure degrades *interaction* (no mouse-driven
-        // copy-mode, no pane selection) but not the session. The option is not
-        // consulted on the input path, it holds no session state, and the web
-        // client carries its own scrollback. Observable rather than dropped:
-        // the failure is WARNed with tmux's reason.
-        if let Err(e) = self.sdk_ops().set_option(name, "mouse", "on").await {
-            tracing::warn!("best-effort `set-option mouse on` for session {name} failed: {e:#}");
-        }
+            if !outcome.used_e {
+                // BestEffort cosmetic cleanup: hides the `export …` line the
+                // fallback typed from the pane's scrollback. The environment
+                // was delivered by that statement, so a scrollback that could
+                // not be cleared is still a session that has it.
+                crate::tmux::env::clear_history(&self.tmux_dep(), name).await;
+            }
 
-        if let Some(binding) = binding {
-            // Baseline = what the Session would have had without the binding.
-            // Read from the Agent process environment *before* caller keys were
-            // withheld, so `MODE=default` can be restored later instead of
-            // being unset.
-            let inherited: HashMap<String, String> = std::env::vars()
-                .filter(|(key, _)| !NEVER_FORWARDED_ENV.contains(&key.as_str()))
-                .collect();
-            let baseline: BTreeMap<String, Option<String>> = overlay
-                .vars
-                .iter()
-                .map(|(key, _)| (key.clone(), inherited.get(key).cloned()))
-                .collect();
-            self.env
-                .record_created_binding(
-                    name,
-                    binding.revision,
-                    binding.profiles,
-                    &overlay,
-                    baseline,
-                    &adapter,
+            // Enable tmux mouse mode so mouse events reach tmux as SGR
+            // sequences (copy-mode scroll, pane selection, and forwarding to
+            // TUI apps). The web client lets xterm.js use its default
+            // behaviour.
+            //
+            // **BestEffort**: a failure degrades *interaction* (no mouse-driven
+            // copy-mode, no pane selection) but not the session. The option is
+            // not consulted on the input path, it holds no session state, and
+            // the web client carries its own scrollback. Observable rather than
+            // dropped: the failure is WARNed with tmux's reason.
+            if let Err(e) = self.sdk_ops().set_option(name, "mouse", "on").await {
+                tracing::warn!(
+                    "best-effort `set-option mouse on` for session {name} failed: {e:#}"
+                );
+            }
+
+            if let Some(binding) = binding {
+                // Baseline = what the Session would have had without the
+                // binding. Read from the Agent process environment *before*
+                // caller keys were withheld, so `MODE=default` can be restored
+                // later instead of being unset.
+                let inherited: HashMap<String, String> = std::env::vars()
+                    .filter(|(key, _)| !NEVER_FORWARDED_ENV.contains(&key.as_str()))
+                    .collect();
+                let baseline: BTreeMap<String, Option<String>> = overlay
+                    .vars
+                    .iter()
+                    .map(|(key, _)| (key.clone(), inherited.get(key).cloned()))
+                    .collect();
+                self.env
+                    .record_created_binding(
+                        name,
+                        binding.revision,
+                        binding.profiles,
+                        &overlay,
+                        baseline,
+                        &adapter,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!("record the Environment Binding for session {name}")
+                    })?;
+            }
+
+            Ok::<Vec<String>, anyhow::Error>(warnings)
+        };
+
+        match tokio::time::timeout(self.create_timeout, post_create).await {
+            Ok(Ok(warnings)) => {
+                // Record completion before returning so a deadline firing in
+                // the same tick reads success, not a stale in-progress stage.
+                set_create_stage(progress, CreateStage::Completed(warnings.clone()));
+                Ok(warnings)
+            }
+            Ok(Err(error)) => {
+                self.compensate_created_session(name).await;
+                Err(error)
+            }
+            Err(_) => {
+                self.compensate_created_session(name).await;
+                Err(anyhow::anyhow!(
+                    "tmux create-session timed out after {:?} while finishing session {name}",
+                    self.create_timeout
+                ))
+            }
+        }
+    }
+
+    /// Reconcile a create whose outer deadline fired.
+    ///
+    /// `Created` is proof enough to remove the Session: `new-session` returned
+    /// Ok under the per-name guard, and the pre-create check proved no Session
+    /// of that name existed. `Requested` is ambiguous — the future was dropped
+    /// while `new-session` was in flight — so only a Session carrying this
+    /// attempt's token is removed.
+    async fn reconcile_create_after_deadline(
+        &self,
+        name: &str,
+        token: &str,
+        progress: &CreateProgress,
+    ) -> String {
+        match create_stage(progress) {
+            // The caller returns this stage as success; reachable only for
+            // exhaustiveness.
+            CreateStage::Completed(_) => String::new(),
+            CreateStage::Created => {
+                self.compensate_created_session(name).await;
+                "; the Session created by this attempt was removed".to_string()
+            }
+            CreateStage::Requested => self.reconcile_ambiguous_create(name, token).await,
+            CreateStage::Preparing => String::new(),
+        }
+    }
+
+    /// Reconcile a create whose tmux outcome this attempt cannot yet prove.
+    ///
+    /// Under the per-name guard and the pre-create absence check, a Session
+    /// that exists now was either made by this attempt or appeared on the
+    /// socket outside Nession (a shared socket, a manual `tmux new`). Only the
+    /// creation token distinguishes them. A Session that cannot be proven is
+    /// left untouched and the returned note says so: killing it would destroy
+    /// someone else's Session.
+    async fn reconcile_ambiguous_create(&self, name: &str, token: &str) -> String {
+        let sessions = match self.sdk_ops().list_sessions().await {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::warn!(
+                    "could not inspect session {name} after an interrupted create: {error:#}"
+                );
+                return format!("; the state of session {name} could not be reconciled");
+            }
+        };
+        if !sessions.iter().any(|session| session.name == name) {
+            return String::new();
+        }
+        match self
+            .sdk_ops()
+            .show_environment(name, CREATE_TOKEN_ENV)
+            .await
+        {
+            Ok(Some(value)) if value == token => {
+                self.compensate_created_session(name).await;
+                "; the Session created by this attempt was removed".to_string()
+            }
+            Ok(_) => {
+                tracing::warn!(
+                    "session {name} exists after an interrupted create but does not carry \
+                     this attempt's {CREATE_TOKEN_ENV}; leaving it untouched"
+                );
+                format!(
+                    "; a Session named {name} could not be proven to belong to this \
+                     create, so it was left untouched"
                 )
-                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "could not prove ownership of session {name} after an interrupted \
+                     create: {error:#}"
+                );
+                format!(
+                    "; the ownership of the existing Session {name} could not be proven, \
+                     so it was left untouched"
+                )
+            }
         }
+    }
 
-        Ok(warnings)
+    /// Remove the Session this create made and any binding state it wrote.
+    ///
+    /// Only called once ownership is proven (`Created`, or a matching creation
+    /// token). The kill is best-effort and observable: if it fails, a retry's
+    /// duplicate refusal is the truthful state and the warning says the
+    /// cleanup did not finish.
+    async fn compensate_created_session(&self, name: &str) {
+        match self.sdk_ops().kill_session(name).await {
+            Ok(()) => tracing::warn!(
+                "removed session {name} after its create failed, so the name is safe to retry"
+            ),
+            Err(error) => tracing::warn!(
+                "could not remove session {name} after its create failed: {error:#}; \
+                 a retry may report it as already existing"
+            ),
+        }
+        // A binding record for a Session this create is removing would be
+        // stale and could give a later same-named Session an inherited
+        // baseline. Removal is idempotent.
+        self.env.clear_session_binding(name).await;
     }
 
     /// Apply the Agent's resolved size to a Session's pane.
@@ -1540,5 +1896,580 @@ mod injected_tmux_tests {
             vec![vec!["kill-session", "-t", "nession-fake-sess"]],
             "on the manager's own addressing, one call, tmux's own grammar"
         );
+    }
+}
+
+/// The per-name create claim's lifecycle, without tmux.
+#[cfg(test)]
+mod create_claim_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_claim_is_removed_once_no_create_holds_or_awaits_it() {
+        let socket = PathBuf::from("/tmp/nession-create-claim-test.sock");
+        let name = "nession-create-claim-test";
+        let key = (socket.clone(), name.to_string());
+
+        let permit = creation_permit(&socket, name);
+        {
+            let slot = permit.slot.clone();
+            let _held = slot.lock().await;
+        }
+        drop(permit);
+
+        {
+            let registry = creation_registry()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(
+                !registry.contains_key(&key),
+                "an idle create claim stayed in the registry forever"
+            );
+        }
+
+        // The next create of the same name claims it again.
+        let permit = creation_permit(&socket, name);
+        let slot = permit.slot.clone();
+        let _held = slot.lock().await;
+    }
+}
+
+/// #2812: a create that fails after `tmux new-session` has created the
+/// Session must reconcile what tmux owns before it reports the failure.
+///
+/// The fake keeps a small session table on disk (`fake-sessions/<name>`), so
+/// "the Session is gone" and "the same name can be created again" are read
+/// from state instead of inferred from exit codes. `new-session` records the
+/// `NESSON_CREATE_TOKEN` the manager passed; `kill-session` removes the row.
+/// A pre-existing row is the identity half: it must survive untouched.
+#[cfg(test)]
+mod create_recovery_tests {
+    use super::*;
+    use crate::test_support::{manager_with_fake, unique_session_name, FakeTmux, FAKE_TIMEOUT};
+    use nession_protocol::contracts::env::v1::EnvSource;
+
+    /// The ownership fence the manager delivers through `new-session -e`.
+    const TOKEN_VAR: &str = "NESSON_CREATE_TOKEN";
+
+    fn session_row(dir: &std::path::Path, name: &str) -> PathBuf {
+        dir.join("fake-sessions").join(name)
+    }
+
+    /// A fake tmux that owns a tiny session table. `new_session_tail` runs
+    /// after a successful create (a marker-gated sleep simulates a call that
+    /// outlives the create budget); `extra_cases` adds case arms.
+    #[cfg(unix)]
+    fn stateful_fake(
+        dir: &std::path::Path,
+        name: &str,
+        new_session_tail: &str,
+        extra_cases: &str,
+    ) -> FakeTmux {
+        let state = dir.join("fake-sessions");
+        let script = format!(
+            "state='{state}'\n\
+             mkdir -p \"$state\"\n\
+             name='{name}'\n\
+             case \"$1\" in\n\
+             list-sessions)\n\
+               if [ -f \"$state/$name\" ]; then\n\
+                 printf '%s||1700000000|1|0|200|60|/tmp|bash\\n' \"$name\"\n\
+               fi\n\
+               exit 0;;\n\
+             new-session)\n\
+               if [ -f \"$state/$name\" ]; then echo \"duplicate session: $name\" >&2; exit 1; fi\n\
+               while [ $# -gt 0 ]; do\n\
+                 if [ \"$1\" = \"-e\" ]; then\n\
+                   shift\n\
+                   case \"$1\" in\n\
+                     {token_var}=*) printf '%s' \"${{1#{token_var}=}}\" > \"$state/$name.token\";;\n\
+                   esac\n\
+                 fi\n\
+                 shift\n\
+               done\n\
+               : > \"$state/$name\"\n\
+               {tail}\n\
+               exit 0;;\n\
+             show-environment)\n\
+               if [ ! -f \"$state/$name\" ]; then echo \"no such session: $name\" >&2; exit 1; fi\n\
+               case \"$4\" in\n\
+                 {token_var})\n\
+                   if [ -f \"$state/$name.token\" ]; then\n\
+                     printf '{token_var}=%s\\n' \"$(cat \"$state/$name.token\")\"\n\
+                     exit 0\n\
+                   fi;;\n\
+               esac\n\
+               echo \"unknown variable: $4\" >&2; exit 1;;\n\
+             kill-session)\n\
+               if [ -f \"$state/$name\" ]; then\n\
+                 rm -f \"$state/$name\" \"$state/$name.token\"\n\
+                 exit 0\n\
+               fi\n\
+               echo \"no such session: $name\" >&2; exit 1;;\n\
+             {extra_cases}\n\
+             *) exit 0;;\n\
+             esac\n",
+            state = state.display(),
+            name = name,
+            token_var = TOKEN_VAR,
+            tail = new_session_tail,
+            extra_cases = extra_cases,
+        );
+        FakeTmux::new(dir, &script)
+    }
+
+    fn profile(name: &str) -> SessionEnvProfile {
+        SessionEnvProfile {
+            profile: nession_protocol::contracts::env::v1::EnvFileRef {
+                name: name.to_string(),
+                source: EnvSource::Server,
+                agent_id: None,
+            },
+            phase: "create".to_string(),
+            content_hash: None,
+        }
+    }
+
+    fn snapshot(name: &str) -> EnvSnapshot {
+        EnvSnapshot {
+            name: name.to_string(),
+            source: EnvSource::Server,
+            agent_id: None,
+            vars: vec![("NS_CREATED".to_string(), "v".to_string())],
+            warnings: Vec::new(),
+        }
+    }
+
+    fn kill_call(name: &str) -> Vec<String> {
+        vec![
+            "kill-session".to_string(),
+            "-t".to_string(),
+            name.to_string(),
+        ]
+    }
+
+    /// SC-01: `new-session` succeeds, the required `resize-window` fails, and
+    /// the created Session must not survive to block a retry.
+    ///
+    /// Reddens before #2812: the create returns Err while the fake still holds
+    /// the row, and the retry then fails as a duplicate.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_post_create_resize_failure_removes_the_created_session_and_the_retry_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-resize-failure");
+        let fail = dir.path().join("fail-resize");
+        std::fs::write(&fail, b"").expect("write the failure marker");
+        let fake = stateful_fake(
+            dir.path(),
+            &name,
+            "",
+            &format!(
+                "resize-window)\n\
+                   if [ -f \"{fail}\" ]; then\n\
+                     echo 'injected resize failure' >&2\n\
+                     exit 1\n\
+                   fi;;",
+                fail = fail.display()
+            ),
+        );
+        let mgr = manager_with_fake(&fake);
+
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("a refused post-create resize must fail the create");
+        assert!(
+            format!("{error:#}").contains("injected resize failure"),
+            "the original post-create failure must reach the caller: {error:#}"
+        );
+        assert!(
+            !session_row(dir.path(), &name).exists(),
+            "the Session this create made still exists after the create failed"
+        );
+        assert!(
+            fake.calls().iter().any(|call| call == &kill_call(&name)),
+            "the failed create must remove its own Session: {:#?}",
+            fake.calls()
+        );
+
+        std::fs::remove_file(&fail).expect("clear the failure marker");
+        mgr.create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect("a compensated failure must leave the name safe to retry");
+        assert!(session_row(dir.path(), &name).exists());
+    }
+
+    /// SC-02: a durable binding write fails after tmux created the Session.
+    /// The create fails, no binding record is left for the name, and the
+    /// Session is gone so a corrected retry succeeds.
+    ///
+    /// The failure is deterministic: a regular file sits where the Session's
+    /// binding directory must be, so `secure_dir` cannot create it. Nothing
+    /// is permission-dependent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_binding_persistence_failure_removes_the_created_session_and_leaves_no_binding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("binding-persist-failure");
+        let fake = stateful_fake(dir.path(), &name, "", "");
+        let state_dir = dir.path().join("env-state");
+        std::fs::create_dir_all(&state_dir).expect("create the state root");
+        let blocker = state_dir.join(&name);
+        std::fs::write(&blocker, b"not a directory").expect("block the binding directory");
+
+        let mgr = manager_with_fake(&fake).with_env_state_dir(state_dir.clone());
+        let snapshots = vec![snapshot("create.env")];
+        let profiles = vec![profile("create.env")];
+        let input = || SessionBindingInput {
+            revision: 1,
+            profiles: &profiles,
+            snapshots: &snapshots,
+        };
+
+        let error = mgr
+            .create_session_with_binding(&name, 200, 60, "/tmp", input())
+            .await
+            .expect_err("a binding that cannot be recorded must fail the create");
+        assert!(
+            format!("{error:#}").contains("record the Environment Binding"),
+            "the failure must name the binding step: {error:#}"
+        );
+        assert!(
+            !session_row(dir.path(), &name).exists(),
+            "the Session this create made still exists after the binding failed"
+        );
+        assert!(
+            !state_dir.join(&name).join("binding.json").exists(),
+            "a failed create left a durable binding for a Session that does not exist"
+        );
+
+        std::fs::remove_file(&blocker).expect("unblock the binding directory");
+        mgr.create_session_with_binding(&name, 200, 60, "/tmp", input())
+            .await
+            .expect("the retry records the binding and creates the Session");
+        assert!(session_row(dir.path(), &name).exists());
+        assert!(state_dir.join(&name).join("binding.json").exists());
+    }
+
+    /// SC-02: the create budget expires while a post-create step is still
+    /// running. tmux owns the Session, so the deadline path must reconcile it
+    /// rather than report a failure over an untracked live Session.
+    ///
+    /// Reddens before #2812: the row survives the timeout and the retry is
+    /// refused as a duplicate.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_post_create_timeout_removes_the_created_session_and_the_retry_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-timeout");
+        let slow = dir.path().join("slow-resize");
+        std::fs::write(&slow, b"").expect("write the slow marker");
+        let fake = stateful_fake(
+            dir.path(),
+            &name,
+            "",
+            &format!(
+                // Bounded, marker-controlled wait: the step outlives the
+                // create budget, but the test can end it as soon as the
+                // timeout has been observed (no fixed sleep lingering past
+                // the test).
+                "resize-window)\n\
+                   i=0\n\
+                   while [ -f \"{slow}\" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done;;",
+                slow = slow.display()
+            ),
+        );
+        let mut mgr = manager_with_fake(&fake);
+        // Comfortably above the pre-check and `new-session` even on a loaded
+        // suite, so the deadline lands in the deliberately slow resize.
+        mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, Duration::from_secs(5));
+
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("a create that exceeds its budget must not report success");
+        let message = format!("{error:#}");
+        assert!(message.contains("timed out"), "{message}");
+        assert!(
+            !session_row(dir.path(), &name).exists(),
+            "the Session created before the deadline still exists: {message}"
+        );
+
+        std::fs::remove_file(&slow).expect("clear the slow marker");
+        // The retry is a normal create, so it gets the normal fixture bound:
+        // the short budget above exists only to make the timeout happen.
+        mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
+        mgr.create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect("a reconciled timeout must leave the name safe to retry");
+        assert!(session_row(dir.path(), &name).exists());
+    }
+
+    /// SC-02: cancellation while `new-session` was in flight is ambiguous —
+    /// the call may have created the Session after the future was dropped.
+    /// The creation token proves this attempt's Session, so it is removed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cancelled_create_removes_a_session_it_can_prove_it_created() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-cancel-owned");
+        let slow = dir.path().join("slow-create");
+        std::fs::write(&slow, b"").expect("write the slow marker");
+        let fake = stateful_fake(
+            dir.path(),
+            &name,
+            &format!(
+                // The Session exists and carries the token before the wait;
+                // only `new-session`'s return is delayed past the deadline.
+                "i=0\n\
+                 while [ -f \"{slow}\" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done",
+                slow = slow.display()
+            ),
+            "",
+        );
+        let mut mgr = manager_with_fake(&fake);
+        mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, Duration::from_secs(5));
+
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("the create exceeded its budget");
+        let message = format!("{error:#}");
+        assert!(message.contains("timed out"), "{message}");
+        assert!(
+            !session_row(dir.path(), &name).exists(),
+            "a Session this create provably made survived cancellation: {message}"
+        );
+        assert!(
+            fake.calls().iter().any(|call| call == &kill_call(&name)),
+            "the reconciliation must remove the proven Session: {:#?}",
+            fake.calls()
+        );
+
+        std::fs::remove_file(&slow).expect("clear the slow marker");
+        // The retry is a normal create, so it gets the normal fixture bound:
+        // the short budget above exists only to make the deadline fire.
+        mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
+        mgr.create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect("the cancelled create left a retryable name");
+    }
+
+    /// SC-02: a same-named Session that this attempt cannot prove it created
+    /// is not killed; the failure says so instead of leaving it silently
+    /// untracked.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cancelled_create_that_cannot_prove_ownership_leaves_the_session_and_says_so() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-cancel-foreign");
+        let state = session_row(dir.path(), &name);
+        let killed = dir.path().join("kill-ran");
+        let hold = dir.path().join("hold-create");
+        std::fs::write(&hold, b"").expect("write the hold marker");
+        // A `tmux` whose `new-session` creates a Session without this
+        // attempt's token, then outlives the create budget. This is the shape
+        // of an external creator on the same socket, or of a legacy path that
+        // could not deliver the token before the deadline.
+        let script = format!(
+            r#"mkdir -p "{state_dir}"
+case "$1" in
+list-sessions) if [ -f "{state}" ]; then printf '%s||1700000000|1|0|200|60|/tmp|bash\n' "{name}"; fi; exit 0;;
+new-session) : > "{state}"; i=0; while [ -f "{hold}" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done; exit 0;;
+show-environment) echo "unknown variable: $4" >&2; exit 1;;
+kill-session) : > "{killed}"; exit 0;;
+*) exit 0;;
+esac"#,
+            state_dir = state.parent().expect("state parent").display(),
+            state = state.display(),
+            name = name,
+            hold = hold.display(),
+            killed = killed.display(),
+        );
+        let fake = FakeTmux::new(dir.path(), &script);
+        let mut mgr = manager_with_fake(&fake);
+        mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, Duration::from_secs(5));
+
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("the create exceeded its budget");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("could not be proven"),
+            "an unprovable live Session must be reported, not silently left: {message}"
+        );
+        assert!(
+            state.exists(),
+            "an unowned same-named Session was killed by the failing create"
+        );
+        assert!(
+            !killed.exists(),
+            "the reconciliation issued kill-session for a Session it could not prove was its own"
+        );
+
+        std::fs::remove_file(&hold).expect("release the abandoned new-session");
+        std::fs::remove_file(&state).expect("clean up the simulated Session");
+    }
+
+    /// SC-02: the SDK's legacy fallback (`-e` refused, then the environment
+    /// typed into the shell) can create the Session and fail while typing it.
+    /// The token travels in that line, so the Session cannot be proven to be
+    /// this attempt's; it is left untouched and the error states that instead
+    /// of leaving it silently untracked.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fallback_create_that_cannot_deliver_the_token_reports_the_session_it_left() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-fallback-leftover");
+        let state = session_row(dir.path(), &name);
+        let killed = dir.path().join("kill-ran");
+        let script = format!(
+            r#"mkdir -p "{state_dir}"
+case "$1" in
+list-sessions) if [ -f "{state}" ]; then printf '%s||1700000000|1|0|200|60|/tmp|bash\n' "{name}"; fi; exit 0;;
+new-session)
+  for arg in "$@"; do
+    if [ "$arg" = "-e" ]; then echo "unknown flag -e" >&2; exit 1; fi
+  done
+  : > "{state}"
+  exit 0;;
+send-keys) echo "injected send-keys failure" >&2; exit 1;;
+show-environment) echo "unknown variable: $4" >&2; exit 1;;
+kill-session) : > "{killed}"; exit 0;;
+*) exit 0;;
+esac"#,
+            state_dir = state.parent().expect("state parent").display(),
+            state = state.display(),
+            name = name,
+            killed = killed.display(),
+        );
+        let fake = FakeTmux::new(dir.path(), &script);
+        let mgr = manager_with_fake(&fake);
+
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("a fallback that cannot deliver its environment fails the create");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("injected send-keys failure"),
+            "the original fallback failure must reach the caller: {message}"
+        );
+        assert!(
+            message.contains("could not be proven"),
+            "an unprovable leftover must be reported, not silently left: {message}"
+        );
+        assert!(
+            state.exists(),
+            "the Session this attempt could not prove was its own was removed"
+        );
+        assert!(
+            !killed.exists(),
+            "the reconciliation killed a Session it could not prove was its own"
+        );
+
+        std::fs::remove_file(&state).expect("clean up the simulated Session");
+    }
+
+    /// SC-02: a Session that existed before this create is never the create's
+    /// to remove. The refusal is deterministic and the row survives.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_pre_existing_same_named_session_is_not_touched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("preexisting");
+        let fake = stateful_fake(dir.path(), &name, "", "");
+        let state = session_row(dir.path(), &name);
+        std::fs::create_dir_all(state.parent().expect("state parent")).expect("state dir");
+        std::fs::write(&state, b"pre-existing").expect("pre-existing Session");
+
+        let mgr = manager_with_fake(&fake);
+        let error = mgr
+            .create_session(&name, 200, 60, "/tmp", &[])
+            .await
+            .expect_err("a name that already exists cannot be created");
+        assert!(
+            format!("{error:#}").contains("already exists"),
+            "the refusal must name the duplicate: {error:#}"
+        );
+        assert!(
+            state.exists(),
+            "the pre-existing Session was removed by a create that never owned it"
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|call| call.first().map(String::as_str) == Some("kill-session")),
+            "the create issued kill-session for a Session it did not make: {:#?}",
+            fake.calls()
+        );
+    }
+
+    /// SC-03: the success path keeps the requested geometry, records the
+    /// durable binding, and leaves the Session discoverable. The failure
+    /// recovery must not turn a normal create into a different outcome.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_successful_create_with_a_binding_keeps_geometry_binding_and_discovery() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = unique_session_name("create-success");
+        let fake = stateful_fake(dir.path(), &name, "", "");
+        let state_dir = dir.path().join("env-state");
+        let mgr = manager_with_fake(&fake).with_env_state_dir(state_dir.clone());
+        let snapshots = vec![snapshot("create.env")];
+        let profiles = vec![profile("create.env")];
+
+        let warnings = mgr
+            .create_session_with_binding(
+                &name,
+                200,
+                60,
+                "/tmp",
+                SessionBindingInput {
+                    revision: 1,
+                    profiles: &profiles,
+                    snapshots: &snapshots,
+                },
+            )
+            .await
+            .expect("a healthy create succeeds");
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        assert!(
+            fake.calls().iter().any(|call| call
+                == &vec![
+                    "resize-window".to_string(),
+                    "-t".to_string(),
+                    name.clone(),
+                    "-x".to_string(),
+                    "200".to_string(),
+                    "-y".to_string(),
+                    "60".to_string()
+                ]),
+            "the requested geometry was not applied: {:#?}",
+            fake.calls()
+        );
+        let binding = std::fs::read(state_dir.join(&name).join("binding.json"))
+            .expect("the durable binding is recorded");
+        let binding: serde_json::Value = serde_json::from_slice(&binding).expect("binding JSON");
+        assert_eq!(binding["applied_revision"], 1);
+        assert_eq!(binding["session_name"], serde_json::json!(name));
+        assert!(
+            mgr.list_sessions()
+                .await
+                .expect("the Session is discoverable")
+                .iter()
+                .any(|session| session.name == name),
+            "the created Session is not discoverable"
+        );
+        let observed = mgr
+            .env()
+            .observe(&name)
+            .await
+            .expect("the binding is observable");
+        assert_eq!(observed.applied_revision, 1);
     }
 }
