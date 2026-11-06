@@ -55,6 +55,8 @@ export interface SidebarProps {
   onSelect: (session: Session) => void;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
+  onViewDetails?: (session: Session) => void;
+  onEditDetails?: (session: Session) => void;
 }
 
 function WebSearchMiss({
@@ -149,6 +151,8 @@ export function Sidebar({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
 }: SidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -214,6 +218,8 @@ export function Sidebar({
           onSelect={onSelect}
           onConfigure={onConfigure}
           onKill={onKill}
+          onViewDetails={onViewDetails}
+          onEditDetails={onEditDetails}
           groups={groups}
           showRowRecency={!grouped}
           searchMissState={

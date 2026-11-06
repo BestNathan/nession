@@ -5,6 +5,8 @@ import { FIXTURE_CLIENT_SESSION_ID, FIXTURE_SELECTED_ID } from '@/app/fixture/fi
 import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
+import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
+import { useSessionDetails } from '@/app/useSessionDetails';
 import { experienceFromSearch } from '@/app/experienceMode';
 import {
   filterSessions,
@@ -94,6 +96,11 @@ export function FixtureShell() {
   const selectedAgent = agents.find(
     (agent) => agent.agent_id === selectedSessionWithCommand?.agent_id,
   );
+  const sessionDetails = useSessionDetails({
+    agents,
+    staleAgentIds: staleAgents,
+    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+  });
   const domain = selectedSessionWithCommand
     ? mapDomainState({
         session: selectedSessionWithCommand,
@@ -146,6 +153,8 @@ export function FixtureShell() {
           onSelect={(session) => setSelectedId(session.session_id)}
           onConfigure={() => {}}
           onKill={() => {}}
+          onViewSessionDetails={(session) => sessionDetails.show(session, false)}
+          onEditSessionDetails={(session) => sessionDetails.show(session, true)}
           onSurfaceChange={() => {}}
           onToolChange={() => {}}
           onCloseDrawer={() => setListOpen(false)}
@@ -160,6 +169,12 @@ export function FixtureShell() {
           )}
         />
       </div>
+      <SessionDetailsDialog
+        session={sessionDetails.target?.session ?? null}
+        state={sessionDetails.domain}
+        editing={sessionDetails.target?.editing ?? false}
+        onClose={sessionDetails.close}
+      />
     </div>
   );
 }

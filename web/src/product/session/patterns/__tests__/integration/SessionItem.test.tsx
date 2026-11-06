@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionItem } from '@/product/session/patterns/SessionItem';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -163,10 +163,14 @@ describe('SessionItem row actions overflow', () => {
     selected = false,
     onConfigure,
     onKill,
+    onViewDetails,
+    onEditDetails,
   }: {
     selected?: boolean;
     onConfigure?: (session: Session) => void;
     onKill?: (session: Session) => void;
+    onViewDetails?: (session: Session) => void;
+    onEditDetails?: (session: Session) => void;
   } = {}) {
     return render(
       <SessionItem
@@ -177,6 +181,8 @@ describe('SessionItem row actions overflow', () => {
         onSelect={vi.fn()}
         onConfigure={onConfigure}
         onKill={onKill}
+        onViewDetails={onViewDetails}
+        onEditDetails={onEditDetails}
       />,
     );
   }
@@ -246,6 +252,54 @@ describe('SessionItem row actions overflow', () => {
     const selectedTrigger = screen.getByTestId(`session-actions-${session.session_id}`);
     expect(selectedTrigger.className).toMatch(/lg:opacity-100/);
     expect(selectedTrigger.className).not.toMatch(/lg:opacity-0/);
+  });
+
+  it('exposes details, edit, attach settings and a separated destructive kill', async () => {
+    const onSelect = vi.fn();
+    const onViewDetails = vi.fn();
+    const onEditDetails = vi.fn();
+    render(
+      <SessionItem
+        session={session}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={onSelect}
+        onViewDetails={onViewDetails}
+        onEditDetails={onEditDetails}
+        onConfigure={vi.fn()}
+        onKill={vi.fn()}
+      />,
+    );
+    await openActions();
+
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Session details',
+      'Edit details',
+      'Attach settings',
+      'Kill session',
+    ]);
+    expect(within(menu).getByRole('separator')).toBeInTheDocument();
+    expect(within(menu).getByTestId(`session-actions-kill-${session.session_id}`)).toHaveAttribute(
+      'data-variant',
+      'destructive',
+    );
+
+    await userEvent.click(screen.getByTestId(`session-actions-details-${session.session_id}`));
+    expect(onViewDetails).toHaveBeenCalledWith(session);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    await openActions();
+    await userEvent.click(screen.getByTestId(`session-actions-edit-${session.session_id}`));
+    expect(onEditDetails).toHaveBeenCalledWith(session);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('keeps a 44px overflow target below lg for narrow Web', () => {
+    renderRow({ onViewDetails: vi.fn(), onEditDetails: vi.fn(), onConfigure: vi.fn(), onKill: vi.fn() });
+    const trigger = screen.getByTestId(`session-actions-${session.session_id}`);
+    expect(trigger.className).toMatch(/(^|\s)max-lg:size-11(\s|$)/);
   });
 
   it('opens attach settings without selecting the row', async () => {

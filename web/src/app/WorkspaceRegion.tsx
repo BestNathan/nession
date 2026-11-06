@@ -43,6 +43,8 @@ export interface WorkspaceRegionProps {
   onOpenWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
+  onViewSessionDetails?: (session: Session) => void;
+  onEditSessionDetails?: (session: Session) => void;
   onSurfaceChange: (surface: Surface) => void;
   onToolChange: (tool: CapabilityId) => void;
   isWide: boolean;
@@ -71,7 +73,8 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
-    onConfigure, onKill, onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
+    onConfigure, onKill, onViewSessionDetails, onEditSessionDetails,
+    onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
     experienceOverride, showList, onBackToSessions, onCloseDrawer, terminal,
   } = props;
 
@@ -93,7 +96,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
-    onConfigure, onKill,
+    onConfigure, onKill, onViewDetails: onViewSessionDetails, onEditDetails: onEditSessionDetails,
   };
 
   const mainShared = {

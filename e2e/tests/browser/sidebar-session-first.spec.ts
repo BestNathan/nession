@@ -108,12 +108,12 @@ for (const viewport of [
 }
 
 test('search, selection, actions and empty states are operable (#2851 SC-02)', async ({ page }) => {
-  await openSidebarFixture(page);
+  await openSidebarFixture(page, { width: 1440, height: 900 }, '?sessionMetadata=normal');
 
   const search = page.getByLabel('Search sessions');
   await search.fill('design');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
-  await expect(page.getByTestId('session-item-title')).toHaveText('design-system');
+  await expect(page.getByTestId('session-item-title')).toHaveText('Design system audit');
 
   await search.fill('no-such-session');
   await expect(page.getByTestId('session-search-miss')).toContainText('No sessions match “no-such-session”');
@@ -128,17 +128,55 @@ test('search, selection, actions and empty states are operable (#2851 SC-02)', a
   await page.getByTestId('session-list-filter-chip').click();
   await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
-  await page.getByTestId('session-item-devbox-01:design-system').click();
+  await page.getByTestId('session-item-devbox-01:fix-terminal-reconnect').click();
   const selected = page.locator('[data-testid="session-item-row"][data-selected="true"]');
   await expect(selected).toHaveCount(1);
-  await expect(selected.getByTestId('session-item-title')).toHaveText('design-system');
-  await expect(page.getByTestId('session-item-devbox-01:design-system')).toHaveAttribute('aria-current', 'true');
+  await expect(selected.getByTestId('session-item-title')).toHaveText('Terminal reconnect reliability');
+  await expect(page.getByTestId('session-item-devbox-01:fix-terminal-reconnect')).toHaveAttribute('aria-current', 'true');
 
-  const actions = page.getByTestId('session-actions-devbox-01:design-system');
-  await actions.focus();
-  await page.keyboard.press('Enter');
+  // The same four-action menu opens on a non-selected row. Opening it, and
+  // viewing that Session's details, must not move the current selection.
+  await page.getByTestId('session-item-devbox-01:design-system').hover();
+  await page.getByTestId('session-actions-devbox-01:design-system').click();
   await expect(page.getByRole('menu')).toBeVisible();
+  await expect(page.getByRole('menuitem').filter({ hasText: 'Session details' })).toBeVisible();
+  await expect(page.getByRole('menuitem').filter({ hasText: 'Edit details' })).toBeVisible();
+  await expect(page.getByRole('menuitem').filter({ hasText: 'Attach settings' })).toBeVisible();
+  await expect(page.getByRole('menuitem').filter({ hasText: 'Kill session' })).toBeVisible();
+  await page.getByTestId('session-actions-details-devbox-01:design-system').click();
+  const detailsDialog = page.getByTestId('session-details-dialog');
+  await expect(detailsDialog).toBeVisible();
+  await expect(detailsDialog).toContainText('Design system audit');
+  await expect(selected.getByTestId('session-item-title')).toHaveText('Terminal reconnect reliability');
   await page.keyboard.press('Escape');
+  await expect(detailsDialog).toHaveCount(0);
+
+  // Edit details opens the existing metadata editor. Saving changes the
+  // display alias only; the immutable Session identity remains the row's key.
+  await page.getByTestId('session-item-devbox-01:design-system').hover();
+  await page.getByTestId('session-actions-devbox-01:design-system').click();
+  await page.getByTestId('session-actions-edit-devbox-01:design-system').click();
+  await expect(page.getByTestId('session-metadata-editor')).toBeVisible();
+  await page.getByTestId('session-metadata-title-input').fill('Design system reviews');
+  await page.getByTestId('session-metadata-save').click();
+  await expect(page.getByTestId('session-metadata-notice')).toContainText(
+    'Session ID are unchanged.',
+  );
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('session-item-devbox-01:design-system')).toHaveCount(1);
+  await expect(page.getByTestId('session-item-devbox-01:design-system')).toContainText(
+    'Design system reviews',
+  );
+
+  // A scrolling list dismisses an open anchored menu.
+  await page.setViewportSize({ width: 1440, height: 480 });
+  await page.getByTestId('session-item-devbox-01:design-system').hover();
+  await page.getByTestId('session-actions-devbox-01:design-system').click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.getByTestId('sidebar').locator('[data-slot="scroll-area-viewport"]').evaluate((element) => {
+    element.scrollTop = 40;
+    element.dispatchEvent(new Event('scroll'));
+  });
   await expect(page.getByRole('menu')).toHaveCount(0);
 
   await page.goto('/#/fixture?sessions=none');
@@ -246,6 +284,12 @@ test('narrow Web uses the overlay drawer and App stays spatial (#2851 SC-04)', a
 
   await open.click();
   await expect(page.getByTestId('session-drawer-panel')).toBeVisible();
+  const narrowActions = page.getByTestId('session-actions-devbox-01:design-system');
+  expect(await narrowActions.boundingBox()).toMatchObject({ width: 44, height: 44 });
+  await narrowActions.click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await expect(page.getByRole('menuitem')).toHaveCount(4);
+  await page.keyboard.press('Escape');
   await page.getByTestId('session-item-devbox-01:design-system').click();
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);
   await open.click();

@@ -7,4 +7,6 @@ isolation: shared
 verifiers:
   - type: browser
     entry: verify.spec.js
+  - type: runtime
+    entry: verify.cjs
 result_policy: all-pass

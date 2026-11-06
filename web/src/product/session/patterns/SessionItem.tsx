@@ -1,4 +1,5 @@
-import { MoreHorizontal, Settings, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Info, MoreHorizontal, Pencil, Settings, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { AgentChannel, DomainState } from '@/product/session/model/domainState';
@@ -36,27 +38,50 @@ const menuReveal = cn(
 );
 
 /**
- * The row's secondary actions as one `…` menu.
+ * The row's secondary actions as one anchored `…` menu.
  *
- * `Button`'s `icon` size is `--control-md`: 32px under Web, 44px inside the App
- * touch band. The popup is `base-ui`'s menu, so the trigger has an accessible
- * name and the actions are keyboard-operable. Destructive action stays behind
- * the disclosure; the confirmation belongs to the caller that owns the kill
- * flow.
+ * The same menu is used on wide and narrow Web: wide reveals the trigger on
+ * hover/focus/selection, while narrow keeps a 44px touch target visible. App
+ * receives the same primitive without Web's details entry, so its existing
+ * attach/kill actions do not gain a new surface. The menu is a floating
+ * overlay; it never selects the row or replaces the list. Base UI owns
+ * click-outside, Escape and focus movement; an explicit scroll listener
+ * dismisses it when the Session list moves under the anchor.
  */
 function SessionRowActionsMenu({
   session,
   selected,
+  onViewDetails,
+  onEditDetails,
   onConfigure,
   onKill,
 }: {
   session: Session;
   selected: boolean;
+  onViewDetails?: (session: Session) => void;
+  onEditDetails?: (session: Session) => void;
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const viewport = document.querySelector(
+      '[data-testid="sidebar"] [data-slot="scroll-area-viewport"]',
+    );
+    if (!viewport) {
+      return;
+    }
+    const close = () => setOpen(false);
+    viewport.addEventListener('scroll', close, { passive: true });
+    return () => viewport.removeEventListener('scroll', close);
+  }, [open]);
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -66,7 +91,7 @@ function SessionRowActionsMenu({
             data-testid={`session-actions-${session.session_id}`}
             aria-label={`Session actions for ${session.session_name}`}
             className={cn(
-              'mt-0.5 shrink-0',
+              'mt-0.5 shrink-0 max-lg:size-11',
               menuReveal,
               selected && 'lg:opacity-100 lg:pointer-events-auto',
             )}
@@ -75,7 +100,25 @@ function SessionRowActionsMenu({
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
+        {onViewDetails ? (
+          <DropdownMenuItem
+            data-testid={`session-actions-details-${session.session_id}`}
+            onClick={() => onViewDetails(session)}
+          >
+            <Info />
+            Session details
+          </DropdownMenuItem>
+        ) : null}
+        {onEditDetails ? (
+          <DropdownMenuItem
+            data-testid={`session-actions-edit-${session.session_id}`}
+            onClick={() => onEditDetails(session)}
+          >
+            <Pencil />
+            Edit details
+          </DropdownMenuItem>
+        ) : null}
         {onConfigure ? (
           <DropdownMenuItem
             data-testid={`session-actions-settings-${session.session_id}`}
@@ -86,14 +129,17 @@ function SessionRowActionsMenu({
           </DropdownMenuItem>
         ) : null}
         {onKill ? (
-          <DropdownMenuItem
-            variant="destructive"
-            data-testid={`session-actions-kill-${session.session_id}`}
-            onClick={() => onKill(session)}
-          >
-            <Trash2 />
-            Kill session
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              data-testid={`session-actions-kill-${session.session_id}`}
+              onClick={() => onKill(session)}
+            >
+              <Trash2 />
+              Kill session
+            </DropdownMenuItem>
+          </>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -131,6 +177,10 @@ export interface SessionItemProps {
   /** Open the attach-settings (configure) dialog for this session. */
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
+  /** Open the read-only Session details surface without selecting the row. */
+  onViewDetails?: (session: Session) => void;
+  /** Open the same details surface directly in its metadata editor. */
+  onEditDetails?: (session: Session) => void;
   /**
    * The Session's user-facing display identity (#2789): its metadata title when
    * set, otherwise the tmux name. The row keeps rendering `session_name` as
@@ -221,6 +271,8 @@ export function SessionItem({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
   showRecency = true,
   displayTitle,
 }: SessionItemProps) {
@@ -284,10 +336,12 @@ export function SessionItem({
           </span>
         )}
       </button>
-      {onConfigure || onKill ? (
+      {onViewDetails || onEditDetails || onConfigure || onKill ? (
         <SessionRowActionsMenu
           session={session}
           selected={selected}
+          onViewDetails={onViewDetails}
+          onEditDetails={onEditDetails}
           onConfigure={onConfigure}
           onKill={onKill}
         />

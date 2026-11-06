@@ -41,7 +41,9 @@ The current Web column is **Session-first** (#2851):
   field. This row is the sidebar's own top action group, not a permanent work-surface
   header.
 - **Middle:** flat Session history, optionally separated by when the work last happened
-  (Today / Previous 7 days / Older). Sessions are never filed under an Agent.
+  (Today / Previous 7 days / Older). Sessions are never filed under an Agent. One anchored
+  `···` menu owns Session details, Edit details, Attach settings and the separated Kill
+  action on wide and narrow Web; it overlays the list and never changes selection by itself.
 - **Bottom:** one compact Agents / locations entry that reveals Agent detail on request,
   followed by Server connection status alone. An offline Agent does not recolor the
   Server mark, and the footer does not aggregate Session or attachment state.
