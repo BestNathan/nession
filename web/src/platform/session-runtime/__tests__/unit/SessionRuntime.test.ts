@@ -464,7 +464,7 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
-  it('revokes queued parser ACKs on baseline replacement/disposal and retries only real send failures (#2867)', async () => {
+  it('revokes queued parser ACKs across generation changes and retries only real send failures (#2867)', async () => {
     const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
     rt.setTransportReady(true);
     rt.buildTransport();
@@ -496,7 +496,29 @@ describe('SessionRuntime', () => {
     expect(acks()[0].payload).toMatchObject({ applied_through: 2 });
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(2);
 
+    // A stream hole revokes the queued prefix.
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 }, 1);
+    rt.noteStreamTruncated();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A replaced renderer cannot let the old timer confirm its prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.noteRendererReplaced();
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // A route-intent change retires the old batch before its timer fires.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await vi.advanceTimersByTimeAsync(32);
+    expect(acks()).toHaveLength(1);
+
+    // Disposal cancels a final queued prefix.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }, 1);
     rt.dispose();
     await vi.advanceTimersByTimeAsync(32);
     expect(acks()).toHaveLength(1); // disposed runtime never sends

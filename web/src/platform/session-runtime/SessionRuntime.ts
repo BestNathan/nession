@@ -1086,6 +1086,10 @@ export class SessionRuntime {
   }
 
   private handleRouteIntentChange(): void {
+    // The old route's queued prefix is not proof for the new route. The timer
+    // is also generation-fenced, but dropping the batch immediately keeps its
+    // event/byte counts from shaping the new route's first flush.
+    this.clearOutputAppliedAckBatch();
     this.revokeRelayProof();
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
