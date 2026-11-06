@@ -268,3 +268,17 @@
 - Categories: app, interaction, navigation, ownership, terminal, touch
 - Reason: Link the App Workspace depth contract to the Session metadata article it now carries
 - Source: https://github.com/BestNathan/nession/issues/2789
+
+## 2026-11-06T09:03:13Z | create | Git Changes read-only worktree preview and repository-scoped file read authority
+- Path: topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md
+- Topic: web
+- Categories: git, files, protocol, safety, read-only, ownership, web
+- Reason: Record #2838's separate typed git.preview operation, Session/repository read binding, descriptor-relative symlink/race boundary, bounded text/binary/truncation states, one-conflict-row rule and stale-response guard; implementation PR #2846
+- Source: https://github.com/BestNathan/nession/issues/2838
+
+## 2026-11-06T09:03:13Z | update | Files capability identity, creation context and safe mutation ownership
+- Path: topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md
+- Topic: web
+- Categories: app, files, ownership, protocol, safety, web
+- Reason: Cross-link the new #2838 Git Changes preview article and distinguish its Session/repository-bound read from the Agent-host Files browse-root authority
+- Source: https://github.com/BestNathan/nession/issues/2838

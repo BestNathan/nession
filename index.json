@@ -119,7 +119,23 @@
           "safety",
           "web"
         ],
-        "updated_at": "2026-11-05T10:32:06Z"
+        "updated_at": "2026-11-06T09:03:13Z"
+      },
+      {
+        "title": "Git Changes read-only worktree preview and repository-scoped file read authority",
+        "description": "A Git Changes row without a diff opens its actual worktree bytes through a separate Session/repository-bound git.preview read, never through git.diff, the broad Files reader or a guessed empty diff",
+        "path": "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
+        "status": "verified",
+        "categories": [
+          "git",
+          "files",
+          "protocol",
+          "safety",
+          "read-only",
+          "ownership",
+          "web"
+        ],
+        "updated_at": "2026-11-06T09:03:13Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
@@ -221,7 +237,11 @@
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
     "files": [
-      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
+    ],
+    "git": [
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "identity": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
@@ -251,16 +271,21 @@
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "protocol": [
-      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "provenance": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
+    "read-only": [
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "release": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
@@ -269,7 +294,8 @@
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
     ],
     "safety": [
-      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md"
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "sandbox": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
@@ -298,6 +324,7 @@
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "workflows": [

@@ -5,7 +5,7 @@ topic: web
 categories: ["app", "files", "ownership", "protocol", "safety", "web"]
 status: verified
 created_at: 2026-11-05T10:32:06Z
-updated_at: 2026-11-05T10:32:06Z
+updated_at: 2026-11-06T09:03:13Z
 sources: ["https://github.com/BestNathan/nession/issues/2751", "https://github.com/BestNathan/nession/pull/2771", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-protocol/src/contracts/file/v1.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-agent/src/fs/ops.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/fileRef.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/createTarget.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/hooks/useFileViewer.ts"]
 ---
 
@@ -97,3 +97,4 @@ consume rather than the current browse-root convention.
 ### Related knowledge
 
 - [Nession Sandbox policy and execution isolation architecture](../engineering/nession-sandbox-policy-and-execution-isolation-architecture.md) — the Sandbox owner; Agent-host Files is not that policy.
+- [Git Changes read-only worktree preview and repository-scoped file read authority](git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md) — a separate Session/repository-bound read for Git rows; it does not inherit this browse-root authority.
