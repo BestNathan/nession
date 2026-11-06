@@ -1,5 +1,6 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
 import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
+import { parseIssueE2E } from '../../../issue-e2e-contract.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool, completeIssueUpdateProposal, candidateIssue, enforceE2EReadOnly } from '../tools/gh/issue/update.mjs';
@@ -110,11 +111,15 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
 // Only errors from the trusted pre-write validation boundary can trigger one
 // extra model pass. Network failures, post-write failures and privilege errors
 // must not cause replay or duplicate writes.
-export function isIssueAuditRepairableRejection(error) {
+export function isIssueAuditRepairableRejection(error, sourceBody = '') {
   const message = error instanceof Error ? error.message : '';
-  return message.startsWith('Issue Contract validation failed before write:') ||
-    message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:') ||
-    message.startsWith('Unauthorized E2E Verification / Report mutation by Issue Agent');
+  if (message.startsWith('Issue Contract validation failed before write:') ||
+      message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:')) return true;
+  if (!message.startsWith('Unauthorized E2E Verification / Report mutation by Issue Agent')) return false;
+  // Retrying a malformed source is allowed; a valid source's immutable E2E
+  // selection cannot be retried away as if it were a formatting issue.
+  const declaration=parseIssueE2E(sourceBody);
+  return Boolean(declaration?.errors?.length);
 }
 
 export async function applyIssueAuditWithContractRetry(issue, envelope, repository, {
@@ -124,7 +129,11 @@ export async function applyIssueAuditWithContractRetry(issue, envelope, reposito
     await applyIssueAuditProposal(issue, envelope, repository, {repair});
     return {contract_repair_attempted:false};
   } catch (error) {
-    if (typeof contractRepair !== 'function' || !isIssueAuditRepairableRejection(error)) throw error;
+    if (typeof contractRepair !== 'function') throw error;
+    const isE2EDenial = error instanceof Error &&
+      error.message.startsWith('Unauthorized E2E Verification / Report mutation by Issue Agent');
+    const sourceBody = isE2EDenial ? fetchGitHubIssue(issue.number, repository).body : '';
+    if (!isIssueAuditRepairableRejection(error, sourceBody)) throw error;
     // Exactly one additional, no-tools generation. The same trusted update
     // boundary revalidates the entire candidate and can reject it again.
     const corrected = await contractRepair(envelope, error);
