@@ -572,6 +572,8 @@ function selfTest() {
     source_run_id:pinned.sourceRunId,source_attempt:pinned.sourceAttempt,
     target_issue:pinned.targetIssueNumber,source_event:pinned.event,
     provider:'qwen',issue_contract_pass:true,
+    owner_trigger_verified:true,source_main_ancestry_confirmed:true,
+    verified_risk_tier:'verification:scoped',
     source_job_id:927,source_sha:'a'.repeat(40),
     label_event_ids:[123,124],protected_e2e_selected_ids:pinned.expectedE2EIds,
   };
@@ -589,7 +591,9 @@ function selfTest() {
     type:'authenticated-issue-audit',
     value:'run '+pinned.sourceRunId+'/'+pinned.sourceAttempt+
       ', agent job 927, target #'+pinned.targetIssueNumber+
-      ', source '+sourceProof.source_sha+', verified canonical Issue/E2E and bot label writes',
+      ', source '+sourceProof.source_sha+
+      ', owner-triggered main ancestor, tier verification:scoped'+
+      ', verified canonical Issue/E2E and bot label writes',
   }]);
   assert.doesNotMatch(fixed.criteria[0].summary,/42219064219/);
   for(const invalid of [
@@ -598,6 +602,9 @@ function selfTest() {
     {...sourceProof,source_job_id:0},
     {...sourceProof,source_attempt:2},
     {...sourceProof,label_event_ids:[]},
+    {...sourceProof,owner_trigger_verified:false},
+    {...sourceProof,source_main_ancestry_confirmed:false},
+    {...sourceProof,verified_risk_tier:null},
     {...sourceProof,protected_e2e_selected_ids:['unrelated']},
   ])assert.throws(()=>verifiedIssueAuditCriterion({...auditContext,
     ci_evidence:{authenticated_issue_audit_repair_readback:invalid}},forged),
@@ -605,6 +612,31 @@ function selfTest() {
   assert.equal(verifiedIssueAuditCriterion({...auditContext,ci_evidence:null},{
     criteria:[{criterion:pinned.criterion,result:'Pending',evidence:[],summary:'Not proven'}],
   }).criteria[0].result,'Pending');
+
+  // Live #42224832591: a historical source was attested by the dedicated
+  // collector, but the model returned Pending solely because an unrelated
+  // generic source_ancestry array was empty. The trusted exact-source proof
+  // owns this historical assertion, so normalize it to Pass deterministically.
+  const uncertain={criteria:[{
+    criterion:pinned.criterion,result:'Pending',
+    evidence:[{type:'workflow',value:'source_ancestry was empty'}],
+    summary:'Model cannot infer historical ancestry from the generic list',
+  }]};
+  const proven=verifiedIssueAuditCriterion(auditContext,uncertain);
+  assert.equal(proven.criteria[0].result,'Pass');
+  assert.deepEqual(proven.criteria[0].evidence,fixed.criteria[0].evidence);
+  const without=verifiedIssueAuditCriterion({...auditContext,ci_evidence:null},uncertain);
+  assert.equal(without.criteria[0].result,'Pending');
+  assert.equal(verifiedIssueAuditCriterion(auditContext,{
+    criteria:[{criterion:pinned.criterion,result:'Fail',evidence:[],summary:'Contradictory live failure'}],
+  }).criteria[0].result,'Fail');
+  for(const tampered of [
+    {...sourceProof,owner_trigger_verified:false},
+    {...sourceProof,source_main_ancestry_confirmed:false},
+    {...sourceProof,verified_risk_tier:'verification:integration'},
+  ])assert.equal(verifiedIssueAuditCriterion({...auditContext,
+    ci_evidence:{authenticated_issue_audit_repair_readback:tampered}},
+    uncertain).criteria[0].result,'Pending');
 
   const newer = passedBody.replace('run 100; ref abc123;', 'run 200; ref newer;');
   assert.throws(() => applyAcceptanceResultToBody(newer, pass), /newer acceptance run 200/);
