@@ -31,3 +31,10 @@ Mock design exploration only, **not** trusted production Acceptance.
 - Pure FSM: `node terminal-direction-2657/gesture-engine.test.mjs` exercises timing, speed changes, four directions, center, cancellation and stale-timer cleanup.
 - Chromium mobile TouchEvent/CDP actual browser sequence (390×844 touch viewport): 1→2→4→8→4→2→8 speed changes, right→up→center→down, release→IDLE, quick swipe→native scroll. All passed in a local prototype fixture with the **same engine and adapter source**.
 - Known boundary: headless Chromium mobile emulation is not real iOS Safari; the published Pages HTML/manifest and actual Nession xterm/runtime remain independent verification tasks.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` now uses the shared `../prototype-frame-2758/` presentation frame (Requirement overview → 1:1 CSS-pixel interactive viewport → functional design and verification). Scenario/debug controls stay outside the product preview; original interactions remain in the owning directory.
+- **Mock fidelity:** TUI/按键模拟没有实际 tmux、TTY、输入协议连接。 The prior mock appearance and interaction code were retained, not silently claimed to be pixel-identical to current production. Use the owning Issue and `docs/design` for authority.
+- **Verification:** static source hooks and matching migration selectors were checked through GitHub. **Chromium/Playwright interactive desktop-and-mobile walkthrough, focus/gesture/console evidence and current product fixture visual comparison remain unverified.** A 1:1 CSS-pixel frame alone does not establish xterm/React or real device fidelity.
+- **Published preview (pending verification):** `https://bestnathan.github.io/nession/prototypes/terminal-direction-2657/index.html`. Confirm `prototypes/manifest.json` SHA against the exact final prototype branch commit before saying it is the current published revision. This public mock is not trusted production Acceptance.
