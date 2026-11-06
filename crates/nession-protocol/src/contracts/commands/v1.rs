@@ -25,11 +25,19 @@ pub struct QuickCommandItem {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientCommandsListPayload {}
 
+/// `server.commands.list` reply.
+///
+/// `commands` is empty when the server could not read the list, so `error` is
+/// what distinguishes a failed read from a genuinely empty collection
+/// (#2784). The message is user-facing and never carries database/SQL
+/// details; the cause is logged server-side.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientCommandsListResponsePayload {
     pub commands: Vec<QuickCommandItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// `server.commands.add` — add a new quick command.

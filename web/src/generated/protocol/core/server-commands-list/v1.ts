@@ -22,7 +22,7 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type ClientCommandsListPayload = Record<symbol, never>;
-export type ClientCommandsListResponsePayload = { commands: Array<QuickCommandItem>, };
+export type ClientCommandsListResponsePayload = { commands: Array<QuickCommandItem>, error?: string | null, };
 export type QuickCommandItem = { id: string, label: string, command: string, raw: boolean, sort_order: number, created_at: number, };
 
 // ── Operations ──
@@ -31,5 +31,5 @@ export type QuickCommandItem = { id: string, label: string, command: string, raw
 export type CommandsListCall = Record<symbol, never>;
 
 /** The payload the provider answers with. */
-export type CommandsListReply = { commands: Array<QuickCommandItem>, };
+export type CommandsListReply = { commands: Array<QuickCommandItem>, error?: string | null, };
 
