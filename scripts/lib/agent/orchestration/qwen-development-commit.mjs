@@ -9,7 +9,8 @@ import {authorizeWorkerFromStore} from './worker-preflight.mjs';
 import {validateQwenDevelopmentCandidate,sealQwenCandidateForStore}
   from './qwen-development-ingest-candidate.mjs';
 import {readCheckpointHeadVersion,publishEncryptedAgentCheckpoint,
-  verifyCommittedCheckpoint,readCommittedCheckpoint} from '../store/remote.mjs';
+  verifyCommittedCheckpoint,readCommittedCheckpoint,
+  fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
@@ -160,9 +161,28 @@ export async function ingestQwenVerifiedCandidate({
       run,result,proof,ciphertext});
     if(bound.metadata.session_id!==expected.session_id)
       fail('replayed native UUID differs from immutable Store checkpoint');
-    verifyCommittedCheckpoint({remote,identity,
-      commit_sha:previous.commit_sha,version:previous.version,
-      ciphertext_sha256:previous.ciphertext_sha256});
+    // A signed Run/Artifact may be re-read, but it cannot propose a different
+    // ciphertext or patch under the same immutable Store Run receipt. Compare
+    // the original RSA-encrypted envelope while holding Store AES authority;
+    // no native plaintext or model messages are rehydrated or logged.
+    const original=fetchEncryptedAgentCheckpoint({remote,identity,
+      expected:{provider:'claude-code',source_sha:claim.inputs.input_sha,
+        harness_digest:bound.metadata.harness_digest},
+      key:aesKey,commitment:{commit_sha:previous.commit_sha,
+        version:previous.version,
+        ciphertext_sha256:previous.ciphertext_sha256}});
+    try{
+      let committed;
+      try{committed=JSON.parse(original.native_bytes.toString('utf8'));}
+      catch{fail('invalid committed Qwen native replay envelope');}
+      if(committed?.kind!=='qwen-claude-native-envelope'||
+         committed.patch_sha256!==bound.proposal.patch_sha256||
+         committed.rsa_envelope?.ciphertext_sha256!==
+           ciphertext.ciphertext_sha256||
+         committed.metadata?.session_id!==bound.metadata.session_id)
+        fail('Qwen replay differs from immutable native ciphertext or patch');
+    }finally{original.native_bytes.fill(0);}
+
     // The proposed patch is ready for the trusted Publisher, not another
     // model Slice. A crash after checkpoint CAS is a byte-identical replay;
     // NEVER generate a continuation action or repeat a Provider call.
