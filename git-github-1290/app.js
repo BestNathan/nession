@@ -71,10 +71,10 @@ return '<section class="alt-workspace"><div class="alt-icon">◇</div><h1>'+esc(
 btn('Open Git capability','choose-git','primary')+'</section>';
 }
 function header(){
-return '<section class="workspace-heading"><div class="heading-main"><span class="eyebrow">CURRENT SESSION / REPOSITORY</span><h1>Git <span class="h1-soft">workspace</span></h1>'+
-'<div class="repo-context"><span class="repo-icon">⑂</span><strong>nession</strong><span class="sep">/</span><span>feature/git-context</span>'+
-'<span class="context-count">4 changed</span></div></div>'+
-'<div class="heading-tools">'+btn('↻ <span>Refresh</span>','refresh','soft')+'</div></section>';
+return '<header class="workspace-heading"><div class="heading-main"><strong class="git-branch">⑂ feature/git-context</strong>'+
+'<div class="repo-context"><span>nession</span><span class="sep">·</span><span>4 changed</span>'+
+'<span class="context-count">worktree /workspace/nession</span></div></div>'+
+'<div class="heading-tools">'+btn('↻','refresh','soft','aria-label="Refresh repository state" title="Refresh repository state"')+'</div></header>';
 }
 function sectionNav(){
 return '<div class="section-nav" role="tablist" aria-label="Git source"><button role="tab" aria-selected="'+(S.section==='repository')+'" class="section-button '+(S.section==='repository'?'active':'')+'" data-action="section" data-value="repository"><span class="section-symbol">⌘</span><span><strong>Repository</strong><small>Local Git</small></span></button>'+
@@ -228,9 +228,8 @@ function githubView(){
 return ghToolbar()+ (isError()?ghState():tabNav(['issues','prs','actions'],S.ghTab,'github-tab')+ghList());
 }
 function workspace(){
-return '<div class="workspace" data-testid="workspace-surface">'+topControls()+(S.other?altWorkspace():header()+sectionNav()+
-'<section class="content-card"><div class="card-content">'+(S.section==='repository'?localView():githubView())+'</div></section>')+
-'<div class="work-bottom-space"></div></div>';
+return '<div class="workspace" data-testid="workspace-surface">'+(S.other?altWorkspace():header()+sectionNav()+
+'<section class="content-card"><div class="card-content">'+(S.section==='repository'?localView():githubView())+'</div></section>')+'</div>';
 }
 function fixtureBar(){
 return '<div class="fixture-panel"><div class="fixture-name"><span class="fixture-indicator">◉</span><span><strong>Prototype controls</strong><small>Mock scenario / deterministic</small></span></div>'+
@@ -241,7 +240,9 @@ btn(S.inspector?'Hide state':'Inspect state','inspector','soft small-btn')+
 (S.inspector?'<div class="inspector"><div><strong>UI state</strong><pre>'+esc(JSON.stringify({surface:S.surface,context:S.context,section:S.section,tab:S.section==='github'?S.ghTab:S.tab,scenario:S.scenario,remote:S.remote,scope:S.scope,selected:S.detail,mobileDetail:S.mobileDetail,reading:S.reading},null,2))+'</pre></div><div><strong>Recent actions</strong><ol>'+S.events.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol></div></div>':'');
 }
 function render(){
-  $('app').innerHTML=chrome()+'<main class="app-stage">'+(S.surface==='terminal'?terminal()+terminalCapsule():workspace()+footerCapsule())+'</main>';
+  // Nession's Session/Workspace shell owns global chrome; a capability does not
+  // render a second wordmark or prototype banner in the product viewport.
+  $('app').innerHTML='<main class="app-stage">'+(S.surface==='terminal'?terminal()+terminalCapsule():workspace()+footerCapsule())+'</main>';
   // Fixture controls belong to the external reviewer, never the product UI.
   const controls=document.getElementById('np-git-fixture-controls');
   if(controls)controls.innerHTML=fixtureBar();
