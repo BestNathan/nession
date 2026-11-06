@@ -13,6 +13,7 @@ test('Web 1180: retain a scroll-reachable left edge and true content width',()=>
   assert.match(css,/\.np-stage\{[^}]*justify-content:safe center;/);
   assert.doesNotMatch(css,/\.np-stage\{[^}]*justify-content:center;/);
   assert.match(css,/\.np-device\{[^}]*border:0;outline:1px/);
+  assert.match(css,/\.np-device\{[^}]*contain:paint/,'position:fixed overlays must not use reviewer window geometry');
   assert.match(css,/\.np-page\{max-width:1460px/);
 });
 
