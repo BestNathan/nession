@@ -42,6 +42,10 @@ function click(action, attrs = {}) { const el = { getAttribute(name) { return na
 function fixture(name) { buttons.find(b => b.f === name).cb(); }
 
 check('initial title', root.innerHTML.includes('Terminal reconnect reliability'));
+check('staging SessionDetails renders identity before runtime and Work context',root.innerHTML.includes('data-testid="session-metadata"')&&root.innerHTML.indexOf('data-testid="session-title"')<root.innerHTML.indexOf('n-runtime-facts')&&root.innerHTML.indexOf('n-runtime-facts')<root.innerHTML.indexOf('Work context'));
+check('Session identity belongs to summary, not extra metadata fieldset',root.innerHTML.includes('n-session-id')&&root.innerHTML.includes('data-testid="session-connection"')&&root.innerHTML.includes('data-testid="session-metadata-view"'));
+check('metadata Edit details lives inside Work context',root.innerHTML.indexOf('data-testid="session-metadata"')<root.innerHTML.indexOf('data-testid="session-metadata-edit"'));
+check('runtime does not invent irrelevant directory and command rows',!root.innerHTML.includes('n-data-label">工作目录')&&!root.innerHTML.includes('n-data-label">运行程序'));
 check('WebLayout owns sibling Sidebar and ShellMain',root.innerHTML.includes('data-testid="web-layout"')&&root.innerHTML.includes('data-testid="sidebar"')&&root.innerHTML.includes('data-testid="shell-main"'));
 check('WorkspaceShell owns Session capability content and dock',root.innerHTML.includes('data-testid="workspace-shell"')&&root.innerHTML.includes('data-testid="workspace-tool-content"')&&root.innerHTML.includes('data-testid="workspace-tool-bar"')&&root.innerHTML.includes('data-testid="workspace-tool-session"'));
 click('collapse');
@@ -50,6 +54,7 @@ click('expand');
 check('Web sidebar expands',!root.innerHTML.includes('data-collapsed="true"'));
 click('edit');
 check('edit form', root.innerHTML.includes('data-testid="session-metadata-editor"'));
+check('editor stays under work context with shared Session heading',root.innerHTML.includes('data-testid="session-details"')&&root.innerHTML.indexOf('data-testid="session-metadata"')<root.innerHTML.indexOf('data-testid="session-metadata-editor"')&&root.innerHTML.includes('data-testid="session-title"'));
 fields['#n-title'].value = 'Reconnect redesign';
 fields['#n-description'].value = 'Precise connection recovery';
 click('save');
