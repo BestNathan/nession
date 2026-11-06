@@ -17,6 +17,7 @@ const HEARTBEAT =
 const SERVER_BINDING =
   'server::handler::tests::server_agent_session_update_v1::' +
   'a_non_gone_update_keeps_the_desired_environment_binding';
+const OPS_BOUNDARY = 'a_failed_list_sessions_is_an_error_not_an_empty_session_list';
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -29,6 +30,11 @@ run(({ evidence }) => {
 
   const binding = crateTests('nession-server', ['--lib', SERVER_BINDING], 600000);
   assertRan(binding, [SERVER_BINDING]);
+
+  // The owner below the watcher must keep the distinction too: a real non-zero
+  // tmux exit is an Err, not an observed-empty session list.
+  const ops = crateTests('nession-tmux', ['--lib', OPS_BOUNDARY], 600000);
+  assertRan(ops, [OPS_BOUNDARY]);
 
   evidence.push(
     {
@@ -50,6 +56,13 @@ run(({ evidence }) => {
       value:
         'exact SHA ' + sha + ': a failed enumeration skipped the heartbeat instead ' +
         'of publishing a fabricated zero-session count',
+    },
+    {
+      type: 'runtime',
+      value:
+        'exact SHA ' + sha + ': the tmux owner returned Err for a real non-zero ' +
+        'list-sessions exit ("lost server"), so the watcher cannot mistake it ' +
+        'for an observed empty snapshot',
     },
   );
   return 'A failed incremental enumeration publishes no gone and preserves the Session and its desired binding; genuine deletion still converges';

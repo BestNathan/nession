@@ -10,12 +10,17 @@ const {
 const RECONNECT =
   'sync::session_watcher::enumeration_failure::' +
   'a_failed_reconnect_resync_stays_pending_and_converges_after_recovery';
+const IDLE_EMPTY = 'an_idle_server_is_an_empty_session_list_not_an_error';
 
 run(({ evidence }) => {
   const sha = targetSha();
 
   const reconnect = crateTests('nession-agent', ['--lib', RECONNECT], 600000);
   assertRan(reconnect, [RECONNECT]);
+
+  // The deliberate empty answer for an idle server remains a success.
+  const idle = crateTests('nession-tmux', ['--lib', IDLE_EMPTY], 600000);
+  assertRan(idle, [IDLE_EMPTY]);
 
   evidence.push({
     type: 'runtime',

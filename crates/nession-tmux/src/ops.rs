@@ -1228,9 +1228,15 @@ impl TmuxOps {
     /// List the server's sessions, newest tmux answer first (tmux's order).
     ///
     /// A server that is not running is an empty list, not an error — that is
-    /// the normal state of an idle socket. Every other failure is logged and
-    /// answered the same way, preserving the pre-existing policy that a poll
-    /// does not turn into a session-surface failure.
+    /// the normal state of an idle socket. Every **other** failure is an
+    /// error: a consumer that cannot tell "the server has no sessions" from
+    /// "we could not ask" will treat a transient enumeration failure as proof
+    /// that every Session was deleted. The watcher/Server path acts on that
+    /// proof destructively (Session registry + desired Environment Binding),
+    /// so the distinction must be preserved here, where tmux's own exit
+    /// status is still available (`#2804`). This matches
+    /// [`Self::list_panes`], which already refuses to claim an empty Pane
+    /// snapshot after a real failure.
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
         let output = tokio::time::timeout(
             self.list_timeout,
@@ -1245,10 +1251,9 @@ impl TmuxOps {
             let stderr = stderr.trim();
             if is_no_sessions_stderr(stderr) {
                 tracing::debug!("tmux list-sessions: {stderr} (no tmux server running)");
-            } else {
-                tracing::warn!("tmux list-sessions exited with {}: {stderr}", output.status);
+                return Ok(Vec::new());
             }
-            return Ok(Vec::new());
+            anyhow::bail!("tmux list-sessions failed ({}): {stderr}", output.status);
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2092,6 +2097,46 @@ mod tests {
         let res = ops.list_sessions().await;
         assert!(res.is_err(), "expected timeout error, got {res:?}");
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn an_idle_server_is_an_empty_session_list_not_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::testing::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in list-sessions) \
+             echo 'no server running on /tmp/x/tmux.sock' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let ops = TmuxOps::new(fake.command());
+        let sessions = ops
+            .list_sessions()
+            .await
+            .expect("an idle server is an empty list, not a failure");
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_list_sessions_is_an_error_not_an_empty_session_list() {
+        // #2804: a real non-zero exit ("lost server", permission denied, …)
+        // must stay distinguishable from the idle-server empty answer; the
+        // watcher treats an observed empty list as proof of deletion.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::testing::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in list-sessions) echo 'lost server' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let ops = TmuxOps::new(fake.command());
+        let err = ops
+            .list_sessions()
+            .await
+            .expect_err("a real enumeration failure must not become an empty session list");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("lost server"),
+            "the failure must carry tmux's own stderr: {message}"
+        );
     }
 
     #[test]
