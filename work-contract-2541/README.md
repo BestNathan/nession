@@ -54,3 +54,9 @@ The original prototype already treated **Work as a Workspace capability**, but t
 - **App:** no desktop sidebar. Exactly **one AppPageHeader Back/title** belongs to WorkspacePanel and responds to Work list vs pushed Contract detail. A second Work-owned Back has been removed from App content. Workspace Capsule continues to own available capability switches throughout.
 - **Candidate distinction:** Work/WorkContract provider registration is not shipped in production, other capability stub content is not a replacement for current Files/Git, Contract versioning and source adoption remain in-memory mock decisions.
 - **Validation:** the actual updated `smoke.test.mjs` passed **10/10 tests** under a V8 DOM-stub harness (full semantic owner check plus Work/Thread/Source/Revision scenarios). This is not a Node/Playwright/real API verification; Chromium screenshot parity with current production fixture remains unverified.
+
+## 2026-11-06 · TerminalCapsule entry correction
+
+The IA review also found that the fallback Terminal mock still used an invented full-width `dev-session / Terminal` header and a standalone `Open Workspace` button. The product `terminalSurface()` now uses a TerminalCapsule-like conversation control with contextual `+` disclosure of the Work entry and the reciprocal circular Workspace destination. The code no longer renders that competing top band. This is an in-memory UI illustration, **not a working xterm/PTY or the production TerminalCapsule implementation**.
+
+The tracked `smoke.test.mjs` now asserts the Terminal surface/Capsule, disclosure and removal of the fake header; the current script passed **10/10 test groups** in the V8 DOM-stub execution environment. Real Chromium/Playwright fixture comparison is still outstanding.
