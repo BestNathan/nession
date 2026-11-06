@@ -59,12 +59,174 @@ test('changes are grouped, and an untracked entry has no expander (SC2)', async 
   await expect(untracked.getByTestId('git-row-tracked')).toHaveCount(0);
 });
 
-test('opening a changed file shows its diff (SC3)', async ({ page }) => {
+test('opening a changed file renders its patch with line semantics (SC3, #2791 SC-01)', async ({
+  page,
+}) => {
+  await gotoGit(page);
+
+  const row = page.getByTestId('git-row-tracked').first();
+  const path = await row.getAttribute('data-path');
+  await row.click();
+
+  await expect(page.getByTestId('git-diff')).toBeVisible();
+  await expect(page.getByTestId('git-diff-path')).toHaveText(path ?? '');
+  const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
+  await expect(patch).toBeVisible();
+
+  // Shadow DOM is where Pierre draws; Playwright's CSS locators pierce it.
+  // `single` is the renderer's name for the unified/stacked presentation.
+  await expect(patch.locator('pre[data-diff]')).toHaveAttribute('data-diff-type', 'single');
+  await expect(patch.locator('[data-column-number]').first()).toBeVisible();
+  await expect(patch.locator('[data-line][data-line-type="context"]')).not.toHaveCount(0);
+  await expect(patch.locator('[data-line][data-line-type="change-addition"]')).toHaveCount(2);
+  await expect(patch.locator('[data-line][data-line-type="change-deletion"]')).toHaveCount(1);
+
+  // The layout switch is presentation only: the selected file and the patch
+  // stay the same, and the row remains the one current Git identity.
+  const unified = page.getByTestId('git-diff-layout-unified');
+  const split = page.getByTestId('git-diff-layout-split');
+  await expect(unified).toHaveAttribute('aria-pressed', 'true');
+  await expect(split).toBeVisible();
+  const diffRequests = await page.evaluate(
+    () => (window as unknown as { fixtureGitDiffRequests?: readonly string[] }).fixtureGitDiffRequests?.length ?? 0,
+  );
+  expect(diffRequests).toBeGreaterThan(0);
+
+  await split.focus();
+  await expect(split).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(patch.locator('pre[data-diff]')).toHaveAttribute('data-diff-type', 'split');
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('git-diff-loading')).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { fixtureGitDiffRequests?: readonly string[] }).fixtureGitDiffRequests?.length ?? 0,
+    ),
+  ).toBe(diffRequests);
+
+  await unified.focus();
+  await page.keyboard.press('Enter');
+  await expect(patch.locator('pre[data-diff]')).toHaveAttribute('data-diff-type', 'single');
+});
+
+test('binary, empty, mode-only, truncated and malformed answers stay honest (#2791 SC-02)', async ({
+  page,
+}) => {
+  await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
+  await page.getByTestId('git-change-list').waitFor();
+
+  const row = (path: string) => page.getByTestId('git-row-tracked').filter({ hasText: path });
+  const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
+
+  await row('assets/logo.png').click();
+  await expect(page.getByTestId('git-diff-binary')).toContainText('Binary file');
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+
+  await row('src/empty.txt').click();
+  await expect(page.getByTestId('git-diff-no-changes')).toContainText('No changes to show');
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+
+  await row('mode/run.sh').click();
+  await expect(page.getByTestId('git-diff-mode-only')).toContainText('100644');
+  await expect(page.getByTestId('git-diff-mode-only')).toContainText('100755');
+  await expect(page.getByTestId('git-diff-mode-only')).toContainText('No line changes');
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+
+  await row('src/large.ts').click();
+  await expect(page.getByTestId('git-diff-truncated')).toContainText('4.0 KB');
+  await expect(patch.locator('pre[data-diff]')).toBeVisible();
+  await expect(patch.locator('[data-line][data-line-type="change-addition"]')).toHaveCount(2);
+
+  await row('src/malformed.ts').click();
+  await expect(page.getByTestId('git-diff-fallback')).toBeVisible();
+  await expect(page.getByTestId('git-diff-fallback-note')).toContainText(
+    'Could not render this diff. Showing the raw patch.',
+  );
+  await expect(page.getByTestId('git-diff-raw')).toContainText('@@ -1,2 +1,2 @@');
+  await expect(page.getByTestId('git-diff-raw')).toContainText('+const after = 2;');
+  // No invented rows: the rejected patch is not partially drawn as if complete.
+  await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
+  await expect(patch.locator('[data-line][data-line-type="change-addition"]')).toHaveCount(0);
+});
+
+test('the diff remains usable at desktop and App-like phone width (#2791 SC-03)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await gotoGit(page);
 
   await page.getByTestId('git-row-tracked').first().click();
   await expect(page.getByTestId('git-diff')).toBeVisible();
-  await expect(page.getByTestId('git-diff-body')).toContainText('@@');
+  const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
+  await expect(patch.locator('[data-line]').first()).toBeVisible();
+
+  // Split is not offered where two columns would stop being readable; the
+  // one presentation that remains is still the complete patch.
+  await expect(page.getByTestId('git-diff-layout')).toHaveCount(0);
+  await expect(patch.locator('pre[data-diff]')).toHaveAttribute('data-diff-type', 'single');
+
+  const fontSize = await patch
+    .locator('[data-line]')
+    .first()
+    .evaluate((line) => Number.parseFloat(getComputedStyle(line).fontSize));
+  expect(fontSize).toBeGreaterThanOrEqual(11);
+
+  // Long code scrolls inside the renderer; the Workspace chrome and page must
+  // not develop a horizontal clip.
+  const code = patch.locator('[data-code]').first();
+  const codeScroll = await code.evaluate((element) => ({
+    overflowX: getComputedStyle(element).overflowX,
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(['auto', 'scroll']).toContain(codeScroll.overflowX);
+  expect(codeScroll.scrollWidth).toBeGreaterThan(codeScroll.clientWidth);
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+  const workspace = await page.getByTestId('git-workspace').boundingBox();
+  expect(workspace).not.toBeNull();
+  expect(workspace?.x ?? 0).toBeGreaterThanOrEqual(0);
+  expect((workspace?.x ?? 0) + (workspace?.width ?? 0)).toBeLessThanOrEqual(391);
+
+  // Desktop offers split, the control is keyboard reachable, and the switch
+  // does not leave the page with a new horizontal boundary.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const split = page.getByTestId('git-diff-layout-split');
+  await expect(split).toBeVisible();
+  await split.focus();
+  await expect(split).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(patch.locator('pre[data-diff]')).toHaveAttribute('data-diff-type', 'split');
+  const desktopOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(desktopOverflow).toBeLessThanOrEqual(1);
+
+  // A change longer than the pane is actually scrollable inside its own body.
+  await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
+  await page.reload();
+  await page.getByTestId('git-change-list').waitFor();
+  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/long.ts' }).click();
+  await expect(patch.locator('[data-line]')).toHaveCount(101);
+  const longBody = page.getByTestId('git-diff-body');
+  await expect(longBody).toHaveCSS('overflow-y', 'auto');
+  const longScroll = await longBody.evaluate((element) => {
+    element.scrollTop = 200;
+    return {
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(longScroll.scrollHeight).toBeGreaterThan(longScroll.clientHeight);
+  expect(longScroll.scrollTop).toBeGreaterThan(0);
+
+  expect(
+    await page.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }).count(),
+  ).toBe(0);
 });
 
 test('the view offers no control that could write to the repository (SC5)', async ({ page }) => {
@@ -88,8 +250,20 @@ test('the view offers no control that could write to the repository (SC5)', asyn
   await expect(view.getByTestId('git-refresh')).toHaveCount(1);
   await expect(view.getByRole('tab')).toHaveCount(4);
 
+  // Opening the diff adds only the two presentation controls. They choose how
+  // the same patch is drawn; neither can ask Git for anything, and the fixed
+  // count is what would notice a third control appearing beside them.
+  await view.getByTestId('git-row-tracked').first().click();
+  await expect(view.getByTestId('git-diff-layout')).toBeVisible();
+  await expect(controls).toHaveCount(10);
+  await expect(view.getByRole('button', { name: 'Unified' })).toHaveCount(1);
+  await expect(view.getByRole('button', { name: 'Split' })).toHaveCount(1);
+  await expect(
+    view.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }),
+  ).toHaveCount(0);
+
   await view.getByTestId('git-refresh').click();
-  await expect(controls).toHaveCount(8);
+  await expect(controls).toHaveCount(10);
 });
 
 test('History bounds what it offers, and unmounts the section it replaced (#826)', async ({
@@ -116,6 +290,11 @@ test('History bounds what it offers, and unmounts the section it replaced (#826)
   await expect(detail).toBeVisible();
   await expect(detail).toContainText('let a capability emerge beside the capsule');
   await expect(detail).toContainText('Changed files');
+
+  // A file selected in the commit detail opens the same patch renderer, now
+  // bounded by the commit's diff request rather than the working tree's.
+  await page.getByTestId('git-commit-file-row').first().click();
+  await expect(page.getByTestId('git-diff-patch').locator('diffs-container')).toBeVisible();
 
   // Unmounted rather than hidden: a hidden section would have its own hook
   // fetching on mount, so the Changes list would still be there paying for a

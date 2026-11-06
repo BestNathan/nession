@@ -210,11 +210,20 @@ describe('GitWorkspace', () => {
         },
       }),
     );
+    const truncatedPatch = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+    ].join('\n');
     mockedDiff.mockResolvedValue(
-      diffResponse('@@ -1 +1 @@\n-old\n+new\n', {
+      diffResponse(truncatedPatch, {
         diff: {
           path: 'src/a.ts',
-          text: '@@ -1 +1 @@\n-old\n+new\n',
+          text: truncatedPatch,
           binary: false,
           truncated_bytes: 4096,
           truncated: true,
@@ -232,9 +241,11 @@ describe('GitWorkspace', () => {
       path: 'src/a.ts',
     });
 
-    const body = await screen.findByTestId('git-diff-body');
-    expect(body).toHaveTextContent('@@ -1 +1 @@');
-    expect(body).toHaveTextContent('+new');
+    const host = await screen.findByTestId('git-diff-patch');
+    await waitFor(() => {
+      expect(host.querySelector('diffs-container')?.shadowRoot?.textContent).toContain('new');
+    });
+    expect(screen.getByTestId('git-diff-path')).toHaveTextContent('src/a.ts');
 
     // C3: a half diff presented as a whole one is the failure this prevents.
     expect(screen.getByTestId('git-diff-truncated')).toHaveTextContent('4.0 KB');
@@ -281,7 +292,8 @@ describe('GitWorkspace', () => {
     render(<GitWorkspace ctx={context()} />);
     await userEvent.click(await screen.findByTestId('git-row-tracked'));
 
-    expect(await screen.findByTestId('git-diff')).toHaveTextContent('Binary file');
+    expect(await screen.findByTestId('git-diff-binary')).toHaveTextContent('Binary file');
+    expect(screen.queryByTestId('git-diff-patch')).toBeNull();
   });
 
   describe('failure states are readable and distinct (SC4)', () => {
