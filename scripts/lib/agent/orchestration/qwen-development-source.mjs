@@ -26,6 +26,35 @@ const QWEN_CANARY=Object.freeze({
 });
 function fail(s){throw Error('Qwen Developer source: '+s);}
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+function exactQwenFixtureContent(original){
+  if(typeof original!=='string'||
+      original.split(QWEN_CANARY.before).length!==2)
+    fail('controlled Qwen fixture has no unique original marker');
+  return original.replace(QWEN_CANARY.before,QWEN_CANARY.after);
+}
+// Code-owned edit policy is shared between the unprivileged Worker's Git
+// validation and the separately trusted Publisher's independently applied
+// immutable patch. A signed Issue chooses this fixture, never a model path.
+export function assertQwenControlledPublisherSource({
+  issue,sourceCheckout,sourceSha,checked,
+}){
+  if(issue!==QWEN_CANARY.issue)return;
+  if(typeof sourceCheckout!=='string'||!path.isAbsolute(sourceCheckout)||
+      !SHA.test(sourceSha??'')||
+      checked?.source_sha!==sourceSha||
+      !Array.isArray(checked?.files)||checked.files.length!==1||
+      checked.files[0].path!==QWEN_CANARY.path||
+      checked.files[0].operation!=null)
+    fail('controlled Publisher fixture requires one exact existing source');
+  const original=git(sourceCheckout,'show',sourceSha+':'+QWEN_CANARY.path);
+  const expected=exactQwenFixtureContent(original);
+  const row=checked.files[0];
+  if(row.old_sha256!==hash(Buffer.from(original))||
+      row.old_bytes!==Buffer.byteLength(original)||
+      row.new_sha256!==hash(Buffer.from(expected))||
+      row.new_bytes!==Buffer.byteLength(expected))
+    fail('controlled Publisher fixture patch changed unauthorized bytes');
+}
 function git(root,...args){
   // Git global/index/worktree overrides must not redirect the source proof
   // away from the pinned disposable checkout. The model cannot control Git
@@ -186,9 +215,8 @@ function checkedGitPatch(snapshot){
     if(changed.size!==1||!changed.has(QWEN_CANARY.path))
       fail('controlled Qwen fixture changed a different source');
     const initial=git(root,'show',snapshot.plan.source_sha+':'+QWEN_CANARY.path);
-    if(initial.split(QWEN_CANARY.before).length!==2||
-        fs.readFileSync(ordinaryFile(root,QWEN_CANARY.path),'utf8')!==
-          initial.replace(QWEN_CANARY.before,QWEN_CANARY.after))
+    if(fs.readFileSync(ordinaryFile(root,QWEN_CANARY.path),'utf8')!==
+          exactQwenFixtureContent(initial))
       fail('controlled Qwen fixture must replace exactly one verified line');
   }
   // Verify that the index is still the originally admitted source. The
