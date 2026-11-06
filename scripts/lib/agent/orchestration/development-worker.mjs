@@ -409,6 +409,9 @@ async function main(){
       }catch{
         console.error('::error::Cursor Developer failure telemetry could not be persisted');
       }
+      // SDK exceptions may include request details or provider messages.
+      // The outer CLI error logger must never surface that raw exception.
+      fail('Cursor Provider invocation or postcondition failed; see sanitized telemetry');
     }
     throw error;
   }finally{
