@@ -3,7 +3,7 @@
 This file is an inert, intentionally bounded source-edit target for the
 real owner/main Qwen Developer → Store → Publisher → Reviewer acceptance
 chain of Nession Issue #2274. It is not a production configuration file,
-a Provider prompt, an Acceptance verdict, or a replacement for staging proof.
+a Provider prompt, an Acceptance verdict, or a replacement for source-aligned staging proof.
 
 ## Fixture state
 
