@@ -85,6 +85,14 @@ const MUTATING_SUBCOMMANDS: [&str; 14] = [
 /// documents for exactly this.
 const READ_ONLY_SUBCOMMAND_FORMS: [(&str, &[&str]); 1] = [("worktree", &["list"])];
 
+/// Flags that turn an otherwise read-only subcommand into a write.
+///
+/// `hash-object` computes an object id from stdin, and `-w` additionally stores
+/// the object. This capability needs the first and must never perform the
+/// second, so the write spelling fails closed here rather than depending on a
+/// caller remembering not to pass it.
+const HASH_OBJECT_WRITE_FLAGS: [&str; 2] = ["-w", "--write"];
+
 /// Default wall-clock ceiling for one git invocation. `status` on a large
 /// repository is normally fast; this is here so a pathological repository (or a
 /// hung filesystem) returns an error instead of pinning an agent task forever.
@@ -161,6 +169,14 @@ impl GitCmd {
                     forms.join(" or ")
                 );
             }
+        }
+
+        if subcommand == "hash-object"
+            && args.iter().any(|arg| HASH_OBJECT_WRITE_FLAGS.contains(arg))
+        {
+            anyhow::bail!(
+                "refusing `hash-object` with a write flag: this capability only computes object ids"
+            );
         }
 
         // The binary is a field because a host may point the agent at a
@@ -373,6 +389,17 @@ mod tests {
             // spelling, so an argument this module cannot vouch for fails closed.
             vec!["worktree"],
             vec!["worktree", "--help"],
+        ] {
+            assert!(guard(&args).is_err(), "expected {args:?} to be refused");
+        }
+    }
+
+    #[test]
+    fn allows_hash_object_to_compute_but_refuses_its_write_form() {
+        assert!(guard(&["hash-object", "-t", "tree", "--stdin"]).is_ok());
+        for args in [
+            vec!["hash-object", "-w", "-t", "tree", "--stdin"],
+            vec!["hash-object", "--write", "-t", "tree", "--stdin"],
         ] {
             assert!(guard(&args).is_err(), "expected {args:?} to be refused");
         }
