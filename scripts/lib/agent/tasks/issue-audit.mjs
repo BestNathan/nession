@@ -55,6 +55,7 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
       labels: labels.join(', ') || '(none)',
       kindLabels: [...KIND_LABELS].join(', '),
       areaLabels: [...AREA_LABELS].join(', '),
+      allowedOutputFields: Object.keys(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties).join(', '),
       findings: (audit.errors ?? []).map((e) => '- ' + e).join('\n') || '(none)',
       issueBodyJson: JSON.stringify(issue.body ?? ''),
       mode,
