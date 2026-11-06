@@ -29,7 +29,7 @@
 ## Fidelity and non-goals
 
 - **Mock only:** contract revisions, criteria, comments, external source, digest, adoption flow, permissions, source errors, account, API and Agent execution are deterministic in-memory fixtures. There is no actual network request, authentication, persistence or live Agent/Acceptance/GitHub/Feishu call.
-- **Source binding identity:** `github:github.com:BestNathan/nession:issue:2541` shows namespacing; `wc_demo_terminal` is distinct stable Contract identity and not a production allocation algorithm.
+- **Source binding identity:** `github:github.com:example/nession:issue:42` is a fabricated demo identity showing namespacing; `wc_demo_terminal` is a separate Contract identity, not a production allocation algorithm.
 - **Verification authority:** a tick is author-authored text. The prototype never invents a trusted Pass from checkbox or a new contract revision from comments.
 - **Candidate vs published:** review/adopt is simulated to explore workflow. Real write/approval permissions and a canonical Contract store are deferred domain decisions, not implemented by this prototype.
 - **Visual fidelity:** local snapshot of Nession's neutrals and semantic roles rather than exact shadcn/React, live Workspace composition or active Sessions. Neither pixel-perfect matching nor working production route claimed. Compare against current production fixture in Chromium before accepting a UI implementation.
@@ -41,3 +41,12 @@
 - Static, actual browser, and Pages exact-SHA checks must be recorded independently. Merely pushing this branch is **not** evidence of the public HTML being live. Pages manifest: `https://bestnathan.github.io/nession/prototypes/manifest.json`.
 - Public preview *after verification*: https://bestnathan.github.io/nession/prototypes/work-contract-2541/index.html
 - Pin exact source SHA in the Issue once published; the publisher supplies an immutable `View source` link on the served page.
+
+## Verification record (2026-11-06)
+
+- **Static connector-backed source check:** 8/8 frame/asset/size/gallery/README/semantic-fixture assertions passed; the fixture uses exactly one shared frame, one product viewport and no CSS scale/zoom.
+- **V8 JavaScript parse check:** `app.js` compiled with V8 `Function` syntax parser successfully.
+- **Deterministic in-memory interaction harness:** 16/16 cases passed: published v1, checked vs trusted Pending, Thread append, source change, candidate comparison open/close, confirmation, explicit v2 adoption, v1 history and v1 execution pin, denied/offline/Feishu, 390/1180 responsive mode and contextual back/reopen. The harness simulates DOM events; it is **not** Chromium/browser proof.
+- **Repeatable local smoke test:** `node --test work-contract-2541/smoke.test.mjs` (added but **not executed** in Node in this review environment). Test file covers seven end-to-end scenarios with an isolated fake DOM.
+- **Real Chromium Web/App screenshot and interactive browser click-through:** NOT VERIFIED. Product Web/App source comparison is source-reviewed only; do not claim pixel/behavior parity.
+- **Public Pages HTTPS and exact manifest SHA:** NOT VERIFIED at authoring time. GitHub source branch is published; public preview may lag and must be checked against the exact prototype commit, not assumed live.
