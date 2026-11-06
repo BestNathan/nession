@@ -9,10 +9,12 @@ import {authorizeWorkerFromStore} from './worker-preflight.mjs';
 import {validateQwenDevelopmentCandidate,sealQwenCandidateForStore}
   from './qwen-development-ingest-candidate.mjs';
 import {readCheckpointHeadVersion,publishEncryptedAgentCheckpoint,
-  verifyCommittedCheckpoint} from '../store/remote.mjs';
+  verifyCommittedCheckpoint,readCommittedCheckpoint} from '../store/remote.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
+const HEX=/^[a-f0-9]{64}$/;
+const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(message){throw Error('trusted Qwen Developer ingest: '+message);}
 function safeOrigin(run,claim,authenticated){
   const inputs=claim?.inputs;
@@ -23,7 +25,8 @@ function safeOrigin(run,claim,authenticated){
       run.repository?.full_name!=='BestNathan/nession'||
       run.head_repository?.full_name!=='BestNathan/nession'||
       !SHA.test(run.head_sha??'')||
-      inputs?.agent_id!=='dev-qwen-01'||!['implement'].includes(inputs.task)||
+      inputs?.agent_id!=='dev-qwen-01'||
+      !['implement','repair'].includes(inputs.task)||
       authenticated?.issue!==Number(inputs.issue_number)||
       authenticated.action_id!==inputs.action_id||
       authenticated.source_run_id!==run.id||
@@ -39,7 +42,8 @@ function git(...args){
       GIT_NO_REPLACE_OBJECTS:'1'}}).trim();}
   catch{fail('read-only authenticated Store access failed');}
 }
-export function readCommittedQwenRunReceipt(remote,identity,run,admissionAction,admissionSource,expected){
+export function readCommittedQwenRunReceipt(remote,identity,run,admissionAction,
+  admissionSource,expected,task='implement'){
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-store-reader-'));
   try{
     const dir=path.join(home,'store');
@@ -49,7 +53,10 @@ export function readCommittedQwenRunReceipt(remote,identity,run,admissionAction,
     const action=record.state?.outbox.find(item=>item.id===admissionAction);
     if(record.state?.assignments?.developer!==identity.agent_id||
        !action||!['dispatched','yielded'].includes(action.status)||
-       action.task?.role!=='developer'||action.task?.task!=='implement'||
+       action.task?.role!=='developer'||action.task?.task!==task||
+       (task==='repair'&&(record.state.phase!=='repair'||
+         record.state.target_sha!==admissionSource||
+         action.task.resume!==true||!action.task.repair_checkpoint))||
        action.task?.agent_id!==identity.agent_id||
        action.task?.sha!==admissionSource||
        action.receipt?.source_run_id!==run.id||
@@ -104,9 +111,18 @@ function sourceForStore(run,admission){
 export function qwenCheckpointNextVersion(admission,head){
   if(admission?.authorized!==true||admission.agent_id!=='dev-qwen-01'||
       admission.provider!=='claude-code'||admission.role!=='developer'||
-      admission.task!=='implement'||!Number.isSafeInteger(head?.version)||
+      !['implement','repair'].includes(admission.task)||
+      !Number.isSafeInteger(head?.version)||
       head.version<0)fail('unauthorized Qwen checkpoint version request');
-  const previous=admission.resume_from?.checkpoint_version??0;
+  const origin=admission.resume_from;
+  const previous=origin?.checkpoint_version??0;
+  if(admission.task==='repair'&&(
+       !origin||!positive(previous)||!SHA.test(origin.checkpoint_commit_sha??'')||
+       !HEX.test(origin.ciphertext_sha256??'')||
+       !SHA.test(origin.source_sha??'')||
+       origin.source_sha===admission.input_sha||
+       !positive(origin.source_run_id)))
+    fail('repair requires signed compatible previous native checkpoint');
   if(!Number.isSafeInteger(previous)||previous<0||head.version!==previous)
     fail('Qwen Store head advanced or does not match signed continuation');
   return previous+1;
@@ -129,7 +145,7 @@ export async function ingestQwenVerifiedCandidate({
   const expected={session_id:proof?.metadata?.session_id,
     harness_digest:proof?.metadata?.harness_digest};
   const previous=readCommittedQwenRunReceipt(remote,identity,run,
-    claim.inputs.action_id,claim.inputs.input_sha,expected);
+    claim.inputs.action_id,claim.inputs.input_sha,expected,claim.inputs.task);
   // The public Artifact contents alone have no authority; cryptographic
   // claim verification and immutable Store admission precede version CAS.
   let admission;
@@ -162,6 +178,21 @@ export async function ingestQwenVerifiedCandidate({
     admission,run,result,proof,ciphertext});
   const head=readCheckpointHeadVersion({remote,identity});
   const nextVersion=qwenCheckpointNextVersion(admission,head);
+  if(admission.task==='repair'){
+    // The original encrypted native checkpoint is already committed and
+    // pinned by the authenticated Store Action. A new model response may
+    // not introduce a different Claude Code native Session UUID/model
+    // harness or silently replace an unavailable checkpoint.
+    const native=readCommittedCheckpoint({remote,identity,
+      commit_sha:admission.resume_from.checkpoint_commit_sha,
+      version:admission.resume_from.checkpoint_version,
+      ciphertext_sha256:admission.resume_from.ciphertext_sha256});
+    if(native.metadata?.provider!=='claude-code'||
+       native.metadata.source_sha!==admission.resume_from.source_sha||
+       native.metadata.harness_digest!==bound.metadata.harness_digest||
+       native.metadata.session_id!==bound.metadata.session_id)
+      fail('repair native Session UUID or source differs from committed original');
+  }
   const {sealed}=sealQwenCandidateForStore({
     admission,run,result,proof,ciphertext,privateKeyPem,
     storeKey:aesKey,nextVersion});
@@ -172,9 +203,10 @@ export async function ingestQwenVerifiedCandidate({
     commit_sha:published.commit_sha,
     ciphertext_sha256:sealed.ciphertext_sha256,
     run_id:run.id,attempt:run.run_attempt};
-  // The signed original Developer Action stays dispatched while the trusted
-  // Publisher consumes this immutable Run/checkpoint and independently
-  // publishes a PR. Only that verified PR output may advance Outbox to Review.
+  // The signed Developer Action remains dispatched. Initial implement
+  // may go to the trusted create-PR Publisher; a repair must instead
+  // update its existing independently attested PR under a separate fence.
+  // Checkpoint ingest never publishes a PR or synthesizes a Reviewer.
   return {status:published.replayed?'replayed':'committed',
     issue:admission.issue,action_id:authenticated.action_id,
     checkpoint,store_commit_sha:published.commit_sha};
