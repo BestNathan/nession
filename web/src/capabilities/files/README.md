@@ -25,18 +25,22 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 
 | State | Owner today | Lifetime / scope |
 |---|---|---|
-| Tree structure, expand/collapse, lazy load, selection, active | `platform/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
+| File identity (`{sourceId, path}`) | `capabilities/files/model/fileRef.ts` | One `FileSource` per active transport/Session; changing source invalidates refs rather than retargeting them |
+| Create/upload destination | `capabilities/files/model/createTarget.ts` + `useNewEntryForm` | Captured when the form opens; immutable for that operation |
+| Tree structure, expand/collapse, selection, active | `platform/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
 | File operations (list/read/write/rename/delete) | `FileOps` RPC surface (`FilesPlugin`) | Per SessionRuntime agent socket; surfaced to UI as `ctx.fileOps` when a P2P transport is attached |
 | Explorer extensions (decorations, context menus) | `platform/explorer` — `ExplorerRegistry` | One registry per `Explorer` mount; register/unregister notify subscribers → incremental row refresh |
 | Selected file + navigation | Web: `app/experiences/web/FilesWebLayout.tsx`; App: `app/experiences/app/FilesAppLayout.tsx` and `useAppFilesNavigator.ts` | Web tree/detail selection versus App directory/search/pushed viewer state; layout scoped, no shared DocumentStore |
-| File content / edit state (dirty, saving) | `useFileViewer` per viewer mount | Discarded on tab switch (viewers unmount) |
+| File content / edit state (dirty, saving, revision, conflict) | `useFileViewer` per viewer mount | Discarded on tab switch (viewers unmount) |
 | Editor UI state (cursor/selection) | Inside `CodeMirrorEditor`'s EditorView | Not lifted; only text diffs are used for dirty tracking |
 
-**Scoping:** nothing file-side is keyed by `sessionIdAtom`/workspace id yet —
-state follows the **`fileOps`/provider object identity**, which changes when
-the transport changes. The Web layout resets its selected viewer on fileOps
-change; the App navigator composes its own directory and pushed-detail state.
-A new `ExplorerStore` is created for a new provider.
+**Scoping:** a file reference carries its `sourceId` (Session-derived, Agent
+fallback) and a path; the path is not meaningful outside that source. The
+layouts reset selected/open state when the provider or source id changes, and
+the agent's guarded mutations (create-only, no-replace rename, expected
+revision) are the authority for conflict semantics. `ExplorerStore` is still
+created per provider. Sandbox policy/enforcement remains #2681's; this
+capability consumes an authorized provider and has no host fallback.
 
 ## DocumentStore / EditorStore — boundary, not yet entities
 

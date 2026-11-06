@@ -275,6 +275,39 @@ function FileViewerContent({
   );
 }
 
+function FileConflictDialog({
+  open,
+  onOpenChange,
+  onReload,
+  onOverwrite,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onReload: () => void;
+  onOverwrite: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent data-testid="file-conflict-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>File changed on disk</AlertDialogTitle>
+          <AlertDialogDescription>
+            This file changed after you opened it. Reload the newer content, or overwrite it
+            with your edit.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep editing</AlertDialogCancel>
+          <Button variant="outline" onClick={onReload}>
+            Reload file
+          </Button>
+          <AlertDialogAction onClick={onOverwrite}>Overwrite</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function FileViewer({
   fileOps,
   path,
@@ -299,6 +332,8 @@ export function FileViewer({
     isReadOnly,
     isDirty,
     saving,
+    conflict,
+    setConflict,
     showUnsavedDialog,
     isText,
     loadedBytes,
@@ -311,6 +346,8 @@ export function FileViewer({
     handleSetViewMode,
     handleContentChange,
     handleSave,
+    handleSaveOverwrite,
+    handleReloadAfterConflict,
     handleCloseClick,
     handleConfirmClose,
     handleSuggestionPreview,
@@ -378,6 +415,16 @@ export function FileViewer({
           </AlertDialogContent>
         </AlertDialog>
       ) : null}
+      <FileConflictDialog
+        open={conflict}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConflict(false);
+          }
+        }}
+        onReload={handleReloadAfterConflict}
+        onOverwrite={handleSaveOverwrite}
+      />
     </div>
   );
 }

@@ -23,19 +23,31 @@ function installSurface({
   commands = COMMANDS,
   state = 'connected' as ConnectionState,
   failures = 0,
+  readErrors = 0,
 }: {
   commands?: QuickCommandItem[];
   state?: ConnectionState;
   /** Fail this many list requests, then succeed (the Retry path). */
   failures?: number;
+  /**
+   * Answer this many list requests with the server's failed-read shape: an
+   * empty list plus a generic error. This is #2784's wire reply, not a
+   * transport rejection.
+   */
+  readErrors?: number;
 } = {}) {
   let remainingFailures = failures;
+  let remainingReadErrors = readErrors;
   let pushChanged: (() => void) | null = null;
   let pushState: ((next: ConnectionState) => void) | null = null;
   const request = vi.fn(async () => {
     if (remainingFailures > 0) {
       remainingFailures -= 1;
       throw new Error('offline');
+    }
+    if (remainingReadErrors > 0) {
+      remainingReadErrors -= 1;
+      return { commands: [], error: 'Saved commands could not be loaded' };
     }
     return { commands };
   });
@@ -183,6 +195,84 @@ describe('Quick Commands view (#2710 SC-05)', () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('quick-commands-list')).toBeInTheDocument();
+  });
+
+  it('shows the error state when the server reports a failed database read', async () => {
+    // #2784: the server resolves with `{ commands: [], error }`. That must not
+    // be mistaken for a genuinely empty saved list.
+    const { request } = installSurface({ readErrors: 1 });
+    renderView();
+
+    await screen.findByTestId('quick-commands-error');
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('quick-commands-empty')).toBeNull();
+    expect(screen.getByTestId('quick-commands-unavailable')).toHaveTextContent(
+      'Saved commands could not be loaded.',
+    );
+  });
+
+  it('recovers through Retry into the correct ordered list after a failed read', async () => {
+    const { request } = installSurface({ readErrors: 1 });
+    renderView();
+
+    await screen.findByTestId('quick-commands-error');
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByTestId('quick-commands-retry'));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    const list = await screen.findByTestId('quick-commands-list');
+    // The server order is preserved: the adapter must not sort or drop rows.
+    expect(
+      Array.from(list.querySelectorAll('code')).map((row) => row.textContent),
+    ).toEqual(['git status --short', 'cargo test -q']);
+    expect(screen.queryByTestId('quick-commands-error')).toBeNull();
+  });
+
+  it('keeps a genuinely empty successful list as an empty ready state', async () => {
+    installSurface({ commands: [] });
+    renderView();
+
+    expect(await screen.findByTestId('quick-commands-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-commands-count')).toHaveTextContent('0 commands');
+    expect(screen.queryByTestId('quick-commands-error')).toBeNull();
+  });
+
+  it('keeps a failed read distinct from empty across server.commands.changed refresh', async () => {
+    // SC-03: a push-triggered refetch must re-read the owner and preserve the
+    // error/empty distinction rather than caching either answer.
+    const { request, plugin } = installSurface({ readErrors: 2 });
+    renderView();
+
+    await screen.findByTestId('quick-commands-error');
+    expect(request).toHaveBeenCalledTimes(1);
+
+    plugin.pushChanged();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('quick-commands-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('quick-commands-empty')).toBeNull();
+
+    plugin.pushChanged();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    expect(await screen.findByTestId('quick-commands-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('quick-commands-error')).toBeNull();
+  });
+
+  it('keeps a failed read distinct from empty across reconnect refresh', async () => {
+    const { request, plugin } = installSurface({
+      state: 'disconnected',
+      readErrors: 1,
+    });
+    renderView();
+
+    await screen.findByTestId('quick-commands-error');
+    expect(request).toHaveBeenCalledTimes(1);
+
+    plugin.pushState('connected');
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('quick-commands-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('quick-commands-error')).toBeNull();
   });
 
   it('refetches when the server pushes server.commands.changed', async () => {

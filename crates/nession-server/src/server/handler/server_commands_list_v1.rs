@@ -15,7 +15,24 @@ impl ConnectionHandler {
                 json!({ "commands": [], "error": "Not authenticated" }),
             ));
         }
-        let commands = self.db.list_quick_commands().await.unwrap_or_default();
+        // A failed read is a failed read, not an empty collection (#2784).
+        // The cause belongs in the log; the reply says only that the list is
+        // unavailable, so the Web can offer its retry state instead of
+        // claiming the user has no saved commands.
+        let commands = match self.db.list_quick_commands().await {
+            Ok(commands) => commands,
+            Err(e) => {
+                tracing::error!("Failed to read saved commands: {e:#}");
+                return Ok(reply_json(
+                    &msg.id,
+                    "server.commands.list",
+                    json!({
+                        "commands": [],
+                        "error": "Saved commands could not be loaded",
+                    }),
+                ));
+            }
+        };
         let items: Vec<serde_json::Value> = commands
             .into_iter()
             .map(|c| {

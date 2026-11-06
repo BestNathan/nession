@@ -13,9 +13,11 @@
 import { expect, test } from '@playwright/test';
 import {
   expectDrawnAffordance,
+  expectInsetFocusOutline,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
+  expectQuietPointerFocus,
   expectRadius,
   expectSingleLine,
   expectTokenHeight,
@@ -166,6 +168,89 @@ for (const row of viewports.filter((v) => v.experience === 'web')) {
 
       await page.setContent(`<div id="clip"><span>fits at ${row.width}px</span></div>`);
       await expectNoUnexpectedOverflow(page.locator('#clip'), optsFor(PATTERN_SESSION_ITEM, 'web', row.id));
+    });
+
+    // #2750 — focus is an interaction state, not outer chrome. Pointer/touch
+    // must not add a halo or second frame; keyboard focus must be locatable
+    // inside the control. The assertions read the focus tokens from the
+    // element, so they fail if a literal ring or an outset outline returns.
+    test('focus is modality-aware and stays inside the control (#2750)', async ({ page }) => {
+      const SESSION_LIST = 'pattern.session-list';
+      await page.goto('/#/fixture');
+
+      // Text-entry fields match :focus-visible on pointer focus, so the border
+      // itself carries the focus state — no second frame may appear.
+      const search = page.locator('[data-slot="input"]').first();
+      await search.click();
+      await expect(search).toBeFocused();
+      await expectQuietPointerFocus(search, optsFor(SESSION_LIST, 'web', row.id), { border: 'ring' });
+
+      // A real Tab step: the next primitive must show the token inset outline,
+      // not an outer ring or a duplicate ring+outline.
+      await page.keyboard.press('Tab');
+      const newSession = page.getByTestId('create-session');
+      await expect(newSession).toBeFocused();
+      await expectInsetFocusOutline(newSession, optsFor(SESSION_LIST, 'web', row.id));
+
+      // Pointer focus on a button paints no focus chrome at all.
+      const filters = page.getByTestId('session-list-filters');
+      await filters.click();
+      await expect(filters).toBeFocused();
+      await expectQuietPointerFocus(filters, optsFor(SESSION_LIST, 'web', row.id));
+
+      // Tabs: the pointer selects quietly; arrow navigation shows focus inside
+      // the existing tab geometry.
+      await page.goto('/#/fixture/workspace?capability=env');
+      await page.getByTestId('env-profile-row-server::staging.env').click();
+      const rawTab = page.getByRole('tab', { name: 'Raw' });
+      await rawTab.click();
+      await expect(rawTab).toBeFocused();
+      await expectQuietPointerFocus(rawTab, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+
+      await page.keyboard.press('ArrowLeft');
+      const variablesTab = page.getByRole('tab', { name: 'Variables' });
+      await expect(variablesTab).toBeFocused();
+      await expectInsetFocusOutline(variablesTab, optsFor(PATTERN_WORKSPACE_NAV, 'web', row.id));
+
+      // Menu rows are located by their focused surface, not by a focus ring.
+      await page.getByTestId('env-new-menu').click();
+      await page.keyboard.press('ArrowDown');
+      const focusedItem = page.locator('[role="menuitem"]:focus');
+      await expect(focusedItem).toHaveCount(1);
+      await expectQuietPointerFocus(focusedItem, optsFor(PATTERN_POPUP_MENU, 'web', row.id));
+      const accent = await focusedItem.evaluate((el) => {
+        const probe = el.ownerDocument.createElement('span');
+        probe.style.backgroundColor = 'var(--nession-accent)';
+        el.ownerDocument.body.appendChild(probe);
+        const resolved = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return resolved;
+      });
+      await expect.poll(() => focusedItem.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(accent);
+      await page.keyboard.press('Escape');
+    });
+
+    test('a focused invalid field keeps its error border and still shows focus (#2750)', async ({ page }) => {
+      await page.goto('/#/fixture');
+      const search = page.locator('[data-slot="input"]').first();
+      await search.evaluate((el) => el.setAttribute('aria-invalid', 'true'));
+      await search.click();
+      await expect(search).toBeFocused();
+
+      // The invalid state owns the border; the transition means it must be
+      // polled rather than sampled on the click frame.
+      const destructive = await search.evaluate((el) => {
+        const probe = el.ownerDocument.createElement('span');
+        probe.style.color = 'var(--nession-destructive)';
+        el.ownerDocument.body.appendChild(probe);
+        const resolved = getComputedStyle(probe).color;
+        probe.remove();
+        return resolved;
+      });
+      await expect.poll(() => search.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(destructive);
+
+      // ...and focus still has an inside-the-control indicator.
+      await expectInsetFocusOutline(search, optsFor('pattern.session-list', 'web', row.id));
     });
   });
 }

@@ -32,7 +32,10 @@ export interface GitRequestState<T> {
  * dropped rather than written over the new one, and pull-on-open rather than a
  * poll. Written four times those are four chances to disagree about staleness,
  * which is the failure a view cannot detect: it renders a stale answer as
- * confidently as a fresh one.
+ * confidently as a fresh one. A generation alone does not cover it either: two
+ * reads can share one (the mount read and a manual Refresh), so `run` also
+ * gives each started read an identity and only the latest-started one may
+ * publish.
  *
  * ## Pull-on-open, never a poll
  *
@@ -73,6 +76,14 @@ export function useGitRequest<T>({
   // Bumped whenever the Session changes; a response that arrives after the
   // context moved on is dropped rather than written over the new one.
   const generation = useRef(0);
+  // Identity of the most recently *started* read. `generation` moves when the
+  // target does — Session change, reconnect, invalidation — but a manual
+  // Refresh starts a read in the generation already in flight. Without this,
+  // two reads for one target are indistinguishable and whichever answers last
+  // wins, which is the stale one. Every started read takes the next number, so
+  // only the latest-started read can publish its terminal state; an older read
+  // can neither overwrite its data, clear its error, nor end its loading.
+  const requestSequence = useRef(0);
   const lastInvalidationEpoch = useRef(0);
   const target = useRef<GitRequestTarget | null>(null);
 
@@ -82,23 +93,26 @@ export function useGitRequest<T>({
       if (!current) {
         return;
       }
+      const forRequest = ++requestSequence.current;
       setState((previous) => ({ ...previous, loading: true, error: null }));
+      let next: GitRequestState<T>;
       try {
         const data = await load(current);
-        if (generation.current !== forGeneration) {
-          return;
-        }
-        setState({ data, loading: false, error: null });
+        next = { data, loading: false, error: null };
       } catch (error) {
-        if (generation.current !== forGeneration) {
-          return;
-        }
-        setState({
+        next = {
           data: null,
           loading: false,
           error: error instanceof Error ? error.message : 'Could not reach the agent',
-        });
+        };
       }
+      // Both identities must still be current: the latest-started read is the
+      // only authority for this target. A target change bumps `generation`
+      // first, so a read from the previous Session cannot publish either.
+      if (generation.current !== forGeneration || requestSequence.current !== forRequest) {
+        return;
+      }
+      setState(next);
     },
     [load],
   );
@@ -140,6 +154,9 @@ export function useGitRequest<T>({
     return gitApi.onInvalidated(onInvalidated);
   }, [run]);
 
+  // A manual refresh is a new read, not a replay: `run` gives it the newest
+  // request identity, so any read already in flight for this target can no
+  // longer publish over it.
   const refresh = useCallback(() => {
     void run(generation.current);
   }, [run]);

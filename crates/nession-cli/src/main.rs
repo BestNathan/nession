@@ -279,7 +279,7 @@ enum SessionsAction {
         #[arg(short = 's', long)]
         session_id: String,
 
-        /// Force connection mode (p2p or relay)
+        /// Connection mode: auto (default; P2P candidates then relay), p2p, or relay
         #[arg(short = 'm', long)]
         mode: Option<String>,
     },

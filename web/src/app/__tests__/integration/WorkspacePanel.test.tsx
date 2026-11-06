@@ -2,6 +2,7 @@ import { act, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspacePanel } from '@/app/WorkspacePanel';
 import type { DomainState } from '@/product/session/model/domainState';
+import type { CapabilityId } from '@/product/capability';
 import type { WorkspaceDepthControl } from '@/app/workspace/workspaceContext';
 import type { Session } from '@/types';
 
@@ -46,23 +47,30 @@ const domain: DomainState = {
   attachment: { channel: 'attached', copy: null },
 };
 
-function renderPanel(onDepthChange = vi.fn()) {
-  const view = render(
+function panelElement(
+  tool: CapabilityId,
+  onDepthChange: (pushed: boolean) => void,
+) {
+  return (
     <WorkspacePanel
       selectedSession={sess}
       selectedAgent={undefined}
       agents={[]}
       domain={domain}
       surface="workspace"
-      tool="files"
+      tool={tool}
       fileOps={null}
       experience="app"
       facts={undefined}
       onSurfaceChange={vi.fn()}
       onToolChange={vi.fn()}
       onDepthChange={onDepthChange}
-    />,
+    />
   );
+}
+
+function renderPanel(onDepthChange = vi.fn(), tool: CapabilityId = 'files') {
+  const view = render(panelElement(tool, onDepthChange));
   return { view, onDepthChange };
 }
 
@@ -135,6 +143,62 @@ describe('WorkspacePanel — the pushed depth is reported upward (#1081)', () =>
         />,
       ),
     ).not.toThrow();
+  });
+});
+
+describe('WorkspacePanel — depth follows the active capability (#2780)', () => {
+  it('reports the root when the active capability has no push, though another owns one', () => {
+    const { view, onDepthChange } = renderPanel();
+    push(captured.depth);
+    expect(onDepthChange).toHaveBeenLastCalledWith(true);
+
+    // The Capsule switched to a root capability without a Back into Files.
+    // The pager must follow the capability on screen, not the retired push.
+    view.rerender(panelElement('agent', onDepthChange));
+
+    expect(onDepthChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('ignores a retired capability callback and does not restore its push on return', () => {
+    const { view, onDepthChange } = renderPanel();
+    const filesDepth = captured.depth;
+    push(filesDepth);
+    expect(onDepthChange).toHaveBeenLastCalledWith(true);
+
+    view.rerender(panelElement('agent', onDepthChange));
+    expect(onDepthChange).toHaveBeenLastCalledWith(false);
+
+    // A delayed effect/cleanup from the unmounted Files view must not take the
+    // Agent root's pager back.
+    const trueCalls = () =>
+      onDepthChange.mock.calls.filter(([value]) => value === true).length;
+    expect(trueCalls()).toBe(1);
+    act(() => {
+      filesDepth?.setPush({ title: 'stale', onLeave: vi.fn() });
+    });
+    expect(trueCalls()).toBe(1);
+
+    // Returning to Files starts at its root; the retired push was not kept.
+    view.rerender(panelElement('files', onDepthChange));
+    expect(trueCalls()).toBe(1);
+    expect(onDepthChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('accepts the new capability own push after the switch', () => {
+    const { view, onDepthChange } = renderPanel();
+    push(captured.depth);
+
+    view.rerender(panelElement('agent', onDepthChange));
+    expect(onDepthChange).toHaveBeenLastCalledWith(false);
+
+    act(() => {
+      captured.depth?.setPush({ title: 'Agent detail', onLeave: vi.fn() });
+    });
+    expect(onDepthChange).toHaveBeenLastCalledWith(true);
+
+    // …and Agent's detail is not the Files depth either.
+    view.rerender(panelElement('files', onDepthChange));
+    expect(onDepthChange).toHaveBeenLastCalledWith(false);
   });
 });
 

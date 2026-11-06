@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -6,7 +6,6 @@ import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClear
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
-import { gitApi } from '../GitPlugin';
 import { useGitStatus } from '../hooks/useGitStatus';
 import {
   describeStatus,
@@ -14,11 +13,14 @@ import {
   formatBytes,
   statusRows,
   worktreeName,
+  type GitRow,
 } from '../state';
-import type { GitDiffResponse, GitStatusResponse } from '../types';
+import type { GitStatusResponse } from '../types';
+import { useGitSelection, type GitSelectionState } from '../hooks/useGitSelection';
 import { GitBranchesView } from './GitBranchesView';
 import { GitChangeList } from './GitChangeList';
 import { GitDiffView } from './GitDiffView';
+import { GitFilePreviewView } from './GitFilePreviewView';
 import { GitHistoryView } from './GitHistoryView';
 import { GitNotice } from './GitNotice';
 import { GitWorktreesView } from './GitWorktreesView';
@@ -37,24 +39,6 @@ import { GitWorktreesView } from './GitWorktreesView';
  */
 type GitSection = 'changes' | 'history' | 'branches' | 'worktrees';
 
-interface GitDiffState {
-  selectedPath: string | null;
-  diff: GitDiffResponse | null;
-  diffLoading: boolean;
-  diffError: string | null;
-}
-
-const NO_DIFF: GitDiffState = {
-  selectedPath: null,
-  diff: null,
-  diffLoading: false,
-  diffError: null,
-};
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : 'Could not reach the agent';
-}
-
 /**
  * The file the entry said to open, if any (`#826`).
  *
@@ -64,61 +48,6 @@ function message(error: unknown): string {
  */
 function focusedPath(ctx: WorkspaceContext): string | null {
   return ctx.focus?.capabilityId === 'git' ? (ctx.focus.resourceId ?? null) : null;
-}
-
-function useGitDiff(ctx: WorkspaceContext) {
-  const agentId = ctx.agent?.agent_id;
-  const sessionId = ctx.session?.session_id;
-  const [state, setState] = useState<GitDiffState>(NO_DIFF);
-
-  // One request per opened file, and a response is dropped when the Session
-  // moved on or the user has since picked something else.
-  const generation = useRef(0);
-  const target = useRef<{ agent_id: string; session: string } | null>(null);
-
-  const selectFile = useCallback(async (path: string) => {
-    const current = target.current;
-    if (!current) {
-      return;
-    }
-    const forGeneration = generation.current;
-    setState({ selectedPath: path, diff: null, diffLoading: true, diffError: null });
-    try {
-      const response = await gitApi.gitDiff({ ...current, path });
-      if (generation.current !== forGeneration) {
-        return;
-      }
-      setState((previous) =>
-        previous.selectedPath === path
-          ? { selectedPath: path, diff: response, diffLoading: false, diffError: null }
-          : previous,
-      );
-    } catch (error) {
-      if (generation.current !== forGeneration) {
-        return;
-      }
-      setState((previous) =>
-        previous.selectedPath === path
-          ? { ...previous, diffLoading: false, diffError: message(error) }
-          : previous,
-      );
-    }
-  }, []);
-
-  // Read out here rather than inside the effect: `ctx` is rebuilt on every
-  // render, so depending on it would re-run this without anything changing.
-  const handedOver = focusedPath(ctx);
-
-  useEffect(() => {
-    generation.current += 1;
-    target.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
-    setState(NO_DIFF);
-    if (target.current && handedOver) {
-      void selectFile(handedOver);
-    }
-  }, [agentId, sessionId, handedOver, selectFile]);
-
-  return { state, selectFile };
 }
 
 /**
@@ -132,7 +61,16 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
   const status = useGitStatus({ agentId, sessionId });
-  const { state: diff, selectFile } = useGitDiff(ctx);
+  const rows = useMemo(
+    () => (status.status?.state === 'ok' ? statusRows(status.status.status) : null),
+    [status.status],
+  );
+  const { state: selection, selectRow } = useGitSelection({
+    agentId,
+    sessionId,
+    handedOver: focusedPath(ctx),
+    rows,
+  });
   const [section, setSection] = useState<GitSection>('changes');
 
   if (!sessionId) {
@@ -165,7 +103,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
       ) : section === 'worktrees' ? (
         <GitWorktreesView ctx={ctx} />
       ) : (
-        <GitBody status={status} diff={diff} onSelect={selectFile} />
+        <GitBody status={status} rows={rows} selection={selection} onSelect={selectRow} />
       )}
     </div>
   );
@@ -217,12 +155,18 @@ function GitHeader({
           <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
         </TabsList>
       </Tabs>
+      {/*
+        Kept available while a read is in flight: a manual re-read is the
+        recovery path, and the shared hook publishes only the latest-started
+        read, so an overlapping refresh cannot regress the view (#2787). A
+        disabled button here made the documented manual-refresh race
+        unobservable on the real surface.
+      */}
       <Button
         type="button"
         data-testid="git-refresh"
         variant="ghost"
         size="sm"
-        disabled={loading}
         aria-label="Refresh repository state"
         title="Refresh repository state"
         onClick={() => onRefresh()}
@@ -266,12 +210,14 @@ function headerSummary(
 
 function GitBody({
   status,
-  diff,
+  rows,
+  selection,
   onSelect,
 }: {
   status: ReturnType<typeof useGitStatus>;
-  diff: GitDiffState;
-  onSelect: (path: string) => void;
+  rows: readonly GitRow[] | null;
+  selection: GitSelectionState;
+  onSelect: (row: GitRow) => void;
 }) {
   if (status.loading) {
     return <GitNotice testId="git-loading">Reading repository state…</GitNotice>;
@@ -302,8 +248,7 @@ function GitBody({
     );
   }
 
-  const rows = statusRows(status.status.status);
-  if (rows.length === 0) {
+  if (!rows || rows.length === 0) {
     // A clean tree is healthy, so it says so plainly and offers nothing —
     // `visual-language.md` P6. And with nothing to open, the diff pane has no
     // subject: the layout drops rather than sitting there empty.
@@ -324,10 +269,20 @@ function GitBody({
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
       <aside className={cn('max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r', workspaceScrollClearanceClass)}>
-        <GitChangeList rows={rows} selectedPath={diff.selectedPath} onSelect={onSelect} />
+        <GitChangeList rows={rows} selectedPath={selection.selectedPath} onSelect={onSelect} />
       </aside>
       <main className="flex min-h-0 flex-1 flex-col lg:flex-none">
-        <GitDiffView response={diff.diff} loading={diff.diffLoading} error={diff.diffError} />
+        {selection.mode === 'preview' ? (
+          <GitFilePreviewView
+            path={selection.selectedPath}
+            expected={selection.previewKind ?? 'untracked'}
+            response={selection.preview}
+            loading={selection.loading}
+            error={selection.error}
+          />
+        ) : (
+          <GitDiffView response={selection.diff} loading={selection.loading} error={selection.error} />
+        )}
       </main>
     </div>
   );

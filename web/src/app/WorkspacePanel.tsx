@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
 import { resolveConversationIdentity } from '@/app/conversationIdentities';
@@ -82,6 +82,22 @@ export function WorkspacePanel({
 }: WorkspacePanelProps) {
   const [pushed, setPushed] = useState<PushedDepth | null>(null);
 
+  // The capability on screen at the moment a callback runs. A view captured
+  // this depth control before a capability switch; its late `setPush` must not
+  // retake ownership of the new capability's pager. A layout effect updates the
+  // ref before the newly mounted view's passive effects can publish, while
+  // still keeping render pure.
+  const activeToolRef = useRef(tool);
+  useLayoutEffect(() => {
+    activeToolRef.current = tool;
+  }, [tool]);
+
+  // The depth on screen is already capability-scoped for display; the pager
+  // must read the same fact. Exporting `pushed !== null` here let a push owned
+  // by a capability the user already left keep the new root fenced off from
+  // the shell's return swipe (#2780).
+  const push = pushed && pushed.capabilityId === tool ? pushed.push : null;
+
   // Report the depth upward rather than keeping it private (#1081): the App's
   // pager needs it, and this is the component that owns it. The panel is
   // unmounted whenever the Workspace layer is closed, so the reset on the way
@@ -89,8 +105,19 @@ export function WorkspacePanel({
   // and it is a separate effect because the reporting one would otherwise clear
   // and re-set on every push, which is a state change nothing asked for.
   useEffect(() => {
-    onDepthChange?.(pushed !== null);
-  }, [pushed, onDepthChange]);
+    onDepthChange?.(push !== null);
+  }, [push, onDepthChange]);
+
+  // Switching capabilities unmounts the view that pushed, so that push belongs
+  // to a view the user has left. Retire it instead of restoring it when the
+  // capability is selected again: the remounted view starts at its own root.
+  // Runs after the new view's passive effects, so a fresh push from the new
+  // capability is not cleared.
+  useEffect(() => {
+    setPushed((current) =>
+      current !== null && current.capabilityId !== tool ? null : current,
+    );
+  }, [tool]);
 
   useEffect(() => {
     return () => onDepthChange?.(false);
@@ -136,14 +163,17 @@ export function WorkspacePanel({
   );
 
   const setPush = useCallback(
-    (push: WorkspacePush | null) => {
-      setPushed(push === null ? null : { capabilityId: tool, push });
+    (nextPush: WorkspacePush | null) => {
+      // A callback from a capability the user has already switched away from
+      // cannot publish a depth for the capability now on screen.
+      if (activeToolRef.current !== tool) {
+        return;
+      }
+      setPushed(nextPush === null ? null : { capabilityId: tool, push: nextPush });
     },
     [tool],
   );
   const depth: WorkspaceDepthControl = useMemo(() => ({ setPush }), [setPush]);
-
-  const push = pushed && pushed.capabilityId === tool ? pushed.push : null;
 
   // The Web's Workspace → Terminal route (#1204): one circular destination
   // action beside the capability dock — surface navigation, not a capability,

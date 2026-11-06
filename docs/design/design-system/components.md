@@ -42,6 +42,34 @@ That ordering matters. A plugin registering a view must not automatically create
 - Extension-specific components may exist inside an extension, but shared/global chrome still follows Nession patterns and visual language.
 - A primitive should not encode product policy such as `always show this tab`, `Agent is navigation parent`, or `one extension = one button`.
 
+### Focus treatment
+
+Focus is a modality-aware interaction state, not decoration (#2750). Pointer and
+touch interaction must not add an outer halo, glow, or second frame; keyboard
+focus must stay locatable inside the control's own geometry.
+
+| Control family | Keyboard-visible focus |
+|---|---|
+| Bordered field primitives — `Input`, `Textarea`, `Select` trigger | the existing border repaints in `ring`; no outline or ring is added |
+| Controls with no usable border to repaint — `Button`, `Toggle`, `Tabs`, `Checkbox`, `ScrollArea`, borderless action/row buttons | an inset outline `focus.ringWidth` thick in `ring`, placed `focus.ringOffset` inside the border edge |
+
+The split follows what `:focus-visible` can promise. Text-entry fields match it
+on pointer focus too, so a second frame would appear on every click; repainting
+the existing border is the quietest honest indicator. Controls that only match
+it after keyboard interaction can afford a stronger, still in-geometry outline.
+The inset outline uses `outline` rather than a `box-shadow` ring so it survives
+forced-colors mode and is not clipped by a scrolling ancestor.
+
+- Invalid keeps its own border (`destructive`); a focused invalid control also
+  shows the inset outline, so focus does not disappear when validation fails.
+- Disabled controls do not receive focus, so they carry no focus treatment.
+- Popup menu rows keep their focused-row surface; a popup trigger follows the
+  control that renders it (`Button`, `SelectTrigger`).
+- Do not suppress focus globally, add per-page overrides, or restore an outset
+  `ring-*` halo.
+- Values live in `experience.web.focus`; consumers use the generated
+  `--nession-focus-ring-*` vocabulary instead of literal widths or offsets.
+
 ### Which upstream geometry gets an owner
 
 shadcn primitives arrive with their own geometry. Replacing all of it is

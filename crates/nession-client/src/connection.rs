@@ -60,7 +60,9 @@ impl ClientConfig {
 /// which is the same invariant written three times and enforced none of them at
 /// the type level.
 pub struct ClientConnection {
-    ws: WsStream,
+    /// Shared with [`crate::units`], whose one-way `relay.begin` both writes a
+    /// frame and reads the frames that precede the Server's receipt.
+    pub(crate) ws: WsStream,
     config: ClientConfig,
     /// The next request id. See [`Self::next_id`] for why this is a counter and
     /// not a clock.

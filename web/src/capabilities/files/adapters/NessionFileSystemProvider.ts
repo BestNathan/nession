@@ -1,4 +1,5 @@
 import type { FileOps } from '../types';
+import { fileErrorMessage } from '../model/fileErrors';
 
 import { fileEntryToExplorerNode, type ExplorerDataProvider, type ExplorerNode } from '@/platform/explorer';
 
@@ -35,16 +36,25 @@ export function createNessionFileSystemProvider(fileOps: FileOps): ExplorerDataP
       const parentPath = parent?.uri ?? '';
       const path = joinPath(parentPath, trimmed);
       if (kind === 'file') {
-        await fileOps.writeFile(path, '');
+        // Create is not an overwrite: the provider, not the caller, owns the
+        // no-replace decision.
+        await fileOps.writeFile(path, '', { createOnly: true });
       } else {
-        await fileOps.createDir(path);
+        await fileOps.createDir(path, { createOnly: true });
       }
     },
 
     async rename(node, name) {
       const trimmed = name.trim();
       const newPath = joinPath(parentPath(node.uri), trimmed);
-      await fileOps.renameFile(node.uri, newPath);
+      try {
+        await fileOps.renameFile(node.uri, newPath, { noReplace: true });
+      } catch (error) {
+        // The explorer shows this message verbatim under its toast; translate
+        // the wire's `already_exists`/`conflict` token into the action the user
+        // can take instead of leaving a raw protocol prefix in the UI.
+        throw new Error(fileErrorMessage(error, 'rename'));
+      }
     },
 
     async delete(node) {

@@ -8,34 +8,90 @@ use nession_protocol::contracts::agent::v1::AgentMetadata;
 use nession_protocol::ProtocolManifest;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The shared services of one test Server.
+///
+/// `test_handler` below builds one connection with services of its own, which
+/// is the right default for a test about one connection. Ownership across
+/// connections is exactly the case where both connections have to be looking
+/// at the same records: a later connection's registration is judged against
+/// the earlier one's state, and the earlier one's late frame against the later
+/// one's claim (#960). Handing out connections from one `TestDeps` is how a
+/// test gets that.
+struct TestDeps {
+    db: Arc<Database>,
+    agent_registry: Arc<AgentRegistry>,
+    session_registry: Arc<SessionRegistry>,
+    command_broker: Arc<CommandBroker>,
+    client_registry: Arc<ClientRegistry>,
+    web_client_registry: Arc<WebClientRegistry>,
+    env_service: Arc<EnvService>,
+    p2p_broker: Arc<crate::broker::ConnectionBroker>,
+}
+
+impl TestDeps {
+    /// A fresh in-memory Server: one DB, one broker, one of each registry.
+    async fn new() -> Self {
+        Self::with_db(Arc::new(Database::new(":memory:").await.unwrap()))
+    }
+
+    /// One Server around a database the test already owns.
+    ///
+    /// A test that has to break the database itself — for example, to prove a
+    /// read failure is reported rather than swallowed — needs the handler
+    /// reading from the same `Database` the test broke.
+    fn with_db(db: Arc<Database>) -> Self {
+        Self {
+            agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
+            session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
+            command_broker: Arc::new(CommandBroker::new()),
+            client_registry: Arc::new(ClientRegistry::new()),
+            web_client_registry: Arc::new(WebClientRegistry::new()),
+            env_service: EnvService::new(Arc::clone(&db)),
+            p2p_broker: Arc::new(crate::broker::ConnectionBroker::new(300)),
+            db,
+        }
+    }
+
+    /// One accepted WebSocket on this Server.
+    ///
+    /// Each call takes the next connection generation from the shared broker,
+    /// so a handler created later is a newer generation — which is the same
+    /// ordering the Server's accept loop produces.
+    fn handler(&self, auth_token: &str) -> ConnectionHandler {
+        ConnectionHandler::new(
+            ConnectionHandlerDeps {
+                agent_registry: Arc::clone(&self.agent_registry),
+                session_registry: Arc::clone(&self.session_registry),
+                command_broker: Arc::clone(&self.command_broker),
+                client_registry: Arc::clone(&self.client_registry),
+                web_client_registry: Arc::clone(&self.web_client_registry),
+                env_service: Arc::clone(&self.env_service),
+                db: Arc::clone(&self.db),
+                p2p_broker: Arc::clone(&self.p2p_broker),
+            },
+            ConnectionHandlerConfig {
+                server_auth_token: auth_token.to_string(),
+                heartbeat_interval_secs: 30,
+                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+                terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
+            },
+        )
+    }
+}
+
 /// Build a test handler wired to in-memory DB + tempdir env store.
 async fn test_handler(auth_token: &str) -> ConnectionHandler {
-    let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
-    let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
-    let command_broker = Arc::new(CommandBroker::new());
-    let client_registry = Arc::new(ClientRegistry::new());
-    let web_client_registry = Arc::new(WebClientRegistry::new());
-    let env_service = EnvService::new(Arc::clone(&db));
-    ConnectionHandler::new(
-        ConnectionHandlerDeps {
-            agent_registry,
-            session_registry,
-            command_broker,
-            client_registry,
-            web_client_registry,
-            env_service,
-            db,
+    TestDeps::new().await.handler(auth_token)
+}
 
-            p2p_broker: std::sync::Arc::new(crate::broker::ConnectionBroker::new(300)),
-        },
-        ConnectionHandlerConfig {
-            server_auth_token: auth_token.to_string(),
-            heartbeat_interval_secs: 30,
-            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
-            terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
-        },
-    )
+/// Build a test handler around a caller-supplied database.
+///
+/// `test_handler` gives every test its own in-memory DB. A test that has to
+/// break the database itself — for example, to prove a read failure is
+/// reported rather than swallowed — needs the handler reading from the same
+/// `Database` the test broke.
+fn handler_with_db(db: Arc<Database>, auth_token: &str) -> ConnectionHandler {
+    TestDeps::with_db(db).handler(auth_token)
 }
 
 fn proto_msg(msg_type: &str, payload: serde_json::Value) -> Message {
@@ -113,6 +169,7 @@ async fn register_agent_id(
             session_count: 0,
             active_sessions: 0,
             protocol_manifest: manifest,
+            probe_generation: 0,
         })
         .await;
 }
@@ -1123,34 +1180,8 @@ async fn address_update_for_another_agent_is_refused() {
 /// second connection's registration clears state the first one wrote, and
 /// the first one's late frames are judged against the second one's claim.
 async fn connections_on_one_server() -> (ConnectionHandler, ConnectionHandler) {
-    let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let agent_registry = Arc::new(AgentRegistry::new(60, Arc::clone(&db)));
-    let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
-    let command_broker = Arc::new(CommandBroker::new());
-    let client_registry = Arc::new(ClientRegistry::new());
-    let web_client_registry = Arc::new(WebClientRegistry::new());
-    let connection = || {
-        ConnectionHandler::new(
-            ConnectionHandlerDeps {
-                agent_registry: Arc::clone(&agent_registry),
-                session_registry: Arc::clone(&session_registry),
-                command_broker: Arc::clone(&command_broker),
-                client_registry: Arc::clone(&client_registry),
-                web_client_registry: Arc::clone(&web_client_registry),
-                env_service: EnvService::new(Arc::clone(&db)),
-                db: Arc::clone(&db),
-
-                p2p_broker: std::sync::Arc::new(crate::broker::ConnectionBroker::new(300)),
-            },
-            ConnectionHandlerConfig {
-                server_auth_token: String::new(),
-                heartbeat_interval_secs: 30,
-                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
-                terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
-            },
-        )
-    };
-    (connection(), connection())
+    let deps = TestDeps::new().await;
+    (deps.handler(""), deps.handler(""))
 }
 
 /// The claim `server/websocket.rs` makes after every frame from a registered
@@ -1694,4 +1725,5 @@ mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
+mod server_session_metadata_v1;
 mod server_session_processes_v1;

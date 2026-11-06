@@ -170,10 +170,29 @@ impl SessionWatcher {
         //      upsert, so duplicate updates are harmless).
         //   2. Mark any previously-known sessions that no longer exist as gone.
         // This guarantees eventual consistency even across rapid reconnect cycles.
-        if self.handle.take_sync_needed() {
+        if self.handle.is_sync_needed() {
             debug!("Full session re-sync triggered after reconnection");
 
-            let current_sessions = self.tmux.list_sessions().await.unwrap_or_default();
+            // A failed enumeration is not an observed empty Session list. The
+            // reconnect intent stays set and `prev_sessions` is untouched, so
+            // the next poll retries the full re-sync instead of telling the
+            // Server that every live Session disappeared (#2804).
+            let current_sessions = match self.tmux.list_sessions().await {
+                Ok(sessions) => sessions,
+                Err(e) => {
+                    warn!(
+                        "Session enumeration failed during full re-sync; keeping the previous \
+                         snapshot and retrying next poll: {:#}",
+                        e
+                    );
+                    return Ok(());
+                }
+            };
+
+            // Only a successful query satisfies the intent. The snapshot below
+            // is a full re-derivation of the Server's view, so a reconnect that
+            // re-marks the flag after this point simply schedules another one.
+            self.handle.take_sync_needed();
 
             // Re-report all *current* sessions first (idempotent upsert).
             for session in &current_sessions {
@@ -205,7 +224,19 @@ impl SessionWatcher {
             return Ok(());
         }
 
-        let current_sessions = self.tmux.list_sessions().await.unwrap_or_default();
+        // Same distinction as the full re-sync: `Err` says tmux could not be
+        // asked, not that it answered with no Sessions. Retain the previous
+        // snapshot and send nothing; a later successful poll converges.
+        let current_sessions = match self.tmux.list_sessions().await {
+            Ok(sessions) => sessions,
+            Err(e) => {
+                warn!(
+                    "Session enumeration failed; keeping the previous snapshot: {:#}",
+                    e
+                );
+                return Ok(());
+            }
+        };
 
         // Build a map of current sessions for easy lookup.
         let mut current_map: HashMap<String, SessionInfo> = HashMap::new();
@@ -350,5 +381,232 @@ mod tests {
         // created_at differs but nothing else.
         prev.created_at = 1000;
         assert!(!session_changed(&prev, &current));
+    }
+}
+
+/// Enumeration-failure coverage (#2804).
+///
+/// These drive the real [`SessionWatcher`] against a manager whose injected
+/// tmux binary the test owns, and read the ordered frames back from the
+/// outbox the watcher publishes into — no mocked watcher and no mocked
+/// `gone` semantics.
+#[cfg(all(test, unix))]
+mod enumeration_failure {
+    use super::*;
+    use crate::connection::outbox::OutboxFrames;
+    use crate::test_support::{FakeTmux, FAKE_TIMEOUT};
+    use crate::tmux::cmd::TmuxCmd;
+    use std::path::Path;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    /// Point a manager at a binary that does not exist yet.
+    ///
+    /// The failure this models is an *error* from `list_sessions`, which is the
+    /// only half a watcher can distinguish: a non-zero exit from tmux is
+    /// already normalized by `TmuxOps::list_sessions` into an observed empty
+    /// list (the idle-server policy), and that is the successful half. A
+    /// missing binary makes the spawn itself fail, which the manager
+    /// propagates as `Err`.
+    fn manager_at(dir: &Path) -> SessionManager {
+        let mut manager = SessionManager::new();
+        manager.with_tmux_cmd(TmuxCmd::new(
+            dir.join("tmux").to_string_lossy().into_owned(),
+            dir.join("tmux.sock"),
+        ));
+        manager.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
+        manager
+    }
+
+    fn watcher_at(dir: &Path) -> (SessionWatcher, ServerClientHandle, OutboxFrames) {
+        let (handle, frames) = ServerClientHandle::test_handle(true);
+        let watcher = SessionWatcher::new(handle.clone(), Arc::new(manager_at(dir)), 5);
+        (watcher, handle, frames)
+    }
+
+    /// Make the next query fail (`Err`), the state a transient tmux failure
+    /// reaches the watcher as.
+    fn fail_listing(dir: &Path) {
+        let bin = dir.join("tmux");
+        if bin.exists() {
+            if let Err(e) = std::fs::remove_file(&bin) {
+                panic!("remove the injected tmux binary: {e}");
+            }
+        }
+    }
+
+    /// Install a fake tmux whose successful answer lists exactly `sessions`.
+    fn listing(dir: &Path, sessions: &[&str]) {
+        let mut script = String::new();
+        for name in sessions {
+            script.push_str(&format!(
+                "printf '%s\\n' '{name}||1000|1|0|80|24|/tmp|bash'\n"
+            ));
+        }
+        FakeTmux::new(dir, &script);
+    }
+
+    /// Drain every pending frame as `(session_name, status)`.
+    fn updates(frames: &mut OutboxFrames) -> Vec<(String, String)> {
+        let mut updates = Vec::new();
+        while let Some(frame) = frames.try_next() {
+            let WsMessage::Text(text) = frame else {
+                panic!("expected a text frame, got {frame:?}");
+            };
+            let parsed: serde_json::Value = match serde_json::from_str(&text) {
+                Ok(parsed) => parsed,
+                Err(e) => panic!("a session update is JSON: {e}"),
+            };
+            let Some(payload) = parsed.get("payload") else {
+                panic!("a session update carries a payload: {parsed}");
+            };
+            let Some(name) = payload
+                .get("session_name")
+                .and_then(serde_json::Value::as_str)
+            else {
+                panic!("a session update names its session: {parsed}");
+            };
+            let Some(status) = payload.get("status").and_then(serde_json::Value::as_str) else {
+                panic!("a session update states its status: {parsed}");
+            };
+            updates.push((name.to_string(), status.to_string()));
+        }
+        updates
+    }
+
+    #[tokio::test]
+    async fn a_failed_enumeration_in_an_incremental_poll_sends_no_gone_and_keeps_tracking() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev"]);
+        let (mut watcher, _handle, mut frames) = watcher_at(dir.path());
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "detached".to_string())],
+            "the first successful poll reports the known session"
+        );
+        assert!(watcher.tracked_sessions().contains_key("dev"));
+
+        fail_listing(dir.path());
+        watcher
+            .poll_and_sync()
+            .await
+            .expect("a failed enumeration is not a watcher failure");
+        assert!(
+            updates(&mut frames).is_empty(),
+            "a failed enumeration must not be published as a deletion"
+        );
+        assert!(
+            watcher.tracked_sessions().contains_key("dev"),
+            "the previous snapshot survives a failed query"
+        );
+
+        listing(dir.path(), &[]);
+        watcher.poll_and_sync().await.expect("recovery poll");
+        assert_eq!(
+            updates(&mut frames),
+            vec![("dev".to_string(), "gone".to_string())],
+            "an observed empty list still converges to deletion"
+        );
+        assert!(watcher.tracked_sessions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_reconnect_resync_stays_pending_and_converges_after_recovery() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev"]);
+        let (mut watcher, handle, mut frames) = watcher_at(dir.path());
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(updates(&mut frames).len(), 1);
+
+        handle.mark_sync_needed();
+        fail_listing(dir.path());
+        watcher.poll_and_sync().await.expect("failed resync poll");
+        assert!(
+            updates(&mut frames).is_empty(),
+            "a failed resync publishes neither a snapshot nor a deletion"
+        );
+        assert!(
+            handle.is_sync_needed(),
+            "the reconnect intent must survive a failed query"
+        );
+        assert!(watcher.tracked_sessions().contains_key("dev"));
+
+        listing(dir.path(), &["dev", "api"]);
+        watcher
+            .poll_and_sync()
+            .await
+            .expect("recovered resync poll");
+        assert!(
+            !handle.is_sync_needed(),
+            "a successful query satisfies the reconnect intent"
+        );
+        let recovered = updates(&mut frames);
+        assert_eq!(
+            recovered.len(),
+            2,
+            "the recovered full snapshot reports every live session: {recovered:?}"
+        );
+        assert!(recovered.contains(&("dev".to_string(), "detached".to_string())));
+        assert!(recovered.contains(&("api".to_string(), "detached".to_string())));
+        assert!(watcher.tracked_sessions().contains_key("dev"));
+        assert!(watcher.tracked_sessions().contains_key("api"));
+
+        // A genuine deletion still converges while a resync is pending: the
+        // recovered snapshot is authoritative once it was actually observed.
+        handle.mark_sync_needed();
+        listing(dir.path(), &["api"]);
+        watcher.poll_and_sync().await.expect("deletion poll");
+        assert!(!handle.is_sync_needed());
+        let after_deletion = updates(&mut frames);
+        assert_eq!(
+            after_deletion.len(),
+            2,
+            "one upsert for the survivor and one deletion: {after_deletion:?}"
+        );
+        assert!(after_deletion.contains(&("api".to_string(), "detached".to_string())));
+        assert!(after_deletion.contains(&("dev".to_string(), "gone".to_string())));
+        assert!(!watcher.tracked_sessions().contains_key("dev"));
+        assert!(watcher.tracked_sessions().contains_key("api"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_enumeration_does_not_hide_selective_session_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        listing(dir.path(), &["dev", "api"]);
+        let (mut watcher, _handle, mut frames) = watcher_at(dir.path());
+        watcher.poll_and_sync().await.expect("initial poll");
+        assert_eq!(updates(&mut frames).len(), 2);
+        assert!(watcher.tracked_sessions().contains_key("dev"));
+        assert!(watcher.tracked_sessions().contains_key("api"));
+
+        fail_listing(dir.path());
+        watcher.poll_and_sync().await.expect("failed poll");
+        assert!(updates(&mut frames).is_empty());
+        assert!(watcher.tracked_sessions().contains_key("dev"));
+        assert!(watcher.tracked_sessions().contains_key("api"));
+
+        listing(dir.path(), &["api"]);
+        watcher.poll_and_sync().await.expect("removal poll");
+        let frames = updates(&mut frames);
+        let gone: Vec<(String, String)> = frames
+            .iter()
+            .filter(|(_, status)| status == "gone")
+            .cloned()
+            .collect();
+        assert_eq!(
+            gone,
+            vec![("dev".to_string(), "gone".to_string())],
+            "only the Session that really disappeared is deleted: {frames:?}"
+        );
+        assert!(
+            !frames.iter().any(|(name, _)| name == "api"),
+            "the surviving session was not re-reported because nothing changed: {frames:?}"
+        );
+        assert!(!watcher.tracked_sessions().contains_key("dev"));
+        assert!(
+            watcher.tracked_sessions().contains_key("api"),
+            "the unaffected Session stays tracked and visible"
+        );
     }
 }

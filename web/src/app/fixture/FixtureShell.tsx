@@ -11,6 +11,7 @@ import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { fixtureGitSurface } from './fixtureGit';
+import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import { fixturePaneCommand } from './fixturePaneCommand';
 
 /**
@@ -32,6 +33,11 @@ export function FixtureShell() {
   const queryIndex = window.location.hash.indexOf('?');
   const search = queryIndex >= 0 ? window.location.hash.slice(queryIndex) : '';
 
+  // The Session metadata stub (#2789), installed for the route's lifetime so
+  // the sidebar's Session rows resolve their display titles through the same
+  // product path the shipped app uses. Absent `?sessionMetadata=` is legacy.
+  useFixtureSessionMetadata(search);
+
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
   // App route had this while the Web route did not — so the Web screen could
@@ -41,8 +47,10 @@ export function FixtureShell() {
   // Installed for the route's lifetime and released on unmount. Nothing
   // emerges by default, so the canonical screenshots are unaffected unless a
   // case opens one — the entry itself already renders here, because Terminal
-  // Keys earns disclosure without a stub.
-  useEffect(() => gitApi.install(fixtureGitSurface('')), []);
+  // Keys earns disclosure without a stub. Carrying the route's scenario keeps
+  // this install equivalent to the fixture App's when it is the one that
+  // remains bound (#2787).
+  useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
   const selectedId = FIXTURE_SELECTED_ID;
   const paneCommand = fixturePaneCommand(search);

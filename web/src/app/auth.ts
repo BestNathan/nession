@@ -20,7 +20,13 @@ export function getToken(): string | null {
 
 /**
  * Stores the authentication token in storage.
- * Always stores in sessionStorage. If remember is true, also stores in localStorage.
+ * Always stores in sessionStorage. The `remember` flag is the persistence
+ * policy for the *whole* token, not just this write: `true` synchronizes the
+ * durable localStorage copy, `false` revokes any copy left by an earlier
+ * remembered login. Leaving a durable copy behind would let a fresh browser
+ * session auto-connect with a credential the user just opted out of persisting
+ * (#2822). Disconnect still never calls this owner, so #354's non-logout
+ * semantics are preserved.
  *
  * @param token - The token to store
  * @param remember - Whether to persist the token across sessions
@@ -29,9 +35,12 @@ export function setToken(token: string, remember: boolean): void {
   // Always store in sessionStorage
   sessionStorage.setItem(TOKEN_KEY, token);
 
-  // Store in localStorage if remember is true
   if (remember) {
+    // Remembered: both copies carry the selected token.
     localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    // Session-only: the durable copy must not outlive the choice.
+    localStorage.removeItem(TOKEN_KEY);
   }
 }
 

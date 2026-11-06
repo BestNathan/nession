@@ -4,7 +4,6 @@ import {
   describeStatus,
   describeUnavailable,
   formatBytes,
-  isSelectable,
   statusRows,
 } from '@/capabilities/git/state';
 import type { GitStatus, GitUnavailable } from '@/capabilities/git/types';
@@ -53,11 +52,8 @@ describe('statusRows', () => {
   });
 });
 
-describe('isSelectable', () => {
-  it('makes a tracked change openable and an untracked file not (#750 SC2)', () => {
-    // The rule the view is built on: an untracked path has no diff — `git diff
-    // HEAD -- <untracked>` exits 0 with no output — so it must not present a
-    // control that opens onto an empty pane.
+describe('statusRows openability', () => {
+  it('keeps every status kind as its own openable row (#2838 supersedes #750 SC2)', () => {
     const rows = statusRows(
       status({
         modified: [
@@ -68,7 +64,11 @@ describe('isSelectable', () => {
       }),
     );
 
-    expect(rows.filter(isSelectable).map((row) => row.path)).toEqual(['src/a.ts']);
+    expect(rows.map((row) => [row.kind, row.path])).toEqual([
+      ['unmerged', 'both.ts'],
+      ['tracked', 'src/a.ts'],
+      ['untracked', 'notes.txt'],
+    ]);
   });
 });
 

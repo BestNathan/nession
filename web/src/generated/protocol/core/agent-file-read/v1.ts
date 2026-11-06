@@ -56,7 +56,15 @@ total_size: number,
 /**
  * Whether more bytes remain after this chunk.
  */
-has_more: boolean, };
+has_more: boolean, 
+/**
+ * Opaque revision of the file at read time.
+ *
+ * Derived from the file's metadata rather than a content hash so a
+ * chunked read never rehashes the file. Pass it back as
+ * `expected_revision` on write to refuse overwriting a newer file.
+ */
+revision: string, };
 
 // ── Operations ──
 
@@ -98,5 +106,13 @@ total_size: number,
 /**
  * Whether more bytes remain after this chunk.
  */
-has_more: boolean, };
+has_more: boolean, 
+/**
+ * Opaque revision of the file at read time.
+ *
+ * Derived from the file's metadata rather than a content hash so a
+ * chunked read never rehashes the file. Pass it back as
+ * `expected_revision` on write to refuse overwriting a newer file.
+ */
+revision: string, };
 

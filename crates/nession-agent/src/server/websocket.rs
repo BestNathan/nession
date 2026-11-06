@@ -33,6 +33,7 @@ use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
+use crate::session::metadata::SessionMetadataStore;
 use crate::session::registry::{
     ControlAcquireRejected, InputRejected, InvalidStreamIdentity, NotAttached, ResizeRejected,
     SessionRegistry, SubscribeRejected,
@@ -264,6 +265,8 @@ pub mod msg_types {
     pub const SESSION_CREATE: &str = "agent.session.create";
     pub const SESSION_KILL: &str = "agent.session.kill";
     pub const SESSION_CAPTURE_PREVIEW: &str = "agent.session.capture-preview";
+    pub const SESSION_METADATA_GET: &str = "agent.session.metadata.get";
+    pub const SESSION_METADATA_UPDATE: &str = "agent.session.metadata.update";
     pub const CLIENT_ATTACH: &str = "agent.attach";
     pub const CLIENT_DETACH: &str = "agent.detach";
     pub const TERMINAL_INPUT: &str = "agent.terminal.input";
@@ -361,7 +364,8 @@ pub use nession_protocol::contracts::session::v1::{
     ClientAttachPayload, ClientAttachResponse, ClientDetachPayload, ClientDetachResponse,
     SessionCapturePreviewPayload, SessionCapturePreviewResponse, SessionCreatePayload,
     SessionCreateResponse, SessionInfo, SessionKillPayload, SessionKillResponse,
-    SessionListResponse, WebAttachInfo, WebSessionAttachPayload, WebSessionCreatePayload,
+    SessionListResponse, SessionMetadata, SessionMetadataGetPayload, SessionMetadataResponse,
+    SessionMetadataUpdatePayload, WebAttachInfo, WebSessionAttachPayload, WebSessionCreatePayload,
     WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
     WebSessionsListResponse,
 };
@@ -954,6 +958,10 @@ pub struct AgentServerContext {
     /// second construction site would be a second, independently configured
     /// owner of the same tmux server.
     pub tmux: Arc<SessionManager>,
+    /// Session-owned metadata (#2789). One store per Agent process, shared by
+    /// the P2P listener and the Server connection, so both paths serialize
+    /// writes against the same per-instance lock.
+    pub session_metadata: Arc<SessionMetadataStore>,
     /// The fixed column count this Agent creates Sessions at (#2487).
     ///
     /// The Agent owns the tmux pane, so this is the creation-time width for a
@@ -971,6 +979,8 @@ pub struct AgentServerContext {
 
 pub struct AgentServer {
     tmux_manager: Arc<SessionManager>,
+    /// Session-owned metadata (#2789).
+    session_metadata: Arc<SessionMetadataStore>,
     /// The one Session service every connection asks for a backend.
     service: Arc<SessionService>,
     /// Agent-wide P2P lease, retained terminal history and peer fan-out.
@@ -1188,6 +1198,7 @@ pub(crate) struct P2pRequest<'a> {
     /// because it is a plain number, unlike the borrows around it.
     terminal_cols: u16,
     file_ops: &'a Arc<FileOps>,
+    session_metadata: &'a Arc<SessionMetadataStore>,
     listen_address: &'a str,
     agent_id: &'a str,
     /// Borrowed rather than held: `AttachMode` is not `Copy`, and taking it by
@@ -1236,6 +1247,8 @@ struct Connection {
     /// The fixed column count this Agent creates Sessions at (#2487).
     terminal_cols: u16,
     file_ops: Arc<FileOps>,
+    /// Session-owned metadata, the same store every connection shares.
+    session_metadata: Arc<SessionMetadataStore>,
     listen_address: String,
     agent_id: String,
     attach_mode: AttachMode,
@@ -1429,6 +1442,7 @@ impl Frame {
             default_working_dir: &connection.default_working_dir,
             terminal_cols: connection.terminal_cols,
             file_ops: &connection.file_ops,
+            session_metadata: &connection.session_metadata,
             listen_address: &connection.listen_address,
             agent_id: &connection.agent_id,
             attach_mode: &connection.attach_mode,
@@ -1525,6 +1539,38 @@ fn terminal_scope(payload_value: &serde_json::Value) -> WireScope {
             .unwrap_or_default()
             .to_string(),
     )
+}
+
+/// One successful metadata answer, on either operation.
+fn metadata_ok_reply(id: &str, metadata: SessionMetadata) -> String {
+    serde_json::to_string(&make_response(
+        id,
+        msg_types::OK,
+        SessionMetadataResponse {
+            success: true,
+            error: None,
+            error_kind: None,
+            metadata: Some(metadata),
+        },
+    ))
+    .unwrap_or_default()
+}
+
+/// One failed metadata answer. The store's stable prefixes become the
+/// `error_kind` the Web acts on; the prefix itself is not repeated in `error`.
+fn metadata_error_reply(id: &str, error: &anyhow::Error) -> String {
+    let (kind, detail) = crate::session::metadata::error_kind_and_detail(error);
+    serde_json::to_string(&make_response(
+        id,
+        msg_types::OK,
+        SessionMetadataResponse {
+            success: false,
+            error: Some(detail),
+            error_kind: Some(kind.to_string()),
+            metadata: None,
+        },
+    ))
+    .unwrap_or_default()
 }
 
 /// The session a frame names as `name` — `session.create` and `session.kill`,
@@ -1660,6 +1706,38 @@ p2p_routes! { ctx, msg_type, payload_value;
                             .unwrap_or_default()
                     }
                     Err(e) => ctx.err("kill_failed", &e.to_string()),
+                }
+            }
+            "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+                let payload: SessionMetadataGetPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                match ctx.session_metadata.get(&payload.name).await {
+                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                    Err(error) => metadata_error_reply(ctx.id, &error),
+                }
+            }
+            "agent.session.metadata.update" => "agent.session.metadata.update" => 1 => WireScope::Sessions => Key(session_by(payload_value)) => {
+                let payload: SessionMetadataUpdatePayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                match ctx
+                    .session_metadata
+                    .update(
+                        &payload.name,
+                        payload.title.as_deref(),
+                        payload.description.as_deref(),
+                        &payload.tags,
+                        payload.expected_revision,
+                    )
+                    .await
+                {
+                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                    Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
             "agent.session.capture-preview" => "agent.session.capture-preview" => 1 => terminal_scope(payload_value) => Query => {
@@ -2705,13 +2783,36 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let path = payload.path.clone();
-                match ctx.file_ops.write_file(&payload.path, &payload.content).await {
-                    Ok(written) => {
-                        let resp = FileWriteResponse { path, written };
+                match ctx
+                    .file_ops
+                    .write_file_with_options(
+                        &payload.path,
+                        &payload.content,
+                        payload.expected_revision.as_deref(),
+                        payload.create_only,
+                    )
+                    .await
+                {
+                    Ok((written, revision)) => {
+                        let resp = FileWriteResponse {
+                            path,
+                            written,
+                            revision,
+                        };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("write_error", &e.to_string()),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else if msg.contains("conflict") {
+                            "conflict"
+                        } else {
+                            "write_error"
+                        };
+                        ctx.err(code, &msg)
+                    }
                 }
             }
             "agent.file.delete" => "agent.file.delete" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
@@ -2738,7 +2839,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let path = payload.path.clone();
-                match ctx.file_ops.create_dir(&payload.path).await {
+                match ctx
+                    .file_ops
+                    .create_dir_with_options(&payload.path, payload.create_only)
+                    .await
+                {
                     Ok(()) => {
                         let resp = FileMutationResponse {
                             path,
@@ -2747,7 +2852,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("create_dir_failed", &format_error_chain(&e)),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else {
+                            "create_dir_failed"
+                        };
+                        ctx.err(code, &format_error_chain(&e))
+                    }
                 }
             }
             "agent.file.rename" => "agent.file.rename" => 1 => WireScope::Files => Key(ResourceKey::Filesystem) => {
@@ -2757,7 +2870,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 let from = payload.from.clone();
                 let to = payload.to.clone();
-                match ctx.file_ops.rename(&payload.from, &payload.to).await {
+                match ctx
+                    .file_ops
+                    .rename_with_options(&payload.from, &payload.to, payload.no_replace)
+                    .await
+                {
                     Ok(()) => {
                         let resp = FileRenameResponse {
                             from,
@@ -2767,7 +2884,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("rename_failed", &e.to_string()),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("already_exists") {
+                            "already_exists"
+                        } else {
+                            "rename_failed"
+                        };
+                        ctx.err(code, &msg)
+                    }
                 }
             }
             "agent.file.cwd" => "agent.file.cwd" => 1 => WireScope::Files => Query => {
@@ -2838,6 +2963,7 @@ impl AgentServer {
 
         Ok(Self {
             tmux_manager,
+            session_metadata: Arc::clone(&context.session_metadata),
             service,
             sessions: Arc::new(SessionRegistry::new()),
             file_ops,
@@ -2896,6 +3022,7 @@ impl AgentServer {
         let service = Arc::clone(&self.service);
         let sessions = Arc::clone(&self.sessions);
         let file_ops = Arc::clone(&self.file_ops);
+        let session_metadata = Arc::clone(&self.session_metadata);
         let mutations = Arc::clone(&self.mutations);
         let tls_acceptor = self.tls_acceptor;
         let default_working_dir = self.default_working_dir.clone();
@@ -2953,6 +3080,7 @@ impl AgentServer {
                                 let svc = Arc::clone(&service);
                                 let shared_sessions = Arc::clone(&sessions);
                                 let fops = Arc::clone(&file_ops);
+                                let meta = Arc::clone(&session_metadata);
                                 let lanes = Arc::clone(&mutations);
                                 let tls = tls_acceptor.clone();
                                 let wd = default_working_dir.clone();
@@ -2976,7 +3104,7 @@ impl AgentServer {
                                             drop(slot);
                                             tokio::spawn(Self::serve_connection(
                                                 ws, authority, addr, tmux, svc,
-                                                shared_sessions, fops, lanes, wd,
+                                                shared_sessions, fops, meta, lanes, wd,
                                                 terminal_cols, la, aid, am, rtx,
                                             ));
                                         }
@@ -3168,6 +3296,7 @@ impl AgentServer {
         service: Arc<SessionService>,
         sessions: Arc<SessionRegistry>,
         file_ops: Arc<FileOps>,
+        session_metadata: Arc<SessionMetadataStore>,
         mutations: Arc<KeyedLane<ResourceKey>>,
         default_working_dir: String,
         terminal_cols: u16,
@@ -3203,6 +3332,7 @@ impl AgentServer {
             default_working_dir,
             terminal_cols,
             file_ops,
+            session_metadata,
             listen_address,
             agent_id,
             attach_mode,
@@ -4348,6 +4478,9 @@ mod tests {
                 credentials: Arc::clone(&credentials),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
+                session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(
+                    SessionManager::new(),
+                ))),
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 handshake_policy,
             },
@@ -4567,6 +4700,9 @@ mod tests {
                 credentials: Arc::new(P2pCredentials::new()),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
+                session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(
+                    SessionManager::new(),
+                ))),
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 handshake_policy: Default::default(),
             },
@@ -5449,6 +5585,8 @@ mod tests {
             FileWritePayload {
                 path: "roundtrip_test.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let write_resp: Message<FileWriteResponse> =
@@ -5488,6 +5626,8 @@ mod tests {
             FileWritePayload {
                 path: "rt/from_list.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let write_resp: Message<FileWriteResponse> =
@@ -5580,6 +5720,8 @@ mod tests {
             FileWritePayload {
                 path: "to_delete.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let _: Message<FileWriteResponse> =
@@ -5646,6 +5788,7 @@ mod tests {
             msg_types::FILE_CREATE_DIR,
             FileCreateDirPayload {
                 path: "test_dir/sub_dir".to_string(),
+                create_only: false,
             },
         );
         let create_resp: Message<serde_json::Value> =
@@ -5703,6 +5846,8 @@ mod tests {
             FileWritePayload {
                 path: "old_name.txt".to_string(),
                 content: b64,
+                expected_revision: None,
+                create_only: false,
             },
         );
         let _ = send_and_receive::<_, FileWriteResponse>(&mut sink, &mut stream, &write_req).await;
@@ -5713,6 +5858,7 @@ mod tests {
             FileRenamePayload {
                 from: "old_name.txt".to_string(),
                 to: "new_name.txt".to_string(),
+                no_replace: false,
             },
         );
         let rename_resp: Message<serde_json::Value> =
@@ -6316,6 +6462,7 @@ mod tests {
             .expect("the first frame fits the budget it is about to exhaust");
 
         let tmux = Arc::new(SessionManager::new());
+        let session_metadata = Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new())));
         let file_ops = Arc::new(crate::fs::ops::FileOps::new(
             crate::fs::sandbox::PathSandbox::new("/tmp").expect("a sandbox root"),
         ));
@@ -6337,6 +6484,7 @@ mod tests {
             let ctx = P2pRequest {
                 id: "resize-1",
                 tmux: &tmux,
+                session_metadata: &session_metadata,
                 service: &service,
                 sessions: &sessions,
                 client_id: &client,
@@ -6467,6 +6615,8 @@ mod tests {
         msg_types::SESSION_CREATE,
         msg_types::SESSION_KILL,
         msg_types::SESSION_CAPTURE_PREVIEW,
+        msg_types::SESSION_METADATA_GET,
+        msg_types::SESSION_METADATA_UPDATE,
         msg_types::CLIENT_ATTACH,
         msg_types::CLIENT_DETACH,
         msg_types::TERMINAL_INPUT,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { EditorView } from '@codemirror/view';
 import { FileViewer } from '@/capabilities/files/components/FileViewer';
 import type { FileOps } from '@/capabilities/files';
 
@@ -354,5 +355,44 @@ describe('FileViewer JSON / JSONL integration (#1199)', () => {
       expect(screen.getByText('Line 1')).toBeInTheDocument();
       expect(screen.getByText('Line 3')).toBeInTheDocument();
     });
+  });
+
+  it('a stale save exposes a conflict dialog; Overwrite retries without the revision guard', async () => {
+    const writeFile = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('conflict: /test/notes.txt changed'))
+      .mockResolvedValueOnce({ path: '/test/notes.txt', written: 6, revision: 'rev-2' });
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer fileOps={ops} path="/test/notes.txt" filename="notes.txt" onClose={vi.fn()} />
+      </div>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    expect(view).not.toBeNull();
+    view?.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+
+    await userEvent.click(await screen.findByText('Save'));
+    const dialog = await screen.findByTestId('file-conflict-dialog');
+    expect(dialog).toHaveTextContent('File changed on disk');
+
+    await userEvent.click(screen.getByText('Overwrite'));
+
+    await waitFor(() => expect(writeFile).toHaveBeenCalledTimes(2));
+    expect(writeFile.mock.calls[0]?.[2]).toEqual({ expectedRevision: 'rev-1' });
+    expect(writeFile.mock.calls[1]?.[2]).toEqual({});
   });
 });

@@ -287,12 +287,31 @@ pub struct TerminalSession<T: TerminalTransport> {
 /// agent (P2P or relay mode).
 pub struct WebSocketTransport {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    /// Frames already read while confirming a route, replayed before the
+    /// socket. Relay attach can forward terminal output before the Server's
+    /// receipt; that output is the session's first screen, not evidence, and
+    /// dropping it would truncate what the user sees.
+    pending: std::collections::VecDeque<String>,
 }
 
 impl WebSocketTransport {
     /// Create a new transport wrapping an existing WebSocket connection.
     pub fn new(ws: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
-        Self { ws }
+        Self {
+            ws,
+            pending: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// A transport that replays `pending` before reading the socket.
+    pub fn with_pending(
+        ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        pending: Vec<String>,
+    ) -> Self {
+        Self {
+            ws,
+            pending: pending.into(),
+        }
     }
 }
 
@@ -306,6 +325,9 @@ impl TerminalTransport for WebSocketTransport {
     }
 
     async fn recv_text(&mut self) -> Result<Option<String>> {
+        if let Some(text) = self.pending.pop_front() {
+            return Ok(Some(text));
+        }
         loop {
             match self.ws.next().await {
                 Some(Ok(WsMessage::Text(text))) => return Ok(Some(text)),

@@ -105,6 +105,28 @@ describe('Git projection', () => {
     expect(screen.queryByTestId('git-peek-body')).toBeNull();
   });
 
+  it('shows a conflicted path once, not also as a modified row (#2838)', async () => {
+    mockedStatus.mockResolvedValue(
+      status({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: [],
+          unmerged: ['src/conflict.ts'],
+        },
+      }),
+    );
+
+    renderProjection();
+
+    const rows = await screen.findAllByTestId('git-peek-file');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('Uconflict.ts');
+  });
+
   it('splits staged from unstaged', async () => {
     renderProjection();
 

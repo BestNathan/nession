@@ -1,8 +1,13 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { FixtureWorkspace } from '@/app/fixture/FixtureWorkspace';
+import {
+  FIXTURE_AGENT_PROCESS_COMMAND_A,
+  FIXTURE_AGENT_PROCESS_COMMAND_B,
+  type FixtureAgentProcessesWindow,
+} from '@/app/fixture/fixtureAgentProcesses';
 
 /** The fixture reads its observations from the route, so every render needs one. */
 function renderFixture(route = '/fixture/workspace') {
@@ -86,6 +91,29 @@ describe('FixtureWorkspace', () => {
     await screen.findByTestId('git-change-list');
     expect(screen.getByTestId('git-branch')).toHaveTextContent('feat/repo-status');
     expect(screen.getByTestId('git-summary')).toHaveTextContent('2 ahead, 1 behind');
+  });
+
+  it('renders the Agent capability over the two-Agent same-name fixture (#2803)', async () => {
+    renderFixture('/fixture/workspace?capability=agent&agentProcesses=pending');
+
+    expect(await screen.findByTestId('agent-detail')).toBeInTheDocument();
+    expect(await screen.findByText(FIXTURE_AGENT_PROCESS_COMMAND_A)).toBeInTheDocument();
+
+    const controls = (window as FixtureAgentProcessesWindow).fixtureAgentProcesses;
+    expect(controls?.selected()).toBe('agent-a:dev');
+
+    // The mounted capability observes the Session move: B's read is held, and
+    // A's rows must already be gone rather than relabeled as B's.
+    act(() => controls?.select('agent-b:dev'));
+    expect(await screen.findByTestId('agent-processes-snapshot-loading')).toBeInTheDocument();
+    expect(screen.queryByText(FIXTURE_AGENT_PROCESS_COMMAND_A)).not.toBeInTheDocument();
+    expect(controls?.selected()).toBe('agent-b:dev');
+    expect(controls?.betaRequests()).toBe(1);
+
+    act(() => controls?.releasePending());
+    expect(await screen.findByText(FIXTURE_AGENT_PROCESS_COMMAND_B)).toBeInTheDocument();
+    expect(screen.queryByText(FIXTURE_AGENT_PROCESS_COMMAND_A)).not.toBeInTheDocument();
+    expect(controls?.pendingSettled()).toBe(true);
   });
 
   /**

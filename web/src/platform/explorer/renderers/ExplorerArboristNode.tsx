@@ -56,6 +56,10 @@ export function ExplorerArboristNode({
       decorations={decorations}
       contextMenuItems={contextMenuItems}
       isRenaming={renamingId === node.id}
+      isSelected={node.isSelected}
+      isOpen={node.isOpen}
+      isLeaf={node.isLeaf}
+      onToggle={() => node.toggle()}
       renameValue={renameValue}
       onRenameChange={onRenameChange}
       onRenameSubmit={() => {
@@ -63,11 +67,20 @@ export function ExplorerArboristNode({
       }}
       onRenameCancel={onRenameCancel}
       onActivate={() => {
+        // Activating a row selects it; expansion and the browse directory stay
+        // separate state. The old directory branch only toggled, so "New file"
+        // had no selected directory to resolve and silently used the browse
+        // path instead.
+        store.setSelection([explorerNode.id]);
+        store.setActive(explorerNode.id);
+        // The row wrapper's own click-selection runs on the same event, but
+        // selecting here keeps the highlight truthful if a context-menu
+        // trigger ever stops that propagation.
+        node.select();
         if (explorerNode.kind === 'directory') {
           node.toggle();
           return;
         }
-        store.setActive(explorerNode.id);
         onFileActivate(explorerNode);
       }}
     />

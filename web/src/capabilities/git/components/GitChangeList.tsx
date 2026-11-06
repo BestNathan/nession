@@ -1,7 +1,7 @@
 import { FileText } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { isSelectable, type GitRow } from '../state';
+import type { GitRow } from '../state';
 
 const GROUPS = ['Conflicts', 'Modified', 'Untracked'] as const;
 
@@ -15,12 +15,10 @@ function groupOf(row: GitRow): (typeof GROUPS)[number] {
 /**
  * The repository's changes, grouped.
  *
- * Modified and untracked are separate groups (#750 SC2) and they are *not*
- * interchangeable rows: an untracked file has no diff, so its row renders as
- * text rather than a control. The grouping is a fact about the repository, not a
- * visual preference — `git diff HEAD` answers nothing for an untracked path, and
- * a row that looks openable but opens onto an empty pane is worse than one that
- * plainly is not.
+ * Modified and untracked are separate groups because they are different
+ * repository facts, but both are openable: a tracked row opens its bounded
+ * diff, while an untracked row opens the worktree file preview (#2838). The
+ * row kind is what selects the renderer, never an empty diff answer.
  *
  * Takes the rows rather than the status so that the caller derives them once:
  * an empty tree is a *layout* decision (the workspace drops the diff pane), and
@@ -34,7 +32,7 @@ export function GitChangeList({
 }: {
   rows: readonly GitRow[];
   selectedPath: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (row: GitRow) => void;
 }) {
   return (
     <div data-testid="git-change-list" className="space-y-4 p-3">
@@ -72,40 +70,23 @@ function GitRowItem({
 }: {
   row: GitRow;
   selected: boolean;
-  onSelect: (path: string) => void;
+  onSelect: (row: GitRow) => void;
 }) {
   const label = rowLabel(row);
-
-  if (!isSelectable(row)) {
-    // No control at all — not a disabled one. An inert row that reads as
-    // pressable would be a promise the capability cannot keep.
-    return (
-      <div
-        data-testid={`git-row-${row.kind}`}
-        data-path={row.path}
-        title={rowTitle(row)}
-        className={cn('flex items-center gap-2 px-2 py-1.5', chromeSansRole('secondary'))}
-      >
-        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="truncate text-muted-foreground">{row.path}</span>
-        {label ? <span className={cn('shrink-0 text-muted-foreground', chromeSansRole('metadata'))}>{label}</span> : null}
-      </div>
-    );
-  }
 
   return (
     <button
       type="button"
-      data-testid="git-row-tracked"
+      data-testid={`git-row-${row.kind}`}
       data-path={row.path}
       aria-label={row.path}
       title={rowTitle(row)}
       aria-current={selected ? 'true' : undefined}
-      onClick={() => onSelect(row.path)}
+      onClick={() => onSelect(row)}
       className={cn(
         'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
         chromeSansRole('secondary'),
-        'hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
         selected && 'bg-accent text-accent-foreground',
       )}
     >
@@ -139,7 +120,7 @@ function rowLabel(row: GitRow): string | null {
  * readable and the detail is one hover away.
  */
 function rowTitle(row: GitRow): string {
-  if (isSelectable(row) && row.file.originalPath) {
+  if (row.kind === 'tracked' && row.file.originalPath) {
     return `${row.file.originalPath} → ${row.path}`;
   }
   return row.path;

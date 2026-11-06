@@ -1,0 +1,136 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { gitApi } from '../GitPlugin';
+import type { GitRow } from '../state';
+import type { GitDiffResponse, GitPreviewResponse } from '../types';
+
+export type GitPreviewKind = 'untracked' | 'unmerged';
+
+export interface GitSelectionState {
+  selectedPath: string | null;
+  mode: 'diff' | 'preview' | null;
+  previewKind: GitPreviewKind | null;
+  diff: GitDiffResponse | null;
+  preview: GitPreviewResponse | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const NO_SELECTION: GitSelectionState = {
+  selectedPath: null,
+  mode: null,
+  previewKind: null,
+  diff: null,
+  preview: null,
+  loading: false,
+  error: null,
+};
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : 'Could not reach the agent';
+}
+
+/**
+ * One request per opened Git row, with the row kind choosing the operation.
+ *
+ * A tracked row asks for its bounded diff. An untracked or unmerged row asks
+ * for the worktree preview read, carrying the row kind it was selected from.
+ * Responses are dropped when the Session moved on or the selection changed;
+ * the Agent independently rechecks the row's status before and after reading.
+ */
+export function useGitSelection({
+  agentId,
+  sessionId,
+  handedOver,
+  rows,
+}: {
+  agentId: string | undefined;
+  sessionId: string | undefined;
+  handedOver: string | null;
+  rows: readonly GitRow[] | null;
+}) {
+  const [state, setState] = useState<GitSelectionState>(NO_SELECTION);
+  const generation = useRef(0);
+  const target = useRef<{ agent_id: string; session: string } | null>(null);
+  const lastHandoff = useRef<string | null>(null);
+
+  const selectRow = useCallback(async (row: GitRow) => {
+    const current = target.current;
+    if (!current) {
+      return;
+    }
+    const forGeneration = generation.current;
+    const mode = row.kind === 'tracked' ? 'diff' : 'preview';
+    const previewKind = row.kind === 'tracked' ? null : row.kind;
+
+    setState({
+      selectedPath: row.path,
+      mode,
+      previewKind,
+      diff: null,
+      preview: null,
+      loading: true,
+      error: null,
+    });
+
+    try {
+      if (row.kind === 'tracked') {
+        const response = await gitApi.gitDiff({ ...current, path: row.path });
+        if (generation.current !== forGeneration) {
+          return;
+        }
+        setState((previous) =>
+          previous.selectedPath === row.path && previous.mode === 'diff'
+            ? { ...previous, diff: response, loading: false, error: null }
+            : previous,
+        );
+      } else {
+        const response = await gitApi.gitPreview({
+          ...current,
+          path: row.path,
+          expected: row.kind,
+        });
+        if (generation.current !== forGeneration) {
+          return;
+        }
+        setState((previous) =>
+          previous.selectedPath === row.path && previous.mode === 'preview'
+            ? { ...previous, preview: response, loading: false, error: null }
+            : previous,
+        );
+      }
+    } catch (failure) {
+      if (generation.current !== forGeneration) {
+        return;
+      }
+      setState((previous) =>
+        previous.selectedPath === row.path && previous.mode === mode
+          ? { ...previous, loading: false, error: message(failure) }
+          : previous,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    generation.current += 1;
+    target.current = agentId && sessionId ? { agent_id: agentId, session: sessionId } : null;
+    lastHandoff.current = null;
+    setState(NO_SELECTION);
+  }, [agentId, sessionId]);
+
+  // The Terminal Peek hands over a path, not a response. Wait until the status
+  // listing can tell which kind of row that path is, then ask the matching
+  // operation. An unknown path stays unselected rather than guessing a diff.
+  useEffect(() => {
+    if (!target.current || !handedOver || !rows || lastHandoff.current === handedOver) {
+      return;
+    }
+    const row = rows.find((candidate) => candidate.path === handedOver);
+    if (!row) {
+      return;
+    }
+    lastHandoff.current = handedOver;
+    void selectRow(row);
+  }, [handedOver, rows, selectRow]);
+
+  return { state, selectRow };
+}

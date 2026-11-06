@@ -33,6 +33,21 @@ pub struct FileWritePayload {
     pub path: String,
     /// Base64-encoded content.
     pub content: String,
+    /// Refuse the write unless the target's current revision equals this value.
+    ///
+    /// A reader passes back the `revision` from {@link FileData}; if the file
+    /// changed in between, the agent answers `conflict` instead of silently
+    /// overwriting the newer content. `None` keeps the historical
+    /// unconditional-write behaviour for older clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<String>,
+    /// Refuse the write unless the target does not already exist.
+    ///
+    /// "Create file" and upload use this so two clients racing on the same
+    /// name cannot replace each other's content. Defaults to `false` for the
+    /// historical write semantics.
+    #[serde(default)]
+    pub create_only: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -41,6 +56,10 @@ pub struct FileWritePayload {
 pub struct FileWriteResponse {
     pub path: String,
     pub written: u64,
+    /// Opaque revision of the file after the write, suitable for the next
+    /// `expected_revision`.
+    #[serde(default)]
+    pub revision: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -59,6 +78,11 @@ pub struct FileDeletePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileCreateDirPayload {
     pub path: String,
+    /// Refuse creation when the directory already exists. The App/Web folder
+    /// actions use this so "New folder" reports the existing name instead of
+    /// silently accepting it.
+    #[serde(default)]
+    pub create_only: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -67,6 +91,11 @@ pub struct FileCreateDirPayload {
 pub struct FileRenamePayload {
     pub from: String,
     pub to: String,
+    /// Refuse to replace an existing destination. Rename/move from the UI
+    /// passes `true`; the historical unconditional rename default keeps older
+    /// clients working.
+    #[serde(default)]
+    pub no_replace: bool,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -129,6 +158,13 @@ pub struct FileData {
     /// Whether more bytes remain after this chunk.
     #[serde(default)]
     pub has_more: bool,
+    /// Opaque revision of the file at read time.
+    ///
+    /// Derived from the file's metadata rather than a content hash so a
+    /// chunked read never rehashes the file. Pass it back as
+    /// `expected_revision` on write to refuse overwriting a newer file.
+    #[serde(default)]
+    pub revision: String,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

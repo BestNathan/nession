@@ -145,7 +145,7 @@ Read from production consumers, not from the values. Counts are Web leaves
 | `terminal` | 4 | `pattern.terminal-surface` | the xterm surface's own type and inset. `padX` / `padY` are consumed as CSS by `product/terminal/components/TerminalViewport.tsx`; `fontSize` / `lineHeight` reach xterm as JS options through `design/generated/terminal.ts`, so the inventory's lexical consumer scan classifies them `reserved` even though they are wired — the scan reads `web/src` for `--var` and utility spellings, and this channel has neither |
 | `shell.sessionRowPadY` / `TitleFontSize` / `MetaFontSize` | 3 | `pattern.session-item` | consumed only by `features/sessions/components/SessionItem.tsx` |
 | `shell` (the rest) | 18 | **shell composition** | the shell's own chrome. `shell.space-*` is generic spacing; `shell.railWidth` / `foot*` size the shell, which is the composition root rather than a pattern — no `$owner`, and none is warranted |
-| `control`, `icon`, `focus`, `motion` | 10 | **generic platform** | consumers span `app/`, `app/workspace/`, `app/patterns/` and the capsule, which is what "generic" means here |
+| `control`, `icon`, `focus`, `motion` | 10 | **generic platform** | consumers span `components/ui/`, `app/`, `app/workspace/`, `app/patterns/` and the capsule, which is what "generic" means here. Focus uses the semantic `ring` colour to repaint a bordered field; `focus.ringWidth` / `focus.ringOffset` size the inset outline on borderless controls — see [components.md](components.md#focus-treatment) |
 | `row` | 3 | generic platform | zero consumers, already classified `reserved` |
 
 `shell.sessionRowRadius` is deliberately **not** annotated: it is genuinely

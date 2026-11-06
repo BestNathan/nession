@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { FileEntry } from '@/capabilities/files';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { resolveFileSource, type FileEntry } from '@/capabilities/files';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
+import { cn } from '@/shared/lib/utils';
+import { bodyAppClass } from './appTypography';
 import { AppFilesDirectoryPane } from './AppFilesDirectoryPane';
 import { AppFilesSearchPanel } from './AppFilesSearchPanel';
 import { AppFilesViewerLayer } from './AppFilesViewerLayer';
@@ -20,6 +22,17 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
 
   const selection = useAppFilesSelection();
 
+  const source = useMemo(
+    () =>
+      resolveFileSource({
+        sessionId: ctx.session?.session_id,
+        agentId: ctx.agent?.agent_id,
+        agentLabel: ctx.agent?.display_name ?? ctx.agent?.hostname,
+        fileOps: ctx.fileOps,
+      }),
+    [ctx.session?.session_id, ctx.agent, ctx.fileOps],
+  );
+
   const nav = useAppFilesNavigator(
     depth,
     {
@@ -27,13 +40,19 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
       agentLabel: ctx.agent?.display_name ?? ctx.agent?.hostname,
     },
     ctx.fileOps,
+    source.id,
   );
 
-  const search = useAppFilesSearch(ctx.fileOps, nav.searchOpen);
-  const handoffError = useAppFilesFocusHandoff(ctx.focus, ctx.fileOps, ctx.onFocusConsumed, nav);
+  const search = useAppFilesSearch(source.fileOps, nav.searchOpen);
+  const handoffError = useAppFilesFocusHandoff(
+    ctx.focus,
+    source.fileOps,
+    ctx.onFocusConsumed,
+    nav,
+  );
 
   const bulk = useAppFilesBulkActions(
-    ctx.fileOps,
+    source.fileOps,
     selection,
     listEntriesRef as RefObject<FileEntry[]>,
     () => setListReloadSignal((n) => n + 1),
@@ -43,14 +62,21 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
     setMoreOpen(false);
   }, [nav.currentDir, nav.searchOpen, nav.selected]);
 
-  if (!ctx.fileOps) {
-    return null;
+  if (source.fileOps === null) {
+    return (
+      <div
+        data-testid="file-source-unavailable"
+        className={cn('flex h-full items-center justify-center px-6 text-center text-muted-foreground', bodyAppClass)}
+      >
+        {source.reason}
+      </div>
+    );
   }
 
   if (nav.selected) {
     return (
       <AppFilesViewerLayer
-        fileOps={ctx.fileOps}
+        fileOps={source.fileOps}
         path={nav.selected.path}
         filename={nav.selected.filename}
         size={nav.selected.size}
@@ -79,7 +105,7 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
 
   return (
     <AppFilesDirectoryPane
-      fileOps={ctx.fileOps}
+      fileOps={source.fileOps}
       nav={nav}
       selection={selection}
       bulk={bulk}

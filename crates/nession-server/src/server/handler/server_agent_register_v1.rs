@@ -101,6 +101,47 @@ impl ConnectionHandler {
             ))));
         };
 
+        // Registration is where an agent's *current* generation authority is
+        // created, so the authority check and the registry/SQLite/session
+        // publication below must be one ordered transition per agent — see
+        // `CommandBroker::begin_registration`. The guard is held until this
+        // handler has finished writing: while an older registration is
+        // applying its state, a newer one waits at the gate, and when a newer
+        // one has applied first, the older one is refused here — before any
+        // write it could make. A check alone would be a TOCTOU: the older
+        // frame could pass it, the newer registration complete in full, and
+        // the older registration's writes then land on top (#960).
+        //
+        // This is reachable even though re-registration on one socket is
+        // refused above: the older connection in the scenario has not
+        // registered yet. Its first frame was merely slow, and by the time it
+        // arrives the newer connection owns the agent.
+        let Some(_registration) = self
+            .command_broker
+            .begin_registration(&payload.agent_id, self.connection_generation)
+            .await
+        else {
+            info!(
+                "Agent {} rejected: {} is older than the agent's current generation",
+                payload.agent_id, self.connection_generation
+            );
+            // Deliberately says nothing about the newer connection: a stale
+            // peer gets the fact that it lost, not the identity of the winner.
+            return Ok(HandlerAction::Reply(Some(Message::Text(
+                json!({
+                    "msg_type": "server.agent.register",
+                    "id": msg.id,
+                    "timestamp": current_timestamp(),
+                    "payload": {
+                        "status": "rejected",
+                        "message": "This connection has been superseded by a newer \
+                                    connection for this agent."
+                    }
+                })
+                .to_string(),
+            ))));
+        };
+
         let addresses = crate::registry::build_probed_addresses(
             payload.addresses.clone(),
             &payload.ip_address,
@@ -147,6 +188,7 @@ impl ConnectionHandler {
             // reconnected since — and for that straggler the relay gate refuses
             // rather than guesses.
             protocol_manifest: Some(protocol_manifest),
+            probe_generation: 0,
         };
 
         self.agent_registry.register(agent_info).await;

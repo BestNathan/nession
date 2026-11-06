@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   RefreshCw,
   FolderPlus,
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AlertDialog,
@@ -24,6 +26,7 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useExplorerFileBrowser } from '../hooks/useExplorerFileBrowser';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { Explorer } from '@/platform/explorer/Explorer';
+import type { ExplorerExtension } from '@/platform/explorer';
 
 export interface FileBrowserProps {
   fileOps: FileOps;
@@ -54,6 +57,37 @@ export function FileBrowser({
     onGetTerminalPwd,
   });
 
+  const { openCreate } = browser;
+  const createExtension = useMemo<ExplorerExtension>(
+    () => ({
+      id: 'files.create',
+      contextMenus: [
+        {
+          id: 'files.create.new-file-here',
+          when: (node) => node.kind === 'directory',
+          render: (node) => (
+            <ContextMenuItem onClick={() => openCreate('file', node)}>
+              <FilePlus /> New file here
+            </ContextMenuItem>
+          ),
+        },
+        {
+          id: 'files.create.new-folder-here',
+          when: (node) => node.kind === 'directory',
+          render: (node) => (
+            <ContextMenuItem onClick={() => openCreate('folder', node)}>
+              <FolderPlus /> New folder here
+            </ContextMenuItem>
+          ),
+        },
+      ],
+    }),
+    [openCreate],
+  );
+
+  const extensions = useMemo(() => [createExtension], [createExtension]);
+  const form = browser.newEntryForm;
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <FileToolbar
@@ -64,15 +98,12 @@ export function FileBrowser({
         onRefresh={() => {
           void browser.handleRefresh();
         }}
-        onNewFile={() => {
-          browser.newEntryForm.setShowNewFile(true);
-          browser.newEntryForm.setShowNewFolder(false);
+        onNewFile={() => browser.openCreate('file')}
+        onNewFolder={() => browser.openCreate('folder')}
+        onUploadClick={() => {
+          browser.beginUpload();
+          browser.fileInputRef.current?.click();
         }}
-        onNewFolder={() => {
-          browser.newEntryForm.setShowNewFolder(true);
-          browser.newEntryForm.setShowNewFile(false);
-        }}
-        onUploadClick={() => browser.fileInputRef.current?.click()}
         showCwdButton={browser.showCwdButton}
         onNavigateToCwd={() => {
           void browser.handleNavigateToCwd();
@@ -87,57 +118,78 @@ export function FileBrowser({
         }}
       />
 
-      {(browser.newEntryForm.showNewFile || browser.newEntryForm.showNewFolder) && (
-        <div className="flex items-center gap-1 px-2 py-1 border-b">
-          <Input
-            autoFocus
-            placeholder={browser.newEntryForm.showNewFile ? 'filename.txt' : 'folder-name'}
-            value={browser.newEntryForm.newName}
-            onChange={(e) => browser.newEntryForm.setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                if (browser.newEntryForm.showNewFile) {
-                  browser.handleCreateFile();
-                } else {
-                  browser.handleCreateFolder();
+      {form.target !== null && (
+        <div className="border-b px-2 py-1" data-testid="files-create-form">
+          <div className="flex items-center gap-1">
+            <Input
+              autoFocus
+              aria-label={form.kind === 'file' ? 'New file name' : 'New folder name'}
+              aria-invalid={form.validationError !== null || undefined}
+              placeholder={form.kind === 'file' ? 'filename.txt' : 'folder-name'}
+              value={form.newName}
+              onChange={(e) => form.changeName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && form.canSubmit) {
+                  void browser.handleCreate();
                 }
-              }
-              if (e.key === 'Escape') {
-                browser.newEntryForm.reset();
-              }
-            }}
-            className={cn('h-7', chromeSansRole('metadata'))}
-          />
-          <Button
-            size="sm"
-            className={cn('h-7', chromeSansRole('metadata'))}
-            onClick={() => {
-              if (browser.newEntryForm.showNewFile) {
-                browser.handleCreateFile();
-              } else {
-                browser.handleCreateFolder();
-              }
-            }}
+                if (e.key === 'Escape') {
+                  form.reset();
+                }
+              }}
+              className={cn('h-7', chromeSansRole('metadata'))}
+            />
+            <Button
+              size="sm"
+              className={cn('h-7', chromeSansRole('metadata'))}
+              disabled={!form.canSubmit}
+              onClick={() => {
+                void browser.handleCreate();
+              }}
+            >
+              Create
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={cn('h-7', chromeSansRole('metadata'))}
+              onClick={() => form.reset()}
+            >
+              Cancel
+            </Button>
+          </div>
+          <p
+            className={cn('pt-1 text-muted-foreground', chromeSansRole('caption'))}
+            data-testid="files-create-destination"
           >
-            Create
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className={cn('h-7', chromeSansRole('metadata'))}
-            onClick={() => browser.newEntryForm.reset()}
-          >
-            Cancel
-          </Button>
+            In {form.parentPath || 'Workspace root'}
+            {form.newName.trim() ? ` → ${form.destinationPath}` : ''}
+          </p>
+          {form.validationError !== null && (
+            <p
+              className={cn('text-destructive', chromeSansRole('caption'))}
+              data-testid="files-create-error"
+            >
+              {form.validationError}
+            </p>
+          )}
+          {form.submitError !== null && (
+            <p
+              className={cn('text-destructive', chromeSansRole('caption'))}
+              data-testid="files-create-error"
+            >
+              {form.submitError}
+            </p>
+          )}
         </div>
       )}
 
       <Explorer
         provider={browser.provider}
+        extensions={extensions}
         onFileActivate={browser.handleFileActivate}
         onFileRenamed={browser.handleExplorerRenamed}
         onDeleteRequest={browser.handleDeleteRequest}
-        revealPath={browser.currentPath}
+        revealPath={browser.revealPath}
         hideToolbar
         storeRef={browser.storeRef}
         className="flex-1 min-h-0"

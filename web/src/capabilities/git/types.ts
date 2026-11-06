@@ -48,6 +48,11 @@ import {
   type BranchesRequest,
   type BranchesResponse,
 } from '@/generated/protocol/git/branches/v1';
+import {
+  type PreviewRequest,
+  type PreviewResponse,
+  type FilePreview,
+} from '@/generated/protocol/git/preview/v1';
 import type { RootResponse } from '@/generated/protocol/git/root/v1';
 import {
   type Worktree,
@@ -68,6 +73,7 @@ export type GitLogRequest = LogRequest & { agent_id: string };
 export type GitCommitRequest = CommitRequest & { agent_id: string };
 export type GitBranchesRequest = BranchesRequest & { agent_id: string };
 export type GitWorktreesRequest = WorktreesRequest & { agent_id: string };
+export type GitPreviewRequest = PreviewRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type GitStatusResponse = StatusResponse;
@@ -77,6 +83,7 @@ export type GitCommitResponse = CommitResponse;
 export type GitBranchesResponse = BranchesResponse;
 export type GitRootResponse = RootResponse;
 export type GitWorktreesResponse = WorktreesResponse;
+export type GitPreviewResponse = PreviewResponse;
 
 /** The capability's names for the payload shapes. */
 export type GitChangeKind = ChangeKind;
@@ -90,6 +97,7 @@ export type GitCommitChangedFile = ChangedFileEntry;
 export type GitBranch = Branch;
 export type GitBranches = Branches;
 export type GitWorktree = Worktree;
+export type GitFilePreview = FilePreview;
 export type GitWorktrees = Worktrees;
 
 /**
@@ -115,6 +123,7 @@ export type GitCommitOk = Extract<GitCommitResponse, { state: 'ok' }>;
 export type GitBranchesOk = Extract<GitBranchesResponse, { state: 'ok' }>;
 export type GitRootOk = Extract<GitRootResponse, { state: 'ok' }>;
 export type GitWorktreesOk = Extract<GitWorktreesResponse, { state: 'ok' }>;
+export type GitPreviewOk = Extract<GitPreviewResponse, { state: 'ok' }>;
 
 /** `agent.git.invalidated` — repository state may be stale (#1008). */
 export interface GitInvalidatedEvent {

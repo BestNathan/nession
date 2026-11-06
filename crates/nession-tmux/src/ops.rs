@@ -543,6 +543,12 @@ pub struct SessionSummary {
     pub height: u16,
     pub working_dir: Option<String>,
     pub foreground_command: Option<String>,
+    /// The Nession-owned tmux user option that fences this Session's metadata.
+    ///
+    /// `None` for a Session that predates metadata (or has not been asked yet);
+    /// reading it does not create it. It is durable across an Agent restart
+    /// because the tmux server owns it, and a kill/recreate gets a new value.
+    pub instance_id: Option<String>,
 }
 
 /// The `list-sessions -F` format `list_sessions` parses.
@@ -550,7 +556,7 @@ pub struct SessionSummary {
 /// `|` is the delimiter because tmux converts tab characters in format strings
 /// to underscores. `pane_current_command` is last and the split is capped, so a
 /// `|` inside it stays part of the command instead of shifting the row.
-const SESSION_LIST_FORMAT: &str = "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}";
+const SESSION_LIST_FORMAT: &str = "#{session_name}|#{@nession_instance_id}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}";
 
 /// Whether a failed `list-sessions` just means "there are no sessions".
 ///
@@ -565,21 +571,23 @@ fn is_no_sessions_stderr(stderr: &str) -> bool {
 
 /// Parse one [`SESSION_LIST_FORMAT`] row.
 fn session_summary_from_line(line: &str) -> Option<SessionSummary> {
-    let parts: Vec<&str> = line.splitn(8, '|').collect();
-    if parts.len() != 8 {
+    let parts: Vec<&str> = line.splitn(9, '|').collect();
+    if parts.len() != 9 {
         return None;
     }
-    let working_dir = parts.get(6).copied().unwrap_or_default();
-    let foreground = parts.get(7).copied().unwrap_or_default();
+    let instance_id = parts.get(1).copied().unwrap_or_default();
+    let working_dir = parts.get(7).copied().unwrap_or_default();
+    let foreground = parts.get(8).copied().unwrap_or_default();
     Some(SessionSummary {
         name: parts.first().copied().unwrap_or_default().to_string(),
-        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
-        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
-        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
-        width: parts.get(4).and_then(|s| s.parse().ok())?,
-        height: parts.get(5).and_then(|s| s.parse().ok())?,
+        created_at: parts.get(2).and_then(|s| s.parse().ok())?,
+        window_count: parts.get(3).and_then(|s| s.parse().ok())?,
+        attached_clients: parts.get(4).and_then(|s| s.parse().ok())?,
+        width: parts.get(5).and_then(|s| s.parse().ok())?,
+        height: parts.get(6).and_then(|s| s.parse().ok())?,
         working_dir: (!working_dir.is_empty()).then(|| working_dir.to_string()),
         foreground_command: (!foreground.is_empty()).then(|| foreground.to_string()),
+        instance_id: (!instance_id.is_empty()).then(|| instance_id.to_string()),
     })
 }
 
@@ -1220,9 +1228,15 @@ impl TmuxOps {
     /// List the server's sessions, newest tmux answer first (tmux's order).
     ///
     /// A server that is not running is an empty list, not an error — that is
-    /// the normal state of an idle socket. Every other failure is logged and
-    /// answered the same way, preserving the pre-existing policy that a poll
-    /// does not turn into a session-surface failure.
+    /// the normal state of an idle socket. Every **other** failure is an
+    /// error: a consumer that cannot tell "the server has no sessions" from
+    /// "we could not ask" will treat a transient enumeration failure as proof
+    /// that every Session was deleted. The watcher/Server path acts on that
+    /// proof destructively (Session registry + desired Environment Binding),
+    /// so the distinction must be preserved here, where tmux's own exit
+    /// status is still available (`#2804`). This matches
+    /// [`Self::list_panes`], which already refuses to claim an empty Pane
+    /// snapshot after a real failure.
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
         let output = tokio::time::timeout(
             self.list_timeout,
@@ -1237,10 +1251,9 @@ impl TmuxOps {
             let stderr = stderr.trim();
             if is_no_sessions_stderr(stderr) {
                 tracing::debug!("tmux list-sessions: {stderr} (no tmux server running)");
-            } else {
-                tracing::warn!("tmux list-sessions exited with {}: {stderr}", output.status);
+                return Ok(Vec::new());
             }
-            return Ok(Vec::new());
+            anyhow::bail!("tmux list-sessions failed ({}): {stderr}", output.status);
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1360,6 +1373,28 @@ impl TmuxOps {
     ///
     /// The caller decides whether a failure is required or merely observable;
     /// this returns it either way, carrying tmux's own stderr.
+    /// Read one session-scoped option: `tmux show-options -qv -t <session> <name>`.
+    ///
+    /// `-q` suppresses tmux's "unknown option" diagnostic and `-v` prints only
+    /// the value. A missing user option is `Ok(None)` — the normal state of a
+    /// Session that has not been asked for metadata yet — while an unreadable
+    /// Session is an error the caller must not mistake for absence.
+    pub async fn show_option(&self, session: &str, name: &str) -> Result<Option<String>> {
+        let output = self
+            .command
+            .output(&["show-options", "-qv", "-t", session, name])
+            .await?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux show-options -t {session} {name} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok((!value.is_empty()).then_some(value))
+    }
+
     pub async fn set_option(&self, session: &str, name: &str, value: &str) -> Result<()> {
         let output = self
             .command
@@ -2064,6 +2099,46 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(2));
     }
 
+    #[tokio::test]
+    async fn an_idle_server_is_an_empty_session_list_not_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::testing::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in list-sessions) \
+             echo 'no server running on /tmp/x/tmux.sock' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let ops = TmuxOps::new(fake.command());
+        let sessions = ops
+            .list_sessions()
+            .await
+            .expect("an idle server is an empty list, not a failure");
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_list_sessions_is_an_error_not_an_empty_session_list() {
+        // #2804: a real non-zero exit ("lost server", permission denied, …)
+        // must stay distinguishable from the idle-server empty answer; the
+        // watcher treats an observed empty list as proof of deletion.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::testing::FakeTmux::new(
+            dir.path(),
+            "case \"$1\" in list-sessions) echo 'lost server' >&2; exit 1;; \
+             *) exit 0;; esac",
+        );
+        let ops = TmuxOps::new(fake.command());
+        let err = ops
+            .list_sessions()
+            .await
+            .expect_err("a real enumeration failure must not become an empty session list");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("lost server"),
+            "the failure must carry tmux's own stderr: {message}"
+        );
+    }
+
     #[test]
     fn missing_socket_file_counts_as_no_sessions() {
         // The exact wording tmux 3.6b emits for a socket path that does not
@@ -2095,7 +2170,7 @@ mod tests {
 
     #[test]
     fn parses_a_session_row_including_the_foreground_command() {
-        let info = session_summary_from_line("work|1700000000|2|1|120|40|/repo|claude")
+        let info = session_summary_from_line("work||1700000000|2|1|120|40|/repo|claude")
             .expect("row parses");
         assert_eq!(info.name, "work");
         assert_eq!(info.created_at, 1_700_000_000);
@@ -2104,13 +2179,26 @@ mod tests {
         assert_eq!(info.width, 120);
         assert_eq!(info.height, 40);
         assert_eq!(info.foreground_command.as_deref(), Some("claude"));
+        assert_eq!(info.instance_id, None);
+    }
+
+    #[test]
+    fn parses_the_owned_instance_id_beside_the_name() {
+        let info = session_summary_from_line(
+            "work|3f7c0f6e-0d1c-4d5e-9a7b-2c1f0e9d8a6b|1700000000|1|0|80|24|/repo|claude",
+        )
+        .expect("row parses");
+        assert_eq!(
+            info.instance_id.as_deref(),
+            Some("3f7c0f6e-0d1c-4d5e-9a7b-2c1f0e9d8a6b")
+        );
     }
 
     #[test]
     fn keeps_a_pipe_inside_the_foreground_command() {
         // The command is the last field, so a delimiter inside it must survive
         // instead of shifting every row into the "unparseable" branch.
-        let info = session_summary_from_line("work|1700000000|1|0|80|24|/repo|we|ird")
+        let info = session_summary_from_line("work||1700000000|1|0|80|24|/repo|we|ird")
             .expect("row parses");
         assert_eq!(info.foreground_command.as_deref(), Some("we|ird"));
     }
@@ -2118,17 +2206,17 @@ mod tests {
     #[test]
     fn reports_an_absent_foreground_command_as_none() {
         let info =
-            session_summary_from_line("work|1700000000|1|0|80|24|/repo|").expect("row parses");
+            session_summary_from_line("work||1700000000|1|0|80|24|/repo|").expect("row parses");
         assert_eq!(info.foreground_command, None);
     }
 
     #[test]
     fn rejects_rows_with_too_few_fields() {
-        assert!(session_summary_from_line("work|1700000000|1|0|80|24").is_none());
+        assert!(session_summary_from_line("work||1700000000|1|0|80|24").is_none());
     }
 
     #[test]
     fn rejects_rows_with_unparseable_numbers() {
-        assert!(session_summary_from_line("work|not-a-number|1|0|80|24|/repo|claude").is_none());
+        assert!(session_summary_from_line("work||not-a-number|1|0|80|24|/repo|claude").is_none());
     }
 }

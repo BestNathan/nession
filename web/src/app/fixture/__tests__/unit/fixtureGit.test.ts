@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureGitSurface } from '@/app/fixture/fixtureGit';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
-import type { GitCommitResponse, GitLogResponse } from '@/capabilities/git';
+import type {
+  GitCommitResponse,
+  GitDiffResponse,
+  GitLogResponse,
+  GitPreviewResponse,
+} from '@/capabilities/git';
 
 /**
  * The fixture's git surface is an *input*, so it has no rendering to look wrong.
@@ -31,12 +36,45 @@ describe('fixture git surface', () => {
     for (const wire of [
       'git.status',
       'git.diff',
+      'git.preview',
       'git.log',
       'git.commit',
       'git.branches',
       'git.worktrees',
     ]) {
       expect(advertised, `${wire} is answered but not advertised`).toContain(wire);
+    }
+  });
+
+  it('answers one preview shape for every row in the preview scenario', async () => {
+    const surface = fixtureGitSurface('?capability=git&git=preview-states');
+
+    const untracked = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'notes/new.ts',
+      expected: 'untracked',
+    });
+    expect(untracked.state).toBe('ok');
+    if (untracked.state === 'ok') {
+      expect(untracked.preview.state).toBe('ready');
+      expect(untracked.preview.text).toContain('untracked');
+    }
+
+    const conflict = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'src/conflict.ts',
+      expected: 'unmerged',
+    });
+    expect(conflict.state).toBe('ok');
+    if (conflict.state === 'ok') {
+      expect(conflict.preview.text).toContain('<<<<<<< HEAD');
+    }
+
+    const missing = await surface.request<GitPreviewResponse>('git.preview', {
+      path: 'src/missing.txt',
+      expected: 'untracked',
+    });
+    expect(missing.state).toBe('ok');
+    if (missing.state === 'ok') {
+      expect(missing.preview.state).toBe('missing');
     }
   });
 
@@ -89,5 +127,39 @@ describe('fixture git surface', () => {
     });
 
     expect(response.state).toBe('error');
+  });
+
+  /**
+   * The route that backs the renderer's state assertions names a repository,
+   * not a rendering. This checks the repository exposes one file for each
+   * answer the diff view has to distinguish, so a missing fixture fails here
+   * rather than as a mysterious count in a browser assertion.
+   */
+  it('answers one diff per state the renderer must distinguish', async () => {
+    const surface = fixtureGitSurface('?capability=git&git=diff-states');
+    const paths = [
+      'web/src/capabilities/git/GitPlugin.ts',
+      'assets/logo.png',
+      'mode/run.sh',
+      'src/empty.txt',
+      'src/large.ts',
+      'src/long.ts',
+      'src/malformed.ts',
+    ];
+
+    const answers = await Promise.all(
+      paths.map((path) => surface.request<GitDiffResponse>('git.diff', { path })),
+    );
+
+    expect(answers.every((answer) => answer.state === 'ok')).toBe(true);
+    const diffs = answers.map((answer) => (answer.state === 'ok' ? answer.diff : null));
+    expect(diffs[1]?.binary).toBe(true);
+    expect(diffs[2]?.text).toContain('old mode');
+    expect(diffs[3]?.text).toBe('');
+    expect(diffs[4]?.truncated).toBe(true);
+    expect(diffs[4]?.truncated_bytes).toBe(4096);
+    expect(diffs[5]?.text).toContain('@@ -1,100 +1,101 @@');
+    expect(diffs[5]?.text.split('\n').length).toBeGreaterThan(100);
+    expect(diffs[6]?.text).toContain('@@ -1,2 +1,2 @@');
   });
 });

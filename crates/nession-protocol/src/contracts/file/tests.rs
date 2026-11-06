@@ -51,10 +51,54 @@ fn a_rename_names_both_ends() {
     let msg = FileRenamePayload {
         from: "/tmp/a".to_string(),
         to: "/tmp/b".to_string(),
+        no_replace: false,
     };
     let back: FileRenamePayload =
         serde_json::from_value(serde_json::to_value(&msg).unwrap()).unwrap();
     assert_eq!((back.from.as_str(), back.to.as_str()), ("/tmp/a", "/tmp/b"));
+}
+
+#[test]
+fn a_write_defaults_to_the_historical_unconditional_behaviour() {
+    // An older client that never heard of the guards must keep overwriting as
+    // it always did; the safe direction is the explicit request, not the
+    // absent key. The revision key is also omitted rather than sent as null.
+    let json = serde_json::json!({ "path": "/tmp/a", "content": "YQ==" });
+    let msg: FileWritePayload = serde_json::from_value(json).unwrap();
+    assert!(msg.expected_revision.is_none());
+    assert!(!msg.create_only);
+
+    let guarded = FileWritePayload {
+        path: "/tmp/a".to_string(),
+        content: "YQ==".to_string(),
+        expected_revision: Some("1-1".to_string()),
+        create_only: true,
+    };
+    let json = serde_json::to_value(&guarded).unwrap();
+    assert_eq!(json["expected_revision"], "1-1");
+    assert_eq!(json["create_only"], true);
+}
+
+#[test]
+fn a_guarded_rename_and_create_dir_default_off() {
+    let rename: FileRenamePayload =
+        serde_json::from_value(serde_json::json!({ "from": "/a", "to": "/b" })).unwrap();
+    assert!(!rename.no_replace);
+
+    let create: FileCreateDirPayload =
+        serde_json::from_value(serde_json::json!({ "path": "/d" })).unwrap();
+    assert!(!create.create_only);
+}
+
+#[test]
+fn a_read_revision_is_optional_on_the_wire() {
+    // An older agent does not answer with a revision. The consumer treats the
+    // absent value as "cannot guard this write", not as a revision of "".
+    let json = serde_json::json!({
+        "path": "/tmp/a", "content": "YQ==", "mime_type": "text/plain"
+    });
+    let data: FileData = serde_json::from_value(json).unwrap();
+    assert!(data.revision.is_empty());
 }
 
 #[test]

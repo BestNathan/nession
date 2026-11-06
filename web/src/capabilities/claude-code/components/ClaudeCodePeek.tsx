@@ -85,7 +85,7 @@ export function ClaudeCodePeek({
                   className={cn(
                     'w-full truncate rounded-[var(--nession-radius-control)] text-left text-muted-foreground',
                     chromeSansRole('caption'),
-                    'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
                   )}
                 >
                   {/* The shared namer takes the canonical shape, so the

@@ -4,11 +4,29 @@ import type {
   GitBranchesResponse,
   GitCommitResponse,
   GitDiffResponse,
+  GitFilePreview,
   GitLogResponse,
+  GitPreviewResponse,
   GitStatusResponse,
   GitWorktreesResponse,
 } from '@/capabilities/git';
 import { FIXTURE_AGENTS } from './fixtureData';
+
+/**
+ * Deterministic controls the `git=overlap` scenario exposes to its Case.
+ *
+ * This is input, not rendering: the Case chooses when the older read settles
+ * and can assert how many reads were actually started (no polling).
+ */
+type FixtureGitOverlapWindow = Window & {
+  fixtureGitOverlap?: {
+    requests: number;
+    olderSettled: boolean;
+    releaseOlder: () => void;
+  };
+  /** Every `git.diff` path this surface has been asked for, in order. */
+  fixtureGitDiffRequests?: readonly string[];
+};
 
 /**
  * A canned git backend for the fixture route.
@@ -16,8 +34,8 @@ import { FIXTURE_AGENTS } from './fixtureData';
  * The fixture is offline, so the git capability has nothing to talk to. This
  * stands in for the agent's `git.*` answers with deterministic data,
  * which is what lets the canonical route render the view at all — and therefore
- * what lets e2e assert #750 SC2 (untracked has no expander) and SC5 (no write
- * affordance) against real DOM rather than against a jsdom mock.
+ * what lets e2e assert the Git Changes read-only surface against real DOM rather
+ * than against a jsdom mock.
  *
  * What it varies is the *repository*, never the component's state: a route
  * cannot ask for "the truncated view" or "the failure view" directly, only for
@@ -31,10 +49,57 @@ import { FIXTURE_AGENTS } from './fixtureData';
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
+ *   /#/fixture/workspace?capability=git&git=diff-states → one file of each diff
+ *     state the renderer owns: ordinary, binary, mode-only, empty, truncated,
+ *     malformed/raw-fallback, and one longer than the pane
+ *   /#/fixture/workspace?capability=git&git=preview-states → untracked,
+ *     conflicted, binary, truncated, missing and changed previews
+ *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
+ *     held until the Case releases it, so a manual Refresh can answer first
+ *     with the newer repository state (#2787)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
-  const status = scenario === 'clean' ? CLEAN_STATUS : CHANGED_STATUS;
+  const status =
+    scenario === 'clean'
+      ? CLEAN_STATUS
+      : scenario === 'diff-states'
+        ? DIFF_STATE_STATUS
+        : scenario === 'preview-states'
+          ? PREVIEW_STATE_STATUS
+          : CHANGED_STATUS;
+  /** Every `git.status` read this surface has been asked for. */
+  let statusRequests = 0;
+  /** Every `git.diff` path this surface has been asked for, in order. */
+  const diffRequests: string[] = [];
+  /** Resolves the held older read in the `overlap` scenario. */
+  let releaseOlderStatus: (() => void) | null = null;
+  let olderSettled = false;
+
+  /**
+   * Publish the overlap controls on the real browser window.
+   *
+   * The Case needs to say *when* the older read resolves, not wait a guessed
+   * amount of time. `olderSettled` flips only after a macrotask, so a Case that
+   * waits for it knows the stale continuation has had its chance to render.
+   * Guarded for the node-env unit project, which has no `window`.
+   */
+  const publishOverlap = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitOverlapWindow).fixtureGitOverlap = {
+      requests: statusRequests,
+      olderSettled,
+      releaseOlder: () => {
+        releaseOlderStatus?.();
+        setTimeout(() => {
+          olderSettled = true;
+          publishOverlap();
+        }, 0);
+      },
+    };
+  };
 
   // The real directory is filled by `AgentsPlugin` from the agent list; the
   // fixture has no agent list request, so it fills the same directory from the
@@ -48,10 +113,33 @@ export function fixtureGitSurface(search: string): PluginSurface {
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === 'git.status') {
+        statusRequests += 1;
+        if (scenario === 'overlap') {
+          publishOverlap();
+          if (statusRequests === 1) {
+            // The mount read: held in flight, answering with the older
+            // repository state when the Case releases it.
+            return new Promise<T>((resolve) => {
+              releaseOlderStatus = () => resolve(CLEAN_STATUS as T);
+              publishOverlap();
+            });
+          }
+          // The manual Refresh: the newer repository state, answered first.
+          return Promise.resolve(CHANGED_STATUS as T);
+        }
         return Promise.resolve(status as T);
       }
       if (type === 'git.diff') {
-        return Promise.resolve(diffFor(String(payload.path)) as T);
+        diffRequests.push(String(payload.path));
+        if (typeof window !== 'undefined') {
+          (window as FixtureGitOverlapWindow).fixtureGitDiffRequests = diffRequests;
+        }
+        return Promise.resolve(diffFor(String(payload.path), scenario) as T);
+      }
+      if (type === 'git.preview') {
+        return Promise.resolve(
+          previewFor(String(payload.path), String(payload.expected), scenario) as T,
+        );
       }
       if (type === 'git.log') {
         return Promise.resolve(historyFor(payload.limit) as T);
@@ -121,16 +209,16 @@ const CHANGED_STATUS: GitStatusResponse = {
     behind: 1,
     modified: [
       {
-        path: 'crates/nession-git/src/cmd.rs',
-        kind: 'modified',
-        staged: true,
-        unstaged: false,
-      },
-      {
         path: 'web/src/capabilities/git/GitPlugin.ts',
         kind: 'modified',
         staged: false,
         unstaged: true,
+      },
+      {
+        path: 'crates/nession-git/src/cmd.rs',
+        kind: 'modified',
+        staged: true,
+        unstaged: false,
       },
       { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
     ],
@@ -139,19 +227,232 @@ const CHANGED_STATUS: GitStatusResponse = {
   },
 };
 
-const TEXT_DIFF = [
-  'diff --git a/web/src/capabilities/git/GitPlugin.ts b/web/src/capabilities/git/GitPlugin.ts',
-  'index 1a2b3c4..5d6e7f8 100644',
-  '--- a/web/src/capabilities/git/GitPlugin.ts',
-  '+++ b/web/src/capabilities/git/GitPlugin.ts',
-  '@@ -1,4 +1,5 @@',
-  " import type { TransportPlugin } from '@/platform/socket/types';",
-  "+import type { GitStatusRequest } from './types';",
-  ' ',
-  ' export class GitPlugin implements TransportPlugin {',
-  '-  readonly name = "claude-code";',
-  '+  readonly name = "git";',
-].join('\n');
+function changedDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'index 1a2b3c4..5d6e7f8 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,4 +1,5 @@',
+    " import type { TransportPlugin } from '@/platform/socket/types';",
+    "+import type { GitStatusRequest } from './types';",
+    ' ',
+    ' export class GitPlugin implements TransportPlugin {',
+    '-  readonly name = "claude-code";',
+    '+  readonly name = "git";',
+  ].join('\n');
+}
+
+/**
+ * One file per state the diff renderer has to answer for.
+ *
+ * This is the repository that produces those answers: the renderer still
+ * decides what each one looks like. The truncated answer is a complete short
+ * patch with the Agent's truncation flag set — exactly what a byte cap at a
+ * hunk boundary produces — while the malformed answer has a hunk whose header
+ * promises more lines than the body carries, the shape a cut in the middle of
+ * a hunk produces.
+ */
+const DIFF_STATE_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/diff-rendering',
+    detached: false,
+    upstream: 'origin/feat/diff-rendering',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      {
+        path: 'web/src/capabilities/git/GitPlugin.ts',
+        kind: 'modified',
+        staged: false,
+        unstaged: true,
+      },
+      { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
+      { path: 'mode/run.sh', kind: 'modified', staged: true, unstaged: false },
+      { path: 'src/empty.txt', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/large.ts', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/long.ts', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/malformed.ts', kind: 'modified', staged: false, unstaged: true },
+    ],
+    untracked: [],
+    unmerged: [],
+  },
+};
+
+/**
+ * A repository with one row of every worktree-preview shape.
+ *
+ * `untracked` and `unmerged` are disjoint by construction: the Agent now
+ * reports a conflicted path once, in `unmerged` only. The missing/changed
+ * answers are races the reader can actually hit after selecting a row.
+ */
+const PREVIEW_STATE_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/file-preview',
+    detached: false,
+    upstream: 'origin/feat/file-preview',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      { path: 'src/deleted.ts', kind: 'deleted', staged: false, unstaged: true },
+    ],
+    untracked: [
+      'notes/new.ts',
+      'assets/logo.bin',
+      'src/large.txt',
+      'src/missing.txt',
+      'src/moved.txt',
+      'src/long-preview.txt',
+      'src/link',
+    ],
+    unmerged: ['src/conflict.ts', 'src/unmerged-missing.ts'],
+  },
+};
+
+function readyPreview(
+  path: string,
+  text: string,
+  overrides: Partial<GitFilePreview> = {},
+): GitPreviewResponse {
+  return {
+    state: 'ok',
+    preview: {
+      path,
+      state: 'ready',
+      text,
+      binary: false,
+      size: text.length,
+      truncated: false,
+      truncated_bytes: 0,
+      ...overrides,
+    },
+  };
+}
+
+function previewFor(path: string, expected: string, scenario: string): GitPreviewResponse {
+  if (scenario === 'preview-states') {
+    if (path === 'notes/new.ts') {
+      return readyPreview(path, 'export const note = "untracked";\n');
+    }
+    if (path === 'src/conflict.ts') {
+      return readyPreview(
+        path,
+        '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
+      );
+    }
+    if (path === 'assets/logo.bin') {
+      return readyPreview(path, '', { binary: true, size: 4096 });
+    }
+    if (path === 'src/large.txt') {
+      return readyPreview(path, 'first line\n', {
+        size: 4103,
+        truncated: true,
+        truncated_bytes: 4096,
+      });
+    }
+    if (path === 'src/missing.txt' || path === 'src/unmerged-missing.ts') {
+      return { state: 'ok', preview: { path, state: 'missing', text: '', binary: false, size: 0, truncated: false, truncated_bytes: 0 } };
+    }
+    if (path === 'src/long-preview.txt') {
+      const lines = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`);
+      return readyPreview(path, lines.join('\n'));
+    }
+    if (path === 'src/link') {
+      return {
+        state: 'ok',
+        preview: {
+          path,
+          state: 'unsupported',
+          text: '',
+          binary: false,
+          size: 0,
+          truncated: false,
+          truncated_bytes: 0,
+          message: 'This path is a symbolic link; previews do not follow links.',
+        },
+      };
+    }
+    if (path === 'src/moved.txt') {
+      return {
+        state: 'ok',
+        preview: {
+          path,
+          state: 'changed',
+          text: '',
+          binary: false,
+          size: 0,
+          truncated: false,
+          truncated_bytes: 0,
+          message: 'The file changed while it was being read. Refresh Git Changes.',
+        },
+      };
+    }
+  }
+
+  if (path.endsWith('index.ts')) {
+    return readyPreview(path, "export { GitPlugin } from './GitPlugin';\n");
+  }
+  if (path === 'notes.md') {
+    return readyPreview(path, '# Notes\n\nUntracked work in progress.\n');
+  }
+
+  return {
+    state: 'ok',
+    preview: {
+      path,
+      state: expected === 'unmerged' ? 'changed' : 'changed',
+      text: '',
+      binary: false,
+      size: 0,
+      truncated: false,
+      truncated_bytes: 0,
+      message: 'This path is no longer in the status group it was selected from. Refresh Git Changes.',
+    },
+  };
+}
+
+function modeDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'old mode 100644',
+    'new mode 100755',
+  ].join('\n');
+}
+
+function longDiff(path: string): string {
+  const lines = [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,100 +1,101 @@',
+  ];
+  for (let index = 1; index <= 100; index += 1) {
+    lines.push(` const line${index} = ${index}; // ${'x'.repeat(100)}`);
+  }
+  lines.push('+const inserted = true;');
+  return lines.join('\n');
+}
+
+function malformedDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,2 +1,2 @@',
+    '-const before = 1;',
+    '+const after = 2;',
+  ].join('\n');
+}
 
 /**
  * Commits, deterministic and offline.
@@ -381,15 +682,66 @@ const WORKTREES: GitWorktreesResponse = {
   },
 };
 
-function diffFor(path: string): GitDiffResponse {
+function diffFor(path: string, scenario: string): GitDiffResponse {
   if (path.endsWith('.png')) {
     return {
       state: 'ok',
       diff: { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
     };
   }
+
+  if (scenario === 'preview-states' && path === 'src/deleted.ts') {
+    return {
+      state: 'error',
+      message: 'This file is no longer available in the worktree.',
+    };
+  }
+
+  if (scenario === 'diff-states') {
+    if (path === 'mode/run.sh') {
+      return {
+        state: 'ok',
+        diff: { path, text: modeDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/empty.txt') {
+      return {
+        state: 'ok',
+        diff: { path, text: '', binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/large.ts') {
+      return {
+        state: 'ok',
+        diff: {
+          path,
+          text: changedDiff(path),
+          binary: false,
+          truncated_bytes: 4096,
+          truncated: true,
+        },
+      };
+    }
+    if (path === 'src/long.ts') {
+      return {
+        state: 'ok',
+        diff: { path, text: longDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/malformed.ts') {
+      return {
+        state: 'ok',
+        diff: { path, text: malformedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    return {
+      state: 'ok',
+      diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+    };
+  }
+
   return {
     state: 'ok',
-    diff: { path, text: TEXT_DIFF, binary: false, truncated_bytes: 0, truncated: false },
+    diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
   };
 }

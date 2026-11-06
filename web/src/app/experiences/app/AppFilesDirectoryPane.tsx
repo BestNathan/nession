@@ -101,6 +101,7 @@ export function AppFilesDirectoryPane({
         sessionId={sessionId}
         fileOps={fileOps}
         onRefresh={onListReload}
+        onCreatedFile={(entry) => nav.openFile(entry)}
       />
       <AppFilesDeleteDialog
         open={bulk.deleteOpen}

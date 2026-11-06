@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use base64::Engine;
 
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use std::time::UNIX_EPOCH;
 use tokio::task;
 
 use super::sandbox::PathSandbox;
@@ -50,11 +52,42 @@ pub use nession_protocol::contracts::file::v1::{FileData, FileEntry};
 /// High-level file operations scoped to a sandbox root.
 pub struct FileOps {
     sandbox: PathSandbox,
+    /// Serialises the metadata check and the atomic replace of a mutation.
+    ///
+    /// The agent is the writer for its host view, so an intra-process lock is
+    /// what makes "check the revision, then replace" a single decision instead
+    /// of two that a concurrent request can interleave. Reads and listings do
+    /// not take it.
+    mutation_lock: tokio::sync::Mutex<()>,
+}
+
+/// An opaque revision derived from the file's metadata.
+///
+/// Deliberately not a content hash: a chunked read must not rehash the whole
+/// file for every chunk. `mtime_nanos + size` is enough to notice a competing
+/// write, which is what `expected_revision` is for.
+fn revision_of(metadata: &fs::Metadata) -> String {
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{mtime}-{}", metadata.len())
+}
+
+fn revision_of_path(path: &Path) -> Result<String> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to stat: {}", path.display()))?;
+    Ok(revision_of(&metadata))
 }
 
 impl FileOps {
     pub fn new(sandbox: PathSandbox) -> Self {
-        Self { sandbox }
+        Self {
+            sandbox,
+            mutation_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
     /// Convert an absolute path to a sandbox-relative path for use with list_dir etc.
@@ -171,7 +204,7 @@ impl FileOps {
         let chunked = offset.is_some() || limit.is_some();
 
         let result = task::spawn_blocking(
-            move || -> Result<(Vec<u8>, String, u64, u64, bool)> {
+            move || -> Result<(Vec<u8>, String, u64, u64, bool, String)> {
                 let metadata = fs::metadata(&resolved).with_context(|| {
                     format!("failed to read metadata: {}", resolved.display())
                 })?;
@@ -195,7 +228,7 @@ impl FileOps {
                     let data = fs::read(&resolved).with_context(|| {
                         format!("failed to read file: {}", resolved.display())
                     })?;
-                    return Ok((data, mime, 0, size, false));
+                    return Ok((data, mime, 0, size, false, revision_of(&metadata)));
                 }
 
                 // Chunked path.
@@ -225,7 +258,14 @@ impl FileOps {
                 buf.truncate(bytes_read);
 
                 let has_more = actual_offset + (bytes_read as u64) < size;
-                Ok((buf, mime, actual_offset, size, has_more))
+                Ok((
+                    buf,
+                    mime,
+                    actual_offset,
+                    size,
+                    has_more,
+                    revision_of(&metadata),
+                ))
             },
         )
         .await??;
@@ -239,21 +279,50 @@ impl FileOps {
             offset: result.2,
             total_size: result.3,
             has_more: result.4,
+            revision: result.5,
         })
     }
 
     /// Write content to a file. Uses atomic write (temp + rename).
     /// `content` is base64-encoded bytes.
     pub async fn write_file(&self, path: &str, content_b64: &str) -> Result<u64> {
+        Ok(self
+            .write_file_with_options(path, content_b64, None, false)
+            .await?
+            .0)
+    }
+
+    /// Write content with create-only and stale-revision protection.
+    ///
+    /// `create_only` refuses an existing target atomically (`hard_link` is the
+    /// no-overwrite primitive; the temp file lives in the same directory). A
+    /// regular write may pass `expected_revision`, the revision returned by
+    /// {@link FileOps::read_file}; if the file changed since that read the
+    /// write is refused as a `conflict` instead of overwriting the newer
+    /// content.
+    ///
+    /// The metadata check and the replace happen under one process-wide
+    /// mutation lock, so two agent requests cannot interleave the check with
+    /// the other's replace.
+    pub async fn write_file_with_options(
+        &self,
+        path: &str,
+        content_b64: &str,
+        expected_revision: Option<&str>,
+        create_only: bool,
+    ) -> Result<(u64, String)> {
         let resolved = self.sandbox.resolve(path)?;
+        let expected_revision = expected_revision.map(str::to_owned);
 
         let data = base64::engine::general_purpose::STANDARD
             .decode(content_b64)
             .context("failed to decode base64 content")?;
 
         let len = data.len() as u64;
+        let user_path = path.to_string();
 
-        task::spawn_blocking(move || -> Result<u64> {
+        let _guard = self.mutation_lock.lock().await;
+        let (_, revision) = task::spawn_blocking(move || -> Result<(u64, String)> {
             // Ensure parent directory exists.
             if let Some(parent) = resolved.parent() {
                 fs::create_dir_all(parent).with_context(|| {
@@ -271,18 +340,96 @@ impl FileOps {
             fs::write(&tmp, &data)
                 .with_context(|| format!("failed to write temp file: {}", tmp.display()))?;
 
-            match fs::rename(&tmp, &resolved) {
-                Ok(()) => Ok(len),
-                Err(e) => {
-                    // Clean up the orphaned temp file on rename failure.
-                    let _ = fs::remove_file(&tmp);
-                    Err(e).with_context(|| format!("failed to rename temp file: {}", tmp.display()))
+            let revision = revision_of_path(&tmp)?;
+
+            if create_only {
+                match fs::hard_link(&tmp, &resolved) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&tmp);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        let _ = fs::remove_file(&tmp);
+                        anyhow::bail!("already_exists: {user_path}");
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+                        // Filesystems without hard links: reserve the name
+                        // atomically with `create_new`, then fill it.
+                        let mut file = match fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&resolved)
+                        {
+                            Ok(file) => file,
+                            Err(open_err)
+                                if open_err.kind() == std::io::ErrorKind::AlreadyExists =>
+                            {
+                                let _ = fs::remove_file(&tmp);
+                                anyhow::bail!("already_exists: {user_path}");
+                            }
+                            Err(open_err) => {
+                                let _ = fs::remove_file(&tmp);
+                                return Err(open_err).with_context(|| {
+                                    format!(
+                                        "failed to create file without replacing: {}",
+                                        resolved.display()
+                                    )
+                                });
+                            }
+                        };
+                        file.write_all(&data).with_context(|| {
+                            format!("failed to write file: {}", resolved.display())
+                        })?;
+                        let _ = fs::remove_file(&tmp);
+                    }
+                    Err(e) => {
+                        let _ = fs::remove_file(&tmp);
+                        return Err(e).with_context(|| {
+                            format!(
+                                "failed to create file without replacing: {}",
+                                resolved.display()
+                            )
+                        });
+                    }
+                }
+            } else {
+                if let Some(expected) = expected_revision {
+                    let current = match fs::metadata(&resolved) {
+                        Ok(metadata) => revision_of(&metadata),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            let _ = fs::remove_file(&tmp);
+                            anyhow::bail!("conflict: {user_path} was removed");
+                        }
+                        Err(e) => {
+                            let _ = fs::remove_file(&tmp);
+                            return Err(e).with_context(|| {
+                                format!("failed to stat: {}", resolved.display())
+                            });
+                        }
+                    };
+                    if current != expected {
+                        let _ = fs::remove_file(&tmp);
+                        anyhow::bail!(
+                            "conflict: {user_path} changed (expected revision {expected}, current {current})"
+                        );
+                    }
+                }
+
+                match fs::rename(&tmp, &resolved) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // Clean up the orphaned temp file on rename failure.
+                        let _ = fs::remove_file(&tmp);
+                        return Err(e)
+                            .with_context(|| format!("failed to rename temp file: {}", tmp.display()));
+                    }
                 }
             }
+
+            Ok((len, revision))
         })
         .await??;
 
-        Ok(len)
+        Ok((len, revision))
     }
 
     /// Delete a file, or a directory.
@@ -325,11 +472,36 @@ impl FileOps {
 
     /// Create a directory (and any missing parents).
     pub async fn create_dir(&self, path: &str) -> Result<()> {
-        let resolved = self.sandbox.resolve(path)?;
+        self.create_dir_with_options(path, false).await
+    }
 
+    /// Create a directory. `create_only` refuses an existing directory (and
+    /// any missing parent, because the UI target's parent always exists);
+    /// the default keeps the historical "create parents, accept existing"
+    /// behaviour for older clients.
+    pub async fn create_dir_with_options(&self, path: &str, create_only: bool) -> Result<()> {
+        let resolved = self.sandbox.resolve(path)?;
+        let user_path = path.to_string();
+
+        let _guard = self.mutation_lock.lock().await;
         task::spawn_blocking(move || -> Result<()> {
-            fs::create_dir_all(&resolved)
-                .with_context(|| format!("failed to create directory: {}", resolved.display()))?;
+            if create_only {
+                match fs::create_dir(&resolved) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        anyhow::bail!("already_exists: {user_path}");
+                    }
+                    Err(e) => {
+                        return Err(e).with_context(|| {
+                            format!("failed to create directory: {}", resolved.display())
+                        })
+                    }
+                }
+            } else {
+                fs::create_dir_all(&resolved).with_context(|| {
+                    format!("failed to create directory: {}", resolved.display())
+                })?;
+            }
             Ok(())
         })
         .await??;
@@ -339,9 +511,21 @@ impl FileOps {
 
     /// Rename (move) a file or directory within the sandbox.
     pub async fn rename(&self, from: &str, to: &str) -> Result<()> {
+        self.rename_with_options(from, to, false).await
+    }
+
+    /// Rename (move) with an optional no-replace guard.
+    ///
+    /// `no_replace` checks the destination under the mutation lock and refuses
+    /// with `already_exists` instead of letting `rename(2)` silently replace
+    /// it. The agent is the writer for its host view; a writer outside the
+    /// agent is outside this contract.
+    pub async fn rename_with_options(&self, from: &str, to: &str, no_replace: bool) -> Result<()> {
         let from_resolved = self.sandbox.resolve(from)?;
         let to_resolved = self.sandbox.resolve(to)?;
+        let user_to = to.to_string();
 
+        let _guard = self.mutation_lock.lock().await;
         task::spawn_blocking(move || -> Result<()> {
             // Ensure parent of destination exists.
             if let Some(parent) = to_resolved.parent() {
@@ -349,6 +533,18 @@ impl FileOps {
                     format!("failed to create parent dir: {}", parent.display())
                 })?;
             }
+
+            if no_replace {
+                match fs::symlink_metadata(&to_resolved) {
+                    Ok(_) => anyhow::bail!("already_exists: {user_to}"),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(e)
+                            .with_context(|| format!("failed to stat: {}", to_resolved.display()))
+                    }
+                }
+            }
+
             fs::rename(&from_resolved, &to_resolved).with_context(|| {
                 format!(
                     "failed to rename {} to {}",
@@ -710,6 +906,10 @@ mod tests {
             .unwrap()
     }
 
+    fn encode_b64(text: &str) -> String {
+        base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+    }
+
     #[tokio::test]
     async fn test_chunked_read_first_chunk() {
         let (dir, ops) = setup();
@@ -822,5 +1022,143 @@ mod tests {
 
         let decoded = decode_b64(&file_data.content);
         assert_eq!(decoded, content);
+    }
+
+    #[tokio::test]
+    async fn test_read_reports_a_revision_that_changes_after_write() {
+        let (_dir, ops) = setup();
+        let before = ops.read_file("missing", None, None).await;
+        assert!(before.is_err());
+
+        ops.write_file("file.txt", &encode_b64("one"))
+            .await
+            .unwrap();
+        let first = ops.read_file("file.txt", None, None).await.unwrap();
+        assert!(!first.revision.is_empty());
+
+        ops.write_file("file.txt", &encode_b64("two"))
+            .await
+            .unwrap();
+        let second = ops.read_file("file.txt", None, None).await.unwrap();
+        assert_ne!(first.revision, second.revision);
+    }
+
+    #[tokio::test]
+    async fn test_create_only_refuses_an_existing_file_and_keeps_its_content() {
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("existing.txt"), b"keep me").unwrap();
+
+        let err = ops
+            .write_file_with_options("existing.txt", &encode_b64("replace"), None, true)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already_exists"), "got: {err:#}");
+        assert_eq!(
+            fs::read(dir.path().join("existing.txt")).unwrap(),
+            b"keep me"
+        );
+
+        ops.write_file_with_options("new.txt", &encode_b64("created"), None, true)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(dir.path().join("new.txt")).unwrap(), b"created");
+    }
+
+    #[tokio::test]
+    async fn test_expected_revision_refuses_a_stale_write_and_accepts_the_current_one() {
+        let (dir, ops) = setup();
+        ops.write_file("file.txt", &encode_b64("first"))
+            .await
+            .unwrap();
+        let loaded = ops.read_file("file.txt", None, None).await.unwrap();
+
+        // Another writer changes the file after the read.
+        fs::write(dir.path().join("file.txt"), b"from another writer").unwrap();
+
+        let err = ops
+            .write_file_with_options(
+                "file.txt",
+                &encode_b64("stale"),
+                Some(&loaded.revision),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("conflict"), "got: {err:#}");
+        assert_eq!(
+            fs::read(dir.path().join("file.txt")).unwrap(),
+            b"from another writer"
+        );
+
+        let current = ops.read_file("file.txt", None, None).await.unwrap();
+        let (written, revision) = ops
+            .write_file_with_options(
+                "file.txt",
+                &encode_b64("updated"),
+                Some(&current.revision),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(written, 7);
+        assert!(!revision.is_empty());
+        assert_eq!(fs::read(dir.path().join("file.txt")).unwrap(), b"updated");
+    }
+
+    #[tokio::test]
+    async fn test_expected_revision_on_a_deleted_file_is_a_conflict() {
+        let (dir, ops) = setup();
+        ops.write_file("file.txt", &encode_b64("first"))
+            .await
+            .unwrap();
+        let loaded = ops.read_file("file.txt", None, None).await.unwrap();
+        fs::remove_file(dir.path().join("file.txt")).unwrap();
+
+        let err = ops
+            .write_file_with_options(
+                "file.txt",
+                &encode_b64("stale"),
+                Some(&loaded.revision),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("conflict"), "got: {err:#}");
+    }
+
+    #[tokio::test]
+    async fn test_rename_no_replace_refuses_an_existing_destination() {
+        let (dir, ops) = setup();
+        fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        fs::write(dir.path().join("b.txt"), b"b").unwrap();
+
+        let err = ops
+            .rename_with_options("a.txt", "b.txt", true)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already_exists"), "got: {err:#}");
+        assert_eq!(fs::read(dir.path().join("a.txt")).unwrap(), b"a");
+        assert_eq!(fs::read(dir.path().join("b.txt")).unwrap(), b"b");
+
+        ops.rename_with_options("a.txt", "c.txt", true)
+            .await
+            .unwrap();
+        assert!(!dir.path().join("a.txt").exists());
+        assert_eq!(fs::read(dir.path().join("c.txt")).unwrap(), b"a");
+    }
+
+    #[tokio::test]
+    async fn test_create_dir_create_only_refuses_an_existing_directory() {
+        let (dir, ops) = setup();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+
+        let err = ops
+            .create_dir_with_options("subdir", true)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already_exists"), "got: {err:#}");
+
+        ops.create_dir_with_options("newdir", true).await.unwrap();
+        assert!(dir.path().join("newdir").is_dir());
     }
 }

@@ -210,6 +210,12 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         Arc::new(mgr)
     };
 
+    // One metadata store for the process: the P2P listener and the central
+    // connection are two entrypoints into the same Session-owned state (#2789).
+    let session_metadata = Arc::new(crate::session::metadata::SessionMetadataStore::new(
+        Arc::clone(&tmux_for_client),
+    ));
+
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -225,6 +231,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             // to *both* mutating paths below (#1021).
             mutations: Arc::clone(&mutation_lane),
             tmux: Arc::clone(&tmux_for_client),
+            session_metadata: Arc::clone(&session_metadata),
             terminal_cols: config.terminal_cols,
             // The P2P listener's default pre-authentication budget (#2653):
             // bounded pending handshakes plus a finite deadline, owned by the
@@ -310,7 +317,8 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             Some(ext_registry),
             Arc::clone(&p2p_credentials),
             Arc::clone(&mutation_lane),
-        );
+        )
+        .with_session_metadata(session_metadata);
 
         // Attempt to connect with a timeout so the agent can still serve
         // local clients even if the central server is unreachable. The
@@ -644,7 +652,7 @@ mod tests {
             .expect("the runtime's own providers must compose");
         let manifest = registry.manifest();
 
-        for wire in ["git.status", "git.diff"] {
+        for wire in ["git.status", "git.diff", "git.preview"] {
             assert!(
                 manifest.carries(wire),
                 "the git provider is part of the Agent product; {wire} is missing"

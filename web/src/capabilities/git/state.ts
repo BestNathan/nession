@@ -8,17 +8,18 @@ import type {
 /**
  * The repository listing, shaped for the view.
  *
- * A discriminated union rather than one row type with an `expandable` flag: #750
- * SC2 says an untracked entry has **no** expander, and a boolean would let a
- * later refactor flip it without the type system noticing. Here, an untracked row
- * carries no `file`, so a row that could request a diff cannot be built for one.
+ * The kind is the preview mode: tracked rows open a bounded `HEAD → worktree`
+ * diff, while untracked and conflicted rows open their actual worktree bytes.
+ * #750 made untracked rows inert because Git has no diff for them; #2838
+ * supersedes that interaction limitation without pretending the row has a
+ * diff.
  */
 export type GitRow =
-  /** Tracked and changed — has a diff to show, so it is selectable. */
+  /** Tracked and changed — opens the bounded combined diff. */
   | { kind: 'tracked'; path: string; file: GitChangedFile }
-  /** Untracked — git has no diff for it, so the row is inert. */
+  /** Git has no baseline; opens a bounded worktree file preview. */
   | { kind: 'untracked'; path: string }
-  /** Mid-merge/rebase conflict. Listed apart: git reports no ordinary change for it. */
+  /** Mid-merge/rebase conflict; opens the current worktree bytes. */
   | { kind: 'unmerged'; path: string };
 
 export function statusRows(status: GitStatus): GitRow[] {
@@ -29,11 +30,6 @@ export function statusRows(status: GitStatus): GitRow[] {
     ),
     ...status.untracked.map((path): GitRow => ({ kind: 'untracked', path })),
   ];
-}
-
-/** Whether a row can be opened. The one place that question is answered. */
-export function isSelectable(row: GitRow): row is Extract<GitRow, { kind: 'tracked' }> {
-  return row.kind === 'tracked';
 }
 
 /**

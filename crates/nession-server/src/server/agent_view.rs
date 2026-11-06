@@ -99,6 +99,7 @@ mod tests {
             session_count: 2,
             active_sessions: 1,
             protocol_manifest: manifest,
+            probe_generation: 0,
         }
     }
 

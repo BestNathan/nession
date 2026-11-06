@@ -206,6 +206,30 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
         },
         Unit {
             owner: "git",
+            id: "git.preview",
+            version: 1,
+            wires: &["git.preview"],
+            decls: vec![
+                decl_of::<nession_git::protocol::preview::v1::PreviewRequestV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::PreviewOkV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::FilePreview>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::FilePreviewStateV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::PreviewExpectedV1>(cfg),
+                decl_of::<nession_git::protocol::SessionTargetV1>(cfg),
+            ],
+            request: Some((
+                "PreviewRequest",
+                nession_git::protocol::preview::v1::PreviewRequestV1::inline,
+                schema_of::<nession_git::protocol::preview::v1::PreviewRequestV1>,
+            )),
+            response: Some((
+                "PreviewResponse",
+                nession_git::protocol::preview::v1::PreviewResponseV1::inline,
+                schema_of::<nession_git::protocol::preview::v1::PreviewResponseV1>,
+            )),
+        },
+        Unit {
+            owner: "git",
             id: "git.root",
             version: 1,
             wires: &["git.root"],
@@ -1161,6 +1185,92 @@ wires: &["agent.session.kill"],
                 "SessionKillReply",
                 nession_protocol::contracts::session::v1::SessionKillResponse::inline,
                 schema_of::<nession_protocol::contracts::session::v1::SessionKillResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.metadata.get",
+            version: 1,
+            wires: &["server.session.metadata.get"],
+            // Typed. `SessionMetadataResponse` is shared with the Agent unit and
+            // the update unit, so the Web reads one shape on every path.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataGetCall",
+                nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionMetadataGetPayload>,
+            )),
+            response: Some((
+                "SessionMetadataGetReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.metadata.update",
+            version: 1,
+            wires: &["server.session.metadata.update"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataUpdateCall",
+                nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::WebSessionMetadataUpdatePayload>,
+            )),
+            response: Some((
+                "SessionMetadataUpdateReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.metadata.get",
+            version: 1,
+            wires: &["agent.session.metadata.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataGetCall",
+                nession_protocol::contracts::session::v1::SessionMetadataGetPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataGetPayload>,
+            )),
+            response: Some((
+                "SessionMetadataGetReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.metadata.update",
+            version: 1,
+            wires: &["agent.session.metadata.update"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionMetadata>(cfg),
+            ],
+            request: Some((
+                "SessionMetadataUpdateCall",
+                nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataUpdatePayload>,
+            )),
+            response: Some((
+                "SessionMetadataUpdateReply",
+                nession_protocol::contracts::session::v1::SessionMetadataResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionMetadataResponse>,
             )),
         },
         Unit {

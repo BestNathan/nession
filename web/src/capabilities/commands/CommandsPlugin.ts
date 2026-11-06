@@ -66,6 +66,13 @@ export class CommandsPlugin implements TransportPlugin {
       LIST_WIRE,
       {},
     );
+    // A failed server read arrives as `{ commands: [], error }`. Returning its
+    // empty array would make an unavailable list indistinguishable from one
+    // the user genuinely has not saved yet (#2784); the hook's error/retry
+    // state is reached by rejecting.
+    if (response.error) {
+      throw new Error(response.error);
+    }
     return response.commands;
   }
 

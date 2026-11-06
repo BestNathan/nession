@@ -70,6 +70,21 @@ The tmux Session environment is shared by the Session and is the initial
 environment for processes created later. It is never presented as evidence
 that an already-running process changed.
 
+## Create failure and retry (#2812)
+
+Creation is one multi-step operation owned by `SessionManager`; the durable
+binding is one of its steps, not a transaction of its own. Once
+`new-session` has created the Session, a failure or timeout in any later step
+— including `record_created_binding` — removes that Session and the binding
+state the attempt wrote before the original error is returned. A retry of the
+same name therefore starts from an absent Session. A same-named Session that
+existed before the create is never removed.
+
+The executable contract, the per-name creation serialization, and the
+ambiguous-cancellation ownership token live on
+`SessionManager::create_session`; this section states only the binding
+consequence.
+
 ## Managed-key baseline
 
 For every key the binding manages, the Agent records what tmux held before
@@ -173,6 +188,11 @@ its original environment — this is the honest contract.
   bash/zsh prompt convergence with user configuration preserved.
 - `crates/nession-agent/src/tmux/manager.rs` `binding_create_tests`: the
   initial shell sees the binding.
+- `crates/nession-agent/src/tmux/manager.rs` `create_recovery_tests`: a
+  post-create size or binding failure and a timeout remove the Session and
+  leave the name retryable; a pre-existing same-named Session survives; a
+  healthy create still records the geometry, the durable binding, and a
+  discoverable Session.
 - `crates/nession-server/src/server/handler/tests/server_session_env_binding_v1.rs`:
   replace-whole semantics, phase preservation, desired survival on Agent
   failure, reapply content resolution, legacy unset without re-reading the

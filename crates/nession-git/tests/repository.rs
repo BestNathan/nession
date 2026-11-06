@@ -26,7 +26,8 @@ use std::process::Command;
 
 use anyhow::{ensure, Context, Result};
 use nession_git::cmd::GitCmd;
-use nession_git::{branches, diff, log, security, status, worktrees};
+use nession_git::protocol::preview::v1::{FilePreviewStateV1, PreviewExpectedV1};
+use nession_git::{branches, diff, log, preview, security, status, worktrees};
 
 /// Run a git command for fixture setup. See the module comment.
 ///
@@ -137,6 +138,196 @@ fn diff_shows_the_change_to_a_tracked_file() {
     );
     assert!(!result.truncated);
     assert!(!result.is_empty());
+}
+
+/// A repository paused in a real two-commit merge conflict.
+fn conflicted_repo() -> Result<tempfile::TempDir> {
+    let dir = repo()?;
+    git(dir.path(), &["checkout", "--quiet", "-b", "other"])?;
+    std::fs::write(dir.path().join("tracked.txt"), "other\n").context("write other")?;
+    git(dir.path(), &["add", "tracked.txt"])?;
+    git(dir.path(), &["commit", "--quiet", "-m", "other"])?;
+    git(dir.path(), &["checkout", "--quiet", "feature/capsule"])?;
+    std::fs::write(dir.path().join("tracked.txt"), "feature\n").context("write feature")?;
+    git(dir.path(), &["add", "tracked.txt"])?;
+    git(dir.path(), &["commit", "--quiet", "-m", "feature"])?;
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir.path())
+        .args(["merge", "other"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .context("fixture merge")?;
+    ensure!(!output.status.success(), "the fixture merge must conflict");
+    Ok(dir)
+}
+
+#[test]
+fn an_untracked_text_file_has_a_bounded_preview() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "first\nsecond\n").unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let preview = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "notes.txt", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Ready);
+    assert!(!preview.binary);
+    assert_eq!(preview.text, "first\nsecond\n");
+    assert_eq!(preview.size, 13);
+    assert!(!preview.truncated);
+    assert_eq!(preview.truncated_bytes, 0);
+}
+
+#[test]
+fn a_conflicted_worktree_file_is_previewed_as_its_actual_bytes_once() {
+    let dir = conflicted_repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let preview = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "tracked.txt", PreviewExpectedV1::Unmerged).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Ready);
+    assert!(!preview.binary);
+    assert!(
+        preview.text.contains("<<<<<<<"),
+        "actual conflict bytes: {preview:?}"
+    );
+
+    let out = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            cmd.run(&["status", "--porcelain=v2", "--branch", "-z"], 64 * 1024)
+                .await
+        })
+        .unwrap();
+    let parsed = status::parse(&out.stdout).unwrap();
+    assert_eq!(parsed.unmerged, vec!["tracked.txt"]);
+    assert!(
+        parsed.modified.is_empty(),
+        "conflict is not also a modified row"
+    );
+    assert_eq!(parsed.changed_count(), 1);
+}
+
+#[test]
+fn a_preview_refuses_a_path_that_is_not_the_selected_status_kind() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "new\n").unwrap();
+    git(dir.path(), &["add", "notes.txt"]).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let preview = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "notes.txt", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Changed);
+    assert!(
+        preview.text.is_empty(),
+        "changed status must not leak stale bytes"
+    );
+}
+
+#[test]
+fn a_preview_refuses_a_missing_path_and_a_traversing_path() {
+    let dir = repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    let missing = runtime
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "gone.txt", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+    assert_eq!(missing.state, FilePreviewStateV1::Missing);
+
+    let escape = runtime.block_on(async {
+        preview::file_preview(&cmd, &root, "../outside.txt", PreviewExpectedV1::Untracked).await
+    });
+    assert!(
+        escape.is_err(),
+        "a traversing path must be refused before reading"
+    );
+}
+
+#[test]
+fn an_untracked_symlink_is_unsupported_not_followed() {
+    let dir = repo().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret"), "should not be read").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("secret"), dir.path().join("link")).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let preview = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "link", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Unsupported);
+    assert!(preview.text.is_empty());
+    assert!(preview
+        .message
+        .unwrap_or_default()
+        .contains("symbolic link"));
+}
+
+#[test]
+fn an_untracked_binary_file_is_classified_without_text() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("image.bin"), [0x89, 0, 1, 2]).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { cmd.resolve_root().await })
+        .unwrap()
+        .unwrap();
+    let preview = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            preview::file_preview(&cmd, &root, "image.bin", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Ready);
+    assert!(preview.binary);
+    assert!(preview.text.is_empty());
+    assert_eq!(preview.size, 4);
 }
 
 #[test]

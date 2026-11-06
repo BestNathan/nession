@@ -16,6 +16,7 @@ use nession_agent::server::websocket::{
     msg_types as ws_msg_types, new_message as ws_message, AgentServer, AgentServerContext,
     Message as ProtocolMessage, SessionCreatePayload, SessionCreateResponse,
 };
+use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::{SessionBindingInput, SessionManager};
 use nession_protocol::contracts::agent::v1::{AgentMetadata, AgentStatus};
 use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource, SessionEnvProfile};
@@ -604,6 +605,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
+            session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },
