@@ -145,12 +145,25 @@ body[data-nession-prototype-frame="v1"] .np-device > #app .ia-app-page-header{di
  body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-inner{padding-bottom:75px}
  body[data-nession-prototype-frame="v1"] .np-device > #app .capability-heading{padding:8px 12px 0}
  body[data-nession-prototype-frame="v1"] .np-device > #app .capability-subnav{padding:0 12px}
- body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout{margin:0 12px}
- body[data-nession-prototype-frame="v1"] .np-device > #app .memory-reader{
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout,
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout.show-detail{
+  margin:0 12px;display:flex;flex-direction:column;min-height:0;flex:1;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout .memory-list,
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout.show-detail .memory-list{
+  display:block;width:100%;flex:0 0 auto;max-height:175px;min-height:0;
+  overflow-y:auto;border-right:0;border-bottom:1px solid var(--nession-border);
+  padding:5px 2px;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout .memory-reader,
+ body[data-nession-prototype-frame="v1"] .np-device > #app .memory-layout.show-detail .memory-reader{
+  display:block;flex:1;min-height:0;overflow-y:auto;
   padding:12px 8px 88px;
  }
+ /* Current main MemoryView is a capability-local file list + reader, not
+    a pushed WorkspacePanel depth. Its index link stays inside the document. */
  body[data-nession-prototype-frame="v1"] .np-device > #app .memory-reader .reader-index{
-  display:none; /* AppPageHeader owns the pushed-depth Back */
+  display:inline-flex;
  }
  body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-dock{bottom:9px;padding:0 8px}
  body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-dock #to-terminal{display:none}
