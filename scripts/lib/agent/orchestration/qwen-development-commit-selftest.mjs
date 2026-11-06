@@ -393,8 +393,10 @@ try {
   assert.equal(boundRemote.state_version,boundRepair.version);
   assert.equal(bindQwenRepairCheckpoint({
     remote,issue,actionId:originalRepair.id}).status,'replayed');
-  assert.equal(bindQwenRepairCheckpoint({
-    remote,issue,actionId:reviewAction.id}).status,'not-qwen-repair');
+  // The reviewed action was consumed and pruned by the canonical
+  // transition; a stale Reviewer ID cannot be resurrected as a Repair.
+  assert.throws(()=>bindQwenRepairCheckpoint({
+    remote,issue,actionId:reviewAction.id}),/pending Action not found/);
   assert.throws(()=>bindQwenRepairCheckpoint({
     remote,issue,actionId:'f'.repeat(64)}),
     /pending Action not found/);
