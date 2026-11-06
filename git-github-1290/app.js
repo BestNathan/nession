@@ -27,11 +27,6 @@ function isError(){return !['healthy','empty','noRuns'].includes(S.scenario)}
 function repoIdentity(){return S.remote==='fork'?'demo-fork/nession':'BestNathan/nession'}
 function stateText(){return scenarios[S.scenario][0]}
 function btn(label,action,cls='',extra=''){return '<button type="button" class="'+cls+'" data-action="'+action+'" '+extra+'>'+label+'</button>'}
-function chrome(){
-return '<header class="topbar"><div class="brand"><span class="nmark">n</span><strong>nession</strong><span class="slash">/</span><span class="brand-sub">design lab</span></div>'+
-'<div class="toplinks"><span class="mock-flag">SIMULATED · NO NETWORK</span><a href="https://github.com/BestNathan/nession/issues/1290" target="_blank" rel="noopener">Issue #1290 ↗</a>'+
-'<a href="https://github.com/BestNathan/nession/tree/prototype/git-github-1290" target="_blank" rel="noopener">Source ↗</a></div></header>';
-}
 function terminal(){
 return '<div class="terminal" data-testid="terminal-surface">'+
 '<div class="term-lines"><div><span class="term-muted">14:28:02</span> <span class="term-green">●</span> attached to nession-dev</div>'+
@@ -45,8 +40,7 @@ function context(){
 if(!S.context)return '';
 return '<div class="context-bubble" data-testid="context-capsule"><div class="context-title">Capabilities <span>Current Session</span></div>'+
 '<button data-action="choose-git" class="context-row"><span class="glyph">⑂</span><span><strong>Git</strong><small>Repository and GitHub context</small></span><b>↗</b></button>'+
-'<button data-action="choose-other" data-value="Agent" class="context-row"><span class="glyph">◎</span><span><strong>Agent</strong><small>Connected · agent-01</small></span><b>›</b></button>'+
-'<button data-action="choose-other" data-value="Files" class="context-row"><span class="glyph">▤</span><span><strong>Files</strong><small>Current workspace files</small></span><b>›</b></button>'+
+
 '</div>';
 }
 function terminalCapsule(){
@@ -61,14 +55,6 @@ function footerCapsule(){
   '<nav class="workspace-capsule" aria-label="Workspace capabilities"><button type="button" class="cap-item chosen" data-testid="workspace-tool-git" aria-pressed="true">⑂ <span>Git</span></button></nav></div></div>';
 }
 function option(value,label,selected){return '<option value="'+value+'" '+(selected?'selected':'')+'>'+esc(label)+'</option>'}
-function topControls(){
-return '<div class="workspace-top"><div class="crumb"><span>Workspace</span><span>›</span><strong>'+(S.other?esc(S.other):'Git')+'</strong></div>'+
-'<div class="top-meta"><span class="dot green"></span> agent-01 <span class="divider">/</span> nession-dev</div></div>';
-}
-function altWorkspace(){
-return '<section class="alt-workspace"><div class="alt-icon">◇</div><h1>'+esc(S.other)+'</h1><p>This prototype focuses on the Git capability. The Capsule remains functional; select Git to return to its complete interactive mock.</p>'+
-btn('Open Git capability','choose-git','primary')+'</section>';
-}
 function header(){
 return '<header class="workspace-heading"><div class="heading-main"><strong class="git-branch">⑂ feature/git-context</strong>'+
 '<div class="repo-context"><span>nession</span><span class="sep">·</span><span>4 changed</span>'+
@@ -227,8 +213,8 @@ function githubView(){
 return ghToolbar()+ (isError()?ghState():tabNav(['issues','prs','actions'],S.ghTab,'github-tab')+ghList());
 }
 function workspace(){
-return '<div class="workspace" data-testid="workspace-surface">'+(S.other?altWorkspace():header()+sectionNav()+
-'<section class="content-card"><div class="card-content">'+(S.section==='repository'?localView():githubView())+'</div></section>')+'</div>';
+return '<div class="workspace" data-testid="workspace-surface">'+header()+sectionNav()+
+'<section class="content-card"><div class="card-content">'+(S.section==='repository'?localView():githubView())+'</div></section>'+'</div>';
 }
 function fixtureBar(){
 return '<div class="fixture-panel"><div class="fixture-name"><span class="fixture-indicator">◉</span><span><strong>Prototype controls</strong><small>Mock scenario / deterministic</small></span></div>'+
