@@ -117,17 +117,21 @@ async fn workspace_diff_baseline(cmd: &GitCmd) -> anyhow::Result<String> {
                 return Err(head_error);
             }
 
-            // The empty tree is a constant per object format. Choosing it by
-            // the repository's declared format keeps the fix read-only without
-            // teaching GitCmd a subcommand (`hash-object`) that can also write.
-            let format = cmd.run_line(&["rev-parse", "--show-object-format"]).await?;
-            match format.trim() {
-                "sha1" => Ok("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()),
-                "sha256" => Ok(
-                    "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321".to_string(),
-                ),
-                other => anyhow::bail!("unsupported Git object format: {other}"),
+            // The empty tree's id belongs to Git's object format, not to this
+            // crate. Asking Git to compute it leaves `GitCmd` as the read-only
+            // owner of what a repository format means, supports both SHA-1 and
+            // SHA-256, and cannot drift from a hand-copied constant. `hash-object`
+            // computes only; its `-w`/`--write` forms are refused in `GitCmd`.
+            let empty_tree = cmd
+                .run_line(&["hash-object", "-t", "tree", "--stdin"])
+                .await?;
+            let oid = empty_tree.trim();
+            let well_formed =
+                matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit());
+            if !well_formed {
+                anyhow::bail!("git returned an invalid empty-tree object id: {oid}");
             }
+            Ok(oid.to_string())
         }
     }
 }
