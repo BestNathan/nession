@@ -201,6 +201,10 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   const current = fetchGitHubIssue(issue.number, repository);
   const fields = hasIssueRepair ? completeIssueUpdateProposal(current, proposal) : null;
   if (fields) {
+    if (typeof fields.title !== 'string' || !fields.title.trim() ||
+        typeof fields.body !== 'string' || !fields.body.trim()) {
+      throw new Error('Issue title and body must be non-empty strings');
+    }
     enforceE2EReadOnly(current.body, fields.body);
     const candidate = candidateIssue(current, fields.title, fields.body, fields.labels);
     const validation = auditIssue(candidate);
