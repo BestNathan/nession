@@ -241,7 +241,10 @@ btn(S.inspector?'Hide state':'Inspect state','inspector','soft small-btn')+
 (S.inspector?'<div class="inspector"><div><strong>UI state</strong><pre>'+esc(JSON.stringify({surface:S.surface,context:S.context,section:S.section,tab:S.section==='github'?S.ghTab:S.tab,scenario:S.scenario,remote:S.remote,scope:S.scope,selected:S.detail,mobileDetail:S.mobileDetail,reading:S.reading},null,2))+'</pre></div><div><strong>Recent actions</strong><ol>'+S.events.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol></div></div>':'');
 }
 function render(){
-$('app').innerHTML=chrome()+'<main class="app-stage">'+(S.surface==='terminal'?terminal()+terminalCapsule():workspace()+footerCapsule())+'</main>'+fixtureBar();
+  $('app').innerHTML=chrome()+'<main class="app-stage">'+(S.surface==='terminal'?terminal()+terminalCapsule():workspace()+footerCapsule())+'</main>';
+  // Fixture controls belong to the external reviewer, never the product UI.
+  const controls=document.getElementById('np-git-fixture-controls');
+  if(controls)controls.innerHTML=fixtureBar();
 }
 function chooseGit(){S.surface='workspace';S.context=false;S.other=null;S.section='repository';S.detail=null;S.mobileDetail=false;S.reading=false;log('Git selected → directly opened Git Workspace; no Peek');render();}
 document.addEventListener('click', e=>{
