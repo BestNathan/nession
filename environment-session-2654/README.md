@@ -80,3 +80,11 @@ Published Pages manifest must report the exact pinned `source.sha` before descri
 ## Non-goals
 
 No new global Workspace navigation, no third permanent panel, no new secret store, no cross-Session bulk operations, no actual Session runtime/protocol behavior, no redesign of the #1202 Profile editor, and no automatic mutation of already-running TUI programs.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` is a directly accessible interactive review page using the shared `../prototype-frame-2758/frame.css`, `frame.js` and `review-bridge.*`. Its order is Requirement overview → 1:1 CSS-pixel product mock → interaction/fidelity details. Use the original [Requirement](https://github.com/BestNathan/nession/issues/2654) for the current design contract.
+- **Behavior:** preserves this directory's existing state transitions; moves fixture controls, reset, test inspectors, and scenario narratives outside the product viewport wherever they are static. Device width controls and full-page Reset belong to the external harness.
+- **Fidelity:** Environment 绑定、revision、shell 会合是模拟，不修改真实进程环境。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
+- **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
+- **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/environment-session-2654/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
