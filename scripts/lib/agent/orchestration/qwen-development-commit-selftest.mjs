@@ -438,9 +438,11 @@ try {
       '-m','Qwen repair dispatch v'+state.version);
     publish('agent-store',post,4);
   }
+  const repairedOrigin=repairBound.outbox.find(x=>
+    x.id===originalRepair.id).task.repair_checkpoint;
   const repairAdmission={...admission,task:'repair',
     action_id:originalRepair.id,input_sha:commitSha,
-    run_id:repairWorkerId,resume_from:immutableOrigin};
+    run_id:repairWorkerId,resume_from:repairedOrigin};
   const repairRun={...run,id:repairWorkerId};
   const repairReader={getRun:async id=>{
     if(id===issuerId)return issuer;
