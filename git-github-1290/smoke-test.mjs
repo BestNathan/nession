@@ -13,6 +13,8 @@ const document={
 };
 const fixtures=readFileSync(new URL('./fixtures.js',import.meta.url),'utf8');
 const source=readFileSync(new URL('./app.js',import.meta.url),'utf8');
+const css=readFileSync(new URL('./product-fidelity.css',import.meta.url),'utf8');
+const html=readFileSync(new URL('./index.html',import.meta.url),'utf8');
 assert.doesNotMatch(source,/\bfetch\s*\(/);
 assert.doesNotMatch(source,/localStorage|sessionStorage/);
 assert.match(fixtures,/BestNathan\/nession/);
@@ -26,10 +28,18 @@ const click=(action,value)=>{
 const change=(select,value)=>listeners.get('change')({target:{dataset:{select},value}});
 const input=value=>listeners.get('input')({target:{dataset:{input:'search'},value,selectionStart:value.length}});
 check('initial current Session Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
+check('no extra product brand',!app.innerHTML.includes('class="topbar"'));
+check('no prototype walkthrough inside Terminal',!app.innerHTML.includes('Select Git from the Capsule'));
+check('product-only stylesheet linked',html.includes('href="./product-fidelity.css"'));
+check('canonical neutral CSS snapshot',css.includes('--nession-workspace-background:var(--nession-background)'));
+check('no dashboard card',css.includes('border-radius:0;')&&css.includes('.np-device > #app .card-content'));
+check('device-owned mobile breakpoint',css.includes('@container (max-width:900px)'));
 click('toggle-context');
 check('Context Capsule',app.innerHTML.includes('data-testid="context-capsule"'));
 click('choose-git');
 check('direct Git Workspace',app.innerHTML.includes('data-testid="workspace-surface"'));
+check('compact Git branch header',app.innerHTML.includes('class="git-branch"')&&app.innerHTML.includes('feature/git-context'));
+check('no duplicate Workspace breadcrumb',!app.innerHTML.includes('class="workspace-top"'));
 check('no intermediate Git Peek',!app.innerHTML.includes('data-testid="git-peek-body"'));
 check('local Git Changes',app.innerHTML.includes('Working tree'));
 click('local-tab','history');
