@@ -1,6 +1,7 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
 import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
 import { parseIssueE2E } from '../../../issue-e2e-contract.mjs';
+import { readVerificationTier, VERIFICATION_TIERS } from '../../../verification-tier-policy.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool, completeIssueUpdateProposal, candidateIssue, enforceE2EReadOnly } from '../tools/gh/issue/update.mjs';
@@ -190,15 +191,25 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   // Validate ALL proposed mutations before the first write, not just the
   // structural fields. Preserve the trusted tool's repeated pre-write checks.
   if (proposal.verification_tier != null &&
-      (typeof proposal.tier_reason !== 'string' ||
+      (!VERIFICATION_TIERS.includes(proposal.verification_tier) ||
+       typeof proposal.tier_reason !== 'string' ||
        proposal.tier_reason.trim().length < 20 || proposal.tier_reason.length > 2000)) {
     throw new Error('invalid Issue verification-tier proposal');
   }
   if (proposal.comment != null &&
-      (typeof proposal.comment !== 'string' || !proposal.comment.trim())) {
+      (typeof proposal.comment !== 'string' || !proposal.comment.trim() ||
+       proposal.comment.length > 8000)) {
     throw new Error('invalid Issue Audit comment proposal');
   }
   const current = fetchGitHubIssue(issue.number, repository);
+  if (proposal.verification_tier != null) {
+    const beforeTier=readVerificationTier(current);
+    if (beforeTier.explicit &&
+        VERIFICATION_TIERS.indexOf(proposal.verification_tier) <
+        VERIFICATION_TIERS.indexOf(beforeTier.tier)) {
+      throw new Error('verification-tier downgrade requires separate trusted approval');
+    }
+  }
   const fields = hasIssueRepair ? completeIssueUpdateProposal(current, proposal) : null;
   if (fields) {
     if (typeof fields.title !== 'string' || !fields.title.trim() ||
