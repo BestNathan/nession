@@ -22,6 +22,8 @@ type FixtureGitOverlapWindow = Window & {
     olderSettled: boolean;
     releaseOlder: () => void;
   };
+  /** Every `git.diff` path this surface has been asked for, in order. */
+  fixtureGitDiffRequests?: readonly string[];
 };
 
 /**
@@ -45,15 +47,25 @@ type FixtureGitOverlapWindow = Window & {
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
+ *   /#/fixture/workspace?capability=git&git=diff-states → one file of each diff
+ *     state the renderer owns: ordinary, binary, mode-only, empty, truncated,
+ *     malformed/raw-fallback, and one longer than the pane
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
  *     held until the Case releases it, so a manual Refresh can answer first
  *     with the newer repository state (#2787)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
-  const status = scenario === 'clean' ? CLEAN_STATUS : CHANGED_STATUS;
+  const status =
+    scenario === 'clean'
+      ? CLEAN_STATUS
+      : scenario === 'diff-states'
+        ? DIFF_STATE_STATUS
+        : CHANGED_STATUS;
   /** Every `git.status` read this surface has been asked for. */
   let statusRequests = 0;
+  /** Every `git.diff` path this surface has been asked for, in order. */
+  const diffRequests: string[] = [];
   /** Resolves the held older read in the `overlap` scenario. */
   let releaseOlderStatus: (() => void) | null = null;
   let olderSettled = false;
@@ -112,7 +124,11 @@ export function fixtureGitSurface(search: string): PluginSurface {
         return Promise.resolve(status as T);
       }
       if (type === 'git.diff') {
-        return Promise.resolve(diffFor(String(payload.path)) as T);
+        diffRequests.push(String(payload.path));
+        if (typeof window !== 'undefined') {
+          (window as FixtureGitOverlapWindow).fixtureGitDiffRequests = diffRequests;
+        }
+        return Promise.resolve(diffFor(String(payload.path), scenario) as T);
       }
       if (type === 'git.log') {
         return Promise.resolve(historyFor(payload.limit) as T);
@@ -182,16 +198,16 @@ const CHANGED_STATUS: GitStatusResponse = {
     behind: 1,
     modified: [
       {
-        path: 'crates/nession-git/src/cmd.rs',
-        kind: 'modified',
-        staged: true,
-        unstaged: false,
-      },
-      {
         path: 'web/src/capabilities/git/GitPlugin.ts',
         kind: 'modified',
         staged: false,
         unstaged: true,
+      },
+      {
+        path: 'crates/nession-git/src/cmd.rs',
+        kind: 'modified',
+        staged: true,
+        unstaged: false,
       },
       { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
     ],
@@ -200,19 +216,96 @@ const CHANGED_STATUS: GitStatusResponse = {
   },
 };
 
-const TEXT_DIFF = [
-  'diff --git a/web/src/capabilities/git/GitPlugin.ts b/web/src/capabilities/git/GitPlugin.ts',
-  'index 1a2b3c4..5d6e7f8 100644',
-  '--- a/web/src/capabilities/git/GitPlugin.ts',
-  '+++ b/web/src/capabilities/git/GitPlugin.ts',
-  '@@ -1,4 +1,5 @@',
-  " import type { TransportPlugin } from '@/platform/socket/types';",
-  "+import type { GitStatusRequest } from './types';",
-  ' ',
-  ' export class GitPlugin implements TransportPlugin {',
-  '-  readonly name = "claude-code";',
-  '+  readonly name = "git";',
-].join('\n');
+function changedDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'index 1a2b3c4..5d6e7f8 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,4 +1,5 @@',
+    " import type { TransportPlugin } from '@/platform/socket/types';",
+    "+import type { GitStatusRequest } from './types';",
+    ' ',
+    ' export class GitPlugin implements TransportPlugin {',
+    '-  readonly name = "claude-code";',
+    '+  readonly name = "git";',
+  ].join('\n');
+}
+
+/**
+ * One file per state the diff renderer has to answer for.
+ *
+ * This is the repository that produces those answers: the renderer still
+ * decides what each one looks like. The truncated answer is a complete short
+ * patch with the Agent's truncation flag set — exactly what a byte cap at a
+ * hunk boundary produces — while the malformed answer has a hunk whose header
+ * promises more lines than the body carries, the shape a cut in the middle of
+ * a hunk produces.
+ */
+const DIFF_STATE_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/diff-rendering',
+    detached: false,
+    upstream: 'origin/feat/diff-rendering',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      {
+        path: 'web/src/capabilities/git/GitPlugin.ts',
+        kind: 'modified',
+        staged: false,
+        unstaged: true,
+      },
+      { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
+      { path: 'mode/run.sh', kind: 'modified', staged: true, unstaged: false },
+      { path: 'src/empty.txt', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/large.ts', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/long.ts', kind: 'modified', staged: false, unstaged: true },
+      { path: 'src/malformed.ts', kind: 'modified', staged: false, unstaged: true },
+    ],
+    untracked: [],
+    unmerged: [],
+  },
+};
+
+function modeDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'old mode 100644',
+    'new mode 100755',
+  ].join('\n');
+}
+
+function longDiff(path: string): string {
+  const lines = [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,100 +1,101 @@',
+  ];
+  for (let index = 1; index <= 100; index += 1) {
+    lines.push(` const line${index} = ${index}; // ${'x'.repeat(100)}`);
+  }
+  lines.push('+const inserted = true;');
+  return lines.join('\n');
+}
+
+function malformedDiff(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,2 +1,2 @@',
+    '-const before = 1;',
+    '+const after = 2;',
+  ].join('\n');
+}
 
 /**
  * Commits, deterministic and offline.
@@ -442,15 +535,59 @@ const WORKTREES: GitWorktreesResponse = {
   },
 };
 
-function diffFor(path: string): GitDiffResponse {
+function diffFor(path: string, scenario: string): GitDiffResponse {
   if (path.endsWith('.png')) {
     return {
       state: 'ok',
       diff: { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
     };
   }
+
+  if (scenario === 'diff-states') {
+    if (path === 'mode/run.sh') {
+      return {
+        state: 'ok',
+        diff: { path, text: modeDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/empty.txt') {
+      return {
+        state: 'ok',
+        diff: { path, text: '', binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/large.ts') {
+      return {
+        state: 'ok',
+        diff: {
+          path,
+          text: changedDiff(path),
+          binary: false,
+          truncated_bytes: 4096,
+          truncated: true,
+        },
+      };
+    }
+    if (path === 'src/long.ts') {
+      return {
+        state: 'ok',
+        diff: { path, text: longDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    if (path === 'src/malformed.ts') {
+      return {
+        state: 'ok',
+        diff: { path, text: malformedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      };
+    }
+    return {
+      state: 'ok',
+      diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+    };
+  }
+
   return {
     state: 'ok',
-    diff: { path, text: TEXT_DIFF, binary: false, truncated_bytes: 0, truncated: false },
+    diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
   };
 }

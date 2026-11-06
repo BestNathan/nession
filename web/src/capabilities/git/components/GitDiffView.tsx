@@ -1,17 +1,13 @@
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
-import { classifyDiffLine, formatBytes } from '../state';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { formatBytes } from '../state';
 import type { GitDiffResponse } from '../types';
-
-const LINE_CLASS: Record<ReturnType<typeof classifyDiffLine>, string> = {
-  // The same vocabulary `EnvDiff` uses for a changed line, so "an added line"
-  // reads identically wherever Nession draws one.
-  added: 'bg-file-created/10 text-file-created',
-  removed: 'bg-file-deleted/10 text-file-deleted',
-  meta: 'text-muted-foreground',
-  context: '',
-};
+import { GitPatchDiff } from './GitPatchDiff';
+import { inspectGitPatch, type GitDiffLayout } from './patchPresentation';
+import { useSplitDiffAvailability } from '../hooks/useSplitDiffAvailability';
 
 /**
  * One file's diff against HEAD.
@@ -26,6 +22,11 @@ const LINE_CLASS: Record<ReturnType<typeof classifyDiffLine>, string> = {
  * one git type with no `rename_all`, so its key is the Rust field name. The
  * generated type is what keeps this line honest — before it, the hand-written
  * mirror said `truncatedBytes`, which is `undefined` on every real answer.
+ *
+ * Pierre draws the patch; this component remains the owner of the answer. The
+ * path, the truncation warning and the binary/mode/empty/malformed states are
+ * decided here so the renderer cannot present an incomplete or unparseable
+ * patch as an ordinary one.
  */
 export function GitDiffView({
   response,
@@ -36,6 +37,25 @@ export function GitDiffView({
   loading: boolean;
   error: string | null;
 }) {
+  const [layout, setLayout] = useState<GitDiffLayout>('unified');
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+  const splitAvailable = useSplitDiffAvailability(viewport);
+
+  const diff = response?.state === 'ok' ? response.diff : null;
+  const inspection = useMemo(
+    () => (diff ? inspectGitPatch(diff.text, diff.binary) : null),
+    [diff],
+  );
+
+  // A pane that lost the room for two columns is drawn unified. Leaving a
+  // split choice selected while its control disappeared would leave no way
+  // back to the presentation the reader is actually seeing.
+  useEffect(() => {
+    if (!splitAvailable) {
+      setLayout('unified');
+    }
+  }, [splitAvailable]);
+
   if (loading) {
     return (
       <p data-testid="git-diff-loading" className={cn('p-4 text-muted-foreground', chromeSansRole('secondary'))}>
@@ -65,44 +85,65 @@ export function GitDiffView({
     );
   }
 
-  const { diff } = response;
+  if (!diff || !inspection) {
+    return null;
+  }
+
   return (
     <div data-testid="git-diff" className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b px-4 py-2">
-        <p className={cn('truncate', chromeMonoRole('code'))} title={diff.path}>
-          {diff.path}
-        </p>
-        {diff.binary ? (
-          <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>Binary file — no line diff to show</p>
-        ) : null}
-        {diff.truncated ? (
-          <p data-testid="git-diff-truncated" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-            Diff truncated: {formatBytes(diff.truncated_bytes)} left out of a large change.
+      <div className="flex shrink-0 items-start gap-3 border-b px-4 py-2">
+        <div className="min-w-0 flex-1">
+          <p
+            data-testid="git-diff-path"
+            className={cn('truncate', chromeMonoRole('code'))}
+            title={diff.path}
+          >
+            {diff.path}
           </p>
+          {diff.truncated ? (
+            <p data-testid="git-diff-truncated" className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
+              Diff truncated: {formatBytes(diff.truncated_bytes)} left out of a large change.
+            </p>
+          ) : null}
+        </div>
+        {inspection.kind === 'renderable' && splitAvailable ? (
+          <ToggleGroup
+            data-testid="git-diff-layout"
+            aria-label="Diff layout"
+            value={[layout]}
+            onValueChange={(values) => {
+              setLayout(values[0] === 'split' ? 'split' : 'unified');
+            }}
+            size="sm"
+            className="shrink-0"
+          >
+            <ToggleGroupItem
+              data-testid="git-diff-layout-unified"
+              value="unified"
+            >
+              Unified
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              data-testid="git-diff-layout-split"
+              value="split"
+            >
+              Split
+            </ToggleGroupItem>
+          </ToggleGroup>
         ) : null}
       </div>
-      <pre
+      <div
+        ref={setViewport}
         data-testid="git-diff-body"
-        className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-2 font-mono', chromeMonoRole('code'), workspaceScrollClearanceClass)}
+        data-renderer={inspection.kind}
+        className={cn('min-h-0 flex-1 overflow-auto', workspaceScrollClearanceClass)}
       >
-        {diff.text === '' ? (
-          <span className="block px-4 text-muted-foreground">
-            No changes to show for this file.
-          </span>
-        ) : (
-          diff.text.split('\n').map((line, index) => (
-            <span
-              // Unified-diff lines carry no identity of their own — two context
-              // lines can be byte-identical, so position is what distinguishes
-              // them and the line is rendered as static text, never reordered.
-              key={index}
-              className={cn('block px-4', LINE_CLASS[classifyDiffLine(line)])}
-            >
-              {line === '' ? ' ' : line}
-            </span>
-          ))
-        )}
-      </pre>
+        <GitPatchDiff
+          diff={diff}
+          inspection={inspection}
+          layout={splitAvailable ? layout : 'unified'}
+        />
+      </div>
     </div>
   );
 }
