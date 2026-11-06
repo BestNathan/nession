@@ -155,6 +155,16 @@ try {
   assert.equal(replay.checkpoint.ciphertext_sha256,
     accepted.checkpoint.ciphertext_sha256);
   assert.equal(readIssueWorkflowState(cloned,issue).version,record.version);
+  // A second RSA envelope is not an idempotent original Run, even if the
+  // signed Action, native UUID and proposed source patch are unchanged.
+  const forgedReplay=sealQwenDevelopmentProposal({
+    admission,snapshot,patch,sessionId,configDir:nativeDir,publicKeyPem});
+  assert.notEqual(forgedReplay.ciphertext.ciphertext_sha256,
+    candidate.ciphertext.ciphertext_sha256);
+  await assert.rejects(()=>ingestQwenVerifiedCandidate({...args,
+    result:forgedReplay.result,proof:forgedReplay.proof,
+    ciphertext:forgedReplay.ciphertext}),
+    /Qwen replay differs from immutable native ciphertext or patch/);
   // The Publisher independently reads the exact signed source Run, immutable
   // native checkpoint, and applies the Worker patch to a CLEAN isolated Git
   // checkout, even though the model's disposable source is now modified.
@@ -222,7 +232,18 @@ try {
   assert.equal(blobs.length,1);
   assert.equal(blobs[0].path,'calc.js');
   const blobSha=blobs[0].git_blob_sha;
-  const treeSha='d'.repeat(40),commitSha='e'.repeat(40);
+  const treeSha='d'.repeat(40);
+  // Match the mocked Publisher PR HEAD to an actual Git commit so the
+  // repair Worker uses a real checked-out SHA B, never an invented source.
+  const repairSource=path.join(home,'qwen-real-published-branch');
+  git(home,'clone','--no-hardlinks',source,repairSource);
+  git(repairSource,'config','user.name','Qwen Repair Case');
+  git(repairSource,'config','user.email','repair@example.invalid');
+  fs.writeFileSync(path.join(repairSource,'calc.js'),
+    'module.exports = (a, b) => a + b;\n');
+  git(repairSource,'add','--','calc.js');
+  git(repairSource,'commit','-m','actual Qwen published source');
+  const commitSha=git(repairSource,'rev-parse','HEAD');
   const branch=intent.record.branch;
   const prNumber=4817;
   let posts=0,wasRefCreated=false,wasPRCreated=false;
@@ -445,6 +466,96 @@ try {
     remote,readback:wrong,intent,registry}),/Publisher|Qwen/i);
   assert.equal(posts,5,'Store handoff must not send new model or GitHub POST');
 
+  // The same Qwen Developer must restore the original encrypted native
+  // Session at the ACTUAL published PR commit in a separately authenticated
+  // Worker Run and store the next immutable ciphertext checkpoint.
+  // No real network/model call or Reviewer approval is simulated as Pass.
+  const binding=readIssueWorkflowState(post,issue);
+  const repairBound=bindVerifiedRepairCheckpoint(binding.state,binding.version,
+    originalRepair.id,immutableOrigin);
+  writeIssueWorkflowState(post,repairBound,binding.version);
+  git(post,'add','-A');
+  git(post,'-c','user.name=Qwen Store Case',
+    '-c','user.email=qwen@example.invalid','commit',
+    '-m','signed Qwen Repair checkpoint CAS');
+  publish('agent-store',post,4);
+  const repairSigner={...signer,issuer_run_id:issuerId};
+  const repairSigned=planGitHubDispatch(repairBound,originalRepair.id,
+    registry,repairSigner);
+  const repairIntent=recordDispatchIntent(repairBound,repairBound.version,
+    originalRepair.id,{status:'prepared',dispatch_id:originalRepair.id,
+      issuer_run_id:issuerId,
+      ticket_sha256:sha256(repairSigned.inputs.dispatch_ticket)});
+  const repairWorkerId=workerId+1;
+  const repairDispatched=recordDispatch(repairIntent,repairIntent.version,
+    originalRepair.id,{status:'verified',dispatch_id:originalRepair.id,
+      source_run_id:repairWorkerId});
+  for(const state of [repairIntent,repairDispatched]){
+    const current=readIssueWorkflowState(post,issue);
+    writeIssueWorkflowState(post,state,current.version);
+    git(post,'add','-A');
+    git(post,'-c','user.name=Qwen Store Case',
+      '-c','user.email=qwen@example.invalid','commit',
+      '-m','Qwen repair dispatch v'+state.version);
+    publish('agent-store',post,4);
+  }
+  const repairedOrigin=repairBound.outbox.find(x=>
+    x.id===originalRepair.id).task.repair_checkpoint;
+  const repairAdmission={...admission,task:'repair',
+    action_id:originalRepair.id,input_sha:commitSha,
+    run_id:repairWorkerId,resume_from:repairedOrigin};
+  const repairRun={...run,id:repairWorkerId};
+  const repairReader={getRun:async id=>{
+    if(id===issuerId)return issuer;
+    if(id===repairWorkerId)return repairRun;
+    throw Error('unexpected repair source Run');
+  }};
+  assert.equal(qwenCheckpointNextVersion(repairAdmission,{version:1}),2);
+  for(const change of [
+    {resume_from:{...repairedOrigin,source_sha:commitSha}},
+    {resume_from:{...repairedOrigin,checkpoint_version:2}},
+    {resume_from:{...repairedOrigin,ciphertext_sha256:'invalid'}},
+    {resume_from:{...repairedOrigin,source_run_id:0}},
+    {resume_from:null},
+  ])assert.throws(()=>qwenCheckpointNextVersion({
+    ...repairAdmission,...change},{version:1}),
+    /repair requires|Store head advanced/);
+  const repairSnapshot=prepareQwenDevelopmentSource({
+    admission:repairAdmission,registry,environment:selected,
+    cliVersion:'2.1.34',workspace:repairSource,allowedFiles:['calc.js']});
+  fs.writeFileSync(path.join(repairSource,'calc.js'),
+    'module.exports = (a, b) => a + b + 0;\n');
+  const repairPatch=collectQwenDevelopmentPatch(repairSnapshot,{events});
+  const repairCandidate=sealQwenDevelopmentProposal({
+    admission:repairAdmission,snapshot:repairSnapshot,patch:repairPatch,
+    sessionId,configDir:nativeDir,publicKeyPem});
+  assert.equal(repairCandidate.result.native_resumed,true);
+  const repairArgs={...args,run:repairRun,
+    claim:{inputs:repairSigned.inputs},reader:repairReader,
+    result:repairCandidate.result,proof:repairCandidate.proof,
+    ciphertext:repairCandidate.ciphertext};
+  // A new native UUID is NOT a compatible repaired Session even with a
+  // byte-correct source patch and a genuinely signed repair ticket.
+  const foreignSession='650e8400-e29b-41d4-a716-446655440001';
+  fs.writeFileSync(path.join(project,foreignSession+'.jsonl'),
+    JSON.stringify({sessionId:foreignSession,type:'user',
+      message:'DO_NOT_LOG_OTHER_SESSION'})+'\n');
+  const foreign=sealQwenDevelopmentProposal({
+    admission:repairAdmission,snapshot:repairSnapshot,patch:repairPatch,
+    sessionId:foreignSession,configDir:nativeDir,publicKeyPem});
+  await assert.rejects(()=>ingestQwenVerifiedCandidate({
+    ...repairArgs,result:foreign.result,proof:foreign.proof,
+    ciphertext:foreign.ciphertext}),
+    /repair native Session UUID or source differs/);
+  const repairAccepted=await ingestQwenVerifiedCandidate(repairArgs);
+  assert.equal(repairAccepted.status,'committed');
+  assert.equal(repairAccepted.checkpoint.version,2);
+  assert.equal(repairAccepted.action_id,originalRepair.id);
+  assert.equal((await ingestQwenVerifiedCandidate(repairArgs)).status,'replayed');
+  assert.equal(readIssueWorkflowState(post,issue).state.phase,'repair');
+  assert.equal(posts,5,'Qwen repair ciphertext ingest cannot issue GitHub POST');
+  assert.ok(!JSON.stringify(repairAccepted).includes('PRIVATE_QWEN_MARKER'));
+  assert.ok(!JSON.stringify(repairAccepted).includes('DO_NOT_LOG_OTHER_SESSION'));
   const badCandidates=[
     {result:{...candidate.result,patch_sha256:'f'.repeat(64)}},
     {proof:{...candidate.proof,patch_sha256:'f'.repeat(64)}},
