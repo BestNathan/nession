@@ -240,7 +240,7 @@ try{
     issue:2274,sourceCheckout:root,sourceSha:fixtureSha,checked}));
   assert.throws(()=>assertQwenControlledPublisherSource({
     issue:2817,sourceCheckout:root,sourceSha:'f'.repeat(40),checked}),
-    /controlled Qwen fixture|Git source/);
+    /controlled Publisher fixture|controlled Qwen fixture|Git source/);
   assert.throws(()=>assertQwenControlledPublisherSource({
     issue:2817,sourceCheckout:root,sourceSha:fixtureSha,
     checked:{...checked,files:[{...checked.files[0],path:'src/other.js'}]}}),
