@@ -1843,31 +1843,6 @@ esac"#,
         }
     }
 
-    /// Cross the prompt boundary that converges a revision published while the
-    /// shell was idle.
-    ///
-    /// The adapter applies a new revision from `PROMPT_COMMAND`, i.e. before
-    /// the shell reads the next line. The previous command's output can be
-    /// read *before* that hook has run, so an assertion sent immediately after
-    /// `write_runtime_files` races the write and can execute at the prompt
-    /// that was already rendered — the CI `VAL2:one` failure in these tests.
-    /// This barrier command executes after the write, so the hook that follows
-    /// it is guaranteed to see the new revision; the caller's assertion then
-    /// runs at that converged prompt. The arithmetic marker distinguishes the
-    /// command's output from the echoed command line.
-    #[cfg(unix)]
-    async fn cross_prompt_boundary(
-        stdin: &mut tokio::process::ChildStdin,
-        lines: &mut tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
-    ) {
-        let line =
-            write_and_wait(stdin, lines, "echo \"BOUNDARY:$((6 * 7))\"", "BOUNDARY:42").await;
-        assert!(
-            line.contains("BOUNDARY:42"),
-            "the prompt barrier did not run: {line}"
-        );
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn the_bash_adapter_converges_at_the_next_prompt_and_preserves_user_config() {
@@ -1927,7 +1902,14 @@ esac"#,
         )
         .await
         .unwrap();
-        cross_prompt_boundary(&mut stdin, &mut lines).await;
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -2010,7 +1992,14 @@ esac"#,
         )
         .await
         .unwrap();
-        cross_prompt_boundary(&mut stdin, &mut lines).await;
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,
@@ -2110,7 +2099,14 @@ esac"#,
         )
         .await
         .unwrap();
-        cross_prompt_boundary(&mut stdin, &mut lines).await;
+        // Writing the runtime files does not wake the shell: PROMPT_COMMAND
+        // applies revision 2 only when the next prompt is drawn. Send a
+        // marker command and wait for it, so the following command runs
+        // after that prompt. Without this handshake the second echo could
+        // execute at the prompt that still carries revision 1, which made
+        // the assertion load-sensitive instead of wrong.
+        let marker = write_and_wait(&mut stdin, &mut lines, "echo \"SYNC2\"", "SYNC2").await;
+        assert!(marker.contains("SYNC2"), "{marker}");
         let line = write_and_wait(
             &mut stdin,
             &mut lines,

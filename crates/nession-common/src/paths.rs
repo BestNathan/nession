@@ -87,6 +87,16 @@ pub fn server_logs_dir() -> io::Result<PathBuf> {
 }
 
 /// Agent logs directory: ~/.nession/agent/logs
+/// Durable Session metadata: ~/.nession/agent/sessions
+///
+/// One directory per tmux Session instance, keyed by the opaque
+/// `@nession_instance_id` user option (#2789). It must outlive an Agent
+/// process because the tmux Sessions do; a kill/recreate starts under a new
+/// instance id and cannot inherit the previous instance's directory.
+pub fn agent_sessions_dir() -> io::Result<PathBuf> {
+    agent_dir().map(|d| d.join("sessions"))
+}
+
 pub fn agent_logs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("logs"))
 }

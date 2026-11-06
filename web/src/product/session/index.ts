@@ -6,6 +6,9 @@ export type {
   EnvFileRef,
   KillSessionResponse,
   Session,
+  SessionMetadata,
+  SessionMetadataInput,
+  SessionMetadataResponse,
   SessionsListResponse,
 } from './types';
 export {

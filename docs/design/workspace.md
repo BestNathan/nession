@@ -106,6 +106,26 @@ The canonical model is defined in [capability-emergence.md](capability-emergence
 Dormant -> Peek -> Workspace
 ```
 
+### Session Workspace view
+
+The Session capability's Workspace view is the context layer for the Session
+itself: runtime facts (identity, connection, windows, last activity) stay
+read-only, while **user-owned work context** — a display title, a plain-text
+description and a flat tag list — is edited in a contained inline editor with
+save/cancel (#2789).
+
+- The title is a display alias shown in Session navigation and the view header;
+  the tmux name and `session_id` stay unchanged and remain visible.
+- Description is plain text, not executable Markdown or AI policy. Tags are
+  trimmed, case-insensitively unique and capped by the shared validation
+  contract; they are not navigation, filters or a tag manager.
+- Loading, absent (legacy) metadata, saving, success, validation failure,
+  revision conflict and an unreachable Agent are distinct states. A failed or
+  conflicting save preserves the draft until the user cancels or explicitly
+  reloads the remote metadata.
+- The editor is reachable by keyboard and touch; on narrow App depth it scrolls
+  within the Workspace view while its own header/Back stays reachable.
+
 ### Session / Terminal
 
 The Session layer is about **what is happening now**.
