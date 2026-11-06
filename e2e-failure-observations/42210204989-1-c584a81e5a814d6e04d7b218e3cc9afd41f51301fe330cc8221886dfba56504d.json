@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_failure_admission_observation",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "event": "schedule",
+    "branch": "main",
+    "conclusion": "failure",
+    "run_id": 42210204989,
+    "run_attempt": 1,
+    "target_sha": "0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0",
+    "completed_at": "2026-11-06T11:36:56Z",
+    "acceptance_record_path": "runs/0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0/full-regression/42210204989-1.json"
+  },
+  "artifact": {
+    "id": 13499815620,
+    "digest": "sha256:8cd434dc2e88a4d3e87f69c896fc225299d39a45af5a280a60dab6fa9f4b3ded"
+  },
+  "fingerprint": "e2e1:c584a81e5a814d6e04d7b218e3cc9afd41f51301fe330cc8221886dfba56504d",
+  "classification": "candidate_test_failure",
+  "observed_at": "2026-11-06T11:36:56Z",
+  "result_ids": [
+    "fixture-visual-app"
+  ],
+  "acceptance_record_path": "runs/0f3b2a012a9203a68ca5f38d56dd1393f6cf74b0/full-regression/42210204989-1.json",
+  "failure_signatures": [
+    {
+      "test_id": "fixture-visual-app",
+      "kind": "assertion_failed",
+      "actionable": true,
+      "signature": {
+        "assertion_code": "playwright_unexpected",
+        "stable_frame": "fixture-visual-app.spec.ts:367:24",
+        "affected_invariant": "fixture-visual-app",
+        "environment_specific": false
+      }
+    }
+  ]
+}
