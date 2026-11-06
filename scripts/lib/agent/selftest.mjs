@@ -56,6 +56,10 @@ assert.throws(()=>buildClaudeCliArgs({
   prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
   jsonSchema:{type:'object',additionalProperties:true}
 }),/closed object/);
+assert.throws(()=>buildClaudeCliArgs({
+  prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
+  jsonSchema:[]
+}),/closed object/);
 assert.match(cursor.text, /missing Location/);
 assert.ok(cursor.text.includes('{{not_a_template_variable}}'));
 assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
