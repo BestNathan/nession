@@ -76,7 +76,7 @@ async function main(){
     ]=await Promise.all([
       source('actions/runs/39609600546'),
       source('actions/runs/39609600546/jobs?per_page=100'),
-      source('issues/comments/6308823032'),
+      source('issues/comments/6317468284'),
       source('pulls/2176'),
       source('git/ref/heads/agent/1997/developer-checkpoint-v3'),
       source('pulls/2176/commits?per_page=100'),
@@ -100,7 +100,7 @@ async function main(){
       summary:'Real first Publisher, exact Store write-ahead CAS, original PR/one-file Git SHA and replay negatives verified. Native Reviewer changes_requested, same Developer repair and SHA B Acceptance are still required by SC-03.',
       evidence:[
         {type:'runtime',value:'exact Case/main SHA='+target},
-        {type:'runtime',value:'source Publisher 39609600546/1 and owner Issue comment 6308823032 independently read from GitHub'},
+        {type:'runtime',value:'source Publisher 39609600546/1 and owner Issue comment 6317468284 independently read from GitHub'},
         {type:'runtime',value:'agent-store immutable Publisher intent commit='+commitSha+' tip='+tip},
         {type:'runtime',value:'real GitHub App PR #2176 original SHA='+verified.original_pr_sha+
           ' current SHA='+verified.current_pr_sha},
