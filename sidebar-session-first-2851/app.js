@@ -15,10 +15,20 @@
   const shell=q("n-shell"), sidebar=q("n-sidebar"), list=q("session-list"), input=q("session-search");
   const rowMenu=q("session-row-menu"), actionOverlay=q("session-action-overlay");
   let menuId=null, menuTrigger=null, actionTarget=null;
+  const actionItems=[
+    {type:"view",label:"Session details",icon:"view"},
+    {type:"edit",label:"Edit details",icon:"edit"},
+    {type:"settings",label:"Attach settings",icon:"settings"},
+    {type:"kill",label:"Kill session",icon:"kill"}
+  ];
   const glyph=(name)=>{
     const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
     svg.setAttribute("viewBox","0 0 24 24");svg.setAttribute("aria-hidden","true");
-    svg.innerHTML=name==="settings"
+    svg.innerHTML=name==="view"
+      ? '<circle cx="12" cy="12" r="2.5"/><path d="M2.5 12s3.7-6 9.5-6 9.5 6 9.5 6-3.7 6-9.5 6-9.5-6-9.5-6z"/>'
+      : name==="edit"
+      ? '<path d="M12 20h9M16.7 3.7l3.6 3.6-11 11-4.7 1.1 1.1-4.7zM14.4 6l3.6 3.6"/>'
+      : name==="settings"
       ? '<circle cx="12" cy="12" r="3"/><path d="M9.5 3.8 10.2 2h3.6l.7 1.8 1.9.8 1.8-.8 2.5 2.5-.8 1.8.8 1.9 1.8.7v3.6l-1.8.7-.8 1.9.8 1.8-2.5 2.5-1.8-.8-1.9.8-.7 1.8h-3.6l-.7-1.8-1.9-.8-1.8.8-2.5-2.5.8-1.8-.8-1.9L2 13.8v-3.6l1.8-.7.8-1.9-.8-1.8 2.5-2.5 1.8.8z"/>'
       : '<path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6M10 10v7m4-7v7"/>';
     return svg;
@@ -35,11 +45,13 @@
     const cover=element("button","n-action-backdrop");cover.type="button";cover.setAttribute("aria-label","Close dialog");cover.addEventListener("click",closeModal);
     const panel=element("div","n-action-panel");
     panel.setAttribute("role",type==="kill"?"alertdialog":"dialog");panel.setAttribute("aria-modal","true");
-    const heading=element("h2","",type==="kill"?"Kill Session":"Attach settings");
+    const heading=element("h2","",type==="kill"?"Kill Session":type==="settings"?"Attach settings":type==="edit"?"Edit Session details":"Session details");
     heading.id="n-session-action-heading";panel.setAttribute("aria-labelledby",heading.id);panel.append(heading);
     panel.append(element("p","n-action-description",type==="kill"
       ?"This will terminate session "+(s.sessionName||s.title)+" on "+s.agent+" and cannot be undone."
-      :"Configure attach settings for "+s.title+". Preview only; no backend calls."));
+      :type==="settings"?"Configure attach settings for "+s.title+". Preview only; no backend calls."
+      :type==="edit"?"Update the display title, description and tags. The tmux Session name remains unchanged."
+      :"Metadata and runtime identity for this Session. This preview uses local fixture data."));
     if(type==="kill"){
       const label=element("label","n-action-label","Type "+(s.sessionName||s.title)+" to confirm");
       const field=element("input","n-action-field");field.type="text";field.autocomplete="off";field.placeholder=s.sessionName||s.title;
@@ -54,6 +66,55 @@
       field.addEventListener("input",()=>{const valid=field.value.trim()===(s.sessionName||s.title);confirm.disabled=!valid;hint.textContent=field.value&&!valid?"Name doesn't match yet.":"";field.setAttribute("aria-invalid",String(Boolean(field.value&&!valid)));});
       buttons.append(button("Cancel","",closeModal),confirm);panel.append(buttons);
       actionOverlay.append(cover,panel);field.focus();return;
+    }
+    if(type==="view"||type==="edit"){
+      const details=element("div","n-meta-summary");
+      const line=(key,value)=>{const item=element("div","n-meta-summary-line");item.append(element("span","",key),element("strong","",value));details.append(item);};
+      line("tmux name",s.sessionName||s.title);line("Agent / location",s.agent);
+      line("Workload",s.kind);line("Session state",s.state);
+      if(type==="view"){
+        line("Display title",s.title);
+        line("Description",s.description||"No description yet.");
+        line("Tags",s.tags?.length?s.tags.join(", "):"No tags");
+        panel.append(details);
+        const acts=element("div","n-action-buttons");
+        acts.append(button("Close","",closeModal),button("Edit details","n-action-primary",()=>openModal("edit",s,actionTarget)));
+        panel.append(acts);actionOverlay.append(cover,panel);acts.querySelector("button")?.focus();return;
+      }
+      if(s.state==="offline"||!agents.find(a=>a.name===s.agent)?.online){
+        panel.append(details,element("p","n-action-error","This Agent is offline. Metadata cannot be saved until it is available."));
+        const acts=element("div","n-action-buttons");acts.append(button("Close","",closeModal));panel.append(acts);
+        actionOverlay.append(cover,panel);acts.querySelector("button")?.focus();return;
+      }
+      const titleLabel=element("label","n-action-label","Display title");
+      const titleInput=element("input","n-action-field");titleInput.type="text";titleInput.value=s.title===s.sessionName?"":s.title;
+      titleInput.placeholder=s.sessionName||s.title;titleInput.maxLength=120;
+      titleLabel.append(titleInput);
+      const help=element("p","n-action-hint","Shown in navigation. The tmux name is not renamed.");
+      const descLabel=element("label","n-action-label","Description");
+      const descInput=element("textarea","n-action-field n-action-textarea");
+      descInput.value=s.description||"";descInput.maxLength=2000;descInput.placeholder="What is this work about?";descLabel.append(descInput);
+      const tagsLabel=element("label","n-action-label","Tags");
+      const tagsInput=element("input","n-action-field");
+      tagsInput.type="text";tagsInput.value=(s.tags||[]).join(", ");tagsInput.placeholder="comma-separated tags";tagsLabel.append(tagsInput);
+      const tagsHelp=element("p","n-action-hint","Up to 12 tags, 32 characters each; duplicates are ignored regardless of case.");
+      const error=element("p","n-action-error","");error.setAttribute("role","alert");
+      const acts=element("div","n-action-buttons");
+      const save=button("Save details","n-action-primary",()=>{
+        const title=titleInput.value.trim(),description=descInput.value.trim();
+        const rawTags=tagsInput.value.split(",").map(x=>x.trim()).filter(Boolean);
+        const tags=[...new Map(rawTags.map(x=>[x.toLocaleLowerCase(),x])).values()];
+        const length=x=>[...x].length;
+        if(length(title)>120){error.textContent="Title must be at most 120 characters.";return;}
+        if(length(description)>2000){error.textContent="Description must be at most 2000 characters.";return;}
+        if(tags.length>12){error.textContent="Use at most 12 tags.";return;}
+        if(tags.some(x=>length(x)>32)){error.textContent="Each tag must be at most 32 characters.";return;}
+        s.title=title||s.sessionName;s.description=description;s.tags=tags;
+        closeModal();render();
+      });
+      acts.append(button("Cancel","",closeModal),save);
+      panel.append(titleLabel,help,descLabel,tagsLabel,tagsHelp,error,acts);actionOverlay.append(cover,panel);
+      titleInput.focus();return;
     }
     const modeLabel=element("label","n-action-label","Connection mode");
     const mode=element("select","n-action-field");
@@ -75,9 +136,12 @@
     if(menuId===s.id){closeMenu(true);return;}
     closeMenu(false);menuId=s.id;menuTrigger=trigger;trigger.setAttribute("aria-expanded","true");
     rowMenu.replaceChildren();rowMenu.setAttribute("role","menu");rowMenu.setAttribute("aria-label","Session actions for "+s.title);
-    for(const a of [{type:"settings",label:"Attach settings"},{type:"kill",label:"Kill session"}]){
+    for(const a of actionItems){
+      if(a.type==="kill")rowMenu.append(element("div","n-row-menu-separator"));
       const item=element("button","n-row-menu-item"+(a.type==="kill"?" n-row-menu-danger":""));
-      item.type="button";item.setAttribute("role","menuitem");item.tabIndex=-1;item.append(glyph(a.type),document.createTextNode(a.label));
+      item.type="button";item.setAttribute("role","menuitem");item.tabIndex=-1;
+      item.setAttribute("data-action",a.type);
+      item.append(glyph(a.icon),document.createTextNode(a.label));
       item.addEventListener("click",()=>openModal(a.type,s,trigger));rowMenu.append(item);
     }
     rowMenu.hidden=false;
@@ -105,14 +169,6 @@
         copy.append(element("span","n-session-name",s.title),element("span","n-session-sub",s.kind+" · "+s.agent));
         open.append(copy);open.addEventListener("click",()=>{selectedId=s.id;drawerOpen=false;section="sessions";dialog=null;render();});
         row.append(open);
-        const controls=element("div","n-inline-actions");
-        for(const a of [{type:"settings",label:"Configure attach settings"},{type:"kill",label:"Kill session"}]){
-          const icon=element("button","n-row-action"+(a.type==="kill"?" n-row-action-kill":""));
-          icon.type="button";icon.title=a.label;icon.setAttribute("aria-label",a.label+" for "+s.title);
-          icon.setAttribute("data-testid","session-"+a.type+"-"+s.id);icon.append(glyph(a.type));
-          icon.addEventListener("click",e=>{e.stopPropagation();openModal(a.type,s,icon);});controls.append(icon);
-        }
-        row.append(controls);
         const more=element("button","n-more","···");more.type="button";more.title="Session actions";
         more.setAttribute("aria-label","Session actions for "+s.title);more.setAttribute("aria-haspopup","menu");more.setAttribute("aria-expanded","false");
         more.addEventListener("click",e=>{e.stopPropagation();openMenu(s,more);});row.append(more);list.append(row);
