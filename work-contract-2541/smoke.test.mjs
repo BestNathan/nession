@@ -94,6 +94,14 @@ test('Web has separate Terminal surface return; App Back honors Work depth',()=>
   assert.match(ui.html(),/Open Terminal/);
   ui.act('terminal');
   assert.match(ui.html(),/dev-session/);
+  assert.match(ui.html(),/data-testid="terminal-surface"/);
+  assert.match(ui.html(),/class="wc-terminal-conversation"/);
+  assert.match(ui.html(),/aria-label="Open Workspace"/);
+  assert.doesNotMatch(ui.html(),/class="wc-terminal-head"/);
+  ui.act('terminal-context');
+  assert.match(ui.html(),/Contextual capabilities/);
+  ui.act('terminal-context');
+  assert.doesNotMatch(ui.html(),/Contextual capabilities/);
   assert.doesNotMatch(ui.html(),/Workspace capabilities/);
   ui.act('open-workspace');
   assert.match(ui.capsule(),/data-value="work"/);
