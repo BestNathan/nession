@@ -9,7 +9,8 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
-  recoverAttestedRepairRuntimeFailure} from './dispatch-store.mjs';
+  recoverAttestedRepairRuntimeFailure,
+  recoverAttestedQwenPreflight} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint}
   from './dispatch-store.mjs';
@@ -21,6 +22,8 @@ import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
+import {SOURCE as QWEN_KEY_FAILURE,verifyQwenPreflightFailureLive}
+  from './qwen-preflight-failure.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -65,7 +68,20 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
        event?.ref==='refs/heads/main'&&
        Number(event?.inputs?.issue_number)===issue&&
        event?.inputs?.action_id===actionId&&
-       Object.keys(event?.inputs??{}).sort().join(',')==='action_id,issue_number');
+       (()=>{
+         const keys=Object.keys(event?.inputs??{}).sort().join(',');
+         const requested=event?.inputs?.recovery_run_id;
+         if(requested===undefined)
+           return keys==='action_id,issue_number';
+         if(keys!=='action_id,issue_number,recovery_run_id')
+           return false;
+         // 0 preserves the original normal dispatch input contract. The
+         // one exact failed Qwen Run needs owner/main + signed source proof.
+         return requested==='0'||requested===0||
+           (String(requested)===String(QWEN_KEY_FAILURE.run_id)&&
+            issue===QWEN_KEY_FAILURE.issue&&
+            actionId===QWEN_KEY_FAILURE.action_id);
+       })());
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
       environment.GITHUB_REF!=='refs/heads/main'||
@@ -204,6 +220,8 @@ async function main(){
   catch{fail('unavailable trusted GitHub workflow event');}
   const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
+  const recoveringQwenKey=!commanded&&
+    String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
@@ -240,6 +258,17 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringQwenKey){
+      // Reconcile the exact externally attested failed Worker only; never
+      // issue another Actions POST with the original dispatched Action.
+      const verified=await verifyQwenPreflightFailureLive(token);
+      const recovered=recoverAttestedQwenPreflight({
+        remote:storeRemote,source:verified});
+      if(!['recovered','replayed'].includes(recovered.status))
+        fail('Qwen preflight recovery was not a canonical Store CAS');
+      console.log(JSON.stringify(recovered));
+      return;
+    }
     if(recoveringRepair){
       const source=await verifyControlledRepairRuntimeFailureLive(token);
       const result=recoverAttestedRepairRuntimeFailure({
