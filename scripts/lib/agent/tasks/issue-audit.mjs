@@ -1,5 +1,5 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
-import { KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
+import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool, completeIssueUpdateProposal } from '../tools/gh/issue/update.mjs';
@@ -108,6 +108,16 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
     throw new Error('Issue Audit proposal contains unauthorized fields');
   }
   const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
+  if (!hasIssueRepair && (proposal.verification_tier != null || proposal.comment != null)) {
+    // An invalid source is meant to be repaired, not merely annotated.
+    // Do not write a tier or comment and then report an invalid contract.
+    const current = fetchGitHubIssue(issue.number, repository);
+    const validation = auditIssue(current);
+    if (!validation.ok) {
+      throw new Error('Issue Audit proposal left the invalid Issue Contract unrepaired: ' +
+        validation.errors.join('; '));
+    }
+  }
   if (hasIssueRepair) {
     // The prompt explicitly allows partial proposals. Read the fixed target
     // again after the model completes; avoid overwriting omitted fields with
