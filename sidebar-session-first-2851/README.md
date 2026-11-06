@@ -39,7 +39,7 @@ Claude / ChatGPT-inspired, Session-first recent-work navigation. This is a **can
 3. Click **New session**, try empty name and offline \`runner-02\` (negative paths), then explicitly submit a title on online \`devbox-01\`. The local fixture adds/selects it; no remote creation.
 4. **Wide Web**: on a selected/hovered/focused Session row, use the existing inline gear **Configure attach settings** or trash **Kill session** icons. The desktop row does **not** acquire a `···` button or switch to a custom Session-actions page.
 5. **Narrow Web drawer**: activate the `···` overflow to open the **anchored** menu containing only `Attach settings` and `Kill session`. Outside click / Escape / scroll close it; the Session list remains visible.
-6. Configure mode and renderer in the local preview shell-dialog approximation; for Kill, type the **exact Session name** to enable the destructive confirmation, following current main `KillConfirmDialog`. No backend/session termination occurs.
+6. Configure mode and renderer in the local preview shell-dialog approximation; for Kill, type the **exact tmux Session name** (not the optional display title) to enable the destructive confirmation, following current main `KillConfirmDialog`. No backend/session termination occurs.
 7. Collapse wide sidebar: column returns all width to work, and selected Session stays. Reopen with the floating control.
 8. Click Agents / locations; observe Agent connectivity independent of Server status.
 9. Select Narrow 390 or 375: open the drawer, close with scrim/button, select a Session. Switch back to desktop Web to retain layout.
