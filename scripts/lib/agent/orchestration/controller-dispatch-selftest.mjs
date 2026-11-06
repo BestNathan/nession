@@ -187,3 +187,6 @@ key.fill(0);
 second.fill(0);
 other.fill(0);
 console.log('Controller dispatch: trusted run binding, fork/retry/role denial, HMAC domain separation passed');
+
+// New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
+await import('./qwen-reviewer-source-selftest.mjs');

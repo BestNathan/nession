@@ -151,12 +151,15 @@ export function verifyDispatchTicket(ticket, keyring, {now=Date.now(),allowExpir
   return parsed.body;
 }
 function dispatchInputs(body, ticket) {
-  // Each Agent workflow declares its own inputs. The reviewer workflow accepts
-  // only the reviewer identity and the action ID; the signed ticket stays on
-  // the plan (never as an undeclared input GitHub would reject).
+  // Reviewer Issue identity is part of the signed Outbox Ticket, never a
+  // model-selected workflow input. Keep historical #1997 dispatch input bytes
+  // unchanged; only new Qwen-published PRs request the typed Issue routing.
   if (body.role === 'reviewer') {
     if (body.schema_version !== 1) reject('a Reviewer dispatch cannot resume a native Session');
-    return { action_id: body.action_id, reviewer: body.agent_id, dispatch_ticket: ticket };
+    const dynamic=body.issue!==1997&&body.agent_id==='review-qwen-01';
+    return { action_id: body.action_id, reviewer: body.agent_id,
+      dispatch_ticket: ticket,
+      ...(dynamic?{issue_number:String(body.issue)}:{}) };
   }
   return { action_id: body.action_id, issue_number: String(body.issue),
     agent_id: body.agent_id, task: body.task, input_sha: body.input_sha,
@@ -170,11 +173,16 @@ function planTicket(plan) {
 function planMatchesBody(plan, body, ticket) {
   if (plan.workflow_id !== PROVIDERS[body.role].workflow) return false;
   if (body.role === 'reviewer') {
-    return own(plan.inputs, ['action_id', 'reviewer', 'dispatch_ticket']) &&
-      Object.keys(plan.inputs).length === 3 &&
-      plan.inputs.action_id === body.action_id &&
-      plan.inputs.reviewer === body.agent_id &&
-      plan.inputs.dispatch_ticket === ticket && body.schema_version === 1;
+    const dynamic=body.issue!==1997&&body.agent_id==='review-qwen-01';
+    const fields=['action_id','reviewer','dispatch_ticket',
+      ...(dynamic?['issue_number']:[])];
+    return own(plan.inputs,fields)&&
+      Object.keys(plan.inputs).length===fields.length&&
+      plan.inputs.action_id===body.action_id&&
+      plan.inputs.reviewer===body.agent_id&&
+      plan.inputs.dispatch_ticket===ticket&&
+      (!dynamic||plan.inputs.issue_number===String(body.issue))&&
+      body.schema_version===1;
   }
   return plan.inputs.dispatch_ticket === ticket &&
     plan.inputs.action_id === body.action_id &&
@@ -428,6 +436,18 @@ export async function attestSkippedDispatchRebinding({
 // Publisher/Reviewer fixture predated that naming convention; admit only its
 // independently committed Publisher transition and exact published PR head.
 export function reviewerPublishedPrBinding(state,pr) {
+  // New Qwen PR branches belong to the exact same Issue and signed
+  // Publisher→Reviewer transition. The trusted Reviewer Ingest separately
+  // checks the full immutable Publisher Intent branch, not just this prefix.
+  if(state?.assignments?.developer==='dev-qwen-01'&&
+     state.assignments.reviewer==='review-qwen-01'&&
+     typeof pr?.head?.ref==='string'&&
+     /^agent\/[1-9]\d*\/qwen-[a-f0-9]{16}$/.test(pr.head.ref)&&
+     pr.head.ref.startsWith('agent/'+state.issue+'/qwen-')&&
+     pr.head.sha===state.target_sha&&
+     state.transitions?.some(t=>t.kind==='publisher'&&
+       t.outcome==='published'&&t.target_sha===state.target_sha))
+    return true;
   if(pr?.head?.ref?.startsWith('agent/issue-'+state?.issue+'-'))return true;
   const sha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
   return state?.issue===1997 && pr?.number===2176 &&
