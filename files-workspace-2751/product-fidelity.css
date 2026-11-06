@@ -1,0 +1,371 @@
+/* Product-only visual-fidelity snapshot for Files #2751.
+ * Baseline: main design/generated/web.css, FilesWebLayout, FilesAppLayout,
+ * FileBrowser and FileViewer (2026-11-06). This is NOT generated output.
+ * Scoped to the mock product, never to the surrounding np-* review page.
+ */
+body[data-nession-prototype-frame="v1"] .np-device > #app {
+  --nession-background: oklch(1 0 0);
+  --nession-foreground: oklch(0.2636 0.0063 258.359);
+  --nession-muted: oklch(0.9519 0.0013 106.424);
+  --nession-muted-foreground: oklch(0.553 0.0118 261.773);
+  --nession-text-secondary: oklch(0.4571 0.01 271.194);
+  --nession-surface: oklch(0.9782 0.0034 247.858);
+  --nession-border: oklch(0.9274 0.0027 106.451);
+  --nession-ring: oklch(0.553 0.0118 261.773);
+  --nession-danger: oklch(0.572 0.189 25);
+  --nession-warning: oklch(0.553 0.115 80);
+  --nession-workspace-background: var(--nession-background);
+  --nession-workspace-navigation: var(--nession-surface);
+  --nession-file-selected: var(--nession-muted);
+  --nession-editor-background: var(--nession-background);
+  --nession-editor-gutter: var(--nession-muted);
+  --nession-workspace-tree-width: 208px;
+  --nession-workspace-tree-font-size: 12.5px;
+  --nession-workspace-editor-font-size: 12.5px;
+  --nession-workspace-editor-line-height: 1.75;
+  /* Legacy mock declarations map onto their canonical semantic roles. */
+  --bg: var(--nession-workspace-background);
+  --panel: var(--nession-workspace-background);
+  --surface: var(--nession-workspace-navigation);
+  --hover: var(--nession-muted);
+  --muted: var(--nession-muted-foreground);
+  --ink: var(--nession-foreground);
+  --line: var(--nession-border);
+  --accent: var(--nession-foreground);
+  --sel: var(--nession-file-selected);
+  --warn: var(--nession-warning);
+  --red: var(--nession-danger);
+  color-scheme: light;
+  background: var(--nession-workspace-background);
+  color: var(--nession-foreground);
+  font-size: 13px;
+  line-height: 1.35;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Files is an opened capability, not a second app, a dashboard or a card. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .frame {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  height: 100%;
+  min-height: 0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  background: var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-header {
+  min-height: 44px;
+  padding: 5px 12px;
+  gap: 10px;
+  border-color: var(--nession-border);
+  background: var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .workspace-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -.018em;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .sub {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .header-ops { gap: 6px; }
+body[data-nession-prototype-frame="v1"] .np-device > #app .select-source {
+  max-width: 184px;
+  min-height: 28px;
+  padding: 4px 8px;
+  background: var(--nession-workspace-background);
+  color: var(--nession-text-secondary);
+  border: 1px solid var(--nession-border);
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .status {
+  color: var(--nession-muted-foreground);
+  font-size: 11px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .dot {
+  background: var(--nession-muted-foreground);
+  width: 5px;
+  height: 5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .dot.off { background: var(--nession-danger); }
+
+/* Actual FilesWebLayout: a 208px local browser plus fluid editor canvas. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .content {
+  grid-template-columns: var(--nession-workspace-tree-width) minmax(0,1fr);
+  background: var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .browser {
+  border: 0;
+  min-width: 0;
+  background: var(--nession-workspace-navigation);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .browser-head {
+  padding: 7px 8px;
+  background: var(--nession-workspace-navigation);
+  border-bottom: 1px solid var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .pathline {
+  margin-bottom: 4px;
+  color: var(--nession-muted-foreground);
+  font-size: 10.5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .toolrow { gap: 2px; }
+body[data-nession-prototype-frame="v1"] .np-device > #app .iconbtn {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--nession-text-secondary);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 14px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .iconbtn:hover {
+  background: var(--nession-muted);
+  border-color: var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .explorer {
+  padding: 6px 3px;
+  scrollbar-width: thin;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tree-row {
+  min-height: 28px;
+  margin: 0 3px;
+  padding: 1px 5px 1px 0;
+  border-radius: 5px;
+  gap: 3px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tree-main {
+  font-size: var(--nession-workspace-tree-font-size);
+  padding: 2px 0;
+  gap: 5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .file-icon,
+body[data-nession-prototype-frame="v1"] .np-device > #app .folder-icon {
+  color: var(--nession-muted-foreground);
+  font-size: 14px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .chevron {
+  color: var(--nession-muted-foreground);
+  width: 16px;
+  min-width: 16px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .more { color: var(--nession-muted-foreground); }
+body[data-nession-prototype-frame="v1"] .np-device > #app .more:hover { background: var(--nession-muted); }
+body[data-nession-prototype-frame="v1"] .np-device > #app .browser-foot {
+  padding: 8px 10px;
+  font-size: 10.5px;
+  color: var(--nession-muted-foreground);
+  border-color: var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail {
+  background: var(--nession-editor-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-head {
+  min-height: 44px;
+  padding: 7px 18px;
+  background: var(--nession-editor-background);
+  border-color: var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .filename {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-path {
+  font-size: 11px;
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-actions { gap: 4px; }
+body[data-nession-prototype-frame="v1"] .np-device > #app .btn,
+body[data-nession-prototype-frame="v1"] .np-device > #app .pill {
+  background: transparent;
+  color: var(--nession-text-secondary);
+  border: 1px solid var(--nession-border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 500;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .btn:hover,
+body[data-nession-prototype-frame="v1"] .np-device > #app .pill:hover {
+  background: var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .btn.primary {
+  background: var(--nession-foreground);
+  color: var(--nession-background);
+  border-color: var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .btn.primary:hover { opacity: .9; }
+body[data-nession-prototype-frame="v1"] .np-device > #app .tag {
+  padding: 2px 5px;
+  background: var(--nession-muted);
+  border: 0;
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .tag.dirty { color: var(--nession-warning); }
+body[data-nession-prototype-frame="v1"] .np-device > #app .viewer {
+  background: var(--nession-editor-background);
+  scrollbar-width: thin;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .lines {
+  color: var(--nession-foreground);
+  padding: 14px 22px 32px 70px;
+  font-size: var(--nession-workspace-editor-font-size);
+  line-height: var(--nession-workspace-editor-line-height);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .code-line:before {
+  color: var(--nession-muted-foreground);
+  background: transparent;
+  right: calc(100% + 19px);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .editarea {
+  background: var(--nession-editor-background);
+  color: var(--nession-foreground);
+  padding: 14px 22px;
+  font-size: var(--nession-workspace-editor-font-size);
+  line-height: var(--nession-workspace-editor-line-height);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .detail-foot,
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-footer {
+  color: var(--nession-muted-foreground);
+  border-color: var(--nession-border);
+  background: var(--nession-workspace-background);
+  font-size: 11px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .empty {
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .empty strong { color: var(--nession-foreground); }
+body[data-nession-prototype-frame="v1"] .np-device > #app .notice {
+  border-left-color: var(--nession-ring);
+  background: var(--nession-muted);
+  color: var(--nession-text-secondary);
+  margin: 0 12px 10px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .notice.error {
+  border-left-color: var(--nession-danger);
+  color: var(--nession-danger);
+  background: var(--nession-background);
+}
+
+/* Dialogs, menus and App are Nession-owned neutrals, not a dark second shell. */
+body[data-nession-prototype-frame="v1"] .np-device > #app .overlay {
+  background: oklch(0 0 0 / 25%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .dialog,
+body[data-nession-prototype-frame="v1"] .np-device > #app .context-menu {
+  background: var(--nession-background);
+  border: 1px solid var(--nession-border);
+  color: var(--nession-foreground);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px oklch(0 0 0 / 12%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .dialog p,
+body[data-nession-prototype-frame="v1"] .np-device > #app .field-label {
+  color: var(--nession-text-secondary);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .destination {
+  background: var(--nession-surface);
+  border: 1px solid var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .destination code {
+  color: var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .field {
+  background: var(--nession-background);
+  color: var(--nession-foreground);
+  border: 1px solid var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .context-menu small {
+  color: var(--nession-muted-foreground);
+  border-color: var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .context-menu button:hover {
+  background: var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .mobile-wrap {
+  background: var(--nession-workspace-background);
+  padding: 0;
+  min-height: 0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  background: var(--nession-workspace-background);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .mobile-mock {
+  min-height: 0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-top {
+  padding: 10px 12px;
+  min-height: 54px;
+  background: var(--nession-workspace-background);
+  border-color: var(--nession-border);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-top .title {
+  font-size: 16px;
+  font-weight: 600;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-sub {
+  font-size: 11px;
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-content {
+  padding: 6px 10px;
+  min-height: 0;
+  background: var(--nession-workspace-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-row {
+  color: var(--nession-foreground);
+  border-color: var(--nession-border);
+  min-height: 48px;
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-row:hover {
+  background: var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-row .name {
+  font-size: 13px;
+  font-weight: 550;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-row .desc {
+  font-size: 11px;
+  color: var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .sheet {
+  background: var(--nession-background);
+  color: var(--nession-foreground);
+  border-color: var(--nession-border);
+  box-shadow: 0 -8px 28px oklch(0 0 0 / 12%);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .sheet button:hover {
+  background: var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-content .lines {
+  padding-left: 60px !important;
+}
+body[data-nession-prototype-frame="v1"] .np-device > #app .phone-footer {
+  padding: 10px 12px;
+}
+/* Reviewer's window never chooses Files product layout; JS np:resize does. */
