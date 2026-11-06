@@ -50,4 +50,12 @@ const result=spawnSync(process.execPath,[
   encoding:'utf8',timeout:5000});
 assert.notEqual(result.status,0);
 assert.match(result.stderr,/OS-isolated Docker worker is mandatory/);
+// The existing agent-provider-contract Gate owns both positive and negative
+// Cursor runtime evidence. A Provider that fails after invoke must still
+// produce canonical, sanitized telemetry without claiming a checkpoint.
+const telemetry=spawnSync(process.execPath,[
+  'scripts/lib/agent/orchestration/development-failure-telemetry-selftest.mjs',
+],{encoding:'utf8',timeout:15000});
+assert.equal(telemetry.status,0,telemetry.stderr);
+assert.match(telemetry.stdout,/Cursor failed Provider telemetry:/);
 console.log('Developer Docker boundary: exact secretless mounts, no host privileged capability and no-host fail-closed verified');
