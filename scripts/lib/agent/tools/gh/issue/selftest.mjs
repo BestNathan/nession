@@ -226,12 +226,20 @@ try {
   // Live #42216764125: the original may have both malformed E2E and
   // Knowledge Impact. A Qwen first pass fixing only E2E must NOT be written.
   // One bounded continuation receives the canonical validation findings.
+  const malformedKnowledge=[
+    '### Knowledge Impact',
+    '- **Decision:** Update.',
+    '- **Related knowledge:** docs/architecture/acceptance-sc-format.md',
+    '- **Reason:** clarify the Issue Audit validation and model repair boundary',
+    '- **Owner and timing:** Agent infrastructure owner before merge',
+    '- **Evidence:** deterministic Issue Audit regression at exact PR SHA',
+  ].join('\n');
   const originalWithTwoDefects={
     ...preE2eIssue,
     createdAt:'2026-11-06T12:00:00Z',
-    body:preE2eIssue.body+'\n\n'+malformedE2e,
+    body:preE2eIssue.body+'\n\n'+malformedKnowledge+'\n\n'+malformedE2e,
   };
-  const firstDraft=preE2eIssue.body+'\n\n'+e2eContract;
+  const firstDraft=preE2eIssue.body+'\n\n'+malformedKnowledge+'\n\n'+e2eContract;
   const repairedKnowledge=[
     '### Knowledge Impact',
     '- Decision: Update',
@@ -240,7 +248,7 @@ try {
     '- Owner and timing: Agent infrastructure owner before merge',
     '- Evidence: deterministic Issue Audit regression at exact PR SHA',
   ].join('\n');
-  const secondDraft=firstDraft+'\n\n'+repairedKnowledge;
+  const secondDraft=firstDraft.replace(malformedKnowledge,repairedKnowledge);
   writeFileSync(filename,JSON.stringify(originalWithTwoDefects));
   const originalSnapshot=readFileSync(filename,'utf8');
   let contractCalls=0;
