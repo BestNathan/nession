@@ -160,7 +160,7 @@ export function writeReviewTelemetry({ outDir, admission, slice, identity, taskI
     event: env.GITHUB_EVENT_NAME ?? 'workflow_dispatch',
     job: 'reviewer',
     task: {
-      id: 'issue-1997-review', type: 'review', issue: admission.issue,
+      id: 'issue-'+admission.issue+'-review', type: 'review', issue: admission.issue,
       pr: admission.pr_number, target_ref: admission.target_sha, action_id: taskId,
       native_session_id: meta.agent_id, native_resumed: false,
     },

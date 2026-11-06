@@ -3,6 +3,7 @@
 // A crash/timeout after the intent is committed yields 'reconcile' (no usable
 // second publish grant), so a replay cannot blindly create another PR.
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -144,4 +145,157 @@ export function commitControlledPublisherIntent({
       store_commit_sha:committed.commit_sha,
       record,may_publish:true};
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
+}
+
+// #2274: extend the SAME immutable Store Intent owner to authenticated Qwen
+// Developer proposals. One file under the canonical results/ path is the
+// durable no-redelivery fence. Never retry a GitHub PR POST after ambiguity.
+const QWEN_INTENT_FIELDS=['schema_version','kind','repository','issue',
+  'action_id','worker_run_id','worker_run_attempt','worker_sha','source_sha',
+  'checkpoint_version','checkpoint_commit_sha','checkpoint_ciphertext_sha256',
+  'patch_sha256','file_manifest_sha256','file_count','target_main_sha',
+  'branch','publisher_run_id','publication'];
+const sha256=x=>createHash('sha256').update(x).digest('hex');
+const positive=x=>Number.isSafeInteger(x)&&x>0;
+export function planQwenPublisherIntent({preflight,target_main_sha,publisher_run_id}){
+  const e=preflight?.evidence;
+  if(e?.schema_version!==1||
+      e.kind!=='trusted_qwen_publisher_preflight_only'||
+      e.status!=='preflight_only'||e.agent_id!=='dev-qwen-01'||
+      !positive(e.issue)||!HEX.test(e.action_id??'')||
+      !positive(e.worker_run_id)||e.worker_run_attempt!==1||
+      !SHA.test(e.worker_sha??'')||!SHA.test(e.source_sha??'')||
+      !positive(e.checkpoint_version)||
+      !SHA.test(e.checkpoint_commit_sha??'')||
+      !HEX.test(e.ciphertext_sha256??'')||
+      !HEX.test(e.patch_sha256??'')||
+      !Array.isArray(e.file_manifest)||e.file_manifest.length<1||
+      e.file_manifest.length>8||
+      !SHA.test(target_main_sha??'')||
+      e.source_sha!==target_main_sha||
+      !positive(publisher_run_id)||
+      typeof preflight.patch!=='string'||
+      sha256(Buffer.from(preflight.patch))!==e.patch_sha256)
+    reject('Qwen Publisher must preflight the exact current-main Worker patch');
+  const paths=e.file_manifest.map(x=>x.path);
+  if(paths.some(p=>typeof p!=='string'||!p.length)||
+      new Set(paths).size!==paths.length||
+      e.file_manifest.some(x=>x.operation!=null||
+        !HEX.test(x.old_sha256??'')||!HEX.test(x.new_sha256??'')||
+        !Number.isSafeInteger(x.old_bytes)||x.old_bytes<0||
+        !Number.isSafeInteger(x.new_bytes)||x.new_bytes<0))
+    reject('unsafe Qwen Publisher checked-file manifest');
+  const record={
+    schema_version:1,kind:'trusted_qwen_publisher_write_ahead_intent',
+    repository:REPO,issue:e.issue,action_id:e.action_id,
+    worker_run_id:e.worker_run_id,worker_run_attempt:1,
+    worker_sha:e.worker_sha,source_sha:e.source_sha,
+    checkpoint_version:e.checkpoint_version,
+    checkpoint_commit_sha:e.checkpoint_commit_sha,
+    checkpoint_ciphertext_sha256:e.ciphertext_sha256,
+    patch_sha256:e.patch_sha256,
+    file_manifest_sha256:sha256(JSON.stringify(e.file_manifest)),
+    file_count:e.file_manifest.length,
+    target_main_sha,branch:'agent/'+e.issue+'/qwen-'+e.action_id.slice(0,16),
+    publisher_run_id,publication:'not_yet_attested',
+  };
+  return validateQwenPublisherIntent(record);
+}
+export function validateQwenPublisherIntent(x){
+  if(!x||typeof x!=='object'||Array.isArray(x)||
+      Object.keys(x).length!==QWEN_INTENT_FIELDS.length||
+      Object.keys(x).some(k=>!QWEN_INTENT_FIELDS.includes(k))||
+      x.schema_version!==1||
+      x.kind!=='trusted_qwen_publisher_write_ahead_intent'||
+      x.repository!==REPO||!positive(x.issue)||
+      !HEX.test(x.action_id??'')||!positive(x.worker_run_id)||
+      x.worker_run_attempt!==1||!SHA.test(x.worker_sha??'')||
+      !SHA.test(x.source_sha??'')||!positive(x.checkpoint_version)||
+      !SHA.test(x.checkpoint_commit_sha??'')||
+      !HEX.test(x.checkpoint_ciphertext_sha256??'')||
+      !HEX.test(x.patch_sha256??'')||!HEX.test(x.file_manifest_sha256??'')||
+      !positive(x.file_count)||x.file_count>8||
+      x.source_sha!==x.target_main_sha||
+      x.branch!=='agent/'+x.issue+'/qwen-'+x.action_id.slice(0,16)||
+      !positive(x.publisher_run_id)||
+      x.publication!=='not_yet_attested')
+    reject('malformed or conflicting signed Qwen Publisher Intent');
+  return x;
+}
+export function qwenPublisherIntentPath(record){
+  const r=validateQwenPublisherIntent(record);
+  return 'workflows/issues/'+r.issue+'/results/'+r.worker_run_id+
+    '-'+r.worker_run_attempt+'-'+r.action_id+'.json';
+}
+function confirmQwenSourceInStore(root,record){
+  const current=readIssueWorkflowState(root,record.issue);
+  const item=current.state?.outbox.filter(x=>x.id===record.action_id);
+  if(current.state?.phase!=='ready'||current.state.target_sha!=null||
+      current.state.assignments.developer!=='dev-qwen-01'||
+      item?.length!==1||item[0].status!=='dispatched'||
+      item[0].task?.role!=='developer'||item[0].task?.task!=='implement'||
+      item[0].task?.agent_id!=='dev-qwen-01'||
+      item[0].task?.sha!==record.source_sha||
+      item[0].receipt?.status!=='verified'||
+      item[0].receipt.source_run_id!==record.worker_run_id)
+    reject('Qwen Publisher missing exact authenticated Store Outbox');
+  const prefix='roles/developer/dev-qwen-01/issues/'+record.issue;
+  const saved=json(root,prefix+'/runs/'+record.worker_run_id+'-1.json');
+  const cp=prefix+'/checkpoints/'+String(record.checkpoint_version).padStart(8,'0')+'.json';
+  const checkpoint=json(root,cp);
+  if(saved?.source_sha!==record.source_sha||
+      saved.workflow_sha!==record.worker_sha||
+      saved.version!==record.checkpoint_version||
+      saved.ciphertext_sha256!==record.checkpoint_ciphertext_sha256||
+      saved.checkpoint_path!==cp||
+      checkpoint?.version!==record.checkpoint_version||
+      checkpoint.ciphertext_sha256!==record.checkpoint_ciphertext_sha256||
+      checkpoint.metadata?.provider!=='claude-code'||
+      checkpoint.metadata.source_sha!==record.source_sha||
+      git(root,'log','-1','--format=%H','HEAD','--',cp)!==
+        record.checkpoint_commit_sha)
+    reject('Qwen Publisher does not own the immutable committed native Run');
+  return current;
+}
+export function commitQwenPublisherIntent({remote,preflight,target_main_sha,
+  publisher_run_id}){
+  const record=planQwenPublisherIntent({preflight,target_main_sha,publisher_run_id});
+  if(typeof remote!=='string'||!remote||/\s/.test(remote)||remote.length>2000)
+    reject('invalid scoped Qwen Store writer remote');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-publisher-intent-'));
+  const root=path.join(tmp,'agent-store');
+  try{
+    try{execFileSync('git',['clone','--quiet','--no-tags','--single-branch',
+      '--branch','agent-store','--',remote,root],{stdio:['ignore','pipe','pipe'],
+      timeout:45000,env:{...process.env,GIT_TERMINAL_PROMPT:'0',
+        GIT_NO_REPLACE_OBJECTS:'1'}});}
+    catch{reject('cannot open canonical agent-store for Qwen Publisher');}
+    if(git(root,'symbolic-ref','--short','HEAD')!=='agent-store')
+      reject('unexpected canonical Store branch');
+    confirmQwenSourceInStore(root,record);
+    const location=qwenPublisherIntentPath(record);
+    const existing=json(root,location);
+    if(existing){
+      validateQwenPublisherIntent(existing);
+      if(JSON.stringify(existing)!==JSON.stringify(record))
+        reject('conflicting immutable Qwen Publisher replay');
+      return {status:'reconcile',may_publish:false,record,
+        store_commit_sha:git(root,'rev-parse','HEAD')};
+    }
+    const full=path.join(root,location);
+    fs.mkdirSync(path.dirname(full),{recursive:true});
+    fs.writeFileSync(full,JSON.stringify(record,null,2)+'\n',
+      {flag:'wx',mode:0o600});
+    git(root,'add','--',location);
+    if(auditStagedRunStore(root,'agent-store').checked_changes!==1)
+      reject('Qwen intent modifies any other Store path');
+    git(root,'-c','user.name=nession-agent-publisher',
+      '-c','user.email=nession-agent-publisher@users.noreply.github.com',
+      'commit','-m','agent-store: Qwen Publisher write-ahead Issue '+record.issue);
+    const committed=publish('agent-store',root,4);
+    if(committed.replayed)
+      reject('ambiguous Qwen intent CAS; reconcile without a second PR POST');
+    return {status:'committed',may_publish:true,record,
+      store_commit_sha:committed.commit_sha};
+  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }

@@ -96,6 +96,8 @@ Environment/setup details belong to `nession-env`.
 
 Local build-cache behavior is documented in `references/local-build-cache.md`.
 
+For Issue SCs, first map each criterion to the [eight supported verification scenarios](../nession-acceptance/references/scenario-catalog.md) and apply its corresponding [SC verification playbook](../nession-acceptance/references/verification-playbook.md) before implementation/handoff or a completion claim. Confirm the exact assertion, available tool/Runner and evidence contract; perform safe local preflight only. Do not run prohibited local full E2E, infer acceptance of runtime/kernel/GitHub/deployed behavior from source review, or require physical Safari/iOS device proof for Web/App (Chromium + Playwright is standard). Record the trusted Case/CI/native/staging/deployed proof still required. If an SC has no valid scenario or feasible approved proof, stop and ask the product owner before implementing an invented substitute; preserve existing Pending evidence until the contract is explicitly revised.
+
 ## 5. Verify Gate-first
 
 While iterating, run the narrowest relevant Gate(s).
@@ -187,7 +189,8 @@ Stop and resolve ownership before continuing when:
 - two instruction/rule owners conflict;
 - a proposed bypass is the only way to make a Gate green;
 - a change depends on unreleased behavior but its base is unclear;
-- a UI change has no realistic validation path.
+- a UI change has no realistic validation path;
+- a new or revised SC cannot be mapped to a catalog scenario with an objectively provable, authorized acceptance path (ask before changing requirements or substituting mock evidence).
 
 ## References
 

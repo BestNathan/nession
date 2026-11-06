@@ -17,6 +17,7 @@ import {createGitHubResultArtifactReader,readAuthenticatedReviewClaim,
 import {acceptTaskResult,recordReboundDispatch} from './outbox.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
+import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {validateAgentWorkflowTelemetry,telemetryStoragePath}
   from '../../../agent-workflow-telemetry.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
@@ -111,13 +112,23 @@ export function resolveReviewIngestSource({environment,event}){
     fail('not a trusted main-owned Ingest workflow');
   const dispatch=environment.GITHUB_EVENT_NAME==='repository_dispatch';
   const owner=environment.GITHUB_EVENT_NAME==='workflow_dispatch';
-  if(event?.repository?.full_name!==REPO||!dispatch&&!owner||
+  const recovery=environment.GITHUB_EVENT_NAME==='issue_comment';
+  if(event?.repository?.full_name!==REPO||!dispatch&&!owner&&!recovery||
      (dispatch&&(event.action!=='nession-review-metrics-ingested'||
        environment.GITHUB_ACTOR!=='github-actions[bot]'||
        event.sender?.login!=='github-actions[bot]'))||
-     (owner&&environment.GITHUB_ACTOR!=='BestNathan'))
+     (owner&&environment.GITHUB_ACTOR!=='BestNathan')||
+     (recovery&&(environment.GITHUB_ACTOR!=='BestNathan'||
+       event.action!=='created'||event.sender?.login!=='BestNathan'||
+       event.issue?.number!==1997||event.issue?.pull_request||
+       event.comment?.user?.login!=='BestNathan'||
+       !/^\/nession ingest-review issue=1997 run=[1-9][0-9]{0,14} attempt=1$/.test(
+         event.comment?.body??''))))
     fail('untrusted Review ingest event');
-  const args=dispatch?event.client_payload:event.inputs;
+  const args=recovery?{
+    source_run_id:Number(event.comment.body.match(/run=([0-9]+) attempt=1$/)[1]),
+    source_run_attempt:1}:
+    dispatch?event.client_payload:event.inputs;
   const id=Number(args?.source_run_id),attempt=Number(args?.source_run_attempt);
   if(!positive(id)||!positive(attempt)||attempt>10)
     fail('unbound Review source Run/attempt');
@@ -185,6 +196,18 @@ export async function verifyReviewerForStore({storeRoot,metricsRoot,run,reader,
   const metrics=findReviewerMetrics(metricsRoot,run);
   const pr=metrics.task?.pr; // unprivileged candidate; attestAgentOutcome checks REST.
   if(!positive(pr))fail('canonical Reviewer Metrics lack reviewed PR number');
+  if(state.assignments?.developer==='dev-qwen-01'){
+    // A Qwen Publisher's branch is an immutable Store Intent, never an
+    // unprivileged model/metrics choice or an arbitrary issue-scoped PR.
+    const published=qwenReviewerPublishedSource({storeRoot,issue:body.issue,
+      actionId,sha:body.input_sha});
+    const actual=await reader.getPullRequest(pr);
+    if(actual?.number!==pr||actual.state!=='open'||
+       actual.head?.ref!==published.branch.slice('refs/heads/'.length)||
+       actual.head?.sha!==published.review_sha||
+       actual.base?.ref!=='main'||actual.base?.repo?.full_name!==REPO)
+      fail('Reviewer source PR differs from committed Qwen Publisher Intent');
+  }
   const receipt=await ingestAgentResult({
     state,action_id:actionId,reader,artifactReader,registry,keyring,
     dispatch_ticket:claim.dispatch_ticket,pr_number:pr,

@@ -10,11 +10,18 @@ import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
-  recordControlledReviewerRecoveryIntent} from './outbox.mjs';
+  recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
+  acceptTaskResult,recordAttestedRepairRuntimeFailure,
+  repairRuntimeSuccessorId} from './outbox.mjs';
+import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
+import {readPublishedRepairCheckpoint} from './repair-checkpoint.mjs';
+import {attestQwenPublishedRepairCheckpoint}
+  from './qwen-repair-checkpoint.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
+import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
 
 const REF='agent-store';
@@ -53,6 +60,201 @@ function persist(dir,state,previousVersion,issue) {
     'commit','-m','agent-store: Issue '+issue+' dispatch state v'+state.version]);
   return publish(REF,dir,4);
 }
+// The one #1997 Repair origin can be attached only by the already-trusted
+// Store writer, after independent immutable pre-publish Run/Checkpoint
+// inspection in the same checkout. This operation has NO workflow_dispatch,
+// Provider, PR or Issue side effect. A subsequent versioned ticket/Worker
+// implementation must still be separately activated before any Repair POST.
+export function bindControlledRepairCheckpoint({remote,issue,actionId}){
+  if(issue!==1997||
+     actionId!=='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d')
+    fail('only exact #1997 reviewed Repair is authorized');
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,issue);
+    if(!prior.state)fail('missing initialized Repair Issue');
+    const origin=readPublishedRepairCheckpoint(dir,prior.state,actionId);
+    const next=bindVerifiedRepairCheckpoint(prior.state,prior.version,actionId,origin);
+    if(next===prior.state)return {status:'replayed',issue,action_id:actionId,
+      state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    const pushed=persist(dir,next,prior.version,issue);
+    if(pushed.replayed)fail('unexpected first Repair origin CAS replay');
+    return {status:'bound',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// This main-owned Store CAS is the sole Qwen cross-phase Repair binding.
+// Only a previously committed Reviewer rejection, Publisher Intent and
+// original native ciphertext author can choose the checkpoint; no ticket,
+// native restore or GitHub workflow_dispatch occurs during this operation.
+export function bindQwenRepairCheckpoint({remote,issue,actionId}){
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !/^[a-f0-9]{64}$/.test(actionId??''))
+    fail('invalid Qwen Repair Issue/Action');
+  return withStore(remote,dir=>{
+    const previous=readIssueWorkflowState(dir,issue);
+    if(!previous.state)fail('Qwen Repair Issue not initialized');
+    const action=previous.state.outbox.find(x=>x.id===actionId);
+    if(!action)fail('pending Action not found in committed Store');
+    if(action.task?.role!=='developer'||action.task?.task!=='repair'||
+       previous.state.assignments.developer!=='dev-qwen-01')
+      return {status:'not-qwen-repair',issue,action_id:actionId,
+        state_version:previous.version};
+    if(action.task.agent_id!=='dev-qwen-01')
+      fail('Qwen Repair assignment differs from action agent');
+    if(action.status!=='pending')
+      return {status:'reconcile',issue,action_id:actionId,
+        action_status:action.status,state_version:previous.version};
+    const proof=attestQwenPublishedRepairCheckpoint({
+      storeRoot:dir,state:previous.state,actionId});
+    const next=bindVerifiedRepairCheckpoint(previous.state,
+      previous.version,actionId,proof);
+    if(next===previous.state)
+      return {status:'replayed',issue,action_id:actionId,
+        state_version:previous.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    const published=persist(dir,next,previous.version,issue);
+    if(published.replayed)
+      fail('ambiguous new Qwen Repair checkpoint CAS; reconcile before dispatch');
+    return {status:'bound',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// A completed native same-Session Repair with no PR modification is an
+// authenticated Developer response to Reviewer changes_requested, not a new
+// PR publication and not a request to waive the Reviewer outcome. Only the
+// already authenticated, checksum-matched Worker + independently committed
+// v4 ciphertext may advance the original pending Repair to a NEW Review.
+// All protocol transitions stay with acceptTaskResult and a single Store CAS.
+export function commitAttestedRepairDispute({remote,run,checkpoint,registry,pr,actionId}){
+  const issue=1997;
+  if(!isControlledRepairAction(actionId))
+    fail('unrecognized attested Repair Action');
+  const prSha='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+  if(!Number.isSafeInteger(run?.id)||run.id<1||run?.run_attempt!==1||
+     run.path!=='.github/workflows/agent-develop.yml'||
+     run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
+     run.actor?.login!=='github-actions[bot]'||
+     run.head_branch!=='main'||run.repository?.full_name!=='BestNathan/nession'||
+     run.head_repository?.full_name!=='BestNathan/nession'||
+     !/^[a-f0-9]{40}$/.test(run.head_sha??'')||
+     run.status!=='completed'||run.conclusion!=='success'||
+     pr?.number!==2176||pr.state!=='open'||pr.head?.sha!==prSha||
+     pr.head?.ref!=='agent/1997/developer-checkpoint-v3'||
+     pr.head?.repo?.full_name!=='BestNathan/nession'||
+     pr.base?.repo?.full_name!=='BestNathan/nession'||
+     checkpoint?.version!==4||!(/^[a-f0-9]{40}$/).test(checkpoint.commit_sha??'')||
+     !(/^[a-f0-9]{64}$/).test(checkpoint.ciphertext_sha256??''))
+    fail('Repair commit requires exact authentic source Run, PR and v4 checkpoint');
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,issue);
+    if(!prior.state)fail('Repair workflow State missing');
+    const existing=prior.state.transitions.filter(t=>t.kind==='developer'&&
+      t.run_id===run.id&&t.attempt===run.run_attempt);
+    if(existing.length){
+      if(existing.length!==1||existing[0].target_sha!==prSha||
+         existing[0].outcome!=='implementation_ready')
+        fail('conflicting authenticated Repair replay');
+      return {status:'replayed',issue,action_id:actionId,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const action=prior.state.outbox.find(x=>x.id===actionId);
+    if(actionId===CONTROLLED_REPAIR_RETRY_ACTION){
+      const failed=prior.state.outbox.find(x=>x.id===
+        'd899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d');
+      if(failed?.status!=='failed'||failed.receipt?.failure_code!==
+         'cursor_native_read_missing_uncommitted'||
+         failed.receipt.source_run_id!==42020432271)
+        fail('replacement Repair has no retained original failure proof');
+    }
+    if(prior.state.phase!=='repair'||action?.status!=='dispatched'||
+       action.task.role!=='developer'||action.task.task!=='repair'||
+       action.task.agent_id!=='dev-cursor-01'||action.task.sha!==prSha||
+       action.task.repair_checkpoint?.checkpoint_version!==3||
+       action.receipt?.status!=='verified'||action.receipt.source_run_id!==run.id)
+      fail('Repair is not the exact authenticated pending Worker Run');
+    verifyCommittedCheckpoint({
+      remote,identity:{role:'developer',agent_id:'dev-cursor-01',issue},
+      commit_sha:checkpoint.commit_sha,version:4,
+      ciphertext_sha256:checkpoint.ciphertext_sha256,
+    });
+    // The public object is metadata only; never expose its ciphertext in
+    // a log. Git-backed commitment above verifies creation SHA and head.
+    const checkpointFile=path.join(dir,
+      'roles/developer/dev-cursor-01/issues/1997/checkpoints/00000004.json');
+    const checkpointRecord=JSON.parse(fs.readFileSync(checkpointFile,'utf8'));
+    if(checkpointRecord?.metadata?.provider!=='cursor'||
+       checkpointRecord?.metadata?.source_sha!==prSha||
+       checkpointRecord?.metadata?.session_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6')
+      fail('committed Repair ciphertext is not same native Agent and PR source');
+    const result={kind:'developer',issue,run_id:run.id,run_attempt:1,
+      target_sha:prSha,outcome:'implementation_ready',task_id:actionId};
+    const source={repository:'BestNathan/nession',path:run.path,name:run.name,
+      run_id:run.id,attempt:1,event:run.event,ref:'refs/heads/main',
+      issue,task_id:actionId,agent_id:'dev-cursor-01',input_sha:prSha,
+      output_sha:prSha,verified:true};
+    const next=acceptTaskResult(prior.state,prior.version,result,source,registry);
+    if(next.phase!=='review'||next.outbox.filter(x=>
+       x.status==='pending'&&x.task.role==='reviewer').length!==1||
+       next.outbox.some(x=>x.id===actionId))
+      fail('Repair must lead to exactly one new Reviewer action');
+    const pushed=persist(dir,next,prior.version,issue);
+    if(pushed.replayed)fail('unexpected Repair result Store replay');
+    return {status:'accepted',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha,
+      reviewer_action_id:next.outbox.find(x=>
+        x.status==='pending'&&x.task.role==='reviewer').id};
+  });
+}
+
+// One bounded, source-authenticated recovery for historical failed
+// no-result published-PR Repair. Never POST the old Action: it may have
+// consumed model tokens but cannot have committed a Store result or PR edit.
+export function recoverAttestedRepairRuntimeFailure({remote,source}){
+  if(source?.verified!==true||source.issue!==1997||
+     source.run_id!==42020432271||source.attempt!==1||
+     source.failure_code!=='cursor_native_read_missing_uncommitted')
+    fail('untrusted historical Repair failure source');
+  const issue=1997;
+  const oldId='d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
+  const nextId=repairRuntimeSuccessorId(issue,oldId,source.run_id);
+  return withStore(remote,dir=>{
+    const read=readIssueWorkflowState(dir,issue);
+    if(!read.state)fail('missing authenticated Repair Store State');
+    const old=read.state.outbox.find(x=>x.id===oldId);
+    if(old?.status==='failed'){
+      const next=read.state.outbox.find(x=>x.id===nextId);
+      if(old.receipt?.failure_code!==source.failure_code||
+         old.receipt?.source_run_id!==source.run_id||
+         !next||next.task.role!=='developer'||
+         next.task.task!=='repair'||
+         next.task.agent_id!=='dev-cursor-01'||
+         next.task.repair_checkpoint?.checkpoint_version!==3||
+         !['pending','dispatching','dispatched'].includes(next.status))
+        fail('conflicting historical Repair failure replay');
+      return {status:'replayed',issue,action_id:nextId,
+        state_version:read.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(read.version!==25||old?.status!=='dispatched'||
+       old.receipt?.source_run_id!==source.run_id||
+       old.task?.repair_checkpoint?.checkpoint_version!==3)
+      fail('historical Repair Run/State changed or not complete');
+    const cp=path.join(dir,'roles/developer/dev-cursor-01/issues/1997/head.json');
+    let cpHead;
+    try{cpHead=JSON.parse(fs.readFileSync(cp,'utf8'));}
+    catch{fail('missing original Developer checkpoint head');}
+    if(cpHead.version!==3||
+       cpHead.ciphertext_sha256!=='7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0')
+      fail('native cursor Checkpoint already moved or changed');
+    const next=recordAttestedRepairRuntimeFailure(
+      read.state,read.version,oldId,source);
+    const pushed=persist(dir,next,read.version,issue);
+    if(pushed.replayed)fail('unexpected first Repair recovery CAS replay');
+    return {status:'recovered',issue,action_id:nextId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
 // Begin the exact external side effect ONLY after this function returns
 // status='committed'. If it returns 'reconcile', never repeat HTTP POST.
 // The persistent intent is an immutable no-redelivery fence after a crash.
@@ -73,7 +275,8 @@ export function commitDispatchIntent({remote,issue,actionId,registry,signer,sour
     }
     if(sourceVerifier!==null){
       if(typeof sourceVerifier!=='function')fail('invalid main SHA source verifier');
-      sourceVerifier(candidate.task.sha,candidate.task.role);
+      sourceVerifier(candidate.task.sha,candidate.task.role,candidate.task,
+        {issue,actionId,storeRoot:dir});
     }
     const {plan,prepared}=prepareGitHubDispatch(state,actionId,registry,signer);
     const published=persist(dir,prepared,previous.version,issue);
