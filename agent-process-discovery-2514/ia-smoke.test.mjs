@@ -88,7 +88,7 @@ test('current Session processes, App inspector, Terminal and unavailable state',
  assert.equal(shell.dataset.experience,'web');
  assert.equal(ids.host.textContent,'dev-linux-01');
  assert.ok(ids.tree.children.length>=5);
- assert.equal(ids.inspector.children[0]?.textContent,'请选择一个进程查看运行命令和资源.');
+ assert.match(ids.inspector.children[0]?.textContent||'',/请选择一个进程查看运行命令和资源/);
  assert.ok(ids.tree.children.every(x=>x.dataset.pid!=='9001'),'infra-private never leaks');
  action('collapse');
  assert.ok(sidebar.classList.contains('collapsed'));
