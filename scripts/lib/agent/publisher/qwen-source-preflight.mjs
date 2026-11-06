@@ -1,6 +1,14 @@
 // #2274: main-owned READ-ONLY Qwen Publisher admission. This is the only
 // bridge from a signed unprivileged Developer patch into trusted Publisher
 // bytes. No Store writer credential, GitHub POST or model call occurs here.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {readIssueWorkflowState} from '../orchestration/state-store.mjs';
+import {qwenCommittedPublisherIntent}
+  from '../orchestration/qwen-reviewer-source.mjs';
+import {validateQwenPublisherIntent} from './store-intent.mjs';
 import {verifyWorkerClaimForAck} from '../orchestration/worker-reconcile.mjs';
 import {authorizeWorkerFromStore} from '../orchestration/worker-preflight.mjs';
 import {validateQwenDevelopmentCandidate}
@@ -92,4 +100,178 @@ export async function preflightTrustedQwenPublisher({
   // write-ahead intent may use this immutable verification without rerunning
   // Claude Code or granting the Worker GitHub write access.
   return Object.freeze({evidence,patch});
+}
+
+
+// #2137: Repair has a different authority boundary from a first PR:
+// reviewed PR SHA A and the ORIGINAL Publisher Intent own the branch.
+// A second model/Worker or fresh main HEAD can never select a new PR.
+export function assertQwenRepairPublisherOrigin({
+  state,admission,checkpoint,originalIntent,
+}){
+  const origin=admission?.resume_from;
+  const intent=validateQwenPublisherIntent(originalIntent);
+  if(!state||!Array.isArray(state.outbox)||
+      !Array.isArray(state.transitions)||
+      state.issue!==admission?.issue||state.phase!=='repair'||
+      state.target_sha!==admission.input_sha||
+      state.assignments?.developer!=='dev-qwen-01'||
+      state.assignments?.reviewer!=='review-qwen-01'||
+      admission.authorized!==true||
+      admission.role!=='developer'||admission.task!=='repair'||
+      admission.agent_id!=='dev-qwen-01'||
+      admission.provider!=='claude-code'||
+      admission.environment!=='dev-claude-qwen'||
+      !SHA.test(admission.input_sha??'')||
+      !HEX.test(admission.action_id??'')||
+      !positive(admission.run_id))
+    fail('Repair Publisher is not a signed same-Developer Review continuation');
+  const actions=state.outbox.filter(x=>x.id===admission.action_id);
+  if(actions.length!==1||actions[0].status!=='dispatched'||
+      actions[0].task?.type!=='dispatch'||
+      actions[0].task.role!=='developer'||
+      actions[0].task.task!=='repair'||
+      actions[0].task.agent_id!==admission.agent_id||
+      actions[0].task.sha!==admission.input_sha||
+      actions[0].task.resume!==true||
+      actions[0].receipt?.status!=='verified'||
+      actions[0].receipt.dispatch_id!==admission.action_id||
+      actions[0].receipt.source_run_id!==admission.run_id||
+      JSON.stringify(actions[0].task.repair_checkpoint)!==
+        JSON.stringify(origin))
+    fail('Repair Publisher lacks the exact committed dispatched Outbox source');
+  const latest=state.transitions.at(-1);
+  const prior=state.transitions.filter(x=>x.kind==='publisher'&&
+    x.outcome==='published'&&x.target_sha===state.target_sha);
+  if(latest?.kind!=='reviewer'||latest.outcome!=='changes_requested'||
+      latest.target_sha!==state.target_sha||!positive(latest.run_id)||
+      latest.attempt!==1||prior.length!==1||
+      prior[0].run_id!==intent.publisher_run_id||
+      prior[0].attempt!==1)
+    fail('Repair Publisher lacks authentic last Review and original publication');
+  if(!origin||!positive(origin.checkpoint_version)||
+      !SHA.test(origin.checkpoint_commit_sha??'')||
+      !HEX.test(origin.ciphertext_sha256??'')||
+      !SHA.test(origin.source_sha??'')||!positive(origin.source_run_id)||
+      intent.issue!==state.issue||
+      intent.source_sha!==intent.target_main_sha||
+      intent.source_sha===state.target_sha||
+      intent.source_sha!==origin.source_sha||
+      intent.worker_run_id!==origin.source_run_id||
+      intent.checkpoint_version!==origin.checkpoint_version||
+      intent.checkpoint_commit_sha!==origin.checkpoint_commit_sha||
+      intent.checkpoint_ciphertext_sha256!==origin.ciphertext_sha256||
+      intent.branch!=='agent/'+state.issue+'/qwen-'+
+        intent.action_id.slice(0,16)||
+      !checkpoint||checkpoint.action_status!=='dispatched'||
+      checkpoint.version!==origin.checkpoint_version+1||
+      !SHA.test(checkpoint.commit_sha??'')||
+      !HEX.test(checkpoint.ciphertext_sha256??''))
+    fail('Repair native vN+1 is not bound to the original Qwen PR checkpoint');
+  return Object.freeze({
+    issue:state.issue,action_id:admission.action_id,
+    review_sha:state.target_sha,branch:'refs/heads/'+intent.branch,
+    original_main_sha:intent.target_main_sha,
+    original_publisher_run_id:intent.publisher_run_id,
+    original_developer_run_id:intent.worker_run_id,
+    original_checkpoint_version:intent.checkpoint_version,
+    repair_checkpoint_version:checkpoint.version,
+    repair_checkpoint_commit_sha:checkpoint.commit_sha,
+  });
+}
+
+// Read only the canonical public orphan State/Intent; no Provider/session
+// plaintext or GitHub writer is needed for this source assertion.
+function readQwenRepairPublisherOrigin({remote,admission,checkpoint}){
+  if(typeof remote!=='string'||(!remote.startsWith('https://x-access-token:')&&
+      !(process.env.NODE_ENV==='test'&&path.isAbsolute(remote))))
+    fail('Repair Publisher requires the scoped authenticated Store source');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-repair-publisher-source-'));
+  try{
+    const dir=path.join(tmp,'agent-store');
+    try{
+      execFileSync('git',['clone','--quiet','--no-tags','--single-branch',
+        '--branch','agent-store','--',remote,dir],{
+        timeout:45000,stdio:['ignore','pipe','pipe'],
+        env:{...process.env,GIT_TERMINAL_PROMPT:'0',
+          GIT_NO_REPLACE_OBJECTS:'1'}});
+    }catch{fail('Repair Publisher cannot read authenticated agent-store');}
+    const state=readIssueWorkflowState(dir,admission.issue).state;
+    const published=state?.transitions?.filter(x=>x.kind==='publisher'&&
+      x.outcome==='published'&&x.target_sha===admission.input_sha);
+    if(published?.length!==1||!positive(published[0].run_id))
+      fail('Repair Publisher has no unique original GitHub publication');
+    const originalIntent=qwenCommittedPublisherIntent({storeRoot:dir,
+      issue:admission.issue,publisherRunId:published[0].run_id});
+    return assertQwenRepairPublisherOrigin({state,admission,checkpoint,
+      originalIntent});
+  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
+}
+
+// A standalone credential-free PATCH verifier for a future same-PR
+// non-force Publisher. The existing first-PR publish path remains strictly
+// implement-only and cannot accidentally issue a second PR for Repair.
+export async function preflightTrustedQwenRepairPublisher({
+  remote,registry,run,claim,reader,rootKey,
+  result,proof,ciphertext,sourceCheckout,
+}){
+  if(!Buffer.isBuffer(rootKey)||rootKey.length!==32||
+      typeof sourceCheckout!=='string'||!path.isAbsolute(sourceCheckout)||
+      run?.run_attempt!==1||claim?.inputs?.task!=='repair'||
+      claim.inputs.agent_id!=='dev-qwen-01')
+    fail('Repair Publisher requires an exact signed native Repair Run');
+  const signed=await verifyWorkerClaimForAck({
+    run,claim,key:rootKey,reader});
+  const admission=authorizeWorkerFromStore({remote,registry,
+    role:'developer',runId:run.id,input:claim.inputs});
+  if(!admission.authorized||admission.task!=='repair'||
+      admission.agent_id!=='dev-qwen-01'||
+      admission.provider!=='claude-code'||
+      admission.environment!=='dev-claude-qwen'||
+      signed.issue!==admission.issue||
+      signed.action_id!==admission.action_id||
+      signed.source_run_id!==admission.run_id)
+    fail('Repair Publisher source differs from signed Store authority');
+  const candidate=validateQwenDevelopmentCandidate({
+    admission,run,result,proof,ciphertext});
+  const checkpoint=readCommittedQwenRunReceipt(remote,candidate.identity,
+    run,admission.action_id,admission.input_sha,candidate.metadata,'repair');
+  if(!checkpoint||!positive(checkpoint.version)||
+      !SHA.test(checkpoint.commit_sha)||!HEX.test(checkpoint.ciphertext_sha256))
+    fail('Repair Publisher requires committed native vN+1 Run receipt');
+  verifyCommittedCheckpoint({remote,identity:candidate.identity,
+    commit_sha:checkpoint.commit_sha,version:checkpoint.version,
+    ciphertext_sha256:checkpoint.ciphertext_sha256});
+  const origin=readQwenRepairPublisherOrigin({remote,admission,checkpoint});
+  const patch=Buffer.from(candidate.proposal.patch_base64,'base64')
+    .toString('utf8');
+  const checked=preflightAgentPatch({checkout:sourceCheckout,
+    source_sha:admission.input_sha,patch,
+    allowed_paths:candidate.proposal.changed_paths});
+  // A deliberately one-line bounded canary must not be broadened into
+  // arbitrary "repair" edits to manufacture Reviewer changes_requested.
+  assertQwenControlledPublisherSource({issue:admission.issue,
+    sourceCheckout,sourceSha:admission.input_sha,checked});
+  const changed=checked.files.map(x=>x.path).sort();
+  if(checked.source_sha!==origin.review_sha||
+      checked.patch_sha256!==candidate.proposal.patch_sha256||
+      JSON.stringify(changed)!==
+        JSON.stringify(candidate.proposal.changed_paths)||
+      checked.files.some(x=>x.operation==='create'))
+    fail('Repair patch is not a tracked exact PR SHA-A edit');
+  return Object.freeze({patch,origin,evidence:Object.freeze({
+    schema_version:1,kind:'trusted_qwen_repair_preflight_only',
+    status:'preflight_only',issue:admission.issue,
+    action_id:admission.action_id,developer_run_id:run.id,
+    source_sha:admission.input_sha,
+    original_pr_branch:origin.branch,
+    original_main_sha:origin.original_main_sha,
+    original_publisher_run_id:origin.original_publisher_run_id,
+    checkpoint_version:checkpoint.version,
+    checkpoint_commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+    native_session_id:candidate.metadata.session_id,
+    harness_digest:candidate.metadata.harness_digest,
+    patch_sha256:checked.patch_sha256,file_manifest:checked.files,
+  })});
 }
