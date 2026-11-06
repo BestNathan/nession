@@ -34,7 +34,7 @@ MEMORIES["vol"].find(x=>x.id==="tools.md").markdown = "# Tool Registry\n\n## Too
 MEMORIES["vol"].find(x=>x.id==="runtime.md").markdown = "# Runtime 生命周期\n\n## Runtime state\n\nTask 表示明确目标，Session 表示持续上下文。\n[返回索引](MEMORY.md)";
 MEMORIES.nession.push({id:"topics/recovery.md",title:"恢复记录",desc:"分块读取与标题定位",markdown:"---\ntitle: Recovery playbook\nkind: note\n---\n\n# 恢复记录\n\n这个文件模拟已读取首个 chunk；需要继续读取才能定位到下面的章节。\n\n<!-- part-2 -->\n\n## Retry strategy\n\n当读取中断时保留先前的内容，用户可以选择继续加载，然后再定位到章节。\n\n- [x] 不自动抓取所有记忆文件\n- [ ] 继续读取时保留本文件上下文\n\n[返回架构文件](../architecture.md#session-boundary) · [返回索引](../MEMORY.md)",partial:true});
 const $=id=>document.getElementById(id);
-const state={session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,generation:0,reading:0,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null};
+const state={session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,sidebarCollapsed:false,origin:false,generation:0,reading:0,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null};
 const S=()=>SESSIONS.find(x=>x.id===state.session),D=()=>MEMORIES[S().key]||[];
 function h(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function doc(){return D().find(x=>x.id===state.file)||D()[0];}
@@ -188,7 +188,7 @@ function followMemoryLink(href){
  openFile(result.path,result.anchor);
 }
 
-function reset(){state.generation++;state.reading++;Object.assign(state,{session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,origin:false,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null});render();}
+function reset(){state.generation++;state.reading++;Object.assign(state,{session:"nession",page:"terminal",previousPage:"terminal",context:"closed",peek:"claude",capability:"claude",tab:"memory",file:"MEMORY.md",phase:"ready",detail:false,sidebarCollapsed:false,origin:false,readingBusy:false,notice:"",raw:false,loadedMore:false,pendingFragment:null,scrolledFragment:null});render();}
 function renderTerminal(){
  const s=S(),cmd=s.claude?"claude":"pwd";
  const lines=s.kind==="unavailable"?'<span class="term-muted"># Agent unreachable · last snapshot retained</span>\nConnection unavailable.\n':'<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cmd">git branch --show-current</span>\n'+h(s.branch)+'\n\n<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cmd">'+cmd+'</span>\n'+(s.claude?"Claude Code\n\n<span class='term-muted'>  Working directory available. Existing TUI remains mounted.</span>\n":h(s.cwd)+"\n")+'\n<span class="prompt">'+h(s.agent)+':'+h(s.cwd)+'$</span> <span class="cursor"></span>';
@@ -286,12 +286,22 @@ function otherCapability(){
  '</p><button class="other-entry" data-cap="claude">返回 Claude Code<small>Memory 自动跟随当前 Session 的 Repository。</small></button></div></div>';
 }
 function renderWorkspace(){
+ // The Workspace shell owns the App page title/Back; Claude Code owns its
+ // internal Conversations / Memory / Configuration and Markdown links.
+ const detail=state.capability==="claude"&&state.tab==="memory"&&state.detail;
+ $("workspace-page-title").textContent=detail?state.file:(state.capability==="claude"?"Claude Code":state.capability==="git"?"Git":"Files");
+ $("workspace-page-back").setAttribute("aria-label",detail?"Back to Memory list":"Back to Terminal");
  $("workspace-inner").innerHTML=state.capability==="claude"?claudeContent():otherCapability();
  renderDock();
 }
 function renderSessions(){
  $("session-list").innerHTML='<div class="session-group">CURRENT & RECENT</div>'+SESSIONS.map(x=>
  '<button type="button" data-session="'+x.id+'" class="session-row '+(x.id===state.session?"active":"")+'"><span class="session-indicator"></span><span><strong>'+h(x.title)+'</strong><small>'+h(x.claude?"Claude Code · ":"Shell · ")+h(x.agent)+'</small></span></button>').join("");
+ // WebLayout Session list belongs to the sibling Sidebar, not Claude Memory.
+ $("ia-session-nav").innerHTML=SESSIONS.map(x=>
+ '<button type="button" data-session="'+x.id+'" class="ia-web-session '+(x.id===state.session?"active":"")+'"><strong>'+h(x.title)+'</strong><small>'+h(x.agent)+' · '+h(x.branch)+'</small></button>').join("");
+ $("app").dataset.sidebarCollapsed=state.sidebarCollapsed?"true":"false";
+ $("rail-expand").setAttribute("aria-label",state.sidebarCollapsed?"Expand sidebar":"Collapse sidebar");
 }
 function render(){
  $("app").dataset.page=state.page;
@@ -323,8 +333,10 @@ $("to-terminal").addEventListener("click",()=>showPage("terminal"));
 $("intent-send").addEventListener("click",simulateIntent);
 $("intent-input").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();simulateIntent();}});
 $("sessions-open").addEventListener("click",returnOneDepth);
-$("rail-expand").addEventListener("click",()=>showPage("sessions"));
+$("rail-expand").addEventListener("click",()=>{state.sidebarCollapsed=!state.sidebarCollapsed;renderSessions();});
 $("sessions-close").addEventListener("click",()=>showPage("terminal"));
+$("workspace-page-back").addEventListener("click",returnOneDepth);
+$("ia-session-nav").addEventListener("click",e=>{const button=e.target.closest("[data-session]");if(button)switchSession(button.dataset.session);});
 $("reset").addEventListener("click",reset);
 $("session-list").addEventListener("click",e=>{const b=e.target.closest("[data-session]");if(b)switchSession(b.dataset.session);});
 $("context-surface").addEventListener("click",e=>{
