@@ -334,6 +334,38 @@ impl SessionManager {
             .collect())
     }
 
+    /// The Nession-owned instance identity for a tmux Session (#2789).
+    ///
+    /// Stored as the `@nession_instance_id` tmux user option, so it outlives an
+    /// Agent restart (the tmux server owns the Session) and dies with the
+    /// Session: killing and recreating the same name starts without the option,
+    /// so the new instance gets a fresh id and cannot inherit metadata. A
+    /// legacy Session initializes one on first access; an invalid stored value
+    /// is replaced rather than becoming a path component.
+    pub async fn session_instance_id(&self, session_name: &str) -> Result<String> {
+        const OPTION: &str = "@nession_instance_id";
+        let ops = self.sdk_ops();
+        if let Some(stored) = ops.show_option(session_name, OPTION).await? {
+            if let Ok(id) = uuid::Uuid::parse_str(stored.trim()) {
+                return Ok(id.to_string());
+            }
+        }
+
+        let fresh = uuid::Uuid::new_v4();
+        ops.set_option(session_name, OPTION, &fresh.to_string())
+            .await?;
+        // Two callers may race the first initialization. The winner's value is
+        // what tmux now holds, and it is the one this Session's metadata must
+        // use even if this caller's UUID lost.
+        let stored = ops
+            .show_option(session_name, OPTION)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("instance id was not stored for {session_name}"))?;
+        uuid::Uuid::parse_str(stored.trim())
+            .map(|id| id.to_string())
+            .with_context(|| format!("invalid instance id stored for {session_name}"))
+    }
+
     /// Query the current working directory of a tmux session's active pane.
     pub async fn get_session_cwd(&self, session_name: &str) -> Result<String> {
         self.display_message(session_name, "#{pane_current_path}")

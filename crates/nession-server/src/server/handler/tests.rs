@@ -31,7 +31,15 @@ struct TestDeps {
 impl TestDeps {
     /// A fresh in-memory Server: one DB, one broker, one of each registry.
     async fn new() -> Self {
-        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        Self::with_db(Arc::new(Database::new(":memory:").await.unwrap()))
+    }
+
+    /// One Server around a database the test already owns.
+    ///
+    /// A test that has to break the database itself — for example, to prove a
+    /// read failure is reported rather than swallowed — needs the handler
+    /// reading from the same `Database` the test broke.
+    fn with_db(db: Arc<Database>) -> Self {
         Self {
             agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
             session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
@@ -74,6 +82,16 @@ impl TestDeps {
 /// Build a test handler wired to in-memory DB + tempdir env store.
 async fn test_handler(auth_token: &str) -> ConnectionHandler {
     TestDeps::new().await.handler(auth_token)
+}
+
+/// Build a test handler around a caller-supplied database.
+///
+/// `test_handler` gives every test its own in-memory DB. A test that has to
+/// break the database itself — for example, to prove a read failure is
+/// reported rather than swallowed — needs the handler reading from the same
+/// `Database` the test broke.
+fn handler_with_db(db: Arc<Database>, auth_token: &str) -> ConnectionHandler {
+    TestDeps::with_db(db).handler(auth_token)
 }
 
 fn proto_msg(msg_type: &str, payload: serde_json::Value) -> Message {
@@ -1706,4 +1724,5 @@ mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
+mod server_session_metadata_v1;
 mod server_session_processes_v1;

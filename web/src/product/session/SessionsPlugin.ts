@@ -7,6 +7,11 @@ import {
 import { WIRE as SESSION_CREATE_WIRE } from '@/generated/protocol/core/server-session-create/v1';
 import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
 import { WIRE as SESSION_LIST_WIRE } from '@/generated/protocol/core/server-session-list/v1';
+import {
+  WIRE as SESSION_METADATA_GET_WIRE,
+  type SessionMetadataResponse,
+} from '@/generated/protocol/core/server-session-metadata-get/v1';
+import { WIRE as SESSION_METADATA_UPDATE_WIRE } from '@/generated/protocol/core/server-session-metadata-update/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   AttachInfo,
@@ -14,6 +19,7 @@ import type {
   EnvFileRef,
   KillSessionResponse,
   Session,
+  SessionMetadataInput,
   SessionsListResponse,
 } from './types';
 
@@ -153,6 +159,44 @@ export class SessionsPlugin implements TransportPlugin {
   async listSessions(agentId?: string): Promise<Session[]> {
     const response = await this.fetchSessions({ agentId });
     return response.sessions;
+  }
+
+  /**
+   * Read one Session's user-owned metadata (#2789).
+   *
+   * The Agent is the writer; the Server authorizes and routes. A refusal is a
+   * typed `SessionMetadataResponse` with `error_kind`, not a thrown request
+   * timeout — the view renders the kind, so an offline Agent is not mistaken
+   * for a missing Session.
+   */
+  async getMetadata(sessionId: string): Promise<SessionMetadataResponse> {
+    return this.requireConnection().request<SessionMetadataResponse>(
+      SESSION_METADATA_GET_WIRE,
+      { session_id: sessionId },
+    );
+  }
+
+  /**
+   * Replace the user-owned fields, guarded by the revision the caller read.
+   *
+   * `expectedRevision` 0 is the first save on a legacy Session; a stale value
+   * comes back with `error_kind: 'conflict'` and leaves the stored metadata
+   * untouched.
+   */
+  async updateMetadata(
+    sessionId: string,
+    input: SessionMetadataInput,
+  ): Promise<SessionMetadataResponse> {
+    return this.requireConnection().request<SessionMetadataResponse>(
+      SESSION_METADATA_UPDATE_WIRE,
+      {
+        session_id: sessionId,
+        title: input.title,
+        description: input.description,
+        tags: input.tags,
+        expected_revision: input.expectedRevision,
+      },
+    );
   }
 
   /**

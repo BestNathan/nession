@@ -47,7 +47,7 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload,
+    ServerSessionCreatePayload, ServerSessionProcessesPayload, SessionMetadataUpdatePayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -72,6 +72,7 @@ use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::p2p_credentials::P2pCredentials;
 use crate::protocol::core_routes;
+use crate::session::metadata::{error_kind_and_detail, SessionMetadataStore};
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use nession_protocol::contracts::p2p::v1::P2pGrantPayload;
@@ -191,6 +192,11 @@ pub struct ServerClient {
     metadata: AgentMetadata,
     /// Tmux manager for handling session commands.
     tmux: Arc<SessionManager>,
+    /// Session-owned metadata (#2789). The runtime replaces the locally built
+    /// store with the one shared with the P2P listener via
+    /// [`Self::with_session_metadata`], so both paths hold one per-instance
+    /// lock.
+    session_metadata: Arc<SessionMetadataStore>,
     /// Store for agent-local env files under `~/.nession/agent/envs`.
     env_store: EnvStore,
     /// The **process's** mutation lane (#1021).
@@ -419,12 +425,23 @@ impl ServerClient {
             default_working_dir,
             extension_registry,
             metadata,
+            session_metadata: Arc::new(SessionMetadataStore::new(Arc::clone(&tmux))),
             tmux,
             p2p_credentials,
             mutations,
             env_store: EnvStore::new(env_root),
             session_publish: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Use the process-wide metadata store instead of the local construction.
+    ///
+    /// The P2P listener and this central connection must serialize metadata
+    /// writes against the same lock; the runtime builds one store and hands it
+    /// to both.
+    pub fn with_session_metadata(mut self, store: Arc<SessionMetadataStore>) -> Self {
+        self.session_metadata = store;
+        self
     }
 
     /// Start the supervisor task and return a handle plus the heartbeat
@@ -3926,6 +3943,84 @@ core_routes!(agent, msg, responses;
                             "command": "session.kill",
                             "success": success,
                             "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => Key(session_by_name(&msg.payload)) => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let name = str_field(&msg.payload, "name");
+                    let (success, error, error_kind, metadata) =
+                        match agent.session_metadata.get(&name).await {
+                            Ok(metadata) => (
+                                true,
+                                None,
+                                None,
+                                serde_json::to_value(metadata).ok(),
+                            ),
+                            Err(failure) => {
+                                let (kind, detail) = error_kind_and_detail(&failure);
+                                (false, Some(detail), Some(kind.to_string()), None)
+                            }
+                        };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.metadata.get",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "metadata": metadata,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.metadata.update" => "agent.session.metadata.update" => 1 => Key(session_by_name(&msg.payload)) => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let payload: SessionMetadataUpdatePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.metadata.update payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let (success, error, error_kind, metadata) = match agent
+                        .session_metadata
+                        .update(
+                            &payload.name,
+                            payload.title.as_deref(),
+                            payload.description.as_deref(),
+                            &payload.tags,
+                            payload.expected_revision,
+                        )
+                        .await
+                    {
+                        Ok(metadata) => (
+                            true,
+                            None,
+                            None,
+                            serde_json::to_value(metadata).ok(),
+                        ),
+                        Err(failure) => {
+                            let (kind, detail) = error_kind_and_detail(&failure);
+                            (false, Some(detail), Some(kind.to_string()), None)
+                        }
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.metadata.update",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "metadata": metadata,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

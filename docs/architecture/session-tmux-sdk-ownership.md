@@ -58,6 +58,37 @@ Three rules make the chain a boundary rather than a directory layout:
    ordered output stream and bounded subscriber state.** A WebSocket handler
    owns neither the backend nor the stream policy.
 
+## Session metadata ownership (#2789)
+
+Session metadata — the user-authored `title`, `description`, `tags` and their
+`revision`/timestamps — is Session-owned state, not tmux state and not Server
+state.
+
+- **Owner:** the Agent's Session domain. `SessionMetadataStore`
+  (`crates/nession-agent/src/session/metadata.rs`) is the only writer and
+  lives under the Agent's private data directory:
+  `~/.nession/agent/sessions/<opaque-session-instance-id>/metadata.json`.
+  `nession-tmux` carries no business fields; it only exposes the tmux Session's
+  `@nession_instance_id` user option through `SessionSummary`/`show-option`.
+- **Identity fence:** the directory key is the tmux Session's
+  `@nession_instance_id`, not its name. The Agent creates and persists that
+  opaque UUID on first metadata access. It survives an Agent restart while the
+  tmux Session survives; killing and recreating the same
+  `agent_id:session_name` yields a new instance and therefore no inherited
+  metadata. Absent metadata is revision 0 — a legacy Session needs no
+  migration step.
+- **Mutation contract:** writes are validated in the Protocol Kernel
+  (`SessionMetadata` / `validate_session_metadata`), atomic (temp + rename) and
+  guarded by an optimistic revision under one per-instance lock. A stale
+  revision is a conflict that leaves the stored metadata intact; invalid input
+  writes nothing.
+- **Transports:** the Agent answers `agent.session.metadata.get|update` on both
+  its P2P socket and its central connection. The Server's
+  `server.session.metadata.get|update` authorizes the request and routes it;
+  it does not keep a competing mutable store. Web/App read and write through
+  the Session product API (`SessionsPlugin`), and the display title falls back
+  to the tmux name.
+
 ## Five lifetimes that must not collapse
 
 | Lifetime | Owner | Survives | Identity |
