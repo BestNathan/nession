@@ -10,7 +10,8 @@ For any user-facing or product-facing change, read:
 
 1. [VISION.md](VISION.md) — what Nession exists to become.
 2. [PRINCIPLE.md](PRINCIPLE.md) — durable product decision constraints.
-3. Relevant material under [docs/design/](docs/design/) for the affected surface.
+3. [PRODUCT.md](PRODUCT.md) — product-generation positioning and the applicable 0.x/1.x target.
+4. Relevant material under [docs/design/](docs/design/) for the affected surface.
 
 Lower-level code, fixtures, screenshots, and historical docs do not override Vision or Principles.
 
