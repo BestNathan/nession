@@ -18,6 +18,7 @@ import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
 import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
+import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -111,8 +112,8 @@ async function api(token,resource) {
   if(!r.ok)fail('GitHub authority read failed ('+r.status+')');
   return r.json();
 }
-function sourceStillAllowed(sha, role, task) {
-  return sourceAllowed(sha, role, {task});
+function sourceStillAllowed(sha,role,task,context){
+  return sourceAllowed(sha,role,{task,context});
 }
 // A Developer action points at a source commit that must be reachable from
 // current main. A Reviewer action points at the published PR head, which is
@@ -122,9 +123,26 @@ function sourceStillAllowed(sha, role, task) {
 export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', args,
   { stdio: 'ignore', timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
   publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha,
-  task = null } = {}) {
+  task = null,context = null } = {}) {
   if (!HEX40.test(sha ?? '')) fail('invalid dispatch source SHA');
   if (role !== 'developer' && role !== 'reviewer') fail('invalid dispatch role');
+  // The trusted current Store resolves the NEW Qwen Reviewer branch from
+  // its immutable Publisher Intent. Do not fetch arbitrary model/Issue refs.
+  const qwenReview=role==='reviewer'&&task?.agent_id==='review-qwen-01'&&
+    context?.issue!==1997;
+  let qwenSource=null;
+  if(qwenReview){
+    qwenSource=qwenReviewerPublishedSource({storeRoot:context?.storeRoot,
+      issue:context?.issue,actionId:context?.actionId??task?.id,sha});
+    try{
+      run(['fetch','--quiet','--no-tags','origin',qwenSource.branch]);
+      const fetched=run(['rev-parse','FETCH_HEAD']);
+      if(String(fetched).trim()!==sha)
+        fail('fetched Qwen Reviewer branch SHA differs from signed Outbox');
+    }catch{
+      fail('published Qwen Reviewer source ref unavailable or changed');
+    }
+  }
   try {
     run(['cat-file', '-e', sha + '^{commit}']);
   } catch {
@@ -139,6 +157,7 @@ export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', a
   try {
     if(role==='reviewer'||repair)
       run(['merge-base','--is-ancestor',publishedMainSha,sha]);
+    if(qwenSource)run(['merge-base','--is-ancestor',qwenSource.base_sha,sha]);
     else run(['merge-base', '--is-ancestor', sha, mainSha]);
   } catch {
     if(role==='reviewer'||repair)
