@@ -52,16 +52,16 @@
         for (const rule of sheet.cssRules) {
           if (rule.type !== 4) continue; // CSSMediaRule
           const condition = rule.conditionText;
-          if (!/\\((?:max|min)-width\\s*:/i.test(condition) ||
+          if (!/\((?:max|min)-width\s*:/i.test(condition) ||
               /(?:prefers-|orientation|print|screen|hover|pointer)/i.test(condition)) continue;
           responsive.push("@container " + condition + " { " +
-            [...rule.cssRules].map(item => item.cssText).join("\\n") + " }");
+            [...rule.cssRules].map(item => item.cssText).join("\n") + " }");
         }
       } catch (_) { /* cross-origin sheets: no read access */ }
     }
     if (responsive.length) {
       const adaptive = document.createElement("style");
-      adaptive.textContent = responsive.join("\\n");
+      adaptive.textContent = responsive.join("\n");
       document.head.appendChild(adaptive);
     }
     device.addEventListener("np:resize", () => window.dispatchEvent(new Event("resize")));
