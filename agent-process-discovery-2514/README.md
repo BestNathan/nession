@@ -55,3 +55,11 @@ Tmux Pane/window/cgroup discovery remains an **internal backend attribution mech
 ## Publication delivery
 
 Keep this directory on the single isolated orphan `prototype` branch and update both the root `README.md` catalog and `index.html` gallery. After pushing, the unprivileged **Prototype / Change Signal** may trigger the trusted main-owned **Deploy / Public Pages** workflow. Verify the exact published SHA in `prototypes/manifest.json`, compare the direct HTML response, then update #2514's immutable source pin and HTTPS publication evidence. Do not claim that a branch push or historical Pages run proves the new design is live.
+
+## Shared review frame — 2026-11-06
+
+- **Entry / preview:** `index.html` is a directly accessible interactive review page using the shared `../prototype-frame-2758/frame.css`, `frame.js` and `review-bridge.*`. Its order is Requirement overview → 1:1 CSS-pixel product mock → interaction/fidelity details. Use the original [Requirement](https://github.com/BestNathan/nession/issues/2514) for the current design contract.
+- **Behavior:** preserves this directory's existing state transitions; moves fixture controls, reset, test inspectors, and scenario narratives outside the product viewport wherever they are static. Device width controls and full-page Reset belong to the external harness.
+- **Fidelity:** Linux/macOS/offline 进程、资源域与当前 Session 限定；没有真实 OS 进程数据。. The original mock's local DOM/CSS is retained; this migration does **not** prove fidelity to React/shadcn, actual xterm, TerminalCapsule, App gesture geometry, or current generated design tokens.
+- **Validation:** GitHub source structure and publisher-required source/gallery hooks checked. The new review frame needs an independent Chromium desktop/narrow-viewport walkthrough, keyboard/touch/scroll check, console inspection, and source-vs-fixture visual comparison; **those browser checks are not yet verified**. The public preview is **unverified** until `prototypes/manifest.json` reports the same commit SHA; mock results are never production Acceptance.
+- **Publication:** keep the existing direct `https://bestnathan.github.io/nession/prototypes/agent-process-discovery-2514/index.html` URL, but treat the immutable GitHub source commit as authoritative until Pages HTTPS/manifest readback succeeds.
