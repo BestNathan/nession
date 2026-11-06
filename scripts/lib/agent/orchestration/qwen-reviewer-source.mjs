@@ -24,7 +24,13 @@ export function qwenReviewerPublishedSource({storeRoot,issue,actionId,sha}){
       state.assignments?.reviewer!=='review-qwen-01'||
       reviewer?.length!==1||reviewer[0].task.agent_id!=='review-qwen-01'||
       reviewer[0].task.task!=='review'||reviewer[0].task.sha!==sha||
-      reviewer[0].status!=='pending'||publisher?.length!==1)
+      !['pending','dispatched'].includes(reviewer[0].status)||
+      (reviewer[0].status==='dispatched'&&(
+        reviewer[0].receipt?.status!=='verified'||
+        reviewer[0].receipt?.dispatch_id!==actionId||
+        !Number.isSafeInteger(reviewer[0].receipt?.source_run_id)||
+        reviewer[0].receipt.source_run_id<1))||
+      publisher?.length!==1)
     fail('no exact outstanding authenticated Qwen Reviewer Outbox action');
   const folder=path.join(storeRoot,'workflows/issues',String(issue),'results');
   const entries=fs.readdirSync(folder,{withFileTypes:true});
