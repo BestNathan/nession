@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { validateAcceptancePlan, isProofEligible, deploymentProofEligible } from './acceptance-plan.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
+import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
 
 export { normalizeAcceptanceResult };
 import {
@@ -400,7 +401,8 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
 function normalizeCommand(contextFile, rawFile, outFile, source) {
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
-  const normalized = normalizeAcceptanceResult(context, raw, source);
+  const normalized = verifiedIssueAuditCriterion(
+    context, normalizeAcceptanceResult(context, raw, source));
   fs.writeFileSync(outFile, JSON.stringify(normalized, null, 2) + '\n');
 }
 
@@ -560,6 +562,49 @@ function selfTest() {
     () => normalizeAcceptanceResult(staging, { criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'implementation pending' }] }),
     /requires concrete evidence/
   );
+
+  // #2860: a model's text about a successful Issue Audit is NOT proof. An
+  // exact-target, exact-run attested receipt is required and owns the final
+  // evidence rather than allowing a wrong/skipped run in model prose.
+  const pinned=SIDEBAR_AUDIT_REPAIR_PROOF;
+  const sourceProof={
+    status:'authenticated-historical-repair-readback',
+    source_run_id:pinned.sourceRunId,source_attempt:pinned.sourceAttempt,
+    target_issue:pinned.targetIssueNumber,source_event:pinned.event,
+    provider:'qwen',issue_contract_pass:true,
+    source_job_id:927,source_sha:'a'.repeat(40),
+    label_event_ids:[123,124],protected_e2e_selected_ids:pinned.expectedE2EIds,
+  };
+  const auditContext={
+    issue:{number:pinned.acceptanceIssue},stage:'post-merge',
+    ci_evidence:{authenticated_issue_audit_repair_readback:sourceProof},
+  };
+  const forged={
+    criteria:[{criterion:pinned.criterion,result:'Pass',evidence:[
+      {type:'workflow',value:'wrong successful run 42219064219 with skipped agent'}
+    ],summary:'wrong run passed'}],
+  };
+  const fixed=verifiedIssueAuditCriterion(auditContext,forged);
+  assert.deepEqual(fixed.criteria[0].evidence,[{
+    type:'authenticated-issue-audit',
+    value:'run '+pinned.sourceRunId+'/'+pinned.sourceAttempt+
+      ', agent job 927, target #'+pinned.targetIssueNumber+
+      ', source '+sourceProof.source_sha+', verified canonical Issue/E2E and bot label writes',
+  }]);
+  assert.doesNotMatch(fixed.criteria[0].summary,/42219064219/);
+  for(const invalid of [
+    null,{...sourceProof,source_run_id:42219064219},
+    {...sourceProof,target_issue:2855},
+    {...sourceProof,source_job_id:0},
+    {...sourceProof,source_attempt:2},
+    {...sourceProof,label_event_ids:[]},
+    {...sourceProof,protected_e2e_selected_ids:['unrelated']},
+  ])assert.throws(()=>verifiedIssueAuditCriterion({...auditContext,
+    ci_evidence:{authenticated_issue_audit_repair_readback:invalid}},forged),
+    /lacks authenticated exact-target/);
+  assert.equal(verifiedIssueAuditCriterion({...auditContext,ci_evidence:null},{
+    criteria:[{criterion:pinned.criterion,result:'Pending',evidence:[],summary:'Not proven'}],
+  }).criteria[0].result,'Pending');
 
   const newer = passedBody.replace('run 100; ref abc123;', 'run 200; ref newer;');
   assert.throws(() => applyAcceptanceResultToBody(newer, pass), /newer acceptance run 200/);
