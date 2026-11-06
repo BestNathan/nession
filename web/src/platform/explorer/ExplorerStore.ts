@@ -29,6 +29,10 @@ export class ExplorerStore {
   private readonly expandedIds = new Set<NodeId>();
   private readonly selectedIds = new Set<NodeId>();
   private readonly loadStateById = new Map<NodeId, LoadState>();
+  private readonly loadGenerationById = new Map<NodeId, number>();
+  private pendingLoadCount = 0;
+  private eventSeq = 0;
+  private readonly eventsSinceLoad: Array<{ seq: number; event: ExplorerEvent }> = [];
   private activeId: NodeId | null = null;
   private revision = 0;
   private cachedRevision = -1;
@@ -95,6 +99,18 @@ export class ExplorerStore {
   }
 
   applyEvent(event: ExplorerEvent): void {
+    // A load's response describes the provider at request time, not the
+    // filesystem after this event. Keep the events that overlap in-flight
+    // loads so a completing snapshot can replay them instead of undoing them.
+    if (this.pendingLoadCount > 0) {
+      this.eventSeq += 1;
+      this.eventsSinceLoad.push({ seq: this.eventSeq, event });
+    }
+    this.applyEventMutation(event);
+    this.emit();
+  }
+
+  private applyEventMutation(event: ExplorerEvent): void {
     switch (event.type) {
       case 'create':
         this.applyCreate(event.node, event.parentId);
@@ -109,7 +125,6 @@ export class ExplorerStore {
         this.applyRename(event.nodeId, event.name, event.newId);
         break;
     }
-    this.emit();
   }
 
   setSelection(ids: Iterable<NodeId>): void {
@@ -157,7 +172,11 @@ export class ExplorerStore {
       parentId: parentId === ROOT_ID ? undefined : parentId,
     });
     const siblings = this.childrenById.get(parentId) ?? [];
-    this.childrenById.set(parentId, [...siblings, node.id]);
+    // Replay after a snapshot may re-deliver an event the provider already
+    // included; a child must not appear twice.
+    if (!siblings.includes(node.id)) {
+      this.childrenById.set(parentId, [...siblings, node.id]);
+    }
     this.loadStateById.set(parentId, 'loaded');
   }
 
@@ -176,6 +195,8 @@ export class ExplorerStore {
   }
 
   private rekeyNode(oldId: NodeId, newId: NodeId, node: ExplorerNode): void {
+    this.invalidateLoad(oldId);
+    this.invalidateLoad(newId);
     this.nodesById.delete(oldId);
     this.nodesById.set(newId, node);
 
@@ -204,7 +225,12 @@ export class ExplorerStore {
     }
 
     if (this.loadStateById.has(oldId)) {
-      this.loadStateById.set(newId, this.loadStateById.get(oldId)!);
+      const state = this.loadStateById.get(oldId)!;
+      // invalidateLoad fenced the old id's request; a moved 'loading' state
+      // would otherwise have no owner left to settle it.
+      this.loadStateById.set(newId, state === 'loading'
+        ? (this.childrenById.has(newId) ? 'loaded' : 'idle')
+        : state);
       this.loadStateById.delete(oldId);
     }
 
@@ -219,6 +245,9 @@ export class ExplorerStore {
       return;
     }
 
+    // A pending load for this node or its descendants describes a subtree
+    // that no longer exists; its completion must never resurrect it.
+    this.invalidateLoad(nodeId);
     for (const childId of this.childrenById.get(nodeId) ?? []) {
       this.removeNode(childId);
     }
@@ -248,6 +277,10 @@ export class ExplorerStore {
       return;
     }
 
+    const generation = (this.loadGenerationById.get(nodeId) ?? 0) + 1;
+    this.loadGenerationById.set(nodeId, generation);
+    const eventStart = this.eventSeq;
+    this.pendingLoadCount += 1;
     this.loadStateById.set(nodeId, 'loading');
     this.emit();
 
@@ -258,31 +291,69 @@ export class ExplorerStore {
       }
 
       const children = await this.provider.loadChildren(parentNode);
-      const childIds: NodeId[] = [];
-      const nextChildIds = new Set<NodeId>();
-
-      for (const child of children) {
-        this.nodesById.set(child.id, {
-          ...child,
-          parentId: nodeId === ROOT_ID ? undefined : nodeId,
-        });
-        childIds.push(child.id);
-        nextChildIds.add(child.id);
+      // Only the newest load for this directory, and only while the directory
+      // still exists, may commit. An older success or failure must not alter
+      // the tree, load state, selection or active node.
+      if (!this.isCurrentLoad(nodeId, generation)) {
+        return;
       }
 
-      for (const staleChildId of this.childrenById.get(nodeId) ?? []) {
-        if (!nextChildIds.has(staleChildId)) {
-          this.removeNode(staleChildId);
-        }
-      }
-
-      this.childrenById.set(nodeId, childIds);
+      this.commitChildren(nodeId, children);
       this.loadStateById.set(nodeId, 'loaded');
+      // Events that arrived while this request was in flight are later facts
+      // than the response; replay them so the older snapshot cannot undo them.
+      this.replayEventsAfter(eventStart);
+      this.emit();
     } catch {
-      this.loadStateById.set(nodeId, 'error');
+      if (this.isCurrentLoad(nodeId, generation)) {
+        this.loadStateById.set(nodeId, 'error');
+        this.emit();
+      }
+    } finally {
+      this.pendingLoadCount -= 1;
+      if (this.pendingLoadCount === 0) {
+        this.eventsSinceLoad.length = 0;
+      }
+    }
+  }
+
+  private isCurrentLoad(nodeId: NodeId, generation: number): boolean {
+    return this.loadGenerationById.get(nodeId) === generation
+      && (nodeId === ROOT_ID || this.nodesById.has(nodeId));
+  }
+
+  private commitChildren(nodeId: NodeId, children: ExplorerNode[]): void {
+    const childIds: NodeId[] = [];
+    const nextChildIds = new Set<NodeId>();
+
+    for (const child of children) {
+      this.nodesById.set(child.id, {
+        ...child,
+        parentId: nodeId === ROOT_ID ? undefined : nodeId,
+      });
+      childIds.push(child.id);
+      nextChildIds.add(child.id);
     }
 
-    this.emit();
+    for (const staleChildId of this.childrenById.get(nodeId) ?? []) {
+      if (!nextChildIds.has(staleChildId)) {
+        this.removeNode(staleChildId);
+      }
+    }
+
+    this.childrenById.set(nodeId, childIds);
+  }
+
+  private replayEventsAfter(seq: number): void {
+    for (const entry of this.eventsSinceLoad) {
+      if (entry.seq > seq) {
+        this.applyEventMutation(entry.event);
+      }
+    }
+  }
+
+  private invalidateLoad(nodeId: NodeId): void {
+    this.loadGenerationById.set(nodeId, (this.loadGenerationById.get(nodeId) ?? 0) + 1);
   }
 
   private emit(): void {
