@@ -48,6 +48,8 @@ assert.match(claude.text, /Never include verification:\*/);
 assert.match(cursor.text, /one complete, distinct array of kind \+ area labels/);
 assert.deepEqual(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties.labels.items.enum.slice(0,2),['bug','requirement']);
 assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.additionalProperties,false);
+assert.equal(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties.labels.items.enum.includes('verification:full'),false);
+assert.deepEqual(Object.keys(ISSUE_AUDIT_PROPOSAL_SCHEMA.properties),['title','body','labels','comment','verification_tier','tier_reason']);
 assert.deepEqual(JSON.parse(issueAuditStructuredEnvelope({structured_output:{labels:['bug','cli']}}).result),
   {labels:['bug','cli']});
 assert.throws(()=>issueAuditStructuredEnvelope({result:'{"labels":["bug","cli"]}'}),/structured output unavailable/);
