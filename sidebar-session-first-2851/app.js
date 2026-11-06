@@ -2,11 +2,11 @@
   "use strict";
   const q = (id) => document.getElementById(id);
   const fixtures = [
-    {id:"sess-01",title:"Fix terminal reconnect",kind:"Claude Code",agent:"devbox-01",group:"Today",state:"active",lines:["nession / session-01","Workspace: /work/demo","Connected to devbox-01","","Latest task: verify terminal continuity","✓ Last command completed"]},
-    {id:"sess-02",title:"Design Files workspace",kind:"shell",agent:"macbook-demo",group:"Today",state:"idle",lines:["nession / session-02","Workspace: /work/files","Git status: clean","","Reviewing file navigator behavior"]},
-    {id:"sess-03",title:"Sandbox policy review",kind:"shell",agent:"runner-02",group:"Earlier",state:"idle",lines:["nession / session-03","Workspace: /work/sandbox","Policy review in progress"]},
-    {id:"sess-04",title:"Production diagnostics",kind:"zsh",agent:"runner-02",group:"Earlier",state:"offline",lines:["nession / session-04","Agent unreachable; work remains discoverable","Reconnect to recover the live terminal view."]},
-    {id:"sess-05",title:"Environment proposal",kind:"Claude Code",agent:"devbox-01",group:"Earlier",state:"idle",lines:["nession / session-05","Workspace: /work/env","Proposal ready for review."]}
+    {id:"sess-01",sessionName:"fix-terminal-reconnect",title:"Fix terminal reconnect",kind:"Claude Code",agent:"devbox-01",group:"Today",state:"active",lines:["nession / session-01","Workspace: /work/demo","Connected to devbox-01","","Latest task: verify terminal continuity","✓ Last command completed"]},
+    {id:"sess-02",sessionName:"design-files",title:"Design Files workspace",kind:"shell",agent:"macbook-demo",group:"Today",state:"idle",lines:["nession / session-02","Workspace: /work/files","Git status: clean","","Reviewing file navigator behavior"]},
+    {id:"sess-03",sessionName:"sandbox-policy",title:"Sandbox policy review",kind:"shell",agent:"runner-02",group:"Earlier",state:"idle",lines:["nession / session-03","Workspace: /work/sandbox","Policy review in progress"]},
+    {id:"sess-04",sessionName:"production-diag",title:"Production diagnostics",kind:"zsh",agent:"runner-02",group:"Earlier",state:"offline",lines:["nession / session-04","Agent unreachable; work remains discoverable","Reconnect to recover the live terminal view."]},
+    {id:"sess-05",sessionName:"environment-proposal",title:"Environment proposal",kind:"Claude Code",agent:"devbox-01",group:"Earlier",state:"idle",lines:["nession / session-05","Workspace: /work/env","Proposal ready for review."]}
   ];
   let sessions = fixtures.map(s=>({...s,lines:s.lines.slice()}));
   let selectedId="sess-01", search="", collapsed=false, width=1280, drawerOpen=false, section="sessions", dialog=null, surface="terminal";
@@ -38,20 +38,20 @@
     const heading=element("h2","",type==="kill"?"Kill Session":"Attach settings");
     heading.id="n-session-action-heading";panel.setAttribute("aria-labelledby",heading.id);panel.append(heading);
     panel.append(element("p","n-action-description",type==="kill"
-      ?"This will terminate session "+s.title+" on "+s.agent+" and cannot be undone."
+      ?"This will terminate session "+(s.sessionName||s.title)+" on "+s.agent+" and cannot be undone."
       :"Configure attach settings for "+s.title+". Preview only; no backend calls."));
     if(type==="kill"){
-      const label=element("label","n-action-label","Type "+s.title+" to confirm");
-      const field=element("input","n-action-field");field.type="text";field.autocomplete="off";field.placeholder=s.title;
+      const label=element("label","n-action-label","Type "+(s.sessionName||s.title)+" to confirm");
+      const field=element("input","n-action-field");field.type="text";field.autocomplete="off";field.placeholder=s.sessionName||s.title;
       label.append(field);panel.append(label);
       const hint=element("p","n-action-hint","");panel.append(hint);
       const buttons=element("div","n-action-buttons");const confirm=button("Kill Session","n-action-danger",()=>{
-        if(field.value.trim()!==s.title)return;
+        if(field.value.trim()!==(s.sessionName||s.title))return;
         sessions=sessions.filter(v=>v.id!==s.id);
         if(selectedId===s.id)selectedId=sessions[0]?.id||null;
         closeModal();render();
       });confirm.disabled=true;
-      field.addEventListener("input",()=>{const valid=field.value.trim()===s.title;confirm.disabled=!valid;hint.textContent=field.value&&!valid?"Name doesn't match yet.":"";field.setAttribute("aria-invalid",String(Boolean(field.value&&!valid)));});
+      field.addEventListener("input",()=>{const valid=field.value.trim()===(s.sessionName||s.title);confirm.disabled=!valid;hint.textContent=field.value&&!valid?"Name doesn't match yet.":"";field.setAttribute("aria-invalid",String(Boolean(field.value&&!valid)));});
       buttons.append(button("Cancel","",closeModal),confirm);panel.append(buttons);
       actionOverlay.append(cover,panel);field.focus();return;
     }
@@ -137,7 +137,7 @@
       const name=field("Session name","text","");name.e.maxLength=80;name.e.autocomplete="off";box.append(name.l);
       const agentLabel=element("label","", "Agent / location");const select=element("select");for(const a of agents){const option=element("option","",a.name+(a.online?"":" (offline)"));option.value=a.name;select.append(option);}agentLabel.append(select);box.append(agentLabel);
       const em=element("p","n-error","");box.append(em);
-      const actions=element("div","n-button-row");actions.append(button("Cancel","",closeDialog),button("Create session","n-primary",()=>{const title=name.e.value.trim();if(!title){error(box,"Enter a name.");name.e.focus();return;}if(!agents.find(a=>a.name===select.value)?.online){error(box,"This Agent is offline. Choose an online Agent.");return;}const id="mock-"+(sessions.length+1);sessions.unshift({id,title,kind:"shell",agent:select.value,group:"Today",state:"active",lines:["nession / "+id,"Session created in local preview.","No backend process has been launched."]});selectedId=id;search="";input.value="";dialog=null;render();}));box.append(actions);name.e.focus();return;
+      const actions=element("div","n-button-row");actions.append(button("Cancel","",closeDialog),button("Create session","n-primary",()=>{const title=name.e.value.trim();if(!title){error(box,"Enter a name.");name.e.focus();return;}if(!agents.find(a=>a.name===select.value)?.online){error(box,"This Agent is offline. Choose an online Agent.");return;}const id="mock-"+(sessions.length+1);sessions.unshift({id,sessionName:title,title,kind:"shell",agent:select.value,group:"Today",state:"active",lines:["nession / "+id,"Session created in local preview.","No backend process has been launched."]});selectedId=id;search="";input.value="";dialog=null;render();}));box.append(actions);name.e.focus();return;
     }
   }
   function renderWork(){
