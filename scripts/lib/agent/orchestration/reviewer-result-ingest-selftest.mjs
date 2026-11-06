@@ -184,7 +184,9 @@ try{
   assert.match(publicBody,/Reviewer examined exact PR/);
   assert.match(publicBody,/Original Review Artifact: 445/);
   assert.throws(()=>formatReviewerIssueReceipt(receipt,commit,next.version,
-    {...verifiedDetail,outcome:'changes_requested'}),/untrusted original Reviewer/);
+    {...verifiedDetail,outcome:'changes_requested',
+      findings:[{path:'calc.js',evidence:'Verified outcome mismatch'}]}),
+    /untrusted original Reviewer/);
   assert.throws(()=>formatReviewerIssueReceipt(receipt,commit,next.version,
     {...verifiedDetail,summary:'forged\nTool: Bash'}),/Review task/);
   const reviewRequest={...receipt,result:{...receipt.result,
