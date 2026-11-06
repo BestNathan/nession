@@ -52,6 +52,9 @@ assert.deepEqual(JSON.parse(issueAuditStructuredEnvelope({structured_output:{lab
   {labels:['bug','cli']});
 assert.throws(()=>issueAuditStructuredEnvelope({result:'{"labels":["bug","cli"]}'}),/structured output unavailable/);
 assert.throws(()=>issueAuditStructuredEnvelope({structured_output:[]}),/structured output unavailable/);
+await assert.rejects(applyIssueAuditProposal(issue,
+  issueAuditStructuredEnvelope({structured_output:{labels:['bug','cli'],issue_number:18}}),
+  'example/repo'),/unauthorized fields/);
 assert.throws(()=>buildClaudeCliArgs({
   prompt:'test',model:'qwen3.7-plus',maxTurns:1,allowedTools:'',disallowedTools:'',
   jsonSchema:{type:'object',additionalProperties:true}
