@@ -414,6 +414,7 @@ describe('TerminalController', () => {
     expect(h.spy).toHaveBeenCalledTimes(2);
     h.finish();
     expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized, last]);
+    expect(onStreamEventParsed.mock.calls.map((call) => call[1])).toEqual([1, 0, 1]);
 
     // Legacy frames and local display bytes are not Agent timeline events.
     transport.onOutput!(new Uint8Array([67]));
@@ -450,7 +451,7 @@ describe('TerminalController', () => {
     second.onOutput!(new Uint8Array([51]), undefined, { streamEpoch: 7, streamSeq: 3 });
     h.finish();
     expect(onStreamEventParsed).toHaveBeenCalledOnce();
-    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 });
+    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 }, 1);
     second.onOutput!(new Uint8Array([52]), undefined, { streamEpoch: 7, streamSeq: 4 });
     controller.dispose();
     h.finish(); // disposed instance ignores even a previously queued callback
