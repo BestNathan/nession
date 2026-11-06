@@ -1,4 +1,4 @@
-// Files #2751: mock-only product visual contract + deterministic flow regression.
+// Files #2751: current product information architecture + mock flow regression.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -8,26 +8,30 @@ const css=readFileSync(new URL('./product-fidelity.css',import.meta.url),'utf8')
 const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(script,'classic inline mock JS must be present');
 
-test('1:1 product styling tracks current canonical Files fixture, not the reviewer shell',()=>{
+test('only Workspace and capability owners draw their Nession screen regions',()=>{
   assert.match(html,/href="\.\/product-fidelity\.css"/);
+  assert.match(script,/function webSidebar\(/);
+  assert.match(script,/function webShell\(/);
+  assert.match(script,/data-testid="workspace-shell"/);
+  assert.match(script,/data-testid="workspace-tool-content"/);
+  assert.match(script,/data-testid="app-page-header"/);
   assert.match(css,/--nession-workspace-tree-width:\s*208px/);
-  assert.match(css,/grid-template-columns:\s*var\(--nession-workspace-tree-width\) minmax\(0,1fr\)/);
+  assert.match(css,/\.ia-web-layout/);
+  assert.match(css,/\.ia-session-sidebar/);
+  assert.match(css,/\.ia-workspace-shell/);
+  assert.match(css,/\.ia-app-page-header/);
   assert.match(css,/--nession-workspace-background:\s*var\(--nession-background\)/);
-  assert.match(css,/\.np-device > #app/);
-  assert.match(css,/\.np-device > #app \.phone-breadcrumb/);
-  assert.doesNotMatch(css,/\.np-stage\s*\{/);
-  assert.doesNotMatch(css,/#0e1013/);
-  assert.match(html,/"hide":\["#app > \.top","#app > \.hint"\]/);
+  assert.doesNotMatch(script,/function workspaceHeader\(/);
+  assert.doesNotMatch(script,/function header\(/);
   assert.doesNotMatch(script,/fetch\("\.\.\/manifest\.json"/);
+  assert.doesNotMatch(css,/\.np-stage\s*\{/);
 });
 
-test('Web/ App use different product composition and App Back owns pushed depth',()=>{
+test('WebLayout + WorkspaceShell + AppPageHeader own navigation through every depth',()=>{
   const listeners={};
-  const app={
-    innerHTML:'',
-    clientWidth:390,clientHeight:844,
+  const app={innerHTML:'',clientWidth:1180,clientHeight:844,
     addEventListener(type,fn){listeners[type]=fn},
-    getBoundingClientRect(){return {left:100,top:50,width:390,height:844}}
+    getBoundingClientRect(){return {left:100,top:50,width:1180,height:844}}
   };
   const page={handlers:{},addEventListener(type,fn){this.handlers[type]=fn}};
   const document={
@@ -37,25 +41,47 @@ test('Web/ App use different product composition and App Back owns pushed depth'
   };
   runInNewContext(script,{document,window:{innerWidth:1440,innerHeight:950}});
   const click=(action,path)=>listeners.click({target:{
-    dataset:{action,path},
-    closest(){return this},
+    dataset:{action,path},closest(){return this},
     getBoundingClientRect(){return {left:120,top:150,right:200,bottom:185}}
   }});
-  assert.match(app.innerHTML,/class="content"/,'Web splits tree and editor');
+  assert.match(app.innerHTML,/data-testid="web-layout"/);
+  assert.match(app.innerHTML,/data-testid="sidebar"/);
+  assert.match(app.innerHTML,/data-testid="workspace-shell"/);
+  assert.match(app.innerHTML,/data-testid="files-web-browser"/);
+  assert.doesNotMatch(app.innerHTML,/class="workspace-header"/);
+  click('sidebar-collapse');
+  assert.match(app.innerHTML,/data-collapsed="true"/);
+  click('sidebar-expand');
+  assert.doesNotMatch(app.innerHTML,/data-collapsed="true"/);
   click('pick','src');
   click('new-file');
-  assert.match(app.innerHTML,/Destination[^]*?<code>src\/</,'selected directory is creation target');
+  assert.match(app.innerHTML,/Destination[^]*?<code>src\/</,'selected dir is creation target');
   click('close-form');
+  click('open-terminal');
+  assert.match(app.innerHTML,/data-testid="terminal-surface"/);
+  click('open-workspace');
+  assert.match(app.innerHTML,/data-testid="workspace-shell"/);
   page.handlers['np:resize']({detail:{width:390}});
-  assert.match(app.innerHTML,/class="mobile-mock"/,'App shows a single navigation stack');
+  assert.doesNotMatch(app.innerHTML,/data-testid="sidebar"/,'App does not miniaturize Web sidebar');
+  assert.match(app.innerHTML,/data-testid="app-page-header"/);
+  assert.match(app.innerHTML,/aria-label="Directory path"/);
+  assert.doesNotMatch(app.innerHTML,/class="phone-top"/,'no duplicate App header');
   click('enter','src');
-  assert.match(app.innerHTML,/aria-label="Back to parent"/);
+  assert.match(app.innerHTML,/<h1>src<\/h1>/);
   click('mobile-open','src/App.tsx');
-  assert.match(app.innerHTML,/aria-label="Back to Files"/);
-  assert.ok(app.innerHTML.indexOf('aria-label="Back to Files"')<app.innerHTML.indexOf('App.tsx'),'App Back precedes file identity');
-  click('mobile-back');
-  assert.doesNotMatch(app.innerHTML,/aria-label="Back to Files"/);
+  assert.match(app.innerHTML,/<h1>App.tsx<\/h1>/);
+  assert.equal((app.innerHTML.match(/data-action="shell-back"/g)||[]).length,1);
+  assert.doesNotMatch(app.innerHTML,/data-action="mobile-back"/);
+  click('shell-back');
+  assert.match(app.innerHTML,/data-testid="files-app-directory"/);
+  click('search-files');
+  assert.match(app.innerHTML,/data-testid="files-app-search"/);
+  click('shell-back');
+  assert.match(app.innerHTML,/data-testid="files-app-directory"/);
+  click('shell-back');
+  assert.match(app.innerHTML,/<h1>Files<\/h1>/);
+  click('shell-back');
+  assert.match(app.innerHTML,/data-testid="terminal-surface"/);
   page.handlers['np:resize']({detail:{width:1180}});
-  assert.match(app.innerHTML,/class="content"/);
-  assert.doesNotMatch(app.innerHTML,/class="mobile-wrap"/);
+  assert.match(app.innerHTML,/data-testid="web-layout"/);
 });
