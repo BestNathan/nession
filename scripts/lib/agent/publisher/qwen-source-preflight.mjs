@@ -180,9 +180,13 @@ export function assertQwenRepairPublisherOrigin({
   });
 }
 
-// Read only the canonical public orphan State/Intent; no Provider/session
-// plaintext or GitHub writer is needed for this source assertion.
-function readQwenRepairPublisherOrigin({remote,admission,checkpoint}){
+// The Worker checked the signed *previous* checkpoint before its model ran.
+// After the Repair Store Ingest commits vN+1, that old head is intentionally
+// no longer current. DO NOT call authorizeWorkerFromStore here: its strict
+// pre-model current-head check must not be weakened for a post-model reader.
+// Reconstruct only a read-only Publisher admission from the signed Claim,
+// committed dispatch receipt, original immutable source and Store history.
+function readQwenRepairPublisherAdmission({remote,registry,run,claim,signed}){
   if(typeof remote!=='string'||(!remote.startsWith('https://x-access-token:')&&
       !(process.env.NODE_ENV==='test'&&path.isAbsolute(remote))))
     fail('Repair Publisher requires the scoped authenticated Store source');
@@ -196,15 +200,94 @@ function readQwenRepairPublisherOrigin({remote,admission,checkpoint}){
         env:{...process.env,GIT_TERMINAL_PROMPT:'0',
           GIT_NO_REPLACE_OBJECTS:'1'}});
     }catch{fail('Repair Publisher cannot read authenticated agent-store');}
-    const state=readIssueWorkflowState(dir,admission.issue).state;
-    const published=state?.transitions?.filter(x=>x.kind==='publisher'&&
-      x.outcome==='published'&&x.target_sha===admission.input_sha);
-    if(published?.length!==1||!positive(published[0].run_id))
+    const state=readIssueWorkflowState(dir,signed.issue).state;
+    const actions=state?.outbox?.filter(x=>x.id===signed.action_id);
+    const action=actions?.length===1?actions[0]:null;
+    const origin=action?.task?.repair_checkpoint;
+    const registered=registry?.instances?.[claim.inputs.agent_id];
+    const canonical=x=>JSON.stringify(Object.fromEntries(
+      Object.keys(x).sort().map(k=>[k,x[k]])));
+    if(state?.issue!==signed.issue||state.phase!=='repair'||
+        state.target_sha!==claim.inputs.input_sha||
+        state.assignments?.developer!=='dev-qwen-01'||
+        state.assignments?.reviewer!=='review-qwen-01'||
+        actions.length!==1||action.status!=='dispatched'||
+        action.task?.type!=='dispatch'||action.task.role!=='developer'||
+        action.task.task!=='repair'||action.task.agent_id!=='dev-qwen-01'||
+        action.task.sha!==claim.inputs.input_sha||
+        action.task.resume!==true||
+        action.receipt?.status!=='verified'||
+        action.receipt.dispatch_id!==signed.action_id||
+        action.receipt.source_run_id!==run.id||
+        claim.inputs.task!=='repair'||
+        claim.inputs.agent_id!=='dev-qwen-01'||
+        Number(claim.inputs.issue_number)!==signed.issue||
+        claim.inputs.action_id!==signed.action_id||
+        !origin||!positive(origin.checkpoint_version)||
+        !SHA.test(origin.checkpoint_commit_sha??'')||
+        !HEX.test(origin.ciphertext_sha256??'')||
+        !SHA.test(origin.source_sha??'')||
+        !positive(origin.source_run_id)||
+        claim.inputs.resume_from!==
+          Buffer.from(canonical(origin)).toString('base64url')||
+        registered?.role!=='developer'||
+        registered.provider!=='claude-code'||
+        registered.environment!=='dev-claude-qwen')
+      fail('post-commit Repair Publisher lacks authenticated signed Outbox');
+    const published=state.transitions.filter(x=>x.kind==='publisher'&&
+      x.outcome==='published'&&x.target_sha===state.target_sha);
+    if(published.length!==1||!positive(published[0].run_id))
       fail('Repair Publisher has no unique original GitHub publication');
     const originalIntent=qwenCommittedPublisherIntent({storeRoot:dir,
-      issue:admission.issue,publisherRunId:published[0].run_id});
-    return assertQwenRepairPublisherOrigin({state,admission,checkpoint,
-      originalIntent});
+      issue:signed.issue,publisherRunId:published[0].run_id});
+
+    // The original vN is historical after vN+1. Verify its immutable
+    // Git object and author commit, NOT the new current identity head.
+    const prefix='roles/developer/dev-qwen-01/issues/'+signed.issue;
+    const location=prefix+'/checkpoints/'+String(origin.checkpoint_version)
+      .padStart(8,'0')+'.json';
+    const filePath=path.join(dir,location);
+    const stat=fs.lstatSync(filePath,{throwIfNoEntry:false});
+    if(!stat?.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)
+      fail('missing or unsafe historic Qwen checkpoint');
+    const git=(...args)=>{
+      try{return execFileSync('git',['-C',dir,...args],{
+        encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:20000,
+        maxBuffer:1024*1024,env:{...process.env,
+          GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'}}).trim();}
+      catch{fail('historical Qwen Git checkpoint is not reachable');}
+    };
+    git('merge-base','--is-ancestor',origin.checkpoint_commit_sha,'HEAD');
+    if(git('rev-parse',origin.checkpoint_commit_sha+':'+location)!==
+       git('hash-object',location))
+      fail('historic native bytes differ from committed origin');
+    let oldCheckpoint,oldHead;
+    try{
+      oldCheckpoint=JSON.parse(fs.readFileSync(filePath,'utf8'));
+      oldHead=JSON.parse(git('show',origin.checkpoint_commit_sha+':'+
+        prefix+'/head.json'));
+    }catch{fail('corrupt historical Qwen native source');}
+    if(oldHead.version!==origin.checkpoint_version||
+        oldHead.checkpoint_path!==location||
+        oldHead.ciphertext_sha256!==origin.ciphertext_sha256||
+        oldCheckpoint.version!==origin.checkpoint_version||
+        oldCheckpoint.schema_version!==1||
+        oldCheckpoint.kind!=='encrypted_agent_checkpoint'||
+        oldCheckpoint.ciphertext_sha256!==origin.ciphertext_sha256||
+        oldCheckpoint.identity?.role!=='developer'||
+        oldCheckpoint.identity.agent_id!=='dev-qwen-01'||
+        oldCheckpoint.identity.issue!==signed.issue||
+        oldCheckpoint.metadata?.provider!=='claude-code'||
+        oldCheckpoint.metadata.source_sha!==origin.source_sha||
+        !HEX.test(oldCheckpoint.metadata.harness_digest??'')||
+        !oldCheckpoint.metadata.session_id)
+      fail('historical original native checkpoint source is invalid');
+    const admission=Object.freeze({authorized:true,issue:signed.issue,
+      role:'developer',agent_id:'dev-qwen-01',provider:'claude-code',
+      environment:'dev-claude-qwen',task:'repair',
+      action_id:signed.action_id,run_id:run.id,
+      input_sha:claim.inputs.input_sha,resume_from:origin});
+    return {admission,state,originalIntent,oldMetadata:oldCheckpoint.metadata};
   }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
 
@@ -222,18 +305,14 @@ export async function preflightTrustedQwenRepairPublisher({
     fail('Repair Publisher requires an exact signed native Repair Run');
   const signed=await verifyWorkerClaimForAck({
     run,claim,key:rootKey,reader});
-  const admission=authorizeWorkerFromStore({remote,registry,
-    role:'developer',runId:run.id,input:claim.inputs});
-  if(!admission.authorized||admission.task!=='repair'||
-      admission.agent_id!=='dev-qwen-01'||
-      admission.provider!=='claude-code'||
-      admission.environment!=='dev-claude-qwen'||
-      signed.issue!==admission.issue||
-      signed.action_id!==admission.action_id||
-      signed.source_run_id!==admission.run_id)
-    fail('Repair Publisher source differs from signed Store authority');
+  const bound=readQwenRepairPublisherAdmission({
+    remote,registry,run,claim,signed});
+  const {admission}=bound;
   const candidate=validateQwenDevelopmentCandidate({
     admission,run,result,proof,ciphertext});
+  if(candidate.metadata.session_id!==bound.oldMetadata.session_id||
+      candidate.metadata.harness_digest!==bound.oldMetadata.harness_digest)
+    fail('Repair native UUID/Harness differs from original committed Session');
   const checkpoint=readCommittedQwenRunReceipt(remote,candidate.identity,
     run,admission.action_id,admission.input_sha,candidate.metadata,'repair');
   if(!checkpoint||!positive(checkpoint.version)||
@@ -242,7 +321,9 @@ export async function preflightTrustedQwenRepairPublisher({
   verifyCommittedCheckpoint({remote,identity:candidate.identity,
     commit_sha:checkpoint.commit_sha,version:checkpoint.version,
     ciphertext_sha256:checkpoint.ciphertext_sha256});
-  const origin=readQwenRepairPublisherOrigin({remote,admission,checkpoint});
+  const origin=assertQwenRepairPublisherOrigin({
+    state:bound.state,admission,checkpoint,
+    originalIntent:bound.originalIntent});
   const patch=Buffer.from(candidate.proposal.patch_base64,'base64')
     .toString('utf8');
   const checked=preflightAgentPatch({checkout:sourceCheckout,
