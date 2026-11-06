@@ -18,6 +18,8 @@ import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatch
   verifyDispatchTicket,planControlledReviewerRecovery,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {readPublishedRepairCheckpoint} from './repair-checkpoint.mjs';
+import {attestQwenPublishedRepairCheckpoint}
+  from './qwen-repair-checkpoint.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -78,6 +80,43 @@ export function bindControlledRepairCheckpoint({remote,issue,actionId}){
     if(pushed.replayed)fail('unexpected first Repair origin CAS replay');
     return {status:'bound',issue,action_id:actionId,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// This main-owned Store CAS is the sole Qwen cross-phase Repair binding.
+// Only a previously committed Reviewer rejection, Publisher Intent and
+// original native ciphertext author can choose the checkpoint; no ticket,
+// native restore or GitHub workflow_dispatch occurs during this operation.
+export function bindQwenRepairCheckpoint({remote,issue,actionId}){
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !/^[a-f0-9]{64}$/.test(actionId??''))
+    fail('invalid Qwen Repair Issue/Action');
+  return withStore(remote,dir=>{
+    const previous=readIssueWorkflowState(dir,issue);
+    if(!previous.state)fail('Qwen Repair Issue not initialized');
+    const action=previous.state.outbox.find(x=>x.id===actionId);
+    if(!action)fail('pending Action not found in committed Store');
+    if(action.task?.role!=='developer'||action.task?.task!=='repair'||
+       previous.state.assignments.developer!=='dev-qwen-01')
+      return {status:'not-qwen-repair',issue,action_id:actionId,
+        state_version:previous.version};
+    if(action.task.agent_id!=='dev-qwen-01')
+      fail('Qwen Repair assignment differs from action agent');
+    if(action.status!=='pending')
+      return {status:'reconcile',issue,action_id:actionId,
+        action_status:action.status,state_version:previous.version};
+    const proof=attestQwenPublishedRepairCheckpoint({
+      storeRoot:dir,state:previous.state,actionId});
+    const next=bindVerifiedRepairCheckpoint(previous.state,
+      previous.version,actionId,proof);
+    if(next===previous.state)
+      return {status:'replayed',issue,action_id:actionId,
+        state_version:previous.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    const published=persist(dir,next,previous.version,issue);
+    if(published.replayed)
+      fail('ambiguous new Qwen Repair checkpoint CAS; reconcile before dispatch');
+    return {status:'bound',issue,action_id:actionId,
+      state_version:next.version,store_commit_sha:published.commit_sha};
   });
 }
 
