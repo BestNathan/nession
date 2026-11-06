@@ -1,0 +1,227 @@
+/* #2514 product-only hierarchy snapshot, current main AgentDetail / AgentProcesses
+ * WebLayout and WorkspaceShell own the host; Agent owns its current Session
+ * process tree/inspector. The narrow internal "Back to processes" is a
+ * genuine AgentProcesses focus-navigation control, not an AppPageHeader clone.
+ */
+body[data-nession-prototype-frame="v1"] .np-device > .shell{
+ --nession-background:oklch(1 0 0);
+ --nession-foreground:oklch(0.2636 0.0063 258.359);
+ --nession-surface:oklch(0.9782 0.0034 247.858);
+ --nession-muted:oklch(0.9519 0.0013 106.424);
+ --nession-muted-foreground:oklch(0.553 0.0118 261.773);
+ --nession-border:oklch(0.9274 0.0027 106.451);
+ --nession-action:oklch(0.538 0.1284 157.694);
+ width:100%;max-width:none;height:100%;min-height:0;
+ overflow:hidden;padding:0;margin:0;display:block;
+ color:var(--nession-foreground);background:var(--nession-background);
+ border:0;border-radius:0;box-shadow:none;font-size:13px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-web-layout{
+ display:flex;width:100%;height:100%;min-height:0;overflow:hidden;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar{
+ display:flex;flex-direction:column;flex:0 0 246px;width:246px;
+ min-width:0;min-height:0;overflow:hidden;
+ background:var(--nession-surface);color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed{
+ flex:0 0 50px;width:50px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-sidebar-head{
+ display:flex;align-items:center;justify-content:space-between;gap:6px;
+ padding:7px 10px;min-height:42px;font-size:12.5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-sidebar-head button{
+ display:grid;place-items:center;min-height:30px;width:30px;
+ border:0;background:transparent;border-radius:7px;
+ color:var(--nession-muted-foreground);font-size:15px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar:not(.collapsed) [data-ia="expand"],
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed [data-ia="collapse"]{display:none}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed .ia-sidebar-head strong,
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed .ia-agent-line,
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed .ia-sidebar-section,
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed .ia-session-list,
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar.collapsed .ia-sidebar-footer{display:none}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-agent-line{
+ display:flex;justify-content:space-between;gap:6px;
+ padding:7px 12px;color:var(--nession-muted-foreground);font-size:11.5px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-agent-line small{font-size:10px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-sidebar-section{
+ margin:9px 8px 4px;padding:10px 4px 6px;
+ border-top:1px solid var(--nession-border);font-size:12.5px;font-weight:600;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-list{
+ flex:1;overflow-y:auto;min-height:0;padding:4px 8px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-row{
+ display:flex;flex-direction:column;gap:3px;align-items:flex-start;
+ background:transparent;border:0;border-radius:7px;
+ padding:9px;width:100%;text-align:left;
+ color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-row.active,
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-row:hover{background:var(--nession-muted)}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-row strong{font-size:12px;font-weight:550}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-row small{color:var(--nession-muted-foreground);font-size:10.5px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-sidebar-footer{
+ display:flex;justify-content:space-between;gap:6px;
+ padding:11px;border-top:1px solid var(--nession-border);
+ color:var(--nession-muted-foreground);font-size:11px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-shell-main{
+ flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;
+ position:relative;overflow:hidden;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-workspace-shell{
+ display:flex;flex:1;flex-direction:column;position:relative;
+ min-width:0;min-height:0;height:100%;overflow:hidden;background:var(--nession-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-workspace-content{
+ flex:1;min-width:0;min-height:0;overflow-y:auto;
+ padding-bottom:78px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .agent{
+ padding:16px 18px 10px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .agent-icon{
+ width:30px;height:30px;background:var(--nession-surface);
+ color:var(--nession-muted-foreground);font-size:14px;border-radius:8px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .agent h2{
+ font-size:14px;font-weight:550;color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .agent p{color:var(--nession-muted-foreground);font-size:11.5px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .agent-meta{
+ margin:0 18px;border-bottom:1px solid var(--nession-border);
+ color:var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .stage{padding:16px 18px 28px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .session-head{
+ gap:8px;align-items:center;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .session-head h3{
+ margin:0;font-size:13.5px;color:var(--nession-foreground);font-weight:600;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-identity{
+ color:var(--nession-muted-foreground);font-size:11.5px;margin-top:3px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .session-activity{
+ display:block;margin-top:3px;text-align:left;color:var(--nession-muted-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-process-refresh{
+ display:flex;align-items:center;gap:5px;
+ color:var(--nession-muted-foreground);font-size:11px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .refresh{
+ border-color:transparent;color:var(--nession-muted-foreground);
+ padding:5px 9px;font-size:16px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .split{
+ border:0;border-radius:0;gap:15px;
+ grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);
+ min-height:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .tree-panel{
+ border:0;background:var(--nession-surface);border-radius:8px;
+ padding:12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .tree-line{
+ min-height:34px;border-radius:6px;color:var(--nession-foreground);
+ padding:6px 8px;margin:0;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .tree-line.selected{
+ background:var(--nession-muted);border-color:transparent;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .inspector{padding:12px 2px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .cmd{
+ background:var(--nession-muted);border-radius:8px;padding:12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .cmd code{color:var(--nession-foreground)}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .resources{gap:7px}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .resource{
+ background:var(--nession-surface);padding:12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .bottom{
+ position:absolute;z-index:10;bottom:14px;left:50%;
+ transform:translateX(-50%);display:flex;align-items:center;gap:8px;
+ margin:0;padding:0;pointer-events:auto;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-return{
+ border:1px solid var(--nession-border);
+ width:36px;height:36px;border-radius:50%;background:var(--nession-background);
+ color:var(--nession-foreground);font-size:18px;
+ box-shadow:0 1px 2px #0000000b,0 8px 24px #00000016;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .capsule{
+ background:var(--nession-background);border:1px solid var(--nession-border);
+ min-height:36px;box-shadow:0 1px 2px #0000000b,0 8px 24px #00000016;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .capsule button{
+ color:var(--nession-foreground);background:var(--nession-muted);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-app-page-header{display:none}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-root{
+ flex:1;min-height:0;position:relative;background:var(--nession-background);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-lines{
+ padding:28px 22px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-dock{
+ position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+ width:min(560px,calc(100% - 26px));display:flex;align-items:center;gap:8px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-conversation{
+ display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:42px;
+ border:1px solid var(--nession-border);border-radius:999px;
+ padding:5px 10px 5px 6px;background:var(--nession-background);
+ color:var(--nession-muted-foreground);font-size:12px;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-conversation button{
+ flex:0 0 30px;width:30px;height:30px;border-radius:50%;border:0;
+ background:var(--nession-muted);color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-conversation span:last-child{margin-left:auto}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-destination{
+ flex:0 0 36px;width:36px;height:36px;border-radius:50%;
+ border:1px solid var(--nession-border);
+ background:var(--nession-background);color:var(--nession-foreground);
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-context{
+ position:absolute;left:0;bottom:calc(100% + 9px);
+ padding:12px;border:1px solid var(--nession-border);border-radius:11px;
+ background:var(--nession-background);box-shadow:0 8px 24px #0000001f;
+}
+body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-context button{
+ border:0;background:var(--nession-muted);color:var(--nession-foreground);
+ padding:7px 11px;border-radius:7px;
+}
+@container (max-width:430px){
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-session-sidebar{display:none}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-app-page-header{
+  display:flex;align-items:center;gap:5px;flex:0 0 auto;
+  min-height:46px;padding:6px 8px 4px;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-app-page-header button{
+  width:36px;height:36px;border:0;border-radius:7px;
+  background:transparent;color:var(--nession-foreground);font-size:24px;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-app-page-header h2{
+  margin:0;font-size:16px;font-weight:600;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .agent{padding:12px 12px 8px}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .agent-meta{margin:0 12px}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .stage{padding:12px 12px 28px}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-workspace-content{padding-bottom:70px}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .bottom{
+  bottom:9px;width:calc(100% - 20px);justify-content:center;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-return{display:none}
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .capsule{
+  width:100%;justify-content:center;min-height:44px;
+ }
+ body[data-nession-prototype-frame="v1"] .np-device > .shell .ia-terminal-dock{
+  width:calc(100% - 20px);bottom:9px;
+ }
+}
