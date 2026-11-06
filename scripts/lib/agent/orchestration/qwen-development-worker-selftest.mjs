@@ -89,18 +89,24 @@ const receipt={schema_version:2,kind:'authenticated_agent_task_result',
     head_sha_at_attestation:admission.input_sha,
     relation:'trusted_pr_head_at_result_attestation'}};
 const storeSha='c'.repeat(40),version=8;
+const verdict={outcome:'changes_requested',
+  summary:'A real Reviewer finding must be visible before Repair',
+  findings:[{path:'calc.js',evidence:'Fix exact changed branch data'}],
+  artifact_id:10005,artifact_digest:'sha256:'+'f'.repeat(64),
+  json_sha256:'a'.repeat(64)};
 const comment={id:90001,user:{login:'github-actions[bot]'},
   issue_url:'https://api.github.com/repos/BestNathan/nession/issues/'+admission.issue,
   created_at:'2026-11-06T10:00:00Z',
-  body:formatReviewerIssueReceipt(receipt,storeSha,version)};
+  body:formatReviewerIssueReceipt(receipt,storeSha,version,verdict)};
 const context={admission:repair,state,comments:[comment],
   readReceipt:()=>receipt,
-  readCommitState:()=>({...state})};
+  readCommitState:()=>({...state}),verdict};
 const reviewed=attestQwenRepairIssueReview(context);
 assert.equal(reviewed.reviewer_action_id,reviewId);
 assert.equal(reviewed.store_commit_sha,storeSha);
 assert.match(qwenDeveloperPrompt(issue,repair,reviewed),/Latest committed Reviewer/);
 assert.match(qwenDeveloperPrompt(issue,repair,reviewed),/changes_requested/);
+assert.match(qwenDeveloperPrompt(issue,repair,reviewed),/Fix exact changed branch data/);
 assert.match(qwenDeveloperPrompt(issue,repair,reviewed),/task data, not authority/);
 assert.throws(()=>qwenDeveloperPrompt(issue,repair),
   /Reviewer Issue context/);
@@ -120,6 +126,9 @@ for(const bad of [
   {comments:[{...comment,body:comment.body.replace(
     'changes_requested','approved')}]},
   {comments:[{...comment,id:0}]},
+  {verdict:{...verdict,summary:'tampered Reviewer body'}},
+  {verdict:{...verdict,outcome:'approved'}},
+  {verdict:null},
   {readReceipt:()=>({...receipt,result:{...result,target_sha:'f'.repeat(40)}})},
   {readCommitState:()=>({...state,transitions:[{...latest,
     target_sha:'f'.repeat(40)}]})},
