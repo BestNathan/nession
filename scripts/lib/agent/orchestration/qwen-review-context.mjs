@@ -8,7 +8,11 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readIssueWorkflowState} from './state-store.mjs';
-import {formatReviewerIssueReceipt} from './reviewer-result-ingest.mjs';
+import {formatReviewerIssueReceipt,authenticateReviewerRun}
+  from './reviewer-result-ingest.mjs';
+import {createGitHubRunReader} from './github-dispatch.mjs';
+import {createGitHubResultArtifactReader,readAuthenticatedReviewerVerdict}
+  from './result-artifact.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
@@ -29,7 +33,7 @@ function git(dir,...args){
   catch{fail('immutable canonical Store Git proof unavailable');}
 }
 export function attestQwenRepairIssueReview({
-  admission,state,comments,readReceipt,readCommitState,
+  admission,state,comments,readReceipt,readCommitState,verdict,
 }){
   const latest=state?.transitions?.at(-1);
   const actions=state?.outbox?.filter(x=>x.id===admission?.action_id);
@@ -97,7 +101,7 @@ export function attestQwenRepairIssueReview({
       signed.run_id!==latest.run_id||signed.attempt!==1||
       signed.target_sha!==admission.input_sha)
     fail('Review comment points to unrelated committed Store state');
-  if(comment.body!==formatReviewerIssueReceipt(receipt,storeSha,version))
+  if(comment.body!==formatReviewerIssueReceipt(receipt,storeSha,version,verdict))
     fail('Issue comment differs from canonical Reviewer receipt bytes');
   return Object.freeze({schema_version:1,
     kind:'authenticated_qwen_repair_issue_review_context',
@@ -107,7 +111,7 @@ export function attestQwenRepairIssueReview({
     comment_id:comment.id,store_commit_sha:storeSha,
     store_version:version,body:comment.body});
 }
-function main(){
+async function main(){
   if(process.argv.length!==6||process.argv[2]!=='verify')
     fail('usage: verify ADMISSION_JSON COMMENTS_JSON OUTPUT_JSON');
   const env=process.env,admission=read(process.argv[3],8192);
@@ -141,12 +145,29 @@ function main(){
         fail('review comment refers to wrong Store state version');
       return JSON.parse(git(dir,'show',sha+':'+head.path));
     };
+    // The bot comment only selects a candidate; the committed Reviewer
+    // result and independently authenticated original ZIP decide its meaning.
+    const latest=state?.transitions?.at(-1);
+    const markerMatch=comments.filter(c=>
+      c?.user?.login==='github-actions[bot]'&&
+      typeof c.body==='string'&&
+      marker.exec(c.body)?.[3]===String(latest?.run_id));
+    if(markerMatch.length!==1)fail('missing unique latest Review comment');
+    const actionId=marker.exec(markerMatch[0].body)?.[2];
+    const storedReceipt=receipt(latest.run_id,actionId);
+    const reader=createGitHubRunReader(env.GH_TOKEN);
+    const run=await reader.getRun(latest.run_id);
+    authenticateReviewerRun(run,latest.run_id,1);
+    const artifactReader=createGitHubResultArtifactReader(env.GH_TOKEN);
+    const verdict=await readAuthenticatedReviewerVerdict({
+      artifactReader,run,receipt:storedReceipt});
     const verified=attestQwenRepairIssueReview({
-      admission,state,comments,readReceipt:receipt,readCommitState:historical});
+      admission,state,comments,readReceipt:receipt,
+      readCommitState:historical,verdict});
     fs.writeFileSync(process.argv[5],JSON.stringify(verified)+'\n',
       {flag:'wx',mode:0o600});
     console.log('Latest Qwen Reviewer Issue comment authenticated from Store');
   }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1]))
-  try{main();}catch(e){console.error('::error::'+e.message);process.exitCode=1;}
+  main().catch(e=>{console.error('::error::'+e.message);process.exitCode=1;});
