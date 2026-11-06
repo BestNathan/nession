@@ -1,6 +1,6 @@
 # Product Model
 
-> Upstream: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md)
+> Upstream: [`VISION.md`](../../VISION.md) → [`PRINCIPLE.md`](../../PRINCIPLE.md) → [1.x product target](../../docs/product/1.x.md)
 
 Nession is an **intelligent workspace** that makes work continuous across devices, environments, and compute nodes.
 
