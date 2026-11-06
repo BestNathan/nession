@@ -25,7 +25,7 @@ test('product conversation begins as composer-only; scenarios belong to reviewer
   assert.match(external, /class="welcome"/);
   assert.match(external, /data-prompt="查看在线 Agent"/);
   assert.match(html,/href="\.\/product-ia\.css"/);
-  assert.match(html,/\\"external\\":\[\\"\.topbar\\",\\"\.welcome\\",\\"#inspector\\",\\"\.composer-caption\\"\]/);
+  assert.ok(html.includes('"external":[".topbar",".welcome","#inspector",".composer-caption"]'));
   assert.match(css,/\.np-fixtures \.welcome/);
   assert.match(css,/\.np-fixtures \.inspector/);
   assert.match(css, /#app\.is-empty \.composer-shell/);
