@@ -148,7 +148,7 @@ try{
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,
     fetcher:async name=>name.startsWith('pulls?')?[pr,pr]:fetcher(name),
   }),/unique published/);
-  fs.writeFileSync(path.join(directory,'302-1-'+'0'.repeat(64)+'.json'),
+  fs.writeFileSync(path.join(directory,'301-1-'+'0'.repeat(64)+'.json'),
     JSON.stringify({...intent,action_id:'0'.repeat(64),
       branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
   await assert.rejects(()=>prepareQwenReviewAdmission({
