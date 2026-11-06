@@ -1,5 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, render, screen, waitFor } from '@testing-library/react';import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorkspace } from '../../GitWorkspace';
 import { gitApi } from '../../../GitPlugin';
@@ -394,6 +393,53 @@ describe('GitWorkspace', () => {
     expect(screen.getByTestId('git-file-preview-path')).toHaveTextContent('b.txt');
     expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('B');
     expect(screen.getByTestId('git-file-preview-text')).not.toHaveTextContent('A');
+  });
+
+  it('drops an in-flight preview when the Session changes (#2838 SC-05)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [],
+          untracked: ['a.txt'],
+          unmerged: [],
+        },
+      }),
+    );
+    const resolvers: Array<(value: GitPreviewResponse) => void> = [];
+    mockedPreview.mockImplementation(
+      () =>
+        new Promise<GitPreviewResponse>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+
+    const { rerender } = render(<GitWorkspace ctx={context()} />);
+    await userEvent.click(await screen.findByTestId('git-row-untracked'));
+    await waitFor(() => expect(mockedPreview).toHaveBeenCalledTimes(1));
+
+    const otherSession: Session = {
+      ...session,
+      session_id: 'agent-1:other',
+      session_name: 'other',
+    };
+    rerender(<GitWorkspace ctx={context({ session: otherSession })} />);
+    await waitFor(() =>
+      expect(mockedStatus).toHaveBeenCalledWith({
+        agent_id: 'agent-1',
+        session: 'agent-1:other',
+      }),
+    );
+    expect(screen.queryByTestId('git-file-preview')).toBeNull();
+
+    await act(async () => {
+      resolvers[0]?.(previewResponse({ path: 'a.txt', text: 'previous session\n' }));
+    });
+    expect(screen.queryByTestId('git-file-preview')).toBeNull();
+    expect(screen.queryByText('previous session')).toBeNull();
   });
 
   it('opens the handed-over path in the mode its status row has (#2838 SC-01)', async () => {

@@ -61,13 +61,13 @@ run(({ evidence }) => {
       '--prefix', 'web', 'test', '--',
       '--project', 'integration',
       'src/capabilities/git/components/__tests__/integration/GitWorkspace.test.tsx',
-      '-t', 'drops a stale preview',
+      '-t', 'drops (a stale|an in-flight) preview',
     ],
     300000,
   );
   const cleanWeb = web.replace(/\x1b\[[0-9;]*m/g, '');
-  if (!/\bTests\s+1 passed/.test(cleanWeb)) {
-    throw new Error('the stale-preview consumer test did not pass: ' + web.slice(-3000));
+  if (!/\bTests\s+2 passed/.test(cleanWeb)) {
+    throw new Error('the stale-preview consumer tests did not pass: ' + web.slice(-3000));
   }
 
   evidence.push({
@@ -81,8 +81,10 @@ run(({ evidence }) => {
   evidence.push({
     type: 'test',
     value:
-      'the Web consumer test selected two untracked files, answered the newer one first, and ' +
-      'kept that newer preview when the older response arrived late; Session→workdir resolution is the unchanged Agent-owned input to this boundary, covered by SC-04 source review rather than a live tmux Session',
+      'the Web consumer tests selected two untracked files and kept the newer result when the older ' +
+      'response arrived late, then switched Sessions while a preview was in flight and discarded it; ' +
+      'Session→workdir resolution is the unchanged Agent-owned input to this boundary, covered by ' +
+      'SC-04 source review rather than a live tmux Session',
   });
   return 'The real provider and consumer preserve bounded reads, typed change states and stale-response isolation';
 });
