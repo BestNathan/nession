@@ -15,7 +15,7 @@
 
 ## Catalog
 
-| WorkContract / immutable revision, Criteria, Thread and source change | [#2541](https://github.com/BestNathan/nession/issues/2541) | [Interactive HTML](work-contract-2541/index.html) · [Scenario & fidelity](work-contract-2541/README.md) |
+| Workspace Work capability / WorkContract, revisions, Criteria, Thread and source adapters | [#2541](https://github.com/BestNathan/nession/issues/2541) | [Interactive HTML](work-contract-2541/index.html) · [Scenario & fidelity](work-contract-2541/README.md) |
 
 | Session Metadata / editable title, description and tags | [#2789](https://github.com/BestNathan/nession/issues/2789) | [Interactive HTML](session-metadata-2789/index.html) · [Scenario & fidelity](session-metadata-2789/README.md) |
 
