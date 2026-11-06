@@ -46,7 +46,7 @@ The canonical **review experience is the interactive `index.html#ui-spec` region
 | Sidebar toggle | single 36px control | focus ring / subtle fill | expanded or fully tucked away | always discoverable; no duplicate Rail controls |
 | Session row (wide Web) | title + metadata, no extra menu | **Inline gear + trash icons** on hover/focus | selected row keeps both icons visible | offline Agent: row remains discoverable |
 | Session row (narrow Web) | title + metadata + one `···` affordance | tap/keyboard opens **anchored** menu | `Attach settings` and `Kill session` only | Escape/outside click/scroll closes menu without replacing list |
-| Configure / Kill outcome | existing `ShellDialogs` modal boundary | configuration only on explicit request | Kill confirmation requires typing exact Session name | mock-only state, no backend side effect |
+| Configure / Kill outcome | existing `ShellDialogs` modal boundary | configuration only on explicit request | Kill confirmation requires typing the exact tmux Session name (not the display alias) | mock-only state, no backend side effect |
 | Search | quiet input, empty text | focus ring, text entry | filter applied without redefining global total | no matches: query-specific message and clear affordance |
 | New Session | explicit button, 36px desktop | hover / focus | opens scoped form, no creation yet | online Agent needed for submit; invalid name and offline Agent produce text errors |
 | Agent entry | bottom secondary row | hover/focus | explicitly reveal Agent detail | offline node does not turn Server status into failure |
