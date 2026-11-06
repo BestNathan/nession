@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorkspace } from '../../GitWorkspace';
@@ -379,6 +379,32 @@ describe('GitWorkspace', () => {
 
     await userEvent.click(screen.getByTestId('git-refresh'));
     await waitFor(() => expect(mockedStatus).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps Refresh available while a read is in flight (#2787 SC-03)', async () => {
+    let resolveFirst!: (value: GitStatusResponse) => void;
+    mockedStatus.mockImplementationOnce(
+      () =>
+        new Promise<GitStatusResponse>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+
+    render(<GitWorkspace ctx={context()} />);
+    // The mount read is still in flight, and the manual recovery path is not
+    // disabled: the hook, not the button, decides which read is authoritative.
+    const refresh = screen.getByTestId('git-refresh');
+    expect(refresh).toBeEnabled();
+    await userEvent.click(refresh);
+    await waitFor(() => expect(mockedStatus).toHaveBeenCalledTimes(2));
+
+    // Let the older mount read finish; the newer answer must remain.
+    await act(async () => {
+      resolveFirst(statusResponse());
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('git-summary')).toHaveTextContent('Working tree clean'),
+    );
   });
 
   it('asks for nothing when there is no Session to ask about', async () => {

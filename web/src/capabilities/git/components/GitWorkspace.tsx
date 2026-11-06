@@ -217,12 +217,18 @@ function GitHeader({
           <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
         </TabsList>
       </Tabs>
+      {/*
+        Kept available while a read is in flight: a manual re-read is the
+        recovery path, and the shared hook publishes only the latest-started
+        read, so an overlapping refresh cannot regress the view (#2787). A
+        disabled button here made the documented manual-refresh race
+        unobservable on the real surface.
+      */}
       <Button
         type="button"
         data-testid="git-refresh"
         variant="ghost"
         size="sm"
-        disabled={loading}
         aria-label="Refresh repository state"
         title="Refresh repository state"
         onClick={() => onRefresh()}

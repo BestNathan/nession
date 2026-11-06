@@ -13,10 +13,13 @@ function surface({
   commands = COMMANDS,
   state = 'connected' as ConnectionState,
   fail = false,
+  error,
 }: {
   commands?: QuickCommandItem[];
   state?: ConnectionState;
   fail?: boolean;
+  /** The server's failed-read shape: an empty list plus a generic message. */
+  error?: string;
 } = {}) {
   let pushChanged: (() => void) | null = null;
   let pushState: ((next: ConnectionState) => void) | null = null;
@@ -26,6 +29,9 @@ function surface({
     }
     if (fail) {
       throw new Error('offline');
+    }
+    if (error !== undefined) {
+      return { commands: [], error };
     }
     return { commands };
   });
@@ -79,6 +85,27 @@ describe('CommandsPlugin', () => {
     commands.install(plugin);
 
     await expect(commands.listCommands()).rejects.toThrow('offline');
+  });
+
+  it('rejects a failed server read instead of returning its empty list', async () => {
+    // The server answers `{ commands: [], error }` when its database read
+    // failed. Handing that empty array to the view is the defect (#2784):
+    // the user sees "No saved commands yet" instead of the error/retry state.
+    const { plugin } = surface({ error: 'Saved commands could not be loaded' });
+    const commands = new CommandsPlugin();
+    commands.install(plugin);
+
+    await expect(commands.listCommands()).rejects.toThrow(
+      'Saved commands could not be loaded',
+    );
+  });
+
+  it('resolves a genuinely empty successful list as empty', async () => {
+    const { plugin } = surface({ commands: [] });
+    const commands = new CommandsPlugin();
+    commands.install(plugin);
+
+    await expect(commands.listCommands()).resolves.toEqual([]);
   });
 
   it('notifies changed listeners and stops after teardown', () => {
