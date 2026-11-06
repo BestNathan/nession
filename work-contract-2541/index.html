@@ -16,8 +16,8 @@
     <span class="np-eyebrow">WORK / DOMAIN DESIGN</span>
     <div class="np-header-main">
       <div>
-        <h1 class="np-title">WorkContract · Immutable work agreement</h1>
-        <p class="np-subtitle">把工作定义为不可随意变更的契约。查看明确的目标与验收条件、独立的 Thread/Execution、来源变化产生的修订提案以及每个执行结果所依据的契约版本。</p>
+        <h1 class="np-title">Workspace / Work capability · WorkContract</h1>
+        <p class="np-subtitle">Work 是 Workspace 的情境能力组件，而非顶层页面；在 Workspace 能力胶囊中切换至 Work，打开不可变契约及 Criteria/Thread/Revision，并保留 Session/Workspace 的连续性。</p>
       </div>
       <div class="np-links">
         <a href="https://github.com/BestNathan/nession/issues/2541" target="_blank" rel="noopener noreferrer">Issue #2541</a>
@@ -25,7 +25,7 @@
       </div>
     </div>
     <div class="np-meta">
-      <span>Surface: <strong>AI Workspace → Work detail</strong></span>
+      <span>Surface: <strong>WorkspaceShell → Work capability → Contract</strong></span>
       <span>Model: <strong>WorkContract v1 / candidate v2</strong></span>
       <span>Fidelity: <strong>Interactive mock, no API</strong></span>
     </div>
@@ -59,6 +59,7 @@
         <button type="button" data-fixture="denied">Access denied</button>
         <button type="button" data-fixture="unavailable">Source offline</button>
         <button type="button" data-fixture="feishu">Feishu block fixture</button>
+        <button type="button" data-fixture="unbound">No Work binding</button>
       </div>
     </section>
     <section class="np-details" aria-label="Functional design and verification">
@@ -68,11 +69,11 @@
         <article class="np-detail">
           <h3>关键体验路径</h3>
           <ol class="np-steps">
-            <li>打开当前工作 → 查看发布的 v1 契约，切换 Criteria，展开 SC 的验证依据。</li>
+            <li>从 Workspace 底部的 Work 能力进入 WorkContract 列表 → 打开详情 → Criteria，展开 SC 验证；不是新顶层 Work 页面。</li>
             <li>切换 Thread，发送模拟评论；v1 版本和目标不应发生变化。</li>
             <li>选择下方 Source changed，打开 Source 或 Compare；检查源内容变更不会直接覆盖发布版本。</li>
             <li>Review proposal → 确认模拟采用 v2；回到 Revision history 仍可查看 v1，执行与验收继续固定在原版本。</li>
-            <li>切换 Access denied / Source offline / Feishu block fixture；切换 Web 与 App 真实 CSS 宽度；Reset 重播。</li>
+            <li>切换 Workspace 胶囊中的 Files / Git / Work：回到 Work 时保留已选 Contract 和 Revision。Web 独立打开 Terminal；App 内详情 Back 回 Work 列表，再 Back 回 Terminal。</li><li>切换 Access denied / Source offline / Feishu block fixture / No Work binding；检查不可用时 Work 胶囊入口消失，已打开 Work 仅作解释。切换 CSS 宽度并 Reset。</li>
           </ol>
         </article>
         <article class="np-detail">
@@ -82,7 +83,7 @@
         </article>
         <article class="np-detail">
           <h3>产品视觉与尺寸</h3>
-          <p>复用共享 #2758 三段式框架；内容区域采用 <code>design/generated/web.css</code> 的语义中性色、字号关系，参考 WorkspaceShell 的工作主体优先与 App 单列深度。外部 Width/Reset/Fixtures 严禁进入产品屏幕。</p>
+          <p>复用共享 #2758 框架。内部模拟既有 WorkspaceShell 的能力内容与底部 CapabilityCapsule：Web 的独立 Terminal 目的地与能力胶囊分离，App 的详情层级 Back 与 Workspace 胶囊并存。Work 没有自主全局导航。外部 Width/Reset/Fixtures 不进入产品屏幕。</p>
           <p>1:1 指 CSS 真实像素，非生产 React / shadcn 像素完全一致。尚需与真实 Nession Web/App Fixture 在 Chromium 中并排比较。</p>
         </article>
         <article class="np-detail">
