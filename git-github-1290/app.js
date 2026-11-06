@@ -3,7 +3,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const S = {surface:'terminal',context:false,section:'repository',tab:'changes',ghTab:'issues',scenario:'healthy',remote:'upstream',scope:'branch',filter:'open',search:'',detail:null,refresh:1,other:null,inspector:false,reading:false,mobileDetail:false,events:['Prototype ready · local fixture only']};
+const S = {surface:'terminal',experience:'web',sidebarCollapsed:false,selectedSession:'nession-dev',context:false,section:'repository',tab:'changes',ghTab:'issues',scenario:'healthy',remote:'upstream',scope:'branch',filter:'open',search:'',detail:null,refresh:1,other:null,inspector:false,reading:false,mobileDetail:false,events:['Prototype ready · local fixture only']};
 const files=[
 {name:'web/src/capabilities/git/GitPlugin.ts',status:'M',meta:'+42 −17',diff:['@@ -112,7 +112,9 @@','-  return git.status(session);','+  const context = resolveRepositoryContext(session);','+  return git.status(context);']},
 {name:'crates/nession-git/src/runtime/remote.rs',status:'A',meta:'+128',diff:['@@ -0,0 +1,3 @@','+pub fn discover_remotes(root: &Path) -> Result<Vec<Remote>> {','+  // typed remote fixture','+}']},
@@ -22,7 +22,7 @@ const workflows=[
 const scenarios={healthy:['Connected','GitHub available'],ambiguous:['Multiple remotes','Choose a trusted remote'],noRemote:['No GitHub remote','Local repository still available'],auth:['Sign in required','Agent API identity unavailable'],denied:['Access denied','Private repository forbidden'],rate:['Rate limited','Retry later'],offline:['Network unavailable','Local repository still available'],empty:['Empty repository','Zero Issues / PRs'],noRuns:['Never executed','Workflows have no runs']};
 const names={changes:'Changes',history:'History',branches:'Branches',worktrees:'Worktrees',issues:'Issues',prs:'Pull Requests',actions:'Actions'};
 function log(message){S.events.unshift(message);S.events=S.events.slice(0,14)}
-function reset(){Object.assign(S,{surface:'terminal',context:false,section:'repository',tab:'changes',ghTab:'issues',scenario:'healthy',remote:'upstream',scope:'branch',filter:'open',search:'',detail:null,refresh:1,other:null,inspector:false,reading:false,mobileDetail:false,events:['Reset to initial Session']});render()}
+function reset(){Object.assign(S,{surface:'terminal',sidebarCollapsed:false,selectedSession:'nession-dev',context:false,section:'repository',tab:'changes',ghTab:'issues',scenario:'healthy',remote:'upstream',scope:'branch',filter:'open',search:'',detail:null,refresh:1,other:null,inspector:false,reading:false,mobileDetail:false,events:['Reset to initial Session']});render()}
 function isError(){return !['healthy','empty','noRuns'].includes(S.scenario)}
 function repoIdentity(){return S.remote==='fork'?'demo-fork/nession':'BestNathan/nession'}
 function stateText(){return scenarios[S.scenario][0]}
@@ -33,7 +33,7 @@ return '<header class="topbar"><div class="brand"><span class="nmark">n</span><s
 '<a href="https://github.com/BestNathan/nession/tree/prototype/git-github-1290" target="_blank" rel="noopener">Source ↗</a></div></header>';
 }
 function terminal(){
-return '<div class="terminal" data-testid="terminal-surface"><div class="terminal-top"><span class="terminal-dot"></span><span>Session / nession-dev</span><span class="terminal-host">agent-01 · feature/git-context</span></div>'+
+return '<div class="terminal" data-testid="terminal-surface">'+
 '<div class="term-lines"><div><span class="term-muted">14:28:02</span> <span class="term-green">●</span> attached to nession-dev</div>'+
 '<div><span class="term-muted">14:28:06</span> <span class="term-green">●</span> workspace: /workspace/nession</div>'+
 '<div class="term-gap"><span class="term-prompt">nession</span> <span class="term-muted">git status --short</span></div>'+
@@ -56,10 +56,9 @@ return '<div class="capsule-dock" data-testid="terminal-capsule">'+context()+
 btn('◫','open-workspace','circle','aria-label="Open Workspace"')+'</div></div>';
 }
 function footerCapsule(){
-const tabs=[['Files','▤'],['Agent','◎'],['Git','⑂'],['Claude Code','✳']];
-return '<div class="capsule-dock workspace-dock" data-testid="workspace-capsule"><div class="capsule-row">'+
-btn('‹','back-terminal','circle','aria-label="Back to Terminal"')+
-'<div class="workspace-capsule">'+tabs.map(([x,g])=>btn('<span class="cap-ico">'+g+'</span><span>'+esc(x)+'</span>','workspace-cap','cap-item '+((S.other===x||(!S.other&&x==='Git'))?'chosen':''),'data-value="'+esc(x)+'"')).join('')+'</div></div></div>';
+  return '<div class="capsule-dock workspace-dock" data-testid="workspace-tool-bar"><div class="capsule-row">'+
+  (S.experience==="web"?btn("⌁","back-terminal","circle",'aria-label="Open Terminal"'):"")+
+  '<nav class="workspace-capsule" aria-label="Workspace capabilities"><button type="button" class="cap-item chosen" data-testid="workspace-tool-git" aria-pressed="true">⑂ <span>Git</span></button></nav></div></div>';
 }
 function option(value,label,selected){return '<option value="'+value+'" '+(selected?'selected':'')+'>'+esc(label)+'</option>'}
 function topControls(){
@@ -184,7 +183,7 @@ function recordDetail(type,arr,id){
     ?[['Labels',(x.labels||[]).join(' · ')||'None'],['Comments at capture',x.comments||'0']]
     :[['Source branch',(x.headRepo||'unknown')+' : '+(x.head||'—')],['Target branch',x.base||'—'],['Changes',x.changedFiles+' files · +'+x.additions+' / −'+x.deletions]];
   return '<div class="gh-detail-content" data-testid="github-detail">'+
-    '<div class="gh-detail-top">'+btn('← Back to list','back-gh-list','gh-back')+'<span class="gh-detail-crumb">'+(type==='issues'?'Issue':'Pull request')+' #'+x.n+'</span>'+btn(S.reading?'Show list':'Focus reading','toggle-reading','soft reader-toggle')+'</div>'+
+    '<div class="gh-detail-top">'+(S.experience==='app'?'':btn('← Back to list','back-gh-list','gh-back'))+'<span class="gh-detail-crumb">'+(type==='issues'?'Issue':'Pull request')+' #'+x.n+'</span>'+btn(S.reading?'Show list':'Focus reading','toggle-reading','soft reader-toggle')+'</div>'+
     '<div class="gh-detail-heading"><div class="gh-detail-kicker"><span class="gh-record-status '+esc(x.state)+'">'+recordStatus(x)+'</span><span>REAL GITHUB SNAPSHOT · '+esc(NESSION_GITHUB_SNAPSHOT.source.capturedDate)+'</span></div>'+
     '<h2>'+esc(x.title)+'</h2><div class="gh-detail-byline">'+esc(x.author)+' · updated '+esc(x.updated||'')+'</div><div class="gh-detail-actions">'+sourceLink(x.url,'Open on GitHub')+'<span>Read only · saved snapshot</span></div></div>'+
     '<div class="gh-metadata"><div><span>Repository</span><strong>BestNathan/nession</strong></div>'+metadata.map(v=>'<div><span>'+esc(v[0])+'</span><strong>'+esc(v[1])+'</strong></div>').join('')+'</div>'+
@@ -239,11 +238,27 @@ btn(S.inspector?'Hide state':'Inspect state','inspector','soft small-btn')+
 '<span class="fixture-counter">Snapshot #'+S.refresh+'</span></div>'+
 (S.inspector?'<div class="inspector"><div><strong>UI state</strong><pre>'+esc(JSON.stringify({surface:S.surface,context:S.context,section:S.section,tab:S.section==='github'?S.ghTab:S.tab,scenario:S.scenario,remote:S.remote,scope:S.scope,selected:S.detail,mobileDetail:S.mobileDetail,reading:S.reading},null,2))+'</pre></div><div><strong>Recent actions</strong><ol>'+S.events.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol></div></div>':'');
 }
+function webSidebar(){
+  var sessions=["nession-dev","design-system","production-shell"];
+  if(S.sidebarCollapsed)return '<aside class="ia-session-sidebar collapsed" data-testid="sidebar" data-collapsed="true"><div class="ia-sidebar-top">'+btn('☷','sidebar-expand','ia-side-toggle','aria-label="Expand sidebar"')+'</div><div class="ia-rail-count">3 Agents</div><div class="ia-rail-count">3 Sessions</div></aside>';
+  return '<aside class="ia-session-sidebar" data-testid="sidebar"><div class="ia-sidebar-top"><span>Agents</span>'+btn('☷','sidebar-collapse','ia-side-toggle','aria-label="Collapse sidebar"')+'</div><div class="ia-agent-summary"><span class="ia-agent-dot"></span> devbox-01 <small>online</small></div><div class="ia-agent-summary"><span class="ia-agent-dot"></span> macbook <small>online</small></div><div class="ia-agent-summary"><span class="ia-agent-dot off"></span> sg-prod <small>offline</small></div><div class="ia-side-section">Sessions</div><div class="ia-session-list">'+sessions.map(function(name){return '<button type="button" data-action="select-session" data-value="'+esc(name)+'" class="ia-session-item'+(name===S.selectedSession?' active':'')+'"><strong>'+esc(name)+'</strong><small>devbox-01 · '+(name==="nession-dev"?"claude":"zsh")+'</small></button>';}).join('')+'</div><div class="ia-sidebar-footer"><span class="ia-agent-dot"></span> Connected <span>3 nodes</span></div></aside>';
+}
+function appPageHeader(){
+  if(S.experience!=="app"||S.surface!=="workspace")return "";
+  const detail=S.section==='github'&&S.mobileDetail&&S.detail;
+  const title=detail?(S.detail.startsWith('issue-')?'Issue #':S.detail.startsWith('pr-')?'PR #':'GitHub')+S.detail.replace(/^(issue-|pr-)/,''):'Git';
+  const back=detail?"Back to Git":"Back to Terminal";
+  return '<header class="ia-app-page-header" data-testid="app-page-header">'+btn('‹','app-page-back','ia-app-back','aria-label="'+back+'"')+'<h1>'+esc(title)+'</h1></header>';
+}
 function render(){
-  // Nession's Session/Workspace shell owns global chrome; a capability does not
-  // render a second wordmark or prototype banner in the product viewport.
-  $('app').innerHTML='<main class="app-stage">'+(S.surface==='terminal'?terminal()+terminalCapsule():workspace()+footerCapsule())+'</main>';
-  // Fixture controls belong to the external reviewer, never the product UI.
+  // WebLayout owns the Session sidebar; WorkspacePanel owns AppPageHeader;
+  // WorkspaceShell owns the dock. Git contributes only local capability UI.
+  const content=S.surface==='terminal'?terminal()+terminalCapsule():
+    '<section class="ia-workspace-shell" data-testid="workspace-shell">'+appPageHeader()+
+    '<div class="ia-workspace-content" data-testid="workspace-tool-content">'+workspace()+'</div>'+footerCapsule()+'</section>';
+  const stage='<main class="app-stage">'+content+'</main>';
+  $('app').innerHTML=S.experience==='web'?
+    '<div class="ia-web-layout" data-testid="web-layout">'+webSidebar()+'<main class="ia-web-main" data-testid="shell-main">'+stage+'</main></div>':stage;
   const controls=document.getElementById('np-git-fixture-controls');
   if(controls)controls.innerHTML=fixtureBar();
 }
@@ -251,6 +266,13 @@ function chooseGit(){S.surface='workspace';S.context=false;S.other=null;S.sectio
 document.addEventListener('click', e=>{
 let el=e.target.closest('[data-action]');if(!el)return;let a=el.dataset.action,v=el.dataset.value;
 switch(a){
+case 'sidebar-collapse':S.sidebarCollapsed=true;break;
+case 'sidebar-expand':S.sidebarCollapsed=false;break;
+case 'select-session':S.selectedSession=v;S.surface='terminal';S.context=false;break;
+case 'app-page-back':
+  if(S.section==='github'&&S.mobileDetail){S.mobileDetail=false;S.reading=false;}
+  else {S.surface='terminal';S.context=false;}
+  break;
 case 'toggle-context':S.context=!S.context;log('Terminal Capsule context '+(S.context?'opened':'closed'));break;
 case 'choose-git':case 'open-git':chooseGit();return;
 case 'open-workspace':S.surface='workspace';S.context=false;S.other=null;log('Opened Workspace via destination circle');break;
@@ -280,6 +302,14 @@ if(el.dataset.select==='remote'){S.remote=el.value;S.detail=null;S.mobileDetail=
 if(el.dataset.select==='filter'){S.filter=el.value;S.detail=null;S.mobileDetail=false;S.reading=false;log('Filter '+el.value);render()}
 });
 document.addEventListener('input',e=>{if(e.target.dataset.input==='search'){const pos=e.target.selectionStart;const hadFocus=true;S.search=e.target.value;render();const target=document.querySelector('[data-input="search"]');if(target&&hadFocus){target.focus();target.setSelectionRange(pos,pos)}}});
+const previewRoot=document.querySelector('[data-np-root]');
+if(previewRoot)previewRoot.addEventListener('np:resize',e=>{
+  const experience=e.detail.width<=430?'app':'web';
+  if(S.experience===experience)return;
+  S.experience=experience;
+  S.context=false;
+  render();
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(S.inspector)S.inspector=false;else if(S.context)S.context=false;else if(S.mobileDetail)S.mobileDetail=false;else if(S.reading)S.reading=false;else if(S.surface==='workspace')S.surface='terminal';render()}});
 render();
 })();
