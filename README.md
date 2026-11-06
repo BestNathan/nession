@@ -44,3 +44,9 @@
 | Mobile App Swipe / edge navigation & gesture ownership | [#2724](https://github.com/BestNathan/nession/issues/2724) | [Interactive HTML](mobile-swipe-2724/index.html) · [Scenario & fidelity](mobile-swipe-2724/README.md) |
 
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
+
+## 2026-11-06 · Whole-gallery presentation refresh
+
+All 14 business prototypes now follow the current [Nession prototype Skill](https://github.com/BestNathan/nession/blob/main/.claude/skills/nession-prototype/SKILL.md) at the **presentation level**. The 12 older directories use `prototype-frame-2758/review-bridge.{css,js}` to preserve their interactive mock logic while exposing a shared overview, fixed CSS-pixel viewport, external scenario controls and separate design/verification details. The already native-framed `terminal-keys-commands-2710` and `session-metadata-2789` remain on the frame kit. `prototype-frame-2758` itself is a presentation demo, not a business capability.
+
+**Status:** GitHub source structure and new review scripts have been checked; no actual Chromium click-through, current production fixture pixel comparison, or new Pages manifest readback is established by this source update. Several legacy product visuals still need a deliberate design-token and App-layout redesign; migrating review chrome is not proof of visual fidelity. No production code or backend effects were changed. All existing direct HTML paths remain stable. Do not claim the public URLs are refreshed until the published manifest SHA agrees with this branch's final commit.
