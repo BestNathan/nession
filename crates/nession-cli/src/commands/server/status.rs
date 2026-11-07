@@ -38,10 +38,15 @@ pub async fn run(pid_file_path: Option<String>) -> Result<()> {
     if let Some(uptime) = uptime {
         println!("Uptime: {uptime}");
     }
-    match identity.config_path.as_deref() {
-        Some(path) => println!("Config: {path} (recorded by the running process)"),
-        None => {
-            println!("Config: unknown (the running process did not record which file it loaded)")
+    match &identity.config_source {
+        pid_file::ConfigRecord::File(path) => {
+            println!("Config: {path} (recorded by the running process)")
+        }
+        pid_file::ConfigRecord::Defaults => {
+            println!("Config: built-in defaults (no config file was loaded)")
+        }
+        pid_file::ConfigRecord::Unknown => {
+            println!("Config: unknown (the running process did not record which configuration it loaded)")
         }
     }
 

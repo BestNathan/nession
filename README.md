@@ -240,6 +240,17 @@ A background `nession agent start` never passes its resolved token to the
 child process as an argument; the credential goes over a private pipe
 instead.
 
+The two global flags apply only where they have an effect. `agents` and
+`sessions` read them as the remote target/credential; `agent start` and
+`agent restart` read them as overrides for the Agent daemon's outbound target.
+`server`, `config`, `update`, and agent stop/status/service commands have no
+use for them and **reject** them rather than silently ignoring them:
+
+```bash
+# Rejected: --server-url does not configure the Server's listener
+nession server start --server-url ws://127.0.0.1:19090
+```
+
 **Web UI** — see [Web dashboard](#web-dashboard) below.
 
 ---
