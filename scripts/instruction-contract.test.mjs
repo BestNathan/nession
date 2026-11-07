@@ -241,16 +241,16 @@ function delegatedRouterFixture(root) {
   const route = path.join(root, 'gates/route');
   fs.mkdirSync(path.join(root, 'gates/suites'), { recursive: true });
   fs.writeFileSync(path.join(root, '.githooks/pre-commit'),
-    '#!/usr/bin/env bash\\nset -euo pipefail\\nexec ./gates/route pre-commit\\n');
+    '#!/usr/bin/env bash\nset -euo pipefail\nexec ./gates/route pre-commit\n');
   fs.writeFileSync(route, [
     '#!/usr/bin/env bash',
     'changed="$(git diff --cached --name-only)"',
-    "matches '((^|/)(AGENTS|CLAUDE)\\\\.md$|^\\\\.agents/|^\\\\.claude/skills/)'",
-    'exec ./gates/run "${ids[@]}"',
+    "matches '((^|/)(AGENTS|CLAUDE)\\.md$|^\\.agents/|^\\.claude/skills/)'",
+    'exec ./gates/run "' + '$' + '{ids[@]}"',
     '',
-  ].join('\\n'));
+  ].join('\n'));
   fs.writeFileSync(path.join(root, 'gates/suites/pre-commit.gates'),
-    'dev-workspace-commit\\ninstruction-contract\\n');
+    'dev-workspace-commit\ninstruction-contract\n');
   return route;
 }
 
@@ -276,7 +276,7 @@ test('rejects delegated router missing instruction Gate suite membership', () =>
   const root = fixture();
   try {
     delegatedRouterFixture(root);
-    fs.writeFileSync(path.join(root, 'gates/suites/pre-commit.gates'), 'dev-workspace-commit\\n');
+    fs.writeFileSync(path.join(root, 'gates/suites/pre-commit.gates'), 'dev-workspace-commit\n');
     assert.ok(validateInstructionTree(root).errors.some(x => x.includes('instruction changes must invoke instruction-contract')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -286,7 +286,7 @@ test('rejects delegated router that drops instruction path ownership', () => {
   try {
     const route = delegatedRouterFixture(root);
     const original = fs.readFileSync(route, 'utf8');
-    fs.writeFileSync(route, original.replace('^\\\\.agents/', '^\\\\.missing/'));
+    fs.writeFileSync(route, original.replace('^\\.agents/', '^\\.missing/'));
     assert.ok(validateInstructionTree(root).errors.some(x => x.includes('missing instruction-surface routing')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

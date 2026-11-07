@@ -229,27 +229,25 @@ function validatePreCommitInstructionRouter(root, errors) {
 
   const text = fs.readFileSync(file, 'utf8');
 
-  // The modern hook is a thin adapter: the staged diff, path ownership and
-  // suite-selected instruction Gate live under gates/. Validate the real
-  // implementation rather than requiring its former inline Hook syntax.
-  if (/^\\s*exec \\.\\/gates\\/route pre-commit\\s*$/m.test(text)) {
+  // The modern hook delegates to the canonical Gate router and stage suite.
+  if (/^\s*exec \.\/gates\/route pre-commit\s*$/m.test(text)) {
     const routePath = 'gates/route';
     const route = path.join(root, routePath);
     validateBashSyntax(root, routePath, errors);
     if (!fs.existsSync(route)) return;
     const routing = fs.readFileSync(route, 'utf8');
     if (!routing.includes('git diff --cached --name-only') ||
-        /git diff --cached --name-only[^\\n]*--diff-filter/.test(routing)) {
-      errors.push(`${routePath}: staged diff must include deletions, renames, and type changes`);
+        /git diff --cached --name-only[^\n]*--diff-filter/.test(routing)) {
+      errors.push(routePath + ': staged diff must include deletions, renames, and type changes');
     }
     const buckets = routing.includes('(^|/)(AGENTS|CLAUDE)') &&
-      routing.includes('^\\\\.agents/') && routing.includes('^\\\\.claude/skills/');
-    if (!buckets) errors.push(`${routePath}: missing instruction-surface routing`);
+      routing.includes('^\\.agents/') && routing.includes('^\\.claude/skills/');
+    if (!buckets) errors.push(routePath + ': missing instruction-surface routing');
     const suitePath = path.join(root, 'gates/suites/pre-commit.gates');
     const suite = fs.existsSync(suitePath) ? fs.readFileSync(suitePath, 'utf8') : '';
-    if (!/^instruction-contract\\s*$/m.test(suite) ||
-        !routing.includes('exec ./gates/run "${ids[@]}"')) {
-      errors.push(`${routePath}: instruction changes must invoke instruction-contract`);
+    if (!/^instruction-contract\s*$/m.test(suite) ||
+        !routing.includes('exec ./gates/run "' + '$' + '{ids[@]}"')) {
+      errors.push(routePath + ': instruction changes must invoke instruction-contract');
     }
     return;
   }
