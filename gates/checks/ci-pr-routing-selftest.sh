@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-GATE_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd -P)"
-source "\${GATE_DIR}/../lib/common.sh"
+GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "${GATE_DIR}/../lib/common.sh"
 GATE_ID='ci-pr-routing-selftest'
 GATE_NAME='PR Quality and Case Smoke routing regression'
 GATE_COMMAND='node --test scripts/ci/quality-scope.test.mjs'
