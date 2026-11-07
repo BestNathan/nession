@@ -60,6 +60,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      # Do not execute the selector from a legacy PR head: the workflow may
+      # postdate that head, and the selector is trusted Quality policy.
+      - name: Checkout trusted Quality selector
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -86,7 +94,7 @@ jobs:
           fi
           [[ "$base" =~ ^[0-9a-f]{40}$ && "$target" =~ ^[0-9a-f]{40}$ ]] || exit 1
           git diff --no-renames --name-only -z "$base" "$target" > "$RUNNER_TEMP/quality-changed-paths"
-          node scripts/ci/quality-scope.mjs "$RUNNER_TEMP/quality-changed-paths"
+          node trusted/scripts/ci/quality-scope.mjs "$RUNNER_TEMP/quality-changed-paths"
           echo "Full Gate applicability was selected from the exact source diff"
 
   instruction-check:

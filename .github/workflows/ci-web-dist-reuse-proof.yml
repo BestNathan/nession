@@ -49,7 +49,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node trusted/scripts/ci/web-dist-source-attestation.mjs attest "$GITHUB_EVENT_PATH" "$GITHUB_OUTPUT"
 
+      - name: Report authenticated Web dist Not Required
+        if: steps.producer.outputs.applicable == 'false'
+        env:
+          SOURCE_SHA: ${{ steps.producer.outputs.sha }}
+          SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
+          SOURCE_ATTEMPT: ${{ steps.producer.outputs.attempt }}
+        run: |
+          {
+            echo '## Web dist Not Required (not artifact proof)'
+            printf -- '- Exact SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- Quality run/attempt: `%s/%s`\n' "$SOURCE_RUN" "$SOURCE_ATTEMPT"
+            echo '- Web tests and Web dist both skipped; source attestation verified the scope.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout attested main source SHA
+        if: steps.producer.outputs.applicable == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.producer.outputs.sha }}
@@ -59,9 +74,11 @@ jobs:
       # The artifact contains dist only. Vite preview (including /api and /ws
       # proxy) still requires its local runtime dependencies.
       - name: Install Web preview dependencies
+        if: steps.producer.outputs.applicable == 'true'
         run: cd target/web && npm ci
 
       - name: Download exact producer artifact
+        if: steps.producer.outputs.applicable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
@@ -74,6 +91,7 @@ jobs:
             --dir "$RUNNER_TEMP/web-dist-proof"
 
       - name: Restore verified exact-SHA dist
+        if: steps.producer.outputs.applicable == 'true'
         id: restore
         env:
           SOURCE_SHA: ${{ steps.producer.outputs.sha }}
@@ -87,9 +105,11 @@ jobs:
           echo 'hit=true' >> "$GITHUB_OUTPUT"
 
       - name: Verify restored runnable Web preview parity
+        if: steps.producer.outputs.applicable == 'true'
         run: node target/scripts/ci/web-preview-parity.mjs target
 
       - name: Report bounded producer-consumer evidence
+        if: steps.producer.outputs.applicable == 'true'
         env:
           SOURCE_SHA: ${{ steps.producer.outputs.sha }}
           SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
@@ -99,8 +119,8 @@ jobs:
           [ "${{ steps.restore.outputs.hit }}" = true ]
           {
             echo "## Verified Web dist reuse (diagnostic, not SC Pass)"
-            echo "- Exact source SHA: `$SOURCE_SHA`"
-            echo "- Quality Gate run/attempt: `$SOURCE_RUN/$SOURCE_ATTEMPT`"
+            printf -- '- Exact source SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- Quality Gate run/attempt: `%s/%s`\n' "$SOURCE_RUN" "$SOURCE_ATTEMPT"
             echo "- Outcome: verified restore + real Preview HTTP/API/WS/fonts parity"
             echo "- This job must not replace the required Full E2E/Acceptance."
           } >> "$GITHUB_STEP_SUMMARY"
