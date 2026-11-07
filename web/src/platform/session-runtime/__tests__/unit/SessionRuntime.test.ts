@@ -588,8 +588,11 @@ describe('SessionRuntime', () => {
       .filter((frame) => frame.msg_type === 'client.terminal.output.progress');
     const applied = () => sentFrames()
       .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
+    vi.useFakeTimers();
     rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(progress()).toHaveLength(0); // #2867 batching still owns cadence
+    await vi.advanceTimersByTimeAsync(32);
 
     expect(progress()).toHaveLength(1);
     // The negotiated path never sends the v1 operation, so no `ok` reply is
@@ -602,6 +605,7 @@ describe('SessionRuntime', () => {
       renderer_generation: rt.terminalAppliedSnapshot?.generation,
       applied_through: 1,
     });
+    vi.useRealTimers();
     rt.dispose();
   });
 
@@ -616,10 +620,13 @@ describe('SessionRuntime', () => {
       terminal_capabilities: ['terminal-progress-notifications-v1'],
     });
     await flushMicrotasks();
+    vi.useFakeTimers();
     rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    await vi.advanceTimersByTimeAsync(32);
     const progress = () => sentFrames()
       .filter((frame) => frame.msg_type === 'client.terminal.output.progress');
+    expect(progress()).toHaveLength(1);
 
     let settle!: (ok: boolean) => void;
     const recovery = new Promise<boolean>((resolve) => { settle = resolve; });
@@ -640,8 +647,10 @@ describe('SessionRuntime', () => {
     expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(1);
     expect(rt.getSnapshot().streamState).toBe('degraded-live');
 
-    // Parser progress is not submitted while the proof is outstanding.
+    // Parser progress is not submitted while the proof is outstanding, even
+    // when the #2867 cadence timer fires.
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 });
+    await vi.advanceTimersByTimeAsync(32);
     expect(progress()).toHaveLength(1);
 
     settle(true);
@@ -650,6 +659,7 @@ describe('SessionRuntime', () => {
     expect(progress()).toHaveLength(2);
     expect(progress()[1].payload).toMatchObject({ applied_through: 2 });
     expect(rt.getSnapshot().streamState).toBe('synchronized');
+    vi.useRealTimers();
     rt.dispose();
   });
 
@@ -1278,8 +1288,10 @@ describe('SessionRuntime', () => {
         terminalCapabilities: ['terminal-progress-notifications-v1'],
       };
       for (const cb of readyCallbacks) { cb(proof, 3); }
+      vi.useFakeTimers();
       rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
       rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      await vi.advanceTimersByTimeAsync(32);
 
       expect(progress).toHaveBeenCalledWith('s1', {
         subscriberGeneration: 41, streamEpoch: 7,
@@ -1325,6 +1337,7 @@ describe('SessionRuntime', () => {
       }
       expect(lastTransport().requestReconcile).toHaveBeenCalledTimes(2);
       expect(lastTransport().requestReconcile).toHaveBeenLastCalledWith(7, 1);
+      vi.useRealTimers();
       rt.dispose();
     });
 
