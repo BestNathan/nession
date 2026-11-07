@@ -90,8 +90,9 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
     'Correct every listed deterministic validation defect; do not omit sections merely to satisfy the validator.',
     'START from the rejected proposal. Preserve its already-correct title, labels, comment,',
     'verification_tier and tier_reason unless the diagnostic specifically rejects those fields.',
-    'If a Requirement has no canonical kind label yet, include labels containing requirement',
-    'and at least one evidence-backed area. The labels array must contain ONLY kind + area labels.',
+    'For a Bug or Requirement with missing or invalid kind/area labels, include one complete',
+    'distinct canonical labels array: exactly one kind (bug or requirement) and at least',
+    'one evidence-backed area. No verification/status/noncontract labels in this array.',
     'For new Requirements, Knowledge Impact MUST use five literal bullet keys',
     '- Decision: None | Read | Create | Update | Supersede (one option, no trailing period)',
     '- Related knowledge: <concrete source or none>',
@@ -100,8 +101,11 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
     '- Evidence: <specific existing record, or explicitly pending>',
     'Do not use Markdown bold for the field names; preserve their factual values.',
     'Use canonical E2E stem IDs and exactly "-" for Pending evidence if malformed.',
-    'Preserve existing valid E2E selections, authenticated Pass/Fail/Error receipts,',
-    'Acceptance Report results/evidence, Success Criteria identities, and unrelated content.',
+    'If the original E2E Verification / Report is valid, copy BOTH sections VERBATIM',
+    'from the original Issue if returning a body. No ID, row, evidence or formatting changes.',
+    'If the original E2E source is malformed, repair only the invalid formatting/placeholder',
+    'while preserving parseable selections and authenticated completed results.',
+    'Preserve Acceptance Report results/evidence, Success Criteria identities, and unrelated content.',
     'Never invent executed evidence, mark a Pending result as Pass, or change protected credentials.',
     'If it cannot be repaired without fabricating facts or protected evidence, return no write fields.',
     'Deterministic rejection (trusted):',
@@ -113,18 +117,16 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
   ].join('\n');
 }
 
-// Only errors from the trusted pre-write validation boundary can trigger one
-// extra model pass. Network failures, post-write failures and privilege errors
-// must not cause replay or duplicate writes.
-export function isIssueAuditRepairableRejection(error, sourceBody = '') {
+// Only identified, non-mutating proposal rejections can invoke ONE additional
+// tool-free model correction. The same protected E2E/label/Issue Contract checks
+// run again on the corrected candidate; no rejected proposal is ever written.
+// Actual GitHub permissions, provider/network and post-write failures are terminal.
+export function isIssueAuditRepairableRejection(error) {
+  if (error?.code === 'ISSUE_AUDIT_LABEL_CONTRACT' ||
+      error?.code === 'ISSUE_AUDIT_E2E_PROTECTED') return true;
   const message = error instanceof Error ? error.message : '';
-  if (message.startsWith('Issue Contract validation failed before write:') ||
-      message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:')) return true;
-  if (!message.startsWith('Unauthorized E2E Verification / Report mutation by Issue Agent')) return false;
-  // Retrying a malformed source is allowed; a valid source's immutable E2E
-  // selection cannot be retried away as if it were a formatting issue.
-  const declaration=parseIssueE2E(sourceBody);
-  return Boolean(declaration?.errors?.length);
+  return message.startsWith('Issue Contract validation failed before write:') ||
+    message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:');
 }
 
 export async function applyIssueAuditWithContractRetry(issue, envelope, repository, {
@@ -135,10 +137,7 @@ export async function applyIssueAuditWithContractRetry(issue, envelope, reposito
     return {contract_repair_attempted:false};
   } catch (error) {
     if (typeof contractRepair !== 'function') throw error;
-    const isE2EDenial = error instanceof Error &&
-      error.message.startsWith('Unauthorized E2E Verification / Report mutation by Issue Agent');
-    const sourceBody = isE2EDenial ? fetchGitHubIssue(issue.number, repository).body : '';
-    if (!isIssueAuditRepairableRejection(error, sourceBody)) throw error;
+    if (!isIssueAuditRepairableRejection(error)) throw error;
     // Exactly one additional, no-tools generation. The same trusted update
     // boundary revalidates the entire candidate and can reject it again.
     const corrected = await contractRepair(envelope, error);
