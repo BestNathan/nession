@@ -61,5 +61,6 @@ agent-checkpoint-store
 run-store-integrity
 run-store-inventory
 gate-consumer-parity
+ci-pr-routing-selftest
 dev-workspace-selftest
 detector-selftest-coverage
