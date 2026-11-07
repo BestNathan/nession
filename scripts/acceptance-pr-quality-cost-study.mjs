@@ -250,7 +250,7 @@ export function selfTestPrQualityCost(){
   assert.equal(verifyCase(sample,caseRun,caseJobs).runtime_provisioning,'skipped');
   assert.throws(()=>verifyCase(sample,caseRun,{total_count:1,jobs:[{
     ...caseJob,steps:caseJob.steps.map(s=>s.name==='Build runtime'?
-      {...s,conclusion:'success'}:s)]}));
+      {...s,conclusion:'success'}:s)}]}));
   const e2eRun={...run,id:sample.e2eRun,name:'E2E / Tests',path:e2ePath};
   const e2eJob={name:'e2e',run_id:e2eRun.id,run_attempt:1,head_sha:e2eRun.head_sha,
     status:'completed',conclusion:'success',
