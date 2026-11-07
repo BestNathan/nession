@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PdfViewer } from '@/capabilities/files/components/PdfViewer';
+import { PdfViewer } from '@/shared/file-viewer/components/PdfViewer';
 
 vi.stubGlobal('URL', {
   createObjectURL: vi.fn(() => 'blob:pdf-url'),

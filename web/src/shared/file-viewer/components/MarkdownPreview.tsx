@@ -18,6 +18,8 @@ import {
 interface MarkdownPreviewProps {
   content: string;
   filename: string;
+  /** Switch the owning surface to source when rendering fails. */
+  onFallback?: () => void;
 }
 
 /** Props for MarkdownErrorBoundary */
@@ -67,11 +69,15 @@ const LARGE_FILE_THRESHOLD = 1_048_576; // 1MB
  * syntax highlighting. The plugin chain lives in `@/shared/markdown/previewPlugins`.
  * Code blocks use highlight.js github-dark-dimmed theme.
  */
-export function MarkdownPreview({ content, filename }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, filename, onFallback }: MarkdownPreviewProps) {
   const isLargeFile = content.length > LARGE_FILE_THRESHOLD;
 
   const handleErrorFallback = () => {
-    // Dispatch a custom event that FileViewer listens to
+    if (onFallback) {
+      onFallback();
+      return;
+    }
+    // Compatibility with the Files hook that predates the shared viewer.
     window.dispatchEvent(new CustomEvent('markdown-preview-error', { detail: { filename } }));
   };
 

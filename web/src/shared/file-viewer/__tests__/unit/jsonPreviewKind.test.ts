@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getJsonPreviewKind } from '../../jsonPreviewKind';
+import { getJsonPreviewKind } from '../../model/jsonPreviewKind';
 
 describe('getJsonPreviewKind', () => {
   it('detects json and jsonl family extensions', () => {
