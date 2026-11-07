@@ -28,6 +28,18 @@ pub enum PreviewExpectedV1 {
     Unmerged,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewWantV1 {
+    /// UTF-8 text for a person to read (the #2838 contract).
+    #[default]
+    Text,
+    /// Complete, bounded media bytes for a recognized media path (#2876).
+    Media,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
@@ -38,6 +50,10 @@ pub struct PreviewRequestV1 {
     pub path: String,
     /// The row kind the caller selected.
     pub expected: PreviewExpectedV1,
+    /// Omitted by the text-preview client; `media` asks for raw bytes.
+    #[serde(default)]
+    #[cfg_attr(feature = "codegen", ts(optional))]
+    pub want: Option<PreviewWantV1>,
 }
 
 /// What the file read produced, before the generic git failure variants.
@@ -56,6 +72,22 @@ pub enum FilePreviewStateV1 {
     Changed,
     /// The path is a symlink, directory or other entry a preview cannot read.
     Unsupported,
+    /// A media request whose complete file exceeds the bounded media read.
+    TooLarge,
+}
+
+/// Complete media bytes for one authorized path.
+///
+/// Never a prefix: a truncated prefix is not a playable/decodable file, so an
+/// oversized answer is `TooLarge` instead of a partial payload.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+pub struct MediaPayloadV1 {
+    pub content_base64: String,
+    /// The MIME type validated from the bytes, not merely the extension.
+    pub mime_type: String,
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +111,9 @@ pub struct FilePreview {
     /// explanation. Never a substitute for the typed `state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Present only on a `want: media` answer that returned complete bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<MediaPayloadV1>,
 }
 
 #[derive(Debug, Clone, Serialize)]

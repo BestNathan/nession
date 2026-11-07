@@ -240,6 +240,7 @@ describe('GitWorkspace', () => {
       session: 'agent-1:work',
       path: 'notes.txt',
       expected: 'untracked',
+      want: 'text',
     });
     expect(mockedDiff).not.toHaveBeenCalled();
 

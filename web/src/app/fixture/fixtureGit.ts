@@ -138,7 +138,11 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       if (type === 'git.preview') {
         return Promise.resolve(
-          previewFor(String(payload.path), String(payload.expected), scenario) as T,
+          previewFor(
+            String(payload.path),
+            scenario,
+            payload.want === 'media' ? 'media' : 'text',
+          ) as T,
         );
       }
       if (type === 'git.log') {
@@ -290,6 +294,18 @@ const DIFF_STATE_STATUS: GitStatusResponse = {
  * reports a conflicted path once, in `unmerged` only. The missing/changed
  * answers are races the reader can actually hit after selecting a row.
  */
+/**
+ * Real, decodable media bytes (#2876 SC-03).
+ *
+ * The fixture stands in for the Agent's bounded media answer, not for a mocked
+ * viewer: the browser decodes these exact bytes, so the Case exercises the
+ * same image/video/audio/PDF elements the product uses.
+ */
+const FIXTURE_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGP4z8BAEiJN9aiGUQ1DSgMAkPn/Afnh+ngAAAAASUVORK5CYII=';
+const FIXTURE_WAV_BASE64 = 'UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+const FIXTURE_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDEyMF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTIgVGYgMjAgNjAgVGQgKE5lc3Npb24gbWVkaWEgc2FtcGxlKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCnRyYWlsZXI8PC9TaXplIDYvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgowCiUlRU9GCg==';
+const FIXTURE_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAK3EU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEnTbuMU6uEHFO7a1OsggKh7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuMS4xMDBXQYxMYXZmNjEuMS4xMDBEiYhAj0AAAAAAABZUrmvMrgEAAAAAAABD14EBc8WIoFP3VVktqNucgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4QF9eEA4JSwgRC6gRCagQJVsIhVt4ECVbiBAhJUw2f6c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2MS4xLjEwMHNz1WPAi2PFiKBT91VZLajbZ8igRaOHRU5DT0RFUkSHk0xhdmM2MS4zLjEwMCBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAxLjAwMDAwMDAwMAAfQ7Z1QPXngQCjoYEAAIAQAgCdASoQABAAAEcIhYWIhYSIAgIADA5gAP5oAKOVgQBkALEBAAEQEAAYABhYL/QACAAAo5WBAMgAsQEAARAQABgAGFgv9AAIAACjlYEBLACxAQABEBAAGAAYWC/0AAgAAKOVgQGQALEBAAEQEAAYABhYL/QACAAAo5WBAfQAsQEAARAQABgAGFgv9AAIAACjlYECWACxAQABEBAAGAAYWC/0AAgAAKOVgQK8ALEBAAEQEBRgAGFgv9AAIAAAo5WBAyAAsQEAARAQABgAGFgv9AAIAACjlYEDhACxAQABEBAAGAAYWC/0AAgAABxTu2uRu4+zgQC3iveBAfGCAabwgQM=';
+
 const PREVIEW_STATE_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
@@ -306,6 +322,18 @@ const PREVIEW_STATE_STATUS: GitStatusResponse = {
     ],
     untracked: [
       'notes/new.ts',
+      'notes/example.ts',
+      'notes/data.json',
+      'notes/events.jsonl',
+      'notes/README.md',
+      'notes/broken.json',
+      'notes/truncated.json',
+      'assets/photo.png',
+      'assets/sample.webm',
+      'assets/sample.wav',
+      'assets/spec.pdf',
+      'assets/fake.png',
+      'assets/oversized.png',
       'assets/logo.bin',
       'src/large.txt',
       'src/missing.txt',
@@ -313,7 +341,7 @@ const PREVIEW_STATE_STATUS: GitStatusResponse = {
       'src/long-preview.txt',
       'src/link',
     ],
-    unmerged: ['src/conflict.ts', 'src/unmerged-missing.ts'],
+    unmerged: ['src/conflict.ts', 'src/conflict.rs', 'src/unmerged-missing.ts'],
   },
 };
 
@@ -337,63 +365,175 @@ function readyPreview(
   };
 }
 
-function previewFor(path: string, expected: string, scenario: string): GitPreviewResponse {
-  if (scenario === 'preview-states') {
-    if (path === 'notes/new.ts') {
-      return readyPreview(path, 'export const note = "untracked";\n');
-    }
-    if (path === 'src/conflict.ts') {
-      return readyPreview(
+function readyMedia(
+  path: string,
+  mimeType: string,
+  contentBase64: string,
+  size: number,
+): GitPreviewResponse {
+  return {
+    state: 'ok',
+    preview: {
+      path,
+      state: 'ready',
+      text: '',
+      binary: true,
+      size,
+      truncated: false,
+      truncated_bytes: 0,
+      media: { content_base64: contentBase64, mime_type: mimeType, complete: true },
+    },
+  };
+}
+
+function mediaFixture(path: string): GitPreviewResponse | null {
+  if (path === 'assets/photo.png') {
+    return readyMedia(path, 'image/png', FIXTURE_PNG_BASE64, 80);
+  }
+  if (path === 'assets/sample.webm') {
+    return readyMedia(path, 'video/webm', FIXTURE_WEBM_BASE64, 743);
+  }
+  if (path === 'assets/sample.wav') {
+    return readyMedia(path, 'audio/wav', FIXTURE_WAV_BASE64, 2044);
+  }
+  if (path === 'assets/spec.pdf') {
+    return readyMedia(path, 'application/pdf', FIXTURE_PDF_BASE64, 445);
+  }
+  if (path === 'assets/fake.png') {
+    return {
+      state: 'ok',
+      preview: {
         path,
-        '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
-      );
+        state: 'unsupported',
+        text: '',
+        binary: false,
+        size: 14,
+        truncated: false,
+        truncated_bytes: 0,
+        message: "The file's content does not match its extension.",
+      },
+    };
+  }
+  if (path === 'assets/oversized.png') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'too_large',
+        text: '',
+        binary: false,
+        size: 9 * 1024 * 1024,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'This file is 9437184 bytes, larger than the 8388608-byte media preview limit.',
+      },
+    };
+  }
+  return null;
+}
+
+function previewStateFor(path: string): GitPreviewResponse | null {
+  if (path === 'notes/new.ts') {
+    return readyPreview(path, 'export const note = "untracked";\n');
+  }
+  if (path === 'notes/example.ts') {
+    return readyPreview(path, 'export const greeting: string = "hello";\nconsole.log(greeting);\n');
+  }
+  if (path === 'src/conflict.rs') {
+    return readyPreview(path, '<<<<<<< HEAD\nfn mine() {}\n=======\nfn theirs() {}\n>>>>>>> other\n');
+  }
+  if (path === 'notes/data.json') {
+    return readyPreview(path, '{\n  "name": "git-viewer",\n  "nested": { "ok": true },\n  "items": [1, 2, 3]\n}\n');
+  }
+  if (path === 'notes/events.jsonl') {
+    return readyPreview(path, '{"line":1,"ok":true}\n{"line":2,"ok":true}\n');
+  }
+  if (path === 'notes/README.md') {
+    return readyPreview(path, '# Git preview\n\nStructured and source views share one policy.\n');
+  }
+  if (path === 'notes/broken.json') {
+    return readyPreview(path, '{ "broken": true, }\n');
+  }
+  if (path === 'notes/truncated.json') {
+    const text = '{"name":"truncated"';
+    return readyPreview(path, text, {
+      size: 4103,
+      truncated: true,
+      truncated_bytes: 4103 - text.length,
+    });
+  }
+  if (path === 'src/conflict.ts') {
+    return readyPreview(
+      path,
+      '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
+    );
+  }
+  if (path === 'assets/logo.bin') {
+    return readyPreview(path, '', { binary: true, size: 4096 });
+  }
+  if (path === 'src/large.txt') {
+    return readyPreview(path, 'first line\n', {
+      size: 4103,
+      truncated: true,
+      truncated_bytes: 4096,
+    });
+  }
+  if (path === 'src/missing.txt' || path === 'src/unmerged-missing.ts') {
+    return { state: 'ok', preview: { path, state: 'missing', text: '', binary: false, size: 0, truncated: false, truncated_bytes: 0 } };
+  }
+  if (path === 'src/long-preview.txt') {
+    const lines = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`);
+    return readyPreview(path, lines.join('\n'));
+  }
+  if (path === 'src/link') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'unsupported',
+        text: '',
+        binary: false,
+        size: 0,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'This path is a symbolic link; previews do not follow links.',
+      },
+    };
+  }
+  if (path === 'src/moved.txt') {
+    return {
+      state: 'ok',
+      preview: {
+        path,
+        state: 'changed',
+        text: '',
+        binary: false,
+        size: 0,
+        truncated: false,
+        truncated_bytes: 0,
+        message: 'The file changed while it was being read. Refresh Git Changes.',
+      },
+    };
+  }
+  return null;
+}
+
+function previewFor(
+  path: string,
+  scenario: string,
+  want: 'text' | 'media',
+): GitPreviewResponse {
+  if (want === 'media') {
+    const media = mediaFixture(path);
+    if (media) {
+      return media;
     }
-    if (path === 'assets/logo.bin') {
-      return readyPreview(path, '', { binary: true, size: 4096 });
-    }
-    if (path === 'src/large.txt') {
-      return readyPreview(path, 'first line\n', {
-        size: 4103,
-        truncated: true,
-        truncated_bytes: 4096,
-      });
-    }
-    if (path === 'src/missing.txt' || path === 'src/unmerged-missing.ts') {
-      return { state: 'ok', preview: { path, state: 'missing', text: '', binary: false, size: 0, truncated: false, truncated_bytes: 0 } };
-    }
-    if (path === 'src/long-preview.txt') {
-      const lines = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`);
-      return readyPreview(path, lines.join('\n'));
-    }
-    if (path === 'src/link') {
-      return {
-        state: 'ok',
-        preview: {
-          path,
-          state: 'unsupported',
-          text: '',
-          binary: false,
-          size: 0,
-          truncated: false,
-          truncated_bytes: 0,
-          message: 'This path is a symbolic link; previews do not follow links.',
-        },
-      };
-    }
-    if (path === 'src/moved.txt') {
-      return {
-        state: 'ok',
-        preview: {
-          path,
-          state: 'changed',
-          text: '',
-          binary: false,
-          size: 0,
-          truncated: false,
-          truncated_bytes: 0,
-          message: 'The file changed while it was being read. Refresh Git Changes.',
-        },
-      };
+  }
+
+  if (scenario === 'preview-states') {
+    const state = previewStateFor(path);
+    if (state) {
+      return state;
     }
   }
 
@@ -408,7 +548,7 @@ function previewFor(path: string, expected: string, scenario: string): GitPrevie
     state: 'ok',
     preview: {
       path,
-      state: expected === 'unmerged' ? 'changed' : 'changed',
+      state: 'changed',
       text: '',
       binary: false,
       size: 0,
