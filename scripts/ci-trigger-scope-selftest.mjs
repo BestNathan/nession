@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // #2095: Execute the production Quality selector against real Git diffs.
-// Never duplicate the path-selection policy here; workflows own their routing.
+// Execute the exact Workflow diff and its canonical quality-scope.mjs router. Do not duplicate rules.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,7 +20,7 @@ for (const [name,filename] of Object.entries({
 
 function classifier() {
   const lines=sources.quality.split('\n');
-  const i=lines.indexOf('      - name: Select impacted checks from the exact PR diff');
+  const i=lines.indexOf('      - name: Classify the exact PR or main-push change');
   assert.ok(i>=0,'production Quality selector missing');
   const j=lines.indexOf('        run: |',i);
   assert.ok(j>i,'production Quality run block missing');
@@ -38,19 +38,20 @@ function classifier() {
 const globs=Object.fromEntries(Object.entries(sources).map(([key,s])=>[key,prPaths(s)]));
 const script=classifier();
 const cases=[
-  {name:'controller-only', files:['.github/workflows/agent-controller-dispatch.yml'], quality:[false,false,true], e2e:false,cases:false,scenario:false},
-  {name:'rust-only', files:['crates/nession-server/src/lib.rs'], quality:[true,false,false], e2e:true,cases:true,scenario:true},
-  {name:'web-only', files:['web/src/App.tsx'], quality:[false,true,false], e2e:true,cases:true,scenario:false},
-  {name:'web-terminal', files:['web/src/product/terminal/index.ts'], quality:[false,true,false], e2e:true,cases:true,scenario:true},
-  {name:'acceptance-case', files:['e2e/acceptance/cases/1258/SC-03/verify.js'], quality:[false,true,false], e2e:true,cases:true,scenario:false},
-  {name:'scenario', files:['e2e/scenarios/terminal-attach-resume.mjs'], quality:[false,true,false], e2e:true,cases:true,scenario:true},
-  {name:'shared-gate', files:['gates/checks/quality.sh'], quality:[true,true,false], e2e:true,cases:true,scenario:false},
-  {name:'shared-script', files:['scripts/acceptance-case-smoke-select.mjs'], quality:[true,true,false], e2e:true,cases:true,scenario:false},
-  {name:'cargo-lock', files:['Cargo.lock'], quality:[true,false,false], e2e:true,cases:true,scenario:true},
-  {name:'rust-clippy-config', files:['clippy.toml'], quality:[true,false,false], e2e:false,cases:false,scenario:false},
-  {name:'quality-yaml', files:['.github/workflows/ci-quality.yml'], quality:[true,true,true], e2e:false,cases:false,scenario:false},
-  {name:'e2e-yaml', files:['.github/workflows/e2e-tests.yml'], quality:[false,false,true], e2e:true,cases:false,scenario:false},
-  {name:'case-yaml', files:['.github/workflows/acceptance-case-smoke.yml'], quality:[false,false,true], e2e:false,cases:true,scenario:false},
+  {name:'controller-only', files:['.github/workflows/agent-controller-dispatch.yml'], quality:[false,false,false,true,false], e2e:false,cases:false,scenario:false},
+  {name:'rust-only', files:['crates/nession-server/src/lib.rs'], quality:[true,false,false,false,false], e2e:true,cases:true,scenario:true},
+  {name:'web-only', files:['web/src/App.tsx'], quality:[false,true,true,false,false], e2e:true,cases:true,scenario:false},
+  {name:'web-terminal', files:['web/src/product/terminal/index.ts'], quality:[false,true,true,false,false], e2e:true,cases:true,scenario:true},
+  {name:'acceptance-case', files:['e2e/acceptance/cases/1258/SC-03/verify.js'], quality:[false,false,true,false,false], e2e:true,cases:true,scenario:false},
+  {name:'scenario', files:['e2e/scenarios/terminal-attach-resume.mjs'], quality:[false,false,true,false,false], e2e:true,cases:true,scenario:true},
+  {name:'fixture-only', files:['e2e/fixtures/agent-development/qwen-repair-source.md'], quality:[false,false,false,false,false], e2e:true,cases:true,scenario:false},
+  {name:'shared-gate', files:['gates/checks/quality.sh'], quality:[true,true,true,false,false], e2e:true,cases:true,scenario:false},
+  {name:'shared-script', files:['scripts/acceptance-case-smoke-select.mjs'], quality:[false,false,true,false,false], e2e:true,cases:true,scenario:false},
+  {name:'cargo-lock', files:['Cargo.lock'], quality:[true,false,false,false,false], e2e:true,cases:true,scenario:true},
+  {name:'rust-clippy-config', files:['clippy.toml'], quality:[true,false,false,false,false], e2e:false,cases:false,scenario:false},
+  {name:'quality-yaml', files:['.github/workflows/ci-quality.yml'], quality:[true,true,true,true,false], e2e:false,cases:false,scenario:false},
+  {name:'e2e-yaml', files:['.github/workflows/e2e-tests.yml'], quality:[false,false,false,true,false], e2e:true,cases:false,scenario:false},
+  {name:'case-yaml', files:['.github/workflows/acceptance-case-smoke.yml'], quality:[false,false,true,true,false], e2e:false,cases:true,scenario:false},
   {name:'docs-only', files:['docs/engineering/notes.md'], quality:null, e2e:false,cases:false,scenario:false},
 ];
 function git(dir,args) {
@@ -65,6 +66,9 @@ function select(files,eventName='pull_request') {
     git(dir,['config','user.name','CI Fixture']);
     git(dir,['config','user.email','ci@example.invalid']);
     fs.writeFileSync(path.join(dir,'base.txt'),'base\n');
+    fs.mkdirSync(path.join(dir,'scripts','ci'),{recursive:true});
+    fs.copyFileSync(path.join(root,'scripts/ci/quality-scope.mjs'),path.join(dir,'scripts/ci/quality-scope.mjs'));
+
     git(dir,['add','.']);git(dir,['commit','-qm','base']);
     const base=git(dir,['rev-parse','HEAD']);
     for(const file of files) {
@@ -80,7 +84,7 @@ function select(files,eventName='pull_request') {
     }});
     assert.equal(result.status,0,'Quality scope failed: '+result.stderr+' '+result.stdout);
     const values=Object.fromEntries(fs.readFileSync(output,'utf8').trim().split('\n').map(s=>s.split('=')));
-    return ['rust','web','workflow'].map(key=>values[key]==='true');
+    return ['rust','web','tooling','workflow','instruction'].map(key=>values[key]==='true');
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 }
 for(const fixture of cases) {
@@ -95,7 +99,7 @@ for(const fixture of cases) {
   // A main-push owns its independent exact-commit source scope. Inapplicable
   // module jobs must remain skipped, not pass because the workflow is green.
   assert.deepEqual(select(fixture.files,'push'),
-    fixture.quality??[false,false,false],
+    fixture.quality??[false,false,false,false,false],
     'Quality merged-SHA jobs incorrectly selected for '+fixture.name);
 }
 console.log('CI trigger scopes: '+cases.length+' exact-diff regression fixtures passed');
