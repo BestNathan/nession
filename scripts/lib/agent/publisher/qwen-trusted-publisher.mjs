@@ -198,7 +198,8 @@ export async function runTrustedQwenPublication({
       fail('only independently signed implement or repair is publishable');
     const preflight=await preflightTrustedQwenPublisher({
       remote,registry,run:worker,claim,reader,rootKey:key,
-      result,proof,ciphertext,sourceCheckout});
+      result,proof,ciphertext,sourceCheckout,
+      targetMainSha:env.GITHUB_SHA});
     if(preflight.evidence.checkpoint_version!==receipt.checkpoint_version||
         preflight.evidence.checkpoint_commit_sha!==receipt.checkpoint_commit_sha||
         preflight.evidence.ciphertext_sha256!==receipt.ciphertext_sha256)

@@ -175,10 +175,10 @@ jobs:
 
       # This checkout is Git data ONLY. No npm install, Bash, hooks, package
       # scripts, source execution or checkout credentials are allowed here.
-      - name: Checkout original exact-SHA source strictly as inert Git data
+      - name: Checkout current-main source strictly as inert Git data
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.source.outputs.sha }}
+          ref: ${{ github.sha }}
           path: source
           fetch-depth: 1
           persist-credentials: false

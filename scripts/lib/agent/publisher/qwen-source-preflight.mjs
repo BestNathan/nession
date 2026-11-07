@@ -26,7 +26,7 @@ const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Qwen Publisher source: '+s);}
 export async function preflightTrustedQwenPublisher({
   remote,registry,run,claim,reader,rootKey,
-  result,proof,ciphertext,sourceCheckout,
+  result,proof,ciphertext,sourceCheckout,targetMainSha=null,
 }){
   if(!Buffer.isBuffer(rootKey)||rootKey.length!==32||
       !remote||typeof remote!=='string'||
@@ -49,6 +49,12 @@ export async function preflightTrustedQwenPublisher({
       signed.action_id!==admission.action_id||
       signed.source_run_id!==admission.run_id)
     fail('signed Qwen Store ACK differs from authenticated source Run');
+  // The Worker may have been dispatched at an earlier main ancestor. Publish
+  // the authenticated patch onto the current main tree, but only after the
+  // real old bytes/manifest and allowlist prove it still applies unchanged.
+  const publisherBase=targetMainSha??admission.input_sha;
+  if(!SHA.test(publisherBase??''))
+    fail('invalid Publisher target main SHA');
   const candidate=validateQwenDevelopmentCandidate({
     admission,run,result,proof,ciphertext});
   const identity=candidate.identity;
@@ -67,15 +73,15 @@ export async function preflightTrustedQwenPublisher({
   // verifies actual file contents, and executes none of the source.
   const patch=Buffer.from(candidate.proposal.patch_base64,'base64').toString('utf8');
   const before=preflightAgentPatch({checkout:sourceCheckout,
-    source_sha:admission.input_sha,patch,
+    source_sha:publisherBase,patch,
     allowed_paths:candidate.proposal.changed_paths});
   // The Worker cannot authorize its own source scope. Independently
   // recheck the signed disposable Canary's exact bytes after Git applies
   // the real candidate patch, before any Store Intent or GitHub write.
   assertQwenControlledPublisherSource({issue:admission.issue,
-    sourceCheckout,sourceSha:admission.input_sha,checked:before});
+    sourceCheckout,sourceSha:publisherBase,checked:before});
   const changed=before.files.map(file=>file.path).sort();
-  if(before.source_sha!==admission.input_sha||
+  if(before.source_sha!==publisherBase||
       before.patch_sha256!==candidate.proposal.patch_sha256||
       JSON.stringify(changed)!==JSON.stringify(candidate.proposal.changed_paths)||
       before.files.some(file=>file.operation==='create'))
@@ -86,7 +92,7 @@ export async function preflightTrustedQwenPublisher({
     issue:admission.issue,action_id:admission.action_id,
     worker_run_id:run.id,worker_run_attempt:run.run_attempt,
     worker_sha:run.head_sha,
-    source_sha:admission.input_sha,
+    source_sha:publisherBase,
     checkpoint_version:checkpoint.version,
     checkpoint_commit_sha:checkpoint.commit_sha,
     ciphertext_sha256:checkpoint.ciphertext_sha256,
