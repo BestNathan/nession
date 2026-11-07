@@ -358,6 +358,8 @@ function SessionsListRegion({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
   createDisabled,
   onCreate,
   searchQuery,
@@ -377,6 +379,8 @@ function SessionsListRegion({
   onSelect: AppSessionsSurfaceProps['onSelect'];
   onConfigure: AppSessionsSurfaceProps['onConfigure'];
   onKill: AppSessionsSurfaceProps['onKill'];
+  onViewDetails: AppSessionsSurfaceProps['onViewDetails'];
+  onEditDetails: AppSessionsSurfaceProps['onEditDetails'];
   createDisabled: boolean;
   onCreate: () => void;
   searchQuery: string;
@@ -403,6 +407,8 @@ function SessionsListRegion({
         onSelect={onSelect}
         onConfigure={onConfigure}
         onKill={onKill}
+        onViewDetails={onViewDetails}
+        onEditDetails={onEditDetails}
         groups={
           grouped
             ? buckets.map((bucket) => ({
@@ -751,6 +757,8 @@ export function AppSessionsSurface({
   onSelect,
   onConfigure,
   onKill,
+  onViewDetails,
+  onEditDetails,
 }: AppSessionsSurfaceProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -804,6 +812,8 @@ export function AppSessionsSurface({
         onSelect={onSelect}
         onConfigure={onConfigure}
         onKill={onKill}
+        onViewDetails={onViewDetails}
+        onEditDetails={onEditDetails}
         createDisabled={createDisabled}
         onCreate={onCreate}
         searchQuery={searchQuery}

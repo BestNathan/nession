@@ -320,3 +320,166 @@ test('Agent detail and Server status stay separate dimensions (#2851 SC-05)', as
   await expect(page.getByTestId('sidebar-agent-sg-prod')).toBeVisible();
   await expect(page.getByTestId('sidebar-server-status')).toHaveText('Server connected');
 });
+
+// ── App Sessions action parity (#2875) ─────────────────────────────────────
+//
+// The App keeps its own spatial Sessions layer (#2851 preserved it); these
+// tests drive the shared four-action row menu at the two native App widths and
+// prove the action owners stay the existing details/edit/configure/kill
+// surfaces. The real-stack acceptance Cases additionally drive configure and
+// the typed-name kill against live Server/Agent.
+
+const APP_ACTION_TARGET = 'devbox-01:design-system';
+
+async function openAppSessions(
+  page: Page,
+  viewport: { width: number; height: number } = { width: 390, height: 844 },
+  search = '?sessionMetadata=normal',
+): Promise<void> {
+  await freezeFixtureClock(page);
+  await page.setViewportSize(viewport);
+  await gotoFixtureApp(page, search);
+  // A same-hash navigation does not reload the document, so a page that is
+  // already on the Sessions layer keeps that layer open and its surface
+  // intercepts the header trigger. Only open it when it is not already up.
+  if ((await page.getByTestId('app-layer-root').getAttribute('data-layer')) !== 'sessions') {
+    await page.getByTestId('app-header-sessions').first().click();
+  }
+  await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+  await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+}
+
+async function openRowMenu(page: Page): Promise<void> {
+  await page.getByTestId(`session-actions-${APP_ACTION_TARGET}`).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+}
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 375, height: 812 },
+]) {
+  test(`App rows expose the four actions without selecting or remounting Terminal at ${viewport.width}x${viewport.height} (#2875 SC-01)`, async ({ page }) => {
+    await openAppSessions(page, viewport);
+
+    const selectedRow = page.locator('[data-testid="session-item-row"][data-selected="true"]');
+    const selectedBefore = await selectedRow.getAttribute('data-session-row');
+    await page.getByTestId('app-layer-terminal').evaluate((element) => {
+      (element as HTMLElement).dataset.kept = '2875';
+    });
+
+    const trigger = page.getByTestId(`session-actions-${APP_ACTION_TARGET}`);
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox?.width).toBe(44);
+    expect(triggerBox?.height).toBe(44);
+
+    await openRowMenu(page);
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem')).toHaveCount(4);
+    for (const label of ['Session details', 'Edit details', 'Attach settings', 'Kill session']) {
+      await expect(menu.getByRole('menuitem', { name: label })).toBeVisible();
+    }
+    await expect(menu.getByRole('separator')).toHaveCount(1);
+
+    // One anchored overlay, not a replacement screen: the App stays on its
+    // Sessions layer, the selected Session is unchanged, and the Terminal
+    // layer was not remounted under it.
+    await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'sessions');
+    expect(await selectedRow.getAttribute('data-session-row')).toBe(selectedBefore);
+    expect(
+      await page.getByTestId('app-layer-terminal').evaluate(
+        (element) => (element as HTMLElement).dataset.kept,
+      ),
+    ).toBe('2875');
+
+    // The App-owned list is the menu's scroll owner: scrolling it dismisses
+    // the overlay, and focus returns to the row's trigger.
+    const appViewport = page
+      .getByTestId('app-sessions-list')
+      .locator('[data-slot="scroll-area-viewport"]')
+      .first();
+    await appViewport.evaluate((element) => {
+      element.scrollTop = 40;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+
+    // Search, history grouping and the creation action remain the App's.
+    await expect(page.getByPlaceholder('Search sessions...')).toBeVisible();
+    await expect(page.getByTestId('session-group-label').first()).toBeVisible();
+    await expect(page.getByTestId('create-session')).toBeVisible();
+    // No Web sidebar/rail/drawer controls leaked into the App composition.
+    await expect(page.getByTestId('sidebar-column')).toHaveCount(0);
+    await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
+    await expect(page.getByTestId('session-drawer')).toHaveCount(0);
+    await expect(page.getByTestId('sidebar-collapse')).toHaveCount(0);
+  });
+}
+
+test('App details and edit target the chosen Session without selection side effects (#2875 SC-02)', async ({ page }) => {
+  await openAppSessions(page);
+
+  const target = APP_ACTION_TARGET;
+  const selectedRow = page.locator('[data-testid="session-item-row"][data-selected="true"]');
+  const selectedBefore = await selectedRow.getAttribute('data-session-row');
+
+  // Session details: the target's metadata and immutable identity, while the
+  // active selection stays where it was.
+  await openRowMenu(page);
+  await page.getByTestId(`session-actions-details-${target}`).click();
+  const details = page.getByTestId('session-details-dialog');
+  await expect(details).toBeVisible();
+  await expect(page.getByTestId('session-title')).toHaveText('Design system audit');
+  await expect(page.getByTestId('session-details')).toContainText(target);
+  expect(await selectedRow.getAttribute('data-session-row')).toBe(selectedBefore);
+  await page.keyboard.press('Escape');
+  await expect(details).toHaveCount(0);
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'sessions');
+
+  // Edit details: the existing metadata editor, not a second one. The display
+  // alias/description/tags change; the tmux name (Session id) does not.
+  await openRowMenu(page);
+  await page.getByTestId(`session-actions-edit-${target}`).click();
+  await expect(page.getByTestId('session-metadata-editor')).toBeVisible();
+  await page.getByTestId('session-metadata-title-input').fill('App parity review');
+  await page.getByTestId('session-metadata-description-input').fill('Four-action App menu');
+  await page.getByTestId('session-metadata-tag-input').fill('parity');
+  await page.getByTestId('session-metadata-add-tag').click();
+  await page.getByTestId('session-metadata-save').click();
+  await expect(page.getByTestId('session-metadata-notice')).toContainText('Session ID are unchanged.');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId(`session-item-${target}`)).toContainText('App parity review');
+  await expect(page.getByTestId(`session-item-${target}`)).toHaveCount(1);
+  await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'sessions');
+});
+
+test('App metadata shows offline read-only and revision conflict truthfully (#2875 SC-02)', async ({ page }) => {
+  // Offline Agent: details remain readable; editing is explicitly unavailable.
+  await openAppSessions(
+    page,
+    { width: 390, height: 844 },
+    '?sessionMetadata=normal&agents=offline',
+  );
+  await openRowMenu(page);
+  await page.getByTestId(`session-actions-details-${APP_ACTION_TARGET}`).click();
+  await expect(page.getByTestId('session-details-dialog')).toBeVisible();
+  await expect(page.getByTestId('session-metadata-editing-unavailable')).toContainText(
+    'Editing is unavailable while the Agent is offline.',
+  );
+  await expect(page.getByTestId('session-metadata-edit')).toBeDisabled();
+  await page.keyboard.press('Escape');
+
+  // Conflict: the first save is rejected and points at the reload action;
+  // the stored title in the row is not overwritten.
+  await openAppSessions(page, { width: 390, height: 844 }, '?sessionMetadata=conflict');
+  await openRowMenu(page);
+  await page.getByTestId(`session-actions-edit-${APP_ACTION_TARGET}`).click();
+  await page.getByTestId('session-metadata-title-input').fill('Conflicting edit');
+  await page.getByTestId('session-metadata-save').click();
+  await expect(page.getByTestId('session-metadata-conflict')).toBeVisible();
+  await expect(page.getByTestId('session-metadata-reload')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId(`session-item-${APP_ACTION_TARGET}`)).toContainText(
+    'Design system audit',
+  );
+});
