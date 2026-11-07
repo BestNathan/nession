@@ -20,6 +20,7 @@ export const CATALOG = [
   ['agent-staging-developer-canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent'],
   ['agent-review', 'agent-review.yml', 'Agent / Review', 'agent-review.yml', 'Agent / Review', 'agent'],
   ['agent-e2e-failure-analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent'],
+  ['agent-staging-convergence-review', 'agent-staging-convergence-review.yml', 'Agent / Staging Convergence Review', 'agent-staging-convergence-review.yml', 'Agent / Staging Convergence Review', 'agent'],
   ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
   ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
   ['store-agent-review-result-ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store'],
