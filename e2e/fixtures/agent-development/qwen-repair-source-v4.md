@@ -8,8 +8,8 @@ replacement for source-aligned staging proof.
 
 ## Fixture state
 
-implementation: pending
-verification: missing
+implementation: qwen-verified
+verification: complete
 
 ## Required final content
 
