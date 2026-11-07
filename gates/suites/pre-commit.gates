@@ -1,15 +1,10 @@
-# pre-commit
-# Gate IDs only. Not wired into current hooks/workflows yet.
-instruction-contract
+# Fast, diff-scoped local checks. gates/route owns applicability.
 dev-workspace-commit
 rust-format
-rust-clippy
-rust-test-unit
 test-isolation
 tmux-socket-isolation
 protocol-integrity
 server-handler-locality
 design-system-fast
 web-eslint
-web-typecheck
-web-test-unit
+instruction-contract

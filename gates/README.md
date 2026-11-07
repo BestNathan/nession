@@ -7,6 +7,7 @@
 ```text
 gates/
 ├── run
+├── route  # live Git hook suite selection
 ├── run-selftest.sh
 ├── checks/<gate-id>.sh
 ├── suites/<suite>.gates
@@ -44,11 +45,11 @@ nonzero subprocess statuses to an invariant failure.
 
 ## Suites
 
-Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. Current files model logical execution surfaces for future cutover. Existing changed-file routers may still add conditional self-test IDs explicitly.
+Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. The `pre-commit` and `pre-push` suites are live hook stage allowlists. `gates/route` selects applicable IDs based on staged/pushed paths, then invokes `gates/run`. Other suites remain explicit profiles for their consumers.
 
 ## Rollout boundary
 
-Hooks route changed-file Gate ID sets into `gates/run`. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
+Hooks delegate to `gates/route`, which filters their stage suite against changed files and invokes `gates/run`. `pre-commit` is limited to fast static checks; `pre-push` runs Rust/Web unit tests, Clippy/TypeScript and rule-owner regression contracts. Full integration, coverage, and browser checks remain available via their Gates and CI. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
 
 The Server Handler locality Gate (`server-handler-locality`) is included in the
 `quality-rust` and aggregate `quality` suites. Its isolated self-test and
@@ -64,7 +65,7 @@ and Rust/Web builds remain workflow-owned prerequisites.
 
 ## Hook routing contract
 
-`gate-router-contract` runs deterministic pre-commit and pre-push scenarios with mocked Git diffs and the Gate runner. It asserts rule-owner changes select their Gate and regression fixtures, including mutation tests proving missing self-test routes are caught. Failed `git diff` broadens pre-push selection instead of returning a successful skip. Hook/Gate changes trigger `gate-runtime-contract` and `gate-router-contract`; Quality CI runs both through `quality-tooling`.
+`gate-router-contract` tests both hooks, the canonical `gates/route` selector, and their live suites with mocked Git diffs and Gate execution. It asserts that fast commit checks exclude unit tests, push selects unit tests, owner changes retain their negative fixtures, and unknown suite Gates fail closed. An unprovable pre-commit diff fails; an unprovable pre-push diff broadens selection to its entire suite. Hook/Gate changes select `gate-runtime-contract` and `gate-router-contract` on push; Quality CI also runs them through `quality-tooling`.
 
 ## Release version contract
 

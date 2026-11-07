@@ -21,20 +21,25 @@ const runnerStub = [
   'printf "%s\\n" "$@" >> "$GATE_ROUTER_CAPTURE"',
   '',
 ].join('\n');
+
 function createFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-gate-router-'));
-  for (const sub of ['.githooks', 'gates', 'bin', 'scripts/lib']) {
+  for (const sub of ['.githooks', 'gates/suites', 'bin', 'scripts/lib']) {
     fs.mkdirSync(path.join(dir, sub), { recursive: true });
   }
   for (const hook of ['pre-commit', 'pre-push']) {
     fs.copyFileSync(path.join(root, '.githooks', hook), path.join(dir, '.githooks', hook));
+    fs.copyFileSync(path.join(root, 'gates/suites', hook + '.gates'),
+      path.join(dir, 'gates/suites', hook + '.gates'));
   }
+  fs.copyFileSync(path.join(root, 'gates/route'), path.join(dir, 'gates/route'));
   fs.copyFileSync(path.join(root, 'scripts/lib/git-diff-base.sh'),
     path.join(dir, 'scripts/lib/git-diff-base.sh'));
   fs.writeFileSync(path.join(dir, 'bin/git'), gitStub, { mode: 0o755 });
   fs.writeFileSync(path.join(dir, 'gates/run'), runnerStub, { mode: 0o755 });
   return dir;
 }
+
 function execute(dir, hook, changed, diffError = false) {
   const capture = path.join(dir, 'gates-capture.txt');
   fs.rmSync(capture, { force: true });
@@ -45,7 +50,6 @@ function execute(dir, hook, changed, diffError = false) {
     MOCK_DIFF_ERROR: diffError ? '1' : '0',
     GATE_ROUTER_CAPTURE: capture,
   };
-  // Existing remote ref exercises diff-scoped routing, not reflog bootstrap.
   const input = hook === 'pre-push'
     ? 'refs/heads/test ' + '1'.repeat(40) + ' refs/heads/test ' + '2'.repeat(40) + '\n'
     : '';
@@ -53,84 +57,111 @@ function execute(dir, hook, changed, diffError = false) {
     cwd: dir, env, input, encoding: 'utf8', timeout: 10000,
   });
   assert.equal(result.error, undefined, 'failed to spawn hook');
-  assert.equal(result.status, 0, hook + ' returned nonzero:\n' + result.stdout + '\n' + result.stderr);
-  return fs.existsSync(capture)
+  const ids = fs.existsSync(capture)
     ? fs.readFileSync(capture, 'utf8').split(/\r?\n/).filter(Boolean)
     : [];
+  return { ...result, ids };
 }
+
 function requireIds(ids, expected, label) {
   for (const id of expected) {
     assert.ok(ids.includes(id), label + ': missing Gate ' + id + '; selected: ' + ids.join(','));
   }
 }
+function rejectIds(ids, forbidden, label) {
+  for (const id of forbidden) {
+    assert.ok(!ids.includes(id), label + ': unexpectedly selected ' + id);
+  }
+}
+
 const cases = [
   { hook: 'pre-commit', changed: 'README.md', expected: ['dev-workspace-commit'] },
   { hook: 'pre-commit', changed: 'docs/AGENTS.md', expected: ['instruction-contract'] },
   { hook: 'pre-commit', changed: 'crates/nession-agent/src/lib.rs',
-    expected: ['rust-format', 'rust-clippy', 'rust-test-unit', 'test-isolation', 'tmux-socket-isolation', 'protocol-integrity'] },
-  { hook: 'pre-commit', changed: 'scripts/check-dev-workspace.sh',
-    expected: ['dev-workspace-commit', 'dev-workspace-selftest'] },
-  { hook: 'pre-push', changed: 'scripts/check-dev-workspace.sh',
-    expected: ['dev-workspace-push', 'dev-workspace-selftest'] },
+    expected: ['rust-format', 'test-isolation', 'tmux-socket-isolation', 'protocol-integrity'],
+    absent: ['rust-clippy', 'rust-test-unit', 'rust-coverage', 'rust-test-integration'] },
+  { hook: 'pre-commit', changed: 'web/src/App.tsx',
+    expected: ['web-eslint', 'design-system-fast'],
+    absent: ['web-typecheck', 'web-test-unit', 'web-coverage', 'web-test-integration'] },
   { hook: 'pre-commit', changed: 'scripts/protocol-gate.mjs',
-    expected: ['protocol-integrity', 'protocol-integrity-selftest'] },
-  { hook: 'pre-commit', changed: 'gates/checks/protocol-integrity.sh',
-    expected: ['gate-runtime-contract', 'gate-router-contract', 'protocol-integrity', 'protocol-integrity-selftest'] },
+    expected: ['protocol-integrity'],
+    absent: ['protocol-integrity-selftest'] },
   { hook: 'pre-commit', changed: '.githooks/pre-commit',
-    expected: ['instruction-contract', 'gate-runtime-contract', 'gate-router-contract'] },
-  { hook: 'pre-commit', changed: 'scripts/gate-router-selftest.mjs',
-    expected: ['gate-runtime-contract', 'gate-router-contract'] },
+    expected: ['instruction-contract'],
+    absent: ['gate-router-contract', 'gate-runtime-contract'] },
   { hook: 'pre-push', changed: 'README.md', expected: ['dev-workspace-push'] },
-  { hook: 'pre-push', changed: 'web/src/main.tsx',
-    expected: ['web-test-unit', 'web-test-integration', 'web-coverage', 'design-system-full'] },
+  { hook: 'pre-push', changed: 'crates/nession-agent/src/lib.rs',
+    expected: ['rust-clippy', 'rust-test-unit'],
+    absent: ['rust-test-integration', 'rust-coverage'] },
+  { hook: 'pre-push', changed: 'web/src/App.tsx',
+    expected: ['web-typecheck', 'web-test-unit'],
+    absent: ['web-test-integration', 'web-coverage', 'design-system-full'] },
   { hook: 'pre-push', changed: 'scripts/protocol-gate.mjs',
     expected: ['protocol-integrity', 'protocol-codegen-drift', 'protocol-integrity-selftest'] },
   { hook: 'pre-push', changed: 'gates/checks/tmux-socket-isolation.sh',
-    expected: ['gate-runtime-contract', 'gate-router-contract', 'tmux-socket-isolation', 'tmux-socket-isolation-selftest'] },
-  { hook: 'pre-push', changed: 'scripts/gate-router-selftest.mjs',
-    expected: ['gate-runtime-contract', 'gate-router-contract'] },
+    expected: ['gate-runtime-contract', 'gate-router-contract', 'tmux-socket-isolation-selftest'] },
   { hook: 'pre-push', changed: 'scripts/check-test-isolation.sh',
-    expected: ['test-isolation', 'test-isolation-selftest'] },
-  { hook: 'pre-commit', changed: 'scripts/server-handler-locality.mjs',
-    expected: ['server-handler-locality', 'server-handler-locality-selftest', 'server-handler-concurrency-selftest'] },
-  { hook: 'pre-commit', changed: 'gates/checks/server-handler-locality.sh',
-    expected: ['gate-runtime-contract', 'gate-router-contract', 'server-handler-locality', 'server-handler-locality-selftest'] },
-  { hook: 'pre-push', changed: 'crates/nession-server/src/server/handler/routes.rs',
-    expected: ['server-handler-locality', 'server-handler-locality-selftest', 'server-handler-concurrency-selftest'] },
+    expected: ['test-isolation-selftest'] },
   { hook: 'pre-push', changed: 'scripts/server-handler-concurrency-selftest.mjs',
     expected: ['server-handler-locality', 'server-handler-locality-selftest', 'server-handler-concurrency-selftest'] },
+  { hook: 'pre-push', changed: 'scripts/check-dev-workspace.sh',
+    expected: ['dev-workspace-selftest'] },
+  { hook: 'pre-push', changed: 'gates/route',
+    expected: ['gate-runtime-contract', 'gate-router-contract', 'pre-push-diff-base-selftest'] },
   { hook: 'pre-push', changed: 'scripts/protocol-gate.mjs', diffError: true,
-    expected: ['gate-runtime-contract', 'gate-router-contract', 'rust-coverage', 'web-coverage', 'protocol-integrity-selftest'] },
+    expected: ['rust-test-unit', 'web-test-unit', 'gate-runtime-contract', 'protocol-integrity-selftest'],
+    absent: ['rust-coverage', 'web-coverage'] },
 ];
+
 for (const [index, c] of cases.entries()) {
   const dir = createFixture();
   try {
-    const ids = execute(dir, c.hook, c.changed, c.diffError ?? false);
-    requireIds(ids, c.expected, 'case ' + index);
-    assert.ok(ids.includes(c.hook === 'pre-commit' ? 'dev-workspace-commit' : 'dev-workspace-push'));
+    const result = execute(dir, c.hook, c.changed, c.diffError ?? false);
+    assert.equal(result.status, 0, 'case ' + index + ' returned nonzero:\n' + result.stdout + '\n' + result.stderr);
+    requireIds(result.ids, c.expected, 'case ' + index);
+    rejectIds(result.ids, c.absent ?? [], 'case ' + index);
+    assert.ok(result.ids.includes(c.hook === 'pre-commit' ? 'dev-workspace-commit' : 'dev-workspace-push'));
     if (c.changed === 'README.md') {
-      assert.ok(!ids.includes('gate-router-contract'), 'unrelated Markdown caused full Gate run');
+      assert.deepEqual(result.ids, [c.hook === 'pre-commit' ? 'dev-workspace-commit' : 'dev-workspace-push']);
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
-// Mutation fixture: intentionally remove the detection's self-test route and
-// prove the same assertion detects that regression (not a trivially green test).
-for (const hook of ['pre-commit', 'pre-push']) {
+
+// Missing Git metadata at commit must error; at push it must broaden scope.
+{
   const dir = createFixture();
   try {
-    const file = path.join(dir, '.githooks', hook);
-    const original = fs.readFileSync(file, 'utf8');
-    const mutation = '  GATE_IDS+=(protocol-integrity-selftest)';
-    assert.ok(original.includes(mutation), 'mutation target absent: ' + hook);
-    fs.writeFileSync(file, original.replace(mutation,
-      '  : # negative fixture: protocol self-test route removed'));
-    const selected = execute(dir, hook, 'scripts/protocol-gate.mjs');
-    assert.throws(() => requireIds(selected, ['protocol-integrity-selftest'], hook + ' mutation'),
-      /missing Gate protocol-integrity-selftest/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+    assert.equal(execute(dir, 'pre-commit', 'web/src/App.tsx', true).status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
-console.log('gate-router-selftest: ' + cases.length + ' positive and 2 negative fixtures passed');
+
+// An unrecognized Gate must not be silently omitted from an active hook suite.
+{
+  const dir = createFixture();
+  try {
+    fs.appendFileSync(path.join(dir, 'gates/suites/pre-push.gates'), 'unknown-gate\n');
+    assert.equal(execute(dir, 'pre-push', 'README.md').status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+// Mutation fixtures: removing a required owner selftest from the canonical
+// stage suite must break the corresponding positive routing assertion.
+for (const [hook, changed, id] of [
+  ['pre-push', 'scripts/protocol-gate.mjs', 'protocol-integrity-selftest'],
+  ['pre-push', 'gates/route', 'gate-router-contract'],
+]) {
+  const dir = createFixture();
+  try {
+    const suite = path.join(dir, 'gates/suites', hook + '.gates');
+    const original = fs.readFileSync(suite, 'utf8');
+    assert.ok(original.includes('\n' + id + '\n'), 'mutation target absent: ' + id);
+    fs.writeFileSync(suite, original.replace('\n' + id + '\n', '\n'));
+    const result = execute(dir, hook, changed);
+    assert.equal(result.status, 0);
+    assert.throws(() => requireIds(result.ids, [id], hook + ' mutation'),
+      new RegExp('missing Gate ' + id));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+console.log('gate-router-selftest: ' + cases.length + ' positive, 2 fail-closed, 2 mutation fixtures passed');
