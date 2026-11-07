@@ -2,7 +2,7 @@
 
 This is an inert, intentionally bounded source-edit target for the real
 Developer -> Reviewer changes_requested -> resumed Developer -> Reviewer
-approved chain of Nession Issue #2952 (parent #1664 SC-17). It is not a
+approved chain of Nession Issue #2961 (parent #1664 SC-17). It is not a
 product configuration file, a Provider prompt, an Acceptance verdict, or a
 replacement for source-aligned staging proof.
 
