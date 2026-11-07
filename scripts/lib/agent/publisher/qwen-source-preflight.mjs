@@ -163,7 +163,7 @@ export function assertQwenRepairPublisherOrigin({
       intent.issue!==state.issue||
       intent.source_sha!==intent.target_main_sha||
       intent.source_sha===state.target_sha||
-      intent.source_sha!==origin.source_sha||
+      intent.worker_source_sha!==origin.source_sha||
       intent.worker_run_id!==origin.source_run_id||
       intent.checkpoint_version!==origin.checkpoint_version||
       intent.checkpoint_commit_sha!==origin.checkpoint_commit_sha||
