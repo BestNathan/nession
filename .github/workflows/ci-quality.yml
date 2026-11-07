@@ -123,6 +123,7 @@ jobs:
           node scripts/staging-branch-convergence.mjs self-test
           node scripts/staging-branch-convergence.mjs discover
           node scripts/staging-convergence-readiness.mjs self-test
+          node scripts/staging-convergence-agent.mjs self-test
       - name: Validate trusted Controller and Store negative contracts
         run: |
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
