@@ -12,19 +12,6 @@ on:
     workflows: ["Agent / Development"]
     branches: [main]
     types: [completed]
-  # Owner/main-only replay when GitHub suppresses a workflow_run delivery.
-  # The exact Worker Run is re-read and re-verified before any Store write.
-  workflow_dispatch:
-    inputs:
-      worker_run_id:
-        description: 'Exact successful Agent / Development Run ID'
-        required: true
-        type: string
-      worker_run_attempt:
-        description: 'Exact successful Run attempt'
-        required: false
-        default: '1'
-        type: string
 
 permissions:
   contents: read
@@ -32,7 +19,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: store-agent-development-ingest-${{ github.event.workflow_run.id || github.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.worker_run_attempt || 1 }}
+  group: store-agent-development-ingest-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
   cancel-in-progress: false
 
 jobs:
@@ -58,18 +45,22 @@ jobs:
           github.event.comment.body == '/nession ingest issue=1997 action=6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e worker_run=39396836009' ||
           github.event.comment.body == '/nession ingest issue=1997 action=dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31 worker_run=39448549052' ||
           startsWith(github.event.comment.body, '/nession ingest-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d worker_run='))) ||
-        (github.event_name == 'workflow_dispatch' &&
+        (github.event_name == 'issue_comment' &&
          github.ref == 'refs/heads/main' &&
          github.actor == 'BestNathan' &&
-         github.event.inputs.worker_run_id != '' &&
-         github.event.inputs.worker_run_attempt != '')
+         github.event.action == 'created' &&
+         github.event.issue.number == 2817 &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         startsWith(github.event.comment.body,
+           '/nession ingest-qwen issue=2817 worker_run='))
       )
     runs-on: ubuntu-24.04
     environment: cursor
     timeout-minutes: 15
     env:
-      SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.worker_run_id || 39288961865 }}
-      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.worker_run_attempt || 1 }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id || 39288961865 }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || 1 }}
     steps:
       - name: Checkout only authenticated main ingestion SHA
         uses: actions/checkout@v4
@@ -172,7 +163,7 @@ jobs:
       # downstream Publisher. Historical #1997 Cursor Ingest remains unchanged.
       - name: Select authenticated Qwen Publisher wake without credentials
         id: qwen
-        if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_run' || github.event_name == 'issue_comment'
         shell: bash
         run: |
           set -euo pipefail

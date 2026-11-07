@@ -242,19 +242,22 @@ export function resolveTrustedIngestSource({environment,event}){
       fail('only completed successful Worker may publish a checkpoint');
     return {run_id:source.id,source};
   }
-  if(environment.GITHUB_EVENT_NAME==='workflow_dispatch'){
+  if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
+     event?.issue?.number===2817){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
-    // before any Store writer is used; this input only locates it.
+    // before any Store writer is used; this comment only locates it.
     if(environment.GITHUB_ACTOR!=='BestNathan'||
-        event?.repository?.full_name!==REPO)
-      fail('manual Ingest dispatch requires exact owner/main authority');
-    const id=Number(event?.inputs?.worker_run_id);
-    const attempt=Number(event?.inputs?.worker_run_attempt??1);
-    if(!Number.isSafeInteger(id)||id<1||
-        !Number.isSafeInteger(attempt)||attempt<1)
-      fail('manual Ingest dispatch requires an exact Worker Run/attempt');
-    return {run_id:id,source:null,manual_recovery:true,attempt};
+        event?.action!=='created'||
+        event.repository?.full_name!==REPO||
+        event.issue?.pull_request||
+        event.comment?.user?.login!=='BestNathan'||
+        !/^\/nession ingest-qwen issue=2817 worker_run=[1-9][0-9]{0,14}$/
+          .test(event.comment?.body??'')||
+        !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
+      fail('manual Qwen Ingest requires exact owner/main Issue comment');
+    const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
+    return {run_id:id,source:null,qwen_recovery:true,attempt:1};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'){
     if(environment.GITHUB_ACTOR!=='BestNathan'||
@@ -310,7 +313,7 @@ async function main(){
       run.run_attempt!==authority.source.run_attempt||
       run.head_sha!==authority.source.head_sha))
     fail('GitHub webhook/source Run mismatch');
-  if(authority.manual_recovery &&
+  if(authority.qwen_recovery &&
      (run.id!==authority.run_id||run.run_attempt!==authority.attempt||
       run.path!=='.github/workflows/agent-develop.yml'||
       run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
@@ -318,8 +321,8 @@ async function main(){
       run.head_branch!=='main'||run.actor?.login!=='github-actions[bot]'||
       run.repository?.full_name!==REPO||
       run.head_repository?.full_name!==REPO))
-    fail('manual Ingest source is not an authenticated successful Worker Run');
-  if(!authority.source && !authority.continuation && !authority.manual_recovery&&
+    fail('manual Qwen Ingest source is not an authenticated successful Worker Run');
+  if(!authority.source && !authority.continuation && !authority.qwen_recovery&&
       (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
