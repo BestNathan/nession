@@ -5,6 +5,9 @@
 // cannot be delivered, with no global producer stall.
 const { run, targetSha, crateTests, assertRan } = require('../../../shared/control-mode-cases.cjs');
 const { webVitestFiles } = require('../../../shared/web-vitest-cases.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const RELAY_TEST =
   'relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice';
@@ -24,16 +27,24 @@ const RUNTIME_TESTS = [
 
 run(({ evidence }) => {
   const sha = targetSha();
+  // The nested real-tmux test owns its socket, never the runtime's product one.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2877-sc05-'));
+  fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
+  const isolated = {
+    NESESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'),
+    NESESSION_HOME: path.join(dir, 'home'),
+  };
 
   const relay = crateTests(
     'nession-server',
     ['--test', 'integration', RELAY_TEST],
     300000,
+    isolated,
   );
   assertRan(relay, [RELAY_TEST]);
 
   for (const test of AGENT_TESTS) {
-    const agent = crateTests('nession-agent', ['--lib', test], 300000);
+    const agent = crateTests('nession-agent', ['--lib', test], 300000, isolated);
     assertRan(agent, [test]);
   }
 

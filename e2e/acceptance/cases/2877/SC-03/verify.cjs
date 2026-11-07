@@ -4,6 +4,9 @@
 // ordinary lag and stale/foreign/malformed reports or retired notifications do
 // not trigger recovery or leak current subscriber state.
 const { run, targetSha, crateTests, assertRan } = require('../../../shared/control-mode-cases.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const AGENT_TEST =
   'progress_is_response_less_and_only_an_actionable_current_inconsistency_opens_one_episode';
@@ -12,14 +15,22 @@ const RELAY_TEST =
 
 run(({ evidence }) => {
   const sha = targetSha();
+  // A nested real-tmux test must not share the runtime's product tmux socket.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2877-sc03-'));
+  fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
+  const isolated = {
+    NESESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'),
+    NESESSION_HOME: path.join(dir, 'home'),
+  };
 
-  const agent = crateTests('nession-agent', ['--lib', AGENT_TEST], 300000);
+  const agent = crateTests('nession-agent', ['--lib', AGENT_TEST], 300000, isolated);
   assertRan(agent, [AGENT_TEST]);
 
   const relay = crateTests(
     'nession-server',
     ['--test', 'integration', RELAY_TEST],
     300000,
+    isolated,
   );
   assertRan(relay, [RELAY_TEST]);
 
