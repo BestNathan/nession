@@ -41,6 +41,8 @@ export function selectQualityFamilies(paths) {
       else if(/^scripts\/(?:ci\/quality-scope|ci\/case-smoke|acceptance-|issue-|e2e-|workflow-|gate-|lib\/agent\/|lib\/acceptance\/|lib\/e2e\/|lib\/issue\/|lib\/workflow\/|detector-selftest-coverage|collect-repo-health|repo-)/.test(p)) {
         // Tooling-only source, exercised through the full canonical tooling suite.
       } else r.rust=r.web=true;
+    } else if(p.startsWith('docs/') || /^(?:README|VISION|PRINCIPLE|PRODUCT)\.md$/.test(p)) {
+      // Ordinary documentation cannot change Quality code or CI consumers.
     } else if(p.startsWith('automation/'))r.tooling=true;
     else if(/^(?:Cargo\.(?:toml|lock)|rust-toolchain\.toml|clippy\.toml)$/.test(p) || p.startsWith('.cargo/'))r.rust=true;
     else if(p==='justfile')r.rust=r.web=r.tooling=true;
