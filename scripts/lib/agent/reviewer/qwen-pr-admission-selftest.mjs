@@ -64,8 +64,10 @@ const files=[{filename:'src/a.ts',sha:BLOB,status:'modified'},
 const tree={sha:TREE,truncated:false,tree:files.map(f=>({
   path:f.filename,mode:'100644',type:'blob',sha:f.sha,
 }))};
+const baseFiles=[{path:'src/a.ts',content:'base a\n'},
+  {path:'docs/b.md',content:'base b\n'}];
 const good={state:published,intent,publisherRun,pullRequests:[pr],pr,
-  ref,commit,files,tree,actionId:reviewerAction};
+  ref,commit,files,tree,actionId:reviewerAction,base_files:baseFiles};
 const make=delta=>admitQwenPublishedReview({...good,...delta});
 const accepted=make({});
 assert.equal(accepted.issue,ISSUE);
@@ -185,6 +187,10 @@ try{
     ['git/commits/'+HEAD]:commit,
     ['pulls/541/files?per_page=100']:files,
     ['git/trees/'+TREE+'?recursive=1']:tree,
+    ['contents/src/a.ts?ref='+MAIN]:{encoding:'base64',
+      content:Buffer.from('base a\n').toString('base64')},
+    ['contents/docs/b.md?ref='+MAIN]:{encoding:'base64',
+      content:Buffer.from('base b\n').toString('base64')},
   };
   const fetcher=async name=>{
     if(!Object.hasOwn(endpoints,name))
