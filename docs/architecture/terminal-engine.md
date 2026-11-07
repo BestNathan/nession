@@ -19,6 +19,8 @@ never imports xterm, the raw adapter module, or xterm's private `_core`.
 |---|---|---|
 | Session route / attach / lease / stream synchronization / ACK | `platform/session-runtime/SessionRuntime` (+ existing transports) | `TerminalController` observes; it decides nothing |
 | The xterm instance, mount/reparent/unmount/dispose, renderer, theme, addons | `platform/terminal-runtime/xterm/XtermEmulator` (port: `platform/terminal-runtime/emulator.ts`) | `TerminalController`, `FixtureTerminal` |
+| Host debug/E2E `xtermInstance` reference ownership | `platform/terminal-runtime/xterm/XtermEmulator` | the host it is mounted in / browser tests |
+| Follow-bottom scheduling and its cancellation | `platform/terminal-runtime/capsule/occlusionScroll.ts` (`CapsuleOcclusionScroll`) | `TerminalController` |
 | Measured cell / buffer / mode / logical-line read models, private `_core` | `platform/terminal-runtime/xterm/XtermMetrics.ts` — the ONE compatibility adapter | the engine only |
 | Ordered buffer/grid mutation (write, resize, dedupe) | `controller/SerializedTerminalWriter.ts` | `TerminalController` |
 | Fixed-column geometry, font fit, rows, content-width value, PTY resize report/debounce | `view/TerminalGeometry.ts` | `TerminalController` (writes the viewport CSS property) |
@@ -93,6 +95,40 @@ the metrics adapter still pass. Test files are exempt, as they are not shipped.
   replaces the emulator; the controller re-installs link matchers on the
   replacement and disposes each subscription exactly once.
 
+## Lifetime ownership (#2879)
+
+Steady-state memory is bounded by three explicit ownership rules; none of them
+replaces the writer/reconciler bounds above, and none adds a second cache or a
+memory manager.
+
+1. **Follow-bottom work is one coalesced logical job.**
+   `CapsuleOcclusionScroll.scheduleScrollToMarginBottom` records the double
+   `requestAnimationFrame` handles and ignores additional schedule requests
+   while a job is pending. Output frequency therefore cannot grow a queue of
+   scroll closures. `dispose()` cancels both queued handles, and both callbacks
+   re-check disposal state before touching the host; a browser that already
+   delivered a cancelled callback is a no-op. The scheduler is injectable
+   (`AnimationFrameScheduler`) so the contract is provable deterministically.
+2. **A host's debug/E2E reference is released by identity.**
+   `XtermEmulator.mount` records the host and sets `host.xtermInstance` to its
+   own Terminal. Reparent, `unmount()` and `dispose()` delete that property
+   only when it still names this Terminal, so a replaced or newer Terminal's
+   reference is never removed. Ordinary detach -> reattach of the same Session
+   keeps the same `Terminal` and its buffer; only the reference moves between
+   hosts.
+3. **A link registration is a stable record with a replaceable provider.**
+   `TerminalController.registerLinkMatcher` stores one
+   `LinkMatcherRegistration` and returns a disposal over that record. A
+   renderer replacement swaps the record's current xterm provider in place
+   (`rewireLinkMatchers`), so disposing the public registration always releases
+   the **latest** provider exactly once — no provider survives on the live
+   emulator after viewport cleanup, and repeated rebuilds do not accumulate
+   duplicates.
+
+These are lifetime guarantees about reachable callbacks, DOM host references
+and providers. They do not change scrollback capacity, buffer growth up to that
+capacity, detach semantics, or any terminal interaction behavior.
+
 ## Tests
 
 - `xterm/__tests__/unit/XtermMetrics.test.ts` — measured cell, fallback, hostile `_core`.
@@ -101,7 +137,17 @@ the metrics adapter still pass. Test files are exempt, as they are not shipped.
 - `xterm/__tests__/unit/LineLinks.test.ts` — offset → cell mapping for ASCII,
   wide, combining, wrapped and out-of-range matches.
 - `xterm/__tests__/integration/XtermEmulator.test.ts` — mount/unmount preserves
-  scrollback.
+  scrollback; the host debug reference is set/cleared by identity across
+  detach, reparent and disposal.
+- `capsule/__tests__/unit/occlusionScroll.test.ts` — deterministic
+  `AnimationFrameScheduler` proves follow-bottom coalescing, dispose
+  cancellation and late-callback no-ops.
+- `controller/__tests__/integration/TerminalController.test.ts` — a link
+  registration survives three renderer rebuilds with one provider and disposes
+  the latest provider once.
+- `e2e/acceptance/cases/2879/SC-02..SC-05` — real Chromium Cases for host
+  reference reclamation, provider registration across rebuilds, the 1,000,000-line
+  post-GC heap plateau, and terminal ordering/repair/reattach preservation.
 - `controller/__tests__/unit/SerializedTerminalWriter.test.ts` — FIFO, bounds,
   parser completion, repeated-resize dedupe.
 - `view/__tests__/unit/TerminalGeometry.test.ts` — width-only font fit,

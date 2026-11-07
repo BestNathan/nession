@@ -76,6 +76,10 @@ export function assessChangedPaths(paths) {
       components.add('deployment');
     } else if (/^\.github\/workflows\//.test(p)) {
       components.add('workflow');
+    } else if (/^\.githooks\/(?:pre-commit|pre-push)$/.test(p)) {
+      // Narrow, audited repository Git hooks participate in developer/CI
+      // quality policy; do not classify arbitrary .githooks/* as known-safe.
+      components.add('build-policy');
     } else if (/^(scripts\/|gates\/|automation\/|Cargo\.|justfile$)/.test(p)) {
       components.add('build-policy');
     } else if (/^crates\//.test(p)) {
@@ -182,6 +186,10 @@ function selfTest() {
   assert.deepEqual(assessChangedPaths(['.github/AGENTS.md']).components, []);
   assert.equal(assessChangedPaths(['.github/AGENTS.md', '.github/CLAUDE.md']).floor,
     VERIFICATION_TIERS[0]);
+  assert.equal(assessChangedPaths(['.githooks/pre-commit','.githooks/pre-push']).needsAudit,false);
+  assert.equal(assessChangedPaths(['.githooks/pre-commit','.github/workflows/ci-quality.yml']).floor,
+    VERIFICATION_TIERS[1]);
+  assert.equal(assessChangedPaths(['.githooks/arbitrary-hook']).needsAudit,true);
   // Root ignore rules are repository metadata; they cannot affect E2E.
   assert.equal(assessChangedPaths(['.gitignore']).needsAudit, false);
   assert.deepEqual(assessChangedPaths(['.gitignore']).components, []);

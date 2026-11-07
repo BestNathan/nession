@@ -98,6 +98,13 @@ export class XtermEmulator implements TerminalEmulator {
   private readonly addons: XtermAddonHost;
   private readonly renderer: XtermRenderer;
   private disposed = false;
+  /**
+   * The host this terminal is currently mounted in (#2879). The debug/E2E
+   * `xtermInstance` property lives on the host; ownership must be released by
+   * identity on detach/reparent/dispose so a host (or a test holding it) can
+   * never retain a replaced Terminal.
+   */
+  private mountHost: HTMLElement | null = null;
   private fontSizeCallback: (reason: CellSizeChangeReason) => void = () => {};
   /**
    * Provenance of the write xterm is parsing right now (#2598). The ordered
@@ -171,22 +178,48 @@ export class XtermEmulator implements TerminalEmulator {
       return;
     }
     if (this.terminal.element?.parentElement === host) {
+      // Re-assert ownership: the property is the host's debug/E2E reference,
+      // and this instance still owns the element inside it.
+      this.setHostReference(host);
       return;
     }
     if (this.terminal.element) {
       // xterm.open() is one-shot: once the terminal has been opened it returns
       // early when called again. Reparent the existing DOM tree so detach /
       // reattach preserves both the buffer and the renderer state.
+      this.releaseHostReference();
       host.appendChild(this.terminal.element);
-      (host as XtermMountElement).xtermInstance = this.terminal;
+      this.setHostReference(host);
       this.terminal.refresh(0, this.terminal.rows - 1);
       return;
     }
     this.terminal.open(host);
     // Expose the Terminal instance on the container element so E2E tests can
     // read the buffer (canvas/webgl renderers don't put text in the DOM).
-    (host as XtermMountElement).xtermInstance = this.terminal;
+    this.setHostReference(host);
     this.remeasureOnFontLoad();
+  }
+
+  private setHostReference(host: HTMLElement): void {
+    (host as XtermMountElement).xtermInstance = this.terminal;
+    this.mountHost = host;
+  }
+
+  /**
+   * Drop the debug/E2E reference only when it still names *this* Terminal.
+   *
+   * A host can be reused by a replacement renderer before the old instance is
+   * disposed; an unconditional `delete` would then hide the live reference and
+   * leave a stale one unaccounted for (#2879).
+   */
+  private releaseHostReference(): void {
+    for (const host of [this.mountHost, this.terminal.element?.parentElement ?? null]) {
+      const mount = host as XtermMountElement | null;
+      if (mount && mount.xtermInstance === this.terminal) {
+        delete mount.xtermInstance;
+      }
+    }
+    this.mountHost = null;
   }
 
   /**
@@ -215,7 +248,11 @@ export class XtermEmulator implements TerminalEmulator {
     if (this.disposed) {
       return;
     }
-    this.terminal.element?.remove();
+    const element = this.terminal.element;
+    // Release before remove(): the element's parent is how the reference is
+    // found when no host was recorded (or was externally moved).
+    this.releaseHostReference();
+    element?.remove();
   }
 
   dispose(): void {
@@ -223,6 +260,7 @@ export class XtermEmulator implements TerminalEmulator {
       return;
     }
     this.disposed = true;
+    this.releaseHostReference();
     this.renderer.dispose();
     // xterm's own addon manager disposes every registered addon exactly once.
     this.terminal.dispose();
