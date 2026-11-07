@@ -289,10 +289,24 @@ Witnesses:
 | The Relay forwards progress with no reply and returns the notice to the current browser subscription. | `crates/nession-server/tests/integration/relay.rs::relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice` |
 | The Web sends progress only after negotiation, submits nothing during recovery, and resumes after a complete same-epoch proof. | `web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts` (#2877 cases); `web/src/platform/terminal-runtime/__tests__/unit/streamReconciler.test.ts` |
 
-Still unmeasured: a controlled long-run comparison of control-frame counts and
-issued-credit peaks under burst/idle/slow-browser fixtures (the requirement's
-SC-06), and multi-subscriber credit-pressure behaviour on real Relay/P2P
-routes beyond the deterministic single-subscriber cases above.
+**Measured 2026-11-07 (#2877 SC-06).** One bounded scripted workload on the CI
+runner compares the notification-mode candidate with the v1 operation baseline
+over the same 257 events (256 × 4 KiB plus one 256 KiB high-output event, one
+slow subscriber that opts into credit then stops acknowledging, and a
+duplicate quiet tail). Measured counts: **0 notification Progress response
+frames** versus **17 v1 operation replies**, **1** coalesced reconcile
+notice, healthy credit peak **262,144 bytes**, slow-subscriber credit peak
+**1,306,624 bytes** (both inside the 2 MiB window), **0** missed events,
+**0** credit-capacity violations, quiet tail silent, teardown clean. This is a
+deterministic ledger/verdict measurement, not an absolute-throughput or
+long-run soak claim.
+
+Witness:
+`crates/nession-agent/src/server/websocket.rs::tests::sc06_bounded_workload_measures_zero_progress_replies_and_per_subscriber_credit_peaks`;
+Case `e2e/acceptance/cases/2877/SC-06`. Multi-subscriber credit-pressure
+behaviour on real Relay/P2P routes beyond the deterministic cases above
+remains covered by the separate full-stack integration tests, not this
+measurement.
 
 ## 10. External references and non-goals
 
