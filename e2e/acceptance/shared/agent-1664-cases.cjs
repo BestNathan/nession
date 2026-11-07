@@ -141,6 +141,10 @@ async function rawStore(storePath) {
   return rawEvidence('agent-store/' + storePath);
 }
 
+async function rawMetrics(metricsPath) {
+  return rawEvidence('metrics/' + metricsPath);
+}
+
 async function rawFileAt(filePath, ref) {
   assert.match(ref, HEX40, 'raw file ref must be an exact commit SHA');
   return rawEvidence(ref + '/' + filePath);
@@ -539,6 +543,6 @@ function fail(error) {
 module.exports = {
   assert, fs, path, root, REPO, API, HEX40, HEX64, QWEN, REPAIR_2961,
   targetSha, runNode, requireSummary, requireSource, read, api, storeJson,
-  storeBytes, fileAt, assertAncestor, verifyRun, verifyQwenChain,
+  storeBytes, fileAt, rawMetrics, assertAncestor, verifyRun, verifyQwenChain,
   verifyQwenRepairChain2961, pass, fail,
 };
