@@ -220,8 +220,9 @@ function selfTest(){
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
   if(process.argv[2]==='self-test')selfTest();
   else if(process.argv[2]==='qualify'){
-    const [action,num,mainSha,laneSha,branch,deployList='']=process.argv.slice(3);
+    const [action,num,mainSha,laneSha,branch,deployList='',syncRef='',syncHeadSha='']=process.argv.slice(3);
     console.log(JSON.stringify(qualify({action,prNumber:Number(num),mainSha,laneSha,branch,
+      syncRef:syncRef||null,syncHeadSha:syncHeadSha||null,
       deployment_workflows:deployList.split(',').filter(Boolean)})));
-  }else throw Error('usage: self-test | qualify <action> <pr> <main-sha> <lane-sha> <branch>');
+  }else throw Error('usage: self-test | qualify <action> <pr> <main-sha> <lane-sha> <branch> [deploy-workflows] [sync-ref] [sync-head-sha]');
 }
