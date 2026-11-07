@@ -361,7 +361,11 @@ async function main(){
   // Developer uses the new *trusted* candidate->Store CAS/Outbox path, not the
   // hard-coded historical #1997 Cursor checkpoint decoder.
   if(claim.inputs.agent_id==='dev-qwen-01'){
-    if(env.GITHUB_EVENT_NAME!=='workflow_run'||
+    // A workflow_run is the natural wake. The exact owner/main issue_comment
+    // lane is the recovery for a suppressed delivery; resolveTrustedIngestSource
+    // has already authenticated the comment and the live Worker Run/artifacts
+    // are re-read above. Both paths still require the dedicated native key.
+    if(!['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
         !env.QWEN_RESUME_PRIVATE_KEY_B64)
       fail('Qwen requires natural main Worker source and dedicated native key');
     const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
