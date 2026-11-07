@@ -49,6 +49,7 @@ import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-histor
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
+import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
@@ -3280,6 +3281,7 @@ async function selfTest() {
     verifiedRunStoreFixtureEvidence:[{verdict:'fixture_pass'}]}).verified_run_store_fixture_evidence,
     [{verdict:'fixture_pass'}]);
   selfTestCiCostStudy();
+  selfTestPrQualityCost();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
@@ -3293,13 +3295,33 @@ async function selfTest() {
 async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return selfTest();
+  if (command === 'collect-pr-quality') {
+    const workspace = process.argv[3], outFile = process.argv[4];
+    if (!workspace || !outFile)throw Error('usage: collect-pr-quality WORKSPACE OUT');
+    const repo=requireText(process.env.GITHUB_REPOSITORY,'GITHUB_REPOSITORY');
+    const targetSha=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],{
+      encoding:'utf8'}).trim();
+    // A narrow trusted-main read-only exception for #2917 PR-stage SC-04.
+    // Never execute PR code or collect the unbounded general CI corpus here.
+    const measured=await collectVerifiedPrQualityCost({
+      repo,issueNumber:Number(process.env.ISSUE_NUMBER??0),
+      stage:process.env.ACCEPTANCE_STAGE,targetSha,
+      get:githubGet,getText:githubJobLog,
+    });
+    fs.writeFileSync(outFile,JSON.stringify({
+      schema_version:1,kind:'acceptance_ci_evidence',target_sha:targetSha,
+      verified_pr_quality_cost_study:measured,
+    },null,2)+'\n');
+    console.log('PR Quality CI cost source attested for issue #2917');
+    return;
+  }
   if (command === 'collect') {
     const workspace = process.argv[3];
     const outFile = process.argv[4];
     if (!workspace || !outFile) throw new Error('usage: acceptance-ci-evidence.mjs collect WORKSPACE OUT');
     return collectCommand(workspace, outFile);
   }
-  throw new Error('usage: acceptance-ci-evidence.mjs <self-test|collect WORKSPACE OUT>');
+  throw new Error('usage: acceptance-ci-evidence.mjs <self-test|collect WORKSPACE OUT|collect-pr-quality WORKSPACE OUT>');
 }
 
 try {
