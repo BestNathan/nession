@@ -65,6 +65,9 @@ const result={kind:'developer',issue,run_id:333,run_attempt:1,
 const zip=zipFixture(result,{dataDescriptor:true});
 assert.deepEqual(parseAgentResult(decodeResultZip(zip)),result);
 assert.deepEqual(parseAgentResult(decodeResultZip(zipFixture(result,{method:0}))),result);
+assert.equal(JSON.parse(decodeResultZip(
+  zipFixture({kind:'receipt'},{name:'development-ingest-receipt.json'}),
+  'development-ingest-receipt.json')).kind,'receipt');
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,next_role:'merge'}))),/privilege-bearing/);
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,acceptance_result:'Pass'}))),/privilege-bearing/);
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,session_id:'secret'}))),/privilege-bearing/);

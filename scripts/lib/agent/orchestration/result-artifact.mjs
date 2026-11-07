@@ -41,7 +41,7 @@ export function decodeResultZip(zip,expectedMember='agent-result.json') {
   // Reuse the exact same bounded, no-traversal, one-member ZIP parser for the
   // read-only Controller request Artifact; never allow caller-supplied paths.
   if(!['agent-result.json','controller-request.json','review-claim.json',
-       'review-verdict.json'].includes(expectedMember))
+       'review-verdict.json','development-ingest-receipt.json'].includes(expectedMember))
     fail('unapproved single-member artifact type');
   if(!Buffer.isBuffer(zip)||zip.length<52||zip.length>MAX_ZIP)fail('archive size/type');
   const end=zip.length-22;
