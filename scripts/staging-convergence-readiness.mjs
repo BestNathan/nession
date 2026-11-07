@@ -20,26 +20,27 @@ const okay=details=>({ready:true,reason:'QUALIFIED',...details});
 
 export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   const branch=action==='sync-main-to-lane'?plan.branch:'main';
-  const head=action==='sync-main-to-lane'?'main':plan.branch;
+  const head=action==='sync-main-to-lane'?plan.sync_ref:plan.branch;
   if(!pr || !['sync-main-to-lane','promote-lane-to-main'].includes(action) ||
-      !SHA.test(plan.main_sha)||!SHA.test(plan.sha))return fail('INVALID_INPUT');
+      !SHA.test(plan.main_sha)||!SHA.test(plan.sha)||
+      (action==='sync-main-to-lane' &&
+        (!SHA.test(plan.sync_head_sha)||!/^chore\/staging-sync-[a-zA-Z0-9-]+$/.test(plan.sync_ref??''))))
+    return fail('INVALID_INPUT');
   if(pr.state!=='open'||pr.draft||!pr.body?.startsWith('Staging Convergence automated proposal')||
       pr.base?.ref!==branch||pr.head?.ref!==head ||
       pr.head?.repo?.full_name!==REPO)return fail('UNTRUSTED_PR_IDENTITY');
-  const expectedHead=action==='sync-main-to-lane'?plan.main_sha:plan.sha;
+  const expectedHead=action==='sync-main-to-lane'?plan.sync_head_sha:plan.sha;
   const expectedBase=action==='sync-main-to-lane'?plan.sha:plan.main_sha;
   if(pr.head.sha!==expectedHead||pr.base.sha!==expectedBase||baseSha!==expectedBase)
     return fail('STALE_PR_SHA');
   if(pr.mergeable_state==='dirty' && pr.mergeable===false)
     return fail('MERGE_CONFLICT');
-  // GitHub reports 'behind' when the main source lacks staging-only commits.
-  // That is intrinsic to a main -> staging *sync* on diverged histories, not
-  // by itself a merge conflict. It is eligible only if GitHub independently
-  // reports mergeable=true and all exact-head PR checks are green; GitHub's
-  // merge endpoint remains the final branch-protection authority.
-  const allowedState=pr.mergeable_state==='clean' ||
-    (action==='sync-main-to-lane'&&pr.mergeable_state==='behind');
-  if(pr.mergeable!==true||!allowedState)
+  // Protected staging requires rust-check/web-check on the *integration*
+  // head. A direct main -> staging PR can be "behind" with all source checks
+  // green yet be rejected by GitHub (HTTP 405, required statuses expected).
+  // The checked integration branch contains staging + main ancestry and must
+  // become genuinely clean. Never waive required checks for a behind PR.
+  if(pr.mergeable!==true||pr.mergeable_state!=='clean')
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
   if(!Array.isArray(workflowRuns)||workflowRuns.length>100)
     return fail('INVALID_RUN_INVENTORY');
@@ -112,16 +113,18 @@ function git(args){
   return execFileSync('git',args,{encoding:'utf8',maxBuffer:4_000_000}).trim();
 }
 
-export function qualify({action,prNumber,mainSha,laneSha,branch,deployment_workflows=[]}) {
+export function qualify({action,prNumber,mainSha,laneSha,branch,
+    syncRef=null,syncHeadSha=null,deployment_workflows=[]}) {
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(mainSha)||
      !SHA.test(laneSha)||!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$/.test(branch)||branch==='main'||
      (action==='promote-lane-to-main'&&!deployment_workflows.length))throw new Error('invalid exact convergence target');
   const pr=read('pulls/'+prNumber);
   const baseRef=action==='sync-main-to-lane'?branch:'main';
   const baseSha=git(['ls-remote','origin','refs/heads/'+baseRef]).split(/\s+/)[0];
-  const expectedHead=action==='sync-main-to-lane'?mainSha:laneSha;
+  const expectedHead=action==='sync-main-to-lane'?syncHeadSha:laneSha;
   const runs=getRuns('head_sha='+expectedHead+'&event=pull_request');
-  const preliminary=evaluatePull({pr,action,plan:{branch,main_sha:mainSha,sha:laneSha},baseSha,workflowRuns:runs});
+  const preliminary=evaluatePull({pr,action,plan:{branch,main_sha:mainSha,sha:laneSha,
+    sync_ref:syncRef,sync_head_sha:syncHeadSha},baseSha,workflowRuns:runs});
   if(!preliminary.ready)return preliminary;
   if(action==='sync-main-to-lane')return preliminary;
 
@@ -165,16 +168,17 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,deployment_workf
 
 function selfTest(){
   const a='a'.repeat(40),b='b'.repeat(40);
-  const plan={branch:'staging',main_sha:a,sha:b};
+  const syncHead='c'.repeat(40),syncRef='chore/staging-sync-aaaaaaaaaaaa-bbbbbbbbbbbb';
+  const plan={branch:'staging',main_sha:a,sha:b,sync_ref:syncRef,sync_head_sha:syncHead};
   const pr={number:88,state:'open',draft:false,body:'Staging Convergence automated proposal (test)',mergeable:true,mergeable_state:'clean',
-    base:{ref:'staging',sha:b},head:{ref:'main',sha:a,repo:{full_name:REPO}}};
-  const runs=REQUIRED.map((path,n)=>({id:n+1,path,head_sha:a,event:'pull_request',
+    base:{ref:'staging',sha:b},head:{ref:syncRef,sha:syncHead,repo:{full_name:REPO}}};
+  const runs=REQUIRED.map((path,n)=>({id:n+1,path,head_sha:syncHead,event:'pull_request',
     status:'completed',conclusion:'success',run_number:n+1,run_attempt:1,
     head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
   assert.equal(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,true);
   assert.equal(evaluatePull({pr:{...pr,mergeable_state:'behind'},action:'sync-main-to-lane',
-    plan,baseSha:b,workflowRuns:runs}).ready,true,
-    'a main->staging sync with exact checks can merge even when main does not contain staging-only commits');
+    plan,baseSha:b,workflowRuns:runs}).ready,false,
+    'behind source PR must not bypass protected staging merge-commit checks');
   assert.equal(evaluatePull({pr:{...pr,mergeable:false,mergeable_state:'behind'},
     action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
     'behind does not override a GitHub-negative mergeability verdict');
@@ -216,8 +220,9 @@ function selfTest(){
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
   if(process.argv[2]==='self-test')selfTest();
   else if(process.argv[2]==='qualify'){
-    const [action,num,mainSha,laneSha,branch,deployList='']=process.argv.slice(3);
+    const [action,num,mainSha,laneSha,branch,deployList='',syncRef='',syncHeadSha='']=process.argv.slice(3);
     console.log(JSON.stringify(qualify({action,prNumber:Number(num),mainSha,laneSha,branch,
+      syncRef:syncRef||null,syncHeadSha:syncHeadSha||null,
       deployment_workflows:deployList.split(',').filter(Boolean)})));
-  }else throw Error('usage: self-test | qualify <action> <pr> <main-sha> <lane-sha> <branch>');
+  }else throw Error('usage: self-test | qualify <action> <pr> <main-sha> <lane-sha> <branch> [deploy-workflows] [sync-ref] [sync-head-sha]');
 }
