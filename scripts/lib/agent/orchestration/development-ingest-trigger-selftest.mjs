@@ -82,6 +82,12 @@ const qwenEvent={action:'created',repository:{full_name:'BestNathan/nession'},
     body:'/nession ingest-qwen issue=2817 worker_run=42344231027'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,event:qwenEvent}),
   {run_id:42344231027,source:null,qwen_recovery:true,attempt:1});
+const qwenRepairEvent={...qwenEvent,issue:{number:2906},
+  comment:{...qwenEvent.comment,
+    body:'/nession ingest-qwen issue=2906 worker_run=42365960306'}};
+assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
+  event:qwenRepairEvent}),
+{run_id:42365960306,source:null,qwen_recovery:true,attempt:1});
 for(const bad of [
   {environment:{...qwenEnv,GITHUB_ACTOR:'fork'}},
   {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
@@ -92,6 +98,11 @@ for(const bad of [
     qwenEvent.comment.body+' '}}},
   {event:{...qwenEvent,comment:{...qwenEvent.comment,body:
     '/nession ingest-qwen issue=2817 worker_run=x'}}},
+  {event:{...qwenEvent,comment:{...qwenEvent.comment,body:
+    '/nession ingest-qwen issue=2906 worker_run=42365960306'}}},
+  {event:{...qwenRepairEvent,comment:{...qwenRepairEvent.comment,body:
+    '/nession ingest-qwen issue=2817 worker_run=42365960306'}}},
+  {event:{...qwenRepairEvent,issue:{number:3000}}},
 ])assert.throws(()=>resolveTrustedIngestSource({...{
   environment:qwenEnv,event:qwenEvent},...bad}));
 console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Qwen Worker Run and event denial passed');

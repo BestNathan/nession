@@ -243,21 +243,21 @@ export function resolveTrustedIngestSource({environment,event}){
     return {run_id:source.id,source};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
-     event?.issue?.number===2817){
+     (event?.issue?.number===2817||event?.issue?.number===2906)){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
     // before any Store writer is used; this comment only locates it.
+    const command=String(event.comment?.body??'').match(
+      /^\/nession ingest-qwen issue=([1-9][0-9]{0,14}) worker_run=([1-9][0-9]{0,14})$/);
     if(environment.GITHUB_ACTOR!=='BestNathan'||
         event?.action!=='created'||
         event.repository?.full_name!==REPO||
         event.issue?.pull_request||
         event.comment?.user?.login!=='BestNathan'||
-        !/^\/nession ingest-qwen issue=2817 worker_run=[1-9][0-9]{0,14}$/
-          .test(event.comment?.body??'')||
+        !command||Number(command[1])!==event.issue.number||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual Qwen Ingest requires exact owner/main Issue comment');
-    const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
-    return {run_id:id,source:null,qwen_recovery:true,attempt:1};
+    return {run_id:Number(command[2]),source:null,qwen_recovery:true,attempt:1};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'){
     if(environment.GITHUB_ACTOR!=='BestNathan'||
