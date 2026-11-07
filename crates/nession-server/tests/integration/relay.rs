@@ -1401,6 +1401,225 @@ async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscrip
 }
 
 // ---------------------------------------------------------------------------
+// #2877: response-less progress and the exception-only reconcile notice
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice() {
+    const BROWSER_ID: &str = "browser-relay-progress-2877";
+    let session_name = unique_session_name("relay-progress");
+
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent("relay-progress-agent").await.unwrap();
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("create tmux session");
+
+    let client_handle = register_agent(
+        server_addr,
+        "relay-progress-agent",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    let (ws, _) = connect_async(format!("ws://{server_addr}"))
+        .await
+        .expect("client connect");
+    let (mut sink, mut stream) = ws.split();
+
+    let auth_req = msg(
+        "server.auth",
+        "auth-progress",
+        serde_json::json!({ "auth_token": "test-token", "client_id": BROWSER_ID }),
+    );
+    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
+    assert_eq!(auth_resp["payload"]["status"], "success");
+
+    let session_id = format!("relay-progress-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-progress-agent",
+        &session_id,
+        Duration::from_secs(20),
+        "started (1s session watcher polling)",
+    )
+    .await
+    .expect("target session must be discovered before relay attach");
+
+    let attach_req = msg(
+        "server.session.attach",
+        "attach-progress",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
+    assert_eq!(attach_resp["payload"]["status"], "success");
+
+    let begin_req = msg(
+        "server.session.relay.begin",
+        "begin-progress",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // One positioned Agent event so a valid progress report is possible.
+    let input_msg = msg(
+        "agent.terminal.input",
+        "input-progress",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode("echo RELAY_PROGRESS_MARKER\n"),
+        }),
+    );
+    sink.send(WsMessage::Text(input_msg.to_string()))
+        .await
+        .expect("send terminal.input");
+
+    let mut proof: Option<serde_json::Value> = None;
+    let mut positioned: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while (proof.is_none() || positioned.is_none()) && tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                match parsed["msg_type"].as_str().unwrap_or("") {
+                    "server.session.relay.ready" => proof = Some(parsed),
+                    "agent.terminal.output" => {
+                        if parsed["payload"]["stream_epoch"].is_u64()
+                            && parsed["payload"]["stream_seq"].is_u64()
+                        {
+                            positioned = Some(parsed);
+                        }
+                    }
+                    "error" => panic!("relay error while waiting for proof/output: {parsed}"),
+                    _ => {}
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(error))) => panic!("WS error: {error}"),
+            Ok(None) => panic!("WS stream closed before proof and output arrived"),
+            Err(_) => continue,
+        }
+    }
+    let proof = proof.expect("the Agent-authored relay ready proof must reach the browser");
+    let positioned = positioned.expect("a positioned Agent output event must reach the browser");
+    let generation = proof["payload"]["subscriber_generation"]
+        .as_u64()
+        .expect("ready proof carries the Agent-minted generation");
+    let epoch = proof["payload"]["stream_epoch"]
+        .as_u64()
+        .expect("ready proof carries the Agent epoch");
+    assert!(
+        proof["payload"]["terminal_capabilities"]
+            .as_array()
+            .expect("a new Agent's capabilities are forwarded by the Server")
+            .iter()
+            .any(|cap| cap == "terminal-progress-notifications-v1"),
+        "the Server must forward the Agent's negotiated capability: {proof}"
+    );
+    let applied = positioned["payload"]["stream_seq"]
+        .as_u64()
+        .expect("positioned output carries a stream seq");
+
+    let progress = |id: &str, through: u64| {
+        msg(
+            "client.terminal.output.progress",
+            id,
+            serde_json::json!({
+                "session_name": session_name,
+                "subscriber_generation": generation,
+                "stream_epoch": epoch,
+                "renderer_generation": 1,
+                "applied_through": through,
+            }),
+        )
+    };
+
+    // A valid report produces no reply at all.
+    sink.send(WsMessage::Text(
+        progress("progress-valid", applied).to_string(),
+    ))
+    .await
+    .expect("send valid progress");
+    // Then one claim beyond what this subscriber was issued, which must earn
+    // the single exception notice.
+    sink.send(WsMessage::Text(
+        progress("progress-ahead", applied + 1_000_000).to_string(),
+    ))
+    .await
+    .expect("send ahead progress");
+
+    let mut notice: Option<serde_json::Value> = None;
+    let mut replied_to_progress = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while notice.is_none() && tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                let id = parsed["id"].as_str().unwrap_or("");
+                if id == "progress-valid" || id == "progress-ahead" {
+                    replied_to_progress = true;
+                }
+                if parsed["msg_type"] == "agent.terminal.reconcile-required" {
+                    notice = Some(parsed);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(error))) => panic!("WS error: {error}"),
+            Ok(None) => panic!("WS stream closed before the reconcile notice"),
+            Err(_) => continue,
+        }
+    }
+
+    assert!(
+        !replied_to_progress,
+        "the Relay must not synthesize a reply to a progress notification"
+    );
+    let notice = notice.expect("the Agent's reconcile notice must reach the browser");
+    let payload = &notice["payload"];
+    assert_eq!(payload["session_name"], session_name);
+    assert_eq!(payload["subscriber_generation"], generation);
+    assert_eq!(payload["stream_epoch"], epoch);
+    assert_eq!(payload["renderer_generation"], 1);
+    assert_eq!(payload["reason"], "progress-ahead-of-issued");
+    assert_eq!(payload["action"], "resume");
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+}
+
+// ---------------------------------------------------------------------------
 // #2126: one Agent timeline, observed through both routes
 // ---------------------------------------------------------------------------
 

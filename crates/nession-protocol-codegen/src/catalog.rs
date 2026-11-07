@@ -2057,10 +2057,26 @@ wires: &["server.commands.update"],
             // One-way parser cursor submission. The Agent validates the
             // current socket/subscriber generation and updates only the
             // peer's cursor; no input acknowledgement or credit is inferred.
+            //
+            // The two declarations beside the request are the #2877 seam, not
+            // this unit's reply: `TerminalOutputProgressPayload` is the
+            // payload of the response-less `client.terminal.output.progress`
+            // notification, and `TerminalReconcileRequiredPayload` is the
+            // Agent's exception-only `agent.terminal.reconcile-required`
+            // notice. A `decl` is a shape, and neither advertises an
+            // operation.
             decls: vec![
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalOutputAppliedPayload>(
                     cfg,
                 ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalOutputProgressPayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalReconcileReason>(cfg),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalReconcileAction>(cfg),
+                decl_of::<
+                    nession_protocol::contracts::terminal::v1::TerminalReconcileRequiredPayload,
+                >(cfg),
             ],
             request: Some((
                 "TerminalOutputAppliedCall",

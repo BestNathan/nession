@@ -251,6 +251,49 @@ The invariants below are no longer design claims: each has a deterministic witne
 
 Still unverified by design and not implied by the table: the **already-attached** separate-process tmux capture (explicitly `unverified`, no `throughSeq`), full-VT/alt-screen fidelity, and the deterministic staging fault-injection matrix (SC-10).
 
+### One-way progress and exception reconciliation — measured 2026-11-07 (#2877)
+
+The parser-applied report is no longer a routine request/reply operation on a
+negotiated connection. The v1 `agent.terminal.output.applied` operation stays
+for compatibility; a client that negotiated
+`terminal-progress-notifications-v1` on `agent.attach` sends the cumulative
+frontier as `client.terminal.output.progress`, and **nothing answers it**. The
+Agent's only outbound reaction is the exception-only
+`agent.terminal.reconcile-required` notification, addressed to the exact
+authenticated subscription.
+
+Ownership and verdicts:
+
+- **Agent Stream Owner** authenticates the socket peer, session, subscriber
+  generation, stream epoch and pinned renderer before touching bookkeeping. The
+  bound for a progress claim is **that subscriber's actually issued frontier**
+  (its attach-cut floor, then the last ordinal its forwarder issued), not the
+  session-global head. Ordinary head-vs-applied lag is normal and silent.
+- **Web SessionRuntime** owns recovery. A current notice atomically starts one
+  single-flight reconcile: no progress is submitted while the proof is
+  outstanding, `agent.terminal.stream.resume` proves a complete contiguous
+  same-epoch run from the trusted parser-applied prefix, and only then does
+  progress reporting resume. An incomplete/unavailable replay takes the
+  existing proven checkpoint/reattach path and stays explicitly degraded.
+  A stale, foreign, malformed or replaced-subscription notice starts nothing.
+- **Relay** forwards both notifications unchanged. It never synthesizes a
+  reply, notice, subscriber generation or head.
+
+Witnesses:
+
+| Invariant | Witness |
+| --- | --- |
+| A progress notification produces no ok/error reply; an ahead claim earns exactly one notice, and the notice names the current subscription, epoch, head and retained floor. | `crates/nession-agent/tests/integration/full_chain.rs::test_terminal_progress_notification_is_response_less_and_coalesces_one_reconcile` |
+| The Agent's acceptance bound is the subscriber's own issued frontier (attach cut as floor), and a stale subscription/renderer is handled distinctly. | `crates/nession-agent/src/server/websocket.rs::tests::progress_is_response_less_and_only_an_actionable_current_inconsistency_opens_one_episode`; `crates/nession-agent/src/server/issued_credit.rs::tests::subscription_frontier_starts_at_the_attach_cut_and_tracks_only_its_own_issues` |
+| The capability is negotiated through the Agent attach reply and forwarded verbatim by the Relay. | `crates/nession-server/src/server/websocket.rs::tests::relay_ready_forwards_notification_capabilities_verbatim_and_never_invents_them` |
+| The Relay forwards progress with no reply and returns the notice to the current browser subscription. | `crates/nession-server/tests/integration/relay.rs::relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice` |
+| The Web sends progress only after negotiation, submits nothing during recovery, and resumes after a complete same-epoch proof. | `web/src/platform/session-runtime/__tests__/unit/SessionRuntime.test.ts` (#2877 cases); `web/src/platform/terminal-runtime/__tests__/unit/streamReconciler.test.ts` |
+
+Still unmeasured: a controlled long-run comparison of control-frame counts and
+issued-credit peaks under burst/idle/slow-browser fixtures (the requirement's
+SC-06), and multi-subscriber credit-pressure behaviour on real Relay/P2P
+routes beyond the deterministic single-subscriber cases above.
+
 ## 10. External references and non-goals
 
 - [Microsoft AHP Terminal Channel](https://github.com/microsoft/agent-host-protocol/blob/main/docs/specification/terminal-channel.md) is a reference for resource/subscribe/reconciliation semantics, not a drop-in VT checkpoint or global Channel Registry requirement.

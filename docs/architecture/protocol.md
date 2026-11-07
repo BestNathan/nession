@@ -276,6 +276,30 @@ rather than a curiosity when the receiving peer *is* the Web: a shape no unit
 carries gets no binding, so the Web names the wire as a string. `server.agents.
 changed` is that case, and the string is checked by rule 1 like any other.
 
+##### How a notification is negotiated
+
+A manifest describes operations, so a notification has no manifest entry to
+resolve. When only some peers can accept one, the capability travels on the
+operation reply the consumer already has: `agent.attach` states
+`terminal_capabilities`, and a client that does not find
+`terminal-progress-notifications-v1` keeps sending the v1
+`agent.terminal.output.applied` operation.
+
+`client.terminal.output.progress` is the Web → Agent half of that negotiated
+pair: the same cumulative parser-applied facts as the v1 operation, sent as a
+notification whose emitter is `client`. Nothing answers it; an accepted,
+duplicate, stale or malformed report is internal bookkeeping. Its exception
+path is `agent.terminal.reconcile-required`, an Agent → Web notification sent
+only to the exact authenticated subscription whose progress it could not
+accept (or whose renderer/epoch binding it must replace). A Relay forwards both
+unchanged; it does not mint a subscriber generation, validate the report,
+credit bytes or synthesize the notice.
+
+The two are deliberately **not** a conversion of the v1 operation. Old Web,
+Agent and Relay combinations keep the request/reply path until the attach
+reply states the capability, which is why the v1 operation's shape and wire
+stay untouched.
+
 The same test, in the form that fits a catalog entry, is on the `Unit` type in
 `crates/nession-protocol-codegen/src/catalog.rs` — which is where someone arrives
 when the schema reports that a unit has no `response`.
