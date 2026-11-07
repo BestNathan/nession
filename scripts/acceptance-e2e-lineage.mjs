@@ -320,15 +320,17 @@ export async function recentPullCommits(repo,pull,get) {
   let commits=await get(base);
   if(!Array.isArray(commits)||!commits.length||commits.length>100)
     throw Error('invalid PR commit history page');
+  let recent=commits.slice(-MAX_COMMITS);
   for(let page=2;commits.at(-1)?.sha!==pull.head.sha&&commits.length===100&&page<=3;page++){
     const next=await get(base+'&page='+page);
     if(!Array.isArray(next)||!next.length||next.length>100)
       throw Error('invalid PR commit continuation');
+    recent=[...recent,...next].slice(-MAX_COMMITS);
     commits=next;
   }
   if(commits.at(-1)?.sha!==pull.head.sha)
     throw Error('associated PR head is missing from bounded commit history');
-  return commits.slice(-MAX_COMMITS);
+  return recent;
 }
 
 export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
@@ -648,6 +650,13 @@ async function selfTest() {
   assert.equal(tail.length,MAX_COMMITS);
   assert.equal(tail.at(-1).sha,manyHead);
   assert.equal(calls.length,2);
+  const oneHead='e'.repeat(40);
+  const lastOne=await recentPullCommits(REPO,{number:2943,head:{sha:oneHead}},
+    async path=>path.endsWith('&page=2')?[{sha:oneHead}]:batch1);
+  assert.equal(lastOne.length,MAX_COMMITS,
+    'last partial GitHub commit page must retain previous-page recent evidence');
+  assert.deepEqual(lastOne.slice(0,MAX_COMMITS-1),batch1.slice(-(MAX_COMMITS-1)));
+  assert.equal(lastOne.at(-1).sha,oneHead);
   await assert.rejects(()=>recentPullCommits(REPO,
     {number:2943,head:{sha:'d'.repeat(40)}},getMany),/missing from bounded/);
 
