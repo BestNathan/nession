@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MarkdownPreview, MarkdownErrorBoundary } from '@/capabilities/files/components/MarkdownPreview';
+import { MarkdownPreview, MarkdownErrorBoundary } from '@/shared/file-viewer/components/MarkdownPreview';
 
 describe('MarkdownPreview', () => {
   it('renders headings', () => {

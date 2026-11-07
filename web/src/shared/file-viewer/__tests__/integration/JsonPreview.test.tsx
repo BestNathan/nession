@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { JsonPreview } from '@/capabilities/files/components/JsonPreview';
-import { JsonlPreview } from '@/capabilities/files/components/JsonlPreview';
+import { JsonPreview } from '@/shared/file-viewer/components/JsonPreview';
+import { JsonlPreview } from '@/shared/file-viewer/components/JsonlPreview';
 
 describe('JsonPreview', () => {
   it('renders parsed structure as an inspector tree', () => {

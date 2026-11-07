@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseJsonDocument, parseJsonlRecords, splitJsonlPhysicalLines } from '../../jsonParse';
+import { parseJsonDocument, parseJsonlRecords, splitJsonlPhysicalLines } from '../../model/jsonParse';
 
 describe('parseJsonDocument', () => {
   it('parses valid JSON objects and scalars', () => {

@@ -277,6 +277,7 @@ function GitBody({
             path={selection.selectedPath}
             expected={selection.previewKind ?? 'untracked'}
             response={selection.preview}
+            media={selection.media}
             loading={selection.loading}
             error={selection.error}
           />

@@ -24,7 +24,9 @@ use anyhow::Context;
 use tokio::io::AsyncReadExt;
 use tokio::time::timeout;
 
-use crate::protocol::preview::v1::{FilePreview, FilePreviewStateV1, PreviewExpectedV1};
+use crate::protocol::preview::v1::{
+    FilePreview, FilePreviewStateV1, MediaPayloadV1, PreviewExpectedV1,
+};
 use crate::runtime::cmd::GitCmd;
 use crate::runtime::security::{self, MAX_STATUS_BYTES};
 use crate::runtime::status;
@@ -37,13 +39,47 @@ pub const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 /// this window returns an explicit error instead of holding the request open.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Read one authorized worktree path and return a typed preview snapshot.
-pub async fn file_preview(
+/// Bytes one media answer may carry.
+///
+/// Base64 expands by a third, and the transport's incoming frame ceiling is
+/// below 16 MiB, so complete bounded media stays comfortably inside one frame
+/// while still covering representative images, short clips and documents. A
+/// larger file is a typed `TooLarge` answer, never a truncated prefix.
+pub const MAX_MEDIA_BYTES: usize = 8 * 1024 * 1024;
+
+/// A refused authorized read, before it is mapped onto an operation's states.
+struct Refusal {
+    path: String,
+    kind: RefusalKind,
+}
+
+enum RefusalKind {
+    Missing,
+    Denied(String),
+    Changed(String),
+    Unsupported(String),
+}
+
+/// Bytes that passed the whole authorization and identity check.
+struct AuthorizedRead {
+    path: String,
+    bytes: Vec<u8>,
+    size: u64,
+}
+
+/// Read one authorized worktree path under `limit` bytes.
+///
+/// This is the single filesystem boundary both preview kinds use: path
+/// validation, status verification, `O_NOFOLLOW`-component opens, the bounded
+/// read, and the file/root/status identity rechecks are identical for text and
+/// media. The caller decides what to do with a refusal or with the bytes.
+async fn read_authorized(
     cmd: &GitCmd,
     root: &Path,
     relative: &str,
     expected: PreviewExpectedV1,
-) -> anyhow::Result<FilePreview> {
+    limit: usize,
+) -> anyhow::Result<Result<AuthorizedRead, Refusal>> {
     let path = security::validate_repo_relative_path(relative)?;
     let root = std::fs::canonicalize(root)
         .with_context(|| format!("failed to canonicalize repository root: {}", root.display()))?;
@@ -55,8 +91,11 @@ pub async fn file_preview(
 
     // Before opening anything, prove the selected row still describes this
     // path. A forged tracked path is therefore never read.
-    if let Some(state) = verify_expected(cmd, &root, &path, expected).await? {
-        return Ok(state);
+    if let Some(kind) = verify_expected(cmd, &root, &path, expected).await? {
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind,
+        }));
     }
 
     // A direct stat before opening keeps a FIFO, socket or device from ever
@@ -64,78 +103,78 @@ pub async fn file_preview(
     // the handle it actually obtained.
     match std::fs::symlink_metadata(root.join(&path)) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Unsupported,
-                Some("This path is a symbolic link; previews do not follow links.".to_string()),
-            ));
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Unsupported(
+                    "This path is a symbolic link; previews do not follow links.".to_string(),
+                ),
+            }));
         }
         Ok(metadata) if !metadata.is_file() => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Unsupported,
-                Some("This path is not a regular file.".to_string()),
-            ));
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Unsupported("This path is not a regular file.".to_string()),
+            }));
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(preview_state(&path, FilePreviewStateV1::Missing, None));
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Missing,
+            }));
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Denied,
-                Some("Permission denied while opening this file.".to_string()),
-            ));
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Denied("Permission denied while opening this file.".to_string()),
+            }));
         }
         Err(error) => return Err(anyhow::Error::from(error)),
     }
 
     if !same_root_still_at(&root, &root_identity) {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Changed,
-            Some(
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Changed(
                 "The repository changed before the preview could be read. Refresh Git Changes."
                     .to_string(),
             ),
-        ));
+        }));
     }
 
     let (file, metadata) = match open_secure(&root, &path) {
         Ok(open) => open,
         Err(OpenFailure::Missing) => {
-            return Ok(preview_state(&path, FilePreviewStateV1::Missing, None))
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Missing,
+            }))
         }
         Err(OpenFailure::Denied(message)) => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Denied,
-                Some(message),
-            ))
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Denied(message),
+            }))
         }
         Err(OpenFailure::Unsupported(message)) => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Unsupported,
-                Some(message),
-            ))
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Unsupported(message),
+            }))
         }
         Err(OpenFailure::Error(error)) => return Err(error),
     };
 
     if !metadata.is_file() {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Unsupported,
-            Some("This path is not a regular file.".to_string()),
-        ));
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Unsupported("This path is not a regular file.".to_string()),
+        }));
     }
 
     let size = metadata.len();
     let modified = metadata.modified().ok();
-    let mut reader =
-        tokio::fs::File::from_std(file).take((MAX_PREVIEW_BYTES as u64).saturating_add(1));
+    let mut reader = tokio::fs::File::from_std(file).take((limit as u64).saturating_add(1));
 
     let mut bytes = Vec::new();
     timeout(READ_TIMEOUT, reader.read_to_end(&mut bytes))
@@ -149,33 +188,34 @@ pub async fn file_preview(
         .await
         .context("failed to re-read file metadata after preview")?;
     if after.len() != size || after.modified().ok() != modified {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Changed,
-            Some("The file changed while it was being read. Refresh Git Changes.".to_string()),
-        ));
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Changed(
+                "The file changed while it was being read. Refresh Git Changes.".to_string(),
+            ),
+        }));
     }
 
     if !same_file_still_at(&root, &path, &after) {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Changed,
-            Some("The file changed while it was being read. Refresh Git Changes.".to_string()),
-        ));
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Changed(
+                "The file changed while it was being read. Refresh Git Changes.".to_string(),
+            ),
+        }));
     }
 
     // The repository directory is part of the read identity too: replacing the
     // root at the same path must not let bytes read from the old tree satisfy a
     // status answer from the new one.
     if !same_root_still_at(&root, &root_identity) {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Changed,
-            Some(
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Changed(
                 "The repository changed while the preview was being read. Refresh Git Changes."
                     .to_string(),
             ),
-        ));
+        }));
     }
 
     // The repository and the selected row are part of the read identity. A
@@ -186,28 +226,260 @@ pub async fn file_preview(
         _ => None,
     };
     if current_root.as_deref() != Some(root.as_path()) {
-        return Ok(preview_state(
-            &path,
-            FilePreviewStateV1::Changed,
-            Some(
+        return Ok(Err(Refusal {
+            path: path.clone(),
+            kind: RefusalKind::Changed(
                 "The repository changed while the preview was being read. Refresh Git Changes."
                     .to_string(),
             ),
-        ));
+        }));
     }
     match verify_expected(cmd, &root, &path, expected).await {
         Ok(None) => {}
-        Ok(Some(state)) => return Ok(state),
+        Ok(Some(kind)) => {
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind,
+            }))
+        }
         Err(_) => {
-            return Ok(preview_state(
-                &path,
-                FilePreviewStateV1::Changed,
-                Some("The repository status changed while the preview was being read. Refresh Git Changes.".to_string()),
-            ))
+            return Ok(Err(Refusal {
+                path: path.clone(),
+                kind: RefusalKind::Changed(
+                    "The repository status changed while the preview was being read. Refresh Git Changes."
+                        .to_string(),
+                ),
+            }))
         }
     }
 
-    Ok(classify(&path, bytes, size))
+    Ok(Ok(AuthorizedRead { path, bytes, size }))
+}
+
+/// Read one authorized worktree path and return a typed preview snapshot.
+pub async fn file_preview(
+    cmd: &GitCmd,
+    root: &Path,
+    relative: &str,
+    expected: PreviewExpectedV1,
+) -> anyhow::Result<FilePreview> {
+    match read_authorized(cmd, root, relative, expected, MAX_PREVIEW_BYTES).await? {
+        Ok(read) => Ok(classify(&read.path, read.bytes, read.size)),
+        Err(refusal) => Ok(preview_refusal(refusal)),
+    }
+}
+
+/// Read one authorized worktree path as complete bounded media (#2876).
+///
+/// The extension selects a media family; the bytes must independently sniff to
+/// the same family. A file over [`MAX_MEDIA_BYTES`] is `TooLarge`, a mismatch
+/// is `Unsupported`, and neither carries a prefix that a viewer could mistake
+/// for a complete file.
+pub async fn file_media(
+    cmd: &GitCmd,
+    root: &Path,
+    relative: &str,
+    expected: PreviewExpectedV1,
+) -> anyhow::Result<FilePreview> {
+    match read_authorized(cmd, root, relative, expected, MAX_MEDIA_BYTES).await? {
+        Ok(read) => Ok(media_preview(read)),
+        Err(refusal) => Ok(media_refusal(refusal)),
+    }
+}
+
+fn preview_refusal(refusal: Refusal) -> FilePreview {
+    let (state, message) = match refusal.kind {
+        RefusalKind::Missing => (FilePreviewStateV1::Missing, None),
+        RefusalKind::Denied(message) => (FilePreviewStateV1::Denied, Some(message)),
+        RefusalKind::Changed(message) => (FilePreviewStateV1::Changed, Some(message)),
+        RefusalKind::Unsupported(message) => (FilePreviewStateV1::Unsupported, Some(message)),
+    };
+    preview_state(&refusal.path, state, message)
+}
+
+fn media_refusal(refusal: Refusal) -> FilePreview {
+    let (state, message) = match refusal.kind {
+        RefusalKind::Missing => (FilePreviewStateV1::Missing, None),
+        RefusalKind::Denied(message) => (FilePreviewStateV1::Denied, Some(message)),
+        RefusalKind::Changed(message) => (FilePreviewStateV1::Changed, Some(message)),
+        RefusalKind::Unsupported(message) => (FilePreviewStateV1::Unsupported, Some(message)),
+    };
+    media_state(&refusal.path, state, message, 0)
+}
+
+fn media_preview(read: AuthorizedRead) -> FilePreview {
+    if read.size > u64::try_from(MAX_MEDIA_BYTES).unwrap_or(u64::MAX) {
+        return media_state(
+            &read.path,
+            FilePreviewStateV1::TooLarge,
+            Some(format!(
+                "This file is {} bytes, larger than the {}-byte media preview limit.",
+                read.size, MAX_MEDIA_BYTES
+            )),
+            read.size,
+        );
+    }
+
+    let Some((mime_type, family)) = sniff_media(&read.path, &read.bytes) else {
+        return media_state(
+            &read.path,
+            FilePreviewStateV1::Unsupported,
+            Some("This file's content is not supported media.".to_string()),
+            read.size,
+        );
+    };
+
+    match extension_media_family(&read.path) {
+        None => {
+            return media_state(
+                &read.path,
+                FilePreviewStateV1::Unsupported,
+                Some("This path is not a supported media file.".to_string()),
+                read.size,
+            )
+        }
+        Some(expected) if expected != family => {
+            return media_state(
+                &read.path,
+                FilePreviewStateV1::Unsupported,
+                Some("The file's content does not match its extension.".to_string()),
+                read.size,
+            )
+        }
+        Some(_) => {}
+    }
+
+    use base64::Engine as _;
+    FilePreview {
+        path: read.path,
+        state: FilePreviewStateV1::Ready,
+        text: String::new(),
+        binary: true,
+        size: read.size,
+        truncated: false,
+        truncated_bytes: 0,
+        message: None,
+        media: Some(MediaPayloadV1 {
+            content_base64: base64::engine::general_purpose::STANDARD.encode(&read.bytes),
+            mime_type: mime_type.to_string(),
+            complete: true,
+        }),
+    }
+}
+
+fn media_state(
+    path: &str,
+    state: FilePreviewStateV1,
+    message: Option<String>,
+    size: u64,
+) -> FilePreview {
+    FilePreview {
+        path: path.to_string(),
+        state,
+        text: String::new(),
+        binary: false,
+        size,
+        truncated: false,
+        truncated_bytes: 0,
+        message,
+        media: None,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MediaFamily {
+    Image,
+    Video,
+    Audio,
+    Pdf,
+}
+
+fn extension_media_family(path: &str) -> Option<MediaFamily> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "bmp" | "ico" => Some(MediaFamily::Image),
+        "mp4" | "webm" | "mov" => Some(MediaFamily::Video),
+        "mp3" | "wav" | "ogg" | "flac" | "aac" => Some(MediaFamily::Audio),
+        "pdf" => Some(MediaFamily::Pdf),
+        _ => None,
+    }
+}
+
+/// Validate media from its bytes, not from the extension that hinted at them.
+fn sniff_media(path: &str, bytes: &[u8]) -> Option<(&'static str, MediaFamily)> {
+    if bytes.starts_with(b"%PDF-") {
+        return Some(("application/pdf", MediaFamily::Pdf));
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(("image/png", MediaFamily::Image));
+    }
+    if bytes.starts_with(b"\xFF\xD8\xFF") {
+        return Some(("image/jpeg", MediaFamily::Image));
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some(("image/gif", MediaFamily::Image));
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12).is_some_and(|kind| kind == b"WEBP") {
+        return Some(("image/webp", MediaFamily::Image));
+    }
+    if bytes.starts_with(b"BM") {
+        return Some(("image/bmp", MediaFamily::Image));
+    }
+    if bytes.starts_with(b"\x00\x00\x01\x00") {
+        return Some(("image/x-icon", MediaFamily::Image));
+    }
+    if bytes.get(4..8).is_some_and(|kind| kind == b"ftyp") {
+        let brand = bytes.get(8..12).unwrap_or_default();
+        return Some((
+            if brand == b"qt  " {
+                "video/quicktime"
+            } else {
+                "video/mp4"
+            },
+            MediaFamily::Video,
+        ));
+    }
+    if bytes.starts_with(b"\x1A\x45\xDF\xA3") {
+        return Some(("video/webm", MediaFamily::Video));
+    }
+    if bytes.starts_with(b"OggS") {
+        return Some(("audio/ogg", MediaFamily::Audio));
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12).is_some_and(|kind| kind == b"WAVE") {
+        return Some(("audio/wav", MediaFamily::Audio));
+    }
+    if bytes.starts_with(b"fLaC") {
+        return Some(("audio/flac", MediaFamily::Audio));
+    }
+    if matches!(bytes.get(..2), Some(&[0xFF, second]) if second == 0xF1 || second == 0xF9) {
+        return Some(("audio/aac", MediaFamily::Audio));
+    }
+    if bytes.starts_with(b"ID3")
+        || matches!(bytes.get(..2), Some(&[0xFF, second]) if second & 0xE0 == 0xE0)
+    {
+        return Some(("audio/mpeg", MediaFamily::Audio));
+    }
+    if is_svg(path, bytes) {
+        return Some(("image/svg+xml", MediaFamily::Image));
+    }
+    None
+}
+
+fn is_svg(_path: &str, bytes: &[u8]) -> bool {
+    let window = bytes.get(..bytes.len().min(512)).unwrap_or_default();
+    let start = window
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(window.len());
+    let Some(window) = window.get(start..) else {
+        return false;
+    };
+    let lower = window
+        .iter()
+        .map(u8::to_ascii_lowercase)
+        .collect::<Vec<u8>>();
+    lower.starts_with(b"<svg")
+        || (lower.starts_with(b"<?xml") && lower.windows(4).any(|w| w == b"<svg"))
 }
 
 fn preview_state(path: &str, state: FilePreviewStateV1, message: Option<String>) -> FilePreview {
@@ -220,6 +492,7 @@ fn preview_state(path: &str, state: FilePreviewStateV1, message: Option<String>)
         truncated: false,
         truncated_bytes: 0,
         message,
+        media: None,
     }
 }
 
@@ -230,7 +503,7 @@ async fn verify_expected(
     root: &Path,
     path: &str,
     expected: PreviewExpectedV1,
-) -> anyhow::Result<Option<FilePreview>> {
+) -> anyhow::Result<Option<RefusalKind>> {
     let out = cmd
         .run(
             &["status", "--porcelain=v2", "--branch", "-z"],
@@ -250,20 +523,14 @@ async fn verify_expected(
     }
 
     let exists = std::fs::symlink_metadata(root.join(path)).is_ok();
-    Ok(Some(preview_state(
-        path,
-        if exists {
-            FilePreviewStateV1::Changed
-        } else {
-            FilePreviewStateV1::Missing
-        },
-        Some(if exists {
+    Ok(Some(if exists {
+        RefusalKind::Changed(
             "This path is no longer in the status group it was selected from. Refresh Git Changes."
-                .to_string()
-        } else {
-            "This file is no longer present in the worktree.".to_string()
-        }),
-    )))
+                .to_string(),
+        )
+    } else {
+        RefusalKind::Missing
+    }))
 }
 
 fn classify(path: &str, bytes: Vec<u8>, size: u64) -> FilePreview {
@@ -279,6 +546,7 @@ fn classify(path: &str, bytes: Vec<u8>, size: u64) -> FilePreview {
             truncated: false,
             truncated_bytes: 0,
             message: Some("Binary file — no text preview.".to_string()),
+            media: None,
         };
     }
 
@@ -297,6 +565,7 @@ fn classify(path: &str, bytes: Vec<u8>, size: u64) -> FilePreview {
             truncated: false,
             truncated_bytes: 0,
             message: Some("The preview could not be bounded safely.".to_string()),
+            media: None,
         };
     };
 
@@ -331,6 +600,7 @@ fn classify(path: &str, bytes: Vec<u8>, size: u64) -> FilePreview {
         truncated,
         truncated_bytes,
         message: None,
+        media: None,
     }
 }
 
@@ -344,6 +614,7 @@ fn binary_preview(path: &str, size: u64) -> FilePreview {
         truncated: false,
         truncated_bytes: 0,
         message: Some("File is not valid UTF-8 text — no text preview.".to_string()),
+        media: None,
     }
 }
 

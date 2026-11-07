@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { VideoViewer } from '@/capabilities/files/components/VideoViewer';
+import { VideoViewer } from '@/shared/file-viewer/components/VideoViewer';
 
 vi.stubGlobal('URL', {
   createObjectURL: vi.fn(() => 'blob:video-url'),
