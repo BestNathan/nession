@@ -50,6 +50,11 @@ const LOG_ERROR={
   [SOURCE_V2.failure_code]:
     'source logs do not independently prove the missing private key',
 };
+const RUN_ROUTE={
+  [SOURCE.failure_code]:id=>'/actions/runs/'+id,
+  [SOURCE_V2.failure_code]:id=>
+    '/actions/runs/'+id+'/attempts/'+SOURCE_V2.attempt,
+};
 const JOBS_ROUTE={
   [SOURCE.failure_code]:id=>'/actions/runs/'+id+'/jobs?per_page=100',
   [SOURCE_V2.failure_code]:id=>
@@ -121,7 +126,7 @@ async function verifyLive(source,token,fetchFn=fetch){
     if(!response.ok)fail('GitHub source read error '+response.status);
     return response.json();
   };
-  const run=await get('/actions/runs/'+source.run_id);
+  const run=await get(RUN_ROUTE[source.failure_code](source.run_id));
   const jobs=await get(JOBS_ROUTE[source.failure_code](source.run_id));
   const artifacts=await get('/actions/runs/'+source.run_id+'/artifacts?per_page=100');
   const candidate=jobs.jobs?.filter(x=>x.name==='qwen-developer')??[];

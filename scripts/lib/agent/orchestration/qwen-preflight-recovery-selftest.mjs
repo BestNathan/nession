@@ -142,7 +142,7 @@ try{
     /trusted Qwen preflight recovery/);
   const mock2=async url=>{
     const key=url.replace('https://api.github.com/repos/'+repo,'');
-    const data=key==='/actions/runs/'+a2.run_id?run2:
+    const data=key==='/actions/runs/'+a2.run_id+'/attempts/1'?run2:
       key==='/actions/runs/'+a2.run_id+'/attempts/1/jobs?per_page=100'?jobs2:
       key==='/actions/runs/'+a2.run_id+'/artifacts?per_page=100'?artifacts2:null;
     if(key.includes('/logs'))return {
