@@ -496,7 +496,13 @@ impl ConnectionHandler {
 
         // Fan out concurrently: this runs while a user waits on a button
         // click, so the cost must be one timeout, not N.
+        //
+        // The generation is captured **before** the Agent is queried. Any
+        // live Session report that commits while the reply is in flight bumps
+        // it, and the projection below then refuses to write the older
+        // snapshot (#2874).
         let results = futures_util::future::join_all(targets.iter().map(|agent_id| async move {
+            let observed_generation = self.session_registry.agent_generation(agent_id);
             let outcome = self
                 .agent_command_with_timeout(
                     agent_id,
@@ -505,18 +511,18 @@ impl ConnectionHandler {
                     SESSION_REFRESH_TIMEOUT,
                 )
                 .await;
-            (agent_id.clone(), outcome)
+            (agent_id.clone(), observed_generation, outcome)
         }))
         .await;
 
         let mut stale = Vec::new();
-        for (agent_id, outcome) in results {
+        for (agent_id, observed_generation, outcome) in results {
             match outcome {
                 Ok(resp) => {
                     let incoming = parse_agent_sessions(&agent_id, &resp);
                     let removed = self
                         .session_registry
-                        .replace_agent_sessions(&agent_id, incoming)
+                        .replace_agent_sessions(&agent_id, incoming, observed_generation)
                         .await;
                     // Sessions that vanished must release their desired
                     // bindings so the files become editable again.
