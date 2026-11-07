@@ -1,0 +1,101 @@
+name: Release / Staging Convergence
+
+# #2926. Runs on trusted main only. This is a deterministic PR planner/writer,
+# NOT an Agent runtime, Acceptance evaluator or permission to auto-merge.
+# Eligible branches come from checked-in push-triggered Staging deploy workflows.
+on:
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Plan and report without creating PRs'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-staging-convergence
+  cancel-in-progress: false
+
+jobs:
+  converge:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify trusted main and deterministic negative fixtures
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node scripts/staging-branch-convergence.mjs self-test
+
+      - name: Discover actual auto-deploy branch sources and plan exact refs
+        id: plan
+        run: |
+          set -euo pipefail
+          node scripts/staging-branch-convergence.mjs plan "$RUNNER_TEMP/convergence-plan.json"
+          count="$(jq '[.branches[].actions[]] | length' "$RUNNER_TEMP/convergence-plan.json")"
+          if [[ "$count" -gt 0 ]]; then
+            echo 'actionable=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'actionable=false' >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo '## Staging branch convergence (#2926)'
+            echo
+            echo '- Main SHA: `'${{ github.sha }}'`'
+            echo '- Scheduled cadence: every two hours (UTC); runs may be delayed by GitHub'
+            echo
+            echo '| Deploy-eligible branch | Ahead main | Behind main | Planned actions |'
+            echo '|---|---:|---:|---|'
+            jq -r '.branches[] | "| `" + .branch + "` | " + (.ahead|tostring) + " | " + (.behind|tostring) + " | " + (.actions|join(", ")) + " |"' "$RUNNER_TEMP/convergence-plan.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint existing repository Publisher App identity for PR creation
+        id: publisher
+        if: steps.plan.outputs.actionable == 'true' && inputs.dry_run != true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Idempotently create or reuse main/staging sync and promotion PRs
+        if: steps.plan.outputs.actionable == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+        run: |
+          set -euo pipefail
+          node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
+          {
+            echo
+            echo '### Pull requests'
+            jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + ")"' "$RUNNER_TEMP/convergence-results.json"
+            echo
+            echo 'PR creation does not authorize merging. Existing exact-SHA Quality, Acceptance and E2E gates remain independent.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain no-op or dry-run
+        if: steps.plan.outputs.actionable != 'true' || inputs.dry_run == true
+        run: |
+          if [[ "${{ inputs.dry_run }}" == 'true' ]]; then
+            echo 'Dry run: no PR writes performed.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No divergence: no PR writes and no model invocations.' >> "$GITHUB_STEP_SUMMARY"
+          fi
