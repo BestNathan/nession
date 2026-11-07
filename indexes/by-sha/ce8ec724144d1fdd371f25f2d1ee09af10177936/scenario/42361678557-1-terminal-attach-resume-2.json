@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42361678557,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2877-terminal-progress-staging",
+    "target_sha": "ce8ec724144d1fdd371f25f2d1ee09af10177936",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42361678557",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "faba268accd9932469bf59a5ce3ed523be05ed251c1d75302a881e6fb16cec7c"
+  },
+  "record": "runs/2026-11-07/42361678557-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "bfa7693cefdcba70f81c7805341fb7258d9888ca34d7b24ec51e19e3ef63fc24"
+}
