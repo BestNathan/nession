@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "897b5e3fb3dd429d711d981ca34f9b55e491c66d",
+  "run_id": 42360733323,
+  "run_attempt": 1,
+  "plan_digest": "4e1bfd28b20c4ba7420139f890a38820708e38fa3f61ddd481e08bc1270f232b",
+  "artifact_digest": "sha256:31e6aa5acfb82dc3d9d258fa08b0cfb87533596250e305ee923d9f4522c9a2e5",
+  "results": [
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 22,
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 148
+    },
+    {
+      "id": "sidebar-session-first",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 209
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 21,
+      "passed": 21,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 67
+    }
+  ]
+}
