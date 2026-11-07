@@ -72,12 +72,16 @@ async function storeJson(storePath) {
   return JSON.parse(bytes.toString('utf8'));
 }
 
-function assertAncestor(sha, target) {
+async function assertAncestor(sha, target) {
   assert.match(sha, HEX40);
-  execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', sha, target], {
-    stdio: ['ignore', 'ignore', 'pipe'], timeout: 30000,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  });
+  // The exact-SHA Case checkout is intentionally shallow, so old chain commits
+  // are not local Git objects. The trusted GitHub compare endpoint re-reads the
+  // real ancestry without requiring an unshallow of the target checkout.
+  const comparison = await api('/compare/' + sha + '...' + target);
+  assert.equal(comparison.merge_base_commit?.sha, sha,
+    'chain SHA is not an ancestor of the Acceptance target');
+  assert.ok(['ahead', 'identical'].includes(comparison.status),
+    'unexpected GitHub compare status for chain SHA');
 }
 
 async function verifyRun(id, { attempt, name, path: workflowPath, event, headSha,
@@ -167,9 +171,9 @@ async function verifyQwenChain(target) {
     'Store lacks the authenticated Publisher transition');
   assert.ok(transition('reviewer', QWEN.reviewRun, QWEN.reviewAttempt, 'approved'),
     'Store lacks the authenticated Reviewer approval');
-  assertAncestor(QWEN.developerSha, target);
-  assertAncestor(QWEN.storeIngestSha, target);
-  assertAncestor(QWEN.prMerge, target);
+  await assertAncestor(QWEN.developerSha, target);
+  await assertAncestor(QWEN.storeIngestSha, target);
+  await assertAncestor(QWEN.prMerge, target);
   return [
     { type: 'runtime', value: 'real Qwen Developer Run ' + developer.id + '/1 completed/success at ' + QWEN.developerSha + '; Store Ingest ' + QWEN.storeIngestRun + '; Publisher ' + QWEN.publisherRun },
     { type: 'runtime', value: 'real PR #' + QWEN.prNumber + ' head ' + QWEN.prHead + ' merged by the owner at ' + QWEN.prMerge + '; Reviewer Run ' + review.id + '/' + QWEN.reviewAttempt + ' approved that exact head' },
@@ -314,7 +318,7 @@ const REPAIR_2961 = Object.freeze({
 
 async function verifyQwenRepairChain2961(target) {
   for (const sha of [REPAIR_2961.initSha, REPAIR_2961.fixSha, REPAIR_2961.prMerge]) {
-    assertAncestor(sha, target);
+    await assertAncestor(sha, target);
   }
   const verified = {};
   for (const [key, spec] of Object.entries(REPAIR_2961.runs)) {
