@@ -214,6 +214,37 @@ function ensurePr(repo, owner, head, base, plan) {
   }
 }
 
+function dispatchConflictReview(repo, receipt, action, plan, lane) {
+  const token = process.env.DISPATCH_GITHUB_TOKEN;
+  if (!token) reject('the trusted Controller Actions dispatcher token is missing');
+  function api(args) {
+    return shell('gh', ['api', ...args], { env: { ...process.env, GH_TOKEN: token } });
+  }
+  const workflow = 'agent-staging-convergence-review.yml';
+  // Exact SHA pair is embedded in the trusted Agent Run display title. This
+  // keeps a repeatedly discovered conflict from spending tokens every tick.
+  const previous = JSON.parse(api(['repos/' + repo + '/actions/workflows/' + workflow +
+    '/runs?event=workflow_dispatch&per_page=100']));
+  if (!Array.isArray(previous.workflow_runs) || previous.total_count > 100) {
+    return { status: 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY' };
+  }
+  const identity = 'Convergence conflict ' + lane.branch + ' ' + plan.main_sha + ' ' + lane.sha;
+  const recorded = previous.workflow_runs.find(run =>
+    run.display_title === identity && run.event === 'workflow_dispatch' &&
+    run.head_branch === 'main' &&
+    run.repository?.full_name === repo &&
+    run.head_repository?.full_name === repo);
+  if (recorded) return { status: 'EXISTING_ANALYSIS', run_id: recorded.id };
+  api(['--method', 'POST', 'repos/' + repo + '/actions/workflows/' + workflow + '/dispatches',
+    '-f', 'ref=main',
+    '-f', 'inputs[pr_number]=' + receipt.number,
+    '-f', 'inputs[branch]=' + lane.branch,
+    '-f', 'inputs[main_sha]=' + plan.main_sha,
+    '-f', 'inputs[lane_sha]=' + lane.sha,
+    '-f', 'inputs[direction]=' + action]);
+  return { status: 'ANALYSIS_DISPATCHED' };
+}
+
 function reconcile(plan) {
   validatePlan(plan);
   const repo = process.env.GITHUB_REPOSITORY || '';
@@ -245,6 +276,9 @@ function reconcile(plan) {
       if (!decision.ready) {
         record.outcome = 'BLOCKED';
         record.reason = decision.reason;
+        if (decision.reason === 'MERGE_CONFLICT') {
+          record.agent_analysis = dispatchConflictReview(repo, receipt, action, plan, lane);
+        }
         results.push(record);
         continue;
       }
