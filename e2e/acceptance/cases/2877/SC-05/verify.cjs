@@ -3,14 +3,16 @@
 // route swap, transport loss, a stale notice, two subscribers (one slow) and
 // credit-capacity pressure; recovery remains possible when a pre-close notice
 // cannot be delivered, with no global producer stall.
+//
+// The two subscriber/credit tests use real per-subscriber ledgers; the Server
+// test drives the real Relay forwarding function; the Web tests drive the exact
+// relay proof, route replacement and transport-loss recovery. No nested
+// full-stack process is started inside the Case runtime.
 const { run, targetSha, crateTests, assertRan } = require('../../../shared/control-mode-cases.cjs');
 const { webVitestFiles } = require('../../../shared/web-vitest-cases.cjs');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const RELAY_TEST =
-  'relay_forwards_progress_without_a_reply_and_returns_the_current_subscriptions_notice';
+const SERVER_TEST =
+  'a_progress_notification_is_forwarded_unchanged_to_the_agent';
 const AGENT_TESTS = [
   'progress_credit_is_per_subscriber_and_one_peer_cannot_contaminate_another',
   'one_stalled_subscriber_cannot_consume_anothers_credit',
@@ -24,31 +26,25 @@ const RUNTIME_TESTS = [
   're-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)',
   'states the loss when a re-attach lands on a renderer with no parsed capture (#2194)',
 ];
+const RELAY_FILE = 'src/product/terminal/__tests__/unit/terminalServer.test.ts';
+const RELAY_TESTS = [
+  'sends the negotiated response-less progress notification on its own wire (#2877)',
+  'routes a strict current-subscription notice by session and drops malformed ones',
+];
 
 run(({ evidence }) => {
   const sha = targetSha();
-  // The nested real-tmux test owns its socket, never the runtime's product one.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2877-sc05-'));
-  fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
-  const isolated = {
-    NESESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'),
-    NESESSION_HOME: path.join(dir, 'home'),
-  };
 
-  const relay = crateTests(
-    'nession-server',
-    ['--test', 'integration', RELAY_TEST],
-    300000,
-    isolated,
-  );
-  assertRan(relay, [RELAY_TEST]);
+  const relay = crateTests('nession-server', ['--lib', SERVER_TEST], 300000);
+  assertRan(relay, [SERVER_TEST]);
 
   for (const test of AGENT_TESTS) {
-    const agent = crateTests('nession-agent', ['--lib', test], 300000, isolated);
+    const agent = crateTests('nession-agent', ['--lib', test], 300000);
     assertRan(agent, [test]);
   }
 
   webVitestFiles([RUNTIME_FILE], RUNTIME_TESTS, { project: 'unit' });
+  webVitestFiles([RELAY_FILE], RELAY_TESTS, { project: 'unit' });
 
   evidence.push({
     type: 'runtime',
@@ -58,7 +54,7 @@ run(({ evidence }) => {
       'recovery, while the fresh binding did; two subscribers kept independent credit ' +
       '(one stalled did not consume the other), capacity pressure failed only the ' +
       'affected subscriber, a lost transport re-began the relay and requested history, ' +
-      'and no path stalled the producer',
+      'and the Relay forwarded the wire unchanged without stalling the producer',
   });
   return 'Direct P2P and Relay share identity and recovery semantics; slow/stale/retired subscriptions are isolated and transport loss still recovers';
 });
