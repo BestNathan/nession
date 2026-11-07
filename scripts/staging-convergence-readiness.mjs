@@ -42,7 +42,12 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
       run.head_repository?.full_name===REPO &&
       Array.isArray(run.pull_requests) &&
       run.pull_requests.some(p=>p.number===pr.number));
-    if(!matches.length||matches.some(run=>run.conclusion!=='success'))
+    // A failed older attempt must not poison a later authenticated successful
+    // rerun at the *same* target SHA. Only the newest real workflow attempt
+    // determines readiness; an in-progress newer run blocks an older green.
+    const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
+    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
       return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
   }
   return okay({expectedHead,expectedBase});
@@ -157,7 +162,8 @@ function selfTest(){
   const pr={number:88,state:'open',draft:false,body:'Staging Convergence automated proposal (test)',mergeable:true,mergeable_state:'clean',
     base:{ref:'staging',sha:b},head:{ref:'main',sha:a,repo:{full_name:REPO}}};
   const runs=REQUIRED.map((path,n)=>({id:n+1,path,head_sha:a,event:'pull_request',
-    conclusion:'success',head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
+    status:'completed',conclusion:'success',run_number:n+1,run_attempt:1,
+    head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
   assert.equal(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,true);
   assert.match(evaluatePull({pr:{...pr,draft:true},action:'sync-main-to-lane',
     plan,baseSha:b,workflowRuns:runs}).reason,/UNTRUSTED/);
@@ -169,6 +175,17 @@ function selfTest(){
     plan,baseSha:b,workflowRuns:runs.slice(1)}).reason,/MISSING/);
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
     workflowRuns:runs.map(r=>({...r,conclusion:'failure'}))}).reason,/MISSING/);
+  const obsolete={...runs[0],id:98,run_number:0,conclusion:'failure'};
+  const latest={...runs[0],id:99,run_number:100,conclusion:'success'};
+  assert.equal(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
+    workflowRuns:[obsolete,latest,...runs.slice(1)]}).ready,true,
+    'old red check must not poison newer exact-HEAD green');
+  assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
+    workflowRuns:[latest,{...latest,id:100,run_number:101,status:'in_progress',conclusion:null},...runs.slice(1)]}).reason,/MISSING/,
+    'newer pending workflow must block stale green');
+  assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
+    workflowRuns:[latest,{...latest,id:101,run_number:101,conclusion:'failure'},...runs.slice(1)]}).reason,/MISSING/,
+    'newer failed check must override historical green');
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[],
     issues:[],deployRuns:[],laneSha:b}).ready,false);
   console.log('staging convergence readiness self-test: PASS');
