@@ -56,3 +56,27 @@ test('Case Smoke selects before build, no-case PR skips runtime, main runs gener
   assert.ok(y.includes('schedule:\n    - cron:'));
   assert.ok(y.includes('Not Required: no eligible source-aligned Cases'));
 });
+
+test('legacy PR heads use trusted Main selector without moving source SHA',()=>{
+  const y=fs.readFileSync(path.join(root,'.github/workflows/ci-quality.yml'),'utf8');
+  assert.ok(y.includes('- name: Checkout trusted Quality selector'));
+  assert.ok(y.includes('ref: main\n          path: trusted'));
+  assert.ok(y.includes('node trusted/scripts/ci/quality-scope.mjs "$RUNNER_TEMP/quality-changed-paths"'));
+  assert.ok(y.includes('git diff --no-renames --name-only -z "$base" "$target"'));
+  assert.ok(y.includes('[[ "$(git rev-parse HEAD)" == "$PR_HEAD_SHA" ]] || exit 1'));
+});
+test('Web dist proof does not treat no-artifact as a failed attestation',()=>{
+  const y=fs.readFileSync(path.join(root,'.github/workflows/ci-web-dist-reuse-proof.yml'),'utf8');
+  assert.ok(y.includes('- name: Report authenticated Web dist Not Required'));
+  assert.ok(y.includes("if: steps.producer.outputs.applicable == 'false'"));
+  for(const title of [
+    'Checkout attested main source SHA', 'Install Web preview dependencies',
+    'Download exact producer artifact', 'Restore verified exact-SHA dist',
+    'Verify restored runnable Web preview parity',
+    'Report bounded producer-consumer evidence'
+  ]) {
+    assert.ok(y.includes('- name: '+title+"\n        if: steps.producer.outputs.applicable == 'true'"),
+      'inapplicable Main push must not execute '+title);
+  }
+  assert.ok(y.includes("printf -- '- Exact source SHA: "));
+});

@@ -61,14 +61,23 @@ export function verify(event, run, jobs) {
   }
   verifyJob('scope', requiredSteps.scope);
   verifyJob('web-check', requiredSteps['web-check']);
-  verifyJob('web-tests', requiredSteps['web-tests']);
-  // Tooling may be inapplicable on Web-only main pushes; the successful
-  // web-check aggregate authenticates either the successful suite or this skip.
   verifyJob('tooling-check', requiredSteps['tooling-check'], true);
-  const dist = verifyJob('web-dist', requiredSteps['web-dist']);
+  const web = verifyJob('web-tests', requiredSteps['web-tests'], true);
+  const dist = verifyJob('web-dist', requiredSteps['web-dist'], true);
+  if (web.conclusion === 'skipped' || dist.conclusion === 'skipped') {
+    // No Web input: Quality correctly omitted both Web tests and dist.
+    // Do NOT attest an artifact and do NOT execute an artifact consumer.
+    // An unpaired skip is a producer failure, even with an overall green run.
+    assert.equal(web.conclusion, 'skipped', 'Web tests ran but dist was omitted');
+    assert.equal(dist.conclusion, 'skipped', 'Web dist was omitted while tests ran');
+    return {
+      schema_version: 1, kind: 'web_dist_not_required', applicable: false,
+      sha: run.head_sha, run_id: run.id, run_attempt: run.run_attempt,
+    };
+  }
   return {
-    schema_version: 1, kind: 'attested_web_dist_source', sha: run.head_sha,
-    run_id: run.id, run_attempt: run.run_attempt, job_id: dist.id,
+    schema_version: 1, kind: 'attested_web_dist_source', applicable: true,
+    sha: run.head_sha, run_id: run.id, run_attempt: run.run_attempt, job_id: dist.id,
   };
 }
 
@@ -95,6 +104,26 @@ function selfTest() {
     steps: steps.map(step => ({name:step, conclusion:'success'})),
   })) };
   assert.equal(verify(event, run, jobs).job_id, 43);
+  assert.equal(verify(event, run, jobs).applicable, true);
+  const withoutWeb = { ...jobs, jobs: jobs.jobs.map(j =>
+    j.name === 'web-tests' || j.name === 'web-dist'
+      ? {...j, conclusion: 'skipped', steps: []} : j) };
+  const notRequired = verify(event, run, withoutWeb);
+  assert.equal(notRequired.kind, 'web_dist_not_required');
+  assert.equal(notRequired.applicable, false);
+  assert.equal(notRequired.sha, sha);
+  for (const name of ['web-tests', 'web-dist']) {
+    const inconsistent = { ...jobs, jobs: jobs.jobs.map(j =>
+      j.name === name ? {...j, conclusion: 'skipped', steps: []} : j) };
+    assert.throws(() => verify(event, run, inconsistent),
+      'unpaired skipped Web job must not silently indicate no artifact');
+  }
+  for (const name of ['web-tests', 'web-dist', 'web-check', 'scope']) {
+    const invalid = { ...withoutWeb, jobs: withoutWeb.jobs.map(j =>
+      j.name === name ? {...j, head_sha: 'b'.repeat(40)} : j) };
+    assert.throws(() => verify(event, run, invalid),
+      'not-required identity must be authenticated: ' + name);
+  }
   const mutate = (name, fn) => {
     const altered = { ...jobs, jobs: jobs.jobs.map(job => job.name===name ? fn(job) : job) };
     assert.throws(() => verify(event,run,altered), name+' negative mutation must fail');
@@ -133,6 +162,7 @@ else if (mode === 'attest') {
     api('/actions/runs/' + id),
     api('/actions/runs/' + id + '/jobs?per_page=100'));
   appendFileSync(outputPath, 'sha=' + receipt.sha + '\nrun_id=' + receipt.run_id +
-    '\nattempt=' + receipt.run_attempt + '\n');
-  console.log('WEB_DIST_SOURCE_V1 ' + JSON.stringify(receipt));
+    '\nattempt=' + receipt.run_attempt + '\napplicable=' + receipt.applicable + '\n');
+  console.log((receipt.applicable ? 'WEB_DIST_SOURCE_V1 ' : 'WEB_DIST_NOT_REQUIRED_V1 ') +
+    JSON.stringify(receipt));
 } else { console.error('usage: web-dist-source-attestation.mjs self-test | attest EVENT GITHUB_OUTPUT'); process.exitCode = 2; }
