@@ -27,7 +27,8 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_run' &&
       github.event.action == 'completed' &&
-      github.event.workflow_run.event == 'workflow_run' &&
+      (github.event.workflow_run.event == 'workflow_run' ||
+       github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.run_attempt == 1 &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -55,7 +56,8 @@ jobs:
           jq -e --argjson id "$SOURCE_INGEST_RUN" --arg sha "$SOURCE_INGEST_SHA" '
             .id == $id and .head_sha == $sha and
             .run_attempt == 1 and .status == "completed" and
-            .conclusion == "success" and .event == "workflow_run" and
+            .conclusion == "success" and
+            (.event == "workflow_run" or .event == "workflow_dispatch") and
             .path == ".github/workflows/store-agent-development-ingest.yml" and
             .head_branch == "main" and
             .repository.full_name == "BestNathan/nession" and

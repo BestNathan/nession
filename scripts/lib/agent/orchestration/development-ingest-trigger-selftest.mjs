@@ -75,4 +75,17 @@ assert.throws(()=>resolveTrustedIngestSource({environment:workflowRun,
   event:{...workflowEvent,action:'requested'}}),/completed successful/);
 assert.throws(()=>resolveTrustedIngestSource({environment:workflowRun,
   event:{...workflowEvent,workflow_run:{...source,conclusion:'failure'}}}),/completed successful/);
-console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment and event denial passed');
+const manualEnv={...environment,GITHUB_EVENT_NAME:'workflow_dispatch'};
+const manualEvent={repository:{full_name:'BestNathan/nession'},
+  inputs:{worker_run_id:'42344231027',worker_run_attempt:'1'}};
+assert.deepEqual(resolveTrustedIngestSource({environment:manualEnv,event:manualEvent}),
+  {run_id:42344231027,source:null,manual_recovery:true,attempt:1});
+for(const bad of [
+  {environment:{...manualEnv,GITHUB_ACTOR:'fork'}},
+  {environment:{...manualEnv,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...manualEvent,inputs:{...manualEvent.inputs,worker_run_id:'x'}}},
+  {event:{...manualEvent,inputs:{...manualEvent.inputs,worker_run_attempt:'0'}}},
+  {event:{...manualEvent,repository:{full_name:'fork/nession'}}},
+])assert.throws(()=>resolveTrustedIngestSource({...{
+  environment:manualEnv,event:manualEvent},...bad}));
+console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Worker Run and event denial passed');
