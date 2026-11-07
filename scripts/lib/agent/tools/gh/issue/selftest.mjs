@@ -27,8 +27,8 @@ const fake = [
   "if (args[1] === 'view') { console.log(JSON.stringify(issue)); process.exit(0); }",
   "if (args[1] === 'edit') {",
   "  const field = (name) => args[args.indexOf(name) + 1];",
-  "  issue.title = field('--title');",
-  "  issue.body = fs.readFileSync(0, 'utf8');",
+  "  if (args.includes('--title')) issue.title = field('--title');",
+  "  if (args.includes('--body-file')) issue.body = fs.readFileSync(0, 'utf8');",
   "  const labels = new Set(issue.labels.map((x) => x.name));",
   "  if (args.includes('--add-label')) for (const label of field('--add-label').split(',')) labels.add(label);",
   "  if (args.includes('--remove-label')) for (const label of field('--remove-label').split(',')) labels.delete(label);",
@@ -385,6 +385,69 @@ try {
   assert.equal(unauthorizedCalls,0);
   assert.equal(readFileSync(filename,'utf8'),validSnapshot);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
+
+  // #2919: Qwen may return a missing or too-short verification_tier reason.
+  // The first draft cannot mutate anything, and only one corrected, trusted
+  // tier tool invocation may add the optional verification label.
+  const preTierSnapshot=readFileSync(filename,'utf8');
+  let tierRepairCalls=0;
+  const tierRepair=await applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({verification_tier:'verification:scoped',tier_reason:'short'}),
+  },'example/repo',{
+    contractRepair:async(previous,error)=>{
+      tierRepairCalls++;
+      assert.equal(error.code,'ISSUE_AUDIT_TIER_PROPOSAL');
+      assert.match(error.message,/invalid Issue verification-tier proposal/);
+      assert.equal(readFileSync(filename,'utf8'),preTierSnapshot,
+        'rejected tier proposal must not change Issue title/body/labels');
+      const prompt=renderIssueAuditContractRepairPrompt(preE2eIssue,previous.result,error.message);
+      assert.match(prompt,/tier_reason MUST also be present/);
+      return {result:JSON.stringify({
+        verification_tier:'verification:scoped',
+        tier_reason:'Scoped deterministic issue audit contract and negative regression fixture.',
+      })};
+    },
+  });
+  assert.equal(tierRepairCalls,1);
+  assert.equal(tierRepair.contract_repair_attempted,true);
+  const afterTier=JSON.parse(readFileSync(filename,'utf8'));
+  const beforeTier=JSON.parse(preTierSnapshot);
+  assert.equal(afterTier.title,beforeTier.title);
+  assert.equal(afterTier.body,beforeTier.body);
+  assert.deepEqual(afterTier.labels.map(x=>x.name).sort(),
+    [...beforeTier.labels.map(x=>x.name),'verification:scoped'].sort());
+
+  // The second invalid reason is terminal and does not publish any labels.
+  writeFileSync(filename,preTierSnapshot);
+  let exhaustedTierCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({verification_tier:'verification:scoped'}),
+  },'example/repo',{
+    contractRepair:async()=>{
+      exhaustedTierCalls++;
+      return {result:JSON.stringify({verification_tier:'verification:scoped',tier_reason:'still short'})};
+    },
+  }),/invalid Issue verification-tier proposal/);
+  assert.equal(exhaustedTierCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),preTierSnapshot);
+
+  // Tier downgrade is an authorization denial, not a format-repair hint.
+  const downgradeTarget={...beforeTier,labels:[
+    ...beforeTier.labels,{name:'verification:full'}]};
+  writeFileSync(filename,JSON.stringify(downgradeTarget));
+  const downgradeSnapshot=readFileSync(filename,'utf8');
+  let downgradeCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({
+      verification_tier:'verification:scoped',
+      tier_reason:'This is a sufficiently long but forbidden downgrade justification.',
+    }),
+  },'example/repo',{
+    contractRepair:async()=>{downgradeCalls++;return {result:'{}'};},
+  }),/downgrade requires separate trusted approval/);
+  assert.equal(downgradeCalls,0);
+  assert.equal(readFileSync(filename,'utf8'),downgradeSnapshot);
+  writeFileSync(filename,preTierSnapshot);
 
   // Reject illegal risk or comment metadata before any body mutation.
   const tierLocked={...preE2eIssue,

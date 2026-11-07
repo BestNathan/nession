@@ -25,5 +25,6 @@ Canonical Issue labels (the only values allowed in a structural repair's "labels
 {{scopeInstructions}}
 
 Risk evaluation: classify verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Do not claim tests passed, remove ai:enabled, change Worker authorization, or downgrade an established higher verification tier.
+If you provide `verification_tier`, you MUST provide `tier_reason`: a specific, evidence-grounded explanation between 20 and 2000 characters (trimmed length at least 20). Do not return an empty or generic reason. An existing higher tier must never be downgraded.
 
 {{riskInstructions}}
