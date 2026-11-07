@@ -184,10 +184,10 @@ function ensurePr(repo, owner, head, base, plan) {
   if (found) return { action: 'reused', number: found.number, url: found.html_url };
   const sync = head === 'main';
   const title = sync
-    ? 'chore(release): sync main into ' + base + ' (#2926)'
-    : 'release: promote ' + head + ' to main (#2926)';
+    ? 'chore(release): sync main into ' + base
+    : 'release: promote ' + head + ' to main';
   const body = [
-    'Refs #2926.',
+    'Staging Convergence automated proposal (source: Release / Staging Convergence).',
     '',
     'Prepared by the trusted two-hour Staging Convergence planner.',
     '',
