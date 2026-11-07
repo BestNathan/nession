@@ -244,6 +244,7 @@ async function main(){
         !positive(Number(claim.inputs.issue_number)))
       fail('selected Worker is not exact-sha Qwen Developer');
     console.log(JSON.stringify({source_sha:claim.inputs.input_sha,
+      task:claim.inputs.task,
       issue:Number(claim.inputs.issue_number),worker_run_id:worker.id}));
     return;
   }
