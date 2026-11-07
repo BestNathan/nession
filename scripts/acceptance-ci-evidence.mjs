@@ -1103,14 +1103,20 @@ export async function workflowRunsForSha(repo, sha, get = githubGet) {
 // with head_sha pinned to that ancestor.
 const ANCESTRY_RUNS_PER_SHA=12, ANCESTRY_RUNS_TOTAL=48;
 export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
-  runsForSha=workflowRunsForSha){
+  runsForSha=workflowRunsForSha,pinnedRunIds=[]){
   if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(targetSha)||
-     !Array.isArray(sourceAncestry))throw Error('invalid ancestry run scope');
+     !Array.isArray(sourceAncestry)||!Array.isArray(pinnedRunIds)||
+     pinnedRunIds.length>16||
+     pinnedRunIds.some(id=>!Number.isSafeInteger(id)||id<1))
+    throw Error('invalid ancestry run scope');
+  // A criterion may name exact Run IDs as evidence. They must survive the
+  // bounded context cap even when their ancestor SHA has newer runs; identity
+  // is still re-read and verified below, never trusted from the Issue.
+  const pinned=new Set(pinnedRunIds);
   const evidence=[];
   for(const entry of sourceAncestry.slice(0,8)){
     if(entry?.is_ancestor!==true||!/^[a-f0-9]{40}$/.test(entry?.ancestor_sha??'')||
        entry.ancestor_sha===targetSha)continue;
-    if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
     const runs=await runsForSha(repo,entry.ancestor_sha);
     if(!Array.isArray(runs))throw Error('invalid ancestry run response');
     // Newest per ancestor, bounded: this reaches an evaluator's context, so it
@@ -1128,8 +1134,13 @@ export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
       seenSuccessPath.add(path);
       if(!newest.some(r=>r?.id===run?.id))newest.push(run);
     }
+    for(const run of sorted){
+      if(pinned.has(Number(run?.id))&&
+         !newest.some(r=>r?.id===run?.id))newest.push(run);
+    }
     for(const run of newest){
-      if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
+      const isPinned=pinned.has(Number(run?.id));
+      if(!isPinned&&evidence.length>=ANCESTRY_RUNS_TOTAL)continue;
       // Identity is re-bound here, never trusted from the ancestor list.
       if(run?.head_sha!==entry.ancestor_sha||
          run?.head_repository?.full_name!==repo||
@@ -1153,6 +1164,23 @@ export function requestedAncestorsFromIssue(body) {
   }
   const unique = [...new Set(hashes)];
   if (unique.length > 8) throw new Error('excessive ancestor proof targets in Issue criteria');
+  return unique;
+}
+
+// Exact Run IDs named on a discovery SC line are lookup hints only. The
+// collector re-reads each Run from GitHub and verifies its own identity, so a
+// forged Issue pin cannot manufacture evidence; it can only keep a real Run
+// from being dropped by the bounded ancestor context.
+export function pinnedAncestryRunIds(body) {
+  const section=String(body??'').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Report|$)/)?.[1]??'';
+  const ids=[];
+  for(const line of section.split('\n')){
+    if(!/^- \[[ x]\] SC-\d+\b/i.test(line)||!/\bancestors?\b/i.test(line))continue;
+    for(const match of line.matchAll(/\brun\b\s+`?([1-9]\d{0,14})`?/gi))
+      ids.push(Number(match[1]));
+  }
+  const unique=[...new Set(ids)];
+  if(unique.length>16)throw new Error('excessive pinned ancestor evidence runs');
   return unique;
 }
 
@@ -1323,10 +1351,13 @@ export function checkGitMergeCommit(workspace,targetSha,expectedHeads=[],runner=
 
 async function collectSourceAncestry(repo, workspace, targetSha) {
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
-  if (!/^\d+$/.test(issueNumber)) return [];
+  if (!/^\d+$/.test(issueNumber)) return {ancestry: [], pinnedRunIds: []};
   const issue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
   const wanted = requestedAncestorsFromIssue(issue.body);
-  return wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha));
+  return {
+    ancestry: wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha)),
+    pinnedRunIds: pinnedAncestryRunIds(issue.body),
+  };
 }
 
 // Optional bounded discovery of *historical implementation* PR gates for
@@ -1759,8 +1790,10 @@ async function collectCommand(workspace, outFile) {
   const selectedRunReceipts = await collectSelectedE2eRunReceipts(repo, sha, directRuns);
   const notRequiredRunReceipts = await collectNotRequiredE2eReceipts(repo, sha, directRuns);
   const fullGateProvisionReceipts = await collectFullGateProvisionReceipts(repo, sha, directRuns);
-  const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
-  const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
+  const ancestryContext = await collectSourceAncestry(repo, workspace, sha);
+  const sourceAncestry = ancestryContext.ancestry;
+  const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha,
+    workflowRunsForSha, ancestryContext.pinnedRunIds);
   const ancestryReceipts = await collectAncestryReceipts(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
@@ -2599,6 +2632,34 @@ async function selfTest() {
   ]);
   assert.ok(ancHidden.some(run=>run.id===800),
     'an older successful ancestor run must survive newer skipped siblings');
+  // An exact Run ID named by the criterion must survive the bounded context
+  // cap even when it is older than both the newest window and its path's
+  // newest success. It is still re-read and identity-checked, not trusted.
+  const ancPinnedRuns=[
+    {id:779,path:'.github/workflows/agent-review.yml',status:'completed',
+      conclusion:'success',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    {id:778,path:'.github/workflows/agent-review.yml',status:'completed',
+      conclusion:'success',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    ...Array.from({length:14},(_,i)=>({
+      id:1000+i,path:'.github/workflows/noise-'+(i%2)+'.yml',status:'completed',
+      conclusion:'skipped',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}})),
+  ];
+  const ancNotPinned=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>ancPinnedRuns);
+  assert.ok(!ancNotPinned.some(run=>run.id===778),
+    'without a pin the older same-path success stays outside the window');
+  const ancPinned=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>ancPinnedRuns,[778]);
+  assert.ok(ancPinned.some(run=>run.id===778),
+    'an explicitly named Run ID must survive the bounded ancestry cap');
+  await assert.rejects(()=>collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>[],['bad']),/invalid ancestry run scope/);
   await assert.rejects(()=>collectAncestryRuns(foreignRepo,[],tgtSha,async()=>[]),
     /invalid ancestry run scope/);
   await assert.rejects(()=>collectAncestryRuns(denialRepo,[],'short',async()=>[]),
@@ -2997,6 +3058,14 @@ async function selfTest() {
   assert.throws(() => requestedAncestorsFromIssue('### Success Criteria\n- [ ] SC-01 ' +
     Array.from({length: 9}, (_, i) => String(i).repeat(40)).join(' ') +
     ' are ancestors'), /excessive/);
+  assert.deepEqual(pinnedAncestryRunIds('### Success Criteria\n- [ ] SC-01 Controller ' +
+    'run `101` attempt `1` and Store Ingest run 102 at ancestor ' + left +
+    '.\n## Acceptance Report\n- [ ] SC-99 fake run 999'), [101, 102]);
+  assert.deepEqual(pinnedAncestryRunIds(
+    '### Success Criteria\n- [ ] SC-01 No ancestor run pins.'), []);
+  assert.throws(() => pinnedAncestryRunIds('### Success Criteria\n- [ ] SC-01 ' +
+    Array.from({length: 17}, (_, i) => 'run ' + (200 + i)).join(' ') +
+    ' at ancestor ' + left), /excessive pinned/);
   assert.deepEqual(normalizeCiEvidence({targetSha:head, sourceAncestry:[
     checkGitAncestor('/tmp', head, left, () => ({status:0})),
   ]}).source_ancestry.map(x => x.is_ancestor), [true]);
