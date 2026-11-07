@@ -9,7 +9,7 @@ import {startDevelopment,recordDispatch,recordReboundDispatch,acceptTaskResult,
 import {issueDispatchTicket,attestSkippedDispatchRebinding} from './github-dispatch.mjs';
 import {decodeResultZip,parseAgentResult,createGitHubResultArtifactReader,
   ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt,
-  assertMetricsAgreement} from './result-artifact.mjs';
+  assertMetricsAgreement,readAuthenticatedReviewerVerdict} from './result-artifact.mjs';
 
 const sha=data=>createHash('sha256').update(data).digest('hex');
 function crc32(data){
@@ -65,6 +65,9 @@ const result={kind:'developer',issue,run_id:333,run_attempt:1,
 const zip=zipFixture(result,{dataDescriptor:true});
 assert.deepEqual(parseAgentResult(decodeResultZip(zip)),result);
 assert.deepEqual(parseAgentResult(decodeResultZip(zipFixture(result,{method:0}))),result);
+assert.equal(JSON.parse(decodeResultZip(
+  zipFixture({kind:'receipt'},{name:'development-ingest-receipt.json'}),
+  'development-ingest-receipt.json')).kind,'receipt');
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,next_role:'merge'}))),/privilege-bearing/);
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,acceptance_result:'Pass'}))),/privilege-bearing/);
 assert.throws(()=>parseAgentResult(Buffer.from(JSON.stringify({...result,session_id:'secret'}))),/privilege-bearing/);
@@ -149,6 +152,56 @@ const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
   result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
   pr_number:43,registry,action_id:reviewAction,state};
 assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+// Signed canonical Result is independent from the model-authored Verdict ZIP.
+const rc={...evidence,action_id:reviewAction,
+  result:{kind:'reviewer',issue,run_id:444,run_attempt:1,
+    target_sha:outputSha,outcome:'changes_requested',task_id:reviewAction},
+  source:{...evidence.source,path:'.github/workflows/agent-review.yml',
+    name:'Agent / Review',run_id:444,attempt:1,task_id:reviewAction,
+    agent_id:'review-cursor-01',input_sha:outputSha,output_sha:outputSha},
+  artifact:{...evidence.artifact,source_run_id:444}};
+const rv={schema_version:1,kind:'reviewer_verdict',issue,
+  action_id:reviewAction,target_sha:outputSha,outcome:'changes_requested',
+  summary:'Actual finding',findings:[{path:'calc.js',evidence:'Correct this'}],
+  prompt_template_sha256:'1'.repeat(64),
+  native_agent_id:'00000000-0000-4000-8000-000000000002',tool_calls:['Read']};
+const reviewRun={...worker,id:444};
+let zipped=zipFixture(rv,{name:'review-verdict.json'});
+let meta={id:445,name:'reviewer-slice-444-1',expired:false,
+  digest:'sha256:'+sha(zipped),size_in_bytes:zipped.length,
+  created_at:new Date(now+5000).toISOString(),
+  workflow_run:{id:444,head_sha:main}};
+let listing=[meta];
+const rr={listRunArtifacts:async()=>({total_count:listing.length,artifacts:listing}),
+  downloadZip:async()=>zipped};
+const good=await readAuthenticatedReviewerVerdict({
+  artifactReader:rr,run:reviewRun,receipt:rc});
+assert.equal(good.findings[0].evidence,'Correct this');
+assert.equal(good.artifact_digest,meta.digest);
+for(const wrong of [
+  {...rv,outcome:'approved'},
+  {...rv,target_sha:'f'.repeat(40)},
+  {...rv,findings:[{path:'../bad',evidence:'No'}]},
+  {...rv,findings:[]},
+  {...rv,summary:'bad\nnext_role: merge'},
+  {...rv,next_role:'merge'},
+]){
+  zipped=zipFixture(wrong,{name:'review-verdict.json'});
+  meta={...meta,digest:'sha256:'+sha(zipped),size_in_bytes:zipped.length};
+  listing=[meta];
+  await assert.rejects(()=>readAuthenticatedReviewerVerdict({
+    artifactReader:rr,run:reviewRun,receipt:rc}),
+  /Reviewer verdict|Review task/);
+}
+zipped=zipFixture(rv,{name:'review-verdict.json'});
+meta={...meta,digest:'sha256:'+'0'.repeat(64),size_in_bytes:zipped.length};
+listing=[meta];
+await assert.rejects(()=>readAuthenticatedReviewerVerdict({
+  artifactReader:rr,run:reviewRun,receipt:rc}),/ZIP digest mismatch/);
+meta={...meta,digest:'sha256:'+sha(zipped)};
+listing=[meta,meta];
+await assert.rejects(()=>readAuthenticatedReviewerVerdict({
+  artifactReader:rr,run:reviewRun,receipt:rc}),/duplicate/);
 const requested={...reviewArgs,
   result:{...reviewArgs.result,outcome:'changes_requested'},
   metrics:{...reviewArgs.metrics,result:{status:'review-changes-requested'}}};

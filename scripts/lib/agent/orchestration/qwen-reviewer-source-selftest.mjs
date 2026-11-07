@@ -37,7 +37,8 @@ const intent=validateQwenPublisherIntent({
   schema_version:1,kind:'trusted_qwen_publisher_write_ahead_intent',
   repository:REPO,issue:ISSUE,action_id:developerAction.id,
   worker_run_id:301,worker_run_attempt:1,worker_sha:'e'.repeat(40),
-  source_sha:A,checkpoint_version:1,checkpoint_commit_sha:C,
+  source_sha:A,worker_source_sha:A,
+  checkpoint_version:1,checkpoint_commit_sha:C,
   checkpoint_ciphertext_sha256:HASH,patch_sha256:HASH,
   file_manifest_sha256:HASH,file_count:1,target_main_sha:A,
   branch:'agent/'+ISSUE+'/qwen-'+developerAction.id.slice(0,16),
@@ -102,6 +103,6 @@ try{
     run:parts=>{if(parts[0]==='fetch')throw Error('missing');return B;}}),
     /published Qwen PR source ref unavailable or changed/);
   fs.writeFileSync(file,JSON.stringify({...intent,publisher_run_id:402}));
-  assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen publication Intent/);
+  assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen review publication Intent/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen signed Reviewer dispatch: one immutable Store branch, actual SHA fetch, two ancestry checks, untrusted source and replay negatives pass');

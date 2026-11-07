@@ -72,6 +72,19 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
     next.phase = 'review';
     next.target_sha = event.target_sha;
     actions = [{ type: 'dispatch', role: 'reviewer', task: 'review', sha: event.target_sha }];
+  } else if (event.kind === 'publisher' && event.outcome === 'published' &&
+      current.phase === 'repair' && current.target_sha != null &&
+      current.target_sha !== event.target_sha &&
+      // A repair publication must follow an independently authenticated
+      // changes_requested outcome for the exact reviewed SHA. The Store
+      // facade additionally verifies the signed Repair Action and PR A→B.
+      current.transitions.at(-1)?.kind === 'reviewer' &&
+      current.transitions.at(-1)?.outcome === 'changes_requested' &&
+      current.transitions.at(-1)?.target_sha === current.target_sha &&
+      event.reviewer_agent_id == null) {
+    next.phase = 'review';
+    next.target_sha = event.target_sha;
+    actions = [{ type: 'dispatch', role: 'reviewer', task: 'review', sha: event.target_sha }];
   } else if (event.kind === 'reviewer' && current.phase === 'review' && current.target_sha === event.target_sha) {
     if (event.outcome === 'changes_requested') {
       next.repair_attempts++;

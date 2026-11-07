@@ -41,7 +41,13 @@ assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
 assert.match(claude.text, /Allowed top-level JSON keys only: title, body, labels, comment, verification_tier, tier_reason/);
-assert.match(claude.text, /existing E2E Verification, E2E Report, Acceptance Plan and Acceptance Report content exactly unchanged/);
+assert.match(claude.text, /If E2E Verification or E2E Report is malformed, repair its FORMAT/);
+assert.match(claude.text, /Resolve EVERY deterministic Issue Contract finding/);
+assert.match(claude.text, /For `### Knowledge Impact`, normalize to exactly five plain Markdown list fields/);
+assert.match(claude.text, /Decision MUST be exactly one of None, Read, Create, Update, Supersede/);
+assert.match(cursor.text, /Resolve EVERY deterministic Issue Contract finding/);
+assert.match(claude.text, /never delete an E2E section, invent or change a completed Pass\/Fail\/Error receipt/);
+assert.match(cursor.text, /Invalid E2E sections are repairable/);
 assert.match(claude.text, /Exactly one kind: bug, requirement/);
 assert.match(claude.text, /One or more areas: terminal, web, ui, ux/);
 assert.match(claude.text, /Never include verification:\*/);

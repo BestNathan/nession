@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ── Regression tests for pre-push diff-base resolution ────────────────────────
 #
-# Exercises scripts/lib/git-diff-base.sh — the logic .githooks/pre-push uses to
+# Exercises scripts/lib/git-diff-base.sh — the logic gates/route uses to
 # decide what a new branch's own delta is. Each test builds a throwaway repo with
 # a specific branch topology, resolves the base, and asserts both the chosen
 # source (creation_point / staging / none) and the resulting file diff.
@@ -11,6 +11,12 @@
 #   ./scripts/test-pre-push-diff-base.sh <regex>    # run matching tests
 #   ./scripts/test-pre-push-diff-base.sh --list     # list test names
 set -uo pipefail
+
+# Git hooks export GIT_DIR/GIT_WORK_TREE for the pushing repository. These
+# tests create throwaway repositories with `git -C`; ambient hook variables
+# would redirect those commands into the caller's real checkout (and even
+# commit/switch its branches), so clear them before any repository setup.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/git-diff-base.sh

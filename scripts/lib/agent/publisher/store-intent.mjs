@@ -28,11 +28,17 @@ function git(dir,...args){
   }).trim();}
   catch(e){reject('Git '+args[0]+' failed ('+(e.status??'unknown')+')');}
 }
-function json(root,file){
+const MAX_RECORD_BYTES=8192;
+// The committed native checkpoint embeds an encrypted Session bounded by the
+// Provider's 16 MiB plaintext budget, so its base64 envelope is intentionally
+// larger than a small publication record. Keep the tighter default for every
+// other Store JSON read.
+const MAX_CHECKPOINT_BYTES=32*1024*1024;
+function json(root,file,max=MAX_RECORD_BYTES){
   const full=path.join(root,file);
   if(!fs.existsSync(full))return null;
   const st=fs.lstatSync(full);
-  if(!st.isFile()||st.isSymbolicLink()||st.size>8192)
+  if(!st.isFile()||st.isSymbolicLink()||st.size>max)
     reject('untrusted immutable publication record');
   try{return JSON.parse(fs.readFileSync(full,'utf8'));}
   catch{reject('invalid immutable publication JSON');}
@@ -152,6 +158,7 @@ export function commitControlledPublisherIntent({
 // durable no-redelivery fence. Never retry a GitHub PR POST after ambiguity.
 const QWEN_INTENT_FIELDS=['schema_version','kind','repository','issue',
   'action_id','worker_run_id','worker_run_attempt','worker_sha','source_sha',
+  'worker_source_sha',
   'checkpoint_version','checkpoint_commit_sha','checkpoint_ciphertext_sha256',
   'patch_sha256','file_manifest_sha256','file_count','target_main_sha',
   'branch','publisher_run_id','publication'];
@@ -165,6 +172,7 @@ export function planQwenPublisherIntent({preflight,target_main_sha,publisher_run
       !positive(e.issue)||!HEX.test(e.action_id??'')||
       !positive(e.worker_run_id)||e.worker_run_attempt!==1||
       !SHA.test(e.worker_sha??'')||!SHA.test(e.source_sha??'')||
+      !SHA.test(e.worker_source_sha??'')||
       !positive(e.checkpoint_version)||
       !SHA.test(e.checkpoint_commit_sha??'')||
       !HEX.test(e.ciphertext_sha256??'')||
@@ -190,6 +198,7 @@ export function planQwenPublisherIntent({preflight,target_main_sha,publisher_run
     repository:REPO,issue:e.issue,action_id:e.action_id,
     worker_run_id:e.worker_run_id,worker_run_attempt:1,
     worker_sha:e.worker_sha,source_sha:e.source_sha,
+    worker_source_sha:e.worker_source_sha,
     checkpoint_version:e.checkpoint_version,
     checkpoint_commit_sha:e.checkpoint_commit_sha,
     checkpoint_ciphertext_sha256:e.ciphertext_sha256,
@@ -210,7 +219,8 @@ export function validateQwenPublisherIntent(x){
       x.repository!==REPO||!positive(x.issue)||
       !HEX.test(x.action_id??'')||!positive(x.worker_run_id)||
       x.worker_run_attempt!==1||!SHA.test(x.worker_sha??'')||
-      !SHA.test(x.source_sha??'')||!positive(x.checkpoint_version)||
+      !SHA.test(x.source_sha??'')||!SHA.test(x.worker_source_sha??'')||
+      !positive(x.checkpoint_version)||
       !SHA.test(x.checkpoint_commit_sha??'')||
       !HEX.test(x.checkpoint_ciphertext_sha256??'')||
       !HEX.test(x.patch_sha256??'')||!HEX.test(x.file_manifest_sha256??'')||
@@ -235,15 +245,15 @@ function confirmQwenSourceInStore(root,record){
       item?.length!==1||item[0].status!=='dispatched'||
       item[0].task?.role!=='developer'||item[0].task?.task!=='implement'||
       item[0].task?.agent_id!=='dev-qwen-01'||
-      item[0].task?.sha!==record.source_sha||
+      item[0].task?.sha!==record.worker_source_sha||
       item[0].receipt?.status!=='verified'||
       item[0].receipt.source_run_id!==record.worker_run_id)
     reject('Qwen Publisher missing exact authenticated Store Outbox');
   const prefix='roles/developer/dev-qwen-01/issues/'+record.issue;
   const saved=json(root,prefix+'/runs/'+record.worker_run_id+'-1.json');
   const cp=prefix+'/checkpoints/'+String(record.checkpoint_version).padStart(8,'0')+'.json';
-  const checkpoint=json(root,cp);
-  if(saved?.source_sha!==record.source_sha||
+  const checkpoint=json(root,cp,MAX_CHECKPOINT_BYTES);
+  if(saved?.source_sha!==record.worker_source_sha||
       saved.workflow_sha!==record.worker_sha||
       saved.version!==record.checkpoint_version||
       saved.ciphertext_sha256!==record.checkpoint_ciphertext_sha256||
@@ -251,7 +261,7 @@ function confirmQwenSourceInStore(root,record){
       checkpoint?.version!==record.checkpoint_version||
       checkpoint.ciphertext_sha256!==record.checkpoint_ciphertext_sha256||
       checkpoint.metadata?.provider!=='claude-code'||
-      checkpoint.metadata.source_sha!==record.source_sha||
+      checkpoint.metadata.source_sha!==record.worker_source_sha||
       git(root,'log','-1','--format=%H','HEAD','--',cp)!==
         record.checkpoint_commit_sha)
     reject('Qwen Publisher does not own the immutable committed native Run');

@@ -23,6 +23,9 @@ on:
       - '.cargo/**'
       - 'justfile'
   workflow_dispatch:
+  # Representative infrastructure smoke remains on main, not every PR.
+  schedule:
+    - cron: '23 5 * * 1'
 
 concurrency:
   group: acceptance-case-smoke-${{ github.event.pull_request.number || github.ref_name }}
@@ -30,6 +33,7 @@ concurrency:
 
 jobs:
   case-smoke:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
@@ -49,9 +53,6 @@ jobs:
           path: trusted
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with: { cache-workspaces: ".", cache-all-crates: "true" }
-
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -63,45 +64,21 @@ jobs:
       # Share the content-addressed Chromium binary cache with E2E / Tests
       # and E2E / Scenario Smoke. OS libraries are checked by a real launch
       # below and are deliberately NOT misrepresented as cached (#2525).
-      - uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
-
-      - run: sudo apt-get update && sudo apt-get install -y tmux
-
       - name: Validate canonical Case contracts and generic selection
         run: |
           node scripts/acceptance-cases-selftest.mjs
           node scripts/acceptance-case-smoke-select.mjs self-test
           node scripts/select-acceptance-cases.mjs self-test
 
-      - name: Build runtime
-        run: |
-          cd web
-          npm ci
-          npm run build
-          cd ..
-          cargo build -p nession-server -p nession-agent
-
-      - name: Install browser Case runtime
-        run: |
-          cd e2e
-          npm ci
-          npx playwright install chromium
-          # The pinned Ubuntu runner already provides launch-time libraries.
-          # Verify them by actually launching Chromium; missing dependencies
-          # fail closed instead of silently passing a cache hit. Do not run
-          # Playwright's --with-deps apt installer on every warm job (#2525).
-          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
-
-      - name: Select representative Case verifier classes (untrusted source, no token)
+      - name: Select representative Case verifier classes (main/scheduled only)
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           node scripts/acceptance-case-smoke-select.mjs select \
             e2e/acceptance/cases "${RUNNER_TEMP}/representative-cases.json"
 
       - name: Select PR-linked Case-method proofs (trusted main policy)
+        id: select
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -111,6 +88,9 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           mkdir -p "${RUNNER_TEMP}/acceptance-smoke-contracts" "${RUNNER_TEMP}/acceptance-smoke-results"
           echo '[]' > "${RUNNER_TEMP}/linked-cases.json"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            echo '[]' > "${RUNNER_TEMP}/representative-cases.json"
+          fi
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             issue_numbers="$(node trusted/scripts/requirement-acceptance.mjs discover-pre-merge)"
             jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
@@ -130,11 +110,60 @@ jobs:
             "${RUNNER_TEMP}/representative-cases.json" \
             "${RUNNER_TEMP}/linked-cases.json" \
             > "${RUNNER_TEMP}/acceptance-smoke-plan.json"
-          jq -e 'length >= 2' "${RUNNER_TEMP}/acceptance-smoke-plan.json" > /dev/null
+          jq -e 'type == "array"' "${RUNNER_TEMP}/acceptance-smoke-plan.json" > /dev/null
           cp "${RUNNER_TEMP}/acceptance-smoke-plan.json" \
             "${RUNNER_TEMP}/acceptance-smoke-results/selection.json"
-          echo "Selected generic Case Smoke plan:"
+          count="$(jq 'length' "${RUNNER_TEMP}/acceptance-smoke-plan.json")"
+          if [[ "$count" -gt 0 ]]; then
+            echo "has_cases=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_cases=false" >> "$GITHUB_OUTPUT"
+            echo "Not Required: no eligible source-aligned Cases"
+          fi
+          if jq -e 'any(.[]; .needs_browser == true)' "${RUNNER_TEMP}/acceptance-smoke-plan.json" > /dev/null; then
+            echo "needs_browser=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_browser=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Selected Case Smoke plan (${count} Cases):"
           jq . "${RUNNER_TEMP}/acceptance-smoke-plan.json"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: steps.select.outputs.has_cases == 'true'
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+        if: steps.select.outputs.has_cases == 'true'
+
+      - name: Build runtime
+        if: steps.select.outputs.has_cases == 'true'
+        run: |
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          cargo build -p nession-server -p nession-agent
+
+      - uses: actions/cache@v4
+        if: steps.select.outputs.needs_browser == 'true'
+        with:
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install selected Case runner dependencies
+        if: steps.select.outputs.has_cases == 'true'
+        run: cd e2e && npm ci
+
+      - name: Install browser Case runtime
+        if: steps.select.outputs.needs_browser == 'true'
+        run: |
+          cd e2e
+          npx playwright install chromium
+          # The pinned Ubuntu runner already provides launch-time libraries.
+          # Verify them by actually launching Chromium; missing dependencies
+          # fail closed instead of silently passing a cache hit. Do not run
+          # Playwright's --with-deps apt installer on every warm job (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
 
       # #1866 Phase B: one job-scoped invocation instead of one
       # `./e2e/run acceptance` per Case. Every Case still emits its own record
@@ -142,6 +171,7 @@ jobs:
       # job-owned runtime. The batch receipt is written to this job's log so
       # Acceptance evaluators can observe the reuse without reading artifacts.
       - name: Run selected source-aligned Cases through one job-scoped batch
+        if: steps.select.outputs.has_cases == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
