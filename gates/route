@@ -12,9 +12,11 @@ esac
 
 changed=""
 broad=false
+# Disable Git rename detection: both old and new paths must be routed.
+# Moving a rule-owned file out of its tree must not suppress its Gate.
 
 if [ "$stage" = pre-commit ]; then
-  if ! changed="$(git diff --cached --name-only)"; then
+  if ! changed="$(git diff --cached --name-only --no-renames)"; then
     echo "→ pre-commit: unable to inspect staged files; refusing to skip checks" >&2
     exit 2
   fi
@@ -36,7 +38,7 @@ else
         continue
       fi
     fi
-    if ! delta="$(git diff --name-only "$remote_sha" "$local_sha")"; then
+    if ! delta="$(git diff --name-only --no-renames "$remote_sha" "$local_sha")"; then
       echo "→ pre-push: unprovable Git diff; checking full pre-push Gate suite" >&2
       broad=true
       continue
@@ -56,13 +58,17 @@ matches() {
 applies() {
   case "$1" in
     dev-workspace-commit|dev-workspace-push) return 0 ;;
-    rust-format) matches '\.rs$' ;;
-    rust-clippy|rust-test-unit)
+    rust-format) matches '(\.rs$|(^|/)\.?rustfmt\.toml$)' ;;
+    rust-clippy)
       matches '(\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^clippy\.toml$|^gates/checks/rust-)' ;;
+    rust-test-unit)
+      matches '(\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^clippy\.toml$|^gates/checks/rust-|^scripts/filtered-test\.sh$)' ;;
     web-eslint)
       matches '(^web/.*\.(ts|tsx|js|jsx)$|^web/eslint|^gates/checks/web-eslint\.sh$)' ;;
-    web-typecheck|web-test-unit)
+    web-typecheck)
       matches '(^web/.*\.(ts|tsx|js|jsx)$|^web/(package(-lock)?\.json|tsconfig[^/]*\.json|vite\.config\.ts)$|^gates/checks/web-)' ;;
+    web-test-unit)
+      matches '(^web/.*\.(ts|tsx|js|jsx)$|^web/(package(-lock)?\.json|tsconfig[^/]*\.json|vite\.config\.ts)$|^gates/checks/web-|^scripts/filtered-web-test\.sh$)' ;;
     test-isolation)
       matches '(\.rs$|^scripts/check-test-isolation|^gates/checks/test-isolation)' ;;
     test-isolation-selftest)
