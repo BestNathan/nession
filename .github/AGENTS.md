@@ -24,7 +24,7 @@ A workflow may:
 
 A workflow must not become a second implementation of protocol, design, acceptance, coverage, or other domain rules.
 
-PR Quality scope is selected by `scripts/ci/quality-scope.mjs`. It must conservatively handle unknown diffs. `tooling-check` and `web-tests` run independently when applicable; the stable required `web-check` aggregates their **exact-head success** (including missing/failed job rejection). Main-push Web dist is emitted only after that aggregate succeeds. Individual Gate identities and full test/coverage rules remain in canonical Gates.
+PR Quality scope is selected by `scripts/ci/quality-scope.mjs`. It must conservatively handle unknown diffs. `tooling-check` and `web-tests` run independently when applicable; the stable required `web-check` aggregates their **exact-head success** (including missing/failed job rejection). Main-push Web dist is emitted only after that aggregate succeeds. The trusted `scripts/ci/web-dist-source-attestation.mjs` consumer verifies the separate `scope`, `web-check`, `web-tests`, `tooling-check` and `web-dist` jobs against the exact producer run/attempt/SHA and required successful steps; this is artifact provenance, not an Acceptance Pass. Individual Gate identities and full test/coverage rules remain in canonical Gates.
 
 `Acceptance / Case Smoke` selects Issue-owned PR Cases using trusted Main code **before** Rust/Web/Chromium provisioning. A proven no-Case PR records Not Required without a full-stack build. Representative generic infrastructure Cases run on its Main weekly/manual lane, not on every PR. Trust and exact-SHA Case selection belong to `scripts/select-acceptance-cases.mjs`.
 

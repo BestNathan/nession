@@ -237,7 +237,8 @@ jobs:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - run: cd web && npm ci && npm run build
+      - name: Build verified main Web dist
+        run: cd web && npm ci && npm run build
       - name: Pack exact-SHA Web dist
         run: node scripts/ci/web-build-artifact.mjs pack --root . --dest "$RUNNER_TEMP/nession-web-dist"
       - name: Publish exact-SHA Web dist transport
