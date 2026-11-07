@@ -83,7 +83,8 @@ export function assertQwenPublisherRunAuthority(env,event,ingester,receipt){
       event.workflow_run?.head_sha!==ingester.head_sha||
       event.workflow_run?.conclusion!=='success'||
       ingester.status!=='completed'||ingester.conclusion!=='success'||
-      ingester.event!=='workflow_run'||ingester.run_attempt!==1||
+      !['workflow_run','issue_comment'].includes(ingester.event)||
+      ingester.run_attempt!==1||
       ingester.path!=='.github/workflows/store-agent-development-ingest.yml'||
       ingester.name!=='Store / Agent Development Ingest'||
       ingester.head_branch!=='main'||
