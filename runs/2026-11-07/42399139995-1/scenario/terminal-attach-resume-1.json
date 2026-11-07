@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "405eed2c3987141d7ec389f9bcffea9aa6ea7ad6",
+  "scenario_revision": "405eed2c3987141d7ec389f9bcffea9aa6ea7ad6",
+  "run_id": 42399139995,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-07T18:04:19.515Z",
+  "finished_at": "2026-11-07T18:04:29.120Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-07T18:04:28.261Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "6f8f6571e20e39c909eb3fa82389233cc6d70014c7ce93bd4b7a77301ba14f2a",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-07T18:04:28.536Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "6f8f6571e20e39c909eb3fa82389233cc6d70014c7ce93bd4b7a77301ba14f2a",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-07T18:04:29.048Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "6f8f6571e20e39c909eb3fa82389233cc6d70014c7ce93bd4b7a77301ba14f2a",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42399139995,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2879-terminal-memory-reclamation",
+    "target_sha": "405eed2c3987141d7ec389f9bcffea9aa6ea7ad6",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42399139995",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ab99f2b23616bdd92afe394a9c0cbde4eee4fa8ae5a8204c77c20217fd76a840"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-42399139995-1",
+    "sha256": "ab99f2b23616bdd92afe394a9c0cbde4eee4fa8ae5a8204c77c20217fd76a840",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42399139995",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "ac12d7e235962d5893f8c7e49fb4948e3702c0d7eadc905713325aeecd222816"
+}

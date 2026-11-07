@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42399139995,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2879-terminal-memory-reclamation",
+    "target_sha": "405eed2c3987141d7ec389f9bcffea9aa6ea7ad6",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42399139995",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "12b2ea4bc076a09223fae79f6b8a7ecfcf00a4eeb30390bc7523e6979858a2b3"
+  },
+  "record": "runs/2026-11-07/42399139995-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "424499e4b97a608b3f6b326182b70a724464cc49e66a5c4c0a793826eb37e3fc"
+}
