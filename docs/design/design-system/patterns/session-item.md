@@ -145,8 +145,9 @@ The App's floor belongs to the row's **controls**, not to the row's box. The row
 
 Secondary actions and technical detail should not occupy permanent row width.
 Web rows reveal one anchored `···` trigger on hover/focus/selection; narrow Web
-keeps the same trigger visible with a 44px touch target. The menu is a floating
-overlay, separate from row selection, and contains:
+and every App row keep the same trigger visible with a 44px touch target. Both
+experiences expose the same four task-level actions and the same floating
+overlay, separate from row selection:
 
 ```text
 Session details     read the target Session without selecting it
@@ -156,11 +157,14 @@ Attach settings     the existing configure dialog
 Kill session        destructive, separated from the three non-destructive actions
 ```
 
-The menu dismisses on Escape, outside click or list scroll. Viewing details
-never moves the current Session. Editing changes only the display alias, not
-the tmux name or `session_id`; an offline Agent keeps details readable while
-editing is explicitly unavailable. Kill reuses the existing typed exact-tmux-name
-confirmation.
+The menu dismisses on Escape, outside click, or scroll of the **owning list**
+(the Web sidebar viewport or the App Sessions layer's own viewport — never a
+single global container). Viewing details never moves the current Session, and
+the App keeps the Terminal mounted underneath the Sessions layer while details
+or settings are open. Editing changes only the display alias, not the tmux name
+or `session_id`; an offline Agent keeps details readable while editing is
+explicitly unavailable. Kill reuses the existing typed exact-tmux-name
+confirmation, where the display title is not accepted.
 
 ## Tokens
 

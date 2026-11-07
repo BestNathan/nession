@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionItem } from '@/product/session/patterns/SessionItem';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -342,6 +342,37 @@ describe('SessionItem row actions overflow', () => {
     );
     expect(onKill).toHaveBeenCalledWith(session);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('dismisses on scroll of the list that owns the row, not a foreign list', async () => {
+    render(
+      <div>
+        {/* A different experience's scroll owner: it must not dismiss this row. */}
+        <div data-testid="foreign-viewport" data-slot="scroll-area-viewport" />
+        <div data-testid="app-sessions-list">
+          <div data-testid="app-viewport" data-slot="scroll-area-viewport">
+            <SessionItem
+              session={session}
+              domain={domain}
+              agentLabel="devbox-01"
+              selected={false}
+              onSelect={vi.fn()}
+              onKill={vi.fn()}
+            />
+          </div>
+        </div>
+      </div>,
+    );
+    await openActions();
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+
+    fireEvent.scroll(screen.getByTestId('foreign-viewport'));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.scroll(screen.getByTestId('app-viewport'));
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
   });
 
   it('opens from the keyboard and activates an item with it', async () => {
