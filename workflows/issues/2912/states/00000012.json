@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "issue": 2912,
+  "version": 12,
+  "phase": "review",
+  "target_sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+  "repair_attempts": 1,
+  "transitions": [
+    {
+      "key": "712fd9408c5dcaeab7aa0576381611bba7bad148fda64626ac51dca6deaf8d63",
+      "kind": "publisher",
+      "run_id": 42371295564,
+      "attempt": 1,
+      "target_sha": "968fb5294499fbf5da70b27652deb8a24512bb47",
+      "outcome": "published"
+    },
+    {
+      "key": "1e71874a128adf8f894da844333ad8732478f3da016daa31453ac3a5e14540ef",
+      "kind": "reviewer",
+      "run_id": 42371708221,
+      "attempt": 1,
+      "target_sha": "968fb5294499fbf5da70b27652deb8a24512bb47",
+      "outcome": "changes_requested"
+    },
+    {
+      "key": "7fb0509eeb0b12ecd5c93b7f07034c5b572f86d76e4bcdcc5dd63bc20ee6607d",
+      "kind": "publisher",
+      "run_id": 42377657787,
+      "attempt": 1,
+      "target_sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+      "outcome": "published"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "e58dbe6748fb578b00e8483d53e957b3b40df5013781bb9f8c7b48f70ca3555c",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "e58dbe6748fb578b00e8483d53e957b3b40df5013781bb9f8c7b48f70ca3555c",
+        "issuer_run_id": 42380401280,
+        "ticket_sha256": "2f29a54e66c09c32a4d161686a141abf8df02d26c097ce9a5bf799747c13ae72"
+      }
+    }
+  ]
+}
