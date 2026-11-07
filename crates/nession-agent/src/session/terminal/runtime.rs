@@ -533,3 +533,4 @@ pub(crate) fn accept_output_ack(
         _ => Err("invalid_output_ack"),
     }
 }
+// CI-only mixed terminal scope benchmark; disposable PR, never merged.

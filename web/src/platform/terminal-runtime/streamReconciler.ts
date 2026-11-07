@@ -863,3 +863,4 @@ function lowestPendingSeq(pending: Map<number, PendingFrame>): number {
   }
   return lowest;
 }
+// CI-only mixed terminal scope benchmark; disposable PR, never merged.
