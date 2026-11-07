@@ -154,6 +154,34 @@ pub fn resolve_path(explicit: Option<String>, component: Component) -> String {
     resolved.unwrap_or(fallback).to_string_lossy().into_owned()
 }
 
+/// What a daemon state file records about the configuration it is running.
+///
+/// The process itself writes this, so `status` can distinguish "this file was
+/// loaded" from "the documented defaults are in effect" without reading a
+/// default file that may not have been loaded (#2869 SC-04).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigRecord {
+    /// The selected config file was read at startup.
+    File(String),
+    /// No config file existed at the implicit default path; built-in defaults
+    /// are in effect.
+    Defaults,
+    /// The record predates this field, or the process did not write one. The
+    /// CLI cannot claim which configuration is live.
+    Unknown,
+}
+
+impl ConfigRecord {
+    /// Record the source the loader actually used.
+    pub fn from_loaded(path: &Path, from_file: bool) -> Self {
+        if from_file {
+            ConfigRecord::File(path.to_string_lossy().into_owned())
+        } else {
+            ConfigRecord::Defaults
+        }
+    }
+}
+
 /// What a daemon state file records about the process that wrote it.
 ///
 /// A bare pid is **not** an identity (#1016): operating systems reuse PIDs, so
@@ -173,11 +201,11 @@ pub struct ProcessIdentity {
     /// When the process started, in seconds since the Unix epoch.
     pub started_at: u64,
     pub kind: Component,
-    /// The `--config` file the process actually loaded, recorded by the
-    /// process itself. `None` means it started without an explicit selection
-    /// (or predates this record); `status` must then say the running source is
-    /// unknown instead of presenting a default file as live state.
-    pub config_path: Option<String>,
+    /// The configuration the process is actually running, recorded by the
+    /// process itself. `Unknown` means it started without recording one (or
+    /// predates the record); `status` must then say the source is unknown
+    /// instead of presenting a default file as live state.
+    pub config_source: ConfigRecord,
 }
 
 impl ProcessIdentity {
@@ -191,7 +219,7 @@ impl ProcessIdentity {
             pid,
             started_at,
             kind,
-            config_path: None,
+            config_source: ConfigRecord::Unknown,
         })
     }
 }
@@ -230,21 +258,26 @@ fn start_time_of(pid: u32) -> Option<u64> {
 pub fn write_identity(
     path: &str,
     kind: Component,
-    config_path: Option<&Path>,
+    config_source: ConfigRecord,
 ) -> Result<ProcessIdentity> {
     let mut identity = ProcessIdentity::of_current_process(kind)?;
-    identity.config_path = config_path.map(|path| path.to_string_lossy().into_owned());
-    let config_line = identity
-        .config_path
-        .as_ref()
-        .map(|path| format!("config_path={path}\n"))
-        .unwrap_or_default();
+    let config_lines = match &config_source {
+        ConfigRecord::File(config_path) => {
+            if config_path.contains(['\n', '\r']) {
+                anyhow::bail!("refusing to record a config path containing a newline");
+            }
+            format!("config_source=file\nconfig_path={config_path}\n")
+        }
+        ConfigRecord::Defaults => "config_source=defaults\n".to_string(),
+        ConfigRecord::Unknown => String::new(),
+    };
+    identity.config_source = config_source;
     let body = format!(
         "pid={}\nstarted_at={}\nkind={}\n{}",
         identity.pid,
         identity.started_at,
         identity.kind.as_str(),
-        config_line
+        config_lines
     );
     fs::write(path, body).with_context(|| format!("Failed to write state file: {path}"))?;
     Ok(identity)
@@ -258,6 +291,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     let mut pid = None;
     let mut started_at = None;
     let mut kind = None;
+    let mut source_kind = None;
     let mut config_path = None;
     for line in content.lines() {
         let Some((key, value)) = line.split_once('=') else {
@@ -267,17 +301,29 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             "pid" => pid = value.trim().parse::<u32>().ok(),
             "started_at" => started_at = value.trim().parse::<u64>().ok(),
             "kind" => kind = Component::parse(value.trim()),
+            "config_source" => source_kind = Some(value.trim().to_string()),
             "config_path" => config_path = Some(value.trim().to_string()),
             _ => {}
         }
     }
+
+    // A legacy `config_path=` line without the source marker is not evidence:
+    // the old writer recorded the *selected* path even when it did not exist
+    // and defaults were used, which is exactly the ambiguity #2869 fixes.
+    let config_source = match source_kind.as_deref() {
+        Some("file") => config_path
+            .map(ConfigRecord::File)
+            .unwrap_or(ConfigRecord::Unknown),
+        Some("defaults") => ConfigRecord::Defaults,
+        _ => ConfigRecord::Unknown,
+    };
 
     match (pid, started_at, kind) {
         (Some(pid), Some(started_at), Some(kind)) => Ok(ProcessIdentity {
             pid,
             started_at,
             kind,
-            config_path,
+            config_source,
         }),
         // A file the old format wrote — a bare pid — reads as a missing record
         // rather than as an identity, because a bare pid is what this replaces.
@@ -407,7 +453,7 @@ mod tests {
         let path = dir.path().join("agent.pid");
         let path = path.to_str().unwrap();
 
-        let written = write_identity(path, Component::Agent, None).unwrap();
+        let written = write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
         let read = read_identity(path).unwrap();
 
         assert_eq!(read, written);
@@ -424,12 +470,55 @@ mod tests {
         write_identity(
             path,
             Component::Agent,
-            Some(std::path::Path::new("/custom/agent.toml")),
+            ConfigRecord::File("/custom/agent.toml".to_string()),
         )
         .unwrap();
         let read = read_identity(path).unwrap();
 
-        assert_eq!(read.config_path.as_deref(), Some("/custom/agent.toml"));
+        assert_eq!(
+            read.config_source,
+            ConfigRecord::File("/custom/agent.toml".to_string())
+        );
+    }
+
+    /// A daemon started from the documented defaults records that fact, so
+    /// `status` does not call the absent default file a loaded source.
+    #[test]
+    fn an_identity_can_record_built_in_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+
+        write_identity(path, Component::Agent, ConfigRecord::Defaults).unwrap();
+
+        assert_eq!(
+            read_identity(path).unwrap().config_source,
+            ConfigRecord::Defaults
+        );
+    }
+
+    /// The old writer recorded `config_path` even when the file did not exist
+    /// and defaults were used, so a legacy line is not evidence of a loaded
+    /// file; it must read as unknown (#2869 SC-04).
+    #[test]
+    fn a_legacy_config_path_without_a_source_is_unknown() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+        let current = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "pid={}\nstarted_at={}\nkind=agent\nconfig_path=/claimed/agent.toml\n",
+                current.pid, current.started_at
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_identity(path).unwrap().config_source,
+            ConfigRecord::Unknown
+        );
     }
 
     #[test]
@@ -438,7 +527,7 @@ mod tests {
         let path = dir.path().join("agent.pid");
         let path = path.to_str().unwrap();
 
-        write_identity(path, Component::Agent, None).unwrap();
+        write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
 
         assert!(matches!(ownership(path).unwrap(), Ownership::Alive(_)));
     }

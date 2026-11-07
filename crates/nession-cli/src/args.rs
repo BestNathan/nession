@@ -18,17 +18,26 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Server URL (ws:// or wss://). Overrides NESSION_SERVER_URL, the legacy
+    /// Remote Server URL (ws:// or wss://) for `agents`/`sessions`, or the
+    /// Agent daemon's outbound Server URL override for `agent start`/
+    /// `agent restart`. Overrides NESSION_SERVER_URL, the legacy
     /// NENSION_SERVER_URL alias, and the ws://127.0.0.1:8080 default.
+    ///
+    /// Commands that do not consume this flag reject it rather than ignoring
+    /// it: `server`, `config`, `update`, and agent stop/status/service leaves.
     #[arg(long, global = true)]
     pub server_url: Option<String>,
 
-    /// Auth token for server authentication. Overrides NESSION_AUTH_TOKEN, the
-    /// legacy NENSION_AUTH_TOKEN alias, and the empty default.
+    /// Remote credential for `agents`/`sessions`, or the Agent daemon's
+    /// outbound credential override for `agent start`/`agent restart`.
+    /// Overrides NESSION_AUTH_TOKEN, the legacy NENSION_AUTH_TOKEN alias, and
+    /// the empty default.
     ///
     /// A value passed here is visible in shell history and in process listings
-    /// while the command runs. For repeatable operation prefer the
-    /// environment variable (`NESSION_AUTH_TOKEN`) or the daemon config.
+    /// while the command runs. For repeatable remote operation prefer
+    /// `NESSION_AUTH_TOKEN`. Remote commands never read a daemon config
+    /// (#2267); an Agent's configured outbound credential is a different
+    /// boundary. Commands that do not consume this flag reject it.
     #[arg(long, global = true)]
     pub auth_token: Option<String>,
 }

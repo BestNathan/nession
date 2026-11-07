@@ -126,6 +126,27 @@ pub fn initialized_server_config() -> ServerConfig {
     config
 }
 
+/// The effective daemon configuration and where it came from.
+///
+/// The distinction is not diagnostic only: an implicit selection whose file
+/// does not exist runs on the documented defaults, and `status` must not
+/// present that absent file as the loaded source (#2869 SC-04).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Loaded<T> {
+    pub config: T,
+    /// True only when the selected file was actually read.
+    pub from_file: bool,
+}
+
+/// Describe an effective config source for an operator-facing banner.
+pub fn describe_origin(path: &Path, from_file: bool) -> String {
+    if from_file {
+        format!("config: {}", path.display())
+    } else {
+        format!("built-in defaults (no config file at '{}')", path.display())
+    }
+}
+
 /// Load an Agent config from the selected file, applying CLI/env overrides.
 ///
 /// An explicit selection that is missing or unreadable fails before startup.
@@ -135,21 +156,24 @@ pub fn load_agent(
     selection: &ConfigSelection,
     server_url_override: &Option<String>,
     auth_token_override: &Option<String>,
-) -> Result<AgentConfig> {
-    let mut config = match fs::read_to_string(&selection.path) {
-        Ok(content) => toml::from_str::<AgentConfig>(&content).with_context(|| {
-            format!(
-                "failed to parse agent config '{}' (selected by {})",
-                selection.path.display(),
-                selection.source()
-            )
-        })?,
+) -> Result<Loaded<AgentConfig>> {
+    let (mut config, from_file) = match fs::read_to_string(&selection.path) {
+        Ok(content) => (
+            toml::from_str::<AgentConfig>(&content).with_context(|| {
+                format!(
+                    "failed to parse agent config '{}' (selected by {})",
+                    selection.path.display(),
+                    selection.source()
+                )
+            })?,
+            true,
+        ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound && !selection.explicit => {
             tracing::info!(
                 "No config file found at '{}', using defaults",
                 selection.path.display()
             );
-            AgentConfig::default()
+            (AgentConfig::default(), false)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(selection.missing_error(ConfigTarget::Agent));
@@ -175,7 +199,7 @@ pub fn load_agent(
 
     finalize_agent_identity(&mut config)?;
 
-    Ok(config)
+    Ok(Loaded { config, from_file })
 }
 
 /// Load a Server config from the selected file.
@@ -183,23 +207,32 @@ pub fn load_agent(
 /// An explicit selection that is missing or unreadable fails before startup.
 /// The implicit default path may be absent; the documented CLI fallback then
 /// applies.
-pub fn load_server(selection: &ConfigSelection) -> Result<ServerConfig> {
+pub fn load_server(selection: &ConfigSelection) -> Result<Loaded<ServerConfig>> {
     match fs::read_to_string(&selection.path) {
-        Ok(content) => toml::from_str::<ServerConfig>(&content).with_context(|| {
-            format!(
-                "failed to parse server config '{}' (selected by {})",
-                selection.path.display(),
-                selection.source()
-            )
-        }),
+        Ok(content) => {
+            let config = toml::from_str::<ServerConfig>(&content).with_context(|| {
+                format!(
+                    "failed to parse server config '{}' (selected by {})",
+                    selection.path.display(),
+                    selection.source()
+                )
+            })?;
+            Ok(Loaded {
+                config,
+                from_file: true,
+            })
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound && !selection.explicit => {
             tracing::info!(
                 "No config file found at '{}', using CLI defaults",
                 selection.path.display()
             );
-            Ok(ServerConfig {
-                listen_address: CLI_SERVER_FALLBACK_LISTEN.to_string(),
-                ..ServerConfig::default()
+            Ok(Loaded {
+                config: ServerConfig {
+                    listen_address: CLI_SERVER_FALLBACK_LISTEN.to_string(),
+                    ..ServerConfig::default()
+                },
+                from_file: false,
             })
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -662,11 +695,19 @@ pub fn set(
     let rendered = document.to_string();
     match target {
         ConfigTarget::Agent => {
-            toml::from_str::<AgentConfig>(&rendered)
+            let candidate: AgentConfig = toml::from_str(&rendered)
+                .with_context(|| format!("'{key}' would make the {label} config invalid"))?;
+            // The runtime's own validation is the contract: a value it would
+            // reject must not reach the file just because it deserializes.
+            candidate
+                .validate()
                 .with_context(|| format!("'{key}' would make the {label} config invalid"))?;
         }
         ConfigTarget::Server => {
-            toml::from_str::<ServerConfig>(&rendered)
+            let candidate: ServerConfig = toml::from_str(&rendered)
+                .with_context(|| format!("'{key}' would make the {label} config invalid"))?;
+            candidate
+                .validate()
                 .with_context(|| format!("'{key}' would make the {label} config invalid"))?;
         }
     }
@@ -936,8 +977,12 @@ mod tests {
             path: dir.path().join("agent-config.toml"),
             explicit: false,
         };
-        let config = load_agent(&selection, &None, &None).expect("defaults");
-        assert_eq!(config.server_url, AgentConfig::default().server_url);
+        let loaded = load_agent(&selection, &None, &None).expect("defaults");
+        assert!(
+            !loaded.from_file,
+            "no file existed, so defaults are in effect"
+        );
+        assert_eq!(loaded.config.server_url, AgentConfig::default().server_url);
     }
 
     #[test]
@@ -957,8 +1002,32 @@ mod tests {
             path: dir.path().join("server-config.toml"),
             explicit: false,
         };
-        let config = load_server(&selection).expect("defaults");
-        assert_eq!(config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+        let loaded = load_server(&selection).expect("defaults");
+        assert!(!loaded.from_file);
+        assert_eq!(loaded.config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+    }
+
+    /// A file that *does* exist is reported as the loaded source even when it
+    /// was selected implicitly, so provenance follows the actual read.
+    #[test]
+    fn an_existing_implicit_config_is_reported_as_loaded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server-config.toml");
+        fs::write(
+            &path,
+            "listen_address = \"127.0.0.1:19090\"\n\
+             tls_cert_path = \"\"\n\
+             tls_key_path = \"\"\n\
+             auth_token = \"\"\n",
+        )
+        .expect("seed");
+        let selection = ConfigSelection {
+            path,
+            explicit: false,
+        };
+        let loaded = load_server(&selection).expect("load");
+        assert!(loaded.from_file);
+        assert_eq!(loaded.config.listen_address, "127.0.0.1:19090");
     }
 
     /// `init` writes a typed Server config whose blank token is paired only
@@ -1037,9 +1106,10 @@ mod tests {
              auth_token = \"operator-secret\"\n",
         );
         let before = fs::read_to_string(&selection.path).expect("read before");
-        let config = load_server(&selection).expect("load");
-        assert_eq!(config.listen_address, "0.0.0.0:19090");
-        assert_eq!(config.auth_token, "operator-secret");
+        let loaded = load_server(&selection).expect("load");
+        assert!(loaded.from_file);
+        assert_eq!(loaded.config.listen_address, "0.0.0.0:19090");
+        assert_eq!(loaded.config.auth_token, "operator-secret");
         assert_eq!(
             before,
             fs::read_to_string(&selection.path).expect("read after"),
@@ -1057,9 +1127,73 @@ mod tests {
              tls_key_path = \"\"\n\
              auth_token = \"\"\n",
         );
-        let config = load_server(&selection).expect("load");
-        assert_eq!(config.listen_address, "127.0.0.1:19090");
-        assert!(config.auth_token.is_empty());
+        let loaded = load_server(&selection).expect("load");
+        assert_eq!(loaded.config.listen_address, "127.0.0.1:19090");
+        assert!(loaded.config.auth_token.is_empty());
+    }
+
+    /// #2869 SC-02: the editor defers to the runtime validators. A value the
+    /// daemon would refuse must be refused here, before the file is written.
+    #[test]
+    fn set_rejects_values_the_runtime_would_reject() {
+        let invalid = [
+            (ConfigTarget::Agent, "terminal_cols", "19"),
+            (ConfigTarget::Agent, "terminal_cols", "401"),
+            (ConfigTarget::Server, "terminal_cols", "19"),
+            (ConfigTarget::Server, "terminal_cols", "401"),
+            (ConfigTarget::Server, "terminal_web_font_size", "5.9"),
+            (ConfigTarget::Server, "terminal_web_font_size", "32.1"),
+            (ConfigTarget::Server, "terminal_web_font_size", "0"),
+        ];
+        for (target, key, value) in invalid {
+            let defaults = match target {
+                ConfigTarget::Agent => {
+                    toml::to_string_pretty(&AgentConfig::default()).expect("serialize")
+                }
+                ConfigTarget::Server => {
+                    toml::to_string_pretty(&ServerConfig::default()).expect("serialize")
+                }
+            };
+            let (_dir, selection) = temp_selection(target, &defaults);
+            let before = fs::read_to_string(&selection.path).expect("read before");
+
+            let error = set(target, &selection, key, value)
+                .expect_err("a runtime-invalid value must be refused");
+            let message = format!("{error:#}");
+            assert!(
+                (message.contains("would make the") && message.contains("config invalid"))
+                    || message.contains("invalid value for"),
+                "{key}={value}: {message}"
+            );
+            assert_eq!(
+                before,
+                fs::read_to_string(&selection.path).expect("read after"),
+                "{key}={value} must not change the file"
+            );
+        }
+    }
+
+    /// The accepted boundaries stay accepted; the fix must not narrow them.
+    #[test]
+    fn set_accepts_the_runtime_boundaries() {
+        let valid = [
+            (ConfigTarget::Agent, "terminal_cols", "20", false),
+            (ConfigTarget::Agent, "terminal_cols", "400", false),
+            (ConfigTarget::Server, "terminal_cols", "20", true),
+            (ConfigTarget::Server, "terminal_cols", "400", true),
+            (ConfigTarget::Server, "terminal_web_font_size", "6", true),
+            (ConfigTarget::Server, "terminal_web_font_size", "32", true),
+        ];
+        for (target, key, value, server) in valid {
+            let defaults = if server {
+                toml::to_string_pretty(&ServerConfig::default()).expect("serialize")
+            } else {
+                toml::to_string_pretty(&AgentConfig::default()).expect("serialize")
+            };
+            let (_dir, selection) = temp_selection(target, &defaults);
+            set(target, &selection, key, value)
+                .unwrap_or_else(|error| panic!("{key}={value} must be accepted: {error:#}"));
+        }
     }
 
     #[test]

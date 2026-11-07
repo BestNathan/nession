@@ -35,12 +35,15 @@ pub async fn run(
         }
     }
 
-    let config = configuration::load_server(&selection)?;
+    let loaded = configuration::load_server(&selection)?;
+    let from_file = loaded.from_file;
+    let config = loaded.config;
     let config_path = selection.path.to_string_lossy().into_owned();
+    let origin = configuration::describe_origin(&selection.path, from_file);
 
     if foreground {
         info!("Starting server in foreground mode");
-        println!("Starting nession-server with config: {config_path}");
+        println!("Starting nession-server with {origin}");
         println!("Listen address: {}", config.listen_address);
         println!("Database: {}", config.db_path);
         println!("Press Ctrl+C to stop");
@@ -48,7 +51,7 @@ pub async fn run(
         pid_file::write_identity(
             &pid_file,
             pid_file::Component::Server,
-            Some(&selection.path),
+            pid_file::ConfigRecord::from_loaded(&selection.path, from_file),
         )?;
 
         let result = run_server_foreground(config).await;
@@ -59,7 +62,7 @@ pub async fn run(
     } else {
         info!("Starting server in background mode");
         let exe = std::env::current_exe()?;
-        let mut cmd = background_child_command(&exe, &config_path, &pid_file);
+        let mut cmd = background_child_command(&exe, &selection, &pid_file);
 
         #[cfg(unix)]
         {
@@ -84,16 +87,37 @@ pub async fn run(
                 println!("PID file: {pid_file}");
             }
             startup::Startup::Exited(status) => {
-                anyhow::bail!("Server exited before it was serving ({status}); check the logs");
+                let detail = startup::child_stderr(&mut child);
+                let _ = fs::remove_file(&pid_file);
+                anyhow::bail!(
+                    "Server exited before it was serving ({status}){}",
+                    if detail.is_empty() {
+                        "; check the logs".to_string()
+                    } else {
+                        format!(": {detail}")
+                    }
+                );
             }
             startup::Startup::TimedOut => {
+                startup::terminate(&mut child);
+                let detail = startup::child_stderr(&mut child);
+                let _ = fs::remove_file(&pid_file);
                 anyhow::bail!(
-                    "Server did not report itself serving within {}s; check the logs",
-                    startup::STARTUP_TIMEOUT.as_secs()
+                    "Server did not report itself serving within {}s{}",
+                    startup::STARTUP_TIMEOUT.as_secs(),
+                    if detail.is_empty() {
+                        "; check the logs".to_string()
+                    } else {
+                        format!(": {detail}")
+                    }
                 );
             }
         }
-        println!("Config: {config_path}");
+        if from_file {
+            println!("Config: {config_path}");
+        } else {
+            println!("Config: {origin}");
+        }
     }
 
     Ok(())
@@ -102,23 +126,34 @@ pub async fn run(
 /// The command the background branch re-executes itself with.
 ///
 /// Extracted so the flag-forwarding contract is asserted against the vector
-/// the parent actually spawns: a dropped `--config` or `--pid-file` would make
-/// the child load or record a different file than the one this command
-/// resolved (#1016).
-pub(crate) fn background_child_command(exe: &Path, config_path: &str, pid_file: &str) -> Command {
+/// the parent actually spawns: a dropped `--pid-file` would make the child
+/// record a different file than the one this command resolved (#1016). An
+/// explicit `--config` is forwarded; an implicit selection is not, because the
+/// child must apply the same documented default rule — including its no-file
+/// fallback — rather than treating the resolved default as a file that must
+/// exist (#2869 SC-01+03).
+pub(crate) fn background_child_command(
+    exe: &Path,
+    selection: &ConfigSelection,
+    pid_file: &str,
+) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.args([
-        "server",
-        "start",
-        "--config",
-        config_path,
-        "--foreground",
-        "--pid-file",
-        pid_file,
-    ])
-    .stdin(Stdio::null())
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
+    let mut args = vec!["server".to_string(), "start".to_string()];
+    if selection.explicit {
+        args.push("--config".to_string());
+        args.push(selection.path.to_string_lossy().into_owned());
+    }
+    args.extend([
+        "--foreground".to_string(),
+        "--pid-file".to_string(),
+        pid_file.to_string(),
+    ]);
+    cmd.args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        // Captured until the child either becomes ready or exits: its own
+        // failure sentence is more useful than "check the logs" (#2869).
+        .stderr(Stdio::piped());
     cmd
 }
 
@@ -132,17 +167,34 @@ async fn run_server_foreground(config: nession_common::config::ServerConfig) -> 
 mod tests {
     use super::*;
 
+    fn explicit_selection(path: &str) -> ConfigSelection {
+        ConfigSelection {
+            path: Path::new(path).to_path_buf(),
+            explicit: true,
+        }
+    }
+
+    fn implicit_selection(path: &str) -> ConfigSelection {
+        ConfigSelection {
+            path: Path::new(path).to_path_buf(),
+            explicit: false,
+        }
+    }
+
+    fn argv(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
     #[test]
     fn the_background_child_receives_the_resolved_config_and_pid_file() {
         let command = background_child_command(
             Path::new("/bin/true"),
-            "/custom/server.toml",
+            &explicit_selection("/custom/server.toml"),
             "/custom/server.pid",
         );
-        let argv: Vec<String> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
         for expected in [
             "server",
             "start",
@@ -152,10 +204,37 @@ mod tests {
             "--pid-file",
             "/custom/server.pid",
         ] {
+            let argv = argv(&command);
             assert!(
                 argv.iter().any(|arg| arg == expected),
                 "missing {expected}: {argv:?}"
             );
         }
+    }
+
+    /// #2869 SC-01+03: the child must not inherit an explicit `--config` that
+    /// the user never supplied, or an absent default file would become a
+    /// missing explicit file.
+    #[test]
+    fn an_implicit_selection_is_not_converted_into_an_explicit_flag() {
+        let command = background_child_command(
+            Path::new("/bin/true"),
+            &implicit_selection("/home/me/.nession/server-config.toml"),
+            "/custom/server.pid",
+        );
+        let argv = argv(&command);
+
+        assert!(
+            !argv.iter().any(|arg| arg == "--config"),
+            "an implicit selection must not gain --config across re-exec: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|arg| arg.ends_with("server-config.toml")),
+            "the resolved default path must not be forwarded: {argv:?}"
+        );
+        assert!(
+            argv.iter().any(|arg| arg == "--pid-file"),
+            "the pid file still identifies the child: {argv:?}"
+        );
     }
 }
