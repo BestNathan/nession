@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Single source of Git hook Gate selection. Stage membership is defined by
+# suites/pre-{commit,push}.gates; this router owns changed-path applicability.
+set -euo pipefail
+
+stage="${1:-}"
+case "$stage" in
+  pre-commit|pre-push) ;;
+  *) echo "usage: ./gates/route pre-commit|pre-push" >&2; exit 2 ;;
+esac
+[ "$#" -eq 1 ] || { echo "unexpected Gate router arguments" >&2; exit 2; }
+
+changed=""
+broad=false
+
+if [ "$stage" = pre-commit ]; then
+  if ! changed="$(git diff --cached --name-only)"; then
+    echo "→ pre-commit: unable to inspect staged files; refusing to skip checks" >&2
+    exit 2
+  fi
+else
+  # The new-branch creation point avoids accidentally testing an unrelated
+  # stacked parent. If the diff cannot be proven, select the whole push suite.
+  # shellcheck source=scripts/lib/git-diff-base.sh
+  . ./scripts/lib/git-diff-base.sh
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "$local_ref" ] || continue
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+      if resolved="$(resolve_diff_base "$local_ref" "$local_sha")"; then
+        source="${resolved%% *}"
+        remote_sha="${resolved#* }"
+        echo "→ new branch: diff from $source ${remote_sha:0:7}"
+      else
+        echo "→ new branch: unknown diff base; checking full pre-push Gate suite" >&2
+        broad=true
+        continue
+      fi
+    fi
+    if ! delta="$(git diff --name-only "$remote_sha" "$local_sha")"; then
+      echo "→ pre-push: unprovable Git diff; checking full pre-push Gate suite" >&2
+      broad=true
+      continue
+    fi
+    changed="${changed}${changed:+$'\n'}${delta}"
+  done
+fi
+
+matches() {
+  [ "$broad" = true ] && return 0
+  [ -n "$changed" ] || return 1
+  grep -Eq "$1" <<< "$changed"
+}
+
+# One applicability rule per stable Gate ID. The suite is authoritative about
+# which Gate belongs to a stage. Rules only decide whether its owner changed.
+applies() {
+  case "$1" in
+    dev-workspace-commit|dev-workspace-push) return 0 ;;
+    rust-format) matches '\.rs$' ;;
+    rust-clippy|rust-test-unit)
+      matches '(\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^clippy\.toml$|^gates/checks/rust-)' ;;
+    web-eslint)
+      matches '(^web/.*\.(ts|tsx|js|jsx)$|^web/eslint|^gates/checks/web-eslint\.sh$)' ;;
+    web-typecheck|web-test-unit)
+      matches '(^web/.*\.(ts|tsx|js|jsx)$|^web/(package(-lock)?\.json|tsconfig[^/]*\.json|vite\.config\.ts)$|^gates/checks/web-)' ;;
+    test-isolation)
+      matches '(\.rs$|^scripts/check-test-isolation|^gates/checks/test-isolation)' ;;
+    test-isolation-selftest)
+      matches '^(scripts/check-test-isolation|gates/checks/test-isolation)' ;;
+    tmux-socket-isolation)
+      matches '(\.rs$|^scripts/|^e2e/|^deploy/|^justfile$|^gates/checks/tmux-socket-isolation)' ;;
+    tmux-socket-isolation-selftest)
+      matches '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)' ;;
+    protocol-integrity)
+      matches '(\.rs$|^web/src/|^scripts/protocol-gate|^gates/checks/protocol-integrity)' ;;
+    protocol-codegen-drift)
+      matches '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate|gates/checks/protocol-)' ;;
+    protocol-integrity-selftest)
+      matches '^(scripts/protocol-gate|gates/checks/protocol-integrity)' ;;
+    server-handler-locality|server-handler-locality-selftest|server-handler-concurrency-selftest)
+      matches '^(crates/nession-server/src/server/|scripts/server-handler-|gates/checks/server-handler-)' ;;
+    design-system-fast)
+      matches '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)' ;;
+    instruction-contract)
+      matches '((^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/|^scripts/instruction-contract|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|pre-push|quality-web|quality)\.gates$)' ;;
+    dev-workspace-selftest)
+      matches '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)' ;;
+    gate-runtime-contract|gate-router-contract)
+      matches '^(gates/|\.githooks/(pre-commit|pre-push)$|scripts/gate-router-selftest\.mjs$)' ;;
+    pre-push-diff-base-selftest)
+      matches '^(scripts/lib/git-diff-base\.sh|scripts/test-pre-push-diff-base\.sh|gates/route$|\.githooks/pre-push$)' ;;
+    *) echo "→ $stage: Gate $1 has no applicability rule" >&2; return 2 ;;
+  esac
+}
+
+suite="./gates/suites/$stage.gates"
+[ -f "$suite" ] || { echo "→ missing hook Gate suite: $suite" >&2; exit 2; }
+ids=()
+while IFS= read -r line || [ -n "$line" ]; do
+  id="${line%%#*}"
+  id="${id#"${id%%[![:space:]]*}"}"
+  id="${id%"${id##*[![:space:]]}"}"
+  [ -n "$id" ] || continue
+  if applies "$id"; then
+    ids+=("$id")
+  else
+    result=$?
+    [ "$result" -eq 1 ] || exit "$result"
+  fi
+done < "$suite"
+[ "${#ids[@]}" -gt 0 ] || { echo "→ $stage selected no Gates" >&2; exit 2; }
+exec ./gates/run "${ids[@]}"

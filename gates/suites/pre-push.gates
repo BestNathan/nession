@@ -1,13 +1,20 @@
-# pre-push
-# Gate IDs only. Not wired into current hooks/workflows yet.
+# Diff-scoped local unit tests and rule-owner regression contracts.
+# Full integration, coverage, and browser suites belong to broader CI / explicit Gates.
 dev-workspace-push
+rust-clippy
 rust-test-unit
-rust-test-integration
-rust-coverage
-protocol-integrity
-server-handler-locality
-protocol-codegen-drift
-design-system-full
+web-typecheck
 web-test-unit
-web-test-integration
-web-coverage
+protocol-integrity
+protocol-codegen-drift
+protocol-integrity-selftest
+server-handler-locality
+server-handler-locality-selftest
+server-handler-concurrency-selftest
+test-isolation-selftest
+tmux-socket-isolation-selftest
+dev-workspace-selftest
+instruction-contract
+gate-runtime-contract
+gate-router-contract
+pre-push-diff-base-selftest

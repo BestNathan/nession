@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ── Regression tests for pre-push diff-base resolution ────────────────────────
 #
-# Exercises scripts/lib/git-diff-base.sh — the logic .githooks/pre-push uses to
+# Exercises scripts/lib/git-diff-base.sh — the logic gates/route uses to
 # decide what a new branch's own delta is. Each test builds a throwaway repo with
 # a specific branch topology, resolves the base, and asserts both the chosen
 # source (creation_point / staging / none) and the resulting file diff.
