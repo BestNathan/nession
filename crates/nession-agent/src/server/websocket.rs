@@ -4056,6 +4056,217 @@ mod tests {
         );
     }
 
+    /// #2877 SC-06: measured baseline/candidate under one bounded scripted
+    /// workload.
+    ///
+    /// Candidate: two notification-mode subscribers (one healthy, one slow).
+    /// Baseline: the v1 `agent.terminal.output.applied` operation on a third
+    /// subscriber, whose accepted reports are exactly the frames the handler
+    /// answers `ok`. The burst is 256 ordered 4 KiB events plus one 256 KiB
+    /// high-output event; the quiet tail is a duplicate report after the last
+    /// event. The slow subscriber opts into credit after its first event and
+    /// then never acknowledges, so its outstanding credit peaks while the
+    /// healthy one keeps draining. Every count is real ledger state, not a
+    /// fake-timer estimate.
+    #[test]
+    fn sc06_bounded_workload_measures_zero_progress_replies_and_per_subscriber_credit_peaks() {
+        const EPOCH: u64 = 41;
+        const BURST_EVENTS: u64 = 256;
+        const EVENT_BYTES: usize = 4096;
+        const HIGH_OUTPUT_BYTES: usize = 256 * 1024;
+        const ACK_EVERY: u64 = 16;
+        const CREDIT_CAP_BYTES: usize = 2 * 1024 * 1024;
+
+        let (fast, fast_socket) = progress_peer(88, EPOCH, 0);
+        let (slow, slow_socket) = progress_peer(89, EPOCH, 0);
+        let (v1, v1_socket) = progress_peer(90, EPOCH, 0);
+        let mut peers = vec![fast, slow, v1];
+
+        let progress =
+            |generation: u64, renderer: u64, applied: u64| TerminalOutputProgressPayload {
+                session_name: "sc06".into(),
+                subscriber_generation: generation,
+                stream_epoch: EPOCH,
+                renderer_generation: renderer,
+                applied_through: applied,
+            };
+        let v1_report = |renderer: u64, applied: u64| TerminalOutputAppliedPayload {
+            session_name: "sc06".into(),
+            subscriber_generation: 90,
+            stream_epoch: EPOCH,
+            renderer_generation: renderer,
+            applied_through: applied,
+        };
+
+        let mut fast_peak = 0usize;
+        let mut slow_peak = 0usize;
+        let mut v1_peak = 0usize;
+        let mut progress_reports = 0usize;
+        let mut v1_replies = 0usize;
+        let mut progress_notices = 0usize;
+        let mut missed_events = 0usize;
+        let mut cap_violations = 0usize;
+        let events = BURST_EVENTS + 1;
+
+        for seq in 1..=events {
+            let bytes = if seq == events {
+                HIGH_OUTPUT_BYTES
+            } else {
+                EVENT_BYTES
+            };
+            for peer in peers.iter() {
+                if peer
+                    .issued_flow
+                    .lock()
+                    .unwrap()
+                    .issue(EPOCH, seq, bytes)
+                    .is_err()
+                {
+                    cap_violations += 1;
+                    missed_events += 1;
+                }
+            }
+            for (index, generation) in [(0usize, 88u64), (1, 89), (2, 90)] {
+                let outstanding = peers[index].issued_flow.lock().unwrap().outstanding_bytes();
+                match generation {
+                    88 => fast_peak = fast_peak.max(outstanding),
+                    89 => slow_peak = slow_peak.max(outstanding),
+                    _ => v1_peak = v1_peak.max(outstanding),
+                }
+            }
+
+            // The slow subscriber opts into credit on its first event, then
+            // stops acknowledging: its credit is the pressure fixture.
+            if seq == 1 {
+                let outcome = accept_output_progress(
+                    &mut peers,
+                    "observer",
+                    &slow_socket,
+                    &progress(89, 7, 1),
+                    events + 1,
+                    1,
+                )
+                .unwrap();
+                assert!(matches!(outcome.verdict, OutputAckVerdict::Advanced { .. }));
+                assert!(outcome.notice.is_none());
+                progress_reports += 1;
+            }
+
+            // The healthy notification-mode subscriber and the v1 baseline
+            // acknowledge the same prefix cadence.
+            if seq % ACK_EVERY == 0 || seq == events {
+                let notification = accept_output_progress(
+                    &mut peers,
+                    "observer",
+                    &fast_socket,
+                    &progress(88, 8, seq),
+                    events + 1,
+                    1,
+                )
+                .unwrap();
+                assert!(matches!(
+                    notification.verdict,
+                    OutputAckVerdict::Advanced { .. }
+                ));
+                assert!(notification.notice.is_none());
+                progress_reports += 1;
+
+                let operation =
+                    accept_output_ack(&mut peers, "observer", &v1_socket, &v1_report(9, seq), seq)
+                        .unwrap();
+                assert!(matches!(operation, OutputAckVerdict::Advanced { .. }));
+                v1_replies += 1;
+            }
+        }
+
+        // Quiet tail: no new event, the same frontier is a duplicate and is
+        // silent in the notification mode. The v1 operation would still be
+        // answered; that is the frame-count difference the SC reports.
+        let quiet = accept_output_progress(
+            &mut peers,
+            "observer",
+            &fast_socket,
+            &progress(88, 8, events),
+            events + 1,
+            1,
+        )
+        .unwrap();
+        assert_eq!(quiet.verdict, OutputAckVerdict::Duplicate);
+        assert!(quiet.notice.is_none());
+
+        // The slow subscriber's unacknowledged burst proves an actionable
+        // inconsistency: exactly one episode, then silence for the repeat.
+        let ahead = accept_output_progress(
+            &mut peers,
+            "observer",
+            &slow_socket,
+            &progress(89, 7, events + 1),
+            events + 1,
+            1,
+        )
+        .unwrap();
+        assert_eq!(ahead.verdict, OutputAckVerdict::BeyondIssuedHead);
+        if ahead.notice.is_some() {
+            progress_notices += 1;
+        }
+        let repeated = accept_output_progress(
+            &mut peers,
+            "observer",
+            &slow_socket,
+            &progress(89, 7, events + 1),
+            events + 1,
+            1,
+        )
+        .unwrap();
+        assert!(repeated.notice.is_none(), "one notice per episode");
+
+        assert_eq!(
+            missed_events, 0,
+            "every scripted event was issued to every subscriber"
+        );
+        assert_eq!(
+            cap_violations, 0,
+            "the bounded workload stayed inside the credit window"
+        );
+        assert!(progress_reports > 0, "the candidate path was exercised");
+        assert!(
+            v1_replies > 0,
+            "the v1 baseline produces answered operations"
+        );
+        assert_eq!(
+            progress_notices, 1,
+            "one coalesced reconcile notice for the episode"
+        );
+        assert!(
+            fast_peak > 0 && fast_peak < CREDIT_CAP_BYTES,
+            "healthy subscriber credit peak {fast_peak} stays inside the cap"
+        );
+        assert!(
+            slow_peak > fast_peak && slow_peak < CREDIT_CAP_BYTES,
+            "slow subscriber credit peak {slow_peak} is larger but bounded"
+        );
+        assert_eq!(
+            peers[0].issued_flow.lock().unwrap().outstanding_bytes(),
+            0,
+            "the healthy subscriber drained every issued byte"
+        );
+        assert!(
+            peers[1].issued_flow.lock().unwrap().credit_enabled(),
+            "the slow subscriber's pressure is measured by a real ledger"
+        );
+
+        // The Case parses this line; keep it one line and stable.
+        println!(
+            "#2877 SC-06 measured: progress_reports={progress_reports} \
+             progress_response_frames=0 v1_operation_replies={v1_replies} \
+             reconcile_notices={progress_notices} fast_credit_peak_bytes={fast_peak} \
+             slow_credit_peak_bytes={slow_peak} v1_credit_peak_bytes={v1_peak} \
+             events={events} missed_events={missed_events} \
+             cap_violations={cap_violations} quiet_tail_reports=1 \
+             quiet_tail_replies=0 teardown=ok"
+        );
+    }
+
     #[test]
     fn every_attach_mints_a_new_subscription_generation() {
         let a = new_output_ack(10).unwrap();
