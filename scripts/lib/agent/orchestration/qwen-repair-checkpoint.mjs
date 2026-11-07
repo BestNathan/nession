@@ -78,14 +78,14 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
      checkpoint.identity.role!=='developer'||
      checkpoint.identity.agent_id!=='dev-qwen-01'||
      checkpoint.metadata?.provider!=='claude-code'||
-     checkpoint.metadata.source_sha!==intent.source_sha||
+     checkpoint.metadata.source_sha!==intent.worker_source_sha||
      !HEX.test(checkpoint.metadata.harness_digest??'')||
      checkpoint.ciphertext_sha256!==intent.checkpoint_ciphertext_sha256||
      run.schema_version!==1||run.kind!=='agent_checkpoint_run'||
      run.role!=='developer'||run.agent_id!=='dev-qwen-01'||
      run.issue!==state.issue||run.run_id!==intent.worker_run_id||
      run.attempt!==1||run.version!==head.version||
-     run.source_sha!==intent.source_sha||
+     run.source_sha!==intent.worker_source_sha||
      run.workflow!=='.github/workflows/agent-develop.yml'||
      !SHA.test(run.workflow_sha??'')||
      run.workflow_sha!==intent.worker_sha||
@@ -102,7 +102,7 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
     checkpoint_version:intent.checkpoint_version,
     checkpoint_commit_sha:intent.checkpoint_commit_sha,
     ciphertext_sha256:intent.checkpoint_ciphertext_sha256,
-    source_sha:intent.source_sha,source_run_id:intent.worker_run_id});
+    source_sha:intent.worker_source_sha,source_run_id:intent.worker_run_id});
 }
 
 // A Qwen Repair source is the immutable ORIGINAL published PR branch, not a
@@ -133,7 +133,7 @@ export function qwenRepairPublishedSource({storeRoot,issue,actionId,sha}){
   if(intent.checkpoint_commit_sha!==proof.checkpoint_commit_sha||
      intent.checkpoint_ciphertext_sha256!==proof.ciphertext_sha256||
      intent.worker_run_id!==proof.source_run_id||
-     intent.source_sha!==proof.source_sha||
+     intent.worker_source_sha!==proof.source_sha||
      intent.target_main_sha!==intent.source_sha||
      intent.branch!=='agent/'+issue+'/qwen-'+intent.action_id.slice(0,16))
     fail('Qwen Repair branch not the authenticated original publication');
