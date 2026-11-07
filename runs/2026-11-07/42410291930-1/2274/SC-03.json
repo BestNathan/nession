@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b92fff098f37cd0f7951136d9ead3576506de27b1710971b88853c9cba9b5c10",
+  "run_id": 42410291930,
+  "run_attempt": 1,
+  "issue": 2274,
+  "criterion": "SC-03",
+  "criterion_text": "A real Qwen Developer session checkpoints and resumes across distinct GitHub Runs with authenticated source, ciphertext-only remote checkpoint, pinned provider/model identity and deterministic rejection of incompatible or tampered continuations.",
+  "stage": "post-merge",
+  "target_sha": "39bb4175791aa34e401bb6dc1d444ce200722aca",
+  "contract_sha256": "8080eae46525ffb74a73a11f1d0a0bf76c54299dbf9afd5a7955a96c65af1278",
+  "case_revision": "39bb4175791aa34e401bb6dc1d444ce200722aca",
+  "case_tree_sha": "f15c45c6285782928e2ef34967c1b646b3168570",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T20:18:49.880Z",
+  "finished_at": "2026-11-07T20:19:00.603Z",
+  "duration_ms": 10723,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The real Qwen Developer checkpointed at SHA A and resumed across a distinct GitHub Run at SHA B with authenticated source, ciphertext-only Store checkpoints, pinned provider/model identity and fail-closed tamper/incompatibility fixtures.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "real Qwen Developer run 42401513247/1 published SHA A 1f925d21129fe5731aec4235a9ff680ac7453785; Reviewer run 42402597971/1 recorded changes_requested; the SAME dev-qwen-01 resumed checkpoint v1 and run 42403004351/1 produced SHA B cfe6eacdce242086b6f549645fbf8a7b05c100ad; Reviewer run 42403363557/1 approved SHA B"
+        },
+        {
+          "type": "store",
+          "value": "agent-store state v14 commits publisher:42402434528=published@1f925d21129fe5731aec4235a9ff680ac7453785, reviewer:42402597971=changes_requested@1f925d21129fe5731aec4235a9ff680ac7453785, publisher:42403209086=published@cfe6eacdce242086b6f549645fbf8a7b05c100ad, reviewer:42403363557=approved@cfe6eacdce242086b6f549645fbf8a7b05c100ad; checkpoint commits 1841f76e2a3fa8d87a70937977b0005706ce9736 and e7ba4e329cfcf8372f23cf1f332ecafc95812954 are committed Store objects"
+        },
+        {
+          "type": "runtime",
+          "value": "exact-SHA PR #2963 head cfe6eacdce242086b6f549645fbf8a7b05c100ad changed only e2e/fixtures/agent-development/qwen-repair-source-v4.md from implementation pending/verification missing to implementation qwen-verified/verification complete; CI / Quality Gate 42403269834 and Acceptance / Orchestrator 42403268820 completed successfully at that exact head; the owner merged it at 6de4b645c75255e1762ac8ba7de8657aabbeab4e; init and merge SHAs are ancestors of target 39bb4175791aa34e401bb6dc1d444ce200722aca"
+        },
+        {
+          "type": "runtime",
+          "value": "qwen-development-commit-selftest: signed Worker -> Store CAS -> Publisher write-ahead -> exact GitHub PR readback -> one Reviewer CAS and replay verified; qwen-development-worker-selftest: signed Run admission, absent Store credentials and defensive prompt passed"
+        }
+      ],
+      "duration_ms": 4875,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42410291930,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "39bb4175791aa34e401bb6dc1d444ce200722aca",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42410291930",
+    "record_path": "runs/2026-11-07/42410291930-1/2274/SC-03.json",
+    "source_result_sha256": "aeefd1f12515ae52bdb89032abffc168caec1ae4f81314b76667463be4a8fa2f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42410291930-1",
+    "sha256": "aeefd1f12515ae52bdb89032abffc168caec1ae4f81314b76667463be4a8fa2f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42410291930",
+    "durability": "time-limited; object archival not configured"
+  }
+}
