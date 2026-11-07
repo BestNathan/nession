@@ -258,6 +258,17 @@ export function selfTestPrQualityCost(){
   assert.equal(verifyE2e(sample,e2eRun,{total_count:1,jobs:[e2eJob]}).verdict,'success');
   assert.throws(()=>verifyE2e(sample,{...e2eRun,conclusion:'failure'},
     {total_count:1,jobs:[{...e2eJob,conclusion:'failure'}]}));
+  // The only failing E2E sample remains an authenticated failure, not a Pass.
+  const mixed=pinnedPrQualitySamples[2];
+  const mixedRun={...e2eRun,id:mixed.e2eRun,head_sha:mixed.after.sha,
+    conclusion:'failure'};
+  const mixedJobs={total_count:1,jobs:[{...e2eJob,run_id:mixed.e2eRun,
+    head_sha:mixed.after.sha,conclusion:'failure',
+    steps:[{name:'Run E2E tests',conclusion:'failure'}]}]};
+  assert.equal(verifyE2e(mixed,mixedRun,mixedJobs).verdict,'failed_closed');
+  assert.throws(()=>verifyE2e(mixed,{...mixedRun,conclusion:'success'},mixedJobs));
+  assert.throws(()=>verifyE2e(mixed,mixedRun,{total_count:1,jobs:[
+    {...mixedJobs.jobs[0],steps:[{name:'Run E2E tests',conclusion:'success'}]}]}));
   const workflow=readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
     import.meta.url),'utf8');
   assert.ok(workflow.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && inputs.issue_number == '2917')"),
