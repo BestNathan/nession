@@ -24,14 +24,13 @@ const QWEN_CANARY=Object.freeze({
   before:'implementation: pending\n',
   after:'implementation: qwen-verified\n',
 });
-// Non-authoritative registry for the controlled repair fixture. The signed
+// Non-authoritative registry for the controlled repair fixtures. The signed
 // Issue task and Publisher patch checks remain the authority; this map exists
-// so Reviewer discovery can find the fixture and its issue without trusting
-// Issue prose alone.
+// so Reviewer discovery can find the fixture and its authorized final state
+// without trusting Issue prose alone.
 export const QWEN_REPAIR_FIXTURES=Object.freeze({
-  2946:Object.freeze({path:'e2e/fixtures/agent-development/qwen-repair-source-v2.md',
-    before:'implementation: pending\n',
-    after:'implementation: qwen-verified\n'}),
+  2951:Object.freeze({path:'e2e/fixtures/agent-development/qwen-repair-source-v3.md',
+    authorized_final_state:'implementation: qwen-verified\nreview: pending\n'}),
 });
 function fail(s){throw Error('Qwen Developer source: '+s);}
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
