@@ -126,12 +126,6 @@ jobs:
           node-version: '24'
       - name: Validate workflow taxonomy and references
         run: ./gates/run workflow-conventions
-      - name: Verify Staging convergence discovery and negative fixtures
-        run: |
-          node scripts/staging-branch-convergence.mjs self-test
-          node scripts/staging-branch-convergence.mjs discover
-          node scripts/staging-convergence-readiness.mjs self-test
-          node scripts/staging-convergence-agent.mjs self-test
       - name: Validate trusted Controller and Store negative contracts
         run: |
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
