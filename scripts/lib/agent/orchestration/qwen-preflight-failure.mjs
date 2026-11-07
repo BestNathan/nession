@@ -25,15 +25,43 @@ export const SOURCE_V2=Object.freeze({
   run_head_sha:'5cabd47497cffc1571af18ac4900646363f40f33',
   failure_code:'qwen_native_restore_private_key_missing',
 });
+// The third exact pre-model failure: the pinned Claude Code package was
+// installed with --ignore-scripts, so the native binary was never fetched and
+// the isolated Worker image could not be built. This failed before source
+// preparation or any model call.
+export const SOURCE_V3=Object.freeze({
+  issue:2817,
+  action_id:'ffeb663aade06266bf5986bb8cabd01a4f7c7d6740d6ccb93f0c340533d7a27e',
+  run_id:42342792435,
+  attempt:1,
+  source_sha:'149df703ff383e7bb6958eb6d1448f6ad7248ca6',
+  run_head_sha:'c6d6f7f9d88d8420b3a6777ed54e93c236421793',
+  failure_code:'qwen_worker_image_claude_binary_missing',
+});
 const PASSED_STEPS=[
   'Checkout main-owned Qwen model-runner code only',
   'Require exact signed Qwen Store ACK before any model or source checkout'];
-const FAILED_STEP=
-  'Validate pinned Qwen model, endpoint, public Session key and CLI version';
-const BLOCKED_STEPS=[
-  'Prepare disposable exact-SHA tracked source without executing it',
-  'Execute Store-admitted Qwen CLI in unprivileged Docker',
-  'Upload only bounded patch and encrypted native Session'];
+const FAILED_STEP={
+  [SOURCE.failure_code]:
+    'Validate pinned Qwen model, endpoint, public Session key and CLI version',
+  [SOURCE_V2.failure_code]:
+    'Validate pinned Qwen model, endpoint, public Session key and CLI version',
+  [SOURCE_V3.failure_code]:
+    'Build pinned, source-free isolated Qwen runtime',
+};
+const PREPARE_SOURCE_STEP=
+  'Prepare disposable exact-SHA tracked source without executing it';
+const BLOCKED_STEPS={
+  [SOURCE.failure_code]:[PREPARE_SOURCE_STEP,
+    'Execute Store-admitted Qwen CLI in unprivileged Docker',
+    'Upload only bounded patch and encrypted native Session'],
+  [SOURCE_V2.failure_code]:[PREPARE_SOURCE_STEP,
+    'Execute Store-admitted Qwen CLI in unprivileged Docker',
+    'Upload only bounded patch and encrypted native Session'],
+  [SOURCE_V3.failure_code]:[
+    'Execute Store-admitted Qwen CLI in unprivileged Docker',
+    'Upload only bounded patch and encrypted native Session'],
+};
 const LOG_PROOF={
   [SOURCE.failure_code]:log=>
     /^.*QWEN_RESUME_PUBLIC_KEY_B64:\s*$/m.test(log)&&
@@ -43,22 +71,29 @@ const LOG_PROOF={
     /^.*QWEN_RESUME_PRIVATE_KEY_B64:\s*$/m.test(log)&&
     log.includes('Qwen native Restore private key is not configured')&&
     log.includes('Process completed with exit code 1'),
+  [SOURCE_V3.failure_code]:log=>
+    log.includes('claude native binary not installed')&&
+    log.includes('Process completed with exit code 1'),
 };
 const LOG_ERROR={
   [SOURCE.failure_code]:
     'source logs do not independently prove the missing public key',
   [SOURCE_V2.failure_code]:
     'source logs do not independently prove the missing private key',
+  [SOURCE_V3.failure_code]:
+    'source logs do not independently prove the missing native CLI binary',
 };
 const RUN_ROUTE={
   [SOURCE.failure_code]:id=>'/actions/runs/'+id,
   [SOURCE_V2.failure_code]:id=>
     '/actions/runs/'+id+'/attempts/'+SOURCE_V2.attempt,
+  [SOURCE_V3.failure_code]:id=>'/actions/runs/'+id,
 };
 const JOBS_ROUTE={
   [SOURCE.failure_code]:id=>'/actions/runs/'+id+'/jobs?per_page=100',
   [SOURCE_V2.failure_code]:id=>
     '/actions/runs/'+id+'/attempts/'+SOURCE_V2.attempt+'/jobs?per_page=100',
+  [SOURCE_V3.failure_code]:id=>'/actions/runs/'+id+'/jobs?per_page=100',
 };
 function fail(s){throw Error('trusted Qwen preflight recovery: '+s);}
 function verifyFailure(source,run,jobs,artifacts,log){
@@ -90,10 +125,11 @@ function verifyFailure(source,run,jobs,artifacts,log){
   if(PASSED_STEPS.some(n=>step(n)?.length!==1||
       step(n)[0].conclusion!=='success'))
     fail('verified Store admission did not precede preflight');
-  if(step(FAILED_STEP)?.length!==1||
-      step(FAILED_STEP)[0].conclusion!=='failure')
-    fail('not the exact Qwen key preflight failure');
-  if(qwen.steps.some(s=>BLOCKED_STEPS.includes(s.name)&&
+  const failedStep=FAILED_STEP[source.failure_code];
+  if(step(failedStep)?.length!==1||
+      step(failedStep)[0].conclusion!=='failure')
+    fail('not the exact Qwen preflight failure');
+  if(qwen.steps.some(s=>BLOCKED_STEPS[source.failure_code].includes(s.name)&&
       s.conclusion!=='skipped'))
     fail('model or native Store candidate may have been executed');
   const expected='development-worker-claim-'+run.id+'-1';
@@ -114,6 +150,9 @@ export function verifyQwenPreflightFailure(run,jobs,artifacts,log){
 }
 export function verifyQwenPreflightFailureV2(run,jobs,artifacts,log){
   return verifyFailure(SOURCE_V2,run,jobs,artifacts,log);
+}
+export function verifyQwenPreflightFailureV3(run,jobs,artifacts,log){
+  return verifyFailure(SOURCE_V3,run,jobs,artifacts,log);
 }
 async function verifyLive(source,token,fetchFn=fetch){
   if(typeof token!=='string'||token.length<8)
@@ -147,4 +186,7 @@ export function verifyQwenPreflightFailureLive(token,fetchFn=fetch){
 }
 export function verifyQwenPreflightFailureV2Live(token,fetchFn=fetch){
   return verifyLive(SOURCE_V2,token,fetchFn);
+}
+export function verifyQwenPreflightFailureV3Live(token,fetchFn=fetch){
+  return verifyLive(SOURCE_V3,token,fetchFn);
 }

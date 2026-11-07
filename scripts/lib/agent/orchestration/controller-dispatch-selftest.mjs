@@ -7,7 +7,8 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
-  SOURCE_V2 as QWEN_KEY_FAILURE_V2} from './qwen-preflight-failure.mjs';
+  SOURCE_V2 as QWEN_KEY_FAILURE_V2,
+  SOURCE_V3 as QWEN_KEY_FAILURE_V3} from './qwen-preflight-failure.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -51,6 +52,19 @@ for(const input of [
   {...qwenRecoveryV2.event.inputs,action_id:QWEN_KEY_FAILURE.action_id},
 ])assert.throws(()=>assertDispatchAuthority({...qwenRecoveryV2,
   event:{...qwenRecoveryV2.event,inputs:input}}),/authenticated owner\/main/);
+const qwenRecoveryV3={...valid,issue:QWEN_KEY_FAILURE_V3.issue,
+  actionId:QWEN_KEY_FAILURE_V3.action_id,
+  event:{...event,inputs:{
+    issue_number:String(QWEN_KEY_FAILURE_V3.issue),
+    action_id:QWEN_KEY_FAILURE_V3.action_id,
+    recovery_run_id:String(QWEN_KEY_FAILURE_V3.run_id),
+  }}};
+assert.equal(assertDispatchAuthority(qwenRecoveryV3).issue,2817);
+for(const input of [
+  {...qwenRecoveryV3.event.inputs,recovery_run_id:'42342792436'},
+  {...qwenRecoveryV3.event.inputs,action_id:QWEN_KEY_FAILURE_V2.action_id},
+])assert.throws(()=>assertDispatchAuthority({...qwenRecoveryV3,
+  event:{...qwenRecoveryV3.event,inputs:input}}),/authenticated owner\/main/);
 assert.equal(assertDispatchAuthority({...valid,event:{...event,
   inputs:{...event.inputs,recovery_run_id:'0'}}}).issue,issue);
 for(const input of [

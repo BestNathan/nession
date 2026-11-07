@@ -10,7 +10,8 @@ import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
   recoverAttestedRepairRuntimeFailure,
-  recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2}
+  recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
+  recoverAttestedQwenPreflightV3}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint}
@@ -25,8 +26,10 @@ import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V2 as QWEN_KEY_FAILURE_V2,
+  SOURCE_V3 as QWEN_KEY_FAILURE_V3,
   verifyQwenPreflightFailureLive,
-  verifyQwenPreflightFailureV2Live}
+  verifyQwenPreflightFailureV2Live,
+  verifyQwenPreflightFailureV3Live}
   from './qwen-preflight-failure.mjs';
 
 const REPO='BestNathan/nession';
@@ -87,7 +90,10 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
             actionId===QWEN_KEY_FAILURE.action_id)||
            (String(requested)===String(QWEN_KEY_FAILURE_V2.run_id)&&
             issue===QWEN_KEY_FAILURE_V2.issue&&
-            actionId===QWEN_KEY_FAILURE_V2.action_id);
+            actionId===QWEN_KEY_FAILURE_V2.action_id)||
+           (String(requested)===String(QWEN_KEY_FAILURE_V3.run_id)&&
+            issue===QWEN_KEY_FAILURE_V3.issue&&
+            actionId===QWEN_KEY_FAILURE_V3.action_id);
        })());
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
@@ -231,6 +237,8 @@ async function main(){
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
   const recoveringQwenKeyV2=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE_V2.run_id);
+  const recoveringQwenKeyV3=!commanded&&
+    String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE_V3.run_id);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
@@ -285,6 +293,15 @@ async function main(){
         remote:storeRemote,source:verified});
       if(!['recovered','replayed'].includes(recovered.status))
         fail('Qwen Restore-key recovery was not a canonical Store CAS');
+      console.log(JSON.stringify(recovered));
+      return;
+    }
+    if(recoveringQwenKeyV3){
+      const verified=await verifyQwenPreflightFailureV3Live(token);
+      const recovered=recoverAttestedQwenPreflightV3({
+        remote:storeRemote,source:verified});
+      if(!['recovered','replayed'].includes(recovered.status))
+        fail('Qwen Worker-image recovery was not a canonical Store CAS');
       console.log(JSON.stringify(recovered));
       return;
     }
