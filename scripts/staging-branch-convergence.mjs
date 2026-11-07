@@ -3,6 +3,7 @@
 // Do not execute workflow files from source branches. This planner cannot merge,
 // push branch refs, waive Gates, or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
+import {qualify} from './staging-convergence-readiness.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -230,7 +231,41 @@ function reconcile(plan) {
       const head = action === 'sync-main-to-lane' ? 'main' : lane.branch;
       const base = action === 'sync-main-to-lane' ? lane.branch : 'main';
       const receipt = ensurePr(repo, owner, head, base, plan);
-      results.push({ branch: lane.branch, direction: action, ...receipt });
+      const record = {branch: lane.branch, direction: action, ...receipt};
+      // A new PR needs GitHub to calculate mergeability and deliver checks.
+      // Qualification and merge are considered only on a subsequent run.
+      if (receipt.action === 'created') {
+        record.outcome = 'AWAITING_EXACT_HEAD_CHECKS';
+        results.push(record);
+        continue;
+      }
+      const decision = qualify({action, prNumber:receipt.number,
+        mainSha:plan.main_sha, laneSha:lane.sha, branch:lane.branch,
+        deployment_workflows:lane.deployment_workflows});
+      if (!decision.ready) {
+        record.outcome = 'BLOCKED';
+        record.reason = decision.reason;
+        results.push(record);
+        continue;
+      }
+      // Never use `--auto`: acceptance might become stale before delayed merge.
+      // Revalidate current refs and emit one exact-head merge request at a time.
+      if (gitRemoteHead('main') !== plan.main_sha ||
+          gitRemoteHead(lane.branch) !== lane.sha) {
+        reject('stale head between qualification and merge: ' + lane.branch);
+      }
+      const expectedHead = action === 'sync-main-to-lane' ? plan.main_sha : lane.sha;
+      const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
+        '-f','merge_method=merge','-f','sha=' + expectedHead]);
+      if (merge.merged !== true || !SHA.test(merge.sha)) {
+        reject('GitHub declined an independently qualified merge: ' + receipt.number);
+      }
+      record.outcome = 'MERGED';
+      record.merge_sha = merge.sha;
+      results.push(record);
+      // Main may now differ from the pinned plan. Never use another lane's
+      // old comparison in the same run; a fresh scheduled pass will re-plan.
+      if (action === 'promote-lane-to-main') return results;
     }
   }
   return results;
