@@ -123,10 +123,11 @@ export function deriveActions(ahead, behind) {
   if (!Number.isSafeInteger(ahead) || ahead < 0 || !Number.isSafeInteger(behind) || behind < 0) {
     reject('invalid ahead/behind counters');
   }
-  const actions = [];
-  if (behind > 0) actions.push('sync-main-to-lane');
-  if (ahead > 0) actions.push('promote-lane-to-main');
-  return actions;
+  // A lane must first incorporate current main. Publishing both directions
+  // at once races two merge bases and risks certifying a stale promotion PR.
+  if (behind > 0) return ['sync-main-to-lane'];
+  if (ahead > 0) return ['promote-lane-to-main'];
+  return [];
 }
 
 function calculatePlan() {
@@ -264,7 +265,7 @@ function selfTest() {
   assert.deepEqual(deriveActions(0, 0), []);
   assert.deepEqual(deriveActions(4, 0), ['promote-lane-to-main']);
   assert.deepEqual(deriveActions(0, 5), ['sync-main-to-lane']);
-  assert.deepEqual(deriveActions(3, 7), ['sync-main-to-lane', 'promote-lane-to-main']);
+  assert.deepEqual(deriveActions(3, 7), ['sync-main-to-lane']);
   assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
