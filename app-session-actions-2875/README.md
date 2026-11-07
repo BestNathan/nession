@@ -33,7 +33,7 @@
 3. Choose Session details and examine immutable tmux name/Session ID alongside editable work metadata. Close and remain in Sessions.
 4. Choose Edit details, update Title/Description/Tags and save. Navigation alias changes, tmux Session name does not. Clearing title restores the tmux fallback.
 5. Configure Auto/P2P/Relay and WebGL/Canvas without auto-attaching. Try Kill with a display title (rejected) and with exact tmux name (unlocks). Cancel and confirm are distinct.
-6. Tap row text instead of the menu to return to Terminal; from Terminal use Sessions and Workspace buttons, with a single Back from Workspace. The Terminal DOM is not replaced.
+6. Tap row text instead of the menu to select a new Terminal, or **swipe left from Sessions to return to the same Terminal**. From Terminal, swipe right to Sessions / left to Workspace (or use its header buttons). Workspace has a single Back. The Terminal DOM is not replaced; these are simplified gesture commits only, not production swipe physics.
 7. Try searching, online/offline filters, empty results, Agents disclosure and menu dismissal by scroll/Escape/outside click. Switch to 375×812 and 430×932 without scaling; Reset restores local fixtures.
 8. External fixtures: Agent offline allows reading details but blocks editing; Save conflict rejects the first save and requires reload; No Sessions presents an explicit creation path.
 

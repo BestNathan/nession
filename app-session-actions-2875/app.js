@@ -351,6 +351,23 @@
     else if(menuId){e.preventDefault();closeMenu(true);}
     else if(layer!=="terminal"){e.preventDefault();setLayer("terminal");}
   });
+  // Spatial navigation demonstration: gesture commits on release, without
+  // claiming to reproduce Nession's real App pager physics or TUI touch ownership.
+  let gesture=null;
+  app.addEventListener("pointerdown",e=>{
+    if(e.pointerType!=="touch"||dialog||menuId)return;
+    if(e.target.closest("input,textarea,select,[role='dialog'],[role='menu']"))return;
+    gesture={id:e.pointerId,x:e.clientX,y:e.clientY};
+  });
+  app.addEventListener("pointerup",e=>{
+    if(!gesture||gesture.id!==e.pointerId)return;
+    const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;gesture=null;
+    if(Math.abs(dx)<85||Math.abs(dx)<Math.abs(dy)*1.8)return;
+    if(layer==="terminal")setLayer(dx>0?"sessions":"workspace");
+    else if(layer==="sessions"&&dx<0)setLayer("terminal");
+    else if(layer==="workspace"&&dx>0)setLayer("terminal");
+  });
+  app.addEventListener("pointercancel",()=>{gesture=null;});
   device.addEventListener("np:resize",e=>updateSize(Number(e.detail.width)));
   renderControls();renderActive();renderList();setLayer("sessions");updateSize(390);
 })();
