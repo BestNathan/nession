@@ -169,6 +169,77 @@ function validatePlan(plan) {
   }
 }
 
+// Staging protection requires rust-check/web-check on an up-to-date integration
+// head. A direct PR whose source is main can be mergeable yet be rejected by
+// GitHub (405, required statuses expected) if staging carries independent work.
+// Make a deterministic, immutable, conflict-free branch with two real parents.
+export function integrationBranchName(lane, mainSha, laneSha) {
+  branchName(lane);
+  if(!SHA.test(mainSha)||!SHA.test(laneSha)) reject('invalid integration parent SHA');
+  const normalized=lane.replace(/[\/._]/g,'-');
+  const name='chore/staging-sync-'+normalized+'-'+mainSha.slice(0,12)+'-'+laneSha.slice(0,12);
+  if(name.length>100)reject('integration branch name too long');
+  return name;
+}
+
+function optionalRemoteHead(branch) {
+  branchName(branch);
+  const out=shell('git',['ls-remote','origin','refs/heads/'+branch]);
+  if(!out)return null;
+  const sha=out.split(/\s+/)[0];
+  if(!SHA.test(sha))reject('invalid remote integration head SHA');
+  return sha;
+}
+
+function ensureIntegrationBranch(repo, plan, lane) {
+  const branch=integrationBranchName(lane.branch,plan.main_sha,lane.sha);
+  const currentMain=gitRemoteHead('main');
+  const currentLane=gitRemoteHead(lane.branch);
+  if(currentMain!==plan.main_sha||currentLane!==lane.sha)
+    reject('source refs moved during integration branch preparation');
+  let output;
+  try {
+    output=shell('git',['merge-tree','--write-tree',lane.sha,plan.main_sha]);
+  } catch(error) {
+    if(error.status===1)return {conflict:true,branch};
+    throw error;
+  }
+  const tree=output.trim().split(/\s+/)[0];
+  if(!SHA.test(tree))reject('invalid Git merge-tree result');
+  const existing=optionalRemoteHead(branch);
+  if(existing) {
+    shell('git',['fetch','--no-tags','origin',
+      '+refs/heads/'+branch+':refs/remotes/origin/'+branch]);
+    const parents=shell('git',['show','-s','--format=%P',existing]).split(/\s+/);
+    const actualTree=shell('git',['rev-parse',existing+'^{tree}']);
+    if(JSON.stringify(parents)!==JSON.stringify([lane.sha,plan.main_sha])||
+       actualTree!==tree)reject('integration branch already exists with wrong parents/tree');
+    return {branch,sha:existing,created:false};
+  }
+  // The App token is used only by this main-owned deterministic controller,
+  // never in an Agent's context. GitHub CLI's credential helper avoids placing
+  // a token in command arguments or persisting checkout credentials.
+  const ident={...process.env,GIT_AUTHOR_NAME:'Nession Convergence',
+    GIT_AUTHOR_EMAIL:'nession-convergence@users.noreply.github.com',
+    GIT_COMMITTER_NAME:'Nession Convergence',
+    GIT_COMMITTER_EMAIL:'nession-convergence@users.noreply.github.com',
+    GIT_TERMINAL_PROMPT:'0'};
+  const commit=shell('git',['commit-tree',tree,'-p',lane.sha,'-p',plan.main_sha,
+    '-m','chore(release): integrate '+plan.main_sha+' into '+lane.sha],
+    {env:ident});
+  if(!SHA.test(commit))reject('invalid integration commit SHA');
+  try {
+    shell('git',['-c','credential.helper=!gh auth git-credential',
+      'push','origin',commit+':refs/heads/'+branch],{env:ident});
+  } catch(error) {
+    // Concurrent controllers must not force-push or overwrite a winner. If an
+    // identical immutable branch won the race, validate it below.
+    if(optionalRemoteHead(branch)!==commit)throw error;
+  }
+  if(optionalRemoteHead(branch)!==commit)reject('integration branch push readback mismatch');
+  return {branch,sha:commit,created:true};
+}
+
 function existingPr(repo, owner, head, base) {
   const results = gh(['--method', 'GET', 'repos/' + repo + '/pulls',
     '-f', 'head=' + owner + ':' + head, '-f', 'base=' + base,
@@ -183,9 +254,9 @@ function existingPr(repo, owner, head, base) {
 function ensurePr(repo, owner, head, base, plan) {
   const found = existingPr(repo, owner, head, base);
   if (found) return { action: 'reused', number: found.number, url: found.html_url };
-  const sync = head === 'main';
+  const sync = base !== 'main';
   const title = sync
-    ? 'chore(release): sync main into ' + base
+    ? 'chore(release): integrate main into ' + base + ' via checked head'
     : 'release: promote ' + head + ' to main';
   const body = [
     'Staging Convergence automated proposal (source: Release / Staging Convergence).',
@@ -198,7 +269,7 @@ function ensurePr(repo, owner, head, base, plan) {
     '',
     '**This PR is a proposal, not release or acceptance evidence.**',
     'Preserve merge commits; verify exact-head CI, applicable Acceptance/E2E, conflicts and deployment before merging.',
-    'The scheduler never merges this PR, changes protected refs, bumps versions or deploys Production.',
+    'The controller may request a merge commit only after the independent exact-head Gates approve. It never bypasses checks, force-pushes, bumps versions or deploys Production.',
   ].join('\n');
   try {
     const created = gh(['--method', 'POST', 'repos/' + repo + '/pulls',
@@ -259,10 +330,25 @@ function reconcile(plan) {
   const results = [];
   for (const lane of plan.branches) {
     for (const action of lane.actions) {
-      const head = action === 'sync-main-to-lane' ? 'main' : lane.branch;
-      const base = action === 'sync-main-to-lane' ? lane.branch : 'main';
-      const receipt = ensurePr(repo, owner, head, base, plan);
-      const record = {branch: lane.branch, direction: action, ...receipt};
+      const sync=action==='sync-main-to-lane';
+      const integration=sync?ensureIntegrationBranch(repo,plan,lane):null;
+      // On an actual merge-tree conflict, the direct-source PR exists only as
+      // an authenticated, SHA-bound read-only Agent analysis surface; it is not
+      // qualified for merge under the protected staging rules.
+      if(sync&&integration.conflict) {
+        const probe=ensurePr(repo,owner,'main',lane.branch,plan);
+        const result={branch:lane.branch,direction:action,...probe,
+          outcome:'BLOCKED',reason:'MERGE_CONFLICT'};
+        if(probe.action!=='created')
+          result.agent_analysis=dispatchConflictReview(repo,probe,action,plan,lane);
+        results.push(result);
+        continue;
+      }
+      const head=sync?integration.branch:lane.branch;
+      const base=sync?lane.branch:'main';
+      const receipt=ensurePr(repo,owner,head,base,plan);
+      const record={branch:lane.branch,direction:action,...receipt,
+        ...(sync?{integration_head:integration.sha}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
       if (receipt.action === 'created') {
@@ -270,8 +356,9 @@ function reconcile(plan) {
         results.push(record);
         continue;
       }
-      const decision = qualify({action, prNumber:receipt.number,
-        mainSha:plan.main_sha, laneSha:lane.sha, branch:lane.branch,
+      const decision = qualify({action,prNumber:receipt.number,
+        mainSha:plan.main_sha,laneSha:lane.sha,branch:lane.branch,
+        syncRef:integration?.branch,syncHeadSha:integration?.sha,
         deployment_workflows:lane.deployment_workflows});
       if (!decision.ready) {
         record.outcome = 'BLOCKED';
@@ -288,7 +375,7 @@ function reconcile(plan) {
           gitRemoteHead(lane.branch) !== lane.sha) {
         reject('stale head between qualification and merge: ' + lane.branch);
       }
-      const expectedHead = action === 'sync-main-to-lane' ? plan.main_sha : lane.sha;
+      const expectedHead = sync ? integration.sha : lane.sha;
       const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
         '-f','merge_method=merge','-f','sha=' + expectedHead]);
       if (merge.merged !== true || !SHA.test(merge.sha)) {
@@ -335,6 +422,12 @@ function selfTest() {
   assert.deepEqual(deriveActions(4, 0), ['promote-lane-to-main']);
   assert.deepEqual(deriveActions(0, 5), ['sync-main-to-lane']);
   assert.deepEqual(deriveActions(3, 7), ['sync-main-to-lane']);
+  const aa='a'.repeat(40),bb='b'.repeat(40);
+  assert.equal(integrationBranchName('staging',aa,bb),
+    'chore/staging-sync-staging-aaaaaaaaaaaa-bbbbbbbbbbbb');
+  assert.equal(integrationBranchName('staging-01',aa,bb),
+    'chore/staging-sync-staging-01-aaaaaaaaaaaa-bbbbbbbbbbbb');
+  assert.throws(()=>integrationBranchName('bad..ref',aa,bb),/unsupported/);
   assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
