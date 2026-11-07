@@ -192,6 +192,33 @@ JSON array of URLs. Unknown keys and invalid values are rejected without
 writing, and edits preserve comments and unrelated keys. `show` masks
 `auth_token`/`agent_token`, and written files are private (0600 on Unix).
 
+#### Safe generated defaults vs. explicit deployment
+
+`config server init` writes a safe starting point, not a deployment policy:
+
+```toml
+listen_address = "127.0.0.1:8080"
+auth_token = ""
+```
+
+While `auth_token` is empty the generated listener is loopback-only (the same
+`127.0.0.1:8080` source as the no-file fallback); `init --force` and
+explicit `--config` generation follow the same rule. An empty token means the
+Server accepts every client, so never pair it with a public interface. To
+expose the Server remotely, set an explicit listener **and** a non-empty
+token, for example:
+
+```bash
+nession config server set listen_address 0.0.0.0:19090
+nession config server set auth_token your-long-random-secret
+```
+
+`nession server start` loads an operator-authored file verbatim and never
+rewrites it. Deliberate local no-auth mode remains supported on loopback, and
+`nession server start` with no file still uses the `127.0.0.1:8080` no-auth
+fallback (the standalone `nession-server` binary behaves the same when
+`config.toml` is absent).
+
 ### 3. Use it
 
 **CLI** (targets the central Server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`). For the `19090` example above, set the target and use the same auth token configured for the Server:

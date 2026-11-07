@@ -269,6 +269,58 @@ fn config_commands_use_the_default_path_when_no_config_is_named() {
         .contains("default-agent"));
 }
 
+/// #2889 SC-01: every generated Server config is safe by default — an empty
+/// `auth_token` only ever appears with a loopback listener. The default path,
+/// `--force` and an explicit `--config` all take the same generation path.
+#[test]
+fn config_server_init_generates_a_safe_loopback_default() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let init = nession(&dir)
+        .args(["config", "server", "init"])
+        .output()
+        .expect("init");
+    assert!(init.status.success(), "{}", stderr(&init));
+    let default = dir.path().join("server-config.toml");
+    let content = std::fs::read_to_string(&default).expect("read generated config");
+    assert!(!content.contains("0.0.0.0"), "{content}");
+    let config: nession_common::config::ServerConfig =
+        toml::from_str(&content).expect("typed generated config");
+    assert!(config.auth_token.trim().is_empty());
+    assert_eq!(config.listen_address, "127.0.0.1:8080");
+
+    // An existing unsafe file must not survive an explicit --force rewrite.
+    std::fs::write(
+        &default,
+        "listen_address = \"0.0.0.0:19090\"\nauth_token = \"\"\n",
+    )
+    .expect("seed unsafe config");
+    let forced = nession(&dir)
+        .args(["config", "server", "init", "--force"])
+        .output()
+        .expect("forced init");
+    assert!(forced.status.success(), "{}", stderr(&forced));
+    let config: nession_common::config::ServerConfig =
+        toml::from_str(&std::fs::read_to_string(&default).expect("read forced config"))
+            .expect("typed forced config");
+    assert!(config.auth_token.trim().is_empty());
+    assert_eq!(config.listen_address, "127.0.0.1:8080");
+
+    // Explicit --config generation obeys the same safe-default rule.
+    let explicit = dir.path().join("explicit-server.toml");
+    let created = nession(&dir)
+        .args(["config", "server", "init", "--config"])
+        .arg(&explicit)
+        .output()
+        .expect("explicit init");
+    assert!(created.status.success(), "{}", stderr(&created));
+    let config: nession_common::config::ServerConfig =
+        toml::from_str(&std::fs::read_to_string(&explicit).expect("read explicit config"))
+            .expect("typed explicit config");
+    assert!(config.auth_token.trim().is_empty());
+    assert_eq!(config.listen_address, "127.0.0.1:8080");
+}
+
 /// SC-04: the real binary exposes every leaf command's help successfully.
 #[test]
 fn every_leaf_command_help_succeeds() {

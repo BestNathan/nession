@@ -101,14 +101,56 @@ impl ConfigSelection {
 }
 
 /// The standalone Server listen address used by `nession server start` when no
-/// config file is supplied.
+/// config file is supplied, and by `nession config server init` while no
+/// credential is configured.
 ///
 /// Deliberately distinct from [`ServerConfig::default()`] (`0.0.0.0:19090`),
-/// which is the `nession-server` binary's own default: the CLI starts an
+/// which is the `nession-server` binary's deployment shape: the CLI starts an
 /// operator's local daemon, while the standalone binary is a deployment
 /// entrypoint. Both defaults are named here/in `ServerConfig` rather than
 /// conflated.
+///
+/// An empty `auth_token` means the Server accepts every client
+/// (`server_auth_v1`), so a generated config may only pair it with this
+/// loopback listener (#2889).
 pub const CLI_SERVER_FALLBACK_LISTEN: &str = "127.0.0.1:8080";
+
+/// Whether `listen_address` binds only the loopback interface.
+fn is_loopback_listen(listen_address: &str) -> bool {
+    let host = listen_address
+        .rsplit_once(':')
+        .map_or(listen_address, |(host, _)| host);
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+}
+
+/// The Server profile `config server init` may generate without operator
+/// opt-in.
+///
+/// `ServerConfig::default()` is a deployment entrypoint (`0.0.0.0:19090` with
+/// no auth); serializing it verbatim created an unauthenticated
+/// network-reachable daemon from the advertised setup path (#2889). An empty
+/// `auth_token` now always generates the named loopback fallback instead.
+fn initial_server_config() -> ServerConfig {
+    let mut config = ServerConfig::default();
+    if config.auth_token.trim().is_empty() {
+        config.listen_address = CLI_SERVER_FALLBACK_LISTEN.to_string();
+    }
+    config
+}
+
+/// Refuse to write an unauthenticated Server config on a non-loopback
+/// listener. This keeps the safe-generation invariant executable even if the
+/// defaults above change.
+fn ensure_safe_initial_listen(config: &ServerConfig) -> Result<()> {
+    if config.auth_token.trim().is_empty() && !is_loopback_listen(&config.listen_address) {
+        anyhow::bail!(
+            "refusing to generate a Server config with an empty auth_token on non-loopback \
+             listener '{}'; set auth_token or choose a loopback listen_address",
+            config.listen_address
+        );
+    }
+    Ok(())
+}
 
 /// Load an Agent config from the selected file, applying CLI/env overrides.
 ///
@@ -529,8 +571,14 @@ pub fn init(target: ConfigTarget, selection: &ConfigSelection, force: bool) -> R
     let toml_str = match target {
         ConfigTarget::Agent => toml::to_string_pretty(&AgentConfig::default())
             .context("failed to serialize agent config")?,
-        ConfigTarget::Server => toml::to_string_pretty(&ServerConfig::default())
-            .context("failed to serialize server config")?,
+        ConfigTarget::Server => {
+            // A generated Server config is a starting point, not a deployment
+            // decision: never emit an unauthenticated non-loopback listener
+            // (#2889). `--force` and `--config` take this same path.
+            let config = initial_server_config();
+            ensure_safe_initial_listen(&config)?;
+            toml::to_string_pretty(&config).context("failed to serialize server config")?
+        }
     };
 
     write_private(&selection.path, &toml_str)?;
@@ -909,6 +957,96 @@ mod tests {
         };
         let config = load_server(&selection).expect("defaults");
         assert_eq!(config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+    }
+
+    /// #2889 SC-01: the generated profile pairs an empty token only with the
+    /// named loopback fallback, never `ServerConfig::default()`'s public
+    /// listener.
+    #[test]
+    fn the_generated_server_config_is_loopback_while_unauthenticated() {
+        let config = initial_server_config();
+        assert!(config.auth_token.trim().is_empty());
+        assert_eq!(config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+        assert!(is_loopback_listen(&config.listen_address));
+        ensure_safe_initial_listen(&config).expect("the generated pairing is safe");
+    }
+
+    /// #2889 SC-01: the safe-generation invariant rejects the exact dangerous
+    /// pairing this issue reported.
+    #[test]
+    fn an_unauthenticated_public_listener_is_rejected_by_the_generator_guard() {
+        let config = ServerConfig {
+            listen_address: "0.0.0.0:19090".to_string(),
+            ..initial_server_config()
+        };
+        let error = ensure_safe_initial_listen(&config)
+            .expect_err("must refuse an unauthenticated public listener");
+        let message = format!("{error:#}");
+        assert!(message.contains("0.0.0.0:19090"), "{message}");
+        assert!(message.contains("auth_token"), "{message}");
+    }
+
+    /// #2889 SC-02: both operator-authored modes stay valid — an explicit
+    /// secure remote listener, and a deliberate local no-auth listener.
+    #[test]
+    fn the_generation_guard_keeps_intentional_operator_modes() {
+        let remote = ServerConfig {
+            listen_address: "0.0.0.0:8443".to_string(),
+            auth_token: "operator-secret".to_string(),
+            ..ServerConfig::default()
+        };
+        ensure_safe_initial_listen(&remote).expect("authenticated remote listener");
+
+        let local = ServerConfig {
+            listen_address: CLI_SERVER_FALLBACK_LISTEN.to_string(),
+            auth_token: String::new(),
+            ..ServerConfig::default()
+        };
+        ensure_safe_initial_listen(&local).expect("loopback no-auth listener");
+    }
+
+    /// #2889 SC-02: normal startup loads the operator's file verbatim; the
+    /// generation guard must never rewrite an existing remote/auth contract.
+    #[test]
+    fn load_server_retains_operator_authored_security_modes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let remote_path = dir.path().join("remote.toml");
+        let remote = ServerConfig {
+            listen_address: "0.0.0.0:8443".to_string(),
+            auth_token: "operator-secret".to_string(),
+            ..ServerConfig::default()
+        };
+        fs::write(
+            &remote_path,
+            toml::to_string_pretty(&remote).expect("serialize remote config"),
+        )
+        .expect("write remote config");
+        let loaded = load_server(&ConfigSelection {
+            path: remote_path,
+            explicit: true,
+        })
+        .expect("load remote config");
+        assert_eq!(loaded.listen_address, "0.0.0.0:8443");
+        assert_eq!(loaded.auth_token, "operator-secret");
+
+        let local_path = dir.path().join("local.toml");
+        let local = ServerConfig {
+            listen_address: CLI_SERVER_FALLBACK_LISTEN.to_string(),
+            auth_token: String::new(),
+            ..ServerConfig::default()
+        };
+        fs::write(
+            &local_path,
+            toml::to_string_pretty(&local).expect("serialize local config"),
+        )
+        .expect("write local config");
+        let loaded = load_server(&ConfigSelection {
+            path: local_path,
+            explicit: true,
+        })
+        .expect("load local config");
+        assert_eq!(loaded.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+        assert!(loaded.auth_token.is_empty());
     }
 
     #[test]
