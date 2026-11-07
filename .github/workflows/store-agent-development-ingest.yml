@@ -62,7 +62,16 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body,
-           '/nession ingest-qwen issue=2906 worker_run='))
+           '/nession ingest-qwen issue=2906 worker_run=')) ||
+        (github.event_name == 'issue_comment' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'BestNathan' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 2912 &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         startsWith(github.event.comment.body,
+           '/nession ingest-qwen issue=2912 worker_run='))
       )
     runs-on: ubuntu-24.04
     environment: cursor
