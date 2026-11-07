@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Filter, Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, Filter, X } from 'lucide-react';
 import { SearchBar } from '@/product/session/components/SearchBar';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { shellMotionClass, shellRowControlMinClass } from '@/app/shellStyles';
-import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 
 export interface SessionListHeaderProps {
@@ -20,8 +18,6 @@ export interface SessionListHeaderProps {
   sortField?: SortField;
   sortDirection?: SortDirection;
   toggleSort?: (field: SortField) => void;
-  onCreate: () => void;
-  createDisabled: boolean;
   onRefresh: () => void;
   loadingSessions: boolean;
 }
@@ -64,6 +60,111 @@ function SortButton({
   );
 }
 
+function SessionFilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="session-list-filter-chip"
+      onClick={() => onClear()}
+      className={cn(
+        shellRowControlMinClass,
+        shellMotionClass,
+        'flex w-fit items-center gap-[var(--nession-shell-space-1)] rounded-full bg-muted px-[var(--nession-shell-space-2)] text-muted-foreground',
+        chromeSansRole('metadata'),
+      )}
+    >
+      {label}
+      <X aria-hidden className="size-3" />
+      <span className="sr-only">Clear filter</span>
+    </button>
+  );
+}
+
+function SessionFilterPanel({
+  statusFilter,
+  setStatusFilter,
+  onlineCount,
+  offlineCount,
+  sortField,
+  sortDirection,
+  toggleSort,
+  onRefresh,
+  loadingSessions,
+}: Omit<SessionListHeaderProps, 'searchQuery' | 'setSearchQuery'>) {
+  const countForFilter = (filter: (typeof STATUS_FILTERS)[number]): number | undefined => {
+    if (filter.countKey === 'onlineCount') { return onlineCount; }
+    if (filter.countKey === 'offlineCount') { return offlineCount; }
+    return undefined;
+  };
+
+  return (
+    <div
+      id="session-list-filters-panel"
+      data-testid="session-list-filters-panel"
+      className="flex flex-col gap-[var(--nession-shell-space-2)]"
+    >
+      <div className="flex flex-wrap items-center gap-1">
+        {STATUS_FILTERS.map((filter) => {
+          const count = countForFilter(filter);
+          const isActive = statusFilter === filter.key;
+          return (
+            <Button
+              key={filter.key}
+              variant={isActive ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setStatusFilter(filter.key)}
+              aria-pressed={isActive}
+              className={cn(shellRowControlMinClass, 'flex-shrink-0')}
+            >
+              {filter.label}
+              {count !== undefined && (
+                <span className={cn('ml-1 rounded-full bg-background/20 px-1.5 py-0.5', chromeSansRole('caption'))}>
+                  {count}
+                </span>
+              )}
+            </Button>
+          );
+        })}
+      </div>
+      <div className={cn('flex items-center gap-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
+        {toggleSort ? (
+          <>
+            <SortButton
+              label="Name"
+              field="name"
+              activeField={sortField}
+              direction={sortDirection}
+              onToggle={toggleSort}
+            />
+            <SortButton
+              label="Activity"
+              field="activity"
+              activeField={sortField}
+              direction={sortDirection}
+              onToggle={toggleSort}
+            />
+          </>
+        ) : null}
+        <RefreshButton
+          onClick={() => onRefresh()}
+          loading={loadingSessions}
+          variant="ghost"
+          ariaLabel="Refresh sessions"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Search and the secondary filter/sort disclosure (#2851).
+ *
+ * Search is the only persistent control above the list. Status filters, sort
+ * and refresh live behind one field action so the navigation column opens with
+ * Sessions rather than a toolbar. A chosen status filter stays visible as a
+ * removable chip — progressive disclosure is not permission for an active
+ * filter to become invisible.
+ */
 export function SessionListHeader({
   searchQuery,
   setSearchQuery,
@@ -74,22 +175,19 @@ export function SessionListHeader({
   sortField,
   sortDirection,
   toggleSort,
-  onCreate,
-  createDisabled,
   onRefresh,
   loadingSessions,
 }: SessionListHeaderProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const countForFilter = (filter: (typeof STATUS_FILTERS)[number]): number | undefined => {
-    if (filter.countKey === 'onlineCount') { return onlineCount; }
-    if (filter.countKey === 'offlineCount') { return offlineCount; }
-    return undefined;
-  };
+  const activeFilter = STATUS_FILTERS.find(
+    (filter) => filter.key === statusFilter && filter.key !== 'all',
+  );
 
   return (
-    <div className="flex shrink-0 flex-col gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)] max-lg:gap-[var(--nession-shell-space-3)]">
-      <SidebarSectionHead label="Sessions" />
+    <div
+      data-testid="session-list-header"
+      className="flex shrink-0 flex-col gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)]"
+    >
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -98,88 +196,45 @@ export function SessionListHeader({
         onlineCount={onlineCount}
         offlineCount={offlineCount}
         showStatusFilters={false}
-      />
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={cn(
-          'justify-start rounded-none px-1 text-muted-foreground hover:text-foreground max-lg:min-h-11',
-          shellMotionClass,
-        )}
-        data-testid="create-session"
-        aria-label="Create session"
-        disabled={createDisabled}
-        onClick={() => onCreate()}
-      >
-        <Plus className="size-4" />
-        New Session
-      </Button>
-      <div className="flex items-center justify-between gap-2">
-        <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-          <CollapsibleTrigger
+        placeholder="Search sessions..."
+        inputAriaLabel="Search sessions"
+        inputClassName="h-[length:var(--nession-control-lg)] rounded-[var(--nession-radius-control)]"
+        fieldAction={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             data-testid="session-list-filters"
-            render={
-              <Button type="button" variant="ghost" size="sm" className={cn(shellRowControlMinClass, 'max-lg:min-h-11 text-muted-foreground hover:text-foreground', shellMotionClass)}>
-                <Filter className="size-4" />
-                Filters
-              </Button>
-            }
-          />
-          <CollapsibleContent
-            data-testid="session-list-filters-panel"
-            className="mt-2 flex flex-col gap-2"
+            aria-label="Filters"
+            aria-expanded={filtersOpen}
+            aria-controls="session-list-filters-panel"
+            title="Filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+            className={cn('text-muted-foreground hover:text-foreground', shellMotionClass)}
           >
-            <div className="flex flex-wrap items-center gap-1">
-              {STATUS_FILTERS.map((filter) => {
-                const count = countForFilter(filter);
-                const isActive = statusFilter === filter.key;
-                return (
-                  <Button
-                    key={filter.key}
-                    variant={isActive ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setStatusFilter(filter.key)}
-                    aria-pressed={isActive}
-                    className={cn(shellRowControlMinClass, 'flex-shrink-0')}
-                  >
-                    {filter.label}
-                    {count !== undefined && (
-                      <span className={cn('ml-1 rounded-full bg-background/20 px-1.5 py-0.5', chromeSansRole('caption'))}>
-                        {count}
-                      </span>
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-            {toggleSort ? (
-              <div className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('body'))}>
-                <SortButton
-                  label="Name"
-                  field="name"
-                  activeField={sortField}
-                  direction={sortDirection}
-                  onToggle={toggleSort}
-                />
-                <SortButton
-                  label="Activity"
-                  field="activity"
-                  activeField={sortField}
-                  direction={sortDirection}
-                  onToggle={toggleSort}
-                />
-              </div>
-            ) : null}
-          </CollapsibleContent>
-        </Collapsible>
-        <RefreshButton
-          onClick={() => onRefresh()}
-          loading={loadingSessions}
-          variant="ghost"
-          ariaLabel="Refresh sessions"
+            <Filter className="size-4" />
+          </Button>
+        }
+      />
+      {activeFilter ? (
+        <SessionFilterChip
+          label={activeFilter.label}
+          onClear={() => setStatusFilter('all')}
         />
-      </div>
+      ) : null}
+      {filtersOpen ? (
+        <SessionFilterPanel
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          onlineCount={onlineCount}
+          offlineCount={offlineCount}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          toggleSort={toggleSort}
+          onRefresh={onRefresh}
+          loadingSessions={loadingSessions}
+        />
+      ) : null}
     </div>
   );
 }

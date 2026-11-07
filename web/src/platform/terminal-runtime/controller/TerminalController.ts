@@ -102,7 +102,7 @@ export interface TerminalControllerEvents {
   onRendererReplaced?: () => void;
   /** An individual Agent event is now parsed/applied by the current xterm.
    * Not a cumulative applied cursor, nor an output ACK (#1950). */
-  onStreamEventParsed?: (position: TerminalStreamPosition) => void;
+  onStreamEventParsed?: (position: TerminalStreamPosition, parsedBytes: number) => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
@@ -721,7 +721,7 @@ export class TerminalController {
         }
         if (bootstrapSeq === null && position
           && this._terminal === terminal && this.transport === transport) {
-          this.events?.onStreamEventParsed?.(position);
+          this.events?.onStreamEventParsed?.(position, data.byteLength);
         }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
@@ -737,7 +737,7 @@ export class TerminalController {
       this.adoptSessionCols(cols);
       this.writer.resize(cols, rows, () => {
         if (position && this._terminal === terminal && this.transport === transport) {
-          this.events?.onStreamEventParsed?.(position);
+          this.events?.onStreamEventParsed?.(position, 0);
         }
       });
     };

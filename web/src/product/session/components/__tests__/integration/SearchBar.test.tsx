@@ -14,12 +14,11 @@ describe('SearchBar', () => {
     vi.useRealTimers();
   });
 
-  it("defaults to the Web column's copy", () => {
-    // The default is Web's string and stays Web's: `SessionListHeader` renders
-    // `SearchBar` with no `placeholder`, so this literal is what the Web
-    // sidebar shows. The App passes its own instead of moving this one (#1050
-    // stage 3) — because changing a shared default would move Web's copy and
-    // Web's goldens as a side effect of an App issue.
+  it('falls back to the shared copy when a caller passes none', () => {
+    // Both current surfaces pass their own `Search sessions...` copy; this is
+    // the fallback for a caller that has not made that decision. Changing a
+    // shared default must not move a caller that passed its own string (#1050
+    // stage 3).
     render(
       <SearchBar
         searchQuery=""
@@ -236,6 +235,44 @@ describe('SearchBar', () => {
     expect(setSearchQuery).not.toHaveBeenCalled();
     // The input should reflect the external value
     expect((input as HTMLInputElement).value).toBe('external-value');
+  });
+
+  it('still debounces a second query after the first is echoed back', () => {
+    vi.useFakeTimers();
+    const setSearchQuery = vi.fn();
+    const { rerender } = render(
+      <SearchBar
+        searchQuery=""
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+    const input = screen.getByRole('textbox');
+
+    fireEvent.change(input, { target: { value: 'design' } });
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(setSearchQuery).toHaveBeenLastCalledWith('design');
+
+    // The parent echoes the debounced value back. That is this field's own
+    // query, not an external reset; the next query must still reach the parent.
+    rerender(
+      <SearchBar
+        searchQuery="design"
+        setSearchQuery={setSearchQuery}
+        statusFilter="all"
+        setStatusFilter={vi.fn()}
+        onlineCount={0}
+        offlineCount={0}
+      />,
+    );
+    fireEvent.change(input, { target: { value: 'no-such-session' } });
+    act(() => { vi.advanceTimersByTime(250); });
+
+    expect(setSearchQuery).toHaveBeenCalledTimes(2);
+    expect(setSearchQuery).toHaveBeenLastCalledWith('no-such-session');
   });
 
   it('rapid typing cancels previous debounce', () => {

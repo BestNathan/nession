@@ -743,3 +743,165 @@ fn the_write_forms_of_a_two_sided_subcommand_are_refused() {
         "and nothing should have been created"
     );
 }
+
+// ── Git-authorized media (#2876) ───────────────────────────────────────────
+
+/// A tiny but real PNG signature + payload; the browser decodes the bytes, not
+/// a fixture-specific shape.
+fn png_bytes() -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    bytes.extend_from_slice(
+        b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00",
+    );
+    bytes.extend_from_slice(&[0u8; 4]);
+    bytes.extend_from_slice(b"IEND\xaeB`\x82");
+    bytes
+}
+
+#[test]
+fn an_untracked_png_returns_complete_media_bytes_and_mime() {
+    let dir = repo().unwrap();
+    let bytes = png_bytes();
+    std::fs::write(dir.path().join("logo.png"), &bytes).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "logo.png", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Ready);
+    assert!(preview.binary);
+    assert!(preview.text.is_empty());
+    let media = preview.media.expect("a ready media answer carries bytes");
+    assert_eq!(media.mime_type, "image/png");
+    assert!(media.complete);
+    use base64::Engine as _;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&media.content_base64)
+        .unwrap();
+    assert_eq!(decoded, bytes);
+}
+
+#[test]
+fn media_refuses_a_file_larger_than_the_bound() {
+    let dir = repo().unwrap();
+    let path = dir.path().join("huge.png");
+    let mut file = std::fs::File::create(&path).unwrap();
+    use std::io::Write as _;
+    file.write_all(b"\x89PNG\r\n\x1a\n").unwrap();
+    file.set_len(nession_git::preview::MAX_MEDIA_BYTES as u64 + 1)
+        .unwrap();
+    drop(file);
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "huge.png", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::TooLarge);
+    assert!(preview.media.is_none(), "no prefix masquerades as a file");
+    assert_eq!(
+        preview.size,
+        nession_git::preview::MAX_MEDIA_BYTES as u64 + 1
+    );
+    assert!(preview.message.unwrap_or_default().contains("larger than"));
+}
+
+#[test]
+fn media_refuses_content_that_does_not_match_the_extension() {
+    let dir = repo().unwrap();
+    std::fs::write(
+        dir.path().join("photo.png"),
+        b"%PDF-1.4\nnot really a png\n",
+    )
+    .unwrap();
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "photo.png", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Unsupported);
+    assert!(preview.media.is_none());
+    assert!(preview
+        .message
+        .unwrap_or_default()
+        .contains("does not match its extension"));
+}
+
+#[test]
+fn media_refuses_a_non_media_path_even_with_media_bytes() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), png_bytes()).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "notes.txt", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Unsupported);
+    assert!(preview
+        .message
+        .unwrap_or_default()
+        .contains("not a supported media file"));
+}
+
+#[test]
+fn media_refuses_a_path_that_is_not_the_selected_status_kind() {
+    let dir = repo().unwrap();
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "tracked.txt", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Changed);
+    assert!(preview.media.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn media_does_not_follow_an_untracked_symlink() {
+    let dir = repo().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("secret.png");
+    std::fs::write(&target, png_bytes()).unwrap();
+    std::os::unix::fs::symlink(&target, dir.path().join("link.png")).unwrap();
+    let cmd = cmd_for(&dir);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let preview = runtime()
+        .unwrap()
+        .block_on(async {
+            preview::file_media(&cmd, &root, "link.png", PreviewExpectedV1::Untracked).await
+        })
+        .unwrap();
+
+    assert_eq!(preview.state, FilePreviewStateV1::Unsupported);
+    assert!(preview.media.is_none());
+    assert!(preview
+        .message
+        .unwrap_or_default()
+        .to_lowercase()
+        .contains("symbolic link"));
+}

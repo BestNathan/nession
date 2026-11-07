@@ -30,6 +30,12 @@ export type AttachResult =
        * and the agent still ignores column changes on resize.
        */
       terminalCols?: number;
+      /**
+       * Notification capabilities the Agent negotiated on this attach
+       * (#2877). Absent means a provider built before the field: the caller
+       * keeps the v1 `agent.terminal.output.applied` request/reply.
+       */
+      terminalCapabilities?: string[];
     }
   | { ok: false; error: string };
 

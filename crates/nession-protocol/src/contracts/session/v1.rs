@@ -1115,6 +1115,17 @@ pub struct ClientAttachResponse {
     /// ignores any column change on resize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// What this Agent's terminal subscription supports beyond the v1 units
+    /// (#2877).
+    ///
+    /// Notification-only capabilities have no manifest entry: a notification
+    /// is not a Protocol Unit, so the attach reply is the negotiation point.
+    /// Absent means a provider built before this field — the client keeps the
+    /// v1 `agent.terminal.output.applied` request/reply and must not send the
+    /// response-less progress notification. The Relay forwards this list
+    /// verbatim; it does not add, remove or validate entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_capabilities: Option<Vec<String>>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

@@ -1,8 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionList } from '@/product/session/patterns/SessionList';
 import type { Agent, Session } from '@/types';
+
+async function openSessionAction(
+  id: string,
+  action: 'settings' | 'kill',
+): Promise<void> {
+  await userEvent.click(screen.getByTestId(`session-actions-${id}`));
+  const item = await screen.findByTestId(`session-actions-${action}-${id}`);
+  await waitFor(() => expect(item).not.toHaveStyle({ pointerEvents: 'none' }));
+  await userEvent.click(item);
+}
+
 
 const agent: Agent = {
   agent_id: 'a1', hostname: 'devbox-01', display_name: 'devbox-01',
@@ -82,7 +93,7 @@ describe('SessionList', () => {
         clientSessionId="" onSelect={vi.fn()} onConfigure={onConfigure}
       />,
     );
-    await userEvent.click(screen.getByTestId(`session-settings-${sess.session_id}`));
+    await openSessionAction(sess.session_id, 'settings');
     expect(onConfigure).toHaveBeenCalledWith(sess);
   });
 

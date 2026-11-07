@@ -1,15 +1,11 @@
-import type { ComponentType } from 'react';
-import { Edit3, Save, Eye, Code, Info, Lock } from 'lucide-react';
+import { Edit3, Save, Info, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
+import { FileContentViewer } from '@/shared/file-viewer';
 import { CodeMirrorEditor } from '@/platform/editor';
-import { StructuredTextPreview } from './StructuredTextPreview';
-import { ImageViewer } from './ImageViewer';
-import { VideoViewer } from './VideoViewer';
-import { AudioViewer } from './AudioViewer';
-import { PdfViewer } from './PdfViewer';
+import type { ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -20,7 +16,6 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import { type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
 import { formatSize } from '@/shared/lib/format';
 import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
@@ -55,7 +50,6 @@ interface FileViewerToolbarProps {
   forceReadOnly: boolean;
   onSave: () => void;
   onEditToggle: () => void;
-  onSetViewMode: (mode: ViewMode) => void;
   /** Absent when the caller owns leaving — see `FileViewerProps.onClose`. */
   onCloseClick?: () => void;
 }
@@ -71,7 +65,7 @@ interface FileViewerToolbarProps {
 const fileViewerActionClass = chromeSansRole('body');
 
 function FileViewerToolbar({
-  path, filename, isDirty, isText, isReadOnly, saving, hasPreviewRawToggle, viewMode, forceReadOnly, onSave, onEditToggle, onSetViewMode, onCloseClick,
+  path, filename, isDirty, isText, isReadOnly, saving, hasPreviewRawToggle, viewMode, forceReadOnly, onSave, onEditToggle, onCloseClick,
 }: FileViewerToolbarProps) {
   // Structured previews get Preview/Raw; Edit is only offered in raw mode.
   const showEditToggle = isText && !forceReadOnly && (!hasPreviewRawToggle || viewMode === 'raw');
@@ -97,28 +91,6 @@ function FileViewerToolbar({
             <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
-        {hasPreviewRawToggle && (
-          <div className="flex items-center rounded-[var(--nession-radius-control)] bg-muted/60 p-0.5" role="group" aria-label="View mode">
-            <Button
-              variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
-              size="sm"
-              className={cn('h-6 px-2', fileViewerActionClass)}
-              onClick={() => onSetViewMode('preview')}
-              aria-pressed={viewMode === 'preview'}
-            >
-              <Eye className="h-3 w-3 mr-1" />Preview
-            </Button>
-            <Button
-              variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
-              size="sm"
-              className={cn('h-6 px-2', fileViewerActionClass)}
-              onClick={() => onSetViewMode('raw')}
-              aria-pressed={viewMode === 'raw'}
-            >
-              <Code className="h-3 w-3 mr-1" />Raw
-            </Button>
-          </div>
-        )}
         {showEditToggle && (
           <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onEditToggle}>
             <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
@@ -137,13 +109,14 @@ interface FileViewerContentProps {
   error: string | null;
   viewerType: ViewerType | null;
   mediaBlobUrl: string | null;
-  filename: string;
+  mediaMimeType: string | null;
+  path: string;
   originalContent: string;
   content: string;
   isReadOnly: boolean;
   isDirty: boolean;
+  /** Files' resolved markdown signal (extension or accepted content detection). */
   isMarkdown: boolean;
-  jsonPreviewKind: JsonPreviewKind | null;
   viewMode: ViewMode;
   showSuggestion: boolean;
   isChunkedLoading: boolean;
@@ -154,14 +127,16 @@ interface FileViewerContentProps {
   onSuggestionPreview: () => void;
   onSuggestionDismiss: () => void;
   onCancelLoad: () => void;
+  onViewModeChange: (mode: ViewMode) => void;
   initialLine?: number;
 }
 
 function FileViewerContent({
-  loading, error, viewerType, mediaBlobUrl, filename, originalContent, content,
-  isReadOnly, isDirty, isMarkdown, jsonPreviewKind, viewMode, showSuggestion,
+  loading, error, viewerType, mediaBlobUrl, mediaMimeType, path, originalContent, content,
+  isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
-  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad, initialLine,
+  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
+  onViewModeChange, initialLine,
 }: FileViewerContentProps) {
   // Chunked progress view — shown while a large file is being downloaded in chunks.
   const chunkedProgressView = (
@@ -174,16 +149,8 @@ function FileViewerContent({
     </div>
   );
 
-  // Media viewers
+  // Media viewers — one shared presentation, fed by the caller's Blob URL.
   if (viewerType && viewerType !== 'markdown') {
-    const mediaViewers: Partial<Record<ViewerType, ComponentType<{ blobUrl: string; filename: string }>>> = {
-      image: ImageViewer,
-      video: VideoViewer,
-      audio: AudioViewer,
-      pdf: PdfViewer,
-    };
-    const MediaViewerComponent = viewerType ? mediaViewers[viewerType] : null;
-
     return (
       <div className="flex-1 min-h-0">
         {loading ? (
@@ -197,37 +164,22 @@ function FileViewerContent({
             <p className="text-destructive">{error}</p>
             <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
-        ) : MediaViewerComponent && mediaBlobUrl ? (
-          <MediaViewerComponent blobUrl={mediaBlobUrl} filename={filename} />
+        ) : mediaBlobUrl ? (
+          <FileContentViewer
+            file={{ path }}
+            sourceEditor={CodeMirrorEditor}
+            data={{
+              kind: 'media',
+              url: mediaBlobUrl,
+              mimeType: mediaMimeType ?? 'application/octet-stream',
+              complete: true,
+            }}
+          />
         ) : null}
       </div>
     );
   }
 
-  const structuredPreviewActive =
-    viewMode === 'preview' && (isMarkdown || jsonPreviewKind !== null);
-
-  if (structuredPreviewActive) {
-    return (
-      <StructuredTextPreview
-        filename={filename}
-        originalContent={originalContent}
-        content={content}
-        isDirty={isDirty}
-        isMarkdown={isMarkdown}
-        jsonPreviewKind={jsonPreviewKind}
-        loading={loading}
-        error={error}
-        isChunkedLoading={isChunkedLoading}
-        loadedBytes={loadedBytes}
-        totalBytes={totalBytes}
-        onRetry={onRetry}
-        onCancelLoad={onCancelLoad}
-      />
-    );
-  }
-
-  // Raw text mode (CodeMirror)
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {showSuggestion && (
@@ -262,15 +214,31 @@ function FileViewerContent({
             <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
         ) : (
-          <CodeMirrorEditor
-            value={content}
-            onChange={onChange}
+          <FileContentViewer
+            // Files' accepted content detection is a validated MIME hint for
+            // the shared policy; the path alone may be a plain .txt.
+            file={{ path, mimeType: isMarkdown ? 'text/markdown' : undefined }}
+            sourceEditor={CodeMirrorEditor}
+            data={{
+              kind: 'text',
+              // The structured preview shows the saved revision, exactly as it
+              // did before the shared viewer; raw shows the editable buffer.
+              text: viewMode === 'preview' ? originalContent : content,
+              complete: true,
+            }}
+            mode={viewMode === 'preview' ? 'preview' : 'source'}
+            onModeChange={(mode) => onViewModeChange(mode === 'preview' ? 'preview' : 'raw')}
             readOnly={isReadOnly}
-            filename={filename}
+            onTextChange={onChange}
             initialLine={initialLine}
           />
         )}
       </div>
+      {isDirty && viewMode === 'preview' ? (
+        <p className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-3 py-1.5 text-warning-foreground', chromeSansRole('metadata'))}>
+          Preview shows the saved version. Save to update preview.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -320,13 +288,13 @@ export function FileViewer({
   const {
     viewerType,
     isMarkdown,
-    jsonPreviewKind,
     hasPreviewRawToggle,
     viewMode,
     showSuggestion,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     isReadOnly,
@@ -369,7 +337,6 @@ export function FileViewer({
         forceReadOnly={forceReadOnly}
         onSave={handleSave}
         onEditToggle={handleEditToggle}
-        onSetViewMode={handleSetViewMode}
         onCloseClick={onClose ? handleCloseClick : undefined}
       />
       <FileViewerContent
@@ -377,13 +344,13 @@ export function FileViewer({
         error={error}
         viewerType={viewerType}
         mediaBlobUrl={mediaBlobUrl}
-        filename={filename}
+        mediaMimeType={mediaMimeType}
+        path={path}
         originalContent={originalContent}
         content={content}
         isReadOnly={isReadOnly}
         isDirty={isDirty}
         isMarkdown={isMarkdown}
-        jsonPreviewKind={jsonPreviewKind}
         viewMode={viewMode}
         showSuggestion={showSuggestion}
         isChunkedLoading={isChunkedLoading}
@@ -394,6 +361,7 @@ export function FileViewer({
         onSuggestionPreview={handleSuggestionPreview}
         onSuggestionDismiss={handleSuggestionDismiss}
         onCancelLoad={handleCancelLoad}
+        onViewModeChange={handleSetViewMode}
         initialLine={initialLine}
       />
       {/* The viewer's own unsaved dialog exists only for its own close

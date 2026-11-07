@@ -1,5 +1,7 @@
 import { useState, type ComponentProps } from 'react';
+import { PanelLeftOpen } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { Button } from '@/components/ui/button';
 import { ShellMain } from '@/app/ShellMain';
 import { Sidebar } from '@/app/Sidebar';
 import { SessionDrawer } from '@/app/SessionDrawer';
@@ -17,7 +19,10 @@ export interface WebLayoutProps {
   onCloseDrawer: () => void;
   onBackToSessions?: () => void;
   /** Everything the sidebar needs except how it reports a selection. */
-  sidebarProps: Omit<SidebarProps, 'onSelect' | 'collapsible' | 'collapsed' | 'onCollapsedChange'>;
+  sidebarProps: Omit<
+    SidebarProps,
+    'onSelect' | 'collapsible' | 'collapsed' | 'onCollapsedChange' | 'onCloseDrawer'
+  >;
   onSelect: (session: Session) => void;
   onConfigure: (session: Session) => void;
   /** Everything the work region needs except what differs per experience. */
@@ -27,61 +32,94 @@ export interface WebLayoutProps {
   terminal?: MainProps['terminal'];
 }
 
+const sidebarColumnWidth = 'w-[min(var(--nession-shell-sidebar-width),90vw)]';
+const shellWidthTransition =
+  'transition-[width] duration-[var(--nession-motion-shell-duration)] ease-[var(--nession-motion-shell-ease)] motion-reduce:transition-none';
+
+function FloatingSidebarOpen({
+  testId,
+  label,
+  onClick,
+}: {
+  testId: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      data-testid={testId}
+      aria-label={label}
+      title={label}
+      onClick={() => onClick()}
+      className={cn(
+        'absolute left-[var(--nession-shell-space-3)] top-[var(--nession-shell-space-3)] z-20',
+        'size-[length:var(--nession-shell-icon-button-size)] rounded-[var(--nession-radius-control)]',
+        'bg-background text-muted-foreground shadow-[var(--nession-elevation-floating)] hover:bg-accent hover:text-accent-foreground',
+      )}
+    >
+      <PanelLeftOpen className="size-[length:var(--nession-icon-md)]" aria-hidden />
+    </Button>
+  );
+}
+
 /**
- * The Web experience: one frame holding the session list and the work surface,
- * with the list as either a column or an overlay depending on width.
+ * The Web experience: one frame holding the Session navigation and the work
+ * surface.
  *
- * This is a composition, not a product meaning — it decides where things sit on
- * a wide screen, which is exactly what `docs/architecture/web.md` assigns to
- * `app/experiences/`. The App experience composes the same Product Patterns
- * into a spatial shell instead (`app/experiences/app/`); both are handed the
- * same `sidebarProps` / `mainShared` by `WorkspaceRegion`, so the two
- * arrangements cannot drift in what they are given.
+ * Wide screens render the sidebar as a column; below `lg` the same sidebar is
+ * an overlay drawer. #2851 made the wide collapse **fully tuck away**: the
+ * column reserves 0px, the work surface receives the width through its normal
+ * resize path, and a single floating control returns the sidebar. The column
+ * stays mounted while at 0px so selection, search and the list's scroll
+ * position survive the round trip; `inert` removes the clipped controls from
+ * keyboard and accessibility order until it returns.
  *
- * The composition owns the sidebar's collapsed state (#1196 §5): collapsing
- * changes the shell's column geometry, so the owner of the geometry holds the
- * one state and hands it down controlled. This is what #1195 was missing —
- * `Sidebar` used to know `collapsed` privately while this column always
- * reserved the expanded width, and the Terminal never got the space back.
+ * The narrow overlay exists as an explicit Web mode even though the default
+ * narrow viewport is the App experience (see `WorkspaceRegion`). It closes on
+ * selection, the top Close action or the scrim, and leaves a visible opening
+ * control over the work surface.
  */
 export function WebLayout(props: WebLayoutProps) {
-  const { isWide, showList, onCloseDrawer, onBackToSessions, sidebarProps, onSelect, onConfigure, mainShared, surface, terminal } = props;
+  const {
+    isWide,
+    showList,
+    onCloseDrawer,
+    onBackToSessions,
+    sidebarProps,
+    onSelect,
+    onConfigure,
+    mainShared,
+    surface,
+    terminal,
+  } = props;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     <div className="relative flex min-h-0 flex-1">
       {isWide ? (
-        /* Two columns above `lg` (the breakpoint the contract schema's enum
-           permits and `useMobileNav` already uses). The sidebar is a
-           real column here — it used to be an overlay drawer at every width,
-           which meant the work surface never actually shared the frame. */
         <div
           data-testid="sidebar-column"
           data-collapsed={sidebarCollapsed ? 'true' : undefined}
-          /* No border: the sidebar carries the chrome surface and the work
-             region sits on the canvas, so the background shift is the
-             separator (visual-language.md P7 — background shift before
-             border). The mockup draws no rule here either. */
+          aria-hidden={sidebarCollapsed ? true : undefined}
+          inert={sidebarCollapsed ? true : undefined}
           className={cn(
-            'flex min-h-0 shrink-0',
-            sidebarCollapsed
-              ? 'w-[length:var(--nession-shell-rail-width)]'
-              : 'w-[min(var(--nession-shell-sidebar-width),90vw)]',
+            'flex min-h-0 shrink-0 overflow-hidden',
+            shellWidthTransition,
+            sidebarCollapsed ? 'w-0' : sidebarColumnWidth,
           )}
         >
           <Sidebar
             {...sidebarProps}
+            className={sidebarColumnWidth}
             collapsed={sidebarCollapsed}
             onCollapsedChange={setSidebarCollapsed}
             onSelect={onSelect}
           />
         </div>
       ) : (
-        /* Below `lg` the sidebar is still an overlay: there is no room for a
-           column that the work surface would have to share. The drawer has its
-           own spatial contract (open ↔ closed), so collapse/rail never appears
-           here (#1196 §7) — and the rail state above stays Web-column state,
-           never leaking into the drawer. */
         <SessionDrawer
           open={showList}
           onClose={() => onCloseDrawer()}
@@ -89,6 +127,7 @@ export function WebLayout(props: WebLayoutProps) {
             <Sidebar
               {...sidebarProps}
               collapsible={false}
+              onCloseDrawer={onCloseDrawer}
               onSelect={(session) => {
                 onCloseDrawer();
                 onSelect(session);
@@ -101,17 +140,25 @@ export function WebLayout(props: WebLayoutProps) {
           }
         />
       )}
-      {/* `min-w-0` is load-bearing, and it is the half #1195 did not cover.
-          As a flex item this column defaults to `min-width: auto`, which floors
-          it at its *content* — and xterm renders its grid at a fixed pixel
-          width, so once the Terminal has been laid out at the collapsed width
-          the column can no longer shrink back. Expanding the sidebar then
-          widened the row past the viewport (measured 1472 in a 1280 viewport)
-          and, because the container never changed size, no ResizeObserver fire
-          meant no `terminal.resize` — the PTY kept the collapsed cols (#1269).
-          Collapsing was always fine: growing the available width needs no
-          floor to be lifted. */}
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* `min-w-0` is load-bearing. As a flex item this column defaults to
+          `min-width: auto`, which floors it at the Terminal's fixed grid width;
+          collapsing was fine, but expanding could leave the row wider than the
+          viewport. Keep it explicit. */}
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {isWide && sidebarCollapsed ? (
+          <FloatingSidebarOpen
+            testId="sidebar-open"
+            label="Open sidebar"
+            onClick={() => setSidebarCollapsed(false)}
+          />
+        ) : null}
+        {!isWide && !showList && onBackToSessions ? (
+          <FloatingSidebarOpen
+            testId="session-drawer-open"
+            label="Open sessions"
+            onClick={onBackToSessions}
+          />
+        ) : null}
         <ShellMain
           {...mainShared}
           surface={surface}

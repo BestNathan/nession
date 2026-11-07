@@ -15,6 +15,10 @@ import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-ter
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import { WIRE as TERMINAL_CONTROL_ACQUIRE_WIRE } from '@/generated/protocol/core/agent-terminal-control-acquire/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
+import type {
+  TerminalReconcileAction,
+  TerminalReconcileReason,
+} from '@/generated/protocol/core/agent-terminal-output-applied/v1';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
 import { getOrCreateSubscriptionId } from '@/platform/socket/subscriptionId';
 import type { PluginSurface } from '@/platform/socket/types';
@@ -136,6 +140,78 @@ export interface TerminalOutputAppliedAck {
   appliedThrough: number;
 }
 
+/**
+ * The capability an Agent states on attach when it accepts the one-way
+ * progress notification and may emit `agent.terminal.reconcile-required`
+ * (#2877). Re-exported from its platform owner so `product` consumers and the
+ * session runtime share one spelling.
+ */
+export { TERMINAL_PROGRESS_NOTIFICATIONS_V1 } from '@/platform/terminal-runtime/terminalCapabilities';
+
+/** Why the Agent asked this exact subscription to reconcile (#2877). */
+export type { TerminalReconcileAction, TerminalReconcileReason };
+
+/**
+ * An exception-only Agent notice (#2877).
+ *
+ * The exact subscription and stream epoch are part of the payload because a
+ * stale, malformed or foreign notice must never start recovery: the consumer
+ * compares them with its current proof before acting.
+ */
+export interface TerminalReconcileNotice {
+  sessionName: string;
+  subscriberGeneration: number;
+  streamEpoch: number;
+  rendererGeneration?: number;
+  headSeq: number;
+  firstAvailableSeq?: number;
+  reason: TerminalReconcileReason;
+  action: TerminalReconcileAction;
+}
+
+/**
+ * Read an `agent.terminal.reconcile-required` payload, or drop it.
+ *
+ * Strict by design: an unknown reason/action or a missing identity is a
+ * malformed notice, and acting on a partial one is exactly the "notification
+ * from a foreign/stale binding starts recovery" failure the contract forbids.
+ */
+export function readReconcileNotice(value: unknown): TerminalReconcileNotice | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const p = value as Record<string, unknown>;
+  const safePositive = (n: unknown): n is number =>
+    typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+  const safeNonNegative = (n: unknown): n is number =>
+    typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+  const reason = p.reason;
+  const action = p.action;
+  if (typeof p.session_name !== 'string' || !p.session_name
+    || !safePositive(p.subscriber_generation)
+    || !safePositive(p.stream_epoch)
+    || !safeNonNegative(p.head_seq)
+    || (reason !== 'progress-ahead-of-issued'
+      && reason !== 'epoch-incompatible'
+      && reason !== 'renderer-replaced'
+      && reason !== 'retention-loss')
+    || (action !== 'resume' && action !== 'reattach')) {
+    return null;
+  }
+  const rendererGeneration = p.renderer_generation;
+  const firstAvailableSeq = p.first_available_seq;
+  return {
+    sessionName: p.session_name,
+    subscriberGeneration: p.subscriber_generation,
+    streamEpoch: p.stream_epoch,
+    ...(safePositive(rendererGeneration) ? { rendererGeneration } : {}),
+    headSeq: p.head_seq,
+    ...(safePositive(firstAvailableSeq) ? { firstAvailableSeq } : {}),
+    reason,
+    action,
+  };
+}
+
 export interface TerminalInputAck {
   sessionName: string;
   inputEpoch: number;
@@ -197,8 +273,19 @@ export interface TerminalAgentApi {
    */
   sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
   /** P2P-only Output Applied ACK. `true` means submitted, not Agent accepted.
-   * Optional for old test/provider implementations. Never input ACK (#1307). */
+   * Optional for old test/provider implementations. Never input ACK (#1307).
+   * Used only when the attach did not negotiate the response-less progress
+   * notification (#2877). */
   sendOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /**
+   * P2P one-way parser progress (#2877). `true` means the local socket
+   * accepted the frame, not that the Agent received or credited it. Sent only
+   * after `terminal-progress-notifications-v1` was negotiated on attach.
+   */
+  sendOutputProgress?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /** Exception-only Agent reconciliation notice (#2877), current exact
+   * subscription identity in the payload. */
+  onReconcileRequired?(cb: (notice: TerminalReconcileNotice) => void): () => void;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -303,6 +390,8 @@ async function attachToSession(
       inputEpoch: fields.inputEpoch,
       inputAppliedThrough: fields.inputAppliedThrough,
       terminalCols: fields.terminalCols,
+      // Absent is an older Agent; the caller keeps the v1 operation (#2877).
+      terminalCapabilities: fields.terminalCapabilities,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -451,6 +540,56 @@ function submitOutputApplied(
   }
 }
 
+/**
+ * Submit the same parser prefix as a **notification** (#2877).
+ *
+ * No reply exists or is awaited: an accepted report is internal bookkeeping,
+ * and a proven inconsistency comes back later as
+ * `agent.terminal.reconcile-required` on its own wire. The wire is a dotted
+ * literal at the call site because `just check-protocol` reads subscriptions
+ * and senders that way.
+ */
+function submitOutputProgress(
+  surface: PluginSurface,
+  sessionName: string,
+  ack: TerminalOutputAppliedAck,
+): boolean {
+  const values = [
+    ack.subscriberGeneration, ack.streamEpoch,
+    ack.rendererGeneration, ack.appliedThrough,
+  ];
+  if (!values.every(Number.isSafeInteger)
+    || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+    || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+    return false;
+  }
+  try {
+    surface.send('client.terminal.output.progress', {
+      session_name: sessionName,
+      subscriber_generation: ack.subscriberGeneration,
+      stream_epoch: ack.streamEpoch,
+      renderer_generation: ack.rendererGeneration,
+      applied_through: ack.appliedThrough,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Subscribe to the Agent's exception-only reconcile notice (#2877). */
+function subscribeReconcileRequired(
+  surface: PluginSurface,
+  cb: (notice: TerminalReconcileNotice) => void,
+): () => void {
+  return surface.subscribe('agent.terminal.reconcile-required', (payload) => {
+    const notice = readReconcileNotice(payload);
+    if (notice) {
+      cb(notice);
+    }
+  });
+}
+
 function submitTerminalResize(
   surface: PluginSurface,
   lease: ControlLease,
@@ -505,6 +644,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
 
     sendOutputApplied: (sessionName, ack) =>
       submitOutputApplied(surface, sessionName, ack),
+
+    sendOutputProgress: (sessionName, ack) =>
+      submitOutputProgress(surface, sessionName, ack),
+
+    onReconcileRequired: (cb) => subscribeReconcileRequired(surface, cb),
 
     sendResize: (sessionName, cols, rows) =>
       submitTerminalResize(surface, lease, sessionName, { cols, rows }),

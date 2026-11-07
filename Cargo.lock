@@ -2029,6 +2029,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
+ "toml_edit 0.22.27",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2080,6 +2081,7 @@ version = "0.35.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.21.7",
  "nession-common",
  "nession-protocol",
  "notify 7.0.0",

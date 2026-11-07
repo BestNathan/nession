@@ -31,14 +31,27 @@ export function useAttachFlow() {
    *  (double-click guard, #668 epoch hazard); a different session may start
    *  and overwrite the slot (last-started wins). The per-flight token keeps an
    *  overtaken flight's finally from clearing a slot a NEWER flight for the
-   *  same session owns (A → B → A: flight 1 must not clear flight 3's guard). */
+   *  same session owns (A → B → A: flight 1 must not clear flight 3's guard).
+   *  The token is also the **commit** guard: a result whose flight no longer
+   *  owns the slot is stale user intent and must never attach, open a dialog
+   *  or toast (#2873). */
   const inFlightRef = useRef<{ sessionId: string; token: number } | null>(null);
   const nextTokenRef = useRef(0);
 
+  /** Revoke the current fast-path flight: an explicit action (a different
+   *  Session click, dialog/config, confirm or cancel) now owns the intent, so
+   *  an older validation may not commit its result (#2873). */
+  const invalidateInFlight = useCallback(() => {
+    inFlightRef.current = null;
+  }, []);
+
   const openAttachDialog = useCallback((session: Session, intent: 'attach' | 'configure') => {
+    // Opening a dialog is explicit intent; it supersedes any pending
+    // fast-path validation for another Session.
+    invalidateInFlight();
     setAttachDialogSession(session);
     setAttachDialogIntent(intent);
-  }, [setAttachDialogSession, setAttachDialogIntent]);
+  }, [invalidateInFlight, setAttachDialogSession, setAttachDialogIntent]);
 
   /** Every explicit confirmation persists (or refreshes) the Session profile;
    *  non-explicit paths (deep-link restore) opt out via `{ persistProfile: false }`. */
@@ -47,6 +60,9 @@ export function useAttachFlow() {
     choice: AttachChoice,
     opts: { persistProfile?: boolean } = {},
   ) => {
+    // A confirmation — dialog or current fast path — is the latest intent.
+    // Any older pending validation must not override it.
+    invalidateInFlight();
     saveAttachPrefs({ mode: choice.mode, renderer: choice.renderer });
     if (opts.persistProfile !== false) {
       // The fingerprint must reflect the FRESH options the choice was built
@@ -54,10 +70,21 @@ export function useAttachFlow() {
       persistConfirmedChoice(session, choice, choice.attachInfo);
     }
     attachToSession({ session, choice, navigate });
-  }, [attachToSession, navigate]);
+  }, [invalidateInFlight, attachToSession, navigate]);
 
   /** Row click entry: no profile → dialog; profile → validate, attach or dialog. */
   const requestAttach = useCallback((session: Session) => {
+    // Same-Session double click: the running validation already owns this
+    // Session's result. Ignore the repeat WITHOUT revoking its guard (#668).
+    if (inFlightRef.current !== null && inFlightRef.current.sessionId === session.session_id) {
+      return;
+    }
+    // Any other click is newer user intent. Revoke an older flight for a
+    // different Session even on paths that never start a new flight (already
+    // attached / no profile), so its late result cannot attach, open a dialog
+    // or toast over this click (#2873).
+    invalidateInFlight();
+
     // Clicking the row of the session we are already attached to: while the
     // terminal is healthy there is nothing to do — a fast-path re-attach
     // would tear down the live runtime (route-epoch bump, #668 class). When
@@ -79,14 +106,18 @@ export function useAttachFlow() {
       openAttachDialog(session, 'attach');
       return;
     }
-    if (inFlightRef.current !== null && inFlightRef.current.sessionId === session.session_id) {
-      return;
-    }
     const token = ++nextTokenRef.current;
     inFlightRef.current = { sessionId: session.session_id, token };
     void (async () => {
       try {
         const resolution = await resolveProfileAttach(session, profile, probeResults);
+        // Commit guard: only the flight that still owns the intent may act.
+        // A → B (B resolves first): the stale A result must not attach A,
+        // open a dialog, or surface a stale error. A → B → A: flight 1 and
+        // flight 2 are stale once flight 3 starts.
+        if (inFlightRef.current?.token !== token) {
+          return;
+        }
         if (resolution.kind === 'choice') {
           confirmAttach(session, resolution.choice);
         } else if (resolution.kind === 'dialog') {
@@ -103,7 +134,7 @@ export function useAttachFlow() {
         }
       }
     })();
-  }, [probeResults, confirmAttach, openAttachDialog, clientSessionId]);
+  }, [probeResults, confirmAttach, openAttachDialog, clientSessionId, invalidateInFlight]);
 
   /** Session-row Settings entry: dialog in configure mode (persist only). */
   const openAttachSettings = useCallback((session: Session) => {
@@ -111,6 +142,9 @@ export function useAttachFlow() {
   }, [openAttachDialog]);
 
   const cancelAttach = useCallback(() => {
+    // Cancelling explicitly dismisses the intent; a pending fast-path result
+    // must not re-open the dialog or attach after it.
+    invalidateInFlight();
     setAttachDialogSession(null);
     setAttachDialogIntent('attach');
     // A restore that landed on /terminal/:sessionId with nothing attached and
@@ -121,7 +155,7 @@ export function useAttachFlow() {
       // re-fire the restore effect the heuristic exists to break.
       navigate('/', { replace: true });
     }
-  }, [setAttachDialogSession, setAttachDialogIntent, clientSessionId, location.pathname, navigate]);
+  }, [invalidateInFlight, setAttachDialogSession, setAttachDialogIntent, clientSessionId, location.pathname, navigate]);
 
   return {
     attachDialogSession,

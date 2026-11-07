@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 
 export interface SessionDrawerProps {
@@ -9,6 +9,27 @@ export interface SessionDrawerProps {
 
 /** AI-style sessions drawer: left overlay with scrim, slides in over full-bleed content. */
 export function SessionDrawer({ open, onClose, sidebar }: SessionDrawerProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    panelRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -22,7 +43,12 @@ export function SessionDrawer({ open, onClose, sidebar }: SessionDrawerProps) {
         className="absolute inset-0 bg-overlay/40"
       />
       <aside
+        ref={panelRef}
         data-testid="session-drawer-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sessions"
+        tabIndex={-1}
         className={cn(
           'absolute inset-y-0 left-0 flex w-[min(20rem,90vw)] flex-col border-r border-border/60 bg-background shadow-[var(--nession-elevation-floating)]',
           'animate-in slide-in-from-left duration-200',

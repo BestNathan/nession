@@ -109,6 +109,12 @@ export function readFileChunked(
       }
 
       const data = await fileOps.readFile(path, { offset, limit: DEFAULT_CHUNK_SIZE });
+      // The request was issued before cancel() and may settle after it. Check
+      // again here, including after the final chunk: a cancelled read must
+      // reject rather than return its last chunk as a complete document.
+      if (cancelled) {
+        throw new DOMException('Read cancelled', 'AbortError');
+      }
       totalSize = data.total_size ?? 0;
       const bytes = base64ToBytes(data.content);
       // An empty non-final chunk would spin this loop forever. Refuse it

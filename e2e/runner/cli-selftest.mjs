@@ -26,7 +26,7 @@ const expectError = (...args) => {
 const testList = call('test', '--list');
 assert.equal(testList.code, 0, testList.stderr);
 const declaredTests = JSON.parse(testList.stdout).tests;
-assert.equal(declaredTests.length, 37);
+assert.equal(declaredTests.length, 38);
 assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });

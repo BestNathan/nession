@@ -198,8 +198,13 @@ impl WebSocketServer {
             });
         }
 
-        // Background sweep: periodically clean up orphaned sessions whose
-        // agent has been unreachable for more than 24 hours.
+        // Background sweep: periodically clean up recovering Sessions whose
+        // Agent has not restored them within the retention window.
+        //
+        // Selection and deletion are deliberately separate: the selection is
+        // only a candidate list, and the reclamation re-checks that same
+        // stale-recovering predicate at the destructive boundary while holding
+        // the Session's lifecycle guard (#2848).
         {
             let session_registry = Arc::clone(&self.session_registry);
             let env_service = Arc::clone(&self.env_service);
@@ -211,24 +216,29 @@ impl WebSocketServer {
                 ticker.tick().await; // consume the immediate first tick
                 loop {
                     ticker.tick().await;
-                    // 24 hours in seconds
-                    let cutoff = 24 * 3600i64;
-                    match db.list_sessions_older_than(cutoff).await {
-                        Ok(rows) => {
+                    match super::orphan_sweep::select_stale_recovering(
+                        &db,
+                        super::orphan_sweep::RECOVERING_RETENTION,
+                    )
+                    .await
+                    {
+                        Ok((cutoff, rows)) => {
                             if rows.is_empty() {
                                 continue;
                             }
-                            for row in &rows {
-                                info!(
-                                    "Cleaning orphaned session {} (agent: {}, last activity: {})",
-                                    row.session_id, row.agent_id, row.last_activity
-                                );
-                                session_registry.remove(&row.session_id).await;
-                                // The Session is gone; its desired binding and
-                                // observed cache are no longer a live claim.
-                                env_service.clear_session_state(&row.session_id).await;
-                            }
-                            tracing::info!("Cleaned {} orphaned sessions", rows.len());
+                            let outcome = super::orphan_sweep::reclaim_selected(
+                                &rows,
+                                cutoff,
+                                &session_registry,
+                                &env_service,
+                            )
+                            .await;
+                            info!(
+                                selected = outcome.selected,
+                                reclaimed = outcome.reclaimed,
+                                skipped = outcome.skipped,
+                                "recovering Session sweep complete"
+                            );
                         }
                         Err(e) => {
                             error!("Orphan session sweep failed: {:#}", e);
@@ -995,6 +1005,15 @@ fn agent_attached_relay_ready(
     if let Some(client_id) = payload.get("controller_client_id").and_then(|v| v.as_str()) {
         if !client_id.is_empty() {
             out_payload["controller_client_id"] = serde_json::json!(client_id);
+        }
+    }
+    // Notification-only capabilities (#2877) are the Agent's statement, so the
+    // Server forwards them unchanged — it neither adds nor validates an entry.
+    // The browser negotiates the response-less progress wire from this list;
+    // absent means an older Agent and keeps the v1 operation.
+    if let Some(capabilities) = payload.get("terminal_capabilities") {
+        if capabilities.is_array() {
+            out_payload["terminal_capabilities"] = capabilities.clone();
         }
     }
     Some(tokio_tungstenite::tungstenite::Message::Text(
@@ -2231,6 +2250,48 @@ mod tests {
     }
 
     #[test]
+    fn relay_ready_forwards_notification_capabilities_verbatim_and_never_invents_them() {
+        let stated = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52,
+                "terminal_capabilities": ["terminal-progress-notifications-v1"]
+            }
+        });
+        let ready = agent_attached_relay_ready(&stated, "sess", "browser-a", "begin-123")
+            .expect("verified Agent subscription");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert_eq!(
+            ready["payload"]["terminal_capabilities"],
+            json!(["terminal-progress-notifications-v1"]),
+            "the Server forwards the Agent's list unchanged"
+        );
+
+        // An older Agent states nothing; the receipt must not invent support.
+        let legacy = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52
+            }
+        });
+        let ready = agent_attached_relay_ready(&legacy, "sess", "browser-a", "begin-123")
+            .expect("legacy Agent remains attachable");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
+
+        // A malformed value is not reinterpreted as a capability list.
+        let malformed = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52,
+                "terminal_capabilities": "terminal-progress-notifications-v1"
+            }
+        });
+        let ready = agent_attached_relay_ready(&malformed, "sess", "browser-a", "begin-123")
+            .expect("the rest of the receipt stands");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
+    }
+
+    #[test]
     fn relay_ready_is_never_minted_from_legacy_partial_or_forged_agent_frames() {
         for reply in [
             json!({"msg_type":"ok","payload":{"session_name":"sess"}}),
@@ -2460,6 +2521,42 @@ mod tests {
         .await;
 
         (agent_write.sent, outcome)
+    }
+
+    /// #2877: the response-less progress notification is an ordinary forwarded
+    /// wire, not a Server-served unit and not a coalescable input burst.
+    ///
+    /// The Agent is the only party that may authenticate or credit it; the
+    /// Relay must hand it over unchanged, in arrival order, with no synthetic
+    /// reply. A classifier that routed `client.*` as a Server unit, or an
+    /// input-throttle arm that swallowed it, fails here.
+    #[tokio::test]
+    async fn a_progress_notification_is_forwarded_unchanged_to_the_agent() {
+        let payload = json!({
+            "session_name": "sess",
+            "subscriber_generation": 41,
+            "stream_epoch": 7,
+            "renderer_generation": 3,
+            "applied_through": 12,
+        });
+        let (sent, outcome) = drive(vec![frame_with_payload(
+            "client.terminal.output.progress",
+            "progress-1",
+            payload.clone(),
+        )])
+        .await;
+
+        assert_eq!(
+            sent.len(),
+            1,
+            "the notification reaches the Agent: {sent:?}"
+        );
+        let forwarded: serde_json::Value =
+            serde_json::from_str(sent[0].to_text().unwrap()).unwrap();
+        assert_eq!(forwarded["msg_type"], "client.terminal.output.progress");
+        assert_eq!(forwarded["id"], "progress-1");
+        assert_eq!(forwarded["payload"], payload);
+        assert!(matches!(outcome, ClientToAgent::Ended));
     }
 
     /// #962: a relay end that arrives inside the throttle window ends the relay

@@ -4,6 +4,7 @@
 // legacy/absent metadata, unavailable Agent, saving, success and revision
 // conflict. The Session identity (tmux name / session_id) is never part of the
 // editor; the title is only the display alias.
+import { useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -251,13 +252,38 @@ function SessionMetadataEditorForm({
 export function SessionMetadataSection({
   session,
   entry,
+  initialEditing = false,
+  editingDisabled = false,
 }: {
   session: Session;
   entry: SessionMetadataEntry;
+  /** Open directly in the editor (the row menu's Edit details action). */
+  initialEditing?: boolean;
+  /** Offline/error Agents keep details readable but do not accept edits. */
+  editingDisabled?: boolean;
 }) {
   const editor = useSessionMetadataEditor(session.session_id, entry);
   const loading = entry.status === 'idle' || entry.status === 'loading';
   const unavailable = entry.status === 'error';
+  const initialEditStarted = useRef(false);
+
+  useEffect(() => {
+    initialEditStarted.current = false;
+  }, [session.session_id, initialEditing]);
+
+  useEffect(() => {
+    if (
+      !initialEditing ||
+      editingDisabled ||
+      initialEditStarted.current ||
+      entry.status !== 'loaded' ||
+      editor.editing
+    ) {
+      return;
+    }
+    initialEditStarted.current = true;
+    editor.startEditing();
+  }, [editingDisabled, editor, entry.status, initialEditing]);
 
   return (
     <section
@@ -275,12 +301,24 @@ export function SessionMetadataSection({
             size="sm"
             variant="outline"
             data-testid="session-metadata-edit"
+            disabled={editingDisabled}
+            title={editingDisabled ? 'Editing is unavailable while the Agent is offline.' : undefined}
             onClick={() => editor.startEditing()}
           >
             Edit details
           </Button>
         ) : null}
       </div>
+
+      {editingDisabled && !editor.editing ? (
+        <p
+          role="status"
+          data-testid="session-metadata-editing-unavailable"
+          className={cn('text-muted-foreground', chromeSansRole('body'))}
+        >
+          Editing is unavailable while the Agent is offline. Details remain readable.
+        </p>
+      ) : null}
 
       {loading && !editor.editing ? (
         <p

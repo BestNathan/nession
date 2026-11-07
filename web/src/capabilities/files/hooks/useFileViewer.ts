@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/shared/lib/errorHelpers';
-import { getJsonPreviewKind, getViewerType, parseExt, type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
+import type { JsonPreviewKind, ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
+import { mediaHintForPath, resolveFilePresentation } from '@/shared/file-viewer';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
-  isMarkdownExt,
 } from '@/shared/markdown';
-import { readFileChunked, type FileOps } from '@/capabilities/files';
+import { readFileChunked, type FileData, type FileOps } from '@/capabilities/files';
 import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
 import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
+import { base64ToBlobUrl } from '@/shared/lib/blob';
 export type ViewMode = 'preview' | 'raw';
 
 /**
@@ -44,22 +45,27 @@ export interface UseFileViewerParams {
 }
 
 /** Decode base64 content to a Blob URL for media viewers. */
-function base64ToBlobUrl(base64: string, mimeType: string): string {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+
+/** Replace the caller's Blob URL with one for the freshly read media. */
+function replaceMediaBlob(
+  current: { current: string | null },
+  base64: string,
+  mimeType: string,
+): string {
+  const url = base64ToBlobUrl(base64, mimeType);
+  if (current.current) {
+    URL.revokeObjectURL(current.current);
   }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  current.current = url;
+  return url;
 }
 
 interface FileLoaderResult {
-  ext: string;
   viewerType: ViewerType | null;
   content: string;
   originalContent: string;
   mediaBlobUrl: string | null;
+  mediaMimeType: string | null;
   loading: boolean;
   error: string | null;
   loadedBytes: number;
@@ -73,6 +79,76 @@ interface FileLoaderResult {
   setContent: (content: string) => void;
   setOriginalContent: (content: string) => void;
   handleCancelLoad: () => void;
+}
+
+/**
+ * The only flight allowed to publish (issue #2902). `isCurrent` binds the
+ * generation this flight took; a superseded or cancelled flight fails it, so
+ * its settles cannot mutate the successor's content, progress or loading.
+ */
+interface LoadFlight {
+  isCurrent: () => boolean;
+  setError: (message: string) => void;
+  settle: () => void;
+}
+
+interface ChunkedFlight extends LoadFlight {
+  begin: () => void;
+  setProgress: (loaded: number, total: number) => void;
+  attachCancel: (cancel: () => void) => void;
+  complete: (text: string) => void;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to read file';
+}
+
+/** Read one whole file; only the owning flight publishes the answer. */
+async function readWholeFile(
+  fileOps: FileOps,
+  path: string,
+  flight: LoadFlight,
+  publish: (data: FileData) => void,
+): Promise<void> {
+  try {
+    const data = await fileOps.readFile(path);
+    if (flight.isCurrent()) { publish(data); }
+  } catch (err) {
+    if (flight.isCurrent()) { flight.setError(errorMessage(err)); }
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
+}
+
+/**
+ * Stream a large file in bounded chunks. A chunk that settles after cancel is
+ * never decoded, reported or committed: `readFileChunked` rejects it and this
+ * flight's generation can no longer publish.
+ */
+async function readChunkedFile(
+  fileOps: FileOps,
+  path: string,
+  flight: ChunkedFlight,
+): Promise<void> {
+  flight.begin();
+  const result = readFileChunked(fileOps, path, (loaded, total) => {
+    if (flight.isCurrent()) { flight.setProgress(loaded, total); }
+  });
+  if (!flight.isCurrent()) {
+    result.cancel();
+    return;
+  }
+  flight.attachCancel(result.cancel);
+  try {
+    const fullText = await result.promise;
+    if (flight.isCurrent()) { flight.complete(fullText); }
+  } catch (err) {
+    if (!flight.isCurrent()) { return; }
+    if (err instanceof DOMException && err.name === 'AbortError') { return; }
+    flight.setError(errorMessage(err));
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
 }
 
 /**
@@ -95,12 +171,12 @@ function useFileLoader(
     onDecodedRef.current = onDecoded;
   });
 
-  const ext = parseExt(path);
-  const viewerType: ViewerType | null = ext ? getViewerType(ext) : null;
+  const viewerType: ViewerType | null = mediaHintForPath(path);
 
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const [mediaMimeType, setMediaMimeType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadedBytes, setLoadedBytes] = useState(0);
@@ -110,10 +186,17 @@ function useFileLoader(
   const [revision, setRevision] = useState<string | undefined>(undefined);
   const blobUrlRef = useRef<string | null>(null);
   const chunkedCancelRef = useRef<(() => void) | null>(null);
+  /**
+   * Monotonic owner of the current read (issue #2902). Every load takes the
+   * next generation; only that generation may publish content, progress,
+   * error or loading, and only it may clear the cancel handle.
+   */
+  const loadGenerationRef = useRef(0);
 
   // Revoke blob URL on unmount
   useEffect(() => {
     return () => {
+      loadGenerationRef.current += 1;
       if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
       chunkedCancelRef.current?.();
       chunkedCancelRef.current = null;
@@ -121,43 +204,44 @@ function useFileLoader(
   }, []);
 
   const handleCancelLoad = useCallback(() => {
+    // Cancel is a settled, non-loading state: invalidate the flight first so a
+    // chunk that settles late cannot publish content or restore loading.
+    loadGenerationRef.current += 1;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
     setIsChunkedLoading(false);
+    setLoading(false);
   }, []);
 
   // Large text files: chunked read, forced read-only — too big to round-trip.
-  const runChunkedLoad = useCallback(async (size: number) => {
-    setForceReadOnly(true);
-    setIsChunkedLoading(true);
-    setTotalBytes(size);
-    // A chunked document is read-only; a guarded save is not offered and the
-    // per-chunk revision would describe the file at a moment, not the whole
-    // loaded result.
-    setRevision(undefined);
-    const result = readFileChunked(fileOps, path, (loaded, total) => {
-      setLoadedBytes(loaded);
-      setTotalBytes(total);
+  const runChunkedLoad = useCallback(async (size: number, generation: number) => {
+    await readChunkedFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      begin: () => {
+        setForceReadOnly(true);
+        setIsChunkedLoading(true);
+        setTotalBytes(size);
+        // A chunked document is read-only; a guarded save is not offered and
+        // the per-chunk revision describes a moment, not the loaded result.
+        setRevision(undefined);
+      },
+      setProgress: (loaded, total) => { setLoadedBytes(loaded); setTotalBytes(total); },
+      attachCancel: (cancel) => { chunkedCancelRef.current = cancel; },
+      complete: (text) => { setContent(text); setOriginalContent(text); onDecodedRef.current(text); },
+      setError,
+      settle: () => {
+        setIsChunkedLoading(false);
+        setLoading(false);
+        chunkedCancelRef.current = null;
+      },
     });
-    chunkedCancelRef.current = result.cancel;
-    try {
-      const fullText = await result.promise;
-      setContent(fullText);
-      setOriginalContent(fullText);
-      onDecodedRef.current(fullText);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') { return; }
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setIsChunkedLoading(false);
-      setLoading(false);
-      chunkedCancelRef.current = null;
-    }
   }, [fileOps, path]);
 
   const loadFile = useCallback(async () => {
-    // Cancel any in-flight chunked read from a previous load so the stale
-    // resolver can't land after we reset state.
+    // Take ownership before cancelling the previous flight: the old reader's
+    // late chunk or finally block must not be able to touch this generation.
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
 
@@ -166,26 +250,25 @@ function useFileLoader(
     setLoadedBytes(0);
     setTotalBytes(0);
     setIsChunkedLoading(false);
+    setMediaMimeType(null);
 
     if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
-      await runChunkedLoad(fileSize);
+      await runChunkedLoad(fileSize, generation);
       return;
     }
 
     setForceReadOnly(false);
-
-    try {
-      const data = await fileOps.readFile(path);
+    await readWholeFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      setError,
+      settle: () => setLoading(false),
+    }, (data) => {
       setRevision(data.revision);
 
       // Media files
       if (viewerType && viewerType !== 'markdown') {
-        const newBlobUrl = base64ToBlobUrl(data.content, data.mime_type);
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-        }
-        blobUrlRef.current = newBlobUrl;
-        setMediaBlobUrl(newBlobUrl);
+        setMediaBlobUrl(replaceMediaBlob(blobUrlRef, data.content, data.mime_type));
+        setMediaMimeType(data.mime_type);
         return;
       }
 
@@ -194,11 +277,7 @@ function useFileLoader(
       setContent(decoded);
       setOriginalContent(decoded);
       onDecodedRef.current(decoded, data.mime_type);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setLoading(false);
-    }
+    });
   }, [path, fileOps, viewerType, fileSize, runChunkedLoad]);
 
   useEffect(() => {
@@ -206,11 +285,11 @@ function useFileLoader(
   }, [loadFile]);
 
   return {
-    ext,
     viewerType,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     loadedBytes,
@@ -318,10 +397,10 @@ function useFileSave({
  * tracking, and save. Extracted so the render body stays small.
  */
 export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
-  const ext = parseExt(path);
-  const jsonPreviewKind: JsonPreviewKind | null = ext ? getJsonPreviewKind(ext) : null;
+  const presentation = resolveFilePresentation({ path });
+  const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
   // Markdown detection — extension-based wins, content-based is fallback
-  const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
+  const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
   const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');
@@ -358,7 +437,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   }, [isMarkdownByExt, path]);
 
   const {
-    viewerType, content, originalContent, mediaBlobUrl, loading, error,
+    viewerType, content, originalContent, mediaBlobUrl, mediaMimeType, loading, error,
     loadedBytes, totalBytes, isChunkedLoading, forceReadOnly, revision,
     setRevision, loadFile, setContent, setOriginalContent, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
@@ -432,6 +511,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     isReadOnly,

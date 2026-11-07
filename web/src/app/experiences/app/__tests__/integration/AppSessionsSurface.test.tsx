@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   AppSessionsSurface,
@@ -177,6 +177,100 @@ describe('App Sessions surface (#1050 stage 1)', () => {
 
     await userEvent.click(chip);
     expect(setStatusFilter).toHaveBeenCalledWith('all');
+  });
+
+  it('exposes all four Session actions without selecting the row', async () => {
+    const onSelect = vi.fn();
+    render(
+      <AppSessionsSurface
+        {...props({
+          onSelect,
+          onViewDetails: vi.fn(),
+          onEditDetails: vi.fn(),
+          onConfigure: vi.fn(),
+          onKill: vi.fn(),
+        })}
+      />,
+    );
+
+    const target = sessions[1];
+    await userEvent.click(screen.getByTestId(`session-actions-${target.session_id}`));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Session details',
+      'Edit details',
+      'Attach settings',
+      'Kill session',
+    ]);
+    expect(within(menu).getByRole('separator')).toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  /**
+   * One fresh surface per action. Reopening one popup four times races Base
+   * UI's open/close inert window under the coverage run; each action is an
+   * independent claim anyway.
+   */
+  describe('App action forwarding', () => {
+    function renderActions() {
+      const onSelect = vi.fn();
+      const onViewDetails = vi.fn();
+      const onEditDetails = vi.fn();
+      const onConfigure = vi.fn();
+      const onKill = vi.fn();
+      render(
+        <AppSessionsSurface
+          {...props({
+            onSelect,
+            onViewDetails,
+            onEditDetails,
+            onConfigure,
+            onKill,
+          })}
+        />,
+      );
+      return { onSelect, onViewDetails, onEditDetails, onConfigure, onKill };
+    }
+
+    async function choose(action: 'details' | 'edit' | 'settings' | 'kill') {
+      const target = sessions[1];
+      await userEvent.click(screen.getByTestId(`session-actions-${target.session_id}`));
+      const item = await screen.findByTestId(`session-actions-${action}-${target.session_id}`);
+      await waitFor(
+        () => expect(item).not.toHaveStyle({ pointerEvents: 'none' }),
+        { timeout: 3_000 },
+      );
+      await userEvent.click(item);
+      return target;
+    }
+
+    it('routes Session details to the App details owner', async () => {
+      const handlers = renderActions();
+      const target = await choose('details');
+      expect(handlers.onViewDetails).toHaveBeenCalledWith(target);
+      expect(handlers.onSelect).not.toHaveBeenCalled();
+    });
+
+    it('routes Edit details to the App metadata editor owner', async () => {
+      const handlers = renderActions();
+      const target = await choose('edit');
+      expect(handlers.onEditDetails).toHaveBeenCalledWith(target);
+      expect(handlers.onSelect).not.toHaveBeenCalled();
+    });
+
+    it('routes Attach settings to the configure owner without attaching', async () => {
+      const handlers = renderActions();
+      const target = await choose('settings');
+      expect(handlers.onConfigure).toHaveBeenCalledWith(target);
+      expect(handlers.onSelect).not.toHaveBeenCalled();
+    });
+
+    it('routes Kill to the existing destructive owner', async () => {
+      const handlers = renderActions();
+      const target = await choose('kill');
+      expect(handlers.onKill).toHaveBeenCalledWith(target);
+      expect(handlers.onSelect).not.toHaveBeenCalled();
+    });
   });
 
   it('offers no way to collapse itself into a rail', () => {
