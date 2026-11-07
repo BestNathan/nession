@@ -42,6 +42,7 @@ const intent=validateQwenPublisherIntent({
   schema_version:1,kind:'trusted_qwen_publisher_write_ahead_intent',
   repository:REPO,issue:ISSUE,action_id:action,worker_run_id:301,
   worker_run_attempt:1,worker_sha:'9'.repeat(40),source_sha:MAIN,
+  worker_source_sha:MAIN,
   checkpoint_version:1,checkpoint_commit_sha:CP,
   checkpoint_ciphertext_sha256:HASH,patch_sha256:HASH,
   file_manifest_sha256:HASH,file_count:2,target_main_sha:MAIN,

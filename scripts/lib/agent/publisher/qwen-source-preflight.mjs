@@ -93,6 +93,7 @@ export async function preflightTrustedQwenPublisher({
     worker_run_id:run.id,worker_run_attempt:run.run_attempt,
     worker_sha:run.head_sha,
     source_sha:publisherBase,
+    worker_source_sha:admission.input_sha,
     checkpoint_version:checkpoint.version,
     checkpoint_commit_sha:checkpoint.commit_sha,
     ciphertext_sha256:checkpoint.ciphertext_sha256,
