@@ -23,17 +23,16 @@ test('SC-05: Pierre diffs and the Files edit lifecycle are unchanged', async ({ 
   // Files: code view, structured Preview/Raw, and the explicit edit/save path.
   await page.goto('/#/fixture/workspace?capability=files');
   await expect(page.getByTestId('file-workspace')).toBeVisible();
-  const tree = page.locator('[data-testid="file-workspace"] [role="tree"]');
-  await tree.getByText('web', { exact: true }).first().click();
-  await tree.getByText('src', { exact: true }).first().click();
-  await tree.getByText('App.tsx', { exact: true }).first().click();
+  await page.getByTestId('file-row-web').click();
+  await page.getByTestId('file-row-web/src').click();
+  await page.getByTestId('file-row-web/src/App.tsx').click();
   const filesEditor = page.getByTestId('codemirror-editor');
   await expect(filesEditor).toBeVisible();
   await expect(page.getByTestId('file-view-unavailable')).toHaveCount(0);
 
-  await tree.getByText('docs', { exact: true }).first().click();
-  await tree.getByText('design', { exact: true }).first().click();
-  await tree.getByText('visual-language.md', { exact: true }).first().click();
+  await page.getByTestId('file-row-docs').click();
+  await page.getByTestId('file-row-docs/design').click();
+  await page.getByTestId('file-row-docs/design/visual-language.md').click();
   await expect(page.getByRole('button', { name: 'Preview', pressed: true })).toBeVisible();
   await page.getByRole('button', { name: 'Raw', pressed: false }).click();
   await expect(page.getByTestId('codemirror-editor')).toBeVisible();
