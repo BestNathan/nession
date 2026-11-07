@@ -331,3 +331,10 @@
 - Categories: app, files, media, ownership, presentation, protocol, safety, web
 - Reason: Record #2876's shared presentation owner: Files retains FileOps, chunked reads, edit/save and guarded writes while presentation moves to shared/file-viewer with the platform editor supplied by the consumer
 - Source: https://github.com/BestNathan/nession/issues/2876
+
+## 2026-11-07T14:12:50Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Record #2917 trusted source-scoped Quality, parallel stable Gate aggregation, early Case selection, distinct Web dist Not Required, exact-SHA producer proof, and measured three-class PR CI timings with statistical limits
+- Source: https://github.com/BestNathan/nession/issues/2917
