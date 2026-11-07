@@ -246,6 +246,118 @@ fn server_config_commands_edit_the_selected_file_with_typed_values() {
     assert_eq!(config.logging.rotation, "hourly");
 }
 
+/// #2889 SC-01, stated once for every generated Server config: a blank
+/// `auth_token` may only be paired with a loopback listener.
+fn assert_safe_server_pairing(path: &std::path::Path) {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("read generated server config {}: {error}", path.display()));
+    let config: nession_common::config::ServerConfig = toml::from_str(&content)
+        .unwrap_or_else(|error| panic!("generated file must be a typed Server config: {error}"));
+    assert!(
+        config.auth_token.is_empty(),
+        "init must not invent a credential: {}",
+        config.auth_token
+    );
+    let listen: std::net::SocketAddr = config
+        .listen_address
+        .parse()
+        .unwrap_or_else(|error| panic!("the generated listener must be host:port: {error}"));
+    assert!(
+        listen.ip().is_loopback(),
+        "a blank auth_token must pair with a loopback listener, got {}",
+        config.listen_address
+    );
+    assert_ne!(
+        (config.listen_address.as_str(), config.auth_token.as_str()),
+        ("0.0.0.0:19090", ""),
+        "the #2889 unsafe pairing must never be generated"
+    );
+}
+
+/// #2889 SC-01: the advertised setup path generates a local no-auth mode, not
+/// an all-interface listener without a credential.
+#[test]
+fn server_init_generates_a_loopback_listener_with_a_blank_token() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let default = dir.path().join("server-config.toml");
+
+    let init = nession(&dir)
+        .args(["config", "server", "init"])
+        .output()
+        .expect("init");
+    assert!(init.status.success(), "{}", stderr(&init));
+    assert_safe_server_pairing(&default);
+
+    // `--force` must obey the same generation rule.
+    let forced = nession(&dir)
+        .args(["config", "server", "init", "--force"])
+        .output()
+        .expect("force init");
+    assert!(forced.status.success(), "{}", stderr(&forced));
+    assert_safe_server_pairing(&default);
+}
+
+/// #2889 SC-01: an explicit `--config` file uses the same safe profile, and a
+/// `--force` rewrite cannot reintroduce the all-interface/blank-token pairing.
+#[test]
+fn server_init_with_an_explicit_config_keeps_the_safe_pairing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("custom-server.toml");
+
+    let init = nession(&dir)
+        .args(["config", "server", "init", "--config"])
+        .arg(&path)
+        .output()
+        .expect("init");
+    assert!(init.status.success(), "{}", stderr(&init));
+    assert_safe_server_pairing(&path);
+
+    std::fs::write(
+        &path,
+        "listen_address = \"0.0.0.0:19090\"\ntls_cert_path = \"\"\ntls_key_path = \"\"\nauth_token = \"operator-secret\"\n",
+    )
+    .expect("seed operator config");
+
+    let forced = nession(&dir)
+        .args(["config", "server", "init", "--force", "--config"])
+        .arg(&path)
+        .output()
+        .expect("force init");
+    assert!(forced.status.success(), "{}", stderr(&forced));
+    assert_safe_server_pairing(&path);
+}
+
+/// #2889 SC-02: an operator-authored remote/authenticated config stays intact;
+/// a CLI read must not rewrite it or un-mask its credential.
+#[test]
+fn an_operator_authored_remote_server_config_is_not_rewritten() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("remote-server.toml");
+    let seeded = "listen_address = \"0.0.0.0:19090\"\ntls_cert_path = \"\"\ntls_key_path = \"\"\nauth_token = \"operator-secret\"\n";
+    std::fs::write(&path, seeded).expect("seed");
+
+    let show = nession(&dir)
+        .args(["config", "server", "show", "--config"])
+        .arg(&path)
+        .output()
+        .expect("show");
+    assert!(show.status.success(), "{}", stderr(&show));
+    let shown = stdout(&show);
+    assert!(
+        shown.contains("0.0.0.0:19090"),
+        "an explicit remote listener must stay visible: {shown}"
+    );
+    assert!(
+        !shown.contains("operator-secret"),
+        "the credential must stay masked: {shown}"
+    );
+    assert_eq!(
+        seeded,
+        std::fs::read_to_string(&path).expect("read after"),
+        "reading a config must not rewrite it"
+    );
+}
+
 /// Without `--config`, the same commands use the target's documented default
 /// path under the isolated `NESSION_HOME`.
 #[test]

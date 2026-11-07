@@ -192,6 +192,22 @@ JSON array of URLs. Unknown keys and invalid values are rejected without
 writing, and edits preserve comments and unrelated keys. `show` masks
 `auth_token`/`agent_token`, and written files are private (0600 on Unix).
 
+A fresh `nession config server init` is deliberately a **local no-auth** file:
+`listen_address` is the loopback fallback (`127.0.0.1:8080`) and `auth_token`
+is empty. That is safe only for this machine, and it matches what
+`nession server start` uses when no config file exists. Accepting clients from
+other machines is an explicit opt-in: set a credential and a reachable
+listener together.
+
+```bash
+nession config server set auth_token <token>
+nession config server set listen_address 0.0.0.0:19090
+```
+
+`init --force` writes the same safe default again; it never restores an
+all-interface listener with a blank token. An operator-authored config is
+loaded as written — the CLI does not rewrite it during startup.
+
 ### 3. Use it
 
 **CLI** (targets the central Server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`). For the `19090` example above, set the target and use the same auth token configured for the Server:
