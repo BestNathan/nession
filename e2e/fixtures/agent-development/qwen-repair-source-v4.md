@@ -9,7 +9,7 @@ replacement for source-aligned staging proof.
 ## Fixture state
 
 implementation: qwen-verified
-verification: missing
+verification: complete
 
 ## Required final content
 
