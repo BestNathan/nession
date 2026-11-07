@@ -41,6 +41,26 @@ pub struct SessionRegistry {
     /// every Session id the Server has ever seen; a live guard keeps its lock
     /// alive until every waiter has finished.
     lifecycle_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
+    /// One lock per Agent id, ordered **before** `lifecycle_guard` (#2874).
+    ///
+    /// A force-refresh projects an Agent's whole Session set from a snapshot
+    /// taken when `agent.session.report` was sent. Every mutation of that
+    /// Agent's Sessions takes this lock, so the refresh's multi-statement
+    /// rewrite can never interleave with a newer live report.
+    agent_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
+    /// Monotonic count of Session-state mutations per Agent (#2874).
+    ///
+    /// The force-refresh captures this before querying the Agent and asks the
+    /// projection to apply only if it has not moved. An update that commits
+    /// while the refresh reply is in flight therefore invalidates the refresh:
+    /// a stale snapshot can never overwrite a newer authoritative report, and
+    /// its persisted rewrite never erases it.
+    agent_generations: Mutex<HashMap<String, u64>>,
+    /// Test seam: when set, a refresh pauses after its atomic in-memory swap
+    /// and before the persisted rewrite, so a Case can hold a concurrent
+    /// update against the projection boundary.
+    #[cfg(test)]
+    refresh_db_pause: Mutex<Option<(Arc<tokio::sync::Barrier>, Arc<tokio::sync::Barrier>)>>,
     db: Arc<Database>,
 }
 
@@ -49,8 +69,60 @@ impl SessionRegistry {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             lifecycle_locks: Mutex::new(HashMap::new()),
+            agent_locks: Mutex::new(HashMap::new()),
+            agent_generations: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            refresh_db_pause: Mutex::new(None),
             db,
         }
+    }
+
+    /// Serialize one Agent's Session-set mutations.
+    ///
+    /// Always acquired before [`Self::lifecycle_guard`]; holding it across the
+    /// in-memory change and the persisted write is what makes a force-refresh
+    /// and a live Agent report mutually exclusive for that Agent (#2874).
+    /// Different Agents never contend.
+    pub(crate) async fn agent_guard(&self, agent_id: &str) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self
+                .agent_locks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(existing) = locks.get(agent_id).and_then(Weak::upgrade) {
+                existing
+            } else {
+                let lock = Arc::new(AsyncMutex::new(()));
+                locks.insert(agent_id.to_string(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        lock.lock_owned().await
+    }
+
+    /// The Agent's current Session-state generation.
+    ///
+    /// A force-refresh reads this **before** asking the Agent for its live
+    /// Sessions and passes it back to [`Self::replace_agent_sessions`].
+    pub(crate) fn agent_generation(&self, agent_id: &str) -> u64 {
+        self.agent_generations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(agent_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Mark one Agent Session-state mutation. Generations are never reused for
+    /// an Agent id, even after the Agent is removed, so an old refresh can
+    /// never match a re-registered Agent by accident.
+    fn bump_agent_generation(&self, agent_id: &str) {
+        let mut generations = self
+            .agent_generations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let generation = generations.entry(agent_id.to_string()).or_insert(0);
+        *generation += 1;
     }
 
     /// Serialize one Session's lifecycle transitions.
@@ -102,6 +174,11 @@ impl SessionRegistry {
     }
 
     pub async fn update_session(&self, session: SessionInfo) {
+        // Ordered before the per-Session guard: a force-refresh holds this
+        // Agent guard for its whole projection, so a live report either
+        // commits before the refresh captures its generation (and invalidates
+        // it) or waits for the projection and then applies on top (#2874).
+        let _agent = self.agent_guard(&session.agent_id).await;
         // Serialized with the stale-row reclaim path: a restore that acquires
         // this guard before the sweep makes the sweep's conditional deletion a
         // no-op (#2848).
@@ -115,6 +192,7 @@ impl SessionRegistry {
             let mut sessions = self.sessions.write().await;
             sessions.insert(session.session_id.clone(), session.clone());
         }
+        self.bump_agent_generation(&session.agent_id);
 
         // Write through to the DB. Failure is logged but non-fatal (the agent
         // is the source of truth and will re-report on reconnect).
@@ -132,6 +210,7 @@ impl SessionRegistry {
     /// Return false when the row already exists; creation still succeeded,
     /// and the caller may broadcast the existing authoritative row.
     pub async fn insert_session_if_absent(&self, session: SessionInfo) -> bool {
+        let _agent = self.agent_guard(&session.agent_id).await;
         let _lifecycle = self.lifecycle_guard(&session.session_id).await;
         let inserted = {
             let mut sessions = self.sessions.write().await;
@@ -144,6 +223,7 @@ impl SessionRegistry {
             }
         };
         if inserted {
+            self.bump_agent_generation(&session.agent_id);
             // The DB is the recovery cache, never the serving authority.
             // Like update_session, do not hold a map write lock during I/O.
             if let Err(e) = self
@@ -181,22 +261,43 @@ impl SessionRegistry {
     }
 
     pub async fn remove(&self, session_id: &str) {
+        // Resolve the Agent before taking the guards; a Session id is
+        // canonically `agent_id:session_name`, and the in-memory entry is the
+        // authoritative source while it exists.
+        let agent_id = {
+            let sessions = self.sessions.read().await;
+            sessions.get(session_id).map(|s| s.agent_id.clone())
+        }
+        .or_else(|| {
+            session_id
+                .split_once(':')
+                .map(|(agent_id, _)| agent_id.to_owned())
+        });
+        let _agent = match agent_id.as_deref() {
+            Some(agent_id) => Some(self.agent_guard(agent_id).await),
+            None => None,
+        };
         let _lifecycle = self.lifecycle_guard(session_id).await;
         if let Err(e) = self.db.delete_session(session_id).await {
             tracing::error!("Failed to delete session {} from DB: {:#}", session_id, e);
         }
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
+        if let Some(agent_id) = agent_id {
+            self.bump_agent_generation(&agent_id);
+        }
     }
 
     /// Reclaim one Session selected by the stale-recovering sweep at `cutoff`.
     ///
-    /// **The caller must hold [`Self::lifecycle_guard`] for this Session** for
-    /// the whole destructive sequence (this call and the Environment Binding
-    /// cleanup that follows). The guard is what makes the reclaim conditional:
-    /// a restore that completed first has already replaced the in-memory entry
+    /// **The caller must hold [`Self::agent_guard`] for this Session's Agent
+    /// and [`Self::lifecycle_guard`] for the Session** for the whole
+    /// destructive sequence (this call and the Environment Binding cleanup
+    /// that follows). The guards are what make the reclaim conditional: a
+    /// restore that completed first has already replaced the in-memory entry
     /// and the persisted row, so both checks below fail and nothing is
-    /// destroyed (#2848).
+    /// destroyed (#2848). The Agent guard also orders the reclaim against a
+    /// force-refresh projection for the same Agent (#2874).
     ///
     /// Returns `true` only when the persisted row was still the stale
     /// recovering row and was deleted. The in-memory entry is removed in the
@@ -204,6 +305,7 @@ impl SessionRegistry {
     /// Binding.
     pub(crate) async fn reclaim_stale_recovering_under_lock(
         &self,
+        agent_id: &str,
         session_id: &str,
         cutoff: i64,
     ) -> bool {
@@ -233,7 +335,10 @@ impl SessionRegistry {
             .delete_recovering_session_before(session_id, cutoff)
             .await
         {
-            Ok(true) => true,
+            Ok(true) => {
+                self.bump_agent_generation(agent_id);
+                true
+            }
             Ok(false) => {
                 // The persisted row changed while the sweep held it — the
                 // restore won. Reclaiming nothing is the only safe result.
@@ -272,6 +377,7 @@ impl SessionRegistry {
     }
 
     pub async fn remove_by_agent(&self, agent_id: &str) -> Vec<String> {
+        let _agent = self.agent_guard(agent_id).await;
         if let Err(e) = self.db.delete_sessions_by_agent(agent_id).await {
             tracing::error!(
                 "Failed to delete sessions for agent {} from DB: {:#}",
@@ -286,6 +392,8 @@ impl SessionRegistry {
             .map(|s| s.session_id.clone())
             .collect();
         sessions.retain(|_, s| s.agent_id != agent_id);
+        drop(sessions);
+        self.bump_agent_generation(agent_id);
         removed
     }
 
@@ -297,13 +405,34 @@ impl SessionRegistry {
     /// observe the intermediate empty state — which is exactly what a
     /// `remove_by_agent()` followed by N × `update_session()` would expose.
     ///
+    /// `observed_generation` is the Agent's generation **before** the refresh
+    /// request was sent (see [`Self::agent_generation`]). If a newer live
+    /// report committed while the reply was in flight, the snapshot is stale:
+    /// the projection is skipped in its entirety and the newer report wins
+    /// (#2874). The check and the rewrite happen under the per-Agent guard, so
+    /// nothing can commit between them.
+    ///
     /// Returns the session IDs that disappeared (present before, absent now)
-    /// so the caller can release their env-usage locks.
+    /// so the caller can release their env-usage locks. A skipped stale
+    /// refresh removes nothing.
     pub async fn replace_agent_sessions(
         &self,
         agent_id: &str,
         incoming: Vec<SessionInfo>,
+        observed_generation: u64,
     ) -> Vec<String> {
+        let _agent = self.agent_guard(agent_id).await;
+
+        if self.agent_generation(agent_id) != observed_generation {
+            tracing::debug!(
+                "Skipping stale session refresh for agent {}: generation moved from {} to {}",
+                agent_id,
+                observed_generation,
+                self.agent_generation(agent_id)
+            );
+            return Vec::new();
+        }
+
         // Swap in-memory state first — it is the live serving path. Same
         // rationale as `update_session`: a slow or failed DB write must not
         // delay visibility.
@@ -322,24 +451,36 @@ impl SessionRegistry {
             }
             removed
         };
+        self.bump_agent_generation(agent_id);
 
-        // Write through to the DB outside the lock. Failures are logged but
-        // non-fatal — the agent is the source of truth and re-reports.
-        if let Err(e) = self.db.delete_sessions_by_agent(agent_id).await {
+        // Test seam: the Case holds this projection while a newer Agent
+        // report arrives, proving the two cannot interleave.
+        #[cfg(test)]
+        {
+            let pause = self
+                .refresh_db_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some((reached, release)) = pause {
+                reached.wait().await;
+                release.wait().await;
+            }
+        }
+
+        // Write through to the DB outside the lock, as one transaction.
+        // Failures are logged but non-fatal — the agent is the source of
+        // truth and re-reports.
+        if let Err(e) = self
+            .db
+            .replace_sessions_for_agent(agent_id, &incoming)
+            .await
+        {
             tracing::error!(
-                "Failed to clear persisted sessions for agent {}: {:#}",
+                "Failed to persist session replacement for agent {}: {:#}",
                 agent_id,
                 e
             );
-        }
-        for session in &incoming {
-            if let Err(e) = self
-                .db
-                .insert_session(session, status_str(&session.status))
-                .await
-            {
-                tracing::error!("Failed to persist session {}: {:#}", session.session_id, e);
-            }
         }
 
         removed
@@ -377,9 +518,9 @@ fn session_info_from_row(row: crate::db::SessionRow) -> SessionInfo {
 }
 
 /// Map a [`SessionStatus`] to the string form persisted in SQLite and sent
-/// over the wire. Kept as a free function so both `update_session` and
-/// `replace_agent_sessions` share one mapping.
-fn status_str(status: &SessionStatus) -> &'static str {
+/// over the wire. Kept as a free function so the registry's single-row writes
+/// and the database layer's transactional replacement share one mapping.
+pub(crate) fn status_str(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Active => "active",
         SessionStatus::Detached => "detached",
@@ -411,6 +552,18 @@ mod tests {
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }
+    }
+
+    /// Capture the generation, then replace — the same sequence the
+    /// force-refresh path uses when nothing else changed.
+    async fn replace(
+        reg: &SessionRegistry,
+        agent_id: &str,
+        incoming: Vec<SessionInfo>,
+    ) -> Vec<String> {
+        let generation = reg.agent_generation(agent_id);
+        reg.replace_agent_sessions(agent_id, incoming, generation)
+            .await
     }
 
     /// The Agent's report can race the command's success reply. The reply
@@ -494,9 +647,7 @@ mod tests {
         reg.update_session(make_session("a1", "old1")).await;
         reg.update_session(make_session("a1", "old2")).await;
 
-        let removed = reg
-            .replace_agent_sessions("a1", vec![make_session("a1", "new1")])
-            .await;
+        let removed = replace(&reg, "a1", vec![make_session("a1", "new1")]).await;
 
         assert_eq!(sorted_ids(&reg).await, vec!["a1:new1"]);
         // Both old sessions are gone; the incoming one is not reported removed.
@@ -511,8 +662,7 @@ mod tests {
         reg.update_session(make_session("a1", "s1")).await;
         reg.update_session(make_session("a2", "s1")).await;
 
-        reg.replace_agent_sessions("a1", vec![make_session("a1", "s2")])
-            .await;
+        replace(&reg, "a1", vec![make_session("a1", "s2")]).await;
 
         assert_eq!(sorted_ids(&reg).await, vec!["a1:s2", "a2:s1"]);
     }
@@ -525,12 +675,12 @@ mod tests {
         reg.update_session(make_session("a1", "keep")).await;
         reg.update_session(make_session("a1", "drop")).await;
 
-        let removed = reg
-            .replace_agent_sessions(
-                "a1",
-                vec![make_session("a1", "keep"), make_session("a1", "add")],
-            )
-            .await;
+        let removed = replace(
+            &reg,
+            "a1",
+            vec![make_session("a1", "keep"), make_session("a1", "add")],
+        )
+        .await;
 
         assert_eq!(removed, vec!["a1:drop"]);
         assert_eq!(sorted_ids(&reg).await, vec!["a1:add", "a1:keep"]);
@@ -542,7 +692,7 @@ mod tests {
         reg.update_session(make_session("a1", "s1")).await;
         reg.update_session(make_session("a2", "s1")).await;
 
-        let removed = reg.replace_agent_sessions("a1", vec![]).await;
+        let removed = replace(&reg, "a1", vec![]).await;
 
         assert_eq!(removed, vec!["a1:s1"]);
         assert_eq!(sorted_ids(&reg).await, vec!["a2:s1"]);
@@ -554,9 +704,7 @@ mod tests {
     async fn replace_on_unknown_agent_inserts() {
         let reg = new_registry().await;
 
-        let removed = reg
-            .replace_agent_sessions("fresh", vec![make_session("fresh", "s1")])
-            .await;
+        let removed = replace(&reg, "fresh", vec![make_session("fresh", "s1")]).await;
 
         assert!(removed.is_empty());
         assert_eq!(sorted_ids(&reg).await, vec!["fresh:s1"]);
@@ -583,12 +731,186 @@ mod tests {
         let db = Arc::new(Database::new(":memory:").await.unwrap());
         let reg = SessionRegistry::new(Arc::clone(&db));
         reg.update_session(make_session("a1", "stale")).await;
-        reg.replace_agent_sessions("a1", vec![make_session("a1", "live")])
-            .await;
+        replace(&reg, "a1", vec![make_session("a1", "live")]).await;
 
         let reloaded = SessionRegistry::new(db);
         reloaded.load_from_db().await;
 
         assert_eq!(sorted_ids(&reloaded).await, vec!["a1:live"]);
+    }
+
+    /// #2874 SC-01: a force-refresh snapshot is stale once a newer live
+    /// report committed while its reply was in flight. The refresh must not
+    /// erase the newer report, and the newer report must survive a reload.
+    #[tokio::test]
+    async fn sc01_a_stale_refresh_cannot_erase_a_newer_agent_report() {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let reg = SessionRegistry::new(Arc::clone(&db));
+        reg.update_session(make_session("a1", "old")).await;
+
+        // The force-refresh sends its query now...
+        let observed_generation = reg.agent_generation("a1");
+
+        // ...and while the reply is in flight a newer authoritative report
+        // commits.
+        let mut newer = make_session("a1", "new");
+        newer.status = SessionStatus::Active;
+        newer.window_count = 9;
+        newer.attached_clients = 3;
+        reg.update_session(newer).await;
+
+        // The old snapshot arrives late.
+        let removed = reg
+            .replace_agent_sessions("a1", vec![make_session("a1", "old")], observed_generation)
+            .await;
+
+        assert!(
+            removed.is_empty(),
+            "a skipped stale refresh must release no Environment Bindings"
+        );
+        let live = reg.get("a1:new").await.expect("newer report remains live");
+        assert_eq!(live.status, SessionStatus::Active);
+        assert_eq!(live.window_count, 9);
+        assert_eq!(live.attached_clients, 3);
+
+        let row = reg
+            .db
+            .get_session("a1:new")
+            .await
+            .expect("read row")
+            .expect("newer report remains persisted");
+        assert_eq!(row.status, "active");
+        assert_eq!(row.window_count, 9);
+        assert_eq!(row.attached_clients, 3);
+
+        // A Server restart must not lose or regress the newer report.
+        let reloaded = SessionRegistry::new(Arc::clone(&reg.db));
+        reloaded.load_from_db().await;
+        let persisted = reloaded
+            .get("a1:new")
+            .await
+            .expect("newer report survives reload");
+        assert_eq!(persisted.status, SessionStatus::Active);
+        assert_eq!(persisted.window_count, 9);
+
+        eprintln!(
+            "#2874 SC-01 measured: observed_generation={observed_generation} current_generation={} removed={} live_status={:?} live_windows={} persisted_status={} persisted_windows={} reload_windows={}",
+            reg.agent_generation("a1"),
+            removed.len(),
+            live.status,
+            live.window_count,
+            row.status,
+            row.window_count,
+            persisted.window_count
+        );
+    }
+
+    /// #2874 SC-01: the persisted rewrite itself cannot interleave a newer
+    /// report. The refresh is held after its atomic in-memory swap; an update
+    /// that arrives there waits for the Agent guard and then applies on top,
+    /// so the newer report is what a reload sees.
+    #[tokio::test]
+    async fn sc01_a_refresh_projection_and_a_live_update_are_serialized() {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let reg = Arc::new(SessionRegistry::new(Arc::clone(&db)));
+        reg.update_session(make_session("a1", "old")).await;
+        let observed_generation = reg.agent_generation("a1");
+
+        let reached = Arc::new(tokio::sync::Barrier::new(2));
+        let release = Arc::new(tokio::sync::Barrier::new(2));
+        *reg.refresh_db_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((Arc::clone(&reached), Arc::clone(&release)));
+
+        let refresh = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move {
+                reg.replace_agent_sessions(
+                    "a1",
+                    vec![make_session("a1", "old")],
+                    observed_generation,
+                )
+                .await
+            })
+        };
+        // The refresh has swapped memory and is paused before its persisted
+        // rewrite.
+        reached.wait().await;
+
+        let mut newer = make_session("a1", "new");
+        newer.status = SessionStatus::Active;
+        newer.window_count = 7;
+        let mut update = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.update_session(newer).await })
+        };
+        let early = tokio::time::timeout(std::time::Duration::from_millis(50), &mut update).await;
+        assert!(
+            early.is_err(),
+            "a live report must not interleave the refresh's persisted rewrite"
+        );
+
+        release.wait().await;
+        let removed = refresh.await.expect("refresh task");
+        assert!(removed.is_empty());
+        update.await.expect("update task");
+
+        let row = reg
+            .db
+            .get_session("a1:new")
+            .await
+            .expect("read row")
+            .expect("newer report persisted after the projection");
+        assert_eq!(row.status, "active");
+        assert_eq!(row.window_count, 7);
+
+        let reloaded = SessionRegistry::new(Arc::clone(&reg.db));
+        reloaded.load_from_db().await;
+        let persisted = reloaded
+            .get("a1:new")
+            .await
+            .expect("newer report survives reload");
+        assert_eq!(persisted.status, SessionStatus::Active);
+        assert_eq!(persisted.window_count, 7);
+
+        eprintln!(
+            "#2874 SC-01 serialization measured: observed_generation={observed_generation} removed={} persisted_status={} persisted_windows={} reload_windows={}",
+            removed.len(),
+            row.status,
+            row.window_count,
+            persisted.window_count
+        );
+    }
+
+    /// #2874 SC-02: an ordinary refresh (no concurrent report) still removes
+    /// obsolete Sessions and persists the replacement, without touching
+    /// another Agent's Sessions.
+    #[tokio::test]
+    async fn sc02_an_ordinary_refresh_replaces_only_its_agent_and_survives_reload() {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let reg = SessionRegistry::new(Arc::clone(&db));
+        reg.update_session(make_session("a1", "old1")).await;
+        reg.update_session(make_session("a1", "old2")).await;
+        reg.update_session(make_session("a2", "keep")).await;
+
+        let mut removed = replace(&reg, "a1", vec![make_session("a1", "replacement")]).await;
+        removed.sort();
+        assert_eq!(removed, vec!["a1:old1", "a1:old2"]);
+        assert_eq!(sorted_ids(&reg).await, vec!["a1:replacement", "a2:keep"]);
+
+        let reloaded = SessionRegistry::new(Arc::clone(&reg.db));
+        reloaded.load_from_db().await;
+        assert_eq!(
+            sorted_ids(&reloaded).await,
+            vec!["a1:replacement", "a2:keep"],
+            "the replacement is durable and the other Agent is untouched"
+        );
+
+        eprintln!(
+            "#2874 SC-02 measured: removed={removed:?} live={:?} reloaded={:?}",
+            sorted_ids(&reg).await,
+            sorted_ids(&reloaded).await
+        );
     }
 }

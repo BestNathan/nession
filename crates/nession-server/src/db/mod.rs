@@ -20,7 +20,7 @@ use migration::Migrator;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use sea_orm_migration::MigratorTrait;
 
@@ -215,36 +215,70 @@ impl Database {
         session: &crate::registry::session::SessionInfo,
         status: &str,
     ) -> Result<()> {
-        let now = chrono::Utc::now().timestamp();
-        let model = sessions::ActiveModel {
-            session_id: Set(session.session_id.clone()),
-            agent_id: Set(session.agent_id.clone()),
-            session_name: Set(session.session_name.clone()),
-            created_at: Set(session.created_at.timestamp()),
-            last_activity: Set(now),
-            status: Set(status.to_owned()),
-            window_count: Set(i32::try_from(session.window_count).unwrap_or(0)),
-            attached_clients: Set(i32::try_from(session.attached_clients).unwrap_or(0)),
-            metadata: Set(Some(String::new())),
-        };
+        let model = session_active_model(session, status, chrono::Utc::now().timestamp());
         sessions::Entity::insert(model)
-            .on_conflict(
-                OnConflict::column(sessions::Column::SessionId)
-                    .update_columns([
-                        sessions::Column::AgentId,
-                        sessions::Column::SessionName,
-                        sessions::Column::CreatedAt,
-                        sessions::Column::LastActivity,
-                        sessions::Column::Status,
-                        sessions::Column::WindowCount,
-                        sessions::Column::AttachedClients,
-                        sessions::Column::Metadata,
-                    ])
-                    .to_owned(),
-            )
+            .on_conflict(session_upsert_columns())
             .exec(&self.conn)
             .await
             .context("failed to insert session")?;
+        Ok(())
+    }
+
+    /// Replace one Agent's persisted Session set in **one transaction**.
+    ///
+    /// The force-refresh projection used to be a delete followed by N
+    /// independent inserts. Even with the in-memory swap atomic, a crash or
+    /// concurrent writer could therefore observe a half-replaced set, and a
+    /// late refresh could interleave its statements with a newer Agent report
+    /// (#2874). Serialization against live updates is owned by
+    /// `SessionRegistry`; this method only guarantees that once the projection
+    /// starts it is all-or-nothing on disk.
+    pub async fn replace_sessions_for_agent(
+        &self,
+        agent_id: &str,
+        replacement: &[crate::registry::session::SessionInfo],
+    ) -> Result<()> {
+        let txn = self
+            .conn
+            .begin()
+            .await
+            .context("failed to begin session replacement")?;
+
+        sessions::Entity::delete_many()
+            .filter(sessions::Column::AgentId.eq(agent_id))
+            .exec(&txn)
+            .await
+            .context("failed to clear sessions by agent")?;
+
+        let now = chrono::Utc::now().timestamp();
+        for session in replacement {
+            let model = session_active_model(
+                session,
+                crate::registry::session::status_str(&session.status),
+                now,
+            );
+            if let Err(e) = sessions::Entity::insert(model)
+                .on_conflict(session_upsert_columns())
+                .exec(&txn)
+                .await
+                .context("failed to insert replacement session")
+            {
+                // Keep the previous set intact rather than leaving a partial
+                // replacement behind.
+                if let Err(rollback) = txn.rollback().await {
+                    tracing::error!(
+                        "Failed to roll back session replacement for agent {}: {:#}",
+                        agent_id,
+                        rollback
+                    );
+                }
+                return Err(e);
+            }
+        }
+
+        txn.commit()
+            .await
+            .context("failed to commit session replacement")?;
         Ok(())
     }
 
@@ -598,6 +632,43 @@ fn agent_row_from_model(m: agents::Model) -> AgentRow {
         connect_url: m.connect_url,
         addresses: m.addresses.unwrap_or_default(),
     }
+}
+
+/// Build the ActiveModel for a Session write. One owner for the column
+/// mapping so a single-row upsert and a transactional replacement can never
+/// persist different fields.
+fn session_active_model(
+    session: &crate::registry::session::SessionInfo,
+    status: &str,
+    now: i64,
+) -> sessions::ActiveModel {
+    sessions::ActiveModel {
+        session_id: Set(session.session_id.clone()),
+        agent_id: Set(session.agent_id.clone()),
+        session_name: Set(session.session_name.clone()),
+        created_at: Set(session.created_at.timestamp()),
+        last_activity: Set(now),
+        status: Set(status.to_owned()),
+        window_count: Set(i32::try_from(session.window_count).unwrap_or(0)),
+        attached_clients: Set(i32::try_from(session.attached_clients).unwrap_or(0)),
+        metadata: Set(Some(String::new())),
+    }
+}
+
+/// Upsert a Session on its primary key, overwriting every mutable field.
+fn session_upsert_columns() -> OnConflict {
+    OnConflict::column(sessions::Column::SessionId)
+        .update_columns([
+            sessions::Column::AgentId,
+            sessions::Column::SessionName,
+            sessions::Column::CreatedAt,
+            sessions::Column::LastActivity,
+            sessions::Column::Status,
+            sessions::Column::WindowCount,
+            sessions::Column::AttachedClients,
+            sessions::Column::Metadata,
+        ])
+        .to_owned()
 }
 
 fn session_row_from_model(m: sessions::Model) -> SessionRow {

@@ -62,9 +62,15 @@ pub async fn reclaim_selected(
         ..SweepOutcome::default()
     };
     for row in rows {
+        // Lock ordering matches the live-write paths: Agent guard, then
+        // Session lifecycle guard. A force-refresh projection for the Agent
+        // and this destructive reclaim are therefore mutually exclusive
+        // (#2874), and a restore of this Session cannot interleave either
+        // (#2848).
+        let _agent = registry.agent_guard(&row.agent_id).await;
         let _lifecycle = registry.lifecycle_guard(&row.session_id).await;
         if registry
-            .reclaim_stale_recovering_under_lock(&row.session_id, cutoff)
+            .reclaim_stale_recovering_under_lock(&row.agent_id, &row.session_id, cutoff)
             .await
         {
             // The Session is gone; its desired binding and observed cache are

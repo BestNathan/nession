@@ -110,6 +110,22 @@ impl ConfigSelection {
 /// conflated.
 pub const CLI_SERVER_FALLBACK_LISTEN: &str = "127.0.0.1:8080";
 
+/// The Server config `nession config server init` writes.
+///
+/// An initialized file is a locally managed daemon, not a deployment artifact,
+/// so it must never pair an all-interface listener with a blank `auth_token`:
+/// the Server treats a blank token as no-auth mode, and once the file exists
+/// the no-file loopback fallback no longer applies (#2889). A blank token
+/// therefore keeps the listener on [`CLI_SERVER_FALLBACK_LISTEN`]; exposing the
+/// Server to another machine stays an explicit operator edit of both fields.
+pub fn initialized_server_config() -> ServerConfig {
+    let mut config = ServerConfig::default();
+    if config.auth_token.is_empty() {
+        config.listen_address = CLI_SERVER_FALLBACK_LISTEN.to_string();
+    }
+    config
+}
+
 /// Load an Agent config from the selected file, applying CLI/env overrides.
 ///
 /// An explicit selection that is missing or unreadable fails before startup.
@@ -509,6 +525,22 @@ pub fn updated_message(label: &str, key: &str, value: &str) -> String {
     format!("{label} config updated: {key} = {shown}")
 }
 
+/// The header written above a generated Server config.
+///
+/// The file is the operator's first contact with the initialized defaults, so
+/// it states the local no-auth mode and the explicit remote opt-in where it
+/// will be read. `config set` edits through `toml_edit`, so the header
+/// survives later edits.
+const SERVER_INIT_HEADER: &str = "\
+# Nession Server configuration.
+#
+# This generated default listens on loopback with no auth_token: local
+# no-auth mode. Before changing listen_address to an address other machines
+# can reach, set a credential too (add --config when this file is not the
+# default):
+#   nession config server set auth_token <token>
+";
+
 /// Create the selected config file from the target's typed defaults.
 pub fn init(target: ConfigTarget, selection: &ConfigSelection, force: bool) -> Result<()> {
     let label = target.label();
@@ -529,13 +561,31 @@ pub fn init(target: ConfigTarget, selection: &ConfigSelection, force: bool) -> R
     let toml_str = match target {
         ConfigTarget::Agent => toml::to_string_pretty(&AgentConfig::default())
             .context("failed to serialize agent config")?,
-        ConfigTarget::Server => toml::to_string_pretty(&ServerConfig::default())
-            .context("failed to serialize server config")?,
+        ConfigTarget::Server => {
+            let config = initialized_server_config();
+            let rendered =
+                toml::to_string_pretty(&config).context("failed to serialize server config")?;
+            if config.auth_token.is_empty() {
+                format!("{SERVER_INIT_HEADER}{rendered}")
+            } else {
+                rendered
+            }
+        }
     };
 
     write_private(&selection.path, &toml_str)?;
 
     println!("{} config written to '{}'", label, selection.path.display());
+    if target == ConfigTarget::Server {
+        let config = initialized_server_config();
+        if config.auth_token.is_empty() {
+            println!(
+                "Server listens on '{}' with no auth_token (local no-auth mode); \
+                 remote access requires setting auth_token and listen_address explicitly.",
+                config.listen_address
+            );
+        }
+    }
     Ok(())
 }
 
@@ -909,6 +959,107 @@ mod tests {
         };
         let config = load_server(&selection).expect("defaults");
         assert_eq!(config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+    }
+
+    /// `init` writes a typed Server config whose blank token is paired only
+    /// with a loopback listener (#2889 SC-01).
+    fn assert_safe_server_pairing(path: &Path) {
+        let content = fs::read_to_string(path).expect("read server config");
+        let config: ServerConfig = toml::from_str(&content).expect("typed server config");
+        assert!(
+            config.auth_token.is_empty(),
+            "initialization must not invent a credential: {}",
+            config.auth_token
+        );
+        let listen: std::net::SocketAddr = config
+            .listen_address
+            .parse()
+            .expect("the initialized listener must be host:port");
+        assert!(
+            listen.ip().is_loopback(),
+            "a blank auth_token must pair with a loopback listener, got {}",
+            config.listen_address
+        );
+        assert_ne!(
+            (config.listen_address.as_str(), config.auth_token.as_str()),
+            ("0.0.0.0:19090", ""),
+            "the #2889 unsafe pairing must never be generated"
+        );
+    }
+
+    #[test]
+    fn the_initialized_server_config_pairs_a_blank_token_with_loopback() {
+        let config = initialized_server_config();
+        assert!(config.auth_token.is_empty());
+        assert_eq!(config.listen_address, CLI_SERVER_FALLBACK_LISTEN);
+        assert!(config
+            .listen_address
+            .parse::<std::net::SocketAddr>()
+            .expect("host:port")
+            .ip()
+            .is_loopback());
+    }
+
+    #[test]
+    fn init_writes_the_safe_server_profile_including_a_force_rewrite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let selection = ConfigSelection {
+            path: dir.path().join("server.toml"),
+            explicit: true,
+        };
+
+        init(ConfigTarget::Server, &selection, false).expect("init");
+        assert_safe_server_pairing(&selection.path);
+
+        // An operator-authored network config must not survive a `--force`
+        // rewrite that would reintroduce the unsafe generated pairing.
+        fs::write(
+            &selection.path,
+            "listen_address = \"0.0.0.0:19090\"\n\
+             tls_cert_path = \"\"\n\
+             tls_key_path = \"\"\n\
+             auth_token = \"operator-secret\"\n",
+        )
+        .expect("seed operator config");
+        init(ConfigTarget::Server, &selection, true).expect("force init");
+        assert_safe_server_pairing(&selection.path);
+    }
+
+    /// An operator-authored remote/authenticated config is loaded exactly as
+    /// written; loading never rewrites the file (#2889 SC-02).
+    #[test]
+    fn an_operator_authored_remote_server_config_loads_unchanged() {
+        let (_dir, selection) = temp_selection(
+            ConfigTarget::Server,
+            "listen_address = \"0.0.0.0:19090\"\n\
+             tls_cert_path = \"\"\n\
+             tls_key_path = \"\"\n\
+             auth_token = \"operator-secret\"\n",
+        );
+        let before = fs::read_to_string(&selection.path).expect("read before");
+        let config = load_server(&selection).expect("load");
+        assert_eq!(config.listen_address, "0.0.0.0:19090");
+        assert_eq!(config.auth_token, "operator-secret");
+        assert_eq!(
+            before,
+            fs::read_to_string(&selection.path).expect("read after"),
+            "loading a config must not rewrite it"
+        );
+    }
+
+    /// Deliberate local no-auth mode remains supported (#2889 SC-02).
+    #[test]
+    fn an_operator_authored_loopback_no_auth_server_config_is_supported() {
+        let (_dir, selection) = temp_selection(
+            ConfigTarget::Server,
+            "listen_address = \"127.0.0.1:19090\"\n\
+             tls_cert_path = \"\"\n\
+             tls_key_path = \"\"\n\
+             auth_token = \"\"\n",
+        );
+        let config = load_server(&selection).expect("load");
+        assert_eq!(config.listen_address, "127.0.0.1:19090");
+        assert!(config.auth_token.is_empty());
     }
 
     #[test]
