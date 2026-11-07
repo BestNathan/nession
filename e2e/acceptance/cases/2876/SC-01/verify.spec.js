@@ -29,6 +29,8 @@ test('SC-01: untracked and unmerged text render in read-only CodeMirror', async 
   await expect(text.locator('pre')).toHaveCount(0);
   await expect(text.locator('.cm-content')).toHaveAttribute('contenteditable', 'false');
   await expect(text.locator('.cm-content')).toHaveCSS('user-select', /text|auto/);
+  // Language-aware rendering produces token spans, not one flat text node.
+  expect(await text.locator('.cm-line span[class]').count()).toBeGreaterThan(0);
 
   // A Git read-only surface offers no write/merge affordance.
   await expect(
