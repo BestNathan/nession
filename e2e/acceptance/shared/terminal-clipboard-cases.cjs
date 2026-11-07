@@ -9,11 +9,11 @@
 const crypto = require('node:crypto');
 const { verifiedRuntime } = require('./foreground-resume-browser.cjs');
 
-async function openClipboardFixture(page) {
+async function openClipboardFixture(page, search = '') {
   // Leave the document first: a second goto to the same hash URL is a
   // same-document navigation and would keep the previous harness page.
   await page.goto('about:blank');
-  await page.goto('/#/fixture/clipboard');
+  await page.goto('/#/fixture/clipboard' + search);
   await page.getByTestId('fixture-clipboard').waitFor();
   await page.waitForFunction(() => Boolean(window.clipboardHarness));
   // The fixture renders with xterm's canvas renderer: `.xterm-rows` only

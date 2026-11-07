@@ -82,4 +82,76 @@ describe('XtermEmulator', () => {
     document.body.removeChild(container1);
     document.body.removeChild(container2);
   });
+
+  // #2879 SC-02: the host's debug/E2E reference is an ownership claim, not a
+  // convenience assignment. Detach/reparent/dispose must release it, and must
+  // never delete a reference that already names a newer Terminal.
+  describe('host debug reference ownership', () => {
+    type MountHost = HTMLElement & { xtermInstance?: unknown };
+
+    function mountHost(): MountHost {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      return host;
+    }
+
+    afterEach(() => {
+      for (const host of document.querySelectorAll('div')) {
+        host.remove();
+      }
+    });
+
+    it('sets and clears the reference on the mounted host by identity', () => {
+      const host = mountHost();
+      instance.mount(host);
+      expect((host as MountHost).xtermInstance).toBe(instance.terminal);
+
+      instance.unmount();
+      expect((host as MountHost).xtermInstance).toBeUndefined();
+      expect(instance.terminal.element?.parentElement).toBeNull();
+    });
+
+    it('clears the previous host when the terminal is reparented', () => {
+      const first = mountHost();
+      const second = mountHost();
+      instance.mount(first);
+      instance.mount(second);
+
+      expect((first as MountHost).xtermInstance).toBeUndefined();
+      expect((second as MountHost).xtermInstance).toBe(instance.terminal);
+      expect(instance.terminal.element?.parentElement).toBe(second);
+    });
+
+    it('does not delete a reference that now names a newer Terminal', () => {
+      const host = mountHost();
+      instance.mount(host);
+      const newer = { terminal: 'newer' };
+      (host as MountHost).xtermInstance = newer;
+
+      instance.unmount();
+
+      expect((host as MountHost).xtermInstance).toBe(newer);
+    });
+
+    it('clears the reference on disposal', () => {
+      const host = mountHost();
+      instance.mount(host);
+      expect((host as MountHost).xtermInstance).toBe(instance.terminal);
+
+      instance.dispose();
+
+      expect((host as MountHost).xtermInstance).toBeUndefined();
+      expect(instance.isDisposed).toBe(true);
+    });
+
+    it('clears a reference left on a detached host when disposed without unmount', () => {
+      const host = mountHost();
+      instance.mount(host);
+      // Simulate an owner that disposed without a preceding detach; the
+      // element's parent is still how disposal finds the host.
+      instance.dispose();
+
+      expect((host as MountHost).xtermInstance).toBeUndefined();
+    });
+  });
 });
