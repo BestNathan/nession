@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42381578566,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2877-sc06-measurement",
+    "target_sha": "c69112717aaede583008ecddbc90ad31590d7c75",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42381578566",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "c9e7f5ab9be06b9678776f4ba2e3a9afe5ff36fd744e53835f749300134101d9"
+  },
+  "record": "runs/2026-11-07/42381578566-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "dd12b2a9198b9cdec808a7fa5d2d39849c1481331f9e1db669694f7ddf2d193b"
+}
