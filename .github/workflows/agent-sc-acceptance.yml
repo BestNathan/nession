@@ -188,7 +188,7 @@ jobs:
           fetch-depth: 0
 
       - name: Checkout immutable authenticated Provider evidence
-        if: inputs.provider_source_run_id != '' || (inputs.stage == 'post-merge' && inputs.issue_number == 1749)
+        if: inputs.provider_source_run_id != '' || (inputs.stage == 'post-merge' && (inputs.issue_number == 1749 || inputs.issue_number == 2817))
         uses: actions/checkout@v4
         with:
           ref: metrics
