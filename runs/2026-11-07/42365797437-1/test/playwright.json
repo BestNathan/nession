@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "197d4d2d01b3a6661db3bac89d3b74be4f8b178d",
+  "source_tree_sha": "0e287316cc4edd6e53e5893400d396a87996419e",
+  "run_id": 42365797437,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 42365797437,
+    "run_attempt": 1,
+    "head_sha": "197d4d2d01b3a6661db3bac89d3b74be4f8b178d",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-11-07T10:52:48Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "not-required",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_not_required",
+    "run_id": 42365797437,
+    "run_attempt": 1,
+    "sha": "197d4d2d01b3a6661db3bac89d3b74be4f8b178d",
+    "event": "push",
+    "branch": "main",
+    "plan_mode": "not-required",
+    "skipped_e2e_only_steps": [
+      "rust_toolchain",
+      "cargo_build",
+      "tmux"
+    ],
+    "browser_scope": "tooling-only",
+    "design_gate": "skipped",
+    "evidence": "GitHub API Run/Attempt/job step outcomes + exact original not-required E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "not-required",
+    "target_sha": "197d4d2d01b3a6661db3bac89d3b74be4f8b178d",
+    "run_id": 42365797437,
+    "run_attempt": 1,
+    "verified_ids": [],
+    "plan_digest": null,
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": null,
+  "test_job": {
+    "job_id": 128383460567,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 13571717154,
+    "name": "issue-e2e-verification",
+    "size_bytes": 1075,
+    "sha256": "bfed875066d168787089b33e8bcefa17d10f3cbf22f4eef8fca73abc6e8a4d97",
+    "expires_at": "2026-11-21T10:53:04Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "dc749caa1846c7a64cebd6cb0a0e6411bf3eedda0f5775c4072c45e89b8f0c43"
+}
