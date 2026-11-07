@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "kind": "authenticated_agent_task_result",
+  "issue": 2912,
+  "action_id": "e58dbe6748fb578b00e8483d53e957b3b40df5013781bb9f8c7b48f70ca3555c",
+  "result": {
+    "kind": "reviewer",
+    "issue": 2912,
+    "run_id": 42380443858,
+    "run_attempt": 1,
+    "target_sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+    "outcome": "changes_requested",
+    "task_id": "e58dbe6748fb578b00e8483d53e957b3b40df5013781bb9f8c7b48f70ca3555c"
+  },
+  "source": {
+    "repository": "BestNathan/nession",
+    "path": ".github/workflows/agent-review.yml",
+    "name": "Agent / Review",
+    "run_id": 42380443858,
+    "attempt": 1,
+    "event": "workflow_dispatch",
+    "ref": "refs/heads/main",
+    "issue": 2912,
+    "task_id": "e58dbe6748fb578b00e8483d53e957b3b40df5013781bb9f8c7b48f70ca3555c",
+    "agent_id": "review-qwen-01",
+    "input_sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+    "output_sha": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+    "verified": true
+  },
+  "artifact": {
+    "id": 13577587296,
+    "digest": "sha256:46213fff924b794463001f92118caedd0e8711a8d8783027f7846b7534518a55",
+    "json_sha256": "67e57a5d0c7b876f31819737be562f37027ab0fd9d5a7ce9195536e61bcb635c",
+    "source_run_id": 42380443858,
+    "source_run_attempt": 1
+  },
+  "acceptance_result": null,
+  "implementing_pr": {
+    "repository": "BestNathan/nession",
+    "number": 2914,
+    "head_sha_at_attestation": "4229f638a9dc4ec6efa1cdb9f0e1cd813aae009f",
+    "relation": "trusted_pr_head_at_result_attestation"
+  }
+}
