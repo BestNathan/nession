@@ -1,12 +1,12 @@
 ---
 title: "Git Changes read-only worktree preview and repository-scoped file read authority"
-description: "A Git Changes row without a diff opens its actual worktree bytes through a separate Session/repository-bound git.preview read, never through git.diff, the broad Files reader or a guessed empty diff"
+description: "A Git Changes row without a diff opens its actual worktree content through a Session/repository-bound git.preview read; text and media share one authorized boundary and one shared file-content presentation owner, never git.diff, the broad Files reader or a guessed empty diff"
 topic: web
-categories: ["git", "files", "protocol", "safety", "read-only", "ownership", "web"]
+categories: ["git", "files", "media", "presentation", "protocol", "safety", "read-only", "ownership", "web"]
 status: verified
 created_at: 2026-11-06T09:03:13Z
-updated_at: 2026-11-06T09:03:13Z
-sources: ["https://github.com/BestNathan/nession/issues/2838", "https://github.com/BestNathan/nession/pull/2846", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/protocol/preview/v1.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/preview.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/status.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/hooks/useGitSelection.ts", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/components/GitFilePreviewView.tsx", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/e2e/tests/browser/fixture-git.spec.ts"]
+updated_at: 2026-11-07T11:03:04Z
+sources: ["https://github.com/BestNathan/nession/issues/2838", "https://github.com/BestNathan/nession/pull/2846", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/protocol/preview/v1.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/preview.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/status.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/hooks/useGitSelection.ts", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/components/GitFilePreviewView.tsx", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/e2e/tests/browser/fixture-git.spec.ts", "https://github.com/BestNathan/nession/issues/2876", "https://github.com/BestNathan/nession/pull/2909", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/crates/nession-git/src/protocol/preview/v1.rs", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/crates/nession-git/src/runtime/preview.rs", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/git/hooks/useGitSelection.ts", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/git/components/GitFilePreviewView.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/FileContentViewer.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/presentation.ts"]
 ---
 
 # Git Changes read-only worktree preview and repository-scoped file read authority
@@ -40,6 +40,33 @@ A conflicted path is emitted **once**, in `unmerged`. `status.rs` no longer
 copies it into `modified`, so the listing and the Signal projection cannot show
 the same resource twice.
 
+## One presentation owner, plus authorized media (#2876)
+
+Text and media no longer have separate renderers in Git Changes. An untracked
+or unmerged row opens the shared `shared/file-viewer/FileContentViewer`:
+read-only CodeMirror with line numbers and language highlighting for text, the
+same Markdown/JSON/JSONL Preview/Raw leaves as Files, and the same
+image/video/audio/PDF leaves for authorized media. `resolveFilePresentation`
+is the one format policy. Git keeps the path/status header and the bounded-read
+messages; Files keeps its edit/save lifecycle. The shared viewer performs no
+capability, provider or transport I/O.
+
+`platform/editor` remains the CodeMirror primitive. The Web layer rule forbids
+`shared -> platform`, so each consumer supplies that editor component to the
+shared viewer; the shared owner still decides when source is shown.
+
+For a recognized media path, `git.preview` accepts `want: media`. That answer
+adds a `media` payload (`content_base64`, sniffed `mime_type`, `complete`) and a
+`too_large` state. It is complete bounded bytes (8 MiB) or a typed refusal; a
+truncated prefix is never returned as media. The extension is only a request
+hint: the Agent sniffs the bytes and refuses a family mismatch (for example a
+`.png` containing PDF bytes) or a non-media path. Text and media run through the
+same authorized read and identity checks below.
+
+The Web consumer owns the Blob URL. A new selection, Session change, late
+answer or unmount revokes it; a stale media answer is dropped rather than
+displayed.
+
 ## Read authority and race boundary
 
 The read is bound to the Session the Agent already resolved:
@@ -64,7 +91,9 @@ remains the single subprocess owner.
 
 ## Bounded text and explicit states
 
-The one-megabyte cap is a preview bound, not a file-size promise. A truncated
+The one-megabyte text cap is a preview bound, not a file-size promise. Media
+has a separate complete-byte bound (8 MiB); exceeding it is `too_large`, never
+a truncated payload that a viewer could mistake for a playable file. A truncated
 text answer reports the exact omitted byte count, drops only an incomplete
 UTF-8 suffix at the cap and never presents a prefix as complete. NUL bytes or
 invalid UTF-8 classify the file as binary with no text; the byte size remains
@@ -73,9 +102,11 @@ missing path and an unavailable read.
 
 ## Client selection and stale answers
 
-The Web list renders every status row as an opener. `useGitSelection` selects
-the operation from the row kind, and guards each response by Agent, Session,
-request generation, path and mode. A newer selection or Session change drops a
+The Web list renders every status row as an opener, then hands the authorized
+content to the shared presentation owner described above. `useGitSelection`
+selects the operation from the row kind, asks for media only when the path is a
+media hint, and guards each response by Agent, Session, request generation,
+path and mode. A newer selection or Session change drops a
 late answer. A Terminal focus handoff carries only a path; it waits until the
 status rows can say which kind that path is, then asks the matching operation.
 An unknown path stays unselected rather than guessing a diff.
@@ -87,6 +118,12 @@ no Files browser, editor, stage, merge or write control.
 
 - Requirement: [#2838](https://github.com/BestNathan/nession/issues/2838);
   implementation PR [#2846](https://github.com/BestNathan/nession/pull/2846).
+- Shared presentation and bounded media:
+  [#2876](https://github.com/BestNathan/nession/issues/2876), implementation PR
+  [#2909](https://github.com/BestNathan/nession/pull/2909). Its browser Cases
+  cover CodeMirror text, structured Preview/Raw, real image/video/audio/PDF
+  bytes and the desktop/phone geometry; its runtime Case runs the real
+  `nession-git` media/authorization tests and the Web stale-answer/Blob tests.
 - Implementation commit: `eb29231c5ab94205b2e8a0c8cefc30287be65c60`.
 - Source-aligned pre-merge Cases: SC-01 untracked content and phone
   recoverability, SC-02 one conflict row and actual bytes/missing state, SC-03
@@ -101,13 +138,17 @@ no Files browser, editor, stage, merge or write control.
 
 The SC-05 runtime Case exercises the real provider/consumer boundary but not a
 live tmux Session view; Session→workdir resolution remains the unchanged
-Agent-owned input and is called out in its evidence. Binary classification is
-the NUL/invalid-UTF-8 heuristic over the bounded bytes, not MIME detection.
+Agent-owned input and is called out in its evidence. Text binary classification
+is the NUL/invalid-UTF-8 heuristic over the bounded bytes, not MIME detection;
+media classification sniffs a fixed family set and refuses unknown bytes.
 Hard links inside the repository and files visible through the Session's own
-mount namespace are not separated further. Revisit if Git preview starts
-serving paths outside a Session's worktree, if a second writer can mutate the
-worktree without triggering status invalidation, or if a real sandbox policy
-needs to replace the Session/mount visibility assumption.
+mount namespace are not separated further. Media is a complete bounded read,
+not a streaming/range transport, so a clip or document over the 8 MiB bound is
+`too_large`; PDF rendering is the browser's embedded viewer. Revisit if Git
+preview starts serving paths outside a Session's worktree, if a second writer
+can mutate the worktree without triggering status invalidation, if large media
+needs seek/range streaming, or if a real sandbox policy needs to replace the
+Session/mount visibility assumption.
 
 ### Related knowledge
 

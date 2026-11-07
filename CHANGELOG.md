@@ -317,3 +317,17 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Cross-link the new #2877 parser-progress/reconcile article and narrow the stream-recovery limit so it points at that contract instead of implying #1645 already owns the new wire
 - Source: https://github.com/BestNathan/nession/issues/2877
+
+## 2026-11-07T11:03:04Z | update | Git Changes read-only worktree preview and repository-scoped file read authority
+- Path: topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md
+- Topic: web
+- Categories: git, files, media, presentation, protocol, safety, read-only, ownership, web
+- Reason: Record #2876's shared FileContentViewer consumption, the want=media complete bounded-byte contract with too_large/MIME-mismatch refusals, the one authorized read for both kinds, and the consumer-owned Blob URL lifecycle
+- Source: https://github.com/BestNathan/nession/issues/2876
+
+## 2026-11-07T11:03:04Z | update | Files capability identity, creation context and safe mutation ownership
+- Path: topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md
+- Topic: web
+- Categories: app, files, media, ownership, presentation, protocol, safety, web
+- Reason: Record #2876's shared presentation owner: Files retains FileOps, chunked reads, edit/save and guarded writes while presentation moves to shared/file-viewer with the platform editor supplied by the consumer
+- Source: https://github.com/BestNathan/nession/issues/2876

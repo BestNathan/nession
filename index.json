@@ -128,28 +128,32 @@
         "categories": [
           "app",
           "files",
+          "media",
           "ownership",
+          "presentation",
           "protocol",
           "safety",
           "web"
         ],
-        "updated_at": "2026-11-06T09:03:13Z"
+        "updated_at": "2026-11-07T11:03:04Z"
       },
       {
         "title": "Git Changes read-only worktree preview and repository-scoped file read authority",
-        "description": "A Git Changes row without a diff opens its actual worktree bytes through a separate Session/repository-bound git.preview read, never through git.diff, the broad Files reader or a guessed empty diff",
+        "description": "A Git Changes row without a diff opens its actual worktree content through a Session/repository-bound git.preview read; text and media share one authorized boundary and one shared file-content presentation owner, never git.diff, the broad Files reader or a guessed empty diff",
         "path": "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
         "status": "verified",
         "categories": [
           "git",
           "files",
+          "media",
+          "presentation",
           "protocol",
           "safety",
           "read-only",
           "ownership",
           "web"
         ],
-        "updated_at": "2026-11-06T09:03:13Z"
+        "updated_at": "2026-11-07T11:03:04Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
@@ -290,6 +294,10 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "media": [
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
+    ],
     "metadata": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
     ],
@@ -309,6 +317,10 @@
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
+    ],
+    "presentation": [
+      "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "protocol": [
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",

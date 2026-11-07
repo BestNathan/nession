@@ -2,11 +2,11 @@
 title: "Files capability identity, creation context and safe mutation ownership"
 description: "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, and mutations refuse silent overwrites or stale writes instead of trusting a path alone"
 topic: web
-categories: ["app", "files", "ownership", "protocol", "safety", "web"]
+categories: ["app", "files", "media", "ownership", "presentation", "protocol", "safety", "web"]
 status: verified
 created_at: 2026-11-05T10:32:06Z
-updated_at: 2026-11-06T09:03:13Z
-sources: ["https://github.com/BestNathan/nession/issues/2751", "https://github.com/BestNathan/nession/pull/2771", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-protocol/src/contracts/file/v1.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-agent/src/fs/ops.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/fileRef.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/createTarget.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/hooks/useFileViewer.ts"]
+updated_at: 2026-11-07T11:03:04Z
+sources: ["https://github.com/BestNathan/nession/issues/2751", "https://github.com/BestNathan/nession/pull/2771", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-protocol/src/contracts/file/v1.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-agent/src/fs/ops.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/fileRef.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/createTarget.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/hooks/useFileViewer.ts", "https://github.com/BestNathan/nession/issues/2876", "https://github.com/BestNathan/nession/pull/2909", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/FileContentViewer.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/presentation.ts", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/files/components/FileViewer.tsx"]
 ---
 
 # Files capability identity, creation context and safe mutation ownership
@@ -21,6 +21,15 @@ renders an unavailable state when no provider exists. It does not fall back to
 the host, to another Session, or to a stale provider when the source changes.
 The committed design owner is
 [file-workspace.md](https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md).
+
+Presentation is not Files-owned. `shared/file-viewer/FileContentViewer` owns the
+raw source surface, the Markdown/JSON/JSONL previews and the image/video/audio/PDF
+leaves, and `resolveFilePresentation` is the one policy shared with Git Changes.
+Files supplies the read content, its explicit edit callback and the platform
+editor component; it retains `FileOps`, chunked loading, revisions, dirty state,
+conflict handling and the guarded write. The viewer is read-only by default; the
+only mutable path is the callback Files passes while its own Edit action is
+active. The shared presentation layer performs no file or provider I/O.
 
 Creation and upload have **one captured destination per operation**. When the
 form opens, resolution order is: the right-clicked entry (a directory is
@@ -76,6 +85,10 @@ available.
 
 - Requirement: [#2751](https://github.com/BestNathan/nession/issues/2751);
   implementation PR [#2771](https://github.com/BestNathan/nession/pull/2771).
+- Shared presentation: [#2876](https://github.com/BestNathan/nession/issues/2876),
+  implementation PR [#2909](https://github.com/BestNathan/nession/pull/2909);
+  Files' edit/save lifecycle and the shared viewer's cross-consumer ownership
+  are covered by the same Cases and the shared ownership test.
 - Exact merged staging commit: `9230d49c3a3ae51e5cfe9f3c4551743135486950`.
 - Source-aligned Acceptance Cases: SC-01 identity/resolver, SC-02 Web creation
   context, SC-03 App pushed-directory/read-first/unsaved guard, SC-05 split
