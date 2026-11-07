@@ -215,6 +215,8 @@ pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
                 decl_of::<nession_git::protocol::preview::v1::FilePreview>(cfg),
                 decl_of::<nession_git::protocol::preview::v1::FilePreviewStateV1>(cfg),
                 decl_of::<nession_git::protocol::preview::v1::PreviewExpectedV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::PreviewWantV1>(cfg),
+                decl_of::<nession_git::protocol::preview::v1::MediaPayloadV1>(cfg),
                 decl_of::<nession_git::protocol::SessionTargetV1>(cfg),
             ],
             request: Some((

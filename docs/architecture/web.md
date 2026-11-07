@@ -300,12 +300,29 @@ src/
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── shared/lib/              # generic pure helpers (cn, format, encoding, languageId,
-│                            #   errorHelpers, clipboard, addressSelection)
+│                            #   errorHelpers, clipboard, addressSelection, blob)
 ├── shared/markdown/         # markdown pipeline (its consumers pin it to this layer)
+├── shared/file-viewer/      # one file-content presentation owner (#2876):
+│                            #   resolveFilePresentation + FileContentViewer,
+│                            #   CodeMirror source, structured previews, media leaves
 ├── components/ui/           # shadcn/ui primitives + wrappers (shared; added via CLI)
 ├── extensions/              # the generic UI-slot registry (no contributor today)
 └── test/                    # vitest setup + shared mocks (not a layer)
 ```
+
+### Shared file presentation (#2876)
+
+`shared/file-viewer/` is the single presentation owner for file content.
+`resolveFilePresentation` is the one format policy; `FileContentViewer`
+composes the read-only source surface, the Markdown/JSON/JSONL previews and
+the existing image/video/audio/PDF leaves. Files and Git Changes both consume
+it: Files keeps the `FileOps`/edit/save lifecycle and Git keeps its
+Session/repository read authority, and the viewer performs no capability,
+provider or transport I/O of its own.
+
+`platform/editor` remains the CodeMirror primitive's owner. Because the layer
+rule forbids `shared -> platform`, each consumer supplies that editor component
+to the shared viewer; the shared owner still decides when source is presented.
 
 ## Capability layout & ownership
 

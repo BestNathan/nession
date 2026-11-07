@@ -225,6 +225,48 @@ fn preview_returns_the_worktree_text_for_an_untracked_file() {
 }
 
 #[test]
+fn preview_returns_complete_media_bytes_for_an_untracked_image() {
+    let dir = repo().unwrap();
+    let bytes = b"\x89PNG\r\n\x1a\nmedia-bytes";
+    std::fs::write(dir.path().join("logo.png"), bytes).unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let result = run(
+        &ext,
+        "git.preview",
+        json!({"session": "agent:s", "path": "logo.png", "expected": "untracked", "want": "media"}),
+    )
+    .unwrap();
+
+    assert_eq!(result["state"], "ok");
+    assert_eq!(result["preview"]["state"], "ready");
+    assert_eq!(result["preview"]["text"], "");
+    assert_eq!(result["preview"]["binary"], true);
+    assert_eq!(result["preview"]["media"]["mime_type"], "image/png");
+    assert_eq!(result["preview"]["media"]["complete"], true);
+    assert!(!result["preview"]["media"]["content_base64"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty());
+}
+
+#[test]
+fn a_text_preview_does_not_carry_media_fields() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "hello\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let result = run(
+        &ext,
+        "git.preview",
+        json!({"session": "agent:s", "path": "notes.txt", "expected": "untracked"}),
+    )
+    .unwrap();
+
+    assert!(result["preview"].get("media").is_none(), "{result}");
+}
+
+#[test]
 fn preview_refuses_a_path_that_is_not_the_selected_status_kind() {
     let dir = repo().unwrap();
     std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();

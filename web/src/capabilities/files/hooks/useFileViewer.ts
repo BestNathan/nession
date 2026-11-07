@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/shared/lib/errorHelpers';
-import { getJsonPreviewKind, getViewerType, parseExt, type JsonPreviewKind, type ViewerType } from '../model/viewerRegistry';
+import type { JsonPreviewKind, ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
+import { mediaHintForPath, resolveFilePresentation } from '@/shared/file-viewer';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
-  isMarkdownExt,
 } from '@/shared/markdown';
 import { readFileChunked, type FileOps } from '@/capabilities/files';
 import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
 import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
+import { base64ToBlobUrl } from '@/shared/lib/blob';
 export type ViewMode = 'preview' | 'raw';
 
 /**
@@ -44,22 +45,27 @@ export interface UseFileViewerParams {
 }
 
 /** Decode base64 content to a Blob URL for media viewers. */
-function base64ToBlobUrl(base64: string, mimeType: string): string {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+
+/** Replace the caller's Blob URL with one for the freshly read media. */
+function replaceMediaBlob(
+  current: { current: string | null },
+  base64: string,
+  mimeType: string,
+): string {
+  const url = base64ToBlobUrl(base64, mimeType);
+  if (current.current) {
+    URL.revokeObjectURL(current.current);
   }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  current.current = url;
+  return url;
 }
 
 interface FileLoaderResult {
-  ext: string;
   viewerType: ViewerType | null;
   content: string;
   originalContent: string;
   mediaBlobUrl: string | null;
+  mediaMimeType: string | null;
   loading: boolean;
   error: string | null;
   loadedBytes: number;
@@ -95,12 +101,12 @@ function useFileLoader(
     onDecodedRef.current = onDecoded;
   });
 
-  const ext = parseExt(path);
-  const viewerType: ViewerType | null = ext ? getViewerType(ext) : null;
+  const viewerType: ViewerType | null = mediaHintForPath(path);
 
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const [mediaMimeType, setMediaMimeType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadedBytes, setLoadedBytes] = useState(0);
@@ -166,6 +172,7 @@ function useFileLoader(
     setLoadedBytes(0);
     setTotalBytes(0);
     setIsChunkedLoading(false);
+    setMediaMimeType(null);
 
     if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
       await runChunkedLoad(fileSize);
@@ -180,12 +187,9 @@ function useFileLoader(
 
       // Media files
       if (viewerType && viewerType !== 'markdown') {
-        const newBlobUrl = base64ToBlobUrl(data.content, data.mime_type);
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-        }
-        blobUrlRef.current = newBlobUrl;
+        const newBlobUrl = replaceMediaBlob(blobUrlRef, data.content, data.mime_type);
         setMediaBlobUrl(newBlobUrl);
+        setMediaMimeType(data.mime_type);
         return;
       }
 
@@ -206,11 +210,11 @@ function useFileLoader(
   }, [loadFile]);
 
   return {
-    ext,
     viewerType,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     loadedBytes,
@@ -318,10 +322,10 @@ function useFileSave({
  * tracking, and save. Extracted so the render body stays small.
  */
 export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
-  const ext = parseExt(path);
-  const jsonPreviewKind: JsonPreviewKind | null = ext ? getJsonPreviewKind(ext) : null;
+  const presentation = resolveFilePresentation({ path });
+  const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
   // Markdown detection — extension-based wins, content-based is fallback
-  const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
+  const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
   const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');
@@ -358,7 +362,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
   }, [isMarkdownByExt, path]);
 
   const {
-    viewerType, content, originalContent, mediaBlobUrl, loading, error,
+    viewerType, content, originalContent, mediaBlobUrl, mediaMimeType, loading, error,
     loadedBytes, totalBytes, isChunkedLoading, forceReadOnly, revision,
     setRevision, loadFile, setContent, setOriginalContent, handleCancelLoad,
   } = useFileLoader(fileOps, path, fileSize, handleDecoded);
@@ -432,6 +436,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
     content,
     originalContent,
     mediaBlobUrl,
+    mediaMimeType,
     loading,
     error,
     isReadOnly,

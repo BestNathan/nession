@@ -29,7 +29,11 @@ path: string,
 /**
  * The row kind the caller selected.
  */
-expected: PreviewExpectedV1, session: string, };
+expected: PreviewExpectedV1, 
+/**
+ * Omitted by the text-preview client; `media` asks for raw bytes.
+ */
+want?: PreviewWantV1, session: string, };
 export type PreviewOkV1 = { preview: FilePreview, };
 export type FilePreview = { path: string, state: FilePreviewStateV1, 
 /**
@@ -54,9 +58,19 @@ truncated: boolean, truncated_bytes: number,
  * Human-readable detail for a non-ready state, or a binary/unsupported
  * explanation. Never a substitute for the typed `state`.
  */
-message?: string | null, };
-export type FilePreviewStateV1 = "ready" | "missing" | "denied" | "changed" | "unsupported";
+message?: string | null, 
+/**
+ * Present only on a `want: media` answer that returned complete bytes.
+ */
+media?: MediaPayloadV1 | null, };
+export type FilePreviewStateV1 = "ready" | "missing" | "denied" | "changed" | "unsupported" | "too_large";
 export type PreviewExpectedV1 = "untracked" | "unmerged";
+export type PreviewWantV1 = "text" | "media";
+export type MediaPayloadV1 = { content_base64: string, 
+/**
+ * The MIME type validated from the bytes, not merely the extension.
+ */
+mime_type: string, complete: boolean, };
 export type SessionTargetV1 = { session: string, };
 
 // ── Operations ──
@@ -70,7 +84,11 @@ path: string,
 /**
  * The row kind the caller selected.
  */
-expected: PreviewExpectedV1, session: string, };
+expected: PreviewExpectedV1, 
+/**
+ * Omitted by the text-preview client; `media` asks for raw bytes.
+ */
+want?: PreviewWantV1, session: string, };
 
 /** The payload the provider answers with. */
 export type PreviewResponse = { "state": "ok", preview: FilePreview, } | { "state": "unavailable", reason: string, message: string, } | { "state": "not_a_repository", message: string, } | { "state": "error", message: string, };
