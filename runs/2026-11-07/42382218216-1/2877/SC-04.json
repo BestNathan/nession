@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c208ad84aab7d316b89a4210b93afdeee005228deab159f5e7b13e08f39c1600",
+  "run_id": 42382218216,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-04",
+  "criterion_text": "On a valid current reconciliation notice (and independently on Web-observed gap), Web executes single-flight existing Resume from its trustworthy applied frontier; a complete ordered same-epoch replay restores progress without duplicate or skipped xterm events; unavailable/incomplete replay takes proven checkpoint/reattach or explicit degraded/unavailable state, never false synchronization.",
+  "stage": "staging",
+  "target_sha": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+  "case_tree_sha": "4c6ef51d5dd993989bd664a305157e53de46a2d5",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T14:37:24.775Z",
+  "finished_at": "2026-11-07T14:37:33.766Z",
+  "duration_ms": 8991,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Exactly one recovery from the trusted applied frontier; completeness and epoch are proven before resync, otherwise the terminal is explicitly degraded",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 327b0e05986ccf7e6775ef3256d8c35d44ed2a34: a valid current notice started one resume from the last parser-applied prefix, suppressed progress while the proof was outstanding, and resumed only on a complete same-epoch answer; an incomplete replay, a replaced epoch and a renderer-replacement notice took the checkpoint/reattach path and left the terminal degraded; stale/foreign notices started nothing"
+        }
+      ],
+      "duration_ms": 3126,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42382218216,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42382218216",
+    "record_path": "runs/2026-11-07/42382218216-1/2877/SC-04.json",
+    "source_result_sha256": "ddb09cd28b83794713461fd152ffd07c2196d822219510157e7046c615d52060"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42382218216-1",
+    "sha256": "ddb09cd28b83794713461fd152ffd07c2196d822219510157e7046c615d52060",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42382218216",
+    "durability": "time-limited; object archival not configured"
+  }
+}

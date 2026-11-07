@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a7f8a0f8db846b47c4843f3ab73dc65c3fc5f7f572a6b713a4869ecd67dfb085",
+  "run_id": 42382218216,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-06",
+  "criterion_text": "Under the same controlled output/idle/pressure fixtures, new-notification mode generates **zero normal Progress-response frames** (vs v1 operation replies); measurements record total control-frame counts and per-subscriber issued-credit peaks, and the bounded workload completes without a new credit-cap disconnect, missed terminal event or unbounded recovery storm. Report measured counts, not an unmeasured percentage or absolute throughput claim.",
+  "stage": "staging",
+  "target_sha": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+  "case_tree_sha": "030b6ecae82675381077f7e8f6b64729b485c0d5",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T14:37:44.020Z",
+  "finished_at": "2026-11-07T14:37:50.210Z",
+  "duration_ms": 6190,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Notification mode answers zero ordinary Progress frames versus v1 replies; measured credit peaks and the bounded workload stay inside policy",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 327b0e05986ccf7e6775ef3256d8c35d44ed2a34: progress_reports=18 progress_response_frames=0 v1_operation_replies=17 reconcile_notices=1 fast_credit_peak_bytes=262144 slow_credit_peak_bytes=1306624 v1_credit_peak_bytes=262144 events=257 missed_events=0 cap_violations=0 quiet_tail_reports=1 quiet_tail_replies=0 teardown=ok; the same 257-event workload answered zero notification Progress frames versus 17 v1 operation replies, emitted one coalesced notice, kept the slow subscriber credit peak at 1306624 bytes (healthy 262144) inside the 2 MiB window, and completed with no missed event, capacity violation, notice storm or teardown failure"
+        }
+      ],
+      "duration_ms": 328,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42382218216,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "327b0e05986ccf7e6775ef3256d8c35d44ed2a34",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42382218216",
+    "record_path": "runs/2026-11-07/42382218216-1/2877/SC-06.json",
+    "source_result_sha256": "706d84e8840329d216405f41e3aa0745d3b66b85b19de8c41e723beb1a0f28bc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42382218216-1",
+    "sha256": "706d84e8840329d216405f41e3aa0745d3b66b85b19de8c41e723beb1a0f28bc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42382218216",
+    "durability": "time-limited; object archival not configured"
+  }
+}
