@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2937,
+  "run_id": 42393050431,
+  "run_attempt": 1,
+  "target_sha": "88328b5ac40f5c4a11bb25a085c400ef9a5bf754",
+  "plan_digest": "4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00",
+  "artifact_digest": "sha256:d101cff97e08ebcbaed95b4c67e38ab1e74ce3fe340ea52da00aaa2676b170be",
+  "ingest_run_id": 42393482870,
+  "ingest_attempt": 1,
+  "declaration_digest": "0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718",
+  "before_body_sha256": "491e3dbfb91db01d95b80675af1bd222b34637351848115b13ae86ba1b9c2fa7",
+  "body_sha256": "8b6b2695fd714995db86cd03940c6a03a03c22d816ce39f3a5d99cdf2dbf1096",
+  "readback_body": "## Requirements: source-aligned integration of main CI/Agent changes into staging\n\n### Context and concrete boundary\nFollow-up integration batch for [#2926](https://github.com/BestNathan/nession/issues/2926), source [#2932](https://github.com/BestNathan/nession/pull/2932). This is a **single main → staging integration cycle**, not a new staging environment or an alternate E2E selection framework.\n\nThe PR's original **net file list** was dominated by CI/GitHub Actions, Gates, Agent/Store orchestration and text fixtures. However, the canonical E2E selector correctly examines the **first-parent history**, not merely the net diff. The historical main integration commit `0f3b2a012...` touched seven existing browser spec IDs on the path to the PR head; all seven exist at both the source and target refs. The source-aligned E2E plan must therefore select the seven **Regression** IDs below. A net tree diff that omits specs does *not* authorize Not Required. The changed `acceptance-case-smoke.yml` additionally requires the independent source-aligned CI/Case proof; never substitute that for selected browser test evidence.\n\n### Success Criteria\n- [ ] SC-01 The exact `main → staging` PR preserves current main provenance, uses a normal merge commit, does not edit protected refs outside the PR, and its historical E2E spec changes are exactly associated with the seven documented Regression IDs, rather than suppressed by the net diff.\n- [ ] SC-02 The exact PR head passes relevant GitHub Quality Gate and Acceptance Case Smoke, including the changed Quality/Case selectors and Agent/Store negative fixtures. Source checks are never accepted from another SHA, and all seven source-aligned browser Regression IDs receive authenticated Pass evidence before merge.\n- [ ] SC-03 When merged to staging, the resulting merge SHA contains the accepted exact main source SHA and the normal Staging artifact workflow creates an authenticated successful build/availability record. A source PR merge is not deployed-identity proof and does not trigger production version bump.\n\n**SC → verification scenarios:** SC-01 = SCN-01 deterministic exact Git history/path contract, SC-02 = SCN-05 authenticated source GitHub CI/Case/E2E receipts, SC-03 = SCN-05 GitHub merge and Staging release run identity. All three are evaluated at the staging merge boundary: the repository's pre-merge Acceptor intentionally does **not** receive GitHub CI evidence, whereas the merged-stage collector may authenticate it; independent GitHub PR checks remain the pre-merge merge gate. SC-03 cannot be decided on the PR: it requires the exact *new* staging merge SHA, and an absent/failed Stage release keeps it Pending/Fail.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: merged\n    branch: staging\n    method: agent\n  SC-02:\n    when: merged\n    branch: staging\n    method: agent\n  SC-03:\n    when: merged\n    branch: staging\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | run 42388542343; ref 4958d07065f6c8af33981b60b5bb86ed4b2384c5; source agent-qwen; other: ci_evidence is null - no authenticated PR metadata, merge commit structure, or ancestry proofs provided; summary: Cannot verify PR provenance, merge commit structure, or E2E spec association without authenticated CI evidence |\n| SC-02 | Pending | run 42388542343; ref 4958d07065f6c8af33981b60b5bb86ed4b2384c5; source agent-qwen; other: ci_evidence is null - no authenticated Quality Gate or Case Smoke workflow runs provided; other: E2E Report shows all seven Regression IDs as Pending with no evidence; summary: Cannot verify Quality Gate/Case Smoke passes or authenticated Pass evidence for seven Regression IDs without CI evidence |\n| SC-03 | Pending | Awaiting authenticated staging merge and Release / Staging Artifacts run |\n\n## E2E Verification\n\n### New\n- none: all seven historically touched browser specs already exist at both source and staging base refs; this batch adds no new E2E IDs.\n\n### Regression\n- files-context-create\n- fixture-app\n- fixture-git\n- fixture-workspace\n- session-metadata\n- ui-contract-assertions\n- ui-contract-web\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| files-context-create | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| fixture-app | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 13/13 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| fixture-git | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| fixture-workspace | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| session-metadata | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 5/5 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| ui-contract-assertions | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 21/21 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n| ui-contract-web | Regression | Pass | run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 36/36 (https://github.com/BestNathan/nession/actions/runs/42393050431) |\n\n## Product alignment\n- [x] Continuous Agent-driven work benefits from correct Source/Staging convergence.\n- [x] Existing Gate, Acceptance and release rules remain the authority.\n- [x] No product UI prototypes required for CI-only integration.\n- [x] Scope is one identified batch; no permission to infer generic Not Required.\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-11-07T16:52:58Z",
+  "readback_updated_at": "2026-11-07T16:52:58Z",
+  "rows": [
+    {
+      "id": "files-context-create",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 13/13 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "fixture-git",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "session-metadata",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 5/5 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 21/21 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "evidence": "run 42393050431/1, SHA 88328b5ac40f5c4a11bb25a085c400ef9a5bf754, contract 0b831e4a7c2e43cd447537b258a1b0f92f8ccededc092014fade1df5909e5718, plan 4c40e2dd58d3a2256e231f0ac2c4b17868de81cce01085951412132a09c58a00, tests 36/36 (https://github.com/BestNathan/nession/actions/runs/42393050431)"
+    }
+  ]
+}
