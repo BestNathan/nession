@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
+import { toast } from 'sonner';
 import { Shell } from '@/app/Shell';
 import { sessionIdAtom } from '@/product/session/state';
 import { leaseRuntimeAtPhase } from '@/test/leaseRuntime';
@@ -10,7 +11,7 @@ import { probeResultsAtom, type AgentProbe } from '@/product/agent/state';
 import { buildOptionsFingerprint } from '@/platform/attach/sessionAttachProfile';
 import { envApi } from '@/capabilities/env';
 import { sessionsApi } from '@/product/session';
-import type { Agent, AttachMode, Session } from '@/types';
+import type { Agent, AttachInfo, AttachMode, Session } from '@/types';
 
 async function openSessionAction(
   id: string,
@@ -32,6 +33,10 @@ const sess: Session = {
   session_id: 'a1:fix', agent_id: 'a1', session_name: 'Fix terminal reconnect',
   status: 'active', window_count: 1, attached_clients: 0,
   last_activity: new Date().toISOString(),
+};
+/** Second Session on the same Agent, for the latest-intent ordering cases. */
+const sessB: Session = {
+  ...sess, session_id: 'a1:other', session_name: 'Other terminal',
 };
 
 // The mocked requestAttach response every flow in this file resolves to. Its
@@ -101,7 +106,7 @@ vi.mock('@/platform/server/components/ServerInfoMenu', () => ({
   ServerInfoMenu: () => <div data-testid="server-info-menu" />,
 }));
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn() },
 }));
 // New-model core surface: the shell builds its relay handle via
 // relayServerHandle(wsService), whose transport members delegate to
@@ -172,12 +177,12 @@ function seedProfile(overrides: {
   mode?: AttachMode;
   fingerprint?: string;
   selectedUrl?: string | null;
-} = {}) {
+} = {}, session: Session = sess) {
   const map = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-  map[sess.session_id] = {
+  map[session.session_id] = {
     schemaVersion: 1,
-    sessionId: sess.session_id,
-    agentId: sess.agent_id,
+    sessionId: session.session_id,
+    agentId: session.agent_id,
     choice: {
       mode: overrides.mode ?? 'auto',
       renderer: 'canvas' as const,
@@ -189,13 +194,13 @@ function seedProfile(overrides: {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
 }
 
-function storedProfile(): {
+function storedProfile(session: Session = sess): {
   choice: { mode: string; renderer: string; selectedUrl: string | null };
   optionsFingerprint: string;
   updatedAt: number;
 } {
   const map = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-  return map[sess.session_id];
+  return map[session.session_id];
 }
 
 /** Reports the current pathname so router navigation is assertable. */
@@ -454,5 +459,211 @@ describe('session attach flow (real shell + real AttachDialog)', () => {
     } finally {
       release();
     }
+  });
+
+  /**
+   * #2873: two Session selections can each have a pending profile validation.
+   * Only the flight that still owns the intent may commit — an older
+   * resolution must not attach, open a dialog, or toast over the newer one.
+   * The deferred attach-info promises make the resolution order explicit; no
+   * timing sleeps decide the outcome.
+   */
+  describe('latest-intent attach ownership (#2873)', () => {
+    type Deferred<T> = {
+      promise: Promise<T>;
+      resolve: (value: T) => void;
+      reject: (reason?: unknown) => void;
+    };
+
+    function deferred<T>(): Deferred<T> {
+      let resolve!: (value: T) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    /** One deferred attach-info reply per `requestAttach` call, in order. */
+    function gatedAttach(): Deferred<AttachInfo>[] {
+      const calls: Deferred<AttachInfo>[] = [];
+      mockedSessionsApi.requestAttach.mockImplementation(() => {
+        const call = deferred<AttachInfo>();
+        calls.push(call);
+        return call.promise;
+      });
+      return calls;
+    }
+
+    function attachInfoFor(session: Session): AttachInfo {
+      return {
+        ...attachInfoResponse,
+        session_id: session.session_id,
+        session_name: session.session_name,
+      };
+    }
+
+    function bothSessions(): void {
+      dashboard.current = {
+        ...dashboard.current,
+        sessions: [sess, sessB],
+        filteredSessions: [sess, sessB],
+      };
+    }
+
+    function routePath(): string {
+      return screen.getByTestId('route-path').textContent ?? '';
+    }
+
+    /** The attach navigation is a router transition; wait for it to land. */
+    async function expectRoute(session: Session): Promise<void> {
+      await waitFor(() => {
+        expect(decodeURIComponent(routePath())).toBe(`/terminal/${session.session_id}`);
+      });
+    }
+
+    /** Let every queued promise continuation run before asserting absence. */
+    async function flushMicrotasks(): Promise<void> {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+
+    beforeEach(() => {
+      vi.mocked(toast.error).mockClear();
+    });
+
+    it('SC-01 keeps the newer B selection when stale A resolves afterwards', async () => {
+      seedProfile();
+      seedProfile({}, sessB);
+      bothSessions();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      await userEvent.click(screen.getByTestId(`session-item-${sessB.session_id}`));
+      expect(calls).toHaveLength(2);
+
+      // B validates and attaches first.
+      calls[1].resolve(attachInfoFor(sessB));
+      await waitFor(() => expect(store.get(sessionIdAtom)).toBe(sessB.session_id));
+      await expectRoute(sessB);
+
+      // A's older validation now resolves. It must not steal the selection.
+      calls[0].resolve(attachInfoFor(sess));
+      await flushMicrotasks();
+
+      expect(store.get(sessionIdAtom)).toBe(sessB.session_id);
+      await expectRoute(sessB);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
+      // The stale result never confirmed A: its persisted profile is untouched.
+      expect(storedProfile(sess).updatedAt).toBe(1);
+    });
+
+    it('SC-01 does not open a stale A dialog after B attaches', async () => {
+      // A's stored manual URL is absent from the fresh candidates, so its
+      // resolution is a dialog request rather than a choice.
+      seedProfile({ mode: 'relay', selectedUrl: 'ws://gone/ws' });
+      seedProfile({}, sessB);
+      bothSessions();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      await userEvent.click(screen.getByTestId(`session-item-${sessB.session_id}`));
+      calls[1].resolve(attachInfoFor(sessB));
+      await waitFor(() => expect(store.get(sessionIdAtom)).toBe(sessB.session_id));
+
+      calls[0].resolve(attachInfoFor(sess));
+      await flushMicrotasks();
+
+      expect(store.get(sessionIdAtom)).toBe(sessB.session_id);
+      await expectRoute(sessB);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('SC-01 does not surface a stale A failure after B attaches', async () => {
+      seedProfile();
+      seedProfile({}, sessB);
+      bothSessions();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      await userEvent.click(screen.getByTestId(`session-item-${sessB.session_id}`));
+      calls[1].resolve(attachInfoFor(sessB));
+      await waitFor(() => expect(store.get(sessionIdAtom)).toBe(sessB.session_id));
+
+      calls[0].reject(new Error('attach info request failed'));
+      await flushMicrotasks();
+
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(store.get(sessionIdAtom)).toBe(sessB.session_id);
+      await expectRoute(sessB);
+    });
+
+    it('SC-02 A→B→A attaches the latest A flight and older completions keep its guard', async () => {
+      seedProfile();
+      seedProfile({}, sessB);
+      bothSessions();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`)); // A (1)
+      await userEvent.click(screen.getByTestId(`session-item-${sessB.session_id}`)); // B (2)
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`)); // A (3)
+      expect(calls).toHaveLength(3);
+
+      // B's flight is stale the moment the third (A) flight starts.
+      calls[1].resolve(attachInfoFor(sessB));
+      await flushMicrotasks();
+      expect(store.get(sessionIdAtom)).toBe('');
+
+      // The first A flight is stale too, and its `finally` must not clear the
+      // third flight's guard: clicking A again is still a double click.
+      calls[0].resolve(attachInfoFor(sess));
+      await flushMicrotasks();
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      expect(calls).toHaveLength(3);
+
+      calls[2].resolve(attachInfoFor(sess));
+      await waitFor(() => expect(store.get(sessionIdAtom)).toBe(sess.session_id));
+      await expectRoute(sess);
+    });
+
+    it('SC-02 a same-Session double click runs one validation and attaches once', async () => {
+      seedProfile();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      expect(calls).toHaveLength(1);
+
+      calls[0].resolve(attachInfoFor(sess));
+      await waitFor(() => expect(store.get(sessionIdAtom)).toBe(sess.session_id));
+      expect(mockedSessionsApi.requestAttach).toHaveBeenCalledTimes(1);
+    });
+
+    it('SC-02 an explicit configure dialog is not overwritten by a stale fast path', async () => {
+      seedProfile();
+      seedProfile({}, sessB);
+      bothSessions();
+      const calls = gatedAttach();
+      const { store } = renderShell('/', { seedProbeCache: true });
+
+      await userEvent.click(screen.getByTestId(`session-item-${sess.session_id}`));
+      expect(calls).toHaveLength(1);
+
+      // Opening Settings is explicit intent and revokes A's pending validation.
+      await openSessionAction(sessB.session_id, 'settings');
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+      calls[0].resolve(attachInfoFor(sess));
+      await flushMicrotasks();
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(store.get(sessionIdAtom)).toBe('');
+    });
   });
 });
