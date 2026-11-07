@@ -13,6 +13,7 @@ Audit constraints:
 3. Every claimed review must use trusted relation-bound Issue tools and pass the existing Issue Contract validator.
 4. Resolve EVERY deterministic Issue Contract finding in the proposed final title/body/labels; a repair of one section does not justify leaving another invalid. The trusted updater will reject the entire proposal before any write if even one finding remains.
 5. For `### Knowledge Impact`, normalize to exactly five plain Markdown list fields, without bold formatting around keys: `- Decision: Update`, `- Related knowledge: ...`, `- Reason: ...`, `- Owner and timing: ...`, `- Evidence: ...`. Decision MUST be exactly one of None, Read, Create, Update, Supersede (no trailing period). Preserve the original factual values of all five fields; change formatting, not their meaning.
+6. E2E `- none: reason` declares zero selected tests; `none` is NEVER an E2E Report test ID. When both New and Regression are `- none:`, keep the explanations and render only the E2E Report table header and separator, with NO `| none | ... |` data rows. For genuine Pending test rows, Evidence must be exactly `-`. Never mint evidence or invent test selection.
 
 Canonical Issue labels (the only values allowed in a structural repair's "labels" field):
 - Exactly one kind: {{kindLabels}}
