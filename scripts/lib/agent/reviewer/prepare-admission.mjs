@@ -10,8 +10,10 @@ import { CONTROLLED_PUBLISHER_INTENT_PATH,
   validateControlledPublisherIntent } from '../publisher/store-intent.mjs';
 import { githubFetcher } from '../github-read.mjs';
 import {readIssueWorkflowState} from '../orchestration/state-store.mjs';
-import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
-import {admitQwenPublishedReview} from './qwen-pr-admission.mjs';
+import {qwenCommittedReviewIntent}
+  from '../orchestration/qwen-reviewer-source.mjs';
+import {admitQwenPublishedReview,admitQwenRepairPublishedReview}
+  from './qwen-pr-admission.mjs';
 
 const PUBLISH_RUN=39609600546;
 const OWNER_COMMENT=6317468284;
@@ -72,34 +74,13 @@ export async function prepareQwenReviewAdmission({
   const publisher=state.transitions.filter(t=>t.kind==='publisher'&&
     t.outcome==='published'&&t.target_sha===state.target_sha);
   if(publisher.length!==1)fail('missing unique Publisher transition');
-  const directory=path.join(storeRoot,'workflows/issues',String(issue),'results');
-  const entries=fs.readdirSync(directory,{withFileTypes:true});
-  if(entries.length>512)fail('unbounded Issue publication history');
-  const candidates=[];
-  for(const entry of entries){
-    if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\.json$/.test(entry.name))continue;
-    if(!entry.isFile()||entry.isSymbolicLink())
-      fail('unsafe immutable Qwen Publisher Intent path');
-    const file=path.join(directory,entry.name),st=fs.lstatSync(file);
-    if(!st.isFile()||st.size>8192||st.size<1)
-      fail('unsafe immutable Qwen Publisher Intent bytes');
-    let doc;
-    try{doc=JSON.parse(fs.readFileSync(file,'utf8'));}
-    catch{fail('invalid immutable Issue publication result');}
-    if(doc?.kind==='trusted_qwen_publisher_write_ahead_intent'&&
-       doc.issue===issue&&doc.publisher_run_id===publisher[0].run_id){
-      if(entry.name!==doc.worker_run_id+'-'+doc.worker_run_attempt+
-          '-'+doc.action_id+'.json')
-        fail('Qwen Publisher Intent path does not match immutable identity');
-      candidates.push(validateQwenPublisherIntent(doc));
-    }
-  }
-  if(candidates.length!==1)
-    fail('missing unique committed Qwen Publisher Intent');
-  const intent=candidates[0];
+  const committed=qwenCommittedReviewIntent({storeRoot,issue,
+    publisherRunId:publisher[0].run_id});
+  const intent=committed.record;
+  const branch=committed.branch;
   const publisherRun=await fetcher('actions/runs/'+intent.publisher_run_id);
   const pullRequests=await fetcher('pulls?state=all&head=BestNathan:'+
-    encodeURIComponent(intent.branch)+'&per_page=100');
+    encodeURIComponent(branch)+'&per_page=100');
   if(!Array.isArray(pullRequests)||pullRequests.length!==1||
       !Number.isSafeInteger(pullRequests[0]?.number)||
       pullRequests[0].number<1)
@@ -107,14 +88,17 @@ export async function prepareQwenReviewAdmission({
   const pr=await fetcher('pulls/'+pullRequests[0].number);
   if(!/^[a-f0-9]{40}$/.test(pr?.head?.sha??''))
     fail('untrusted Qwen PR HEAD SHA');
-  const ref=await fetcher('git/ref/heads/'+intent.branch);
+  const ref=await fetcher('git/ref/heads/'+branch);
   const commit=await fetcher('git/commits/'+pr.head.sha);
   if(!/^[a-f0-9]{40}$/.test(commit?.tree?.sha??''))
     fail('untrusted Qwen Git tree SHA');
   const files=await fetcher('pulls/'+pr.number+'/files?per_page=100');
   const tree=await fetcher('git/trees/'+commit.tree.sha+'?recursive=1');
-  return admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
-    pr,ref,commit,files,tree,actionId,reviewerAgentId});
+  return committed.repair
+    ? admitQwenRepairPublishedReview({state,intent,publisherRun,pullRequests,
+      pr,ref,commit,files,tree,actionId,reviewerAgentId})
+    : admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
+      pr,ref,commit,files,tree,actionId,reviewerAgentId});
 }
 
 async function main(){

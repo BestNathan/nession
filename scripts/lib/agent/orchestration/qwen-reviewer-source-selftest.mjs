@@ -103,6 +103,6 @@ try{
     run:parts=>{if(parts[0]==='fetch')throw Error('missing');return B;}}),
     /published Qwen PR source ref unavailable or changed/);
   fs.writeFileSync(file,JSON.stringify({...intent,publisher_run_id:402}));
-  assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen publication Intent/);
+  assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen review publication Intent/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen signed Reviewer dispatch: one immutable Store branch, actual SHA fetch, two ancestry checks, untrusted source and replay negatives pass');
