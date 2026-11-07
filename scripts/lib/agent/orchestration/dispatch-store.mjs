@@ -10,6 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
   recordAttestedQwenPreflightFailure,qwenPreflightSuccessorId,
+  recordAttestedQwenPreflightFailureV2,qwenPreflightSuccessorIdV2,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
@@ -24,7 +25,8 @@ import {attestQwenPublishedRepairCheckpoint}
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
-import {SOURCE as QWEN_KEY_FAILURE} from './qwen-preflight-failure.mjs';
+import {SOURCE as QWEN_KEY_FAILURE,
+  SOURCE_V2 as QWEN_KEY_FAILURE_V2} from './qwen-preflight-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -444,6 +446,57 @@ export function recoverAttestedQwenPreflight({remote,source}){
     const state=recordAttestedQwenPreflightFailure(record.state,record.version,source);
     const published=persist(dir,state,record.version,original.issue);
     if(published.replayed)fail('unexpected Qwen recovery CAS replay');
+    return {status:'recovered',issue:original.issue,
+      action_id:successorId,state_version:state.version,
+      store_commit_sha:published.commit_sha};
+  });
+}
+
+// Second exact #2817 Qwen pre-model failure: the dedicated Restore private
+// key was absent when the first successor Worker ran. This retires only that
+// authenticated Action and creates a fresh pending successor. It never calls
+// the model, creates a PR or re-POSTs the acknowledged Worker Run.
+export function recoverAttestedQwenPreflightV2({remote,source}){
+  const original=QWEN_KEY_FAILURE_V2;
+  if(source?.verified!==true||source.issue!==original.issue||
+     source.action_id!==original.action_id||
+     source.run_id!==original.run_id||
+     source.attempt!==1||
+     source.source_sha!==original.source_sha||
+     source.run_head_sha!==original.run_head_sha||
+     source.failure_code!==original.failure_code)
+    fail('Qwen Restore-key recovery requires the exact independently attested failed Run');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,original.issue);
+    if(!record.state)fail('missing Qwen canary issue state');
+    const old=record.state.outbox.find(x=>x.id===original.action_id);
+    const successorId=qwenPreflightSuccessorIdV2(original.issue,
+      original.action_id,original.run_id);
+    if(old?.status==='failed'){
+      const next=record.state.outbox.find(x=>x.id===successorId);
+      if(old.receipt?.source_run_id!==original.run_id||
+         old.receipt?.failure_code!==original.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting previously recovered Qwen Restore-key Run');
+      return {status:'replayed',issue:original.issue,
+        action_id:successorId,state_version:record.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==6||old?.status!=='dispatched'||
+       old.receipt?.status!=='verified'||
+       old.receipt.source_run_id!==original.run_id||
+       old.task.role!=='developer'||old.task.task!=='implement'||
+       old.task.agent_id!=='dev-qwen-01'||old.task.sha!==original.source_sha)
+      fail('Qwen Store state no longer matches authenticated Worker');
+    const folder=path.join(dir,'roles/developer/dev-qwen-01/issues/2817');
+    if(fs.existsSync(path.join(folder,'head.json'))||
+       fs.existsSync(path.join(folder,'runs/'+original.run_id+'-1.json'))||
+       fs.existsSync(path.join(folder,'checkpoints')))
+      fail('cannot recover Qwen Worker with a committed native checkpoint');
+    const state=recordAttestedQwenPreflightFailureV2(record.state,
+      record.version,source);
+    const published=persist(dir,state,record.version,original.issue);
+    if(published.replayed)fail('unexpected Qwen Restore-key recovery CAS replay');
     return {status:'recovered',issue:original.issue,
       action_id:successorId,state_version:state.version,
       store_commit_sha:published.commit_sha};

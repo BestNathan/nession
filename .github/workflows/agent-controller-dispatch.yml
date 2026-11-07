@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       recovery_run_id:
-        description: '0 = normal dispatch; 42187623195 = exact #2817 preflight recovery'
+        description: '0 = normal dispatch; 42187623195 / 42339656510 = exact #2817 Qwen preflight recovery'
         required: false
         default: 0
         type: number

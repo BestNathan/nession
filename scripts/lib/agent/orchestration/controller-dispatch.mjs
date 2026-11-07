@@ -10,7 +10,8 @@ import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure,executeControlledReviewerRecovery,
   recoverAttestedRepairRuntimeFailure,
-  recoverAttestedQwenPreflight} from './dispatch-store.mjs';
+  recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2}
+  from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint}
   from './dispatch-store.mjs';
@@ -22,7 +23,10 @@ import {verifyControlledRepairRuntimeFailureLive} from './repair-runtime-failure
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
-import {SOURCE as QWEN_KEY_FAILURE,verifyQwenPreflightFailureLive}
+import {SOURCE as QWEN_KEY_FAILURE,
+  SOURCE_V2 as QWEN_KEY_FAILURE_V2,
+  verifyQwenPreflightFailureLive,
+  verifyQwenPreflightFailureV2Live}
   from './qwen-preflight-failure.mjs';
 
 const REPO='BestNathan/nession';
@@ -80,7 +84,10 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
          return requested==='0'||requested===0||
            (String(requested)===String(QWEN_KEY_FAILURE.run_id)&&
             issue===QWEN_KEY_FAILURE.issue&&
-            actionId===QWEN_KEY_FAILURE.action_id);
+            actionId===QWEN_KEY_FAILURE.action_id)||
+           (String(requested)===String(QWEN_KEY_FAILURE_V2.run_id)&&
+            issue===QWEN_KEY_FAILURE_V2.issue&&
+            actionId===QWEN_KEY_FAILURE_V2.action_id);
        })());
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
@@ -222,6 +229,8 @@ async function main(){
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
+  const recoveringQwenKeyV2=!commanded&&
+    String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE_V2.run_id);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
   const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
@@ -266,6 +275,16 @@ async function main(){
         remote:storeRemote,source:verified});
       if(!['recovered','replayed'].includes(recovered.status))
         fail('Qwen preflight recovery was not a canonical Store CAS');
+      console.log(JSON.stringify(recovered));
+      return;
+    }
+    if(recoveringQwenKeyV2){
+      // The second exact pre-model failure; same Store-only CAS boundary.
+      const verified=await verifyQwenPreflightFailureV2Live(token);
+      const recovered=recoverAttestedQwenPreflightV2({
+        remote:storeRemote,source:verified});
+      if(!['recovered','replayed'].includes(recovered.status))
+        fail('Qwen Restore-key recovery was not a canonical Store CAS');
       console.log(JSON.stringify(recovered));
       return;
     }
