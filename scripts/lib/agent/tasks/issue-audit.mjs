@@ -93,6 +93,9 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
     'For a Bug or Requirement with missing or invalid kind/area labels, include one complete',
     'distinct canonical labels array: exactly one kind (bug or requirement) and at least',
     'one evidence-backed area. No verification/status/noncontract labels in this array.',
+    'If verification_tier is present, tier_reason MUST also be present and explain',
+    'the actual bounded Issue risk in 20–2000 characters (trimmed length at least 20).',
+    'Do not lower an existing higher verification tier or invent a reason.',
     'For new Requirements, Knowledge Impact MUST use five literal bullet keys',
     '- Decision: None | Read | Create | Update | Supersede (one option, no trailing period)',
     '- Related knowledge: <concrete source or none>',
@@ -123,7 +126,8 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
 // Actual GitHub permissions, provider/network and post-write failures are terminal.
 export function isIssueAuditRepairableRejection(error) {
   if (error?.code === 'ISSUE_AUDIT_LABEL_CONTRACT' ||
-      error?.code === 'ISSUE_AUDIT_E2E_PROTECTED') return true;
+      error?.code === 'ISSUE_AUDIT_E2E_PROTECTED' ||
+      error?.code === 'ISSUE_AUDIT_TIER_PROPOSAL') return true;
   const message = error instanceof Error ? error.message : '';
   return message.startsWith('Issue Contract validation failed before write:') ||
     message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:');
@@ -193,7 +197,10 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
       (!VERIFICATION_TIERS.includes(proposal.verification_tier) ||
        typeof proposal.tier_reason !== 'string' ||
        proposal.tier_reason.trim().length < 20 || proposal.tier_reason.length > 2000)) {
-    throw new Error('invalid Issue verification-tier proposal');
+    // This is *before* any Issue mutation and can be corrected once with no
+    // tools. A genuine downgrade or failure inside the tier tool stays terminal.
+    throw Object.assign(new Error('invalid Issue verification-tier proposal'),
+      {code:'ISSUE_AUDIT_TIER_PROPOSAL'});
   }
   if (proposal.comment != null &&
       (typeof proposal.comment !== 'string' || !proposal.comment.trim() ||
