@@ -25,7 +25,7 @@ async function main() {
   const contract = runNode('scripts/agent-workflow-telemetry-contract.mjs');
   requireSummary(contract, 'agent workflow telemetry contract:', 'telemetry workflow contract');
 
-  assertAncestor(SOURCE_SHA, target);
+  await assertAncestor(SOURCE_SHA, target);
   const directory = await api('/contents/raw/workflows/agent-provider-smoke/2026-11-07?ref=metrics');
   assert.ok(Array.isArray(directory), 'metrics workflow directory is not a directory listing');
   const matches = directory.filter(entry => entry.name.startsWith(RECORD + '.json'));
