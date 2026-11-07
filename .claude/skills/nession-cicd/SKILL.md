@@ -88,6 +88,7 @@ Treat the files themselves as live truth:
 
 - `.github/workflows/ci-quality.yml`
 - `.github/workflows/release-staging.yml`
+- `.github/workflows/release-staging-convergence.yml`
 - `.github/workflows/release-production.yml`
 - `.github/workflows/e2e-tests.yml`
 - `.github/workflows/acceptance-orchestrator.yml`
@@ -127,6 +128,10 @@ Do not blind-retry deterministic failures.
 Acceptance execution belongs to `nession-acceptance`; issue structure belongs to `nession-writing-requirements`.
 
 The GitHub workflow is only the router around the canonical acceptance validator. In `pull_request_target`, never execute untrusted PR-head code with credentials.
+
+## Scheduled Staging branch convergence (#2926)
+
+`Release / Staging Convergence` plans a two-hour main-owned scan. Eligible source **branches** are extracted from trusted push-triggered staging GitOps deployment workflows by `scripts/staging-branch-convergence.mjs`; do **not** select every name containing `staging` or confuse the on-demand `staging-01` environment with a branch. The controller creates/reuses main→eligible-branch sync PRs and eligible-branch→main promotion PRs, never directly merges or rewrites protected refs. A conflict, missing exact-head checks or pending SC evidence must be repaired/proven through existing trusted Agent/Acceptance mechanisms before promotion. Production version bump stays a separate explicit PR. Inspect the workflow Job Summary and run `node scripts/staging-branch-convergence.mjs self-test` before changing discovery rules.
 
 ## 6. Staging and release
 
