@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "472c30dee7fda0080834ebbfce6ad0632ccb4c67d40c31e7b6e3a56720be5a8e",
+  "run_id": 42406467353,
+  "run_attempt": 1,
+  "issue": 1664,
+  "criterion": "SC-17",
+  "criterion_text": "On a separate controlled fixture Issue/PR (not #1664), real GitHub Actions demonstrate Developer → Reviewer changes_requested → resumed Developer → Reviewer approved → exact-SHA Quality Gate → eligible Agent/Case Acceptance, with Issue references, Store checkpoint and metrics linked and verified; no self-referential acceptance loop or unauthorized merge.",
+  "stage": "post-merge",
+  "target_sha": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+  "contract_sha256": "28db829e11761fa002ab9c89818bcdfcb2fb3fb26d5c89ba2af6c9ad05b3624a",
+  "case_revision": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+  "case_tree_sha": "d472304c8561a0edc4f53549e1028f027cb1247e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T19:32:47.206Z",
+  "finished_at": "2026-11-07T19:32:58.250Z",
+  "duration_ms": 11044,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The controlled #2961 fixture proves the real Qwen Developer -> Reviewer changes_requested -> resumed Developer -> Reviewer approved chain, the exact-SHA Quality Gate and eligible acceptance runs; the canonical state machine independently owns the transition policy and forbids model-chosen roles.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "development-selftest: SHA A -> reviewer dispatch; changes_requested -> phase=repair with actions[0].resume=true; Developer -> SHA B; Reviewer approved SHA B -> quality -> sc-acceptance; model next_role denied"
+        },
+        {
+          "type": "runtime",
+          "value": "real Qwen Developer run 42401513247/1 published SHA A 1f925d21129fe5731aec4235a9ff680ac7453785; Reviewer run 42402597971/1 recorded changes_requested; the SAME dev-qwen-01 resumed checkpoint v1 and run 42403004351/1 produced SHA B cfe6eacdce242086b6f549645fbf8a7b05c100ad; Reviewer run 42403363557/1 approved SHA B"
+        },
+        {
+          "type": "store",
+          "value": "agent-store state v14 commits publisher:42402434528=published@1f925d21129fe5731aec4235a9ff680ac7453785, reviewer:42402597971=changes_requested@1f925d21129fe5731aec4235a9ff680ac7453785, publisher:42403209086=published@cfe6eacdce242086b6f549645fbf8a7b05c100ad, reviewer:42403363557=approved@cfe6eacdce242086b6f549645fbf8a7b05c100ad; checkpoint commits 1841f76e2a3fa8d87a70937977b0005706ce9736 and e7ba4e329cfcf8372f23cf1f332ecafc95812954 are committed Store objects"
+        },
+        {
+          "type": "runtime",
+          "value": "exact-SHA PR #2963 head cfe6eacdce242086b6f549645fbf8a7b05c100ad changed only e2e/fixtures/agent-development/qwen-repair-source-v4.md from implementation pending/verification missing to implementation qwen-verified/verification complete; CI / Quality Gate 42403269834, E2E / Tests 42403269775, Acceptance / Case Smoke 42403269793 and Acceptance / Orchestrator 42403268820 all completed successfully at that exact head; the owner merged it at 6de4b645c75255e1762ac8ba7de8657aabbeab4e; all chain SHAs are ancestors of target 8e60e662feef050f7f1b5e8b0ec63081977643e1"
+        }
+      ],
+      "duration_ms": 5184,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42406467353,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42406467353",
+    "record_path": "runs/2026-11-07/42406467353-1/1664/SC-17.json",
+    "source_result_sha256": "29b799fc9073b60661c91bf98631d98241bcc562c1495f4eb658fd28b1e90bf4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42406467353-1",
+    "sha256": "29b799fc9073b60661c91bf98631d98241bcc562c1495f4eb658fd28b1e90bf4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42406467353",
+    "durability": "time-limited; object archival not configured"
+  }
+}

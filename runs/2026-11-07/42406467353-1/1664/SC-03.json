@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b9b29a868dbfb964605339f3509a04b99908e0e1b6dadb7d5b9591a8db641342",
+  "run_id": 42406467353,
+  "run_attempt": 1,
+  "issue": 1664,
+  "criterion": "SC-03",
+  "criterion_text": "A real authenticated development result at SHA A dispatches Reviewer for SHA A; changes_requested dispatches the same Developer's repair task; reviewed SHA B and eligible Acceptance are selected only by deterministic policy, not by model-supplied next_role.",
+  "stage": "post-merge",
+  "target_sha": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+  "contract_sha256": "28db829e11761fa002ab9c89818bcdfcb2fb3fb26d5c89ba2af6c9ad05b3624a",
+  "case_revision": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+  "case_tree_sha": "dec8a845c1f1eb6dcb9932a4bc468fa3ee9c1079",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T19:32:03.665Z",
+  "finished_at": "2026-11-07T19:32:11.463Z",
+  "duration_ms": 7798,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Canonical state machine proves Reviewer dispatch, changes_requested resume repair, SHA B approval and deterministic quality/acceptance selection; the real #2817 chain authenticates the Developer result and Reviewer dispatch for the exact PR HEAD.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "development-selftest: SHA A -> reviewer dispatch; changes_requested -> phase=repair with actions[0].resume=true; Developer -> SHA B; Reviewer approved SHA B -> quality -> sc-acceptance; model next_role denied"
+        },
+        {
+          "type": "runtime",
+          "value": "real Qwen Developer Run 42344231027/1 completed/success at c5372a9c4865750182319f38ec642238b23dc2f5; Store Ingest 42353290383; Publisher 42353330828"
+        },
+        {
+          "type": "runtime",
+          "value": "real PR #2891 head 52ecf6640f6d22f97e58a3ef559aa03493651680 merged by the owner at 357b5aa17554cbdeb426c1bb94ca710f82caf8cf; Reviewer Run 42354175666/6 approved that exact head"
+        },
+        {
+          "type": "store",
+          "value": "agent-store state v16 has publisher:42353330828=published and reviewer:42354175666/6=approved at 52ecf6640f6d22f97e58a3ef559aa03493651680; all chain SHAs are ancestors of target 8e60e662feef050f7f1b5e8b0ec63081977643e1"
+        }
+      ],
+      "duration_ms": 1872,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42406467353,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8e60e662feef050f7f1b5e8b0ec63081977643e1",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42406467353",
+    "record_path": "runs/2026-11-07/42406467353-1/1664/SC-03.json",
+    "source_result_sha256": "95b15a50ca35b4791f3578f7f775d5b1bf5fc4a6a9ff4f58ecd865eaa1b5cf96"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42406467353-1",
+    "sha256": "95b15a50ca35b4791f3578f7f775d5b1bf5fc4a6a9ff4f58ecd865eaa1b5cf96",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42406467353",
+    "durability": "time-limited; object archival not configured"
+  }
+}
