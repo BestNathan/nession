@@ -259,6 +259,56 @@ try {
   assert.ok(repairedE2e.body.endsWith(e2eContract));
   assert.deepEqual(parseIssueE2E(repairedE2e.body).errors,[]);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
+
+  // #2921 / live #2878: - none: is a DECLARATION, never a Report row ID.
+  const emptyNone=[
+    '## E2E Verification','### New','- none: focused browser Case not yet selected',
+    '### Regression','- none: existing test does not prove the ordering',
+    '## E2E Report','| ID | Type | Result | Evidence |','|---|---|---|---|',
+  ].join('\n');
+  const invalidNone=emptyNone+
+    '\n| none | New | Pending | Focused browser Case not yet selected |'+
+    '\n| none | Regression | Pending | Existing test not yet established |';
+  assert.deepEqual(parseIssueE2E(emptyNone).errors,[]);
+  assert.ok(parseIssueE2E(invalidNone).errors.some(e=>e.includes('unrequired E2E Report ID')));
+  const noneTarget={...preE2eIssue,body:preE2eIssue.body+'\n\n'+invalidNone};
+  writeFileSync(filename,JSON.stringify(noneTarget));
+  const noneSnapshot=readFileSync(filename,'utf8');
+  let noneRepairCalls=0;
+  const noneRepair=await applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:noneTarget.body}),
+  },'example/repo',{
+    contractRepair:async(previous,error)=>{
+      noneRepairCalls++;
+      assert.equal(error.code,'ISSUE_AUDIT_E2E_PROTECTED');
+      assert.match(error.message,/none placeholders are not selected IDs/);
+      assert.equal(readFileSync(filename,'utf8'),noneSnapshot);
+      const prompt=renderIssueAuditContractRepairPrompt(noneTarget,previous.result,error.message);
+      assert.match(prompt,/E2E Report MUST contain ONLY the table/);
+      return {result:JSON.stringify({body:preE2eIssue.body+'\n\n'+emptyNone})};
+    },
+  });
+  assert.equal(noneRepairCalls,1);
+  assert.equal(noneRepair.contract_repair_attempted,true);
+  const afterNone=JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(afterNone.body,preE2eIssue.body+'\n\n'+emptyNone);
+  assert.deepEqual(parseIssueE2E(afterNone.body).selectedIds,[]);
+  assert.deepEqual(parseIssueE2E(afterNone.body).errors,[]);
+
+  // A second malformed Report still fails closed, leaving the target intact.
+  writeFileSync(filename,noneSnapshot);
+  let noneFailedCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:noneTarget.body}),
+  },'example/repo',{
+    contractRepair:async()=>{
+      noneFailedCalls++;
+      return {result:JSON.stringify({body:noneTarget.body})};
+    },
+  }),/Unauthorized E2E/);
+  assert.equal(noneFailedCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),noneSnapshot);
+  writeFileSync(filename,JSON.stringify(preE2eIssue));
   // Live #42216764125: the original may have both malformed E2E and
   // Knowledge Impact. A Qwen first pass fixing only E2E must NOT be written.
   // One bounded continuation receives the canonical validation findings.
