@@ -303,3 +303,17 @@
 - Categories: web, navigation, sidebar, interaction, ownership, responsive
 - Reason: Record the approved unified four-action row menu (details, edit, attach, typed-name kill), its details-without-selection behavior, offline edit unavailability and scroll/Escape/outside dismissal; align implementation sources to the final feature commit
 - Source: https://github.com/BestNathan/nession/issues/2851
+
+## 2026-11-07T09:26:00Z | create | Terminal parser progress and exception reconciliation
+- Path: topics/terminal/terminal-parser-progress-and-exception-reconciliation.md
+- Topic: terminal
+- Categories: architecture, protocol, recovery, terminal, web
+- Reason: Record #2877's negotiated response-less `client.terminal.output.progress` notification, the Agent's per-subscriber actually-issued frontier with the attach cut as floor, the coalesced exception-only `agent.terminal.reconcile-required` notice, the Web SessionRuntime single-flight resume/checkpoint recovery contract and the Relay pass-through boundary; SC-06 measurement remains unproven
+- Source: https://github.com/BestNathan/nession/issues/2877
+
+## 2026-11-07T09:26:00Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Cross-link the new #2877 parser-progress/reconcile article and narrow the stream-recovery limit so it points at that contract instead of implying #1645 already owns the new wire
+- Source: https://github.com/BestNathan/nession/issues/2877

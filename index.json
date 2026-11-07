@@ -78,6 +78,20 @@
     ],
     "terminal": [
       {
+        "title": "Terminal parser progress and exception reconciliation",
+        "description": "Negotiated one-way parser-applied progress, the Agent's per-subscriber issued frontier, and the exception-only reconcile-required recovery contract for terminal streams",
+        "path": "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
+        "status": "candidate",
+        "categories": [
+          "architecture",
+          "protocol",
+          "recovery",
+          "terminal",
+          "web"
+        ],
+        "updated_at": "2026-11-07T09:26:00Z"
+      },
+      {
         "title": "Terminal tools capsule chord and command ownership",
         "description": "One upper Capsule slot for Terminal Keys and Quick Commands: one-shot modifier chords, Insert vs Run, and separate fit and scroll clearances",
         "path": "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
@@ -102,7 +116,7 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-05T08:36:00Z"
+        "updated_at": "2026-11-07T09:26:00Z"
       }
     ],
     "web": [
@@ -231,6 +245,7 @@
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
+      "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ],
@@ -296,6 +311,7 @@
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "protocol": [
+      "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
@@ -304,6 +320,9 @@
     ],
     "read-only": [
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
+    ],
+    "recovery": [
+      "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md"
     ],
     "release": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
@@ -338,6 +357,7 @@
     ],
     "terminal": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
@@ -346,6 +366,7 @@
     ],
     "web": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
+      "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
