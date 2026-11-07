@@ -23,7 +23,8 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   const head=action==='sync-main-to-lane'?'main':plan.branch;
   if(!pr || !['sync-main-to-lane','promote-lane-to-main'].includes(action) ||
       !SHA.test(plan.main_sha)||!SHA.test(plan.sha))return fail('INVALID_INPUT');
-  if(pr.state!=='open'||pr.draft||pr.base?.ref!==branch||pr.head?.ref!==head ||
+  if(pr.state!=='open'||pr.draft||!pr.body?.startsWith('Staging Convergence automated proposal')||
+      pr.base?.ref!==branch||pr.head?.ref!==head ||
       pr.head?.repo?.full_name!==REPO)return fail('UNTRUSTED_PR_IDENTITY');
   const expectedHead=action==='sync-main-to-lane'?plan.main_sha:plan.sha;
   const expectedBase=action==='sync-main-to-lane'?plan.sha:plan.main_sha;
@@ -45,12 +46,12 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   return okay({expectedHead,expectedBase});
 }
 
-export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],deployRuns=[],laneSha}) {
+export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],deployRuns=[],laneSha,branch='staging',deployment_workflows=['release-staging.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
       firstParentCommits.length===0||firstParentCommits.length>PROMOTION_LIMIT)
     return fail('UNBOUNDED_OR_EMPTY_PROMOTION');
-  const run=deployRuns.filter(r=>r.path?.split('@')[0]===DEPLOY &&
-    r.head_sha===laneSha && r.head_branch==='staging' && r.event==='push' &&
+  const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
+    r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
   if(!run.length||run[0].conclusion!=='success')return fail('STAGING_RELEASE_NOT_PROVEN');
   if(!Array.isArray(associations)||associations.length!==firstParentCommits.length)
@@ -60,7 +61,7 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     const item=firstParentCommits[n],pairs=associations[n];
     if(!SHA.test(item)||!Array.isArray(pairs))return fail('INVALID_PR_PROVENANCE');
     const matches=pairs.filter(pr=>pr.merge_commit_sha===item&&pr.merged_at&&
-      pr.base?.ref==='staging'&&pr.base?.repo?.full_name===REPO);
+      pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1)return fail('MISSING_STAGING_MERGE_PR:'+item);
     const pr=matches[0];
     // Trusted main->staging sync PRs introduce no new acceptance obligations.
@@ -97,9 +98,10 @@ function git(args){
   return execFileSync('git',args,{encoding:'utf8',maxBuffer:4_000_000}).trim();
 }
 
-export function qualify({action,prNumber,mainSha,laneSha,branch}) {
+export function qualify({action,prNumber,mainSha,laneSha,branch,deployment_workflows=[]}) {
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(mainSha)||
-     !SHA.test(laneSha)||branch!=='staging')throw new Error('invalid exact convergence target');
+     !SHA.test(laneSha)||!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$/.test(branch)||branch==='main'||
+     (action==='promote-lane-to-main'&&!deployment_workflows.length))throw new Error('invalid exact convergence target');
   const pr=read('pulls/'+prNumber);
   const baseRef=action==='sync-main-to-lane'?branch:'main';
   const baseSha=git(['ls-remote','origin','refs/heads/'+baseRef]).split(/\s+/)[0];
@@ -122,14 +124,14 @@ export function qualify({action,prNumber,mainSha,laneSha,branch}) {
     }
   }
   const issues=[...numberSet].map(n=>read('issues/'+n));
-  const deployRuns=getRuns('actions/workflows/release-staging.yml/runs?head_sha='+laneSha);
-  return evaluatePromotion({firstParentCommits:commits,associations,issues,deployRuns,laneSha});
+  const deployRuns=deployment_workflows.flatMap(file=>getRuns('actions/workflows/'+encodeURIComponent(file)+'/runs?head_sha='+laneSha));
+  return evaluatePromotion({firstParentCommits:commits,associations,issues,deployRuns,laneSha,branch,deployment_workflows});
 }
 
 function selfTest(){
   const a='a'.repeat(40),b='b'.repeat(40);
   const plan={branch:'staging',main_sha:a,sha:b};
-  const pr={number:88,state:'open',draft:false,mergeable:true,mergeable_state:'clean',
+  const pr={number:88,state:'open',draft:false,body:'Staging Convergence automated proposal (test)',mergeable:true,mergeable_state:'clean',
     base:{ref:'staging',sha:b},head:{ref:'main',sha:a,repo:{full_name:REPO}}};
   const runs=REQUIRED.map((path,n)=>({id:n+1,path,head_sha:a,event:'pull_request',
     conclusion:'success',head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
@@ -149,7 +151,8 @@ function selfTest(){
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
   if(process.argv[2]==='self-test')selfTest();
   else if(process.argv[2]==='qualify'){
-    const [action,num,mainSha,laneSha,branch]=process.argv.slice(3);
-    console.log(JSON.stringify(qualify({action,prNumber:Number(num),mainSha,laneSha,branch})));
+    const [action,num,mainSha,laneSha,branch,deployList='']=process.argv.slice(3);
+    console.log(JSON.stringify(qualify({action,prNumber:Number(num),mainSha,laneSha,branch,
+      deployment_workflows:deployList.split(',').filter(Boolean)})));
   }else throw Error('usage: self-test | qualify <action> <pr> <main-sha> <lane-sha> <branch>');
 }
