@@ -251,6 +251,27 @@ function existingPr(repo, owner, head, base) {
   return matches[0] || null;
 }
 
+export function staleGeneratedSyncPr(pr,repo,lane,currentHead) {
+  return pr?.state==='open'&&pr.base?.ref===lane&&
+    pr.head?.ref!==currentHead&&pr.head?.repo?.full_name===repo&&
+    pr.body?.startsWith('Staging Convergence automated proposal')&&
+    pr.head.ref.startsWith('chore/staging-sync-'+lane.replace(/[\/._]/g,'-')+'-');
+}
+
+function closeSupersededSyncPrs(repo,lane,currentHead) {
+  const list=gh(['--method','GET','repos/'+repo+'/pulls',
+    '-f','base='+lane,'-f','state=open','-f','per_page=100']);
+  if(!Array.isArray(list)||list.length>=100)
+    reject('unbounded active staging sync PR inventory');
+  const closed=[];
+  for(const pr of list) {
+    if(!staleGeneratedSyncPr(pr,repo,lane,currentHead))continue;
+    gh(['--method','PATCH','repos/'+repo+'/pulls/'+pr.number,'-f','state=closed']);
+    closed.push(pr.number);
+  }
+  return closed;
+}
+
 function ensurePr(repo, owner, head, base, plan) {
   const found = existingPr(repo, owner, head, base);
   if (found) return { action: 'reused', number: found.number, url: found.html_url };
@@ -346,9 +367,10 @@ function reconcile(plan) {
       }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
+      const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
       const receipt=ensurePr(repo,owner,head,base,plan);
       const record={branch:lane.branch,direction:action,...receipt,
-        ...(sync?{integration_head:integration.sha}: {})};
+        ...(sync?{integration_head:integration.sha,superseded_prs:superseded}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
       if (receipt.action === 'created') {
@@ -428,6 +450,17 @@ function selfTest() {
   assert.equal(integrationBranchName('staging-01',aa,bb),
     'chore/staging-sync-staging-01-aaaaaaaaaaaa-bbbbbbbbbbbb');
   assert.throws(()=>integrationBranchName('bad..ref',aa,bb),/unsupported/);
+  const sample={state:'open',base:{ref:'staging'},head:{
+    ref:'chore/staging-sync-staging-aaaaaaaaaaaa-bbbbbbbbbbbb',
+    repo:{full_name:'BestNathan/nession'}},
+    body:'Staging Convergence automated proposal (source: Release / Staging Convergence).'};
+  assert.equal(staleGeneratedSyncPr(sample,'BestNathan/nession','staging',
+    'chore/staging-sync-staging-cccccccccccc-dddddddddddd'),true);
+  assert.equal(staleGeneratedSyncPr(sample,'BestNathan/nession','staging',sample.head.ref),false);
+  assert.equal(staleGeneratedSyncPr({...sample,body:'manual integration'},
+    'BestNathan/nession','staging','another'),false);
+  assert.equal(staleGeneratedSyncPr({...sample,head:{...sample.head,
+    repo:{full_name:'external/fork'}}},'BestNathan/nession','staging','another'),false);
   assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
