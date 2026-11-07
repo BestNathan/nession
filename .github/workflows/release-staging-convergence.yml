@@ -6,6 +6,12 @@ name: Release / Staging Convergence
 on:
   schedule:
     - cron: '0 */2 * * *'
+  # Bootstrap after the workflow definition is first installed/modified on main;
+  # ordinary code pushes do not create extra convergence scans.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-staging-convergence.yml'
   workflow_dispatch:
     inputs:
       dry_run:
