@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "63a695ed77269cec019adf7336c650f2598ffc576078cc7ec5bda3ce4ad84992",
+  "run_id": 42404681931,
+  "run_attempt": 1,
+  "issue": 1664,
+  "criterion": "SC-07",
+  "criterion_text": "After injected interruption following PR publication but before checkpoint publication, the same Developer session recovers its checkpoint, synchronizes current Issue/PR SHA and current permissions, and resumes without a second PR or replayed mutation.",
+  "stage": "post-merge",
+  "target_sha": "32142eda60af359171e063977d26b70c89b8a897",
+  "contract_sha256": "a166fd33cec6c2ab768e3b3fc692b60342ca2334b130d96dc89233e4dba6dea6",
+  "case_revision": "32142eda60af359171e063977d26b70c89b8a897",
+  "case_tree_sha": "79a0f12d5d508987c82ca94eee373a070d3640a3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T19:11:31.772Z",
+  "finished_at": "2026-11-07T19:11:38.813Z",
+  "duration_ms": 7041,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A published-PR Repair interruption is attested by exact Run/Artifact/stage, creates one bounded CAS successor with no blind POST, restores the same encrypted native checkpoint and Issue/PR delta, and the readback contract forbids a second PR or replayed mutation.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "repair-runtime-failure-selftest: exact published-PR Repair Run/Artifact/Stage proof, bounded CAS successor, no blind POST"
+        },
+        {
+          "type": "runtime",
+          "value": "native-resume-failure-selftest + qwen-preflight-recovery-selftest: exact Run/checkpoint restore, one successor, replay/compromise denial"
+        },
+        {
+          "type": "runtime",
+          "value": "qwen-development-worker-selftest: same-session repair requires signed Issue projection and current PR delta"
+        },
+        {
+          "type": "runtime",
+          "value": "publication-readback-selftest: unique branch/PR and SHA A/B replay negatives; exact SHA 32142eda60af359171e063977d26b70c89b8a897"
+        }
+      ],
+      "duration_ms": 1184,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42404681931,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "32142eda60af359171e063977d26b70c89b8a897",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42404681931",
+    "record_path": "runs/2026-11-07/42404681931-1/1664/SC-07.json",
+    "source_result_sha256": "007382c5c46afcffdfbd871fef7d4697f47de9e80ab9a67655864371888440c7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42404681931-1",
+    "sha256": "007382c5c46afcffdfbd871fef7d4697f47de9e80ab9a67655864371888440c7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42404681931",
+    "durability": "time-limited; object archival not configured"
+  }
+}

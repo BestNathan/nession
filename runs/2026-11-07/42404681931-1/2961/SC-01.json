@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "93fe241b845a30eca1c907978c27cdfa17067eca033de67954761a6916b8a254",
+  "run_id": 42404681931,
+  "run_attempt": 1,
+  "issue": 2961,
+  "criterion": "SC-01",
+  "criterion_text": "The real Qwen Developer publishes phase 1 at SHA A; the Reviewer requests changes for the missing verification marker; the resumed same Developer adds the marker at SHA B; the same Reviewer approves SHA B.",
+  "stage": "post-merge",
+  "target_sha": "32142eda60af359171e063977d26b70c89b8a897",
+  "contract_sha256": "1c033c8c7c823dab38297c4e5b9e57cee696c4a1c118cdfdcab9d0cc5f8a972e",
+  "case_revision": "32142eda60af359171e063977d26b70c89b8a897",
+  "case_tree_sha": "17bd7110345dc8f30bead7c1dab3303aff3485ee",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T19:11:51.043Z",
+  "finished_at": "2026-11-07T19:11:56.952Z",
+  "duration_ms": 5909,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "Command failed: git -C /home/runner/work/nession/nession/workspace merge-base --is-ancestor 1244766abad9d2496492e67d49a158a35b877bbc 32142eda60af359171e063977d26b70c89b8a897\nfatal: Not a valid commit name 1244766abad9d2496492e67d49a158a35b877bbc",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact-SHA selftest or public GitHub/Store proof did not establish the criterion"
+        }
+      ],
+      "duration_ms": 49,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42404681931,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "32142eda60af359171e063977d26b70c89b8a897",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42404681931",
+    "record_path": "runs/2026-11-07/42404681931-1/2961/SC-01.json",
+    "source_result_sha256": "1521a5ff76d5943f2636a43ef53c356581f121bb42f198688a5c4fd7ec5f51a4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42404681931-1",
+    "sha256": "1521a5ff76d5943f2636a43ef53c356581f121bb42f198688a5c4fd7ec5f51a4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42404681931",
+    "durability": "time-limited; object archival not configured"
+  }
+}
