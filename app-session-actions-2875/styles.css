@@ -4,7 +4,7 @@
   --nession-muted:oklch(.9519 .0013 106.424);--nession-muted-foreground:oklch(.553 .0118 261.773);
   --nession-text-secondary:oklch(.4571 .01 271.194);--nession-border:oklch(.9274 .0027 106.451);
   --nession-sidebar:oklch(.9782 .0034 247.858);--nession-sidebar-accent:oklch(.9519 .0013 106.424);
-  --nession-danger:oklch(.577 .245 27.3);--nession-radius-control:10px;--nession-shell-session-row-radius:7px;
+  --nession-destructive:oklch(.572 .189 25);--nession-danger:var(--nession-destructive);--nession-radius-control:10px;--nession-shell-session-row-radius:7px;
   --nession-typography-title-size:17px;--nession-typography-primary-size:16px;--nession-typography-body-size:14px;
   --nession-typography-secondary-size:13px;--nession-typography-metadata-size:12px;
   --nession-shell-icon-button-size:44px;--nession-control-sm:44px;
@@ -34,7 +34,7 @@
 .n-terminal-copy{flex:1;min-height:0;overflow:auto;padding:24px 15px 110px;font:12px/1.45 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--nession-foreground)}
 .n-terminal-copy>div+div{margin-top:8px}
 .n-terminal-prompt{font-weight:600}
-.n-capsule{position:absolute;bottom:20px;left:12px;right:12px;display:flex;align-items:center;gap:6px;border:1px solid var(--nession-border);border-radius:22px;background:var(--nession-background);box-shadow:0 5px 20px #00000013;padding:6px;min-height:52px}
+.n-capsule{position:absolute;bottom:max(20px,env(safe-area-inset-bottom,0px));left:12px;right:12px;display:flex;align-items:center;gap:6px;border:1px solid var(--nession-border);border-radius:22px;background:var(--nession-background);box-shadow:0 5px 20px #00000013;padding:6px;min-height:52px}
 .n-capsule input{border:0;min-width:0;flex:1;outline:none;background:transparent;padding:8px 0;font-size:14px}
 .n-capsule-plus{border:0;border-radius:50%;width:38px;height:38px;flex:none;background:transparent;font-size:24px;color:var(--nession-muted-foreground)}
 .n-capsule-send{border:0;border-radius:14px;width:38px;height:38px;flex:none;background:var(--nession-foreground);color:var(--nession-background);font-size:22px}

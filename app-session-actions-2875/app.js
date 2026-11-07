@@ -24,7 +24,7 @@
   const copy=()=>fixture.map(s=>({...s,tags:s.tags.slice()}));
   let sessions=copy(), activeId="sess-01", layer="sessions", query="", statusFilter="all", sortBy="activity", filtersOpen=false, agentsOpen=false;
   let scenario="normal", conflictPending=false, menuId=null, menuOrigin=null, dialog=null, dialogOrigin=null;
-  let selectedInspector=null, firstRender=true;
+  let selectedInspector=null, nextMockId=1;
   const menu=$("session-menu"), dialogRoot=$("dialog-root"), list=$("session-list"), scroll=$("session-scroll");
   const E=(tag,className,text)=>{
     const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;
@@ -234,7 +234,7 @@
         }
         if(s.revision!==dialog.revision){error.textContent="Remote revision conflict: reload current metadata.";return;}
         s.title=title;s.desc=desc;s.tags=tags;s.revision+=1;
-        closeDialog();renderActive();renderList();notice("Session details saved");refreshInspector();
+        closeDialog();renderActive();renderList();list.querySelector('[data-session="'+s.id+'"] .n-more')?.focus();notice("Session details saved");refreshInspector();
       },"primary");
       panel.append(titleField.label,titleHint,descField.label,tagsField.label,tagsHint,error,acts);
       dialogRoot.append(backdrop,panel);titleField.input.focus();refreshInspector();return;
@@ -279,7 +279,7 @@
         if(!name){err.textContent="Enter a Session name.";return;}
         if(sessions.some(x=>x.sessionName===name&&x.agent===sel.value)){err.textContent="A Session with this name already exists on this Agent.";return;}
         if(scenario==="offline"||sel.value==="runner-02"){err.textContent="This Agent is offline.";return;}
-        const id="mock-"+(Date.now()%1000000)+"-"+sessions.length;
+        const id="mock-"+(nextMockId++);
         sessions.unshift({id,sessionName:name,title:"",desc:"",tags:[],kind:"shell",agent:sel.value,online:true,state:"active",group:"Today",revision:0,mode:"auto",renderer:"webgl"});
         activeId=id;query="";$("session-search").value="";closeDialog();renderActive();renderList();setLayer("terminal");notice("Session created in local preview");
       },"primary");
@@ -287,7 +287,7 @@
     }
   }
   function setScenario(next){
-    scenario=next;sessions=next==="empty"?[]:copy();activeId=sessions[0]?.id||null;
+    scenario=next;nextMockId=1;sessions=next==="empty"?[]:copy();activeId=sessions[0]?.id||null;
     query="";statusFilter="all";sortBy="activity";filtersOpen=false;agentsOpen=false;conflictPending=next==="conflict";
     closeMenu(false);if(dialog)closeDialog();clearNotice();
     $("session-search").value="";renderControls();renderActive();renderList();setLayer("sessions");
