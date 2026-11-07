@@ -67,8 +67,17 @@ export function enforceE2EReadOnly(currentBody, candidateBody) {
   if (!before && !after) return;
 
   const denied = () => {
+    // A "none" declaration is not an actual selected test ID. Give the
+    // correction model a fixed, bounded diagnosis without exposing raw Issue
+    // or model-authored text; the same guard still rejects the whole proposal.
+    const hasNonePlaceholder=before?.selectedIds?.length===0 &&
+      before.newNone!==null && before.regressionNone!==null &&
+      after?.rows?.has('none');
+    const detail=hasNonePlaceholder
+      ? ' (E2E Report none placeholders are not selected IDs; remove those data rows and retain the header and both - none: justifications)'
+      : '';
     throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
-      'Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
+      'Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review'+detail);
   };
   // A structurally invalid source is an audit input, not proof of an
   // unauthorized write. The candidate, however, MUST be fully valid.
