@@ -16,7 +16,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   issues: read
   pull-requests: read
 
@@ -84,6 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
           READ_GITHUB_TOKEN: ${{ github.token }}
+          DISPATCH_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
