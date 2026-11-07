@@ -1007,6 +1007,15 @@ fn agent_attached_relay_ready(
             out_payload["controller_client_id"] = serde_json::json!(client_id);
         }
     }
+    // Notification-only capabilities (#2877) are the Agent's statement, so the
+    // Server forwards them unchanged — it neither adds nor validates an entry.
+    // The browser negotiates the response-less progress wire from this list;
+    // absent means an older Agent and keeps the v1 operation.
+    if let Some(capabilities) = payload.get("terminal_capabilities") {
+        if capabilities.is_array() {
+            out_payload["terminal_capabilities"] = capabilities.clone();
+        }
+    }
     Some(tokio_tungstenite::tungstenite::Message::Text(
         frame.to_string(),
     ))
@@ -2238,6 +2247,48 @@ mod tests {
         assert!(ready["payload"].get("control_role").is_none());
         assert!(ready["payload"].get("control_generation").is_none());
         assert!(ready["payload"].get("controller_client_id").is_none());
+    }
+
+    #[test]
+    fn relay_ready_forwards_notification_capabilities_verbatim_and_never_invents_them() {
+        let stated = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52,
+                "terminal_capabilities": ["terminal-progress-notifications-v1"]
+            }
+        });
+        let ready = agent_attached_relay_ready(&stated, "sess", "browser-a", "begin-123")
+            .expect("verified Agent subscription");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert_eq!(
+            ready["payload"]["terminal_capabilities"],
+            json!(["terminal-progress-notifications-v1"]),
+            "the Server forwards the Agent's list unchanged"
+        );
+
+        // An older Agent states nothing; the receipt must not invent support.
+        let legacy = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52
+            }
+        });
+        let ready = agent_attached_relay_ready(&legacy, "sess", "browser-a", "begin-123")
+            .expect("legacy Agent remains attachable");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
+
+        // A malformed value is not reinterpreted as a capability list.
+        let malformed = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52,
+                "terminal_capabilities": "terminal-progress-notifications-v1"
+            }
+        });
+        let ready = agent_attached_relay_ready(&malformed, "sess", "browser-a", "begin-123")
+            .expect("the rest of the receipt stands");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("terminal_capabilities").is_none());
     }
 
     #[test]

@@ -8,6 +8,8 @@
 //! Input ACK (#1307) is an independent Agent->client PTY-write cursor and
 //! must never share this state or wire identity.
 
+use nession_protocol::contracts::terminal::v1::TerminalReconcileReason;
+
 /// Highest JSON integer that JavaScript can round-trip losslessly.
 const MAX_SAFE_WIRE_INTEGER: u64 = (1_u64 << 53) - 1;
 
@@ -46,6 +48,11 @@ pub struct SubscriberOutputAck {
     /// Renderer identity is pinned by the first advancing parser ACK. A
     /// remount must reattach rather than reuse this subscriber generation.
     renderer_generation: Option<u64>,
+    /// The one unresolved reconcile episode for this subscription (#2877).
+    /// Set when a notice was emitted, cleared only when a later report
+    /// advances within the current binding. It bounds notices to one per
+    /// episode instead of one per rejected report.
+    reconcile_episode: Option<TerminalReconcileReason>,
 }
 
 fn is_safe_positive(value: u64) -> bool {
@@ -66,6 +73,7 @@ impl SubscriberOutputAck {
             binding,
             applied_through: 0,
             renderer_generation: None,
+            reconcile_episode: None,
         })
     }
 
@@ -75,6 +83,34 @@ impl SubscriberOutputAck {
 
     pub fn applied_through(&self) -> u64 {
         self.applied_through
+    }
+
+    /// The renderer identity this subscription has pinned, if any.
+    pub fn renderer_generation(&self) -> Option<u64> {
+        self.renderer_generation
+    }
+
+    /// The unresolved reconcile episode, if a notice is already active.
+    pub fn reconcile_episode(&self) -> Option<TerminalReconcileReason> {
+        self.reconcile_episode
+    }
+
+    /// Open an episode, or report that one is already active.
+    ///
+    /// `true` means this call is the one that must emit the notice; `false`
+    /// means a notice for the same unresolved episode is already outstanding
+    /// and repeating it would be a recovery storm.
+    pub fn begin_reconcile_episode(&mut self, reason: TerminalReconcileReason) -> bool {
+        if self.reconcile_episode.is_some() {
+            return false;
+        }
+        self.reconcile_episode = Some(reason);
+        true
+    }
+
+    /// A later authenticated report advanced within the current binding.
+    pub fn clear_reconcile_episode(&mut self) {
+        self.reconcile_episode = None;
     }
 
     /// The first *advancing* ACK pins the renderer that parsed the bytes.
@@ -234,6 +270,34 @@ mod tests {
         assert_eq!(a.observe(id, 1, 3), OutputAckVerdict::Regressive);
         assert_eq!(a.observe(id, 3, 2), OutputAckVerdict::BeyondIssuedHead);
         assert_eq!(a.applied_through(), 2);
+    }
+
+    #[test]
+    fn reconcile_episode_is_one_per_unresolved_binding_until_progress_advances() {
+        let id = binding(31, 47);
+        let mut cursor = SubscriberOutputAck::new(id).unwrap();
+        assert!(cursor.begin_reconcile_episode(TerminalReconcileReason::ProgressAheadOfIssued));
+        assert_eq!(
+            cursor.reconcile_episode(),
+            Some(TerminalReconcileReason::ProgressAheadOfIssued)
+        );
+        // A repeated rejection for the same episode emits nothing more.
+        assert!(!cursor.begin_reconcile_episode(TerminalReconcileReason::EpochIncompatible));
+        assert_eq!(
+            cursor.reconcile_episode(),
+            Some(TerminalReconcileReason::ProgressAheadOfIssued)
+        );
+        // An advancing report within the same binding resolves it.
+        assert!(matches!(
+            cursor.observe_with_renderer(id, 7, 1, 5),
+            OutputAckVerdict::Advanced { .. }
+        ));
+        cursor.clear_reconcile_episode();
+        assert_eq!(cursor.reconcile_episode(), None);
+        assert!(cursor.begin_reconcile_episode(TerminalReconcileReason::RendererReplaced));
+        // A replacement subscription is a new episode space.
+        cursor.replace(binding(32, 47)).unwrap();
+        assert_eq!(cursor.reconcile_episode(), None);
     }
 
     #[test]

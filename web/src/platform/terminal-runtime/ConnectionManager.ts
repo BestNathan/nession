@@ -641,8 +641,7 @@ export class ConnectionManager implements TerminalTransport {
     streamEpoch: number | undefined,
     streamCursor: number | undefined,
     options?: { preserveAppliedCursor?: boolean },
-  ): void {
-    if (this.mode === 'relay') {
+  ): void {    if (this.mode === 'relay') {
       // Relay's attach receipt is a transport receipt, not proof that the
       // current xterm renderer applied a complete, verified checkpoint.
       // In particular tmux screen-only capture cannot establish a full VT
@@ -653,6 +652,18 @@ export class ConnectionManager implements TerminalTransport {
       return;
     }
     this.reconciler.seed(streamEpoch, streamCursor, options);
+  }
+
+  /**
+   * Recover through the one stream owner (#2877).
+   *
+   * The request proves a contiguous same-epoch run from the trusted prefix;
+   * it does not re-deliver events the renderer already received. Whether the
+   * answer is sufficient is the reconciler's verdict, never a transport
+   * acknowledgment.
+   */
+  requestReconcile(epoch: number, afterSeq: number): Promise<boolean> {
+    return this.reconciler.requestReconcile(epoch, afterSeq);
   }
 
   /**

@@ -142,6 +142,35 @@ impl SubscriberIssuedFlow {
         }
     }
 
+    /// A flow whose subscription starts at an Agent stream cut (#2877).
+    ///
+    /// The cut is what the attach reply / bootstrap proved, not a parser
+    /// position. It is the **lower bound** of what this subscriber may claim
+    /// as applied: a renderer preserved across a re-attach legitimately holds
+    /// a prefix at or below it, and treating that prefix as "ahead of what we
+    /// issued" would invent an inconsistency on every healthy reattach. New
+    /// events issued after the cut remain the strict upper bound.
+    pub fn new_with_base(base: u64) -> Self {
+        Self {
+            epoch: None,
+            last_issued: Some(base),
+            credit: None,
+        }
+    }
+
+    /// The highest sequence this subscriber has actually been issued.
+    ///
+    /// This is the authoritative frontier for a progress report: the
+    /// session-global head is not evidence that this subscriber was handed
+    /// those events. `base` (the attach cut) is a conservative floor.
+    pub fn issued_frontier(&self) -> u64 {
+        let issued = self
+            .credit
+            .as_ref()
+            .map_or(0, IssuedByteCredit::issued_through);
+        issued.max(self.last_issued.unwrap_or(0))
+    }
+
     /// Called immediately BEFORE offering an event to the serialized
     /// outbound writer. Dequeue is *not* the acknowledgement of this event.
     /// Failed sends revoke this subscriber, never credit undelivered output.
@@ -230,6 +259,34 @@ impl Default for SubscriberIssuedFlow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_frontier_starts_at_the_attach_cut_and_tracks_only_its_own_issues() {
+        // A preserved renderer may hold a prefix at or below the cut it joined;
+        // a fresh subscriber was issued nothing above it.
+        let mut flow = SubscriberIssuedFlow::new_with_base(7);
+        assert_eq!(flow.issued_frontier(), 7);
+        flow.issue(3, 8, 2).unwrap();
+        assert_eq!(flow.issued_frontier(), 8);
+        // The first parser ACK only opts into credit at the last issued
+        // ordinal; it does not move the frontier.
+        assert_eq!(flow.parser_ack(3, 8), Ok(0));
+        assert!(flow.credit_enabled());
+        assert_eq!(flow.issued_frontier(), 8);
+        flow.issue(3, 9, 2).unwrap();
+        assert_eq!(flow.issued_frontier(), 9);
+        assert_eq!(flow.parser_ack(3, 9), Ok(2));
+        assert_eq!(
+            flow.issued_frontier(),
+            9,
+            "acknowledgement moves credit, not the frontier"
+        );
+
+        // Another subscriber on the same session never inherits this one's
+        // issued position.
+        let other = SubscriberIssuedFlow::new_with_base(0);
+        assert_eq!(other.issued_frontier(), 0);
+    }
 
     #[test]
     fn output_resize_output_releases_only_the_applied_prefix() {

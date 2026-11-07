@@ -22,6 +22,28 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type TerminalOutputAppliedPayload = { session_name: string, subscriber_generation: number, stream_epoch: number, renderer_generation: number, applied_through: number, };
+export type TerminalOutputProgressPayload = { session_name: string, subscriber_generation: number, stream_epoch: number, renderer_generation: number, applied_through: number, };
+export type TerminalReconcileReason = "progress-ahead-of-issued" | "epoch-incompatible" | "renderer-replaced" | "retention-loss";
+export type TerminalReconcileAction = "resume" | "reattach";
+export type TerminalReconcileRequiredPayload = { session_name: string, 
+/**
+ * The Agent-minted subscription this notice is about.
+ */
+subscriber_generation: number, stream_epoch: number, 
+/**
+ * The renderer generation pinned by this subscription, when one has
+ * advanced a parser prefix. Absent means the subscription has not pinned
+ * one yet.
+ */
+renderer_generation?: number | null, 
+/**
+ * The Agent's authoritative stream head.
+ */
+head_seq: number, 
+/**
+ * The lowest sequence the Agent can still replay, when it stated one.
+ */
+first_available_seq?: number | null, reason: TerminalReconcileReason, action: TerminalReconcileAction, };
 
 // ── Operations ──
 
