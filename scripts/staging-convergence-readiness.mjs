@@ -30,6 +30,8 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   const expectedBase=action==='sync-main-to-lane'?plan.sha:plan.main_sha;
   if(pr.head.sha!==expectedHead||pr.base.sha!==expectedBase||baseSha!==expectedBase)
     return fail('STALE_PR_SHA');
+  if(pr.mergeable_state==='dirty' && pr.mergeable===false)
+    return fail('MERGE_CONFLICT');
   if(pr.mergeable!==true||pr.mergeable_state!=='clean')
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
   if(!Array.isArray(workflowRuns)||workflowRuns.length>100)
@@ -140,6 +142,8 @@ function selfTest(){
     plan,baseSha:b,workflowRuns:runs}).reason,/UNTRUSTED/);
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',
     plan,baseSha:a,workflowRuns:runs}).reason,/STALE/);
+  assert.equal(evaluatePull({pr:{...pr,mergeable:false,mergeable_state:'dirty'},
+    action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).reason,'MERGE_CONFLICT');
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',
     plan,baseSha:b,workflowRuns:runs.slice(1)}).reason,/MISSING/);
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,
