@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { resolveIdentity, validateRegistry } from '../harness/contract.mjs';
 import { advanceWorkflow } from './transition.mjs';
+import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2 } from './qwen-preflight-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -204,13 +205,21 @@ export function validateDevelopmentState(state) {
           r.dispatch_id!==item.id||
           !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE,
             CONTROLLED_REPAIR_FAILURE,
-            QWEN_PREFLIGHT_FAILURE.failure_code].includes(r.failure_code)||
+            QWEN_PREFLIGHT_FAILURE.failure_code,
+            QWEN_PREFLIGHT_FAILURE_V2.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
             state.issue!==QWEN_PREFLIGHT_FAILURE.issue||
             item.id!==QWEN_PREFLIGHT_FAILURE.action_id||
             item.task.agent_id!=='dev-qwen-01'||
             item.task.task!=='implement'||item.task.sha!==QWEN_PREFLIGHT_FAILURE.source_sha||
             r.source_run_id!==QWEN_PREFLIGHT_FAILURE.run_id))||
+          (r.failure_code===QWEN_PREFLIGHT_FAILURE_V2.failure_code&&(
+            state.issue!==QWEN_PREFLIGHT_FAILURE_V2.issue||
+            item.id!==QWEN_PREFLIGHT_FAILURE_V2.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_PREFLIGHT_FAILURE_V2.source_sha||
+            r.source_run_id!==QWEN_PREFLIGHT_FAILURE_V2.run_id))||
           (r.failure_code===CONTROLLED_REPAIR_FAILURE&&(
             item.id!==CONTROLLED_REPAIR_ACTION||
             r.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
@@ -964,6 +973,60 @@ export function recordAttestedQwenPreflightFailure(state,version,proof){
     status:'pending',attempts:0,receipt:null};
   return validateDevelopmentState({...state,version:version+1,
     outbox:[failed,successor]});
+}
+
+// The second exact pre-model Qwen failure: current main had no dedicated
+// Restore private key when the first successor Worker ran. This is a new,
+// independently attested source and therefore gets its own bounded successor
+// domain; it never re-POSTs an acknowledged Action.
+export function qwenPreflightSuccessorIdV2(issue,actionId,runId){
+  if(issue!==QWEN_PREFLIGHT_FAILURE_V2.issue||
+     actionId!==QWEN_PREFLIGHT_FAILURE_V2.action_id||
+     runId!==QWEN_PREFLIGHT_FAILURE_V2.run_id)
+    reject('unrecognized Qwen Restore-key preflight recovery identity');
+  return hash([issue,actionId,runId,'qwen-native-restore-key-preflight-recovery-v1']);
+}
+export function recordAttestedQwenPreflightFailureV2(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+  'Qwen Restore-key preflight failure evidence');
+  const source=QWEN_PREFLIGHT_FAILURE_V2;
+  const first=state.outbox.find(x=>x.id===
+    '61bced6ae498054e883d8a52d7398e7877852ef6a3c41e93644138a4b47dacb3');
+  const current=state.outbox.find(x=>x.id===source.action_id);
+  if(state.version!==version||state.version!==6||
+     state.issue!==source.issue||state.phase!=='ready'||
+     state.target_sha!==null||state.transitions.length!==0||
+     state.outbox.length!==2||state.assignments.developer!=='dev-qwen-01'||
+     first?.status!=='failed'||
+     first.receipt?.source_run_id!==42187623195||
+     first.receipt?.failure_code!=='qwen_native_sealing_public_key_missing'||
+     proof.verified!==true||proof.issue!==source.issue||
+     proof.action_id!==source.action_id||proof.run_id!==source.run_id||
+     proof.attempt!==1||proof.source_sha!==source.source_sha||
+     proof.run_head_sha!==source.run_head_sha||
+     proof.failure_code!==source.failure_code||
+     current?.status!=='dispatched'||current.attempts!==1||
+     current.task.role!=='developer'||current.task.task!=='implement'||
+     current.task.agent_id!=='dev-qwen-01'||
+     current.task.sha!==source.source_sha||
+     current.receipt?.status!=='verified'||
+     current.receipt?.dispatch_id!==source.action_id||
+     current.receipt?.source_run_id!==source.run_id)
+    reject('Qwen Restore-key recovery lacks exact failed Run/Store lineage');
+  const nextId=qwenPreflightSuccessorIdV2(source.issue,source.action_id,
+    source.run_id);
+  if(state.outbox.some(x=>x.id===nextId))
+    reject('Qwen Restore-key successor already exists');
+  const failed={...current,status:'failed',receipt:{
+    status:'failed',dispatch_id:current.id,source_run_id:source.run_id,
+    source_attempt:1,failure_code:source.failure_code,
+  }};
+  const successor={id:nextId,task:{...current.task},
+    status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===current.id?failed:x),successor]});
 }
 
 export function failedDispatch(state, expectedVersion, actionId) {

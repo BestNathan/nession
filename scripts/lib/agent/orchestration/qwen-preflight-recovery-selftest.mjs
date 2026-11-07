@@ -6,13 +6,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {SOURCE,verifyQwenPreflightFailure,
-  verifyQwenPreflightFailureLive} from './qwen-preflight-failure.mjs';
+import {SOURCE,SOURCE_V2,verifyQwenPreflightFailure,
+  verifyQwenPreflightFailureLive,verifyQwenPreflightFailureV2,
+  verifyQwenPreflightFailureV2Live} from './qwen-preflight-failure.mjs';
 import {startDevelopment,recordDispatchIntent,recordDispatch,
   recordAttestedQwenPreflightFailure,qwenPreflightSuccessorId,
+  recordAttestedQwenPreflightFailureV2,qwenPreflightSuccessorIdV2,
   validateDevelopmentState} from './outbox.mjs';
 import {writeIssueWorkflowState,readIssueWorkflowState} from './state-store.mjs';
-import {recoverAttestedQwenPreflight} from './dispatch-store.mjs';
+import {recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2}
+  from './dispatch-store.mjs';
 
 const repo='BestNathan/nession',a=SOURCE;
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-preflight-recovery-'));
@@ -48,6 +51,44 @@ const artifacts={total_count:1,artifacts:[{
 const log='2026-11-06T08:26:16Z   QWEN_RESUME_PUBLIC_KEY_B64: \n'+
   '2026-11-06T08:26:16Z Error: error:1E08010C:DECODER routines::unsupported\n'+
   '2026-11-06T08:26:16Z ##[error]Process completed with exit code 1.\n';
+// Second exact pre-model failure: the restore private key was absent on the
+// workflow head that ran the first successor Action.
+const a2=SOURCE_V2;
+const run2={id:a2.run_id,run_attempt:1,head_sha:a2.run_head_sha,
+  head_branch:'main',path:'.github/workflows/agent-develop.yml',
+  name:'Agent / Development',event:'workflow_dispatch',
+  status:'completed',conclusion:'failure',actor:{login:'github-actions[bot]'},
+  repository:{full_name:repo},head_repository:{full_name:repo}};
+const qwen2={id:128304345959,run_id:a2.run_id,run_attempt:1,
+  name:'qwen-developer',status:'completed',conclusion:'failure',steps:[
+    step('Checkout main-owned Qwen model-runner code only','success'),
+    step('Run actions/setup-node@v4','success'),
+    step('Require exact signed Qwen Store ACK before any model or source checkout','success'),
+    step('Validate pinned Qwen model, endpoint, public Session key and CLI version','failure'),
+    step('Prepare disposable exact-SHA tracked source without executing it','skipped'),
+    step('Fetch only bounded read-only Issue context outside model container','skipped'),
+    step('Attest latest committed Qwen Reviewer Issue comment before Repair','skipped'),
+    step('Build pinned, source-free isolated Qwen runtime','skipped'),
+    step('Download only same-Run encrypted Qwen Resume transfer','skipped'),
+    step('Open Qwen native Session on trusted host before model Docker','skipped'),
+    step('Execute Store-admitted Qwen CLI in unprivileged Docker','skipped'),
+    step('Upload only bounded patch and encrypted native Session','skipped'),
+    step('Upload canonical real Qwen Developer telemetry','success'),
+    step('Remove private transient restored Session and Issue data','success'),
+  ]};
+const jobs2={total_count:5,jobs:[
+  {id:11,run_id:a2.run_id,name:'claim',status:'completed',conclusion:'success'},
+  qwen2,...['qwen-restore','restore','developer'].map((name,i)=>({
+    id:i+12,run_id:a2.run_id,name,status:'completed',conclusion:'skipped'}))
+]};
+const artifacts2={total_count:1,artifacts:[{
+  name:'development-worker-claim-'+a2.run_id+'-1',
+  expired:false,digest:'sha256:'+'c'.repeat(64),
+  workflow_run:{id:a2.run_id,head_sha:a2.run_head_sha},
+}]};
+const log2='2026-11-07T04:43:35Z   QWEN_RESUME_PRIVATE_KEY_B64: \n'+
+  '2026-11-07T04:43:35Z Error: Qwen native Restore private key is not configured\n'+
+  '2026-11-07T04:43:35Z ##[error]Process completed with exit code 1.\n';
 try{
   const proof=verifyQwenPreflightFailure(run,jobs,artifacts,log);
   assert.deepEqual(proof,{verified:true,...a});
@@ -78,6 +119,40 @@ try{
     throw Error('unexpected trusted fetch '+url);
   };
   assert.deepEqual(await verifyQwenPreflightFailureLive('verified-token',mock),proof);
+
+  const proof2=verifyQwenPreflightFailureV2(run2,jobs2,artifacts2,log2);
+  assert.deepEqual(proof2,{verified:true,...a2});
+  for(const [source,j,aft,lg] of [
+    [{...run2,actor:{login:'attacker'}},jobs2,artifacts2,log2],
+    [{...run2,run_attempt:2},jobs2,artifacts2,log2],
+    [{...run2,head_sha:a2.source_sha},jobs2,artifacts2,log2],
+    [{...run2,event:'pull_request'},jobs2,artifacts2,log2],
+    [run2,{...jobs2,total_count:6},artifacts2,log2],
+    [run2,{...jobs2,jobs:jobs2.jobs.map(x=>x.name==='qwen-developer'?
+      {...x,conclusion:'success'}:x)},artifacts2,log2],
+    [run2,{...jobs2,jobs:jobs2.jobs.map(x=>x.name==='qwen-developer'?
+      {...x,steps:x.steps.map(s=>s.name==='Execute Store-admitted Qwen CLI in unprivileged Docker'?
+        {...s,conclusion:'success'}:s)}:x)},artifacts2,log2],
+    [run2,jobs2,{...artifacts2,total_count:2},log2],
+    [run2,jobs2,artifacts2,log2.replace(
+      'Qwen native Restore private key is not configured','ready')],
+    [run2,jobs2,artifacts2,log2.replace(
+      'QWEN_RESUME_PRIVATE_KEY_B64: ','QWEN_RESUME_PRIVATE_KEY_B64: sensitive')],
+  ])assert.throws(()=>verifyQwenPreflightFailureV2(source,j,aft,lg),
+    /trusted Qwen preflight recovery/);
+  const mock2=async url=>{
+    const key=url.replace('https://api.github.com/repos/'+repo,'');
+    const data=key==='/actions/runs/'+a2.run_id?run2:
+      key==='/actions/runs/'+a2.run_id+'/attempts/1/jobs?per_page=100'?jobs2:
+      key==='/actions/runs/'+a2.run_id+'/artifacts?per_page=100'?artifacts2:null;
+    if(key.includes('/logs'))return {
+      ok:true,headers:{get:()=>String(log2.length)},text:async()=>log2};
+    if(data)return {ok:true,json:async()=>data};
+    throw Error('unexpected trusted fetch '+url);
+  };
+  assert.deepEqual(await verifyQwenPreflightFailureV2Live('verified-token',mock2),
+    proof2);
+
   const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
   const first=startDevelopment(registry,{
     issue:a.issue,sha:a.source_sha,developer:'dev-qwen-01',
@@ -109,6 +184,34 @@ try{
     {...proof,...patch}),/agent outbox/);
   assert.throws(()=>recordAttestedQwenPreflightFailure(dispatched,2,proof),
     /stale|agent outbox/);
+
+  const successorId=qwenPreflightSuccessorId(a.issue,a.action_id,a.run_id);
+  const prepared2=recordDispatchIntent(final,4,successorId,{
+    status:'prepared',dispatch_id:successorId,issuer_run_id:42339621697,
+    ticket_sha256:'d'.repeat(64)});
+  const dispatched2=recordDispatch(prepared2,5,successorId,{
+    status:'verified',dispatch_id:successorId,source_run_id:a2.run_id});
+  assert.equal(dispatched2.version,6);
+  const final2=recordAttestedQwenPreflightFailureV2(dispatched2,6,proof2);
+  validateDevelopmentState(final2);
+  assert.equal(final2.version,7);
+  assert.equal(final2.outbox.length,3);
+  assert.equal(final2.outbox[1].status,'failed');
+  assert.equal(final2.outbox[1].receipt.failure_code,a2.failure_code);
+  assert.equal(final2.outbox[2].status,'pending');
+  assert.equal(final2.outbox[2].attempts,0);
+  assert.equal(final2.outbox[2].id,
+    qwenPreflightSuccessorIdV2(a2.issue,a2.action_id,a2.run_id));
+  assert.deepEqual(final2.outbox[2].task,dispatched2.outbox[1].task);
+  for(const patch of [
+    {run_id:a2.run_id+1},{run_head_sha:'0'.repeat(40)},
+    {source_sha:'0'.repeat(40)},
+    {failure_code:'qwen_native_sealing_public_key_missing'},{verified:false},
+  ])assert.throws(()=>recordAttestedQwenPreflightFailureV2(dispatched2,6,
+    {...proof2,...patch}),/agent outbox/);
+  assert.throws(()=>recordAttestedQwenPreflightFailureV2(dispatched2,5,proof2),
+    /stale|agent outbox/);
+
   const remote=path.join(root,'remote.git');
   const local=path.join(root,'work');
   execFileSync('git',['init','--bare',remote],{stdio:'ignore'});
@@ -139,7 +242,27 @@ try{
   assert.throws(()=>recoverAttestedQwenPreflight({
     remote:url,source:{...proof,run_id:2}}),
     /trusted dispatch Store/);
-  console.log('Qwen preflight recovery: real Store CAS, exact GitHub source, one successor, replay, compromised Run/log/artifact negatives pass');
+
+  for(const [state,previous] of [[prepared2,4],[dispatched2,5]]){
+    writeIssueWorkflowState(local,state,previous);
+    git(local,'add','-A');
+    git(local,'commit','-m','second Qwen failure source Issue v'+state.version);
+    git(local,'push','origin','agent-store');
+  }
+  const result2=recoverAttestedQwenPreflightV2({remote:url,source:proof2});
+  assert.equal(result2.status,'recovered');
+  assert.equal(result2.action_id,final2.outbox[2].id);
+  assert.equal(result2.state_version,7);
+  const replay2=recoverAttestedQwenPreflightV2({remote:url,source:proof2});
+  assert.equal(replay2.status,'replayed');
+  assert.equal(replay2.action_id,result2.action_id);
+  assert.equal(replay2.state_version,7);
+  git(local,'pull','--ff-only','origin','agent-store');
+  assert.deepEqual(readIssueWorkflowState(local,a2.issue).state,final2);
+  assert.throws(()=>recoverAttestedQwenPreflightV2({
+    remote:url,source:{...proof2,run_id:2}}),
+    /trusted dispatch Store/);
+  console.log('Qwen preflight recovery: real Store CAS, exact GitHub source, one successor, replay, compromised Run/log/artifact negatives pass; Restore-key recovery repeat passed');
 }finally{
   fs.rmSync(root,{recursive:true,force:true});
 }
