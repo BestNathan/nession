@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "be3c4e76d77e4b9749f83f6246f1d072e4762636ea159638885abde7892027c1",
+  "run_id": 42376756526,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-02",
+  "criterion_text": "In isolated P2P and Relay protocol cases, valid monotonic parser Progress advances only the matching subscriber's credited issued prefix without a response; a duplicate, older subscribed generation, foreign peer or unverified renderer never advances or contaminates any subscription credit; an authenticated claim beyond that subscriber's **actually issued** frontier cannot be accepted.",
+  "stage": "staging",
+  "target_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "case_tree_sha": "09f5d0a64af9e3982b4248f37336efa0a2c90946",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T13:26:52.154Z",
+  "finished_at": "2026-11-07T13:27:45.056Z",
+  "duration_ms": 52902,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Only the matching subscriber’s actually issued prefix can advance; every invalid, stale, duplicate or foreign claim is refused without a reply",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe: the Agent recorded a valid contiguous parser prefix only for the exact socket/subscription/epoch/renderer; duplicate, stale-generation, stale-epoch, stale-renderer and ahead-of-issued claims did not advance or contaminate any cursor, and the Relay forwarding function delivered the response-less progress frame to the Agent unchanged with no synthesized reply"
+        }
+      ],
+      "duration_ms": 46971,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42376756526,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "record_path": "runs/2026-11-07/42376756526-1/2877/SC-02.json",
+    "source_result_sha256": "dfcc3b48270ef4d3b190de65973fb8820c93ce97168405fdc2076969cec431bf"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42376756526-1",
+    "sha256": "dfcc3b48270ef4d3b190de65973fb8820c93ce97168405fdc2076969cec431bf",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "durability": "time-limited; object archival not configured"
+  }
+}

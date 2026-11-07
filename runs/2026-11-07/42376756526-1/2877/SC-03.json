@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6a0523e0dcf42e71874459d423363903f2a019fb0ce7459f9432ae1bb43db39f",
+  "run_id": 42376756526,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-03",
+  "criterion_text": "A provable live-subscription inconsistency emits **at most one active Reconcile Required episode**, carrying correct current binding/reason/head information; ordinary lag and stale/foreign/malformed reports or retired notifications do not trigger unnecessary recovery or leak current subscriber state.",
+  "stage": "staging",
+  "target_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "case_tree_sha": "dffd66c9550f8852a8c235d9f3a547af86e7119f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T13:27:45.056Z",
+  "finished_at": "2026-11-07T13:27:52.427Z",
+  "duration_ms": 7371,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One active Reconcile Required episode per proven inconsistency; stale, foreign, duplicate and ordinary-lag reports stay silent",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe: an ahead-of-issued claim opened exactly one episode and repeating it emitted nothing; a stale subscriber generation was ignored without disturbing the active episode; the notice payload named the current subscriber_generation, stream_epoch, reason, action, head_seq and retained floor, and the Web/Relay readers dropped malformed, foreign or stale notices"
+        }
+      ],
+      "duration_ms": 1508,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42376756526,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "record_path": "runs/2026-11-07/42376756526-1/2877/SC-03.json",
+    "source_result_sha256": "ff324cbd04f30cfd3beed1b7037f76e72e57de26a75f94a599374567d471fd08"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42376756526-1",
+    "sha256": "ff324cbd04f30cfd3beed1b7037f76e72e57de26a75f94a599374567d471fd08",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "durability": "time-limited; object archival not configured"
+  }
+}

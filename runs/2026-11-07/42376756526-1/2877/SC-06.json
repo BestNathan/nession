@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e45482b7ded1454e976eaa14915614296c514ef272973dbb297a791df130cefc",
+  "run_id": 42376756526,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-06",
+  "criterion_text": "Under the same controlled output/idle/pressure fixtures, new-notification mode generates **zero normal Progress-response frames** (vs v1 operation replies); measurements record total control-frame counts and per-subscriber issued-credit peaks, and the bounded workload completes without a new credit-cap disconnect, missed terminal event or unbounded recovery storm. Report measured counts, not an unmeasured percentage or absolute throughput claim.",
+  "stage": "staging",
+  "target_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "case_tree_sha": "41398ead489c46a5b4ce9be67048a6055aab4697",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T13:28:11.714Z",
+  "finished_at": "2026-11-07T13:28:17.617Z",
+  "duration_ms": 5903,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "No controlled CI measurement lane exists yet for frame counts and per-subscriber issued-credit peaks under burst/idle/slow-browser fixtures",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe: prerequisite is a reproducible runner comparison that records outgoing Progress, normal responses, reconcile notices, issued-credit peak, stalls, gaps and teardown under identical scripted workloads; not claimed by this Case"
+        }
+      ],
+      "duration_ms": 38,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42376756526,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "record_path": "runs/2026-11-07/42376756526-1/2877/SC-06.json",
+    "source_result_sha256": "52075f400f5a96c07ec4a83539b1c5246aa8961026929be8d2516497a3489882"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42376756526-1",
+    "sha256": "52075f400f5a96c07ec4a83539b1c5246aa8961026929be8d2516497a3489882",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "durability": "time-limited; object archival not configured"
+  }
+}

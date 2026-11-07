@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e82935e61077d522350c42f5e9c27305864f5899c210533dbedb83ae9c6e6483",
+  "run_id": 42376756526,
+  "run_attempt": 1,
+  "issue": 2877,
+  "criterion": "SC-05",
+  "criterion_text": "Direct P2P and Relay share identity and recovery semantics across disconnect, dropped Progress/notice, renderer replacement, route swap, two subscribers (one slow) and near-credit-exhaustion; recovery remains possible when a pre-close notice cannot be delivered, with bounded retries and no global producer stall.",
+  "stage": "staging",
+  "target_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "contract_sha256": "6dd7ceda47605bcae9437dd312abea871ecf1227147137789186de5261e1a012",
+  "case_revision": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+  "case_tree_sha": "b8cbe99f669a60ec859b3d8122e8d87c5b0c0c0b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-07T13:28:01.441Z",
+  "finished_at": "2026-11-07T13:28:11.713Z",
+  "duration_ms": 10272,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Direct P2P and Relay share identity and recovery semantics; slow/stale/retired subscriptions are isolated and transport loss still recovers",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe: P2P and Relay carried the same Agent-minted subscription identity; a route swap retired the old generation so its notice could not start recovery, while the fresh binding did; two subscribers kept independent credit (one stalled did not consume the other), capacity pressure failed only the affected subscriber, a lost transport re-began the relay and requested history, and the Relay forwarded the wire unchanged without stalling the producer"
+        }
+      ],
+      "duration_ms": 4403,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42376756526,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c1491cf11fb3daab2bf87673e1ac89ad84ab7dfe",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "record_path": "runs/2026-11-07/42376756526-1/2877/SC-05.json",
+    "source_result_sha256": "cb1a0482963f9a7741d6c81ff0f75c6e57f95e6a2b81141dc38935c4eacacfa9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42376756526-1",
+    "sha256": "cb1a0482963f9a7741d6c81ff0f75c6e57f95e6a2b81141dc38935c4eacacfa9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42376756526",
+    "durability": "time-limited; object archival not configured"
+  }
+}
