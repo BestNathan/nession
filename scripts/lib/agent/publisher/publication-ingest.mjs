@@ -282,7 +282,7 @@ export function applyQwenPublisherReviewHandoff({
     attempt:1,issue:record.issue,source_sha:readback.head_sha,
     developer_action_id:record.action_id,
     developer_run_id:record.worker_run_id,developer_attempt:1,
-    developer_source_sha:record.source_sha,
+    developer_source_sha:record.worker_source_sha,
     checkpoint_commit_sha:record.checkpoint_commit_sha,
     pr_number:readback.pull_request};
   const next=acceptAttestedQwenPublication(
