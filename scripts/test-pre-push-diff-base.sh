@@ -12,6 +12,12 @@
 #   ./scripts/test-pre-push-diff-base.sh --list     # list test names
 set -uo pipefail
 
+# Git hooks export GIT_DIR/GIT_WORK_TREE for the pushing repository. These
+# tests create throwaway repositories with `git -C`; ambient hook variables
+# would redirect those commands into the caller's real checkout (and even
+# commit/switch its branches), so clear them before any repository setup.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/git-diff-base.sh
 . "$SCRIPT_DIR/lib/git-diff-base.sh"
