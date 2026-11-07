@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "473218821ca57af4710495f363a37519d1c1a2fe",
+  "run_id": 42394894602,
+  "run_attempt": 1,
+  "plan_digest": "0a5aaef47d94211274826a052233035aecab1debec4a960c101018d00b0a0270",
+  "artifact_digest": "sha256:d7c883183c85a399e37df053c6d1688056ddfd5299662eaf6ce5bdfc018a6f4d",
+  "results": [
+    {
+      "id": "files-context-create",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 40
+    },
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 13,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 154
+    },
+    {
+      "id": "fixture-git",
+      "result": "Pass",
+      "discovered": 12,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 132
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 60
+    },
+    {
+      "id": "session-metadata",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 34
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 21,
+      "passed": 21,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 62
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "discovered": 36,
+      "passed": 36,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 441
+    }
+  ]
+}
