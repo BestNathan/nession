@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 // Authenticated GitHub workflow_run boundary for Issue E2E evidence.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
