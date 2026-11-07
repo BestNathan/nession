@@ -65,7 +65,7 @@ and Rust/Web builds remain workflow-owned prerequisites.
 
 ## Hook routing contract
 
-`gate-router-contract` tests both hooks, the canonical `gates/route` selector, and their live suites with mocked Git diffs and Gate execution. It asserts that fast commit checks exclude unit tests, push selects unit tests, owner changes retain their negative fixtures, and unknown suite Gates fail closed. An unprovable pre-commit diff fails; an unprovable pre-push diff broadens selection to its entire suite. Hook/Gate changes select `gate-runtime-contract` and `gate-router-contract` on push; Quality CI also runs them through `quality-tooling`.
+`gate-router-contract` tests both hooks, the canonical `gates/route` selector, and their live suites with mocked Git diffs and Gate execution. It asserts that fast commit checks exclude unit tests, push selects unit tests, owner changes retain their negative fixtures, and unknown suite Gates fail closed. Routing disables Git rename detection so both old and new paths are checked when a tracked file moves out of a Gate-owned tree. Unit-test runner scripts are explicit pre-push owners. An unprovable pre-commit diff fails; an unprovable pre-push diff broadens selection to its entire suite. Hook/Gate changes select `gate-runtime-contract` and `gate-router-contract` on push; Quality CI also runs them through `quality-tooling`.
 
 ## Release version contract
 
