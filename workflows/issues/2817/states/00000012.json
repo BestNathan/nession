@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "issue": 2817,
+  "version": 12,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "61bced6ae498054e883d8a52d7398e7877852ef6a3c41e93644138a4b47dacb3",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "149df703ff383e7bb6958eb6d1448f6ad7248ca6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "61bced6ae498054e883d8a52d7398e7877852ef6a3c41e93644138a4b47dacb3",
+        "source_run_id": 42187623195,
+        "source_attempt": 1,
+        "failure_code": "qwen_native_sealing_public_key_missing"
+      }
+    },
+    {
+      "id": "0ca813917a26c699af111593b3b3b855ea70d65bca447b78b33031a966f84ec4",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "149df703ff383e7bb6958eb6d1448f6ad7248ca6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "0ca813917a26c699af111593b3b3b855ea70d65bca447b78b33031a966f84ec4",
+        "source_run_id": 42339656510,
+        "source_attempt": 1,
+        "failure_code": "qwen_native_restore_private_key_missing"
+      }
+    },
+    {
+      "id": "ffeb663aade06266bf5986bb8cabd01a4f7c7d6740d6ccb93f0c340533d7a27e",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "149df703ff383e7bb6958eb6d1448f6ad7248ca6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "ffeb663aade06266bf5986bb8cabd01a4f7c7d6740d6ccb93f0c340533d7a27e",
+        "source_run_id": 42342792435,
+        "source_attempt": 1,
+        "failure_code": "qwen_worker_image_claude_binary_missing"
+      }
+    },
+    {
+      "id": "1eafaeb9a57b5ed5619fb0bfbce7474b11618239348ec334f142020b95ee9ef7",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "149df703ff383e7bb6958eb6d1448f6ad7248ca6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "1eafaeb9a57b5ed5619fb0bfbce7474b11618239348ec334f142020b95ee9ef7",
+        "source_run_id": 42344231027
+      }
+    }
+  ]
+}
