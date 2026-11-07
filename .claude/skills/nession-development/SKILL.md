@@ -34,6 +34,19 @@ git status
 
 The root must be clean. Do not edit, commit, create a feature branch, or run feature-development builds there.
 
+
+### Issue-based development preflight (`ship`)
+
+For a **new** development request (`ship`) tied to an existing GitHub Issue, check the live Issue **before creating a worktree, changing code, or launching a Developer**:
+
+1. Read the Issue's open/closed state and labels; check its linked **open implementation PRs** (including GitHub cross-references), not just branch-name guesses.
+2. If the Issue is closed, already development-complete/awaiting Acceptance, has `status:in-progress`, **or has an open implementation PR even without the label**, **STOP the new `ship`**. Do not create another branch/worktree, restart a Developer, or silently take over. Tell the user which Issue/PR is already in progress and ask them to explicitly request `continue`/`resume` if they intend to work on that existing development. A second `ship` by the same actor also stops.
+3. Otherwise add GitHub Issue label **`status:in-progress`** before starting implementation, and confirm the update succeeded. If the repository label does not exist or the update is denied, arrange its creation/permission through the repository owner; **do not silently proceed unmarked**. Do not change requirement approval or Acceptance evidence while marking development status.
+4. An explicit `continue`/`resume` of existing work keeps the same Issue/PR development context and label; it is **not** a new `ship`. If ownership or the existing work cannot be identified, stop and report what needs resolution rather than starting duplicate work.
+
+This is a **lightweight coordination rule**, not a distributed lock. Do not introduce a Claim object, CAS protocol, Store schema, or new workflow just for this label. For work with no linked Issue, the normal worktree workflow applies.
+
+
 ## 2. Create an isolated worktree
 
 Every feat/fix/chore/docs/version change uses its own worktree under `.claude/worktrees/`.
@@ -158,6 +171,8 @@ PR evidence should state:
 - known unverified gaps.
 
 ## 9. After merge
+
+For an Issue-based development task, remove `status:in-progress` **only after the implementation is actually finished and handed off** (normally after its final development PR is merged), or after an explicitly authorized cancellation with no ongoing development. If the task fails, pauses, or is blocked, **leave the label in place** so another `ship` will stop. If the Issue still has development work or an open implementation PR, keep the label. Removing a development label does **not** mark Acceptance criteria as passed or close the Issue; follow `nession-acceptance` and the existing lifecycle.
 
 A merged worktree/branch is finished. Do not keep developing on it.
 
