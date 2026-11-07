@@ -80,8 +80,7 @@ function autoDeploysStaging(content) {
   // triggered by push. Manual deployments and lane E2E consumers are excluded.
   // Comments do not establish deploy eligibility.
   const uncommented = content.replace(/^\s*#.*$/gm, '');
-  return /^\s*deploy-staging-gitops:\s*$/m.test(uncommented) &&
-    /(?:^|\n)\s*(?:\.\/)?scripts\/gitops-commit\.sh\s+staging(?:\s|$)/.test(uncommented);
+  return /(?:^|\n)\s*(?:\.\/)?scripts\/gitops-commit\.sh\s+staging(?:-[0-9]+)?(?:\s|$)/.test(uncommented);
 }
 
 export function discoverDeployBranches(entries) {
@@ -135,6 +134,9 @@ function calculatePlan() {
   fetchForComparison('main');
   const mainSha = shell('git', ['rev-parse', 'refs/remotes/origin/main']);
   if (!SHA.test(mainSha)) reject('invalid main SHA');
+  if (mainSha !== shell('git', ['rev-parse', 'HEAD'])) {
+    reject('checkout main SHA is stale relative to origin/main; reschedule on current trusted source');
+  }
   const states = branches.map(({ branch, deployment_workflows }) => {
     fetchForComparison(branch);
     const sha = shell('git', ['rev-parse', 'refs/remotes/origin/' + branch]);
@@ -248,6 +250,13 @@ function selfTest() {
     { file: 'deploy-manual.yml', content: 'on:\n  workflow_dispatch:\njobs:\n  deploy-staging-gitops:\n    steps:\n      - run: ./scripts/gitops-commit.sh staging deadbeef' },
     { file: 'test.yml', content: deploy.replace('gitops-commit.sh staging', 'gitops-commit.sh production') },
   ]), [{ branch: 'staging', deployment_workflows: ['release-staging.yml'] }]);
+  assert.deepEqual(discoverDeployBranches([
+    { file: 'release-staging.yml', content: deploy },
+    { file: 'deploy-staging-01.yml', content: deploy
+      .replace("['staging']", "['staging-01']")
+      .replace('deploy-staging-gitops:', 'deploy-staging-01:')
+      .replace('gitops-commit.sh staging ', 'gitops-commit.sh staging-01 ') },
+  ]).map(x => x.branch), ['staging', 'staging-01']);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['staging*']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['!main']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['main']")), /unsupported/);
