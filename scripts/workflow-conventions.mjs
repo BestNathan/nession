@@ -66,6 +66,7 @@ export const CATALOG = [
   ['metrics-replay-request', 'metrics-replay-request.yml', 'Metrics / Replay Request', 'metrics-replay-request.yml', 'Metrics / Replay Request', 'metrics'],
   ['metrics-repository', 'repo-metrics.yml', 'Repository Metrics', 'metrics-repository.yml', 'Metrics / Repository Health', 'metrics'],
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
+  ['release-staging-convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['deploy-identity', 'deploy-identity.yml', 'Deploy / Identity', 'deploy-identity.yml', 'Deploy / Identity', 'delivery'],
