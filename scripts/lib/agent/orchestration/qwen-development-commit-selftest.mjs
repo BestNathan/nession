@@ -129,8 +129,11 @@ try {
   const project=path.join(nativeDir,'projects','-workspace');
   fs.mkdirSync(project,{recursive:true});
   const sessionId='550e8400-e29b-41d4-a716-446655440000';
+  // #2817: a real native Session makes the committed checkpoint larger than
+  // a small publication record; the Publisher must still read its metadata.
   fs.writeFileSync(path.join(project,sessionId+'.jsonl'),
-    JSON.stringify({sessionId,type:'user',message:'PRIVATE_QWEN_MARKER'})+'\n');
+    JSON.stringify({sessionId,type:'user',message:'PRIVATE_QWEN_MARKER',
+      history:'q'.repeat(9000)})+'\n');
   const rsa=generateKeyPairSync('rsa',{modulusLength:2048});
   const publicKeyPem=rsa.publicKey.export({type:'spki',format:'pem'});
   const privateKeyPem=rsa.privateKey.export({type:'pkcs8',format:'pem'});
@@ -149,6 +152,8 @@ try {
   assert.ok(!JSON.stringify(accepted).includes('PRIVATE_QWEN_MARKER'));
   const cloned=path.join(home,'readback');
   git(home,'clone','--branch','agent-store',remote,cloned);
+  assert.ok(fs.statSync(path.join(cloned,'roles/developer/dev-qwen-01','issues',
+    String(issue),'checkpoints','00000001.json')).size>8192);
   const record=readIssueWorkflowState(cloned,issue);
   assert.equal(record.version,3);
   const original=record.state.outbox.find(a=>a.id===action.id);

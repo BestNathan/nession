@@ -28,11 +28,17 @@ function git(dir,...args){
   }).trim();}
   catch(e){reject('Git '+args[0]+' failed ('+(e.status??'unknown')+')');}
 }
-function json(root,file){
+const MAX_RECORD_BYTES=8192;
+// The committed native checkpoint embeds an encrypted Session bounded by the
+// Provider's 16 MiB plaintext budget, so its base64 envelope is intentionally
+// larger than a small publication record. Keep the tighter default for every
+// other Store JSON read.
+const MAX_CHECKPOINT_BYTES=32*1024*1024;
+function json(root,file,max=MAX_RECORD_BYTES){
   const full=path.join(root,file);
   if(!fs.existsSync(full))return null;
   const st=fs.lstatSync(full);
-  if(!st.isFile()||st.isSymbolicLink()||st.size>8192)
+  if(!st.isFile()||st.isSymbolicLink()||st.size>max)
     reject('untrusted immutable publication record');
   try{return JSON.parse(fs.readFileSync(full,'utf8'));}
   catch{reject('invalid immutable publication JSON');}
@@ -246,7 +252,7 @@ function confirmQwenSourceInStore(root,record){
   const prefix='roles/developer/dev-qwen-01/issues/'+record.issue;
   const saved=json(root,prefix+'/runs/'+record.worker_run_id+'-1.json');
   const cp=prefix+'/checkpoints/'+String(record.checkpoint_version).padStart(8,'0')+'.json';
-  const checkpoint=json(root,cp);
+  const checkpoint=json(root,cp,MAX_CHECKPOINT_BYTES);
   if(saved?.source_sha!==record.worker_source_sha||
       saved.workflow_sha!==record.worker_sha||
       saved.version!==record.checkpoint_version||
