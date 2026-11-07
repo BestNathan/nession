@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { resolveIdentity, validateRegistry } from '../harness/contract.mjs';
 import { advanceWorkflow } from './transition.mjs';
-import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2 } from './qwen-preflight-failure.mjs';
+import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
+  SOURCE_V3 as QWEN_PREFLIGHT_FAILURE_V3 } from './qwen-preflight-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -206,7 +207,8 @@ export function validateDevelopmentState(state) {
           !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE,
             CONTROLLED_REPAIR_FAILURE,
             QWEN_PREFLIGHT_FAILURE.failure_code,
-            QWEN_PREFLIGHT_FAILURE_V2.failure_code].includes(r.failure_code)||
+            QWEN_PREFLIGHT_FAILURE_V2.failure_code,
+            QWEN_PREFLIGHT_FAILURE_V3.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
             state.issue!==QWEN_PREFLIGHT_FAILURE.issue||
             item.id!==QWEN_PREFLIGHT_FAILURE.action_id||
@@ -220,6 +222,13 @@ export function validateDevelopmentState(state) {
             item.task.task!=='implement'||
             item.task.sha!==QWEN_PREFLIGHT_FAILURE_V2.source_sha||
             r.source_run_id!==QWEN_PREFLIGHT_FAILURE_V2.run_id))||
+          (r.failure_code===QWEN_PREFLIGHT_FAILURE_V3.failure_code&&(
+            state.issue!==QWEN_PREFLIGHT_FAILURE_V3.issue||
+            item.id!==QWEN_PREFLIGHT_FAILURE_V3.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_PREFLIGHT_FAILURE_V3.source_sha||
+            r.source_run_id!==QWEN_PREFLIGHT_FAILURE_V3.run_id))||
           (r.failure_code===CONTROLLED_REPAIR_FAILURE&&(
             item.id!==CONTROLLED_REPAIR_ACTION||
             r.source_run_id!==CONTROLLED_REPAIR_FAILED_RUN||
@@ -1019,6 +1028,64 @@ export function recordAttestedQwenPreflightFailureV2(state,version,proof){
     source.run_id);
   if(state.outbox.some(x=>x.id===nextId))
     reject('Qwen Restore-key successor already exists');
+  const failed={...current,status:'failed',receipt:{
+    status:'failed',dispatch_id:current.id,source_run_id:source.run_id,
+    source_attempt:1,failure_code:source.failure_code,
+  }};
+  const successor={id:nextId,task:{...current.task},
+    status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===current.id?failed:x),successor]});
+}
+
+// Third exact pre-model failure: the pinned Claude Code package was installed
+// with --ignore-scripts, so the native binary was absent and the isolated
+// Worker image could not be built. Retire only that acknowledged Action and
+// create one pending successor; never call the model or re-POST the Run.
+export function qwenPreflightSuccessorIdV3(issue,actionId,runId){
+  if(issue!==QWEN_PREFLIGHT_FAILURE_V3.issue||
+     actionId!==QWEN_PREFLIGHT_FAILURE_V3.action_id||
+     runId!==QWEN_PREFLIGHT_FAILURE_V3.run_id)
+    reject('unrecognized Qwen Worker-image preflight recovery identity');
+  return hash([issue,actionId,runId,'qwen-worker-image-preflight-recovery-v1']);
+}
+export function recordAttestedQwenPreflightFailureV3(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+  'Qwen Worker-image preflight failure evidence');
+  const source=QWEN_PREFLIGHT_FAILURE_V3;
+  const v1=state.outbox.find(x=>x.id===
+    '61bced6ae498054e883d8a52d7398e7877852ef6a3c41e93644138a4b47dacb3');
+  const v2=state.outbox.find(x=>x.id===QWEN_PREFLIGHT_FAILURE_V2.action_id);
+  const current=state.outbox.find(x=>x.id===source.action_id);
+  if(state.version!==version||state.version!==9||
+     state.issue!==source.issue||state.phase!=='ready'||
+     state.target_sha!==null||state.transitions.length!==0||
+     state.outbox.length!==3||state.assignments.developer!=='dev-qwen-01'||
+     v1?.status!=='failed'||
+     v1.receipt?.source_run_id!==42187623195||
+     v1.receipt?.failure_code!=='qwen_native_sealing_public_key_missing'||
+     v2?.status!=='failed'||
+     v2.receipt?.source_run_id!==42339656510||
+     v2.receipt?.failure_code!=='qwen_native_restore_private_key_missing'||
+     proof.verified!==true||proof.issue!==source.issue||
+     proof.action_id!==source.action_id||proof.run_id!==source.run_id||
+     proof.attempt!==1||proof.source_sha!==source.source_sha||
+     proof.run_head_sha!==source.run_head_sha||
+     proof.failure_code!==source.failure_code||
+     current?.status!=='dispatched'||current.attempts!==1||
+     current.task.role!=='developer'||current.task.task!=='implement'||
+     current.task.agent_id!=='dev-qwen-01'||
+     current.task.sha!==source.source_sha||
+     current.receipt?.status!=='verified'||
+     current.receipt?.dispatch_id!==source.action_id||
+     current.receipt?.source_run_id!==source.run_id)
+    reject('Qwen Worker-image recovery lacks exact failed Run/Store lineage');
+  const nextId=qwenPreflightSuccessorIdV3(source.issue,source.action_id,
+    source.run_id);
+  if(state.outbox.some(x=>x.id===nextId))
+    reject('Qwen Worker-image successor already exists');
   const failed={...current,status:'failed',receipt:{
     status:'failed',dispatch_id:current.id,source_run_id:source.run_id,
     source_attempt:1,failure_code:source.failure_code,
