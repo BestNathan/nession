@@ -30,6 +30,7 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
         <img
           src={blobUrl}
           alt={filename}
+          data-testid="image-viewer"
           className={cn(
             'transition-transform duration-100',
             fitToScreen ? 'object-contain max-w-full max-h-full' : '',

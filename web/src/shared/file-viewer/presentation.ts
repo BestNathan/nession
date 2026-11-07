@@ -92,7 +92,9 @@ export function resolveFilePresentation(
     return {
       kind: jsonKind,
       language: jsonKind === 'json' ? 'json' : 'plaintext',
-      canPreview: data?.kind === 'text' ? data.complete : true,
+      // The format supports a structured preview; whether the caller's data is
+      // complete enough to show one is decided by the caller's `complete` flag.
+      canPreview: true,
       jsonKind,
     };
   }
@@ -102,7 +104,7 @@ export function resolveFilePresentation(
     return {
       kind: 'markdown',
       language: 'markdown',
-      canPreview: data?.kind === 'text' ? data.complete : true,
+      canPreview: true,
       jsonKind: null,
     };
   }

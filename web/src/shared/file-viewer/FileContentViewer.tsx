@@ -71,7 +71,8 @@ export function FileContentViewer({
   const [internalMode, setInternalMode] = useState<FileViewMode>('preview');
 
   const requested: FileViewMode = mode && mode !== 'auto' ? mode : internalMode;
-  const canPreview = presentation.canPreview && data.kind === 'text' && data.complete;
+  const supportsPreview = presentation.canPreview && data.kind === 'text';
+  const canPreview = supportsPreview && data.complete;
   const effective: FileViewMode = canPreview ? requested : 'source';
 
   const chooseMode = useCallback(
@@ -133,7 +134,7 @@ export function FileContentViewer({
     return null;
   }
 
-  const showToggle = presentation.canPreview && data.complete;
+  const showToggle = canPreview;
   const structuredKind =
     presentation.kind === 'markdown' || presentation.kind === 'json' || presentation.kind === 'jsonl'
       ? presentation.kind
@@ -152,7 +153,7 @@ export function FileContentViewer({
           <ModeToggle mode={effective} onMode={chooseMode} />
         </div>
       ) : null}
-      {!data.complete && presentation.canPreview ? (
+      {!data.complete && supportsPreview ? (
         <p
           data-testid="file-view-incomplete"
           className={cn('shrink-0 border-b border-border/40 px-3 py-1 text-muted-foreground', chromeSansRole('metadata'))}
