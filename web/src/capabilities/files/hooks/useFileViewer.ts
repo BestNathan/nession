@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { toastError } from '@/shared/lib/errorHelpers';
-import { getJsonPreviewKind, getViewerType, parseExt, type JsonPreviewKind, type ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
+import type { JsonPreviewKind, ViewerType } from '@/shared/file-viewer/model/viewerRegistry';
+import { mediaHintForPath, resolveFilePresentation } from '@/shared/file-viewer';
 import {
   AUTO_APPLY_CONFIDENCE,
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
-  isMarkdownExt,
 } from '@/shared/markdown';
 import { readFileChunked, type FileOps } from '@/capabilities/files';
 import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
@@ -61,7 +61,6 @@ function replaceMediaBlob(
 }
 
 interface FileLoaderResult {
-  ext: string;
   viewerType: ViewerType | null;
   content: string;
   originalContent: string;
@@ -102,8 +101,7 @@ function useFileLoader(
     onDecodedRef.current = onDecoded;
   });
 
-  const ext = parseExt(path);
-  const viewerType: ViewerType | null = ext ? getViewerType(ext) : null;
+  const viewerType: ViewerType | null = mediaHintForPath(path);
 
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
@@ -212,7 +210,6 @@ function useFileLoader(
   }, [loadFile]);
 
   return {
-    ext,
     viewerType,
     content,
     originalContent,
@@ -325,10 +322,10 @@ function useFileSave({
  * tracking, and save. Extracted so the render body stays small.
  */
 export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
-  const ext = parseExt(path);
-  const jsonPreviewKind: JsonPreviewKind | null = ext ? getJsonPreviewKind(ext) : null;
+  const presentation = resolveFilePresentation({ path });
+  const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
   // Markdown detection — extension-based wins, content-based is fallback
-  const isMarkdownByExt = ext ? isMarkdownExt(ext) : false;
+  const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
   const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');

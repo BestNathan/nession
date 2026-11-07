@@ -451,6 +451,9 @@ fn sniff_media(path: &str, bytes: &[u8]) -> Option<(&'static str, MediaFamily)> 
     if bytes.starts_with(b"fLaC") {
         return Some(("audio/flac", MediaFamily::Audio));
     }
+    if matches!(bytes.get(..2), Some(&[0xFF, second]) if second == 0xF1 || second == 0xF9) {
+        return Some(("audio/aac", MediaFamily::Audio));
+    }
     if bytes.starts_with(b"ID3")
         || matches!(bytes.get(..2), Some(&[0xFF, second]) if second & 0xE0 == 0xE0)
     {
