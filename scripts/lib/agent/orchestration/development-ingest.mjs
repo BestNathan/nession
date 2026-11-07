@@ -242,6 +242,23 @@ export function resolveTrustedIngestSource({environment,event}){
       fail('only completed successful Worker may publish a checkpoint');
     return {run_id:source.id,source};
   }
+  if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
+     [2817,2906,2912].includes(event?.issue?.number)){
+    // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
+    // The exact Worker Run is re-read and re-verified by the live Ingest
+    // before any Store writer is used; this comment only locates it.
+    const command=String(event.comment?.body??'').match(
+      /^\/nession ingest-qwen issue=([1-9][0-9]{0,14}) worker_run=([1-9][0-9]{0,14})$/);
+    if(environment.GITHUB_ACTOR!=='BestNathan'||
+        event?.action!=='created'||
+        event.repository?.full_name!==REPO||
+        event.issue?.pull_request||
+        event.comment?.user?.login!=='BestNathan'||
+        !command||Number(command[1])!==event.issue.number||
+        !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
+      fail('manual Qwen Ingest requires exact owner/main Issue comment');
+    return {run_id:Number(command[2]),source:null,qwen_recovery:true,attempt:1};
+  }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'){
     if(environment.GITHUB_ACTOR!=='BestNathan'||
         event?.action!=='created'||
@@ -272,13 +289,14 @@ async function main(){
   if(process.argv.length===3&&process.argv[2]==='source'){
     const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
     const source=resolveTrustedIngestSource({environment:process.env,event});
-    console.log(JSON.stringify({run_id:source.run_id,attempt:source.source?.run_attempt??1}));
+    console.log(JSON.stringify({run_id:source.run_id,
+      attempt:source.source?.run_attempt??source.attempt??1}));
     return;
   }
   if(process.argv.length!==5||process.argv[2]!=='ingest')fail('usage: ingest CLAIM_ZIP RESULT_ZIP');
   const env=process.env,token=env.ACTIONS_READ_TOKEN;
   if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
-      !['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
+      !['workflow_run','issue_comment','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
       env.GITHUB_WORKFLOW!=='Store / Agent Development Ingest'||
       env.GITHUB_REF!=='refs/heads/main'||
       !HEX40.test(env.GITHUB_SHA??'')||
@@ -295,7 +313,16 @@ async function main(){
       run.run_attempt!==authority.source.run_attempt||
       run.head_sha!==authority.source.head_sha))
     fail('GitHub webhook/source Run mismatch');
-  if(!authority.source && !authority.continuation&&
+  if(authority.qwen_recovery &&
+     (run.id!==authority.run_id||run.run_attempt!==authority.attempt||
+      run.path!=='.github/workflows/agent-develop.yml'||
+      run.name!=='Agent / Development'||run.event!=='workflow_dispatch'||
+      run.status!=='completed'||run.conclusion!=='success'||
+      run.head_branch!=='main'||run.actor?.login!=='github-actions[bot]'||
+      run.repository?.full_name!==REPO||
+      run.head_repository?.full_name!==REPO))
+    fail('manual Qwen Ingest source is not an authenticated successful Worker Run');
+  if(!authority.source && !authority.continuation && !authority.qwen_recovery&&
       (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
@@ -334,7 +361,11 @@ async function main(){
   // Developer uses the new *trusted* candidate->Store CAS/Outbox path, not the
   // hard-coded historical #1997 Cursor checkpoint decoder.
   if(claim.inputs.agent_id==='dev-qwen-01'){
-    if(env.GITHUB_EVENT_NAME!=='workflow_run'||
+    // A workflow_run is the natural wake. The exact owner/main issue_comment
+    // lane is the recovery for a suppressed delivery; resolveTrustedIngestSource
+    // has already authenticated the comment and the live Worker Run/artifacts
+    // are re-read above. Both paths still require the dedicated native key.
+    if(!['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
         !env.QWEN_RESUME_PRIVATE_KEY_B64)
       fail('Qwen requires natural main Worker source and dedicated native key');
     const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);

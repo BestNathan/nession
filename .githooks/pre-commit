@@ -1,63 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Changed-file routing only. Every blocking invariant and repair instruction is
-# owned by one Gate ID; aggregation and exit status belong to gates/run.
-STAGED_ALL="$(git diff --cached --name-only)"
-GATE_IDS=(dev-workspace-commit)
-matches_staged() { grep -Eq "$1" <<< "$STAGED_ALL"; }
-
-if [ -z "$STAGED_ALL" ]; then
-  exec ./gates/run "${GATE_IDS[@]}"
-fi
-
-if matches_staged '\.rs$'; then
-  GATE_IDS+=(rust-format rust-clippy rust-test-unit test-isolation)
-fi
-if matches_staged '(\.rs$|^scripts/|^e2e/|^deploy/|^justfile$|^gates/checks/tmux-socket-isolation)'; then
-  GATE_IDS+=(tmux-socket-isolation)
-fi
-if matches_staged '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)'; then
-  GATE_IDS+=(tmux-socket-isolation-selftest)
-fi
-if matches_staged '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)'; then
-  GATE_IDS+=(dev-workspace-selftest)
-fi
-if matches_staged '^(scripts/check-test-isolation|gates/checks/test-isolation)'; then
-  GATE_IDS+=(test-isolation test-isolation-selftest)
-fi
-if matches_staged '(\.rs$|^web/src/|^scripts/protocol-gate|^gates/checks/protocol-integrity)'; then
-  GATE_IDS+=(protocol-integrity)
-fi
-if matches_staged '^(scripts/protocol-gate|gates/checks/protocol-integrity)'; then
-  GATE_IDS+=(protocol-integrity-selftest)
-fi
-if matches_staged '^(crates/nession-server/src/server/|scripts/server-handler-|gates/checks/server-handler-)'; then
-  GATE_IDS+=(server-handler-locality server-handler-locality-selftest server-handler-concurrency-selftest)
-fi
-if matches_staged '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)'; then
-  GATE_IDS+=(design-system-fast)
-fi
-if matches_staged '^web/.*\.(ts|tsx)$|^gates/checks/web-(eslint|typecheck|test-unit)\.sh$'; then
-  GATE_IDS+=(web-eslint web-typecheck web-test-unit)
-fi
-if matches_staged '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/pre-commit$|^\.github/workflows/quality\.yml$|^scripts/instruction-contract(\.test)?\.mjs$|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|quality-web|quality)\.gates$'; then
-  GATE_IDS+=(instruction-contract)
-fi
-# A Gate's own change must at least prove its script/catalog/runtime contract.
-if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$|scripts/gate-router-selftest\.mjs$)'; then
-  GATE_IDS+=(gate-runtime-contract gate-router-contract)
-fi
-
-# Screenshot relocation is an existing non-Gate maintenance operation.
-# Keep it independent of the blocking check result.
+# Non-Gate maintenance: relocate incidental screenshots before validating the
+# staged tree. All blocking policy and changed-file routing belong to gates/.
 if compgen -G "*.png" >/dev/null 2>&1; then
   ./scripts/move-screenshots.sh
 fi
-STAGED_ROOT_PNGS="$(printf '%s\n' "$STAGED_ALL" | grep -E '^[^/]+\.png$' || true)"
-if [ -n "$STAGED_ROOT_PNGS" ]; then
-  git reset -q HEAD -- $STAGED_ROOT_PNGS 2>/dev/null || true
+staged_root_pngs="$(git diff --cached --name-only | grep -E '^[^/]+\.png$' || true)"
+if [ -n "$staged_root_pngs" ]; then
+  git reset -q HEAD -- $staged_root_pngs 2>/dev/null || true
   echo "→ unstaged root PNGs (moved to .playwright-mcp/screenshots/)"
 fi
 
-exec ./gates/run "${GATE_IDS[@]}"
+exec ./gates/route pre-commit

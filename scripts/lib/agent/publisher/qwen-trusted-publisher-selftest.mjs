@@ -25,6 +25,10 @@ const event={action:'completed',workflow_run:{
   id:88001,head_sha:sha,conclusion:'success'}};
 assert.equal(assertQwenPublisherRunAuthority(env,event,ingester,receipt)
   .source_run_id,87001);
+// A manually recovered Ingest Run is still authenticated by its exact path,
+// name, head, artifact and receipt; only the event shape differs.
+assert.equal(assertQwenPublisherRunAuthority(env,event,
+  {...ingester,event:'issue_comment'},receipt).source_run_id,87001);
 for(const bad of [
   {env:{...env,GITHUB_EVENT_NAME:'pull_request'}},
   {env:{...env,GITHUB_REF:'refs/pull/99/merge'}},
@@ -34,6 +38,7 @@ for(const bad of [
   {event:{...event,workflow_run:{...event.workflow_run,
     conclusion:'failure'}}},
   {ingester:{...ingester,head_branch:'staging'}},
+  {ingester:{...ingester,event:'pull_request'}},
   {ingester:{...ingester,run_attempt:2}},
   {ingester:{...ingester,conclusion:'failure'}},
   {ingester:{...ingester,

@@ -4,7 +4,7 @@
 # Answers: "what code was introduced by this branch / this push?"
 # rather than: "what differs between this branch and main?"
 #
-# Sourced by .githooks/pre-push. Also tested directly by
+# Sourced by gates/route for pre-push. Also tested directly by
 # scripts/test-pre-push-diff-base.sh.
 #
 # Precedence for a NEW branch (no remote ref yet):

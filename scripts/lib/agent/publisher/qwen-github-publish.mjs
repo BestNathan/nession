@@ -40,6 +40,7 @@ function verifiedSpec(preflight,intent){
       e.worker_run_id!==record.worker_run_id||
       e.worker_run_attempt!==1||e.worker_sha!==record.worker_sha||
       e.source_sha!==record.source_sha||
+      e.worker_source_sha!==record.worker_source_sha||
       e.checkpoint_version!==record.checkpoint_version||
       e.checkpoint_commit_sha!==record.checkpoint_commit_sha||
       e.ciphertext_sha256!==record.checkpoint_ciphertext_sha256||

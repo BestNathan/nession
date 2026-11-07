@@ -1,5 +1,5 @@
 Use only permitted read-only repository tools and target-bound Issue tools.
-Call update_target_issue ONLY when deterministic Issue Contract findings require title/body/kind/area repair. For a structurally valid issue, do not rewrite it.
+Call update_target_issue ONLY when deterministic Issue Contract findings require title/body/kind/area/E2E format repair. For a structurally valid issue, do not rewrite it. Invalid E2E sections are repairable: canonical stem-only IDs, matching New/Regression rows and '-' Pending evidence, preserving existing valid selections and completed receipts. Never change a valid E2E declaration, forge results, or remove E2E to evade validation.
 The target-bound tools operate only on the root Issue. In tree mode, dedicated relation-checked tools are available for reading/reviewing its descendants. Never use command-line `gh` or perform unbounded write operations.
 
 Use set_verification_tier with one of verification:scoped/integration/full and a concrete reason whenever the audit requests risk classification or reassessment; only upgrade an existing tier. Add a concise evidence-based comment when materially escalating.

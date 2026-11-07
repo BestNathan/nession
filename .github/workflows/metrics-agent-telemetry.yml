@@ -17,6 +17,7 @@ on:
       - Agent / Staging Developer Canary
       - Agent / Review
       - Agent / E2E Failure Analysis
+      - Agent / Staging Convergence Review
       - Agent / Cursor Resume Seed
       - Agent / Cursor Resume Verify
       - Agent / Claude Resume Seed
@@ -65,6 +66,9 @@ jobs:
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
             (github.event.workflow_run.name == 'Agent / E2E Failure Analysis' &&
+             github.event.workflow_run.event == 'workflow_dispatch' &&
+             github.event.workflow_run.head_branch == 'main') ||
+            (github.event.workflow_run.name == 'Agent / Staging Convergence Review' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
             (github.event.workflow_run.name == 'Agent / Provider Smoke' &&

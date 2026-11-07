@@ -318,6 +318,12 @@ function selfTest() {
   assert.ok(auditIssue(recent).errors.some(e=>e.includes('missing Knowledge Impact')));
   const assessed={...recent,body:recent.body+'\n\n### Knowledge Impact\n- Decision: None\n- Related knowledge: none, checked project ledger\n- Reason: existing architectural truth remains unchanged\n- Owner and timing: Issue author at creation\n- Evidence: relevant canonical doc and exact SHA reviewed\n'};
   assert.equal(auditIssue(assessed).ok,true,auditIssue(assessed).errors.join('; '));
+  // Live #2851: visual Markdown emphasis is not a canonical field key, and
+  // the Decision enum must not inherit a trailing prose period.
+  assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Decision: None','- **Decision:** None')})
+    .errors.some(e=>e.includes('Knowledge Impact missing decision')));
+  assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Decision: None','- Decision: Update.')})
+    .errors.some(e=>e.includes('unsupported Decision Update.')));
   assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Decision: None','- Decision: Unknown')}).errors.some(e=>e.includes('unsupported Decision')));
   assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Owner and timing: Issue author at creation','')}).errors.some(e=>e.includes('missing owner and timing')));
   console.log('issue-contract self-test: base cases and four knowledge impact compatibility/negative fixtures passed');

@@ -5,11 +5,20 @@ import { fetchGitHubIssue } from './read.mjs';
 
 const CONTRACT_LABELS = new Set([...KIND_LABELS, ...AREA_LABELS]);
 
+// Typed errors identify rejected, non-mutating Audit proposals. Error text
+// alone must not grant a retry to an unrelated GitHub/tooling failure.
+function rejectedAuditProposal(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 // One contract for proposal completion and the final trusted mutation tool.
 // Diagnostics expose only violation classes, never raw model output or labels.
 export function validateContractLabels(labels) {
   if (!Array.isArray(labels)) {
-    throw new Error('Issue labels must be distinct canonical kind/area labels (not_array)');
+    throw rejectedAuditProposal('ISSUE_AUDIT_LABEL_CONTRACT',
+      'Issue labels must be distinct canonical kind/area labels (not_array)');
   }
   const violations = [];
   if (labels.some((label) => typeof label !== 'string')) violations.push('non_string');
@@ -20,7 +29,8 @@ export function validateContractLabels(labels) {
   if (labels.filter((label) => KIND_LABELS.has(label)).length !== 1) violations.push('kind_count');
   if (!labels.some((label) => AREA_LABELS.has(label))) violations.push('missing_area');
   if (violations.length) {
-    throw new Error('Issue labels must be distinct canonical kind/area labels (' + violations.join(', ') + ')');
+    throw rejectedAuditProposal('ISSUE_AUDIT_LABEL_CONTRACT',
+      'Issue labels must be distinct canonical kind/area labels (' + violations.join(', ') + ')');
   }
 }
 
@@ -55,10 +65,52 @@ export function enforceE2EReadOnly(currentBody, candidateBody) {
   const before = parseIssueE2E(currentBody);
   const after = parseIssueE2E(candidateBody);
   if (!before && !after) return;
-  if (!before || !after || before.errors.length || after.errors.length ||
-      before.digest !== after.digest ||
-      JSON.stringify([...before.rows]) !== JSON.stringify([...after.rows])) {
-    throw new Error('Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
+
+  const denied = () => {
+    // A "none" declaration is not an actual selected test ID. Give the
+    // correction model a fixed, bounded diagnosis without exposing raw Issue
+    // or model-authored text; the same guard still rejects the whole proposal.
+    const hasNonePlaceholder=before?.selectedIds?.length===0 &&
+      before.newNone!==null && before.regressionNone!==null &&
+      after?.rows?.has('none');
+    const detail=hasNonePlaceholder
+      ? ' (E2E Report none placeholders are not selected IDs; remove those data rows and retain the header and both - none: justifications)'
+      : '';
+    throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
+      'Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review'+detail);
+  };
+  // A structurally invalid source is an audit input, not proof of an
+  // unauthorized write. The candidate, however, MUST be fully valid.
+  // Do not let the Agent delete an invalid declaration to evade validation
+  // or add an entirely new E2E plan to a legacy Issue that had none.
+  if (!before || !after || after.errors.length) denied();
+
+  if (before.errors.length === 0) {
+    // Once the declaration is valid, all E2E selection and result changes
+    // belong to the trusted proposal / evidence projector, not Issue Audit.
+    if (before.digest !== after.digest ||
+        JSON.stringify([...before.rows]) !== JSON.stringify([...after.rows])) denied();
+    return;
+  }
+
+  // Allow repair of malformed declarations / Pending placeholders, but never
+  // silently drop already parseable obligations or rewrite completed evidence.
+  // Ill-formed IDs can be canonicalized (e.g. foo.spec.ts -> foo), whereas
+  // valid existing IDs cannot be replaced to alter test scope.
+  for (const id of before.newIds) if (!after.newIds.includes(id)) denied();
+  for (const id of before.regressionIds) if (!after.regressionIds.includes(id)) denied();
+  if (before.newNone !== null && before.newNone !== after.newNone) denied();
+  if (before.regressionNone !== null && before.regressionNone !== after.regressionNone) denied();
+
+  // Neither downgrade/delete an existing completed row nor mint a new
+  // Pass/Fail/Error receipt. Canonical Pending evidence may become "-".
+  for (const [id, row] of before.rows) {
+    if (row.result !== 'Pending' &&
+        JSON.stringify(row) !== JSON.stringify(after.rows.get(id))) denied();
+  }
+  for (const [id, row] of after.rows) {
+    if (row.result !== 'Pending' &&
+        JSON.stringify(row) !== JSON.stringify(before.rows.get(id))) denied();
   }
 }
 

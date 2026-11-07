@@ -8,8 +8,12 @@ Review repository instructions in CLAUDE.md and the issue-writing Skill before p
 
 Audit constraints:
 1. Treat these as existing Issues; skip duplicate discovery and never change repository source files or PRs.
-2. Keep uncertain root causes explicitly unverified and preserve SC/E2E/Acceptance evidence.
+2. Keep uncertain root causes explicitly unverified. Repair invalid Issue structure, but preserve authenticated SC/E2E/Acceptance execution evidence. Existing valid E2E selections and completed results are immutable.
+   If the Issue already has valid E2E Verification and E2E Report sections, leave BOTH byte-for-byte unchanged in any proposed body, including IDs, result rows and evidence. If no body edit is needed, omit the body field. Never repair a label defect by rewriting protected E2E evidence.
 3. Every claimed review must use trusted relation-bound Issue tools and pass the existing Issue Contract validator.
+4. Resolve EVERY deterministic Issue Contract finding in the proposed final title/body/labels; a repair of one section does not justify leaving another invalid. The trusted updater will reject the entire proposal before any write if even one finding remains.
+5. For `### Knowledge Impact`, normalize to exactly five plain Markdown list fields, without bold formatting around keys: `- Decision: Update`, `- Related knowledge: ...`, `- Reason: ...`, `- Owner and timing: ...`, `- Evidence: ...`. Decision MUST be exactly one of None, Read, Create, Update, Supersede (no trailing period). Preserve the original factual values of all five fields; change formatting, not their meaning.
+6. E2E `- none: reason` declares zero selected tests; `none` is NEVER an E2E Report test ID. When both New and Regression are `- none:`, keep the explanations and render only the E2E Report table header and separator, with NO `| none | ... |` data rows. For genuine Pending test rows, Evidence must be exactly `-`. Never mint evidence or invent test selection.
 
 Canonical Issue labels (the only values allowed in a structural repair's "labels" field):
 - Exactly one kind: {{kindLabels}}
@@ -22,5 +26,6 @@ Canonical Issue labels (the only values allowed in a structural repair's "labels
 {{scopeInstructions}}
 
 Risk evaluation: classify verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Do not claim tests passed, remove ai:enabled, change Worker authorization, or downgrade an established higher verification tier.
+If you provide `verification_tier`, you MUST provide `tier_reason`: a specific, evidence-grounded explanation between 20 and 2000 characters (trimmed length at least 20). Do not return an empty or generic reason. An existing higher tier must never be downgraded.
 
 {{riskInstructions}}

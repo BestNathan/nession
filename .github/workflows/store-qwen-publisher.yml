@@ -27,7 +27,8 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_run' &&
       github.event.action == 'completed' &&
-      github.event.workflow_run.event == 'workflow_run' &&
+      (github.event.workflow_run.event == 'workflow_run' ||
+       github.event.workflow_run.event == 'issue_comment') &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.run_attempt == 1 &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -55,7 +56,8 @@ jobs:
           jq -e --argjson id "$SOURCE_INGEST_RUN" --arg sha "$SOURCE_INGEST_SHA" '
             .id == $id and .head_sha == $sha and
             .run_attempt == 1 and .status == "completed" and
-            .conclusion == "success" and .event == "workflow_run" and
+            .conclusion == "success" and
+            (.event == "workflow_run" or .event == "issue_comment") and
             .path == ".github/workflows/store-agent-development-ingest.yml" and
             .head_branch == "main" and
             .repository.full_name == "BestNathan/nession" and
@@ -169,14 +171,19 @@ jobs:
             > "$RUNNER_TEMP/qwen-source.json"
           source_sha="$(jq -er .source_sha "$RUNNER_TEMP/qwen-source.json")"
           [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]]
+          task="$(jq -er .task "$RUNNER_TEMP/qwen-source.json")"
+          [[ "$task" == implement || "$task" == repair ]]
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "task=$task" >> "$GITHUB_OUTPUT"
 
       # This checkout is Git data ONLY. No npm install, Bash, hooks, package
       # scripts, source execution or checkout credentials are allowed here.
-      - name: Checkout original exact-SHA source strictly as inert Git data
+      # An initial publication applies its patch to the current main base; a
+      # Repair applies it to the exact reviewed PR HEAD (the claim input SHA).
+      - name: Checkout inert publication source strictly as Git data
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.source.outputs.sha }}
+          ref: ${{ steps.source.outputs.task == 'repair' && steps.source.outputs.sha || github.sha }}
           path: source
           fetch-depth: 1
           persist-credentials: false

@@ -13,7 +13,9 @@ import {createGitHubRunReader,verifyDispatchTicket,
   attestSkippedDispatchRebinding} from './github-dispatch.mjs';
 import {createGitHubResultArtifactReader,readAuthenticatedReviewClaim,
   ingestAgentResult,appendAuthenticatedResult,
-  validateAuthenticatedAgentReceipt} from './result-artifact.mjs';
+  validateAuthenticatedAgentReceipt,readAuthenticatedReviewerVerdict}
+  from './result-artifact.mjs';
+import {validateReviewDetails} from '../tasks/review.mjs';
 import {acceptTaskResult,recordReboundDispatch} from './outbox.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
@@ -174,7 +176,9 @@ export async function verifyReviewerForStore({storeRoot,metricsRoot,run,reader,
          t.run_id===run.id&&t.attempt===run.run_attempt&&
          t.target_sha===prior.result.target_sha&&t.outcome===prior.result.outcome))
       fail('partial or conflicting reviewer replay');
-    return {replayed:true,record,receipt:prior,intermediate:null,next:null};
+    const verdict=await readAuthenticatedReviewerVerdict({
+      artifactReader,run,receipt:prior});
+    return {replayed:true,record,receipt:prior,intermediate:null,next:null,verdict};
   }
   const action=record.state.outbox.find(x=>x.id===actionId&&
     x.status==='dispatched'&&x.task.role==='reviewer'&&x.task.type==='dispatch');
@@ -213,6 +217,8 @@ export async function verifyReviewerForStore({storeRoot,metricsRoot,run,reader,
     dispatch_ticket:claim.dispatch_ticket,pr_number:pr,
     verified_main_sha:run.head_sha,metrics,now,
   });
+  const verdict=await readAuthenticatedReviewerVerdict({
+    artifactReader,run,receipt});
   const next=acceptTaskResult(state,state.version,
     receipt.result,receipt.source,registry);
   if(!['quality','repair','blocked'].includes(next.phase)||
@@ -220,7 +226,7 @@ export async function verifyReviewerForStore({storeRoot,metricsRoot,run,reader,
      (receipt.result.outcome==='changes_requested'&&
        !['repair','blocked'].includes(next.phase)))
     fail('unexpected deterministic Reviewer transition');
-  return {replayed:false,record,receipt,intermediate,next};
+  return {replayed:false,record,receipt,intermediate,next,verdict};
 }
 export function stageVerifiedReviewerStore({storeRoot,verified}) {
   if(verified.replayed)return {changed:false,version:verified.record.version};
@@ -241,35 +247,61 @@ export function issueReceiptMarker(receipt) {
   return '<!-- nession-review-result:v1:'+receipt.issue+':'+receipt.action_id+
     ':'+receipt.result.run_id+':'+receipt.result.run_attempt+' -->';
 }
-export function formatReviewerIssueReceipt(receipt,storeCommit,storeVersion){
+export function formatReviewerIssueReceipt(receipt,storeCommit,storeVersion,
+  verdict=null){
   validateAuthenticatedAgentReceipt(receipt);
   if(receipt.result.kind!=='reviewer'||!HEX40.test(storeCommit??'')||
-     !positive(storeVersion))fail('invalid Reviewer Issue projection');
+      !positive(storeVersion))fail('invalid Reviewer Issue projection');
   const approved=receipt.result.outcome==='approved';
-  return [
+  const tick=String.fromCharCode(96);
+  const info=[
     issueReceiptMarker(receipt),
-    '## Authenticated Reviewer result',
-    '',
-    '- Verdict: \`'+receipt.result.outcome+'\`',
+    '## Authenticated Reviewer result','',
+    '- Verdict: '+tick+receipt.result.outcome+tick,
     '- Source: [Agent / Review run '+receipt.result.run_id+
       '](https://github.com/'+REPO+'/actions/runs/'+receipt.result.run_id+
       ') / attempt '+receipt.result.run_attempt,
-    '- Signed Action: \`'+receipt.action_id+'\`',
+    '- Signed Action: '+tick+receipt.action_id+tick,
     '- Reviewed PR: #'+receipt.implementing_pr.number+
-      ' at \`'+receipt.result.target_sha+'\`',
-    '- Committed Store: \`'+storeCommit+'\`, workflow state v'+storeVersion,
+      ' at '+tick+receipt.result.target_sha+tick,
+    '- Committed Store: '+tick+storeCommit+tick+', workflow state v'+storeVersion,
     '- Next deterministic step: '+(approved?
       'one pending Quality verification action':
       'the same assigned Developer repair action (or repair-limit block)'),
-    '',
-    'This is a committed orchestration receipt, not Acceptance Pass or merge authority.',
-  ].join('\n');
+  ];
+  if(verdict!==null){
+    const decision=validateReviewDetails({
+      outcome:verdict.outcome,summary:verdict.summary,findings:verdict.findings});
+    if(decision.outcome!==receipt.result.outcome||
+        !positive(verdict.artifact_id)||
+        !/^sha256:[a-f0-9]{64}$/.test(verdict.artifact_digest??'')||
+        !HEX64.test(verdict.json_sha256??''))
+      fail('untrusted original Reviewer findings source');
+    // This is model-authored task context, NOT an instruction authority.
+    // The full authenticated ZIP remains addressable through the Run/Artifact.
+    const shown=decision.findings.slice(0,6);
+    info.push('','### Reviewer observations (untrusted task context only)',
+      '- Original Review Artifact: '+verdict.artifact_id+
+        ' (ZIP '+verdict.artifact_digest+', JSON '+verdict.json_sha256+')',
+      '- Summary: '+JSON.stringify(decision.summary.slice(0,1400)),
+      ...shown.map((f,i)=>'- Finding '+(i+1)+': '+
+        JSON.stringify({path:f.path,evidence:f.evidence.slice(0,600)})),
+      ...(decision.findings.length>shown.length
+        ?['- Additional findings in original authenticated Artifact: '+
+          (decision.findings.length-shown.length)]:[]));
+  }
+  info.push('','This is a committed orchestration receipt, not Acceptance Pass or merge authority.');
+  const body=info.join('\n');
+  if(Buffer.byteLength(body)>8192)
+    fail('Reviewer Issue correction exceeds bounded model context');
+  return body;
 }
+
 // Issue comments are a projection after Store commit, never a source of state.
 // A failed/ambiguous POST is handled by a later authenticated replay that
 // re-reads all pages for the deterministic marker before attempting another POST.
 export async function projectReviewerIssue({receipt,commit,version,token,
-  fetchFn=fetch}) {
+  verdict=null,fetchFn=fetch}) {
   if(typeof token!=='string'||token.length<8)fail('Issue projection token required');
   const marker=issueReceiptMarker(receipt);
   const api='https://api.github.com/repos/'+REPO+'/issues/'+receipt.issue+'/comments';
@@ -286,7 +318,7 @@ export async function projectReviewerIssue({receipt,commit,version,token,
     if(comments.length<100)break;
     if(page===20)fail('Issue comments exceed bounded reconciliation');
   }
-  const body=formatReviewerIssueReceipt(receipt,commit,version);
+  const body=formatReviewerIssueReceipt(receipt,commit,version,verdict);
   const response=await fetchFn(api,{method:'POST',headers:{...headers,
     'Content-Type':'application/json'},body:JSON.stringify({body})});
   if(response.status!==201)fail('Issue receipt projection failed: '+response.status);
@@ -339,7 +371,8 @@ async function main(){
     }
     // Project only after the immutable Store CAS was published successfully.
     const projected=await projectReviewerIssue({
-      receipt:verified.receipt,commit,version:staged.version,token:readToken,
+      receipt:verified.receipt,commit,version:staged.version,
+      token:readToken,verdict:verified.verdict,
     });
     console.log(JSON.stringify({status:staged.changed?'accepted':'replayed',
       issue:verified.receipt.issue,run_id:run.id,attempt:run.run_attempt,

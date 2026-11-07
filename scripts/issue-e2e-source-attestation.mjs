@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 // Authenticated GitHub workflow_run boundary for Issue E2E evidence.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,10 +42,19 @@ export function verifySource(event,run,pr,plan,results,artifact) {
     workflow_verified:true,artifact_digest:artifact.digest};
 }
 
+// The producer selected tests relative to the *current target branch tip*
+// (issue-e2e-selection-entry.mjs currentBaseSha), not Git's merge-base.
+// Recomputing from merge-base on a divergent main->staging PR incorrectly
+// changes the plan digest after a legitimately passing selected run.
+export function assertSourcePlanBase(pr,claimed) {
+  assert.match(pr?.base?.sha??'',SHA);
+  assert.match(claimed?.base_sha??'',SHA);
+  assert.equal(claimed.base_sha,pr.base.sha,
+    'target branch advanced after source run; rerun E2E for the new base');
+  return pr.base.sha;
+}
 export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
-  const effectiveBase=execFileSync('git',['merge-base',pr.base.sha,pr.head.sha],{
-    cwd:sourceRoot,encoding:'utf8',
-  }).trim();
+  const effectiveBase=assertSourcePlanBase(pr,claimed);
   const rebuilt = buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
   assert.equal(claimed.mode,rebuilt.mode);
   assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
@@ -104,6 +112,16 @@ function selfTest(){
   const results={target_sha:sha,plan_digest:plan.plan_digest,run_id:77,run_attempt:1,results:[]};
   const artifact={id:1,name:'issue-e2e-verification',expired:false,digest:'sha256:'+'d'.repeat(64)};
   assert.equal(verifySource(event,run,pr,plan,results,artifact).workflow_verified,true);
+  // Source and Ingest must use the SAME GitHub-authenticated target tip,
+  // even when the PR's merge-base is an unrelated older commit. Stale targets
+  // and artifact-selected arbitrary bases are always denied.
+  assert.equal(assertSourcePlanBase(pr,plan),base);
+  assert.throws(()=>assertSourcePlanBase(
+    {...pr,base:{...pr.base,sha:'e'.repeat(40)}},plan),
+    /target branch advanced/);
+  assert.throws(()=>assertSourcePlanBase(pr,{...plan,base_sha:'f'.repeat(40)}),
+    /target branch advanced/);
+
   assert.throws(()=>verifySource(event,run,{...pr,head:{...pr.head,sha:base}},plan,results,artifact),/stale/);
   assert.throws(()=>verifySource(event,{...run,path:'bad.yml'},pr,plan,results,artifact));
   assert.throws(()=>verifySource(event,run,pr,plan,{...results,run_attempt:2},artifact));

@@ -6,6 +6,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
+import {collectAuthenticatedQwenChain,selfTestQwenChainEvidence}
+  from './acceptance-qwen-chain-evidence.mjs';
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { collectRoutingProof } from './acceptance-routing-proof.mjs';
@@ -47,12 +49,13 @@ import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-histor
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
+import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
 import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
-import {collectIssueAuditReadback,selfTestIssueAuditReadback} from './acceptance-issue-audit-readback.mjs';
+import {collectIssueAuditReadback,selfTestIssueAuditReadback,SIDEBAR_AUDIT_REPAIR_PROOF} from './acceptance-issue-audit-readback.mjs';
 import {collectRunStoreFixtureEvidence,selfTestRunStoreFixtureEvidence} from './acceptance-run-store-fixture-evidence.mjs';
 import {collectAuthenticatedAgentFixture,selfTestAuthenticatedAgentFixture} from './acceptance-run-store-agent-fixture-evidence.mjs';
 import {collectCasMatrixEvidence,selfTestCasMatrixEvidence} from './acceptance-run-store-cas-evidence.mjs';
@@ -181,7 +184,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], authenticatedQwenChainFixture = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -216,11 +219,14 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: directRunsAtSha.runs.map(compactRun),
     direct_runs_dropped: directRunsAtSha.dropped,
     ...(authenticatedIssueAuditReadback ? {authenticated_issue_audit_readback:authenticatedIssueAuditReadback} : {}),
+    ...(authenticatedIssueAuditRepairReadback ? {authenticated_issue_audit_repair_readback:authenticatedIssueAuditRepairReadback} : {}),
     ...(verifiedAgentTelemetryRecords.length
       ? { verified_agent_telemetry_records: verifiedAgentTelemetryRecords } : {}),
     verified_development_checkpoint_readbacks: developmentReadback,
     verified_run_store_fixture_evidence: verifiedRunStoreFixtureEvidence,
     authenticated_agent_store_disposable_fixture: authenticatedAgentStoreFixture,
+    ...(authenticatedQwenChainFixture
+      ? {authenticated_qwen_chain_fixture: authenticatedQwenChainFixture} : {}),
     authenticated_run_store_cas_matrix: authenticatedRunStoreCasMatrix,
     authenticated_run_store_integrity_audit: authenticatedRunStoreIntegrityAudit,
     authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
@@ -494,6 +500,10 @@ export function collectVerifiedAgentTelemetryRecords({ metricsRoot, repo, sha, r
               id: record.task.id, type: record.task.type, issue: record.task.issue,
               pr: record.task.pr ?? null, target_ref: record.task.target_ref ?? null,
               action_id: record.task.action_id ?? null,
+            } : null,
+            execution: record.execution ? {
+              turns: record.execution.turns ?? null,
+              tools: record.execution.tools ?? null,
             } : null,
             result: record.result ?? null,
           });
@@ -1102,14 +1112,20 @@ export async function workflowRunsForSha(repo, sha, get = githubGet) {
 // with head_sha pinned to that ancestor.
 const ANCESTRY_RUNS_PER_SHA=12, ANCESTRY_RUNS_TOTAL=48;
 export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
-  runsForSha=workflowRunsForSha){
+  runsForSha=workflowRunsForSha,pinnedRunIds=[]){
   if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(targetSha)||
-     !Array.isArray(sourceAncestry))throw Error('invalid ancestry run scope');
+     !Array.isArray(sourceAncestry)||!Array.isArray(pinnedRunIds)||
+     pinnedRunIds.length>16||
+     pinnedRunIds.some(id=>!Number.isSafeInteger(id)||id<1))
+    throw Error('invalid ancestry run scope');
+  // A criterion may name exact Run IDs as evidence. They must survive the
+  // bounded context cap even when their ancestor SHA has newer runs; identity
+  // is still re-read and verified below, never trusted from the Issue.
+  const pinned=new Set(pinnedRunIds);
   const evidence=[];
   for(const entry of sourceAncestry.slice(0,8)){
     if(entry?.is_ancestor!==true||!/^[a-f0-9]{40}$/.test(entry?.ancestor_sha??'')||
        entry.ancestor_sha===targetSha)continue;
-    if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
     const runs=await runsForSha(repo,entry.ancestor_sha);
     if(!Array.isArray(runs))throw Error('invalid ancestry run response');
     // Newest per ancestor, bounded: this reaches an evaluator's context, so it
@@ -1127,8 +1143,13 @@ export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
       seenSuccessPath.add(path);
       if(!newest.some(r=>r?.id===run?.id))newest.push(run);
     }
+    for(const run of sorted){
+      if(pinned.has(Number(run?.id))&&
+         !newest.some(r=>r?.id===run?.id))newest.push(run);
+    }
     for(const run of newest){
-      if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
+      const isPinned=pinned.has(Number(run?.id));
+      if(!isPinned&&evidence.length>=ANCESTRY_RUNS_TOTAL)continue;
       // Identity is re-bound here, never trusted from the ancestor list.
       if(run?.head_sha!==entry.ancestor_sha||
          run?.head_repository?.full_name!==repo||
@@ -1152,6 +1173,23 @@ export function requestedAncestorsFromIssue(body) {
   }
   const unique = [...new Set(hashes)];
   if (unique.length > 8) throw new Error('excessive ancestor proof targets in Issue criteria');
+  return unique;
+}
+
+// Exact Run IDs named on a discovery SC line are lookup hints only. The
+// collector re-reads each Run from GitHub and verifies its own identity, so a
+// forged Issue pin cannot manufacture evidence; it can only keep a real Run
+// from being dropped by the bounded ancestor context.
+export function pinnedAncestryRunIds(body) {
+  const section=String(body??'').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Report|$)/)?.[1]??'';
+  const ids=[];
+  for(const line of section.split('\n')){
+    if(!/^- \[[ x]\] SC-\d+\b/i.test(line)||!/\bancestors?\b/i.test(line))continue;
+    for(const match of line.matchAll(/\brun\b\s+`?([1-9]\d{0,14})`?/gi))
+      ids.push(Number(match[1]));
+  }
+  const unique=[...new Set(ids)];
+  if(unique.length>16)throw new Error('excessive pinned ancestor evidence runs');
   return unique;
 }
 
@@ -1322,10 +1360,13 @@ export function checkGitMergeCommit(workspace,targetSha,expectedHeads=[],runner=
 
 async function collectSourceAncestry(repo, workspace, targetSha) {
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
-  if (!/^\d+$/.test(issueNumber)) return [];
+  if (!/^\d+$/.test(issueNumber)) return {ancestry: [], pinnedRunIds: []};
   const issue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
   const wanted = requestedAncestorsFromIssue(issue.body);
-  return wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha));
+  return {
+    ancestry: wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha)),
+    pinnedRunIds: pinnedAncestryRunIds(issue.body),
+  };
 }
 
 // Optional bounded discovery of *historical implementation* PR gates for
@@ -1549,6 +1590,10 @@ async function collectHistoricalReporterE2eRerun(repo,issue,targetSha){
 async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  // The reusable Acceptance workflow checks out `provider-metrics` next to the
+  // target `workspace` directory at the job root, not inside the target tree.
+  const metricsRoot = path.join(
+    process.env.GITHUB_WORKSPACE || path.dirname(workspace), 'provider-metrics');
   const directRuns = await workflowRunsForSha(repo, sha);
   // SC-03 #2824: bind existing Qwen run to its actual GitHub Issue writes,
   // not merely a successful workflow check or an untrusted comment. This
@@ -1571,6 +1616,19 @@ async function collectCommand(workspace, outFile) {
         'scripts/lib/agent/prompt/templates/issue-audit/v1/actions/deepseek.hbs',
       ]).status===0,
     }):null;
+  // The older #2824 proof is for a different target (#2811). For #2855,
+  // re-read the exact successful #2851 Qwen agent job and actual bot writes.
+  // A generic workflow-level success or skipped Agent is never evidence.
+  const authenticatedIssueAuditRepairReadback =
+    process.env.ACCEPTANCE_STAGE === 'post-merge' &&
+    Number(process.env.ISSUE_NUMBER)===SIDEBAR_AUDIT_REPAIR_PROOF.acceptanceIssue
+      ? await collectIssueAuditReadback({
+        repo,targetSha:sha,sourceRunId:SIDEBAR_AUDIT_REPAIR_PROOF.sourceRunId,
+        targetIssueNumber:SIDEBAR_AUDIT_REPAIR_PROOF.targetIssueNumber,
+        proof:SIDEBAR_AUDIT_REPAIR_PROOF,request:githubGet,readLog:githubJobLog,
+        isAncestor:(source,target)=>spawnSync('git',
+          ['-C',workspace,'merge-base','--is-ancestor',source,target]).status===0,
+      }) : null;
   const verifiedRunStoreFixtureEvidence = process.env.ACCEPTANCE_STAGE === 'post-merge' && String(process.env.ISSUE_NUMBER ?? '') === '1690'
     ? await collectRunStoreFixtureEvidence(repo, sha, directRuns, githubGet) : [];
   // SC-10: the real disposable agent-store fixture has its OWN executed CAS
@@ -1612,7 +1670,17 @@ async function collectCommand(workspace, outFile) {
   // canonical storage path. The metrics branch is already checked out at
   // provider-metrics by the acceptance workflow.
   const verifiedAgentTelemetryRecords = collectVerifiedAgentTelemetryRecords({
-    metricsRoot: path.join(workspace, 'provider-metrics'), repo, sha, runs: directRuns,
+    metricsRoot, repo, sha, runs: directRuns,
+  });
+  // #2817: the controlled Qwen chain spans three main ancestors and two real
+  // PRs. Re-read its exact Runs, committed Store bytes, PR diff and canonical
+  // telemetry so the Agent can judge the fixture from authenticated facts.
+  const authenticatedQwenChainFixture = await collectAuthenticatedQwenChain({
+    repo,targetSha:sha,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,workspace,get:githubGet,
+    telemetryForRun:(runSha,run)=>collectVerifiedAgentTelemetryRecords({
+      metricsRoot,repo,sha:runSha,runs:[run],
+    }),
   });
   // SC-04 reads independently attested GitOps, anonymous ACR and VPN/K8s
   // source runs. No VPN/Kubernetes credentials enter the Acceptance Agent.
@@ -1745,8 +1813,10 @@ async function collectCommand(workspace, outFile) {
   const selectedRunReceipts = await collectSelectedE2eRunReceipts(repo, sha, directRuns);
   const notRequiredRunReceipts = await collectNotRequiredE2eReceipts(repo, sha, directRuns);
   const fullGateProvisionReceipts = await collectFullGateProvisionReceipts(repo, sha, directRuns);
-  const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
-  const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
+  const ancestryContext = await collectSourceAncestry(repo, workspace, sha);
+  const sourceAncestry = ancestryContext.ancestry;
+  const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha,
+    workflowRunsForSha, ancestryContext.pinnedRunIds);
   const ancestryReceipts = await collectAncestryReceipts(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
@@ -1878,8 +1948,9 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
-    authenticatedMetricsReplayLineage, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, deferredAcceptanceReplays,
+    authenticatedMetricsReplayLineage, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
+    authenticatedQwenChainFixture,
     authenticatedRunStoreCasMatrix,
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
     authenticatedRunStoreFiveModeReadback,
@@ -2585,6 +2656,34 @@ async function selfTest() {
   ]);
   assert.ok(ancHidden.some(run=>run.id===800),
     'an older successful ancestor run must survive newer skipped siblings');
+  // An exact Run ID named by the criterion must survive the bounded context
+  // cap even when it is older than both the newest window and its path's
+  // newest success. It is still re-read and identity-checked, not trusted.
+  const ancPinnedRuns=[
+    {id:779,path:'.github/workflows/agent-review.yml',status:'completed',
+      conclusion:'success',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    {id:778,path:'.github/workflows/agent-review.yml',status:'completed',
+      conclusion:'success',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    ...Array.from({length:14},(_,i)=>({
+      id:1000+i,path:'.github/workflows/noise-'+(i%2)+'.yml',status:'completed',
+      conclusion:'skipped',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}})),
+  ];
+  const ancNotPinned=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>ancPinnedRuns);
+  assert.ok(!ancNotPinned.some(run=>run.id===778),
+    'without a pin the older same-path success stays outside the window');
+  const ancPinned=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>ancPinnedRuns,[778]);
+  assert.ok(ancPinned.some(run=>run.id===778),
+    'an explicitly named Run ID must survive the bounded ancestry cap');
+  await assert.rejects(()=>collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>[],['bad']),/invalid ancestry run scope/);
   await assert.rejects(()=>collectAncestryRuns(foreignRepo,[],tgtSha,async()=>[]),
     /invalid ancestry run scope/);
   await assert.rejects(()=>collectAncestryRuns(denialRepo,[],'short',async()=>[]),
@@ -2983,6 +3082,14 @@ async function selfTest() {
   assert.throws(() => requestedAncestorsFromIssue('### Success Criteria\n- [ ] SC-01 ' +
     Array.from({length: 9}, (_, i) => String(i).repeat(40)).join(' ') +
     ' are ancestors'), /excessive/);
+  assert.deepEqual(pinnedAncestryRunIds('### Success Criteria\n- [ ] SC-01 Controller ' +
+    'run `101` attempt `1` and Store Ingest run 102 at ancestor ' + left +
+    '.\n## Acceptance Report\n- [ ] SC-99 fake run 999'), [101, 102]);
+  assert.deepEqual(pinnedAncestryRunIds(
+    '### Success Criteria\n- [ ] SC-01 No ancestor run pins.'), []);
+  assert.throws(() => pinnedAncestryRunIds('### Success Criteria\n- [ ] SC-01 ' +
+    Array.from({length: 17}, (_, i) => 'run ' + (200 + i)).join(' ') +
+    ' at ancestor ' + left), /excessive pinned/);
   assert.deepEqual(normalizeCiEvidence({targetSha:head, sourceAncestry:[
     checkGitAncestor('/tmp', head, left, () => ({status:0})),
   ]}).source_ancestry.map(x => x.is_ancestor), [true]);
@@ -3174,11 +3281,13 @@ async function selfTest() {
     verifiedRunStoreFixtureEvidence:[{verdict:'fixture_pass'}]}).verified_run_store_fixture_evidence,
     [{verdict:'fixture_pass'}]);
   selfTestCiCostStudy();
+  selfTestPrQualityCost();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
   selfTestRegressions();
   selfTestCaseReceipts();
+  assert.equal(selfTestQwenChainEvidence(),true);
   assert.deepEqual(normalizeCiEvidence({targetSha:head, verifiedCaseReceipts:[{changed_records:2}]}).verified_case_receipts,[{changed_records:2}]);
   console.log('acceptance-ci-evidence self-test: historical Case, authenticated receipt, reporter history and negative ancestry passed');
 }
@@ -3186,13 +3295,33 @@ async function selfTest() {
 async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return selfTest();
+  if (command === 'collect-pr-quality') {
+    const workspace = process.argv[3], outFile = process.argv[4];
+    if (!workspace || !outFile)throw Error('usage: collect-pr-quality WORKSPACE OUT');
+    const repo=requireText(process.env.GITHUB_REPOSITORY,'GITHUB_REPOSITORY');
+    const targetSha=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],{
+      encoding:'utf8'}).trim();
+    // A narrow trusted-main read-only exception for #2917 PR-stage SC-04.
+    // Never execute PR code or collect the unbounded general CI corpus here.
+    const measured=await collectVerifiedPrQualityCost({
+      repo,issueNumber:Number(process.env.ISSUE_NUMBER??0),
+      stage:process.env.ACCEPTANCE_STAGE,targetSha,
+      get:githubGet,getText:githubJobLog,
+    });
+    fs.writeFileSync(outFile,JSON.stringify({
+      schema_version:1,kind:'acceptance_ci_evidence',target_sha:targetSha,
+      verified_pr_quality_cost_study:measured,
+    },null,2)+'\n');
+    console.log('PR Quality CI cost source attested for issue #2917');
+    return;
+  }
   if (command === 'collect') {
     const workspace = process.argv[3];
     const outFile = process.argv[4];
     if (!workspace || !outFile) throw new Error('usage: acceptance-ci-evidence.mjs collect WORKSPACE OUT');
     return collectCommand(workspace, outFile);
   }
-  throw new Error('usage: acceptance-ci-evidence.mjs <self-test|collect WORKSPACE OUT>');
+  throw new Error('usage: acceptance-ci-evidence.mjs <self-test|collect WORKSPACE OUT|collect-pr-quality WORKSPACE OUT>');
 }
 
 try {
