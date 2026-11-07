@@ -1,0 +1,148 @@
+name: Agent / Staging Convergence Review
+run-name: Convergence conflict ${{ inputs.branch }} ${{ inputs.main_sha }} ${{ inputs.lane_sha }}
+
+# #2926: model-backed but read-only, exact-ref conflict analysis. The scheduler
+# may dispatch this without giving the model any GitHub writer/merge authority.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        type: string
+        required: true
+      branch:
+        type: string
+        required: true
+      main_sha:
+        type: string
+        required: true
+      lane_sha:
+        type: string
+        required: true
+      direction:
+        type: choice
+        options: [sync-main-to-lane, promote-lane-to-main]
+        required: true
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-staging-convergence-review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: staging-convergence-review-${{ inputs.main_sha }}-${{ inputs.lane_sha }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev-claude-qwen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify source identity and GitHub-confirmed conflict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BRANCH: ${{ inputs.branch }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+          LANE_SHA: ${{ inputs.lane_sha }}
+          DIRECTION: ${{ inputs.direction }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$MAIN_SHA" =~ ^[a-f0-9]{40}$ && "$LANE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$ && "$BRANCH" != main ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$MAIN_SHA"
+          test "$(git rev-parse "refs/remotes/origin/$BRANCH")" = "$LANE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/convergence-pr.json"
+          if [[ "$DIRECTION" == sync-main-to-lane ]]; then
+            head=main; base="$BRANCH"; source="$MAIN_SHA"; target="$LANE_SHA"
+          else
+            head="$BRANCH"; base=main; source="$LANE_SHA"; target="$MAIN_SHA"
+          fi
+          jq -e --arg head "$head" --arg base "$base" \
+            --arg source "$source" --arg target "$target" '
+            .state == "open" and .head.ref == $head and .base.ref == $base and
+            .head.sha == $source and .base.sha == $target and
+            .mergeable_state == "dirty" and
+            (.body | startswith("Staging Convergence automated proposal"))' \
+            "$RUNNER_TEMP/convergence-pr.json" >/dev/null
+          # No checkout or execution of untrusted branch code.
+          set +e
+          git merge-tree --write-tree "$MAIN_SHA" "$LANE_SHA" > "$RUNNER_TEMP/merge-tree.txt"
+          merge_exit=$?
+          set -e
+          [[ "$merge_exit" == 1 ]] || {
+            echo "::error::Expected an actual Git merge conflict, got exit $merge_exit"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/convergence-agent"
+          head -c 40000 "$RUNNER_TEMP/merge-tree.txt" > "$RUNNER_TEMP/merge-tree-bounded.txt"
+          jq -n --argjson pr "$PR_NUMBER" --arg branch "$BRANCH" \
+            --arg main "$MAIN_SHA" --arg lane "$LANE_SHA" \
+            --arg direction "$DIRECTION" --rawfile merge_tree "$RUNNER_TEMP/merge-tree-bounded.txt" \
+            '{pr_number:$pr,branch:$branch,main_sha:$main,lane_sha:$lane,
+              direction:$direction,mergeable_state:"dirty",merge_tree:$merge_tree}' \
+            > "$RUNNER_TEMP/convergence-agent/request.json"
+
+      - name: Install pinned model CLI and verify bounded analysis
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          node scripts/staging-convergence-agent.mjs self-test
+
+      - name: Diagnose conflict with no repository writer
+        env:
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANALYSIS_CLAUDE_MODEL: ${{ vars.ANTHROPIC_MODEL || vars.ACCEPTANCE_CLAUDE_MODEL }}
+          PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+        run: |
+          set -euo pipefail
+          node scripts/staging-convergence-agent.mjs run \
+            "$RUNNER_TEMP/convergence-agent/request.json" \
+            "$RUNNER_TEMP/convergence-agent"
+          jq -r '"Conflict analysis (not a merge verdict): " + .summary' \
+            "$RUNNER_TEMP/convergence-agent/diagnosis.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canonical Agent telemetry and native trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-staging-convergence-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/convergence-agent/agent-telemetry.json
+            ${{ runner.temp }}/convergence-agent/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload nonauthoritative conflict proposal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-convergence-diagnosis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/convergence-agent/diagnosis.json
+          if-no-files-found: warn
+          retention-days: 7
