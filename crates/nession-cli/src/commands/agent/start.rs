@@ -61,19 +61,26 @@ pub async fn run(
         }
     }
 
-    let config = configuration::load_agent(&selection, &server_url_override, &auth_token_override)?;
+    let loaded = configuration::load_agent(&selection, &server_url_override, &auth_token_override)?;
+    let from_file = loaded.from_file;
+    let config = loaded.config;
     let config_path = selection.path.to_string_lossy().into_owned();
+    let origin = configuration::describe_origin(&selection.path, from_file);
 
     if foreground {
         info!("Starting agent in foreground mode");
-        println!("Starting nession-agent with config: {config_path}");
+        println!("Starting nession-agent with {origin}");
         println!("Agent ID: {}", config.agent_id);
         println!("Press Ctrl+C to stop");
 
-        // Record this process's identity (foreground mode) together with the
-        // config file it actually loaded, so `status` can report a verified
-        // source instead of presenting a default file as live state.
-        pid_file::write_identity(&pid_file, pid_file::Component::Agent, Some(&selection.path))?;
+        // Record this process's identity together with the configuration it
+        // actually loaded, so `status` can report a verified source instead of
+        // presenting a default file as live state.
+        pid_file::write_identity(
+            &pid_file,
+            pid_file::Component::Agent,
+            pid_file::ConfigRecord::from_loaded(&selection.path, from_file),
+        )?;
 
         let result = run_agent_foreground(config).await;
 
@@ -88,7 +95,7 @@ pub async fn run(
         // and `lifecycle::secret_handoff` for the channel it travels over.
         let mut cmd = background_child_command(
             &exe,
-            &config_path,
+            &selection,
             &pid_file,
             server_url_override.as_deref(),
             auth_token_override.as_deref(),
@@ -131,16 +138,37 @@ pub async fn run(
                 println!("PID file: {pid_file}");
             }
             startup::Startup::Exited(status) => {
-                anyhow::bail!("Agent exited before it was serving ({status}); check the logs");
+                let detail = startup::child_stderr(&mut child);
+                let _ = fs::remove_file(&pid_file);
+                anyhow::bail!(
+                    "Agent exited before it was serving ({status}){}",
+                    if detail.is_empty() {
+                        "; check the logs".to_string()
+                    } else {
+                        format!(": {detail}")
+                    }
+                );
             }
             startup::Startup::TimedOut => {
+                startup::terminate(&mut child);
+                let detail = startup::child_stderr(&mut child);
+                let _ = fs::remove_file(&pid_file);
                 anyhow::bail!(
-                    "Agent did not report itself serving within {}s; check the logs",
-                    startup::STARTUP_TIMEOUT.as_secs()
+                    "Agent did not report itself serving within {}s{}",
+                    startup::STARTUP_TIMEOUT.as_secs(),
+                    if detail.is_empty() {
+                        "; check the logs".to_string()
+                    } else {
+                        format!(": {detail}")
+                    }
                 );
             }
         }
-        println!("Config: {config_path}");
+        if from_file {
+            println!("Config: {config_path}");
+        } else {
+            println!("Config: {origin}");
+        }
     }
 
     Ok(())
@@ -148,29 +176,35 @@ pub async fn run(
 
 /// The command a background start re-executes itself with.
 ///
-/// Extracted from [`run`] so the invariant #2269 fixes — the resolved
-/// credential is not in the child's argument vector — is asserted against the
-/// same vector the parent actually spawns, rather than a parallel copy built
-/// for a test.
+/// Extracted from [`run`] so the invariants #2269 and #2869 fix are asserted
+/// against the same vector the parent actually spawns, rather than a parallel
+/// copy built for a test:
+///
+/// - the resolved credential is not in the child's argument vector (#2269);
+/// - an implicit selection stays implicit across re-exec (#2869 SC-01+03). The
+///   child resolves the same documented default path itself, so an absent
+///   default file still means "use defaults" instead of turning into an
+///   explicit `--config` that must exist.
 pub(crate) fn background_child_command(
     exe: &Path,
-    config_path: &str,
+    selection: &ConfigSelection,
     pid_file: &str,
     server_url_override: Option<&str>,
     auth_token_override: Option<&str>,
 ) -> Command {
     let mut cmd = Command::new(exe);
-    let mut child_args: Vec<String> = vec![
-        "agent".to_string(),
-        "start".to_string(),
-        "--config".to_string(),
-        config_path.to_string(),
+    let mut child_args: Vec<String> = vec!["agent".to_string(), "start".to_string()];
+    if selection.explicit {
+        child_args.push("--config".to_string());
+        child_args.push(selection.path.to_string_lossy().into_owned());
+    }
+    child_args.extend([
         "--foreground".to_string(),
         // Forwarded, so the child records its identity where this parent —
         // and every later `stop`/`status` — looks for it (#1016).
         "--pid-file".to_string(),
         pid_file.to_string(),
-    ];
+    ]);
     if let Some(url) = server_url_override {
         child_args.push("--server-url".to_string());
         child_args.push(url.to_string());
@@ -186,7 +220,9 @@ pub(crate) fn background_child_command(
             Stdio::null()
         })
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        // Captured until the child either becomes ready or exits: its own
+        // failure sentence is more useful than "check the logs" (#2869).
+        .stderr(Stdio::piped());
     cmd
 }
 
@@ -211,11 +247,25 @@ mod tests {
     fn background_command(auth_token_override: Option<&str>) -> Command {
         background_child_command(
             Path::new("/bin/true"),
-            "agent-config.toml",
+            &explicit_selection("/custom/agent.toml"),
             "agent.pid",
             None,
             auth_token_override,
         )
+    }
+
+    fn explicit_selection(path: &str) -> ConfigSelection {
+        ConfigSelection {
+            path: Path::new(path).to_path_buf(),
+            explicit: true,
+        }
+    }
+
+    fn implicit_selection(path: &str) -> ConfigSelection {
+        ConfigSelection {
+            path: Path::new(path).to_path_buf(),
+            explicit: false,
+        }
     }
 
     fn argv(command: &Command) -> Vec<String> {
@@ -271,7 +321,7 @@ mod tests {
     fn the_background_child_receives_the_resolved_config_and_pid_file() {
         let command = background_child_command(
             Path::new("/bin/true"),
-            "/custom/agent.toml",
+            &explicit_selection("/custom/agent.toml"),
             "/custom/agent.pid",
             Some("ws://server:1"),
             None,
@@ -290,5 +340,33 @@ mod tests {
                 "missing {expected}: {argv:?}"
             );
         }
+    }
+
+    /// #2869 SC-01+03: an implicit parent selection must stay implicit in the
+    /// child. Passing the resolved default as `--config` would make the child
+    /// treat an absent default file as an explicit, missing selection.
+    #[test]
+    fn an_implicit_selection_is_not_converted_into_an_explicit_flag() {
+        let command = background_child_command(
+            Path::new("/bin/true"),
+            &implicit_selection("/home/me/.nession/agent-config.toml"),
+            "/custom/agent.pid",
+            None,
+            None,
+        );
+        let argv = argv(&command);
+
+        assert!(
+            !argv.iter().any(|arg| arg == "--config"),
+            "an implicit selection must not gain --config across re-exec: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|arg| arg.ends_with("agent-config.toml")),
+            "the resolved default path must not be forwarded: {argv:?}"
+        );
+        assert!(
+            argv.iter().any(|arg| arg == "--pid-file"),
+            "the pid file still identifies the child: {argv:?}"
+        );
     }
 }

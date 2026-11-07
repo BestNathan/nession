@@ -18,7 +18,7 @@
 
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::lifecycle::pid_file;
 
@@ -51,14 +51,20 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
             }
         );
     }
-    let config_path_str = selection.path.to_string_lossy().into_owned();
+    let config_path_str = absolute_path(&selection.path)?;
 
-    let pid_file_str = pid_file::resolve_path(pid_file, pid_file::Component::Agent);
+    let pid_file_str = absolute_path(Path::new(&pid_file::resolve_path(
+        pid_file,
+        pid_file::Component::Agent,
+    )))?;
 
     let exe = std::env::current_exe().context("failed to resolve current executable path")?;
-    let exe_str = exe.to_string_lossy().into_owned();
+    let exe_str = absolute_path(&exe)?;
 
-    let nession_home = std::env::var("NESSION_HOME").ok();
+    let nession_home = std::env::var("NESSION_HOME")
+        .ok()
+        .map(|home| absolute_path(Path::new(&home)))
+        .transpose()?;
 
     install_platform(
         &config_path_str,
@@ -292,6 +298,59 @@ fn service_status_platform() -> &'static str {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Make a service path absolute.
+///
+/// A service manager does not run in the operator's current directory, so a
+/// relative `--config`/`--pid-file` would point somewhere else at boot. The
+/// path does not have to exist (a pid file usually does not yet).
+fn absolute_path(path: &Path) -> Result<String> {
+    let absolute = std::path::absolute(path)
+        .with_context(|| format!("failed to make '{}' absolute", path.display()))?;
+    let text = absolute.to_string_lossy().into_owned();
+    if text.contains(['\n', '\r']) {
+        anyhow::bail!("service paths must not contain a newline: {text:?}");
+    }
+    Ok(text)
+}
+
+/// Quote one systemd command-line argument.
+///
+/// systemd unit files are not a shell: arguments are split on whitespace, `%`
+/// starts a specifier and `$` starts variable expansion. Every argv element is
+/// double-quoted with those characters escaped, so a path with spaces or
+/// special characters starts the same file the operator selected (#2869
+/// SC-03).
+#[cfg(target_os = "linux")]
+fn systemd_quote(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(';', "\\;")
+        .replace('%', "%%")
+        .replace('$', "$$");
+    format!("\"{escaped}\"")
+}
+
+/// Escape an `Environment=` value: specifiers apply, `$` does not expand there.
+#[cfg(target_os = "linux")]
+fn systemd_environment_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%")
+}
+
+/// Escape text for an XML text node or attribute value.
+#[cfg(target_os = "macos")]
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 /// The systemd user unit this command installs.
 ///
 /// Pure so the emitted argv can be asserted: both `--config` and `--pid-file`
@@ -304,8 +363,27 @@ fn systemd_unit_content(
     nession_home: Option<&str>,
 ) -> String {
     let env_lines = nession_home
-        .map(|home| format!("Environment=NESSION_HOME={home}\n"))
+        .map(|home| {
+            format!(
+                "Environment=\"NESSION_HOME={}\"\n",
+                systemd_environment_value(home)
+            )
+        })
         .unwrap_or_default();
+    let exec_start = [
+        exe_path,
+        "agent",
+        "start",
+        "--config",
+        config_path,
+        "--foreground",
+        "--pid-file",
+        pid_file,
+    ]
+    .iter()
+    .map(|argument| systemd_quote(argument))
+    .collect::<Vec<_>>()
+    .join(" ");
     format!(
         "[Unit]\n\
          Description=Nession Agent (boot autostart)\n\
@@ -314,7 +392,7 @@ fn systemd_unit_content(
          \n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={exe_path} agent start --config {config_path} --foreground --pid-file {pid_file}\n\
+         ExecStart={exec_start}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          {env_lines}\n\
@@ -334,7 +412,8 @@ fn launchd_plist_content(
     let env_block = match nession_home {
         Some(home) => format!(
             "  <key>EnvironmentVariables</key>\n  <dict>\n    \
-             <key>NESSION_HOME</key>\n    <string>{home}</string>\n  </dict>\n"
+             <key>NESSION_HOME</key>\n    <string>{}</string>\n  </dict>\n",
+            xml_escape(home)
         ),
         None => String::new(),
     };
@@ -346,21 +425,24 @@ fn launchd_plist_content(
          <dict>\n\
          \x20 <key>Label</key>\n  <string>com.nession.agent</string>\n\
          \x20 <key>ProgramArguments</key>\n  <array>\n    \
-         <string>{exe_path}</string>\n    \
+         <string>{exe}</string>\n    \
          <string>agent</string>\n    \
          <string>start</string>\n    \
          <string>--config</string>\n    \
-         <string>{config_path}</string>\n    \
+         <string>{config}</string>\n    \
          <string>--foreground</string>\n    \
          <string>--pid-file</string>\n    \
-         <string>{pid_file}</string>\n  </array>\n\
+         <string>{pid}</string>\n  </array>\n\
          {env_block}\
          \x20 <key>RunAtLoad</key>\n  <true/>\n\
          \x20 <key>KeepAlive</key>\n  <true/>\n\
          \x20 <key>StandardOutPath</key>\n  <string>/tmp/nession-agent.launchd.out</string>\n\
          \x20 <key>StandardErrorPath</key>\n  <string>/tmp/nession-agent.launchd.err</string>\n\
          </dict>\n\
-         </plist>\n"
+         </plist>\n",
+        exe = xml_escape(exe_path),
+        config = xml_escape(config_path),
+        pid = xml_escape(pid_file),
     )
 }
 
@@ -457,33 +539,130 @@ mod tests {
         );
         assert!(
             unit.contains(
-                "ExecStart=/usr/local/bin/nession agent start --config /custom/agent.toml --foreground --pid-file /custom/agent.pid"
+                "ExecStart=\"/usr/local/bin/nession\" \"agent\" \"start\" \"--config\" \"/custom/agent.toml\" \"--foreground\" \"--pid-file\" \"/custom/agent.pid\""
             ),
             "{unit}"
         );
         assert!(
-            unit.contains("Environment=NESSION_HOME=/custom/home"),
+            unit.contains("Environment=\"NESSION_HOME=/custom/home\""),
             "{unit}"
+        );
+    }
+
+    /// Parse a systemd ExecStart value back into argv under systemd's quoting
+    /// rules: double quotes group whitespace, a backslash escapes the next
+    /// character, and `%%`/`$$` are the literal forms of `%`/`$`.
+    #[cfg(target_os = "linux")]
+    fn parse_systemd_argv(line: &str) -> Vec<String> {
+        let mut args = Vec::new();
+        let mut current = String::new();
+        let mut in_quotes = false;
+        let mut chars = line.chars().peekable();
+        while let Some(character) = chars.next() {
+            match character {
+                '"' => in_quotes = !in_quotes,
+                '\\' => {
+                    if let Some(escaped) = chars.next() {
+                        current.push(escaped);
+                    }
+                }
+                ' ' | '\t' if !in_quotes => {
+                    if !current.is_empty() {
+                        args.push(std::mem::take(&mut current));
+                    }
+                }
+                '%' => {
+                    if chars.peek() == Some(&'%') {
+                        let _ = chars.next();
+                    }
+                    current.push('%');
+                }
+                '$' => {
+                    if chars.peek() == Some(&'$') {
+                        let _ = chars.next();
+                    }
+                    current.push('$');
+                }
+                _ => current.push(character),
+            }
+        }
+        if !current.is_empty() {
+            args.push(current);
+        }
+        args
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn systemd_artifacts_escape_awkward_paths_into_the_same_argv() {
+        let exe = "/opt/Nession Tools/bin/nession";
+        let config = "/home/me/Config %20 $HOME;dir/agent.toml";
+        let pid_file = "/tmp/agent \"quoted\".pid";
+        let home = "/home/me/Home %x $y";
+
+        let unit = systemd_unit_content(exe, config, pid_file, Some(home));
+        let exec_start = unit
+            .lines()
+            .find_map(|line| line.strip_prefix("ExecStart="))
+            .expect("ExecStart line");
+
+        assert_eq!(
+            parse_systemd_argv(exec_start),
+            vec![
+                exe.to_string(),
+                "agent".to_string(),
+                "start".to_string(),
+                "--config".to_string(),
+                config.to_string(),
+                "--foreground".to_string(),
+                "--pid-file".to_string(),
+                pid_file.to_string(),
+            ],
+            "{exec_start}"
+        );
+        assert!(
+            unit.contains("Environment=\"NESSION_HOME=/home/me/Home %%x $y\""),
+            "specifiers are doubled; `$` is not expanded in Environment=: {unit}"
         );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn the_launchd_plist_forwards_config_and_pid_file() {
+    fn the_launchd_plist_forwards_config_and_pid_file_with_valid_escaping() {
         let plist = launchd_plist_content(
-            "/usr/local/bin/nession",
-            "/custom/agent.toml",
-            "/custom/agent.pid",
-            Some("/custom/home"),
+            "/opt/My Tools/nession",
+            "/home/me/Config & Data/agent.toml",
+            "/tmp/agent \"quoted\".pid",
+            Some("/home/me/Home <x>"),
         );
         for expected in [
-            "<string>--config</string>",
-            "<string>/custom/agent.toml</string>",
-            "<string>--pid-file</string>",
-            "<string>/custom/agent.pid</string>",
+            "<string>/opt/My Tools/nession</string>",
+            "<string>/home/me/Config &amp; Data/agent.toml</string>",
+            "<string>/tmp/agent &quot;quoted&quot;.pid</string>",
+            "<string>/home/me/Home &lt;x&gt;</string>",
         ] {
             assert!(plist.contains(expected), "missing {expected}: {plist}");
         }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("com.nession.agent.plist");
+        std::fs::write(&path, &plist).expect("write plist");
+        let status = std::process::Command::new("plutil")
+            .arg("-lint")
+            .arg(&path)
+            .status()
+            .expect("run plutil");
+        assert!(status.success(), "launchd plist must parse: {plist}");
+    }
+
+    #[test]
+    fn relative_service_paths_are_made_absolute() {
+        let relative = absolute_path(Path::new("relative/agent.toml")).expect("absolute");
+        assert!(Path::new(&relative).is_absolute(), "{relative}");
+        assert!(relative.ends_with("relative/agent.toml"), "{relative}");
+
+        let absolute = absolute_path(Path::new("/already/agent.toml")).expect("absolute");
+        assert_eq!(absolute, "/already/agent.toml");
     }
 
     #[test]

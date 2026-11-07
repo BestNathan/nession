@@ -107,6 +107,44 @@ pub async fn wait_for_ready(
     }
 }
 
+/// Read a background child's captured stderr after it exited.
+///
+/// Background children write no terminal of their own; their failure sentence
+/// is the most useful part of the parent's report, so the pipe is drained once
+/// the child is known to have exited (#2869).
+///
+/// Bounded on purpose: a child that spawned a helper which inherited the pipe
+/// could otherwise keep the read end open after the child itself is gone, and
+/// the parent would hang reporting a failure. A missing detail is better than
+/// a stuck start.
+pub fn child_stderr(child: &mut std::process::Child) -> String {
+    use std::io::Read;
+    let Some(mut stderr) = child.stderr.take() else {
+        return String::new();
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buffer = String::new();
+        let _ = stderr.read_to_string(&mut buffer);
+        let _ = sender.send(buffer);
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// Kill and reap a child that missed its readiness deadline.
+///
+/// The parent's deadline is not permission to leave a process behind: a child
+/// that never announced is not serving, and its state file must not survive as
+/// a phantom daemon.
+pub fn terminate(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// The pid to report for a background start that announced itself.
 ///
 /// Read from the state file the child wrote rather than from `child.id()`, so
@@ -244,7 +282,7 @@ mod tests {
         let written = crate::lifecycle::pid_file::write_identity(
             state_file,
             crate::lifecycle::pid_file::Component::Server,
-            None,
+            crate::lifecycle::pid_file::ConfigRecord::Unknown,
         )
         .expect("write identity");
 
