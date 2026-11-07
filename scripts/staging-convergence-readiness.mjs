@@ -113,6 +113,27 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,deployment_workf
   if(!preliminary.ready)return preliminary;
   if(action==='sync-main-to-lane')return preliminary;
 
+  // A code-promotion merge must not silently become a Production release.
+  // Production's current version-tag retry path can publish even without a bump
+  // if its tag is absent. Keep the explicit release/version owner separate.
+  const versionOf=(ref,path)=> {
+    const text=git(['show','origin/'+ref+':'+path]);
+    const match=path==='Cargo.toml'
+      ? /^version\s*=\s*"([^"]+)"/m.exec(text)
+      : /"version"\s*:\s*"([^"]+)"/.exec(text);
+    if(!match)throw Error('missing release version in '+ref+':'+path);
+    return match[1];
+  };
+  const mainRust=versionOf('main','Cargo.toml');
+  const mainWeb=versionOf('main','web/package.json');
+  if(mainRust!==mainWeb ||
+     versionOf(branch,'Cargo.toml')!==mainRust ||
+     versionOf(branch,'web/package.json')!==mainWeb) {
+    return fail('VERSION_CHANGE_REQUIRES_SEPARATE_RELEASE_PR');
+  }
+  const tag=git(['ls-remote','--tags','--refs','origin','refs/tags/v'+mainRust]);
+  if(!tag||!SHA.test(tag.split(/\s+/)[0]))return fail('CURRENT_RELEASE_TAG_NOT_FOUND');
+
   // First-parent integration history is bounded. No cherry-pick/direct-push
   // change is eligible without a normal source PR/Issue acceptance.
   const commits=git(['rev-list','--first-parent','--reverse','origin/main..origin/'+branch])
