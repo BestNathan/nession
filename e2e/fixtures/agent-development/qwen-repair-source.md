@@ -9,7 +9,7 @@ source-aligned staging proof.
 ## Fixture state
 
 implementation: qwen-verified
-review: approved-by-developer
+review: pending
 
 ## Policy
 
