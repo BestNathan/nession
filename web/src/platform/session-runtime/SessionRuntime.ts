@@ -31,7 +31,12 @@ import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamA
 // the constraint is the same one, and it is why the type-only imports below are
 // legal while a value import of the same modules would not be.
 import type { FilesPlugin } from '@/capabilities/files';
-import type { TerminalAgentApi, RelaySubscriptionProof } from '@/product/terminal';
+import type {
+  TerminalAgentApi,
+  RelaySubscriptionProof,
+  TerminalReconcileNotice,
+} from '@/product/terminal';
+import { TERMINAL_PROGRESS_NOTIFICATIONS_V1 } from '@/platform/terminal-runtime/terminalCapabilities';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -422,8 +427,12 @@ export class SessionRuntime {
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
+    /** Notification capabilities stated by this attach (#2877). */
+    terminalCapabilities?: string[];
   } | null = null;
   private connectionUnsub: (() => void) | null = null;
+  /** P2P reconcile-notice subscription for the current Agent transport. */
+  private reconcileUnsub: (() => void) | null = null;
   /**
    * The transport most recently handed out by {@link buildTransport}, and the
    * transport generation it was built at. The pair is what lets the runtime
@@ -450,6 +459,15 @@ export class SessionRuntime {
   private disconnectHandling = false;
   private relayServerUnsub: (() => void) | null = null;
   private relayReadyUnsub: (() => void) | null = null;
+  private relayReconcileUnsub: (() => void) | null = null;
+  /**
+   * A current reconcile notice is being recovered (#2877). While set, no
+   * parser proof is submitted as progress, and every later notice for the same
+   * episode is ignored — recovery is single-flight.
+   */
+  private reconcileInFlight = false;
+  /** Fences a reconcile result away from a binding that replaced it. */
+  private reconcileEpoch = 0;
   /** Exact begin envelope, scoped to its physical Server socket. */
   private relayBeginWire: SentSocketMessage | null = null;
   /** Informational only: no verified renderer baseline or ACK credit. */
@@ -606,6 +624,7 @@ export class SessionRuntime {
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
+    terminalCapabilities?: string[];
   } | null {
     return this.p2pAttachSeed;
   }
@@ -768,7 +787,10 @@ export class SessionRuntime {
    * does not prove the Agent accepted or credited it — `recordAckSubmitted`
    * records only a frame the transport accepted.
    */
-  private submitPendingAppliedAck(): void {
+  private submitPendingAppliedAck(force = false): void {
+    // A reconcile episode invalidates the proof this ACK would stand on until
+    // the Agent proves a complete same-epoch replay (#2877).
+    if (this.reconcileInFlight) { return; }
     const binding = this.terminalAppliedBinding;
     if (this.disposed || !binding) { return; }
     const snapshot = this.terminalAppliedCursor.snapshot(binding);
@@ -776,7 +798,7 @@ export class SessionRuntime {
       this.terminalAppliedBinding = null;
       return;
     }
-    if (snapshot.appliedSeq <= snapshot.ackSentSeq
+    if ((!force && snapshot.appliedSeq <= snapshot.ackSentSeq)
       || this.attachState.phase !== 'attached'
       || this.liveTransportGeneration !== this.transportGeneration) {
       return;
@@ -791,17 +813,23 @@ export class SessionRuntime {
     const api = this.agentTerminalApi;
     const subscriberGeneration = seed?.subscriberGeneration;
     if (this.attachedTransportGeneration !== this.transportGeneration
-      || !api?.sendOutputApplied
+      || !api
       || !Number.isSafeInteger(subscriberGeneration) || !subscriberGeneration
       || !seed?.streamEpoch || seed.streamEpoch !== snapshot.streamEpoch) {
       return;
     }
-    if (api.sendOutputApplied(this.config.sessionName, {
+    const ack = {
       subscriberGeneration,
       streamEpoch: snapshot.streamEpoch,
       rendererGeneration: snapshot.generation,
       appliedThrough: snapshot.appliedSeq,
-    })) {
+    };
+    // The negotiated path sends a notification with no reply. An older Agent
+    // keeps the v1 operation; the reply is not awaited either way (#2877).
+    const sent = this.p2pSupportsProgress
+      ? api.sendOutputProgress?.(this.config.sessionName, ack)
+      : api.sendOutputApplied?.(this.config.sessionName, ack);
+    if (sent) {
       this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
       this.clearOutputAppliedAckBatch();
     }
@@ -817,23 +845,40 @@ export class SessionRuntime {
     const conn = this.config.serverConnection;
     const proof = this.relayProof;
     const sent = this.relayBeginWire;
-    if (!conn?.isReady() || !conn.sendRelayOutputApplied || !proof || !sent
+    if (!conn?.isReady() || !proof || !sent
       || proof.streamEpoch !== snapshot.streamEpoch
       || proof.sessionName !== this.config.sessionName
       || proof.browserClientId !== getOrCreateClientId()) {
       return; // unverified/legacy/stale routes have no credit
     }
-    // The proof was accepted only on the exact begin+physical socket. Agent
-    // rechecks peer token, stream generation/epoch and the issued frontier.
-    if (conn.sendRelayOutputApplied(this.config.sessionName, {
+    const ack = {
       subscriberGeneration: proof.subscriberGeneration,
       streamEpoch: snapshot.streamEpoch,
       rendererGeneration: snapshot.generation,
       appliedThrough: snapshot.appliedSeq,
-    })) {
+    };
+    // The proof carries the Agent's own capability list, forwarded verbatim by
+    // the Server (#2877). The notification is only sent when the Agent stated
+    // it accepts the response-less wire; otherwise this stays v1.
+    const sentAck = this.relaySupportsProgress
+      ? conn.sendRelayOutputProgress?.(this.config.sessionName, ack)
+      : conn.sendRelayOutputApplied?.(this.config.sessionName, ack);
+    if (sentAck) {
       this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
       this.clearOutputAppliedAckBatch();
     }
+  }
+
+  /** The Agent negotiated the response-less progress wire on this P2P attach. */
+  private get p2pSupportsProgress(): boolean {
+    return this.p2pAttachSeed?.terminalCapabilities
+      ?.includes(TERMINAL_PROGRESS_NOTIFICATIONS_V1) === true;
+  }
+
+  /** The Agent negotiated the response-less progress wire on this relay. */
+  private get relaySupportsProgress(): boolean {
+    return this.relayProof?.terminalCapabilities
+      ?.includes(TERMINAL_PROGRESS_NOTIFICATIONS_V1) === true;
   }
 
   private resetTerminalAppliedCursor(): void {
@@ -885,6 +930,126 @@ export class SessionRuntime {
     // before the loss was reported, even if its parser callback is late.
     this.bootstrapRepairPending = false;
     this.emitSnapshot();
+  }
+
+  /**
+   * Handle one Agent reconcile notice (#2877).
+   *
+   * The Agent sends this only for the exact subscription it authenticated.
+   * The runtime still validates the notice against its own current binding —
+   * a stale/foreign payload must never start recovery — then runs exactly one
+   * recovery at a time: `terminal.stream.resume` from the last trusted
+   * parser-applied prefix. While that proof is outstanding no progress is
+   * submitted. A complete same-epoch replay resumes reporting; anything else
+   * takes the proven checkpoint/reattach path and stays explicitly degraded.
+   */
+  noteReconcileRequired(notice: TerminalReconcileNotice): void {
+    if (this.disposed || this.attachState.phase !== 'attached') {
+      return;
+    }
+    if (notice.sessionName !== this.config.sessionName) {
+      return;
+    }
+    const identity = this.currentProgressIdentity();
+    if (!identity
+      || notice.subscriberGeneration !== identity.subscriberGeneration
+      || notice.streamEpoch !== identity.streamEpoch) {
+      // Stale, foreign or replaced subscription: not our episode.
+      return;
+    }
+    if (this.reconcileInFlight) {
+      return;
+    }
+    const snapshot = this.terminalAppliedSnapshot;
+    if (notice.action === 'reattach'
+      || !snapshot
+      || snapshot.streamEpoch !== notice.streamEpoch) {
+      // The Agent proved the applied proof is unusable, or there is no
+      // trustworthy prefix to resume from. Only a proven checkpoint/reattach
+      // may reconstruct; never invent a synchronized state.
+      this.degradeAndReattach();
+      return;
+    }
+    const transport = this.liveTransport;
+    if (!this.liveTransport || !transport?.requestReconcile
+      || this.liveTransportGeneration !== this.transportGeneration) {
+      this.degradeAndReattach();
+      return;
+    }
+    const epoch = ++this.reconcileEpoch;
+    this.reconcileInFlight = true;
+    this.emitSnapshot();
+    void transport.requestReconcile(notice.streamEpoch, snapshot.appliedSeq).then(
+      (ok) => {
+        if (this.disposed || !this.reconcileInFlight || epoch !== this.reconcileEpoch) {
+          return;
+        }
+        this.reconcileInFlight = false;
+        if (ok) {
+          // The Agent proved a complete contiguous same-epoch run. Restate the
+          // parser frontier even when it did not move: the claim from before
+          // the episode was never accepted, so silence would leave the Agent
+          // without an updated position.
+          this.submitPendingAppliedAck(true);
+          this.emitSnapshot();
+          return;
+        }
+        this.degradeAndReattach();
+      },
+      () => {
+        if (this.disposed || !this.reconcileInFlight || epoch !== this.reconcileEpoch) {
+          return;
+        }
+        this.reconcileInFlight = false;
+        this.degradeAndReattach();
+      },
+    );
+  }
+
+  /** The current transport's Agent-minted subscription identity. */
+  private currentProgressIdentity(): {
+    subscriberGeneration: number;
+    streamEpoch: number;
+  } | null {
+    if (this.effectiveForcedRelay) {
+      const proof = this.relayProof;
+      if (!proof || !this.config.serverConnection?.isReady()) {
+        return null;
+      }
+      return {
+        subscriberGeneration: proof.subscriberGeneration,
+        streamEpoch: proof.streamEpoch,
+      };
+    }
+    const seed = this.p2pAttachSeed;
+    const subscriberGeneration = seed?.subscriberGeneration;
+    if (!Number.isSafeInteger(subscriberGeneration) || !subscriberGeneration
+      || !seed?.streamEpoch) {
+      return null;
+    }
+    return { subscriberGeneration, streamEpoch: seed.streamEpoch };
+  }
+
+  /**
+   * Invalidate the applied proof and take the proven checkpoint path.
+   *
+   * Used when a reconcile notice names a fresh binding or when resume cannot
+   * prove a complete run. The existing bootstrap/reattach machinery owns the
+   * reconstruction; this only makes the loss explicit and stops progress
+   * submission until a capture is parsed by the replacement renderer.
+   */
+  private degradeAndReattach(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.reconcileInFlight = false;
+    this.reconcileEpoch += 1;
+    this.resetTerminalAppliedCursor();
+    this.historyMayHaveGap = true;
+    this.gapDetected = true;
+    this.bootstrapRepairPending = true;
+    this.emitSnapshot();
+    this.forceBootstrapReattach();
   }
 
   /**
@@ -1134,6 +1299,10 @@ export class SessionRuntime {
       needsBootstrap,
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
+        // A fresh binding replaces any reconcile episode: a result for the
+        // previous subscription must not degrade the one just attached.
+        this.reconcileEpoch += 1;
+        this.reconcileInFlight = false;
         // An attach reply names the stream epoch this subscription continues.
         // If it differs from the last one adopted, the buffer kept across the
         // loss belongs to a timeline this Agent cannot replay (#2194).
@@ -1150,6 +1319,7 @@ export class SessionRuntime {
           inputEpoch: result.inputEpoch,
           inputAppliedThrough: result.inputAppliedThrough,
           controlGeneration: result.controlGeneration,
+          terminalCapabilities: result.terminalCapabilities,
         };
       },
     });
@@ -1276,6 +1446,8 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.reconcileEpoch += 1;
+    this.reconcileInFlight = false;
     this.invalidateP2PCredential();
     this.revokeRelayProof();
     this.resetTerminalAppliedCursor();
@@ -1345,7 +1517,7 @@ export class SessionRuntime {
     if (this.attachState.phase !== 'attached') {
       return 'unavailable';
     }
-    return this.gapDetected || this.terminalAppliedSnapshot === null
+    return this.gapDetected || this.reconcileInFlight || this.terminalAppliedSnapshot === null
       ? 'degraded-live'
       : 'synchronized';
   }
@@ -1410,6 +1582,8 @@ export class SessionRuntime {
   private teardownConnectionHandler(): void {
     this.connectionUnsub?.();
     this.connectionUnsub = null;
+    this.reconcileUnsub?.();
+    this.reconcileUnsub = null;
     // Every path that drops the connection handler also ends the probe, and
     // `wireConnectionHandler` re-arms it on the next `'connected'`. Kept here
     // rather than in `dispose()` because the other three callers are the ones
@@ -1551,6 +1725,8 @@ export class SessionRuntime {
     this.relayServerUnsub = null;
     this.relayReadyUnsub?.();
     this.relayReadyUnsub = null;
+    this.relayReconcileUnsub?.();
+    this.relayReconcileUnsub = null;
   }
 
   private wireRelayServerHandler(): void {
@@ -1580,9 +1756,20 @@ export class SessionRuntime {
       this.submitPendingAppliedAck();
     }) ?? null;
 
+    // The Agent's exception-only notice (#2877). The Server forwards it
+    // unchanged; its identity fields are checked against the current route.
+    this.relayReconcileUnsub = conn.onRelayReconcileRequired?.(
+      this.config.sessionName,
+      (notice) => this.noteReconcileRequired(notice),
+    ) ?? null;
+
     this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {
       if (state !== 'connected') {
         this.revokeRelayProof();
+        // A route cutover replaces the subscription a reconcile result would
+        // belong to.
+        this.reconcileEpoch += 1;
+        this.reconcileInFlight = false;
       }
       // Any loss of the server transport ends the server-side relay forwarding
       // loop: 'connecting' (first connect / handshake pending), 'reconnecting'
@@ -1681,6 +1868,9 @@ export class SessionRuntime {
     if (!this.agentWs) {
       return;
     }
+    this.reconcileUnsub = this.agentTerminalApi?.onReconcileRequired?.(
+      (notice) => this.noteReconcileRequired(notice),
+    ) ?? null;
     this.connectionUnsub = this.agentWs.onConnectionStateChange((next) => {
       this.emitConnectionState(next);
       if (next === 'connected') {
@@ -1692,6 +1882,10 @@ export class SessionRuntime {
         // Anything else: recovery is already running, and a probe tick would
         // only race it.
         this.stopLivenessProbe();
+        // A route loss replaces the subscription a reconcile result would
+        // belong to (#2877).
+        this.reconcileEpoch += 1;
+        this.reconcileInFlight = false;
         if (
           (next === 'reconnecting' || next === 'connecting')
           && this.attachState.phase === 'attached'

@@ -18,8 +18,10 @@ use tokio::sync::{mpsc, Mutex};
 
 use nession_protocol::contracts::session::v1::ClientAttachResponse;
 use nession_protocol::contracts::terminal::v1::{
-    TerminalOutputAppliedPayload, TerminalResumeRecovery, TerminalStreamEventPayload,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalOutputAppliedPayload, TerminalOutputProgressPayload, TerminalReconcileAction,
+    TerminalReconcileReason, TerminalReconcileRequiredPayload, TerminalResumeRecovery,
+    TerminalStreamEventPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TERMINAL_PROGRESS_NOTIFICATIONS_V1,
 };
 
 use crate::server::issued_credit::SubscriberIssuedFlow;
@@ -432,6 +434,11 @@ pub(crate) fn client_attach_response(
         // resizing the shared pane; an Agent from before the field omits it,
         // which leaves the client's own build configuration in charge.
         terminal_cols: Some(session.terminal_cols),
+        // #2877: a response-less progress report and the exception-only
+        // reconcile notice are notifications, not units, so this reply is
+        // where a client learns it may send them. Absence (an older Agent)
+        // keeps the client on the v1 request/reply operation.
+        terminal_capabilities: Some(vec![TERMINAL_PROGRESS_NOTIFICATIONS_V1.to_string()]),
     }
 }
 
@@ -531,5 +538,172 @@ pub(crate) fn accept_output_ack(
         }
         OutputAckVerdict::Duplicate => Ok(verdict),
         _ => Err("invalid_output_ack"),
+    }
+}
+
+/// The exact peer a reconcile notice must reach, lifted out of the session
+/// map so the caller can send it without holding the map lock (#2877).
+pub(crate) struct ReconcileNotice {
+    pub(crate) outbound: P2pOutbound,
+    pub(crate) payload: TerminalReconcileRequiredPayload,
+}
+
+impl std::fmt::Debug for ReconcileNotice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReconcileNotice")
+            .field("payload", &self.payload)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What one authenticated progress report did, including the exception-only
+/// notice it may have earned.
+#[derive(Debug)]
+pub(crate) struct OutputProgressOutcome {
+    pub(crate) verdict: OutputAckVerdict,
+    pub(crate) notice: Option<ReconcileNotice>,
+}
+
+/// Apply one subscriber's one-way parser-progress report (#2877).
+///
+/// The report is a notification, so an accepted, duplicate, stale-subscriber
+/// or invalid report produces **no reply**. Only a proven, actionable
+/// inconsistency about the *current* binding earns at most one notice for the
+/// unresolved episode. The frontier is the subscriber's own issued position,
+/// never the session-global head: lag behind the head is normal, a claim
+/// beyond what this subscriber was handed is not.
+pub(crate) fn accept_output_progress(
+    peers: &mut [SessionPeer],
+    client_id: &str,
+    peer_token: &Arc<()>,
+    payload: &TerminalOutputProgressPayload,
+    head_seq: u64,
+    first_available_seq: u64,
+) -> Result<OutputProgressOutcome, &'static str> {
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
+    else {
+        return Err("not_current_subscriber");
+    };
+    if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
+        return Err("invalid_renderer_generation");
+    }
+    let issued_frontier = peer
+        .issued_flow
+        .lock()
+        .map_err(|_| "credit_state_unavailable")?
+        .issued_frontier();
+
+    let mut cursor = peer.output_ack.clone();
+    let verdict = cursor.observe_with_renderer(
+        OutputAckBinding {
+            subscriber_generation: payload.subscriber_generation,
+            stream_epoch: payload.stream_epoch,
+        },
+        payload.renderer_generation,
+        payload.applied_through,
+        issued_frontier,
+    );
+
+    // An old subscription/transport callback is ignored rather than
+    // challenged; only the exact current generation may enter an episode.
+    let notice = |reason: TerminalReconcileReason,
+                  action: TerminalReconcileAction,
+                  peer: &mut SessionPeer|
+     -> Option<ReconcileNotice> {
+        // At most one active notice per unresolved episode.
+        if !peer.output_ack.begin_reconcile_episode(reason) {
+            return None;
+        }
+        Some(ReconcileNotice {
+            outbound: peer.outbound.clone(),
+            payload: TerminalReconcileRequiredPayload {
+                session_name: payload.session_name.clone(),
+                subscriber_generation: peer.output_ack.binding().subscriber_generation,
+                stream_epoch: peer.output_ack.binding().stream_epoch,
+                renderer_generation: peer.output_ack.renderer_generation(),
+                head_seq,
+                first_available_seq: Some(first_available_seq),
+                reason,
+                action,
+            },
+        })
+    };
+
+    match verdict {
+        OutputAckVerdict::Advanced { .. } => {
+            let ack = {
+                let mut issued = peer
+                    .issued_flow
+                    .lock()
+                    .map_err(|_| "credit_state_unavailable")?;
+                issued.parser_ack(payload.stream_epoch, payload.applied_through)
+            };
+            match ack {
+                Ok(_) => {
+                    cursor.clear_reconcile_episode();
+                    peer.output_ack = cursor;
+                    Ok(OutputProgressOutcome {
+                        verdict,
+                        notice: None,
+                    })
+                }
+                // The claimed prefix passed the cursor check but the issued
+                // ledger refused it. Nothing is committed: the report cannot
+                // be used for credit, and the current episode is the same
+                // "ahead of what was issued" inconsistency.
+                Err(_) => Ok(OutputProgressOutcome {
+                    verdict: OutputAckVerdict::BeyondIssuedHead,
+                    notice: notice(
+                        TerminalReconcileReason::ProgressAheadOfIssued,
+                        TerminalReconcileAction::Resume,
+                        peer,
+                    ),
+                }),
+            }
+        }
+        OutputAckVerdict::Duplicate => Ok(OutputProgressOutcome {
+            verdict,
+            notice: None,
+        }),
+        // A retired subscription's report is not a challenge to the binding
+        // that replaced it.
+        OutputAckVerdict::StaleSubscriber => Ok(OutputProgressOutcome {
+            verdict,
+            notice: None,
+        }),
+        OutputAckVerdict::StaleEpoch => Ok(OutputProgressOutcome {
+            verdict,
+            notice: notice(
+                TerminalReconcileReason::EpochIncompatible,
+                TerminalReconcileAction::Reattach,
+                peer,
+            ),
+        }),
+        OutputAckVerdict::StaleRenderer => Ok(OutputProgressOutcome {
+            verdict,
+            notice: notice(
+                TerminalReconcileReason::RendererReplaced,
+                TerminalReconcileAction::Reattach,
+                peer,
+            ),
+        }),
+        OutputAckVerdict::BeyondIssuedHead => Ok(OutputProgressOutcome {
+            verdict,
+            notice: notice(
+                TerminalReconcileReason::ProgressAheadOfIssued,
+                TerminalReconcileAction::Resume,
+                peer,
+            ),
+        }),
+        // Invalid identity or a malformed/regressive report fails closed:
+        // never credit, never challenge the healthy binding.
+        OutputAckVerdict::Regressive | OutputAckVerdict::UnsafeWireInteger => {
+            Ok(OutputProgressOutcome {
+                verdict,
+                notice: None,
+            })
+        }
     }
 }

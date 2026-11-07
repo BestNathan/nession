@@ -2,7 +2,7 @@ import type { WebSocketService } from '@/platform/socket';
 import type { ConnectionState, SentSocketMessage } from '@/platform/socket/types';
 // Type only. The capability singleton is passed in by the caller, which lives
 // above this layer — `platform` may not import a `product` module (#783).
-import type { TerminalServerApi, RelaySubscriptionProof, TerminalOutputAppliedAck } from '@/product/terminal';
+import type { TerminalServerApi, RelaySubscriptionProof, TerminalOutputAppliedAck, TerminalReconcileNotice } from '@/product/terminal';
 
 /**
  * Everything optional about a relay begin. An object rather than a positional
@@ -52,6 +52,13 @@ export interface RelayServerHandle {
   onRelayReady?(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
   /** Optional on legacy handle; Agent ACK credit is strictly guarded by SessionRuntime. */
   sendRelayOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /** Optional: response-less parser progress (#2877), only after negotiation. */
+  sendRelayOutputProgress?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
+  /** Optional: the Agent's exception-only reconcile notice (#2877). */
+  onRelayReconcileRequired?(
+    sessionName: string,
+    cb: (notice: TerminalReconcileNotice) => void,
+  ): () => void;
   /** Ask the server to stop relaying terminal traffic for a session. */
   endRelay(sessionId: string): void;
 }
@@ -129,6 +136,21 @@ export function relayServerHandle(
     sendRelayOutputApplied: (sessionName, ack) => {
       if (stale() || service.connectionState !== 'connected') { return false; }
       return terminalServerApi.sendRelayOutputApplied(sessionName, ack);
+    },
+    sendRelayOutputProgress: (sessionName, ack) => {
+      if (stale() || service.connectionState !== 'connected') { return false; }
+      return terminalServerApi.sendRelayOutputProgress(sessionName, ack);
+    },
+    onRelayReconcileRequired: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelayReconcileRequired(sessionName, (notice) => {
+        // Same physical-socket fence as every relay subscription: a notice
+        // read on a replaced connection must not start recovery for the
+        // binding the new one holds.
+        if (!stale() && service.connectionState === 'connected') {
+          cb(notice);
+        }
+      });
     },
     sendRelayInput: (sessionName, data, opts) => {
       if (stale()) { return; }

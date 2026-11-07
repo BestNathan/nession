@@ -322,6 +322,21 @@ pub mod msg_types {
     /// `just check-protocol` as a notification rather than an operation whose
     /// answerer went missing.
     pub const TERMINAL_INPUT_ACK: &str = "agent.terminal.input.ack";
+    /// Browser -> Agent one-way parser-applied progress (#2877).
+    ///
+    /// A **notification**, not an operation: nothing answers it. Declared
+    /// here because this is the file that handles it — a notification's wire
+    /// is a `pub const` beside the code that carries it, and the first
+    /// segment names the emitter (`client`). A client sends it only after
+    /// negotiating [`nession_protocol::contracts::terminal::v1::TERMINAL_PROGRESS_NOTIFICATIONS_V1`];
+    /// older clients keep the v1 `agent.terminal.output.applied` operation.
+    pub const TERMINAL_OUTPUT_PROGRESS: &str = "client.terminal.output.progress";
+    /// Agent -> Web exception-only reconciliation notice (#2877).
+    ///
+    /// Emitted to exactly one authenticated subscriber, at most once per
+    /// unresolved episode, and never answered. See
+    /// [`TerminalReconcileRequiredPayload`].
+    pub const TERMINAL_RECONCILE_REQUIRED: &str = "agent.terminal.reconcile-required";
     pub const OK: &str = "ok";
     pub const ERROR: &str = "error";
 }
@@ -386,8 +401,10 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
-    TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
-    TerminalStreamEventPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalOutputPayload, TerminalOutputProgressPayload, TerminalReconcileAction,
+    TerminalReconcileReason, TerminalReconcileRequiredPayload, TerminalResizePayload,
+    TerminalResumeRecovery, TerminalStreamEventPayload, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -1295,6 +1312,9 @@ struct Frame {
 enum Routed {
     /// Not a control wire: an operation, and it goes to a lane.
     Operation,
+    /// A notification with no lane and no reply: handled on the reader task,
+    /// beside the route table rather than as an arm of it.
+    Notification,
     /// A control wire with nothing to answer.
     Silent,
     /// A control wire with an answer to write.
@@ -1375,6 +1395,28 @@ impl Frame {
                 debug!("control.heartbeat received");
                 Routed::Silent
             }
+            // A one-way progress report (#2877). It is **not** an operation:
+            // nothing answers it, so it has no arm in `p2p_routes!` and no
+            // manifest entry. It still needs the same credential scope as the
+            // terminal it reports on, and a frame outside that scope fails
+            // closed — a refused notification is dropped, never answered.
+            msg_types::TERMINAL_OUTPUT_PROGRESS => {
+                if !self
+                    .connection
+                    .authority
+                    .covers(&terminal_scope(&self.payload))
+                {
+                    warn!(
+                        wire = %self.msg_type,
+                        credential = %self.connection.authority.credential_id,
+                        session = %self.connection.authority.session_id,
+                        "dropping a peer-to-peer notification outside the credential's scope"
+                    );
+                    Routed::Silent
+                } else {
+                    Routed::Notification
+                }
+            }
             // The scope gate (#1013), and this is the only place it can go.
             //
             // It runs on the reader task, before any lane handoff and before
@@ -1451,6 +1493,86 @@ impl Frame {
 
         let reply = dispatch_p2p(ctx, &msg_type, payload).await;
         write_frame(&connection, Some(reply)).await
+    }
+
+    /// Handle one notification on the reader task.
+    ///
+    /// A notification has no reply and no lane: an accepted, duplicate, stale
+    /// or malformed progress report is bookkeeping and silence. The only
+    /// outbound frame this path can produce is an exception-only
+    /// `agent.terminal.reconcile-required` addressed to the exact subscriber
+    /// that proved the inconsistency (#2877).
+    ///
+    /// Returns whether the connection is still usable. A notice that cannot
+    /// reach a stalled/closed subscriber is a dead binding, which is the same
+    /// verdict a terminal fan-out reaches.
+    async fn handle_notification(self) -> bool {
+        let Self {
+            msg_type,
+            payload,
+            connection,
+            ..
+        } = self;
+        match msg_type.as_str() {
+            msg_types::TERMINAL_OUTPUT_PROGRESS => {
+                let payload: TerminalOutputProgressPayload = match serde_json::from_value(payload) {
+                    Ok(payload) => payload,
+                    Err(error) => {
+                        // Malformed: fail closed, never grant credit, never
+                        // answer. The sender's next report restates the fact.
+                        debug!("dropping a malformed terminal progress notification: {error}");
+                        return true;
+                    }
+                };
+                let client_id = connection_client_id(&connection.client_id).await;
+                match connection.sessions.record_output_progress(
+                    &payload.session_name,
+                    &client_id,
+                    &connection.peer_token,
+                    &payload,
+                ) {
+                    Ok(outcome) => {
+                        debug!(
+                            session = %payload.session_name,
+                            verdict = ?outcome.verdict,
+                            "terminal progress recorded without a reply"
+                        );
+                        let Some(notice) = outcome.notice else {
+                            return true;
+                        };
+                        // One line per episode, bounded by the episode itself.
+                        warn!(
+                            session = %notice.payload.session_name,
+                            subscriber = notice.payload.subscriber_generation,
+                            reason = ?notice.payload.reason,
+                            head = notice.payload.head_seq,
+                            "terminal progress inconsistency; asking the exact subscriber to reconcile"
+                        );
+                        let Ok(json) = serde_json::to_string(&new_message(
+                            msg_types::TERMINAL_RECONCILE_REQUIRED,
+                            notice.payload,
+                        )) else {
+                            return true;
+                        };
+                        match notice.outbound.send_terminal(WsMessage::Text(json)).await {
+                            Ok(()) => true,
+                            Err(_) => false,
+                        }
+                    }
+                    // A frame from a peer this Session does not know, or an
+                    // unusable identity, is dropped without a reply.
+                    Err(reason) => {
+                        debug!(
+                            session = %payload.session_name,
+                            reason,
+                            "dropped a terminal progress notification"
+                        );
+                        true
+                    }
+                }
+            }
+            _ => true,
+        }
     }
 }
 
@@ -3462,6 +3584,11 @@ impl AgentServer {
                         // A control wire with nothing to answer: handled, and
                         // deliberately silent.
                         Routed::Silent => {}
+                        Routed::Notification => {
+                            if !frame.handle_notification().await {
+                                break;
+                            }
+                        }
                         Routed::Operation => {
                             // The lane is a property of the unit, declared
                             // beside it in `p2p_routes!`. A wire this socket
@@ -3603,9 +3730,10 @@ mod tests {
     use super::*;
     use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
     use crate::session::terminal::runtime::{
-        accept_output_ack, atomic_output_prefix, build_terminal_resume_response, fan_out,
-        fan_out_peers, fan_out_recorded_resize, new_output_ack, subscribe_at_stream_cut,
-        AttachedSession, SessionPeer, SUBSCRIBER_QUEUE_BYTES, SUBSCRIBER_QUEUE_SLOTS,
+        accept_output_ack, accept_output_progress, atomic_output_prefix,
+        build_terminal_resume_response, fan_out, fan_out_peers, fan_out_recorded_resize,
+        new_output_ack, subscribe_at_stream_cut, AttachedSession, SessionPeer,
+        SUBSCRIBER_QUEUE_BYTES, SUBSCRIBER_QUEUE_SLOTS,
     };
     use crate::session::terminal::state as session_terminal;
 
@@ -3740,6 +3868,192 @@ mod tests {
             })
         );
         assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 0);
+    }
+
+    fn progress_peer(generation: u64, epoch: u64, base: u64) -> (SessionPeer, Arc<()>) {
+        let socket = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        let (tx, _) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        (
+            SessionPeer {
+                client_id: "observer".to_string(),
+                subscription_id: None,
+                peer_token: Arc::clone(&socket),
+                output_ack: SubscriberOutputAck::new(OutputAckBinding {
+                    subscriber_generation: generation,
+                    stream_epoch: epoch,
+                })
+                .unwrap(),
+                outbound,
+                output_tx: Some(tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new_with_base(base))),
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+            },
+            socket,
+        )
+    }
+
+    #[test]
+    fn progress_is_response_less_and_only_an_actionable_current_inconsistency_opens_one_episode() {
+        let (peer, socket) = progress_peer(88, 9, 3);
+        let mut peers = vec![peer];
+        let payload = |subscriber_generation: u64, stream_epoch: u64, renderer: u64, applied| {
+            TerminalOutputProgressPayload {
+                session_name: "demo".into(),
+                subscriber_generation,
+                stream_epoch,
+                renderer_generation: renderer,
+                applied_through: applied,
+            }
+        };
+        let report = |peers: &mut Vec<SessionPeer>, p: &TerminalOutputProgressPayload| {
+            accept_output_progress(peers, "observer", &socket, p, 10, 1)
+        };
+
+        // A claim beyond what this subscriber was actually issued is the one
+        // actionable inconsistency. It is not committed and it opens exactly
+        // one episode; the repeated report is silent.
+        let ahead = report(&mut peers, &payload(88, 9, 7, 4)).unwrap();
+        assert_eq!(ahead.verdict, OutputAckVerdict::BeyondIssuedHead);
+        let notice = ahead
+            .notice
+            .expect("the first ahead report asks for reconcile");
+        assert_eq!(
+            notice.payload.reason,
+            TerminalReconcileReason::ProgressAheadOfIssued
+        );
+        assert_eq!(notice.payload.action, TerminalReconcileAction::Resume);
+        assert_eq!(notice.payload.subscriber_generation, 88);
+        assert_eq!(notice.payload.stream_epoch, 9);
+        assert_eq!(notice.payload.head_seq, 10);
+        assert_eq!(notice.payload.first_available_seq, Some(1));
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        let repeated = report(&mut peers, &payload(88, 9, 7, 4)).unwrap();
+        assert!(
+            repeated.notice.is_none(),
+            "one notice per unresolved episode"
+        );
+
+        // An old subscription generation is ignored, never challenged.
+        let stale = report(&mut peers, &payload(87, 9, 7, 4)).unwrap();
+        assert_eq!(stale.verdict, OutputAckVerdict::StaleSubscriber);
+        assert!(stale.notice.is_none());
+        assert_eq!(
+            peers[0].output_ack.reconcile_episode(),
+            Some(TerminalReconcileReason::ProgressAheadOfIssued),
+            "a stale report must not disturb the current episode"
+        );
+
+        // Once the events are actually issued, a corrected report advances and
+        // clears the episode.
+        {
+            let mut issued = peers[0].issued_flow.lock().unwrap();
+            issued.issue(9, 4, 4).unwrap();
+            issued.issue(9, 5, 4).unwrap();
+        }
+        let corrected = report(&mut peers, &payload(88, 9, 7, 4)).unwrap();
+        assert!(matches!(
+            corrected.verdict,
+            OutputAckVerdict::Advanced { .. }
+        ));
+        assert!(corrected.notice.is_none());
+        assert_eq!(peers[0].output_ack.reconcile_episode(), None);
+
+        // A different epoch for the current subscription requires a fresh
+        // binding, and is actionable once.
+        let epoch = report(&mut peers, &payload(88, 10, 7, 4)).unwrap();
+        assert_eq!(epoch.verdict, OutputAckVerdict::StaleEpoch);
+        assert_eq!(
+            epoch
+                .notice
+                .expect("epoch mismatch is actionable")
+                .payload
+                .reason,
+            TerminalReconcileReason::EpochIncompatible
+        );
+        // Recover the episode by advancing within the binding.
+        assert!(matches!(
+            report(&mut peers, &payload(88, 9, 7, 5)).unwrap().verdict,
+            OutputAckVerdict::Advanced { .. }
+        ));
+        assert_eq!(peers[0].output_ack.reconcile_episode(), None);
+
+        // A renderer that is not the pinned one needs a fresh binding.
+        let renderer = report(&mut peers, &payload(88, 9, 8, 5)).unwrap();
+        assert_eq!(renderer.verdict, OutputAckVerdict::StaleRenderer);
+        assert_eq!(
+            renderer
+                .notice
+                .expect("renderer mismatch is actionable")
+                .payload
+                .reason,
+            TerminalReconcileReason::RendererReplaced
+        );
+
+        // Invalid wire identity fails closed: no credit, no notice, no reply.
+        assert_eq!(
+            report(&mut peers, &payload(88, 9, 0, 5)).unwrap_err(),
+            "invalid_renderer_generation"
+        );
+        assert_eq!(
+            report(&mut peers, &payload(99, 9, 8, 5)).unwrap().verdict,
+            OutputAckVerdict::StaleSubscriber
+        );
+    }
+
+    #[test]
+    fn progress_credit_is_per_subscriber_and_one_peer_cannot_contaminate_another() {
+        let (a, a_socket) = progress_peer(88, 9, 3);
+        let (b, b_socket) = progress_peer(89, 9, 3);
+        let mut peers = vec![a, b];
+        for peer in &peers {
+            peer.issued_flow.lock().unwrap().issue(9, 4, 4).unwrap();
+        }
+        let payload = |generation: u64, applied| TerminalOutputProgressPayload {
+            session_name: "demo".into(),
+            subscriber_generation: generation,
+            stream_epoch: 9,
+            renderer_generation: 7,
+            applied_through: applied,
+        };
+
+        // B's ahead claim is B's episode. A's cursor and episode are untouched.
+        let ahead_b =
+            accept_output_progress(&mut peers, "observer", &b_socket, &payload(89, 5), 10, 1)
+                .unwrap();
+        assert_eq!(ahead_b.verdict, OutputAckVerdict::BeyondIssuedHead);
+        assert_eq!(
+            ahead_b
+                .notice
+                .expect("B's claim opens its own episode")
+                .payload
+                .subscriber_generation,
+            89
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        assert_eq!(peers[0].output_ack.reconcile_episode(), None);
+        assert_eq!(
+            peers[1].output_ack.reconcile_episode(),
+            Some(TerminalReconcileReason::ProgressAheadOfIssued)
+        );
+
+        // A's valid contiguous prefix advances only A.
+        let advanced_a =
+            accept_output_progress(&mut peers, "observer", &a_socket, &payload(88, 4), 10, 1)
+                .unwrap();
+        assert!(matches!(
+            advanced_a.verdict,
+            OutputAckVerdict::Advanced { .. }
+        ));
+        assert!(advanced_a.notice.is_none());
+        assert_eq!(peers[0].output_ack.applied_through(), 4);
+        assert_eq!(peers[1].output_ack.applied_through(), 0);
+        assert_eq!(
+            peers[1].output_ack.reconcile_episode(),
+            Some(TerminalReconcileReason::ProgressAheadOfIssued),
+            "A's progress does not resolve B's episode"
+        );
     }
 
     #[test]

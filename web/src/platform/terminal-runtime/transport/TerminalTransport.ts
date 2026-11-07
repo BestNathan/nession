@@ -49,6 +49,14 @@ export interface TerminalTransport {
   flushAllOutbound(): void;
 
   /**
+   * Ask the Agent to prove the timeline from a trusted parser-applied prefix
+   * (#2877). Resolves `true` only on a complete same-epoch replay, `false`
+   * when the caller must take the checkpoint/reattach path. Optional so a
+   * legacy transport without resume simply reports it cannot reconcile.
+   */
+  requestReconcile?(epoch: number, afterSeq: number): Promise<boolean>;
+
+  /**
    * This client just became the Controller: the next resize must be stated
    * even if its size is the one this transport last sent (#2286).
    *

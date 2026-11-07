@@ -84,6 +84,14 @@ export class StreamReconciler {
    * nothing is buffered to place them against.
    */
   private wantHistory = false;
+  /**
+   * The caller waiting for one explicit reconciliation request (#2877).
+   *
+   * It is settled by the next resume answer/failure rather than by success of
+   * the local call: the only proof that recovery worked is the Agent's
+   * complete same-epoch reply.
+   */
+  private reconcileWaiter: { promise: Promise<boolean>; resolve: (ok: boolean) => void } | null = null;
   private disposed = false;
   private readonly handlers: StreamApplyHandlers;
 
@@ -289,12 +297,72 @@ export class StreamReconciler {
   }
 
   /**
+   * Ask the Agent to prove the timeline from a trusted parser-applied prefix
+   * (#2877), resolving only on a complete same-epoch replay answer.
+   *
+   * This reuses the existing resume request rather than adding a second
+   * recovery mechanism: it anchors the request at the received frontier when
+   * that is ahead of `afterSeq` (those events were already delivered and
+   * re-requesting them would duplicate xterm writes), and otherwise proves
+   * the prefix from `afterSeq`. A live frame or an ordinary gap request
+   * already in flight answers the same question, so this waits for it rather
+   * than issuing a competing request.
+   *
+   * `true` means the Agent stated a complete contiguous same-epoch run;
+   * `false` (or a rejected/expired request) leaves the caller to take the
+   * proven checkpoint/reattach path. Never resolves `true` on an unstated
+   * `complete`: absence is not proof.
+   */
+  requestReconcile(epoch: number, afterSeq: number): Promise<boolean> {
+    if (this.disposed) {
+      return Promise.resolve(false);
+    }
+    if (!Number.isSafeInteger(epoch) || epoch <= 0
+      || !Number.isSafeInteger(afterSeq) || afterSeq < 0) {
+      return Promise.resolve(false);
+    }
+    if (this.reconcileWaiter) {
+      return this.reconcileWaiter.promise;
+    }
+    if (this.epoch !== epoch) {
+      // A different timeline cannot inherit this renderer's proof; adopting
+      // it without a fresh binding is not a reconciliation.
+      return Promise.resolve(false);
+    }
+    if (this.frontier === null || this.frontier < afterSeq) {
+      this.frontier = afterSeq;
+    }
+    // Drop held frames at/below the trusted prefix: the consumer already
+    // applied that stretch, and re-delivering it is a duplicate xterm write.
+    for (const seq of [...this.pending.keys()]) {
+      if (seq <= afterSeq) {
+        this.forgetFrame(seq);
+      }
+    }
+    this.wantHistory = true;
+    let resolve!: (ok: boolean) => void;
+    const promise = new Promise<boolean>((done) => {
+      resolve = done;
+    });
+    this.reconcileWaiter = { promise, resolve };
+    this.recover();
+    return promise;
+  }
+
+  private settleReconcile(ok: boolean): void {
+    const waiter = this.reconcileWaiter;
+    this.reconcileWaiter = null;
+    waiter?.resolve(ok);
+  }
+
+  /**
    * Drop everything and stop. A resume reply still in flight is discarded by
    * its generation guard, so a transport rewire cannot deliver the old
    * stream's events into the new one (#1303).
    */
   dispose(): void {
     this.disposed = true;
+    this.settleReconcile(false);
     this.reset(null);
   }
 
@@ -314,6 +382,7 @@ export class StreamReconciler {
 
   /** Adopt a stream generation, discarding every trace of the previous one. */
   private reset(epoch: number | null): void {
+    this.settleReconcile(false);
     this.epoch = epoch;
     this.frontier = null;
     this.pending.clear();
@@ -513,6 +582,9 @@ export class StreamReconciler {
     this.anchor();
     this.noteAttempt(afterSeq);
     this.drain();
+    // An explicit reconcile request is answered by exactly this proof: a
+    // complete same-epoch run. An unstated `complete` is not proof.
+    this.settleReconcile(reply.epochMatch && reply.complete === true);
     // An answer that left a hole open is not the end of the recovery — the
     // request did not cover everything it was asked for, and the frames still
     // waiting cannot place themselves. Ask again now rather than waiting for
@@ -530,6 +602,7 @@ export class StreamReconciler {
     }
     const afterSeq = flight.afterSeq;
     this.noteAttempt(afterSeq);
+    this.settleReconcile(false);
     // A stream with no anchor has no hole to fill, only history that did not
     // come. Holding its first frames behind a request that already failed
     // would freeze the terminal for a fetch the consumer never needed to see
@@ -625,6 +698,7 @@ export class StreamReconciler {
    * that repaints a buffer with nothing missing from it. See {@link skipHole}.
    */
   private abandon(): void {
+    this.settleReconcile(false);
     this.attemptsFor = -1;
     this.attempts = 0;
     this.wantHistory = false;

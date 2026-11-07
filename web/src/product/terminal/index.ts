@@ -4,12 +4,16 @@
 // never leaks into those consumers.
 export { ATTACH_TIMEOUT_MS } from './agent';
 export { createTerminalAgentApi } from './agent';
+export { TERMINAL_PROGRESS_NOTIFICATIONS_V1, readReconcileNotice } from './agent';
 export type {
   AgentError,
   TerminalAgentApi,
   TerminalInputAck,
   TerminalOutputAppliedAck,
   TerminalInputSequence,
+  TerminalReconcileAction,
+  TerminalReconcileNotice,
+  TerminalReconcileReason,
   TerminalResizeFrame,
 } from './agent';
 export { TerminalServerPlugin } from './server';
