@@ -21,29 +21,41 @@ test('SC-05: Pierre diffs and the Files edit lifecycle are unchanged', async ({ 
   await expect(page.getByTestId('git-diff-layout-unified')).toBeVisible();
 
   // Files: code view, structured Preview/Raw, and the explicit edit/save path.
+  // The explorer exposes rows as treeitems; folder labels flip between
+  // "Expand folder" and "Collapse folder" as they open.
   await page.goto('/#/fixture/workspace?capability=files');
   await expect(page.getByTestId('file-workspace')).toBeVisible();
-  await page.getByTestId('file-row-web').click();
-  await page.getByTestId('file-row-web/src').click();
-  await page.getByTestId('file-row-web/src/App.tsx').click();
+  await page.getByRole('treeitem', { name: 'Expand folder web' }).click();
+  await page.getByRole('treeitem', { name: 'Expand folder src' }).click();
+  await page.getByRole('treeitem', { name: 'App.tsx', exact: true }).click();
   const filesEditor = page.getByTestId('codemirror-editor');
   await expect(filesEditor).toBeVisible();
   await expect(page.getByTestId('file-view-unavailable')).toHaveCount(0);
 
-  await page.getByTestId('file-row-docs').click();
-  await page.getByTestId('file-row-docs/design').click();
-  await page.getByTestId('file-row-docs/design/visual-language.md').click();
-  await expect(page.getByRole('button', { name: 'Preview', pressed: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Raw', pressed: false }).click();
+  await page.getByRole('treeitem', { name: 'Expand folder docs' }).click();
+  await page.getByRole('treeitem', { name: 'Expand folder design' }).click();
+  await page.getByRole('treeitem', { name: 'visual-language.md', exact: true }).click();
+  const mode = page.getByRole('group', { name: 'View mode' });
+  await expect(mode.getByRole('button', { name: 'Preview', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await mode.getByRole('button', { name: 'Raw', exact: true, pressed: false }).click();
   await expect(page.getByTestId('codemirror-editor')).toBeVisible();
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   const content = page.locator('.cm-content');
   await content.click();
   await page.keyboard.press('End');
   await page.keyboard.type('\nSC-05 edit');
-  await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeEnabled();
+  await save.click();
+  // A completed write clears the dirty mark; Save stays as a disabled action
+  // while the editor remains in Edit mode.
+  await expect(page.locator('[title="Unsaved changes"]')).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await expect(save).toHaveCount(0);
 
   test.info().annotations.push({
     type: 'evidence',

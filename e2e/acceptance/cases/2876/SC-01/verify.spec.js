@@ -32,11 +32,13 @@ test('SC-01: untracked and unmerged text render in read-only CodeMirror', async 
   // Language-aware rendering produces token spans, not one flat text node.
   expect(await text.locator('.cm-line span[class]').count()).toBeGreaterThan(0);
 
-  // A Git read-only surface offers no write/merge affordance.
+  // A Git read-only surface offers no write/merge affordance. Scoped to the
+  // preview: the change list legitimately names a file "unmerged-missing.ts".
+  const preview = page.getByTestId('git-file-preview');
   await expect(
-    page.getByRole('button', { name: /stage|commit|push|discard|resolve|merge/i }),
+    preview.getByRole('button', { name: /stage|commit|push|discard|resolve|merge/i }),
   ).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Save$|^Edit$/ })).toHaveCount(0);
+  await expect(preview.getByRole('button', { name: /^Save$|^Edit$/ })).toHaveCount(0);
 
   const conflict = page.getByTestId('git-row-unmerged').filter({ hasText: 'src/conflict.rs' });
   await conflict.click();

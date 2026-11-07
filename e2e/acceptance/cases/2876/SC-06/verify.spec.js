@@ -32,13 +32,17 @@ test('SC-06: text, structured and media stay usable at desktop and phone widths'
     await expect(page.getByTestId('git-file-preview-status')).toBeVisible();
     const body = page.getByTestId('git-file-preview-body');
     await expect(body).toHaveCSS('overflow-y', 'auto');
-    const scroller = page.getByTestId('git-file-preview-text').locator('.cm-scroller');
-    await expect(scroller).toBeVisible();
-    const scroll = await scroller.evaluate((element) => {
+    // The pane is the scroller: CodeMirror grows to its content inside it.
+    const scroll = await body.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
-      return element.scrollTop;
+      return {
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+      };
     });
-    expect(scroll).toBeGreaterThan(0);
+    expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+    expect(scroll.scrollTop).toBeGreaterThan(0);
     expect(
       await body.evaluate(
         (element) => Number.parseFloat(getComputedStyle(element).paddingBottom),
@@ -47,8 +51,13 @@ test('SC-06: text, structured and media stay usable at desktop and phone widths'
     await expectContained(page);
 
     await page.getByTestId('git-row-untracked').filter({ hasText: 'notes/data.json' }).click();
-    await expect(page.getByRole('button', { name: 'Preview', pressed: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Raw', pressed: false })).toBeVisible();
+    const mode = page.getByRole('group', { name: 'View mode' });
+    await expect(mode.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
+    await expect(mode.getByRole('button', { name: 'Preview', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(mode.getByRole('button', { name: 'Raw', exact: true, pressed: false })).toBeVisible();
     await expect(page.getByRole('tree')).toBeVisible();
     await expectContained(page);
 

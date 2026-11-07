@@ -15,35 +15,38 @@ test('SC-02: structured Preview/Raw matches Files for Git rows', async ({ page }
 
   const row = (path) => page.getByTestId('git-row-untracked').filter({ hasText: path });
   const source = () => page.getByTestId('git-file-preview-text');
+  // Scope to the shared toggle: getByRole name matching is substring-based, so
+  // "Preview" would also match the change-list row "src/long-preview.txt".
+  const mode = () => page.getByRole('group', { name: 'View mode' });
 
   // JSON: tree first, Raw is source, Preview returns to the tree.
   await row('notes/data.json').click();
   await expect(page.getByRole('tree')).toBeVisible();
   await expect(page.getByText('"name"')).toBeVisible();
-  await page.getByRole('button', { name: 'Raw', pressed: false }).click();
+  await mode().getByRole('button', { name: 'Raw', exact: true, pressed: false }).click();
   await expect(source().locator('.cm-editor')).toBeVisible();
   await expect(source()).toContainText('"name": "git-viewer"');
   await expect(source().locator('pre')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Preview', pressed: false }).click();
+  await mode().getByRole('button', { name: 'Preview', exact: true, pressed: false }).click();
   await expect(page.getByRole('tree')).toBeVisible();
 
   // JSONL: records render in the same Preview/Raw contract.
   await row('notes/events.jsonl').click();
   await expect(page.getByText('Line 1')).toBeVisible();
   await expect(page.getByText('Line 2')).toBeVisible();
-  await page.getByRole('button', { name: 'Raw', pressed: false }).click();
+  await mode().getByRole('button', { name: 'Raw', exact: true, pressed: false }).click();
   await expect(source()).toContainText('{"line":1,"ok":true}');
 
   // Markdown: rendered preview and the same source fallback.
   await row('notes/README.md').click();
   await expect(page.getByRole('heading', { name: 'Git preview' })).toBeVisible();
-  await page.getByRole('button', { name: 'Raw', pressed: false }).click();
+  await mode().getByRole('button', { name: 'Raw', exact: true, pressed: false }).click();
   await expect(source()).toContainText('# Git preview');
 
   // Invalid JSON stays usable through Raw.
   await row('notes/broken.json').click();
   await expect(page.getByText('Invalid JSON')).toBeVisible();
-  await page.getByRole('button', { name: 'Raw', pressed: false }).click();
+  await mode().getByRole('button', { name: 'Raw', exact: true, pressed: false }).click();
   await expect(source()).toContainText('"broken": true');
 
   // A truncated JSON answer is incomplete; no Preview is offered and the
@@ -52,7 +55,7 @@ test('SC-02: structured Preview/Raw matches Files for Git rows', async ({ page }
   await expect(page.getByTestId('file-view-incomplete')).toContainText(
     'Preview unavailable for incomplete content',
   );
-  await expect(page.getByRole('button', { name: 'Preview' })).toHaveCount(0);
+  await expect(mode()).toHaveCount(0);
   await expect(source()).toContainText('{"name":"truncated"');
 
   test.info().annotations.push({
