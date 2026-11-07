@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 42380757373,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "42380757373-1-issue-2917-pre-merge"
+  },
+  "task": {
+    "id": "issue-2917-pre-merge",
+    "type": "acceptance",
+    "issue": 2917,
+    "stage": "pre-merge",
+    "target_ref": "ec6767fa05ef8a46a48be370ea13f3dd42cee0a4",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "01716576-7bd7-4bd5-bed6-f81309d3804c",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v3",
+      "sha256": "849b0133e640731fef0c0fd28ffdc71f3ac858e59a4ce4837802e5eed4b4da5e"
+    }
+  },
+  "execution": {
+    "turns": 23,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 162,
+    "output": 11642,
+    "cache_read": 735322,
+    "cache_write": 124663,
+    "reasoning": null,
+    "total": 871789
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-07T14:18:44.234Z",
+    "finished_at": "2026-11-07T14:20:23.458Z",
+    "agent_duration_ms": 98850,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 3,
+    "pending": 1,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "SC-02 has unsupported result (empty)",
+      "started_at": "2026-11-07T14:16:15.218Z",
+      "finished_at": "2026-11-07T14:18:44.234Z",
+      "turns": 33,
+      "tokens": {
+        "input": 102,
+        "output": 6858,
+        "cache_read": 488977,
+        "cache_write": 77953,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "valid",
+      "error": null,
+      "started_at": "2026-11-07T14:18:44.234Z",
+      "finished_at": "2026-11-07T14:20:45.279Z",
+      "turns": 23,
+      "tokens": {
+        "input": 60,
+        "output": 4784,
+        "cache_read": 246345,
+        "cache_write": 46710,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
