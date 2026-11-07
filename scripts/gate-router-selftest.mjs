@@ -5,6 +5,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// Git exports GIT_DIR/GIT_WORK_TREE to pre-push hooks. This test creates and
+// commits in throwaway repositories; ambient hook variables would redirect
+// those Git commands into the caller's real checkout.
+for (const key of ['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY','GIT_COMMON_DIR']) delete process.env[key];
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitStub = [
   '#!/usr/bin/env bash',
