@@ -32,7 +32,14 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
     return fail('STALE_PR_SHA');
   if(pr.mergeable_state==='dirty' && pr.mergeable===false)
     return fail('MERGE_CONFLICT');
-  if(pr.mergeable!==true||pr.mergeable_state!=='clean')
+  // GitHub reports 'behind' when the main source lacks staging-only commits.
+  // That is intrinsic to a main -> staging *sync* on diverged histories, not
+  // by itself a merge conflict. It is eligible only if GitHub independently
+  // reports mergeable=true and all exact-head PR checks are green; GitHub's
+  // merge endpoint remains the final branch-protection authority.
+  const allowedState=pr.mergeable_state==='clean' ||
+    (action==='sync-main-to-lane'&&pr.mergeable_state==='behind');
+  if(pr.mergeable!==true||!allowedState)
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
   if(!Array.isArray(workflowRuns)||workflowRuns.length>100)
     return fail('INVALID_RUN_INVENTORY');
@@ -165,6 +172,22 @@ function selfTest(){
     status:'completed',conclusion:'success',run_number:n+1,run_attempt:1,
     head_repository:{full_name:REPO},pull_requests:[{number:88}]}));
   assert.equal(evaluatePull({pr,action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,true);
+  assert.equal(evaluatePull({pr:{...pr,mergeable_state:'behind'},action:'sync-main-to-lane',
+    plan,baseSha:b,workflowRuns:runs}).ready,true,
+    'a main->staging sync with exact checks can merge even when main does not contain staging-only commits');
+  assert.equal(evaluatePull({pr:{...pr,mergeable:false,mergeable_state:'behind'},
+    action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
+    'behind does not override a GitHub-negative mergeability verdict');
+  for (const state of ['unknown','blocked','dirty','unstable']) {
+    assert.equal(evaluatePull({pr:{...pr,mergeable_state:state},
+      action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
+      'GitHub blocked/unknown state must fail closed: '+state);
+  }
+  const promo={...pr,base:{ref:'main',sha:a},head:{ref:'staging',sha:b,repo:{full_name:REPO}}};
+  assert.equal(evaluatePull({pr:{...promo,mergeable_state:'behind'},action:'promote-lane-to-main',
+    plan,baseSha:a,workflowRuns:runs}).ready,false,
+    'promotion is not eligible merely because its branch is behind');
+
   assert.match(evaluatePull({pr:{...pr,draft:true},action:'sync-main-to-lane',
     plan,baseSha:b,workflowRuns:runs}).reason,/UNTRUSTED/);
   assert.match(evaluatePull({pr,action:'sync-main-to-lane',
