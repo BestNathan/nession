@@ -2523,6 +2523,42 @@ mod tests {
         (agent_write.sent, outcome)
     }
 
+    /// #2877: the response-less progress notification is an ordinary forwarded
+    /// wire, not a Server-served unit and not a coalescable input burst.
+    ///
+    /// The Agent is the only party that may authenticate or credit it; the
+    /// Relay must hand it over unchanged, in arrival order, with no synthetic
+    /// reply. A classifier that routed `client.*` as a Server unit, or an
+    /// input-throttle arm that swallowed it, fails here.
+    #[tokio::test]
+    async fn a_progress_notification_is_forwarded_unchanged_to_the_agent() {
+        let payload = json!({
+            "session_name": "sess",
+            "subscriber_generation": 41,
+            "stream_epoch": 7,
+            "renderer_generation": 3,
+            "applied_through": 12,
+        });
+        let (sent, outcome) = drive(vec![frame_with_payload(
+            "client.terminal.output.progress",
+            "progress-1",
+            payload.clone(),
+        )])
+        .await;
+
+        assert_eq!(
+            sent.len(),
+            1,
+            "the notification reaches the Agent: {sent:?}"
+        );
+        let forwarded: serde_json::Value =
+            serde_json::from_str(sent[0].to_text().unwrap()).unwrap();
+        assert_eq!(forwarded["msg_type"], "client.terminal.output.progress");
+        assert_eq!(forwarded["id"], "progress-1");
+        assert_eq!(forwarded["payload"], payload);
+        assert!(matches!(outcome, ClientToAgent::Ended));
+    }
+
     /// #962: a relay end that arrives inside the throttle window ends the relay
     /// rather than being forwarded to the agent.
     ///
