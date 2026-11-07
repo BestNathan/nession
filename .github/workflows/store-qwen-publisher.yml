@@ -171,14 +171,19 @@ jobs:
             > "$RUNNER_TEMP/qwen-source.json"
           source_sha="$(jq -er .source_sha "$RUNNER_TEMP/qwen-source.json")"
           [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]]
+          task="$(jq -er .task "$RUNNER_TEMP/qwen-source.json")"
+          [[ "$task" == implement || "$task" == repair ]]
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "task=$task" >> "$GITHUB_OUTPUT"
 
       # This checkout is Git data ONLY. No npm install, Bash, hooks, package
       # scripts, source execution or checkout credentials are allowed here.
-      - name: Checkout current-main source strictly as inert Git data
+      # An initial publication applies its patch to the current main base; a
+      # Repair applies it to the exact reviewed PR HEAD (the claim input SHA).
+      - name: Checkout inert publication source strictly as Git data
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ steps.source.outputs.task == 'repair' && steps.source.outputs.sha || github.sha }}
           path: source
           fetch-depth: 1
           persist-credentials: false
