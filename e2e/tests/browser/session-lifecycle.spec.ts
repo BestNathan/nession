@@ -158,12 +158,14 @@ test.describe('Session lifecycle', () => {
     ).toContainText(`${reportedCommand} · ${agentLabel} ·`);
 
     // ── Kill session ──
-    // The Kill button is in the same row as the session name.  Use the
-    // row-level hover class to scope the search, since CSS-selector
-    // traversal with ".." is fragile across the nested flex layout.
-    // The Kill button appears on row hover (or when the row is selected).
+    // Since #2851 every row action lives in the one `…` menu (the row no
+    // longer renders a direct Kill button). Open the trigger inside the row,
+    // then choose the menu's Kill item; the popup is portaled outside the row.
     await sessionRow.hover();
-    await sessionRow.getByRole('button', { name: 'Kill session' }).click();
+    await sessionRow.locator('[data-testid^="session-actions-"]').first().click();
+    const killItem = page.locator('[data-testid^="session-actions-kill-"]').first();
+    await expect(killItem).toBeVisible();
+    await killItem.click();
 
     // KillConfirmDialog should open (it's an AlertDialog)
     const killDialog = page.getByRole('alertdialog');
