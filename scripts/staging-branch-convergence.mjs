@@ -80,7 +80,7 @@ function autoDeploysStaging(content) {
   // triggered by push. Manual deployments and lane E2E consumers are excluded.
   // Comments do not establish deploy eligibility.
   const uncommented = content.replace(/^\s*#.*$/gm, '');
-  return /(?:^|\n)\s*(?:\.\/)?scripts\/gitops-commit\.sh\s+staging(?:-[0-9]+)?(?:\s|$)/.test(uncommented);
+  return /(?:^|\n)\s*(?:-\s+run:\s*)?(?:\.\/)?scripts\/gitops-commit\.sh\s+staging(?:-[0-9]+)?(?:\s|$)/.test(uncommented);
 }
 
 export function discoverDeployBranches(entries) {
