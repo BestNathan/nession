@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {runClaudeCli,normalizeClaudeUsage} from './lib/agent/providers/claude-code.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from './agent-workflow-telemetry.mjs';
 import {providerScopedRunName} from './lib/agent/telemetry/run-name.mjs';
@@ -53,7 +54,8 @@ function telemetry(r,prompt,envelope,status,file){
     task:{id:'conflict-'+r.pr_number,type:'staging-convergence-conflict-review',
       issue:null,target_ref:r.lane_sha,fingerprint:r.main_sha+':'+r.lane_sha},
     agent:{provider:'claude-code',id:'staging-convergence-reviewer',
-      role:'analyst',prompt:promptTelemetry({text:prompt,version:'v1'}),
+      role:'analyst',prompt:promptTelemetry({template_id:'staging-convergence-conflict',template_version:'v1',
+        template_sha256:createHash('sha256').update('staging-convergence-conflict-v1').digest('hex')}),
       model:{id:model,request_model:model,backend_mapping:'qwen-configured-gateway'},
       run_id:envelope?.session_id??null,request_id:null,status},
     execution:{turns:envelope?.num_turns??null,model_requests:null,
