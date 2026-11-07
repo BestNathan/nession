@@ -33,6 +33,12 @@ Previously the 63 Tooling Gates (roughly two minutes on a representative run) se
 
 **Statistical limitation:** Three classes, one observed before/after pair each, not controlled repetitions. They prove measured improvement on those samples and preserved routing/Fail-Closed gates, not an SLA or population-wide speedup. Formal SC-04 verdict remains owned by the repository's trusted Acceptance evaluator; this document is only source-linked evidence.
 
+## Trusted PR-stage Acceptance input for SC-04
+
+The [#2941 merged fix](https://github.com/BestNathan/nession/pull/2941) activates a narrow, read-only CI evidence collector exclusively for Issue #2917 at `pre-merge`. Its [pinned study owner](https://github.com/BestNathan/nession/blob/41c131b5a88791bf2561fb772164c386dd99b6c5/scripts/acceptance-pr-quality-cost-study.mjs) does not trust the contents of this document as proof: it fetches the actual six Quality GitHub Runs/Jobs/Steps, three Case Smoke Runs, three E2E Runs, and three disposable probe commit files/parents to independently re-establish exact identities, times and required verdicts. The result is delivered as `ci_evidence.verified_pr_quality_cost_study` to the existing read-only SC evaluator. Only the deterministic Issue updater may project an SC result; no source documentation or Agent statement can confer Pass alone.
+
+This timing/qualification check is **not** equivalent to a universal CI SLA, and the mixed diagnostic E2E remains an authenticated Fail-Closed observation, not a product E2E Pass. Normal PR-stage Acceptance remains CI-evidence-free, and post-merge evidence collection has unchanged semantics. Source provenance: [Main merge 41c131b5](https://github.com/BestNathan/nession/commit/41c131b5a88791bf2561fb772164c386dd99b6c5) and [Issue #2917](https://github.com/BestNathan/nession/issues/2917).
+
 ## Sources and publication identity
 
 - [Issue #2917: full exact run list and context](https://github.com/BestNathan/nession/issues/2917#issuecomment-6708007432)
