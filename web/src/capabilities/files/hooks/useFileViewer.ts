@@ -8,7 +8,7 @@ import {
   SUGGEST_CONFIDENCE,
   detectLanguageForFile,
 } from '@/shared/markdown';
-import { readFileChunked, type FileOps } from '@/capabilities/files';
+import { readFileChunked, type FileData, type FileOps } from '@/capabilities/files';
 import { fileErrorMessage, fileErrorKind } from '../model/fileErrors';
 import { useMarkdownPreviewErrorFallback } from './useMarkdownPreviewErrorFallback';
 import { base64ToBlobUrl } from '@/shared/lib/blob';
@@ -82,6 +82,76 @@ interface FileLoaderResult {
 }
 
 /**
+ * The only flight allowed to publish (issue #2902). `isCurrent` binds the
+ * generation this flight took; a superseded or cancelled flight fails it, so
+ * its settles cannot mutate the successor's content, progress or loading.
+ */
+interface LoadFlight {
+  isCurrent: () => boolean;
+  setError: (message: string) => void;
+  settle: () => void;
+}
+
+interface ChunkedFlight extends LoadFlight {
+  begin: () => void;
+  setProgress: (loaded: number, total: number) => void;
+  attachCancel: (cancel: () => void) => void;
+  complete: (text: string) => void;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to read file';
+}
+
+/** Read one whole file; only the owning flight publishes the answer. */
+async function readWholeFile(
+  fileOps: FileOps,
+  path: string,
+  flight: LoadFlight,
+  publish: (data: FileData) => void,
+): Promise<void> {
+  try {
+    const data = await fileOps.readFile(path);
+    if (flight.isCurrent()) { publish(data); }
+  } catch (err) {
+    if (flight.isCurrent()) { flight.setError(errorMessage(err)); }
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
+}
+
+/**
+ * Stream a large file in bounded chunks. A chunk that settles after cancel is
+ * never decoded, reported or committed: `readFileChunked` rejects it and this
+ * flight's generation can no longer publish.
+ */
+async function readChunkedFile(
+  fileOps: FileOps,
+  path: string,
+  flight: ChunkedFlight,
+): Promise<void> {
+  flight.begin();
+  const result = readFileChunked(fileOps, path, (loaded, total) => {
+    if (flight.isCurrent()) { flight.setProgress(loaded, total); }
+  });
+  if (!flight.isCurrent()) {
+    result.cancel();
+    return;
+  }
+  flight.attachCancel(result.cancel);
+  try {
+    const fullText = await result.promise;
+    if (flight.isCurrent()) { flight.complete(fullText); }
+  } catch (err) {
+    if (!flight.isCurrent()) { return; }
+    if (err instanceof DOMException && err.name === 'AbortError') { return; }
+    flight.setError(errorMessage(err));
+  } finally {
+    if (flight.isCurrent()) { flight.settle(); }
+  }
+}
+
+/**
  * Read-file state: decodes text content or builds a media blob URL, tracks
  * loading/error, and calls `onDecoded` after a text file is decoded so the
  * caller can run content-based markdown detection. The server-reported MIME
@@ -116,10 +186,17 @@ function useFileLoader(
   const [revision, setRevision] = useState<string | undefined>(undefined);
   const blobUrlRef = useRef<string | null>(null);
   const chunkedCancelRef = useRef<(() => void) | null>(null);
+  /**
+   * Monotonic owner of the current read (issue #2902). Every load takes the
+   * next generation; only that generation may publish content, progress,
+   * error or loading, and only it may clear the cancel handle.
+   */
+  const loadGenerationRef = useRef(0);
 
   // Revoke blob URL on unmount
   useEffect(() => {
     return () => {
+      loadGenerationRef.current += 1;
       if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
       chunkedCancelRef.current?.();
       chunkedCancelRef.current = null;
@@ -127,43 +204,44 @@ function useFileLoader(
   }, []);
 
   const handleCancelLoad = useCallback(() => {
+    // Cancel is a settled, non-loading state: invalidate the flight first so a
+    // chunk that settles late cannot publish content or restore loading.
+    loadGenerationRef.current += 1;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
     setIsChunkedLoading(false);
+    setLoading(false);
   }, []);
 
   // Large text files: chunked read, forced read-only — too big to round-trip.
-  const runChunkedLoad = useCallback(async (size: number) => {
-    setForceReadOnly(true);
-    setIsChunkedLoading(true);
-    setTotalBytes(size);
-    // A chunked document is read-only; a guarded save is not offered and the
-    // per-chunk revision would describe the file at a moment, not the whole
-    // loaded result.
-    setRevision(undefined);
-    const result = readFileChunked(fileOps, path, (loaded, total) => {
-      setLoadedBytes(loaded);
-      setTotalBytes(total);
+  const runChunkedLoad = useCallback(async (size: number, generation: number) => {
+    await readChunkedFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      begin: () => {
+        setForceReadOnly(true);
+        setIsChunkedLoading(true);
+        setTotalBytes(size);
+        // A chunked document is read-only; a guarded save is not offered and
+        // the per-chunk revision describes a moment, not the loaded result.
+        setRevision(undefined);
+      },
+      setProgress: (loaded, total) => { setLoadedBytes(loaded); setTotalBytes(total); },
+      attachCancel: (cancel) => { chunkedCancelRef.current = cancel; },
+      complete: (text) => { setContent(text); setOriginalContent(text); onDecodedRef.current(text); },
+      setError,
+      settle: () => {
+        setIsChunkedLoading(false);
+        setLoading(false);
+        chunkedCancelRef.current = null;
+      },
     });
-    chunkedCancelRef.current = result.cancel;
-    try {
-      const fullText = await result.promise;
-      setContent(fullText);
-      setOriginalContent(fullText);
-      onDecodedRef.current(fullText);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') { return; }
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setIsChunkedLoading(false);
-      setLoading(false);
-      chunkedCancelRef.current = null;
-    }
   }, [fileOps, path]);
 
   const loadFile = useCallback(async () => {
-    // Cancel any in-flight chunked read from a previous load so the stale
-    // resolver can't land after we reset state.
+    // Take ownership before cancelling the previous flight: the old reader's
+    // late chunk or finally block must not be able to touch this generation.
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
     chunkedCancelRef.current?.();
     chunkedCancelRef.current = null;
 
@@ -175,20 +253,21 @@ function useFileLoader(
     setMediaMimeType(null);
 
     if (fileSize && fileSize > CHUNKED_READ_THRESHOLD) {
-      await runChunkedLoad(fileSize);
+      await runChunkedLoad(fileSize, generation);
       return;
     }
 
     setForceReadOnly(false);
-
-    try {
-      const data = await fileOps.readFile(path);
+    await readWholeFile(fileOps, path, {
+      isCurrent: () => loadGenerationRef.current === generation,
+      setError,
+      settle: () => setLoading(false),
+    }, (data) => {
       setRevision(data.revision);
 
       // Media files
       if (viewerType && viewerType !== 'markdown') {
-        const newBlobUrl = replaceMediaBlob(blobUrlRef, data.content, data.mime_type);
-        setMediaBlobUrl(newBlobUrl);
+        setMediaBlobUrl(replaceMediaBlob(blobUrlRef, data.content, data.mime_type));
         setMediaMimeType(data.mime_type);
         return;
       }
@@ -198,11 +277,7 @@ function useFileLoader(
       setContent(decoded);
       setOriginalContent(decoded);
       onDecodedRef.current(decoded, data.mime_type);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read file');
-    } finally {
-      setLoading(false);
-    }
+    });
   }, [path, fileOps, viewerType, fileSize, runChunkedLoad]);
 
   useEffect(() => {
