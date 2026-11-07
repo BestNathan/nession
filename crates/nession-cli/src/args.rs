@@ -269,6 +269,10 @@ pub enum ConfigAction {
 #[derive(Subcommand)]
 pub enum ConfigSubAction {
     /// Initialize default configuration file
+    ///
+    /// A Server file starts in local no-auth mode: it listens on 127.0.0.1:8080
+    /// with an empty auth_token. Remote access is an explicit edit of both
+    /// listen_address and auth_token; `--force` rewrites the same safe default.
     Init {
         /// Overwrite existing config file if present
         #[arg(short, long)]
