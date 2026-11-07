@@ -146,3 +146,73 @@ jobs:
           path: ${{ runner.temp }}/convergence-agent/diagnosis.json
           if-no-files-found: warn
           retention-days: 7
+
+  publish:
+    needs: review
+    if: needs.review.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-convergence-diagnosis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/convergence-diagnosis
+      - name: Authenticate exact PR and bound nonauthoritative model output
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+          LANE_SHA: ${{ inputs.lane_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnosis="$RUNNER_TEMP/convergence-diagnosis/diagnosis.json"
+          jq -e --argjson pr "$PR_NUMBER" --arg main "$MAIN_SHA" --arg lane "$LANE_SHA" '
+            .schema_version == 1 and .pr_number == $pr and
+            .main_sha == $main and .lane_sha == $lane and
+            .authoritative == false and
+            (.summary | type == "string" and length > 0 and length <= 1600) and
+            (.repair_steps | type == "array" and length <= 12) and
+            ([.repair_steps[] | type == "string" and length <= 600] | all)
+          ' "$diagnosis" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/conflict-pr.json"
+          jq -e --arg main "$MAIN_SHA" --arg lane "$LANE_SHA" '
+            .state == "open" and .mergeable_state == "dirty" and
+            ((.head.sha == $main and .base.sha == $lane) or
+             (.head.sha == $lane and .base.sha == $main)) and
+            (.body | startswith("Staging Convergence automated proposal"))
+          ' "$RUNNER_TEMP/conflict-pr.json" >/dev/null
+
+      - name: Mint the existing scoped PR-review App outside the model job
+        id: publisher
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Publish read-only proposal as a normal PR review
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnosis="$RUNNER_TEMP/convergence-diagnosis/diagnosis.json"
+          body="$(jq -r '
+            "### Agent conflict analysis (non-authoritative)\n\n" +
+            "The model has NOT merged, edited, tested or accepted these changes. " +
+            "A separate Developer repair PR and real Gates/Acceptance are required.\n\n" +
+            "**Summary:** " + .summary + "\n\n" +
+            "**Suggested repair steps:**\n" +
+            ([.repair_steps[] | "- " + .] | join("\n")) + "\n\n" +
+            "Source refs: main `" + .main_sha + "`; Staging `" + .lane_sha + "`."
+          ' "$diagnosis")"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+            -f event=COMMENT -f body="$body" >/dev/null
+          echo "Published a bounded nonauthoritative Agent review to PR #$PR_NUMBER." >> "$GITHUB_STEP_SUMMARY"
