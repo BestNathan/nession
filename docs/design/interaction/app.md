@@ -86,6 +86,29 @@ rather than a history list:
 The layer's header is the App's title band, and it is a *page* title: the muted section
 label the screen used to open with described the list rather than naming the screen.
 
+### Row actions
+
+Each Session row carries one touch-safe `···` trigger (44px control band) and one
+anchored overlay with the same four task-level actions the Web sidebar exposes
+(#2875):
+
+```text
+Session details     read the target Session without selecting it
+Edit details        edit title / description / tags through the existing metadata owner
+Attach settings     the existing configure dialog, without attaching
+──────────────
+Kill session        destructive, separated; requires the exact immutable tmux name
+```
+
+Opening the menu or choosing details/settings never selects or attaches another
+Session; the Terminal stays mounted under the Sessions layer and the user returns
+to the same layer when the dialog closes. The overlay is not a replacement screen
+and never becomes a permanent toolbar. It dismisses on outside click, Escape, or a
+scroll of the App-owned Session list viewport, then restores focus to the row's
+trigger. These actions reuse the canonical owners — `SessionDetailsDialog` and the
+metadata store, `AttachDialog` in configure intent, and `KillConfirmDialog` — so
+App does not gain a second editor, attach flow, or kill path.
+
 ## Contextual interaction capsule
 
 A lightweight floating capsule is the primary high-level interaction surface over the Terminal.

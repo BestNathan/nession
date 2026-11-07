@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
-import { filterSessions } from '@/app/useDashboard';
+import { useSessionDetails } from '@/app/useSessionDetails';
+import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
+import { filterSessions, type SortDirection, type SortField, type StatusFilter } from '@/app/useDashboard';
 import { useDashboardFilter } from '@/app/useDashboardFilter';
-import { mapDomainState } from '@/product/session/model/domainState';
+import { mapDomainState, type DomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import type { TerminalChrome } from '@/app/ShellMain';
+import type { Agent, Session } from '@/types';
+import type { SidebarProps } from '@/app/Sidebar';
 import { FIXTURE_CLIENT_SESSION_ID } from '@/app/fixture/fixtureData';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
@@ -54,6 +58,104 @@ const fixtureOps = fixtureFileOps();
  * list) made the field inert and left the canonical screen showing a Session
  * order no sort in the product produces.
  */
+/**
+ * The App fixture's details/edit owner (#2875). Extracted so the canonical
+ * fixture component stays within the one-screen size budget while composing
+ * the same `useSessionDetails` + `SessionDetailsDialog` pair as the shipped
+ * App; the row menu's first two actions become reachable here.
+ */
+function useFixtureSessionDetails(
+  agents: Agent[],
+  staleAgents: string[],
+) {
+  const details = useSessionDetails({
+    agents,
+    staleAgentIds: staleAgents,
+    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+  });
+  return {
+    onViewDetails: (session: Session) => details.show(session, false),
+    onEditDetails: (session: Session) => details.show(session, true),
+    dialog: (
+      <SessionDetailsDialog
+        session={details.target?.session ?? null}
+        state={details.domain}
+        editing={details.target?.editing ?? false}
+        onClose={details.close}
+      />
+    ),
+  };
+}
+
+
+/**
+ * The App fixture's `SidebarProps`, split out so the canonical fixture
+ * component stays within the one-screen code budget. The row actions forward
+ * the shipped details/edit owner (#2875); the remaining handlers stay inert.
+ */
+function fixtureSidebarProps({
+  agents,
+  filteredSessions,
+  sessions,
+  staleAgents,
+  selectedId,
+  searchQuery,
+  setSearchQuery,
+  statusFilter,
+  setStatusFilter,
+  sortField,
+  sortDirection,
+  toggleSort,
+  isSearchActive,
+  connectionStatus,
+  domain,
+  sessionDetails,
+}: {
+  agents: Agent[];
+  filteredSessions: Session[];
+  sessions: Session[];
+  staleAgents: string[];
+  selectedId: SidebarProps['selectedId'];
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  statusFilter: StatusFilter;
+  setStatusFilter: (value: StatusFilter) => void;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  toggleSort: (field: SortField) => void;
+  isSearchActive: boolean;
+  connectionStatus: SidebarProps['connectionStatus'];
+  domain: DomainState | null;
+  sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
+}) {
+  return {
+    agents,
+    filteredSessions,
+    // The unfiltered population: this fixture exercises real filters.
+    totalSessionCount: sessions.length,
+    staleAgents,
+    selectedId,
+    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+    loadingSessions: false,
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    sortField,
+    sortDirection,
+    toggleSort,
+    isSearchActive,
+    connectionStatus,
+    domain,
+    onCreate: () => {},
+    onRefresh: () => {},
+    onConfigure: () => {},
+    onKill: () => {},
+    onViewDetails: sessionDetails.onViewDetails,
+    onEditDetails: sessionDetails.onEditDetails,
+  };
+}
+
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
@@ -114,6 +216,8 @@ export function FixtureApp() {
   const { historyDegraded, terminalControl, clipboardNotice } = fixtureStatusInputs(search);
   const sessions = useMemo(() => fixtureSessions(search), [search]);
   const agents = useMemo(() => fixtureAgents(search), [search]);
+  // The shipped details/edit owner (#2875), against the deterministic stub.
+  const sessionDetails = useFixtureSessionDetails(agents, staleAgents);
   const connectionStatus = fixtureConnection(search);
 
   const filteredSessions = useMemo(
@@ -128,9 +232,8 @@ export function FixtureApp() {
   );
 
   const selectedId = fixtureSelectedId(search);
-  // The pane's reported foreground command (`fixturePaneCommand`): the input
-  // the work sense resolves from, so `?pane=claude.exe` is the canonical screen
-  // as if the agent had reported Claude Code in the pane.
+  // The reported foreground command: `?pane=claude.exe` is the canonical
+  // screen as if the agent had reported Claude Code in the pane.
   const paneCommand = fixturePaneCommand(search);
   const selectedSession = useMemo(() => {
     const base = sessions.find((s) => s.session_id === selectedId) ?? null;
@@ -153,16 +256,12 @@ export function FixtureApp() {
       })
     : null;
 
-  const sidebarProps = {
+  const sidebarProps = fixtureSidebarProps({
     agents,
     filteredSessions,
-    // The unfiltered population, not `filteredSessions.length` — the fixture
-    // exercises real filters, so this is the one place the two can differ.
-    totalSessionCount: sessions.length,
+    sessions,
     staleAgents,
     selectedId,
-    clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-    loadingSessions: false,
     searchQuery,
     setSearchQuery,
     statusFilter,
@@ -173,11 +272,8 @@ export function FixtureApp() {
     isSearchActive,
     connectionStatus,
     domain,
-    onCreate: () => {},
-    onRefresh: () => {},
-    onConfigure: () => {},
-    onKill: () => {},
-  };
+    sessionDetails,
+  });
 
   const mainShared = {
     selectedSession,
@@ -229,6 +325,7 @@ export function FixtureApp() {
           />
         )}
       />
+      {sessionDetails.dialog}
     </div>
   );
 }

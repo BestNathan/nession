@@ -40,13 +40,17 @@ const menuReveal = cn(
 /**
  * The row's secondary actions as one anchored `…` menu.
  *
- * The same menu is used on wide and narrow Web: wide reveals the trigger on
- * hover/focus/selection, while narrow keeps a 44px touch target visible. App
- * receives the same primitive without Web's details entry, so its existing
- * attach/kill actions do not gain a new surface. The menu is a floating
- * overlay; it never selects the row or replaces the list. Base UI owns
- * click-outside, Escape and focus movement; an explicit scroll listener
- * dismisses it when the Session list moves under the anchor.
+ * Web and App receive the same primitive and the same four actions: details,
+ * edit, attach settings and kill. Wide Web reveals the trigger on
+ * hover/focus/selection, while narrow Web and App keep a 44px touch target
+ * visible. The menu is a floating overlay; it never selects the row or
+ * replaces the list. Base UI owns click-outside, Escape and focus movement; an
+ * explicit scroll listener dismisses it when the list that anchors it moves.
+ *
+ * The owning scroll viewport is resolved from the **row itself** (#2875): the
+ * Web sidebar and the App Sessions layer scroll different containers, and the
+ * previous global `[data-testid="sidebar"]` query left an App menu anchored to
+ * a list that had already scrolled away.
  */
 function SessionRowActionsMenu({
   session,
@@ -69,16 +73,17 @@ function SessionRowActionsMenu({
     if (!open) {
       return;
     }
-    const viewport = document.querySelector(
-      '[data-testid="sidebar"] [data-slot="scroll-area-viewport"]',
-    );
+    const row = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-session-row]'),
+    ).find((element) => element.dataset.sessionRow === session.session_id);
+    const viewport = row?.closest('[data-slot="scroll-area-viewport"]');
     if (!viewport) {
       return;
     }
     const close = () => setOpen(false);
     viewport.addEventListener('scroll', close, { passive: true });
     return () => viewport.removeEventListener('scroll', close);
-  }, [open]);
+  }, [open, session.session_id]);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -280,6 +285,7 @@ export function SessionItem({
   return (
     <div
       data-testid="session-item-row"
+      data-session-row={session.session_id}
       data-selected={selected}
       /* Selection is the surface and nothing else. The mockup fills the row
          with `--n-raised` and draws no other cue, and visual-language.md
