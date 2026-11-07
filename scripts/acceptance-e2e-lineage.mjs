@@ -309,13 +309,30 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
   return proofs;
 }
 
-export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
-  if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
+// GitHub's pull-commit endpoint is paginated. On an integration PR with
+// 100+ commits, the first page excludes the actual head; a first-page-only
+// collector incorrectly rejects its authenticated exact-head evidence.
+// Never use an arbitrary earlier commit as the missing head's substitute.
+export async function recentPullCommits(repo,pull,get) {
+  if(repo!==REPO||!goodInt(pull?.number)||!SHA.test(String(pull?.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
-  const commits=await get('/repos/'+repo+'/pulls/'+pull.number+'/commits?per_page=100');
-  const selected=(Array.isArray(commits)?commits:[]).slice(-MAX_COMMITS);
-  if (!selected.some(x=>x.sha===pull.head.sha))
-    throw Error('associated PR head is missing from commit history');
+  const base='/repos/'+repo+'/pulls/'+pull.number+'/commits?per_page=100';
+  let commits=await get(base);
+  if(!Array.isArray(commits)||!commits.length||commits.length>100)
+    throw Error('invalid PR commit history page');
+  for(let page=2;commits.at(-1)?.sha!==pull.head.sha&&commits.length===100&&page<=3;page++){
+    const next=await get(base+'&page='+page);
+    if(!Array.isArray(next)||!next.length||next.length>100)
+      throw Error('invalid PR commit continuation');
+    commits=next;
+  }
+  if(commits.at(-1)?.sha!==pull.head.sha)
+    throw Error('associated PR head is missing from bounded commit history');
+  return commits.slice(-MAX_COMMITS);
+}
+
+export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
+  const selected=await recentPullCommits(repo,pull,get);
   const testDrill=pull.state==='closed'&&!pull.merged_at&&
     pull.head?.repo?.full_name===REPO&&pull.base?.repo?.full_name===REPO&&
     /DO NOT MERGE/i.test(String(pull.title??''))&&
@@ -615,6 +632,25 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
 }
 
 async function selfTest() {
+  // Real protected Staging sync PR #2943 spans 199 commits. The head lives on
+  // page two; first-page-only evidence collectors must fail closed or paginate.
+  const manyHead='c'.repeat(40),calls=[];
+  const batch1=Array.from({length:100},(_,i)=>({sha:i.toString(16).padStart(40,'0')}));
+  const batch2=[...Array.from({length:98},(_,i)=>({
+    sha:(i+100).toString(16).padStart(40,'0')})),{sha:manyHead}];
+  const getMany=async path=>{
+    calls.push(path);
+    if(path.endsWith('/pulls/2943/commits?per_page=100'))return batch1;
+    if(path.endsWith('/pulls/2943/commits?per_page=100&page=2'))return batch2;
+    throw Error('unexpected paginated test path: '+path);
+  };
+  const tail=await recentPullCommits(REPO,{number:2943,head:{sha:manyHead}},getMany);
+  assert.equal(tail.length,MAX_COMMITS);
+  assert.equal(tail.at(-1).sha,manyHead);
+  assert.equal(calls.length,2);
+  await assert.rejects(()=>recentPullCommits(REPO,
+    {number:2943,head:{sha:'d'.repeat(40)}},getMany),/missing from bounded/);
+
   const pr={number:1718,head:{sha:'b'.repeat(40)}},a='a'.repeat(40),b='b'.repeat(40);
   const run=(id,sha,conclusion)=>({
     id,run_attempt:1,head_sha:sha,created_at:'2026-10-14T01:00:00Z',
