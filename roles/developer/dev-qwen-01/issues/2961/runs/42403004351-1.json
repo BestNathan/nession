@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "agent_checkpoint_run",
+  "role": "developer",
+  "agent_id": "dev-qwen-01",
+  "issue": 2961,
+  "run_id": 42403004351,
+  "attempt": 1,
+  "source_sha": "1f925d21129fe5731aec4235a9ff680ac7453785",
+  "workflow_sha": "f610d133cd245329ecf42f69e95e14327e0fd981",
+  "workflow": ".github/workflows/agent-develop.yml",
+  "checkpoint_path": "roles/developer/dev-qwen-01/issues/2961/checkpoints/00000002.json",
+  "version": 2,
+  "ciphertext_sha256": "00b4eb8ddd35bfee54d0393461aca74abd5094f90a31b956a08de37683ddab9d",
+  "harness_digest": "2eb552cbd009ce38acd1d8fd79b239b40467920ff5701811ca263db4760219e9"
+}

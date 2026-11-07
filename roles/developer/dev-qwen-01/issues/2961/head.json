@@ -1,5 +1,5 @@
 {
-  "version": 1,
-  "checkpoint_path": "roles/developer/dev-qwen-01/issues/2961/checkpoints/00000001.json",
-  "ciphertext_sha256": "26699f1d6f2b6f6242c22330b813c634e12afe67987adac114098495b1cc5a96"
+  "version": 2,
+  "checkpoint_path": "roles/developer/dev-qwen-01/issues/2961/checkpoints/00000002.json",
+  "ciphertext_sha256": "00b4eb8ddd35bfee54d0393461aca74abd5094f90a31b956a08de37683ddab9d"
 }
