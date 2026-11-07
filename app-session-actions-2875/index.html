@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · App Sessions actions · #2875</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review-root">
+  <header class="np-overview">
+    <nav class="np-breadcrumb" aria-label="Review navigation"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>App Sessions</span></nav>
+    <span class="np-eyebrow">REQUIREMENT #2875 · APP SESSION ACTIONS</span>
+    <div class="np-header-main">
+      <div>
+        <h1 class="np-title">App Sessions · 完整操作菜单</h1>
+        <p class="np-subtitle">沿用 Nession App 的 Sessions ← Terminal → Workspace 空间关系，不搬运 Web Sidebar。测试每个 Session 行尾的「···」四项操作、元信息修改、精确名称删除确认与工作连续性。</p>
+      </div>
+      <div class="np-links">
+        <a href="https://github.com/BestNathan/nession/issues/2875" target="_blank" rel="noopener noreferrer">Issue #2875</a>
+        <a href="https://github.com/BestNathan/nession/issues/2851" target="_blank" rel="noopener noreferrer">Web precedent #2851</a>
+        <a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+      </div>
+    </div>
+    <div class="np-meta"><span>Surface: <strong>App / spatial Sessions</strong></span><span>Sizes: <strong>390 × 844 / 375 × 812 / 430 × 932 CSS px</strong></span><span>Authority: <strong>Local mock, no API</strong></span></div>
+  </header>
+  <main>
+    <section class="np-preview" aria-labelledby="preview-title">
+      <div class="np-section-heading">
+        <div><h2 id="preview-title">完整 App 交互预览 · 1:1</h2><p>请点击 Session 行尾「···」尝试详情、编辑、连接配置和删除。尺寸切换不缩放 UI，模拟器操作不写入真实 Session。</p></div>
+        <div class="np-preview-toolbar" aria-label="Review controls">
+          <a href="#ui-spec">查看 UI 设计标注</a>
+          <button type="button" data-np-size="390" aria-pressed="true">App 390</button>
+          <button type="button" data-np-size="375">App 375</button>
+          <button type="button" data-np-size="430">App 430</button>
+          <button type="button" data-np-reset>Reset</button>
+        </div>
+      </div>
+      <div class="np-stage">
+        <div class="np-device" data-np-device style="--np-device-width:390px;--np-device-height:844px">
+          <div class="n-app" id="app-shell" data-experience="app" data-layer="sessions">
+            <!-- Terminal is mounted once. Sessions and Workspace remain independent spatial layers. -->
+            <div class="n-terminal-layer" id="terminal-layer" aria-label="Session Terminal">
+              <header class="n-app-header n-terminal-header">
+                <button class="n-icon" id="open-sessions" type="button" aria-label="Sessions" title="Sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+                <h1 id="terminal-session-title" class="n-header-title">Fix terminal reconnect</h1>
+                <button class="n-icon" id="open-workspace" type="button" aria-label="Workspace" title="Workspace"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M14 4v16"/></svg></button>
+              </header>
+              <div class="n-terminal-copy" id="terminal-copy" role="log" aria-label="Mock terminal output">
+                <div class="n-terminal-prompt">~ $ nession status</div>
+                <div>Session connected.</div>
+                <div>Working context preserved.</div>
+              </div>
+              <form class="n-capsule" id="terminal-capsule">
+                <button class="n-capsule-plus" type="button" id="capsule-plus" aria-label="Show capabilities" title="Capabilities">+</button>
+                <label class="n-sr-only" for="capsule-input">Message or command</label>
+                <input id="capsule-input" type="text" placeholder="Message or command..." autocomplete="off">
+                <button class="n-capsule-send" type="submit" aria-label="Send input">↑</button>
+              </form>
+            </div>
+            <section class="n-sessions-layer" id="sessions-layer" aria-label="Sessions navigation">
+              <header class="n-app-header">
+                <h1 class="n-header-title">Sessions</h1>
+                <button type="button" id="new-session" class="n-icon" aria-label="New Session" title="New Session"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg></button>
+              </header>
+              <div class="n-sessions-chrome">
+                <div class="n-search-row">
+                  <label class="n-search-box" for="session-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input id="session-search" type="search" autocomplete="off" placeholder="Search sessions..." aria-label="Search sessions"></label>
+                  <button id="filter-trigger" class="n-icon" type="button" aria-label="Filters" aria-expanded="false" aria-controls="filter-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg></button>
+                </div>
+                <div id="active-filter" class="n-active-filter" hidden></div>
+                <div class="n-filter-panel" id="filter-panel" hidden>
+                  <div class="n-filter-options" aria-label="Agent status filter">
+                    <button type="button" data-filter="all" aria-pressed="true">All</button>
+                    <button type="button" data-filter="online">Online</button>
+                    <button type="button" data-filter="offline">Offline</button>
+                  </div>
+                  <div class="n-filter-options" aria-label="Sort sessions">
+                    <button type="button" data-sort="activity" aria-pressed="true">Activity ↓</button>
+                    <button type="button" data-sort="name">Name ↑</button>
+                  </div>
+                </div>
+              </div>
+              <div class="n-sessions-scroll" id="session-scroll" tabindex="0" aria-label="Session history">
+                <div id="session-list" role="list" aria-label="Sessions"></div>
+                <div class="n-agents" id="agents-section"></div>
+              </div>
+              <div class="n-connection-alert" id="connection-alert" hidden>Server connection unavailable · <button type="button" id="retry-connection">Retry</button></div>
+            </section>
+            <section class="n-workspace-layer" id="workspace-layer" aria-label="Workspace context">
+              <header class="n-app-header">
+                <button type="button" id="workspace-back" class="n-icon" aria-label="Back to Terminal" title="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+                <h1 class="n-header-title">Workspace</h1>
+              </header>
+              <div class="n-workspace-body"><p class="n-overline">CURRENT SESSION</p><h2 id="workspace-title"></h2><p>Context and capabilities for this work.</p><div class="n-workspace-tile">Files <span>›</span></div><div class="n-workspace-tile">Git <span>›</span></div><div class="n-workspace-tile">Environment <span>›</span></div></div>
+            </section>
+            <div class="n-popup" id="session-menu" role="menu" aria-label="Session actions" hidden></div>
+            <div class="n-modal-root" id="dialog-root" hidden></div>
+            <div class="n-toast" id="product-toast" role="status" hidden></div>
+          </div>
+        </div>
+      </div>
+      <p class="np-stage-label" data-np-current-size>390 CSS px · 1:1</p>
+      <div class="np-fixtures" aria-label="Review-only fixture controls">
+        <span class="np-fixtures-title">测试场景 · 不属于产品 UI</span>
+        <button type="button" data-fixture="normal" aria-pressed="true">Normal</button>
+        <button type="button" data-fixture="offline">Agent offline</button>
+        <button type="button" data-fixture="conflict">Save conflict</button>
+        <button type="button" data-fixture="empty">No Sessions</button>
+      </div>
+    </section>
+    <section class="np-details" id="ui-spec" aria-label="Interactive design spec">
+      <h2>UI 设计标注与交互验收</h2>
+      <p class="np-details-lede">下方为评审辅助区域，独立于 App 可见屏幕。所有数值来自固定的 Nession App Token 快照或明确标注为本原型候选，并支持读取预览中的实际 DOM 几何数据。</p>
+      <div class="np-detail-grid">
+        <article class="np-detail">
+          <h3>核心路径</h3>
+          <ol class="np-steps">
+            <li>从 Sessions 列表选一个<strong>未选中</strong>的 Session 行尾 <code>···</code>，打开四项菜单。菜单不会自动切换工作。</li>
+            <li>选择 <strong>Session details</strong> 查看 tmux 名、位置、状态、描述、Tags。关闭仍在 Sessions。</li>
+            <li>选择 <strong>Edit details</strong> 修改 Title、Description、Tags；保存后行标题更新，但删除仍需要旧 tmux 名。</li>
+            <li>测试 <strong>Attach settings</strong> 和 <strong>Kill session</strong>；杀掉 Session 之前必须准确输入 tmux 名。</li>
+            <li>测试离线 Agent、模拟并发冲突、搜索/筛选、关闭菜单和返回 Terminal / Workspace。</li>
+          </ol>
+        </article>
+        <article class="np-detail">
+          <h3>体验边界</h3>
+          <p>App 保留 <strong>Sessions ← Terminal → Workspace</strong>。Sessions 是独立空间层，而不是折叠的 Web Sidebar；点击会话行才切换正在工作的 Session，点击菜单仅操作目标。</p>
+          <p>Session metadata 沿用既有 title/description/tags 领域语义；会话标识、tmux 名和 Agent 不可在编辑表单中修改。销毁前的名称确认不可省略。</p>
+        </article>
+        <article class="np-detail">
+          <h3>规格量测 · 预览中实时读取</h3>
+          <div class="n-inspector-controls" aria-label="Visual component picker">
+            <button type="button" data-inspect="#app-shell">App viewport</button>
+            <button type="button" data-inspect=".n-app-header">App header</button>
+            <button type="button" data-inspect=".n-session-row">Session row</button>
+            <button type="button" data-inspect=".n-more">··· touch target</button>
+            <button type="button" data-inspect=".n-session-title">Row title</button>
+            <button type="button" data-inspect=".n-session-meta">Row metadata</button>
+            <button type="button" data-inspect="#session-menu">Open dropdown</button>
+          </div>
+          <pre id="inspector-output" class="n-inspector-output" aria-live="polite">选择组件，读取尺寸、字号、圆角、CSS Token 和实际可见状态。</pre>
+          <p>产品 Token：<code>--nession-typography-title-size=17px</code>、<code>--nession-typography-primary-size=16px</code>、<code>--nession-typography-body-size=14px</code>、<code>--nession-shell-icon-button-size=44px</code>。列表控件触控目标至少 44px。</p>
+        </article>
+        <article class="np-detail">
+          <h3>数据与验证声明</h3>
+          <p>本原型使用纯静态 HTML/CSS/JS + 公开安全的虚构数据。按钮只修改浏览器内存；配置不会连接 Agent，删除不会杀真实进程，Terminal 是文字示意而非 xterm，不能证明 PTY/重连或真实滑动手势。</p>
+          <p><strong>状态：</strong>交互设计原型，非生产实现，也不是 #2875 的 Acceptance Pass。Web #2851 通过的浏览器 Case 不能替代 App 专项四项菜单测试。</p>
+          <details class="np-inspector"><summary>DOM 所有权与测试注意事项</summary><pre>AppLayout / AppLayers
+  ├─ Terminal (stays mounted)
+  ├─ Sessions → AppSessionsSurface → SessionList / SessionItem
+  └─ Workspace → AppPageHeader / WorkspaceShell
+One row overflow → SessionDetailsDialog | AttachDialog | KillConfirmDialog
+Mock: no API, no xterm, no file persistence, no full swipe gesture</pre></details>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer class="np-footer">Nession · Interactive design only · source-provenance from trusted Pages publisher · No live API calls</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body>
+</html>
