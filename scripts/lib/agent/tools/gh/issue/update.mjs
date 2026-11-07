@@ -5,11 +5,20 @@ import { fetchGitHubIssue } from './read.mjs';
 
 const CONTRACT_LABELS = new Set([...KIND_LABELS, ...AREA_LABELS]);
 
+// Typed errors identify rejected, non-mutating Audit proposals. Error text
+// alone must not grant a retry to an unrelated GitHub/tooling failure.
+function rejectedAuditProposal(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 // One contract for proposal completion and the final trusted mutation tool.
 // Diagnostics expose only violation classes, never raw model output or labels.
 export function validateContractLabels(labels) {
   if (!Array.isArray(labels)) {
-    throw new Error('Issue labels must be distinct canonical kind/area labels (not_array)');
+    throw rejectedAuditProposal('ISSUE_AUDIT_LABEL_CONTRACT',
+      'Issue labels must be distinct canonical kind/area labels (not_array)');
   }
   const violations = [];
   if (labels.some((label) => typeof label !== 'string')) violations.push('non_string');
@@ -20,7 +29,8 @@ export function validateContractLabels(labels) {
   if (labels.filter((label) => KIND_LABELS.has(label)).length !== 1) violations.push('kind_count');
   if (!labels.some((label) => AREA_LABELS.has(label))) violations.push('missing_area');
   if (violations.length) {
-    throw new Error('Issue labels must be distinct canonical kind/area labels (' + violations.join(', ') + ')');
+    throw rejectedAuditProposal('ISSUE_AUDIT_LABEL_CONTRACT',
+      'Issue labels must be distinct canonical kind/area labels (' + violations.join(', ') + ')');
   }
 }
 
@@ -57,7 +67,8 @@ export function enforceE2EReadOnly(currentBody, candidateBody) {
   if (!before && !after) return;
 
   const denied = () => {
-    throw new Error('Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
+    throw rejectedAuditProposal('ISSUE_AUDIT_E2E_PROTECTED',
+      'Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
   };
   // A structurally invalid source is an audit input, not proof of an
   // unauthorized write. The candidate, however, MUST be fully valid.

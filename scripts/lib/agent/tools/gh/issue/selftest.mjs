@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal } from './update.mjs';
-import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt } from '../../../tasks/issue-audit.mjs';
+import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, isIssueAuditRepairableRejection } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
@@ -138,6 +138,42 @@ try {
   assert.deepEqual(repairedNoLabels.labels.map(x=>x.name).sort(),['bug','cli']);
   assert.equal(repairedNoLabels.title,unlabelled.title);
   assert.equal(repairedNoLabels.body,unlabelled.body);
+
+  // #2915: missing_area/kind_count are typed, pre-write proposal rejections.
+  writeFileSync(filename,absentLabelSnapshot);
+  let labelRepairCalls=0;
+  const labelRepair=await applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({labels:['bug']}),
+  },'example/repo',{
+    contractRepair:async(previous,error)=>{
+      labelRepairCalls++;
+      assert.equal(error.code,'ISSUE_AUDIT_LABEL_CONTRACT');
+      assert.match(error.message,/missing_area/);
+      assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
+      const prompt=renderIssueAuditContractRepairPrompt(unlabelled,previous.result,error.message);
+      assert.match(prompt,/For a Bug or Requirement with missing or invalid kind\/area labels/);
+      return {result:JSON.stringify({labels:['bug','web']})};
+    },
+  });
+  assert.equal(labelRepairCalls,1);
+  assert.equal(labelRepair.contract_repair_attempted,true);
+  assert.deepEqual(JSON.parse(readFileSync(filename,'utf8')).labels.map(x=>x.name).sort(),
+    ['bug','web']);
+
+  // A second invalid draft is terminal; no Issue or model comment is written.
+  writeFileSync(filename,absentLabelSnapshot);
+  let exhaustedLabelCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({labels:['bug','ci','ci'],comment:'must not publish'}),
+  },'example/repo',{
+    contractRepair:async()=>{
+      exhaustedLabelCalls++;
+      assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
+      return {result:JSON.stringify({labels:['bug'],comment:'must not publish'})};
+    },
+  }),/missing_area/);
+  assert.equal(exhaustedLabelCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),absentLabelSnapshot);
   writeFileSync(filename,savedIssue);
 
   await assert.rejects(comment.execute({ body: 'ok', issue_number: 18 }), /Unauthorized/);
@@ -285,19 +321,68 @@ try {
   assert.equal(rejectedCalls,1);
   assert.equal(readFileSync(filename,'utf8'),originalSnapshot);
 
-  // A valid input cannot be silently re-scoped. E2E privilege violations
-  // on already-valid sources are not eligible for contract retry.
+  // #2915: an E2E-scope change is rejected pre-write. A single
+  // non-mutating correction can succeed only when valid E2E stays verbatim.
   writeFileSync(filename,JSON.stringify({...preE2eIssue,body:preE2eIssue.body+'\n\n'+e2eContract}));
   const validSnapshot=readFileSync(filename,'utf8');
+  const originalValid=JSON.parse(validSnapshot);
+  const changedE2e=originalValid.body
+    .replace('- terminal-attach','- terminal-replay')
+    .replace('| terminal-attach | Regression','| terminal-replay | Regression');
+  let protectedRepairCalls=0;
+  const protectedRepair=await applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({body:changedE2e}),
+  },'example/repo',{
+    contractRepair:async(previous,error)=>{
+      protectedRepairCalls++;
+      assert.equal(error.code,'ISSUE_AUDIT_E2E_PROTECTED');
+      assert.equal(readFileSync(filename,'utf8'),validSnapshot);
+      const prompt=renderIssueAuditContractRepairPrompt(originalValid,previous.result,error.message);
+      assert.match(prompt,/copy BOTH sections VERBATIM/);
+      return {result:JSON.stringify({
+        title:'Requirement: safe structural repair',body:originalValid.body,
+      })};
+    },
+  });
+  assert.equal(protectedRepairCalls,1);
+  assert.equal(protectedRepair.contract_repair_attempted,true);
+  const corrected=JSON.parse(readFileSync(filename,'utf8'));
+  assert.equal(corrected.title,'Requirement: safe structural repair');
+  assert.equal(corrected.body,originalValid.body);
+  assert.deepEqual(parseIssueE2E(corrected.body).errors,[]);
+
+  // A second unsafe proposal, including forged evidence, fails closed.
+  writeFileSync(filename,validSnapshot);
   let unsafeCalls=0;
   await assert.rejects(applyIssueAuditWithContractRetry(issue,{
-    result:JSON.stringify({body:preE2eIssue.body+'\n\n'+e2eContract
-      .replace('- terminal-attach','- terminal-replay')
-      .replace('| terminal-attach | Regression','| terminal-replay | Regression')}),
+    result:JSON.stringify({body:changedE2e}),
   },'example/repo',{
-    contractRepair:async()=>{unsafeCalls++;return {result:JSON.stringify({body:firstDraft})};},
+    contractRepair:async()=>{
+      unsafeCalls++;
+      return {result:JSON.stringify({body:originalValid.body
+        .replace('| Pending | - |','| Pass | forged |')})};
+    },
   }),/Unauthorized E2E/);
-  assert.equal(unsafeCalls,0);
+  assert.equal(unsafeCalls,1);
+  assert.equal(readFileSync(filename,'utf8'),validSnapshot);
+
+  // Error text alone cannot authorize a retry. Real permission, provider,
+  // post-write and verification-tier failures never get an extra model call.
+  for(const failure of [
+    new Error('Issue labels must be distinct canonical kind/area labels (missing_area)'),
+    new Error('Unauthorized E2E Verification / Report mutation by Issue Agent'),
+    new Error('GitHub API error 403: permission denied'),
+    new Error('Provider HTTP 429'),
+    new Error('Issue was written but post-write contract failed'),
+    new Error('verification-tier downgrade requires separate trusted approval'),
+  ])assert.equal(isIssueAuditRepairableRejection(failure),false,failure.message);
+  let unauthorizedCalls=0;
+  await assert.rejects(applyIssueAuditWithContractRetry(issue,{
+    result:JSON.stringify({issue_number:999,body:originalValid.body}),
+  },'example/repo',{
+    contractRepair:async()=>{unauthorizedCalls++;return {result:'{}'};},
+  }),/unauthorized fields/);
+  assert.equal(unauthorizedCalls,0);
   assert.equal(readFileSync(filename,'utf8'),validSnapshot);
   writeFileSync(filename,JSON.stringify(preE2eIssue));
 
