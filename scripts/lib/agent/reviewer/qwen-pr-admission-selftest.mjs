@@ -11,7 +11,8 @@ import {startDevelopment,validateDevelopmentState,
   acceptAttestedQwenPublication} from '../orchestration/outbox.mjs';
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
 import {assertReviewerAdmission} from './pr-admission.mjs';
-import {admitQwenPublishedReview} from './qwen-pr-admission.mjs';
+import {admitQwenPublishedReview,admitQwenRepairPublishedReview}
+  from './qwen-pr-admission.mjs';
 import {renderReviewPrompt,reviewModelResult} from '../tasks/review.mjs';
 
 const REPO='BestNathan/nession',ISSUE=3001,MAIN='a'.repeat(40);
@@ -119,6 +120,52 @@ assert.throws(()=>assertReviewerAdmission({...accepted,
   publisher_branch:'agent/3001/qwen-forged'}),/Qwen Reviewer admission/);
 console.log('Qwen Reviewer: authenticated published multi-file PR/Outbox model view and 18 negative source/role/branch/files cases pass');
 
+// A Repair updates the same PR to SHA B; its parent is the reviewed SHA A,
+// not main, and the publication is the repair Publisher Run.
+const SHA_B='1'.repeat(40),REPAIR_RUN=402;
+const REPAIR_ACTION='2'.repeat(64),REPAIR_CHECKPOINT='3'.repeat(40);
+const repairIntent={schema_version:1,
+  kind:'trusted_qwen_repair_publisher_write_ahead',repository:REPO,issue:ISSUE,
+  action_id:REPAIR_ACTION,worker_run_id:302,worker_run_attempt:1,
+  worker_sha:'7'.repeat(40),source_sha:HEAD,original_main_sha:MAIN,
+  original_publisher_run_id:401,
+  branch:'refs/heads/agent/'+ISSUE+'/qwen-'+action.slice(0,16),
+  checkpoint_version:2,checkpoint_commit_sha:REPAIR_CHECKPOINT,
+  checkpoint_ciphertext_sha256:'4'.repeat(64),patch_sha256:'5'.repeat(64),
+  file_manifest_sha256:'6'.repeat(64),file_count:2,
+  publisher_run_id:REPAIR_RUN,publication:'not_yet_attested'};
+const repairReviewer={...next[0],id:REPAIR_ACTION,
+  task:{...next[0].task,sha:SHA_B}};
+const repairPublished=validateDevelopmentState({...published,
+  version:published.version+1,phase:'review',target_sha:SHA_B,
+  outbox:[repairReviewer],transitions:[...published.transitions,
+    {key:'9'.repeat(64),kind:'publisher',run_id:REPAIR_RUN,attempt:1,
+      target_sha:SHA_B,outcome:'published'}]});
+const repairPublisherRun={...publisherRun,id:REPAIR_RUN,
+  head_sha:'a'.repeat(40)};
+const prB={...pr,head:{...pr.head,sha:SHA_B}};
+const refB={...ref,object:{sha:SHA_B}};
+const commitB={sha:SHA_B,parents:[{sha:HEAD}],tree:{sha:TREE}};
+const repairAdmission=admitQwenRepairPublishedReview({
+  state:repairPublished,intent:repairIntent,publisherRun:repairPublisherRun,
+  pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
+  actionId:REPAIR_ACTION});
+assert.equal(repairAdmission.target_sha,SHA_B);
+assert.equal(repairAdmission.base_sha_at_publication,MAIN);
+assert.equal(repairAdmission.publisher_run_id,REPAIR_RUN);
+assert.equal(repairAdmission.publisher_branch,intent.branch);
+for(const bad of [
+  {commit:{...commitB,parents:[{sha:MAIN}]}},
+  {publisherRun:{...repairPublisherRun,id:REPAIR_RUN+1}},
+  {ref:{...refB,object:{sha:HEAD}}},
+  {pr:{...prB,base:{...prB.base,ref:'staging'}}},
+  {files:files.slice(0,1)},
+])assert.throws(()=>admitQwenRepairPublishedReview({
+  state:repairPublished,intent:repairIntent,publisherRun:repairPublisherRun,
+  pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
+  actionId:REPAIR_ACTION,...bad}),/Qwen Reviewer admission|Repair/);
+console.log('Qwen Reviewer repair: SHA A parent, repair Publisher/outbox, SHA B admission and negatives pass');
+
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-review-store-'));
 try{
@@ -158,6 +205,6 @@ try{
       branch:'agent/'+ISSUE+'/qwen-'+'0'.repeat(16)})+'\n');
   await assert.rejects(()=>prepareQwenReviewAdmission({
     storeRoot:root,issue:ISSUE,actionId:reviewerAction,fetcher}),
-  /unique committed Qwen Publisher Intent/);
+  /unique Qwen review publication Intent/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen Reviewer: trusted Store readback, live GitHub source routing, duplicate intent and PR rejection verified');
