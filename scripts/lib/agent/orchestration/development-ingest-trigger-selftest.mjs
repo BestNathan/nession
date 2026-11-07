@@ -75,4 +75,23 @@ assert.throws(()=>resolveTrustedIngestSource({environment:workflowRun,
   event:{...workflowEvent,action:'requested'}}),/completed successful/);
 assert.throws(()=>resolveTrustedIngestSource({environment:workflowRun,
   event:{...workflowEvent,workflow_run:{...source,conclusion:'failure'}}}),/completed successful/);
-console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment and event denial passed');
+const qwenEnv={...environment,GITHUB_EVENT_NAME:'issue_comment'};
+const qwenEvent={action:'created',repository:{full_name:'BestNathan/nession'},
+  issue:{number:2817},
+  comment:{id:90910,user:{login:'BestNathan'},
+    body:'/nession ingest-qwen issue=2817 worker_run=42344231027'}};
+assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,event:qwenEvent}),
+  {run_id:42344231027,source:null,qwen_recovery:true,attempt:1});
+for(const bad of [
+  {environment:{...qwenEnv,GITHUB_ACTOR:'fork'}},
+  {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...qwenEvent,action:'edited'}},
+  {event:{...qwenEvent,issue:{number:2817,pull_request:{url:'https://example.org'}}}},
+  {event:{...qwenEvent,comment:{...qwenEvent.comment,user:{login:'fork'}}}},
+  {event:{...qwenEvent,comment:{...qwenEvent.comment,body:
+    qwenEvent.comment.body+' '}}},
+  {event:{...qwenEvent,comment:{...qwenEvent.comment,body:
+    '/nession ingest-qwen issue=2817 worker_run=x'}}},
+])assert.throws(()=>resolveTrustedIngestSource({...{
+  environment:qwenEnv,event:qwenEvent},...bad}));
+console.log('Trusted Ingest replay: exact owner/main/source, fork, Issue, edited comment, manual Qwen Worker Run and event denial passed');
