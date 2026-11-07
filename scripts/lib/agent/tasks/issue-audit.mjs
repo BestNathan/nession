@@ -1,6 +1,6 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
 import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../issue-contract.mjs';
-import { parseIssueE2E } from '../../../issue-e2e-contract.mjs';
+
 import { readVerificationTier, VERIFICATION_TIERS } from '../../../verification-tier-policy.mjs';
 import { parseModelJsonWithRepair } from './model-json.mjs';
 import { createIssueReadTool, fetchGitHubIssue } from '../tools/gh/issue/read.mjs';
