@@ -1589,6 +1589,10 @@ async function collectHistoricalReporterE2eRerun(repo,issue,targetSha){
 async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  // The reusable Acceptance workflow checks out `provider-metrics` next to the
+  // target `workspace` directory at the job root, not inside the target tree.
+  const metricsRoot = path.join(
+    process.env.GITHUB_WORKSPACE || path.dirname(workspace), 'provider-metrics');
   const directRuns = await workflowRunsForSha(repo, sha);
   // SC-03 #2824: bind existing Qwen run to its actual GitHub Issue writes,
   // not merely a successful workflow check or an untrusted comment. This
@@ -1665,7 +1669,7 @@ async function collectCommand(workspace, outFile) {
   // canonical storage path. The metrics branch is already checked out at
   // provider-metrics by the acceptance workflow.
   const verifiedAgentTelemetryRecords = collectVerifiedAgentTelemetryRecords({
-    metricsRoot: path.join(workspace, 'provider-metrics'), repo, sha, runs: directRuns,
+    metricsRoot, repo, sha, runs: directRuns,
   });
   // #2817: the controlled Qwen chain spans three main ancestors and two real
   // PRs. Re-read its exact Runs, committed Store bytes, PR diff and canonical
@@ -1674,8 +1678,7 @@ async function collectCommand(workspace, outFile) {
     repo,targetSha:sha,issue:Number(process.env.ISSUE_NUMBER??0),
     stage:process.env.ACCEPTANCE_STAGE,workspace,get:githubGet,
     telemetryForRun:(runSha,run)=>collectVerifiedAgentTelemetryRecords({
-      metricsRoot:path.join(workspace,'provider-metrics'),repo,
-      sha:runSha,runs:[run],
+      metricsRoot,repo,sha:runSha,runs:[run],
     }),
   });
   // SC-04 reads independently attested GitOps, anonymous ACR and VPN/K8s
