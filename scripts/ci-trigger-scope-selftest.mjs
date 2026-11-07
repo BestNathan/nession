@@ -22,6 +22,8 @@ function classifier() {
   const lines=sources.quality.split('\n');
   const i=lines.indexOf('      - name: Classify the exact PR or main-push change');
   assert.ok(i>=0,'production Quality selector missing');
+  assert.ok(sources.quality.includes('path: trusted') && sources.quality.includes('ref: main'),
+    'Quality scope must load trusted Main policy for historical PR heads');
   const j=lines.indexOf('        run: |',i);
   assert.ok(j>i,'production Quality run block missing');
   const body=[];
@@ -31,7 +33,7 @@ function classifier() {
     else break;
   }
   const script=body.join('\n');
-  assert.ok(script.includes('git merge-base') && script.includes('git diff --no-renames --name-only -z') && script.includes('git rev-parse "$target^1"'),
+  assert.ok(script.includes('git merge-base') && script.includes('git diff --no-renames --name-only -z') && script.includes('git rev-parse "$target^1"') && script.includes('node trusted/scripts/ci/quality-scope.mjs'),
     'Quality selector must use exact PR diff');
   return script;
 }
@@ -66,8 +68,9 @@ function select(files,eventName='pull_request') {
     git(dir,['config','user.name','CI Fixture']);
     git(dir,['config','user.email','ci@example.invalid']);
     fs.writeFileSync(path.join(dir,'base.txt'),'base\n');
-    fs.mkdirSync(path.join(dir,'scripts','ci'),{recursive:true});
-    fs.copyFileSync(path.join(root,'scripts/ci/quality-scope.mjs'),path.join(dir,'scripts/ci/quality-scope.mjs'));
+    // A historical PR head deliberately has no selector; trusted Main owns it.
+    fs.mkdirSync(path.join(dir,'trusted','scripts','ci'),{recursive:true});
+    fs.copyFileSync(path.join(root,'scripts/ci/quality-scope.mjs'),path.join(dir,'trusted/scripts/ci/quality-scope.mjs'));
 
     git(dir,['add','.']);git(dir,['commit','-qm','base']);
     const base=git(dir,['rev-parse','HEAD']);
