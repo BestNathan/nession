@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 1664
+criterion: SC-15
+stage: post-merge
+runtime: full-stack-local
+# Read-only public GitHub/metrics proof and disposable ingestion negatives.
+# No credentialed API, model call, private artifact content or Store mutation.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.js
+result_policy: all-pass
