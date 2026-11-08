@@ -100,6 +100,7 @@ mod tests {
             active_sessions: 1,
             protocol_manifest: manifest,
             probe_generation: 0,
+            offline_generation: 0,
         }
     }
 

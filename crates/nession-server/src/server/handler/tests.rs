@@ -170,6 +170,7 @@ async fn register_agent_id(
             active_sessions: 0,
             protocol_manifest: manifest,
             probe_generation: 0,
+            offline_generation: 0,
         })
         .await;
 }

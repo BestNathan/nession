@@ -189,6 +189,7 @@ impl ConnectionHandler {
             // rather than guesses.
             protocol_manifest: Some(protocol_manifest),
             probe_generation: 0,
+            offline_generation: 0,
         };
 
         self.agent_registry.register(agent_info).await;

@@ -6,7 +6,7 @@ use nession_protocol::contracts::agent::v1::{
 use nession_protocol::ProtocolManifest;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 #[derive(Debug, Clone)]
 pub struct AgentInfo {
@@ -55,6 +55,18 @@ pub struct AgentInfo {
     /// longer exists (#2839). Callers constructing an `AgentInfo` for
     /// registration may leave this at zero — `register` overwrites it.
     pub probe_generation: u64,
+    /// Monotonic **offline episode** generation, assigned by
+    /// [`AgentRegistry::check_offline_agents`].
+    ///
+    /// Every Online→Offline transition opens a new episode and increments this.
+    /// The grace-cleanup task captures the episode it was scheduled for and must
+    /// claim that same episode again before removing anything, so work left over
+    /// from an earlier offline interval cannot act on a later one (#2997).
+    ///
+    /// Like `probe_generation`, this is monotonic for the whole Agent lifetime:
+    /// `register` preserves the current value rather than resetting it, because
+    /// a reset would make an older cleanup's episode id current again.
+    pub offline_generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +74,31 @@ pub enum AgentStatus {
     Online,
     Offline,
     Degraded,
+}
+
+/// One Agent's Online→Offline transition, captured by the heartbeat sweep.
+///
+/// The sweep opens a new offline episode for each transition and hands this to
+/// the grace-cleanup task. The task must claim the same episode again it wakes,
+/// so cleanup scheduled for an earlier episode cannot remove Sessions belonging
+/// to a later one (#2997).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfflineTransition {
+    pub agent_id: String,
+    /// The offline episode this transition opened; see
+    /// [`AgentInfo::offline_generation`].
+    pub offline_generation: u64,
+}
+
+/// Proof that an expired offline episode is still the Agent's current one, and
+/// that no heartbeat or registration can make it current again while this guard
+/// lives.
+///
+/// Produced by [`AgentRegistry::begin_offline_cleanup`]; the registry's per-Agent
+/// liveness gate stays held until the guard is dropped, which is what makes the
+/// eligibility check and the destructive removal one ordered transition.
+pub struct OfflineCleanupGuard {
+    _gate: OwnedMutexGuard<()>,
 }
 
 /// One Agent's probe work, captured with the registration generation it
@@ -80,6 +117,16 @@ pub struct AgentRegistry {
     agents: Arc<RwLock<HashMap<String, AgentInfo>>>,
     heartbeat_timeout_secs: u64,
     db: Arc<Database>,
+    /// One gate per Agent, ordering the transitions that decide which offline
+    /// episode the Agent is in: registration and heartbeat recovery (which make
+    /// it Online) and expired-episode cleanup (which acts on it while Offline).
+    ///
+    /// Kept beside the records for the same reason `CommandBroker` keeps its
+    /// registration gates beside its own: the map lock is held only long enough
+    /// to find the gate, never across the state it orders. A cleanup that holds
+    /// a gate keeps its episode current until the guard is dropped, so a status
+    /// check alone is not what authorizes removal (#2997).
+    liveness_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl AgentRegistry {
@@ -88,6 +135,7 @@ impl AgentRegistry {
             agents: Arc::new(RwLock::new(HashMap::new())),
             heartbeat_timeout_secs,
             db,
+            liveness_gates: Mutex::new(HashMap::new()),
         }
     }
 
@@ -133,6 +181,8 @@ impl AgentRegistry {
                         // Agent is not a registration a stale probe could
                         // overwrite.
                         probe_generation: 0,
+                        // No offline episode has been opened in this process.
+                        offline_generation: 0,
                     };
                     agents.insert(row.agent_id, info);
                 }
@@ -145,6 +195,15 @@ impl AgentRegistry {
     }
 
     pub async fn register(&self, mut info: AgentInfo) {
+        // A registration is an Online transition, so it shares the Agent's
+        // liveness gate with heartbeat recovery and expired-episode cleanup
+        // (#2997): cleanup either sees this registration and stands down, or
+        // finishes before it begins applying, and can never remove state across
+        // the transition. The gate covers the SQLite write because that write is
+        // part of what the registration publishes.
+        let gate = self.liveness_gate(&info.agent_id).await;
+        let _liveness = gate.lock_owned().await;
+
         // Write-through to SQLite so addresses/connect_url survive restarts.
         let metadata_json =
             serde_json::to_string(&info.metadata).unwrap_or_else(|_| "{}".to_string());
@@ -173,9 +232,20 @@ impl AgentRegistry {
         // Assigned under the same write lock as the insertion, so the
         // generation a probe snapshot reads and the addresses it read with it
         // always belong to the same registration.
-        info.probe_generation = agents
-            .get(&info.agent_id)
-            .map_or(1, |current| current.probe_generation.saturating_add(1));
+        //
+        // The offline episode counter is likewise carried forward rather than
+        // reset: it is monotonic for the whole Agent lifetime, so a registration
+        // that replaces this row cannot make an older cleanup's episode id
+        // current again (#2997).
+        let (probe_generation, offline_generation) =
+            agents.get(&info.agent_id).map_or((1, 0), |current| {
+                (
+                    current.probe_generation.saturating_add(1),
+                    current.offline_generation,
+                )
+            });
+        info.probe_generation = probe_generation;
+        info.offline_generation = offline_generation;
         agents.insert(info.agent_id.clone(), info);
     }
 
@@ -189,6 +259,13 @@ impl AgentRegistry {
         session_count: u32,
         active_sessions: u32,
     ) -> bool {
+        // A heartbeat is the Online transition. Ordering it against the
+        // expired-episode cleanup claim (#2997) means a heartbeat that restores
+        // a Session-bearing Agent either lands before cleanup (which then stands
+        // down) or after it has finished — never in the middle of the removal.
+        let gate = self.liveness_gate(agent_id).await;
+        let _liveness = gate.lock_owned().await;
+
         let mut agents = self.agents.write().await;
         if let Some(agent) = agents.get_mut(agent_id) {
             let status_before = agent.status.clone();
@@ -305,7 +382,13 @@ impl AgentRegistry {
         false
     }
 
-    pub async fn check_offline_agents(&self) -> Vec<String> {
+    /// Mark Agents that have missed their heartbeat window as Offline.
+    ///
+    /// Every Online→Offline transition opens a new offline episode and gets a
+    /// monotonic generation. The grace-cleanup task is bound to that generation,
+    /// so work scheduled by an earlier episode cannot act on a later one
+    /// (#2997).
+    pub async fn check_offline_agents(&self) -> Vec<OfflineTransition> {
         let mut agents = self.agents.write().await;
         let now = Utc::now();
         let mut offline = vec![];
@@ -315,7 +398,11 @@ impl AgentRegistry {
                 let elapsed = (now - agent.last_heartbeat).num_seconds().unsigned_abs();
                 if elapsed > self.heartbeat_timeout_secs {
                     agent.status = AgentStatus::Offline;
-                    offline.push(agent_id.clone());
+                    agent.offline_generation = agent.offline_generation.saturating_add(1);
+                    offline.push(OfflineTransition {
+                        agent_id: agent_id.clone(),
+                        offline_generation: agent.offline_generation,
+                    });
                 }
             }
         }
@@ -323,7 +410,52 @@ impl AgentRegistry {
         offline
     }
 
+    /// Claim the expired offline episode `offline_generation` for destructive
+    /// cleanup.
+    ///
+    /// Succeeds only while the Agent is still in that episode: `Offline`, with
+    /// the generation the sweep recorded. The returned guard holds the Agent's
+    /// liveness gate until dropped, so no heartbeat or registration can turn the
+    /// Agent Online between this check and the removal that follows — the check
+    /// and the destructive boundary are one ordered transition (#2997).
+    ///
+    /// `None` means the episode is over (the Agent recovered, re-registered, or
+    /// a later offline interval began) and nothing may be removed.
+    pub async fn begin_offline_cleanup(
+        &self,
+        agent_id: &str,
+        offline_generation: u64,
+    ) -> Option<OfflineCleanupGuard> {
+        let gate = self.liveness_gate(agent_id).await;
+        let gate = gate.lock_owned().await;
+        {
+            let agents = self.agents.read().await;
+            let agent = agents.get(agent_id)?;
+            if agent.status != AgentStatus::Offline
+                || agent.offline_generation != offline_generation
+            {
+                return None;
+            }
+        }
+        Some(OfflineCleanupGuard { _gate: gate })
+    }
+
+    /// The per-Agent gate ordering liveness transitions.
+    ///
+    /// Looked up (and created on first use) without holding the map lock across
+    /// the wait on the gate itself, so unrelated Agents never serialize on one
+    /// another. The entries live as long as the Agent row (plus the lifetime of
+    /// any guard already handed out); `unregister` drops the entry with the row.
+    async fn liveness_gate(&self, agent_id: &str) -> Arc<Mutex<()>> {
+        let mut gates = self.liveness_gates.lock().await;
+        Arc::clone(gates.entry(agent_id.to_string()).or_default())
+    }
+
     pub async fn unregister(&self, agent_id: &str) {
+        // The gate belongs to the Agent row: an id that comes back starts a new
+        // episode history and must not inherit a claim from the previous
+        // incarnation.
+        self.liveness_gates.lock().await.remove(agent_id);
         let mut agents = self.agents.write().await;
         agents.remove(agent_id);
     }
@@ -650,6 +782,7 @@ mod tests {
             active_sessions: 0,
             protocol_manifest: None,
             probe_generation: 0,
+            offline_generation: 0,
         }
     }
 
