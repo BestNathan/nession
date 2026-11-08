@@ -129,12 +129,19 @@ function validatedAttestedRequest(filename){
   }
   const source=event?.workflow_run;
   const run=document?.run;
+  const qwenComment=run?.event==='issue_comment'&&
+    document?.request?.issue===3001&&
+    document.request.sha===run.head_sha&&
+    document.request.developer==='dev-qwen-01'&&
+    document.request.reviewer==='review-qwen-01'&&
+    document.request.acceptor==='accept-qwen-01';
   if(document.schema_version!==1||
       document.kind!=='agent_controller_start_request'||
       !run||run.repository!==REPO||
       run.workflow!=='Acceptance / Agent Controller'||
       run.workflow_path!=='.github/workflows/acceptance-agent-controller.yml'||
-      run.event!=='workflow_dispatch'||run.ref!=='refs/heads/main'||
+      (run.event!=='workflow_dispatch'&&!qwenComment)||
+      source?.event!==run.event||run.ref!=='refs/heads/main'||
       run.actor!=='BestNathan'||!SHA.test(run.head_sha??'')||
       source?.id!==run.run_id||source?.run_attempt!==run.attempt||
       source?.head_sha!==run.head_sha||
