@@ -78,7 +78,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
         (event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT&&actionId===REPAIR_RETRY_ACTION)||
         (REVIEW_DISPATCH_RE.exec(event?.comment?.body??'')?.[1]===actionId))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
-       issue===1997)
+       issue===1997))
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
        event?.ref==='refs/heads/main'&&
        Number(event?.inputs?.issue_number)===issue&&
