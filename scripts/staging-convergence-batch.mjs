@@ -132,7 +132,8 @@ export function verifyBatchIssue(issue,plan,comments=[],auditRuns=[]){
       ' '+parsed.digest+' run=([1-9][0-9]*)$').exec(c?.body?.trim()??'');
     if(!match||c?.user?.login!=='github-actions[bot]')return false;
     const run=auditRuns.find(r=>r.id===Number(match[1]));
-    return run?.name==='Agent / Issue Audit'&&run.event==='workflow_dispatch'&&
+    return run?.name==='Agent / Issue Audit'&&run.display_title==='Issue Audit #'+issue.number&&
+      run.event==='workflow_dispatch'&&
       run.status==='completed'&&run.conclusion==='success'&&
       run.head_branch==='main'&&run.repository?.full_name===REPO&&
       run.head_repository?.full_name===REPO&&
@@ -202,7 +203,7 @@ function selfTest(){
   const auditComment={user:{login:'github-actions[bot]'},
     body:AUDIT_APPROVAL+' '+c+' '+parsed.digest+' run=42'};
   const run={id:42,name:'Agent / Issue Audit',event:'workflow_dispatch',
-    status:'completed',conclusion:'success',head_branch:'main',
+    status:'completed',conclusion:'success',head_branch:'main',display_title:'Issue Audit #123',
     repository:{full_name:REPO},head_repository:{full_name:REPO},
     created_at:'2026-11-08T00:00:01Z'};
   assert.equal(verifyBatchIssue(issue,plan,[auditComment],[run]).approved,true);
