@@ -30,7 +30,7 @@ function readQwenPublisherIntents(storeRoot,issue){
     total+=entries.length;
     if(total>512)fail('unbounded Publisher Intent history');
     for(const file of entries){
-      if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\\.json$/.test(file.name))continue;
+      if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\.json$/.test(file.name))continue;
       if(!file.isFile()||file.isSymbolicLink())fail('unsafe Store result entry');
       const full=path.join(folder,file.name),stat=fs.lstatSync(full);
       if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>65536)
@@ -77,7 +77,7 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
   if(matches.length!==1)fail('missing unique Qwen review publication Intent');
   const chosen=matches[0],record=chosen.record;
   return Object.freeze({repair:chosen.repair,record,
-    branch:chosen.repair?record.branch.replace(/^refs\\/heads\\//,''):record.branch});
+    branch:chosen.repair?record.branch.replace(/^refs\/heads\//,''):record.branch});
 }
 export function qwenReviewerPublishedSource({storeRoot,issue,actionId,sha}){
   if(typeof storeRoot!=='string'||!storeRoot||
