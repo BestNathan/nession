@@ -1,101 +1,83 @@
 'use strict';
-// #1974 SC-04: the owning implementation PR's exact attested HEAD has
-// independently completed Quality, Case Smoke, E2E and canonical Agent
-// Acceptance. No manual checkbox is promoted, and this Case never treats a
-// missing run as Pass.
+// #1974 SC-04: evidence for the *actually* attested Qwen implementation PR
+// HEAD. Never hardcode historical #2961/#2963 or infer a pass from merging.
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
-const {
-  REPO,issueRecords,isResultV2,isIntent,fetchJson,HEX40,
-}=require('../../../shared/agent-store-1997.cjs');
+const {REPO,fetchJson,HEX40}=require('../../../shared/agent-store-1997.cjs');
+const {attestLatestQwenProducer}=require('../../../shared/qwen-live-source.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
-
 const root=path.resolve(__dirname,'../../../../..');
 const REQUIRED=[
-  {label:'Quality Gate',name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml',events:['pull_request']},
-  {label:'Case Smoke',name:'Acceptance / Case Smoke',path:'.github/workflows/acceptance-case-smoke.yml',events:['pull_request']},
-  {label:'E2E',name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml',events:['pull_request']},
+ {label:'Quality',name:'CI / Quality Gate',
+   path:'.github/workflows/ci-quality.yml',events:['pull_request']},
+ {label:'Case Smoke',name:'Acceptance / Case Smoke',
+   path:'.github/workflows/acceptance-case-smoke.yml',events:['pull_request']},
+ {label:'E2E',name:'E2E / Tests',
+   path:'.github/workflows/e2e-tests.yml',events:['pull_request']},
+ {label:'Agent Acceptance',name:'Acceptance / Orchestrator',
+   path:'.github/workflows/acceptance-orchestrator.yml',events:['pull_request_target']}
 ];
-const AGENT={label:'Agent Acceptance',name:'Acceptance / Orchestrator',
-  path:'.github/workflows/acceptance-orchestrator.yml',events:['pull_request_target']};
-function pending(summary,evidence){
-  console.log(JSON.stringify({status:'pending',summary,evidence}));
-}
-function matches(run,spec){
-  return run?.name===spec.name&&
+function matches(run,spec,sha){
+  return run?.head_sha===sha&&
+    run.repository?.full_name===REPO&&
+    run.head_repository?.full_name===REPO&&
+    run.name===spec.name&&
     String(run.path??'').replace(/@refs\/heads\/[^\s]+$/,'')===spec.path&&
-    spec.events.includes(run.event);
+    spec.events.includes(run.event)&&
+    Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0;
 }
-
+function pending(source,summary,evidence=[]){
+  console.log(JSON.stringify({status:'pending',summary,
+    evidence:[{type:'store',value:'agent-store='+(source.storeSha||'unavailable')},
+      ...evidence]}));
+}
 async function main(){
-  const target=process.env.NESSION_ACCEPTANCE_TARGET_SHA||'';
-  assert.match(target,HEX40,'exact target SHA required');
-  assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),target,
-    'Case checkout SHA mismatch');
-  assert.equal(process.env.GITHUB_REF_NAME,'main','post-merge Case must run on main');
+ const target=process.env.NESSION_ACCEPTANCE_TARGET_SHA||'';
+ assert.match(target,HEX40,'exact merged target SHA required');
+ assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),
+   target,'Case checkout SHA mismatch');
+ assert.equal(process.env.GITHUB_REF_NAME,'main');
 
-  const {storeSha,results}=await issueRecords(2961);
-  const v2=results.filter(item=>isResultV2(item.doc));
-  if(!v2.length){
-    pending(
-      'No authenticated Result v2 exists, so the owning implementation PR and its exact-HEAD gates are not established. No exact-SHA verdict is inferred.',
-      [{type:'store',value:'agent-store='+storeSha+' result_records='+results.length}]);
-    return;
-  }
-  const relevant=v2.filter(item=>item.doc?.implementing_pr?.number===2963&&
-    item.doc?.source?.agent_id==='dev-qwen-01');
-  if(relevant.length===0){
-    const intents=results.filter(item=>isIntent(item.doc));
-    assert.ok(intents.length>=2,
-      'real Qwen Publisher and Repair intents are missing from the pinned store');
-    pending(
-      'Real #2961 Qwen Publisher/Repair intents exist, but no original Developer Result v2 is committed; the owning PR exact-HEAD gate proof remains Pending.',
-      [
-        {type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' intents='+intents.length},
-        {type:'blocked',value:'present kinds='+[...new Set(results.map(x=>x.doc.kind))].join(',')},
-      ]);
-    return;
-  }
-  assert.equal(relevant.length,1,'expected one original Qwen Developer v2 for PR #2963');
-  const receipt=relevant[0].doc;
-  const binding=receipt.implementing_pr;
-  assert.ok(binding&&Number.isSafeInteger(binding.number)&&binding.number>0,'missing implementing PR');
-  assert.equal(binding.repository,REPO);
-  assert.equal(binding.head_sha_at_attestation,receipt.result.target_sha);
-  assert.match(binding.head_sha_at_attestation,HEX40);
-
-  const sha=binding.head_sha_at_attestation;
-  const listed=await fetchJson('/actions/runs?head_sha='+sha+'&per_page=100');
-  assert.ok(Array.isArray(listed?.workflow_runs),'GitHub run listing unavailable');
-  const runs=listed.workflow_runs;
-  const missing=[],failed=[];
-  for(const spec of [...REQUIRED,AGENT]){
-    const candidates=runs.filter(run=>matches(run,spec));
-    const success=candidates.find(run=>run.status==='completed'&&run.conclusion==='success');
-    if(success)continue;
-    const completed=candidates.find(run=>run.status==='completed');
-    if(completed)failed.push(spec.label+'='+completed.conclusion+' (run '+completed.id+')');
-    else missing.push(spec.label);
-  }
-  if(failed.length) throw new Error('exact-HEAD gate failed: '+failed.join('; '));
-  if(missing.length){
-    pending(
-      'The authenticated implementation PR HEAD has not yet produced every required exact-SHA gate.',
-      [
-        {type:'pr',value:'#'+binding.number+' attested_head='+sha},
-        {type:'missing',value:missing.join(', ')},
-        {type:'observed',value:runs.filter(run=>run.head_sha===sha).map(run=>run.name+'='+run.conclusion).sort().slice(0,12).join(', ')},
-      ]);
-    return;
-  }
-
-  report(
-    'The owning PR HEAD has successful exact-SHA Quality, Case Smoke, E2E and canonical Agent Acceptance runs, independent of the Issue checkbox.',
-    [
-      {type:'pr',value:'#'+binding.number+' attested_head='+sha},
-      {type:'gates',value:'Quality + Case Smoke + E2E + Agent Acceptance completed/success'},
-      {type:'store',value:'agent-store='+storeSha+' result='+relevant[0].path},
-    ]);
+ const source=await attestLatestQwenProducer();
+ if(source.status!=='verified'){
+   pending(source,'No independent real Qwen Developer v2, Writer and PR attestation: '+
+     source.reason);
+   return;
+ }
+ const sha=source.fixture.sha;
+ const pull=await fetchJson('/pulls/'+source.fixture.pr);
+ assert.equal(pull.head?.sha,sha,'PR HEAD moved since source attestation');
+ assert.equal(pull.base?.ref,'main');
+ assert.equal(pull.head?.repo?.full_name,REPO);
+ const result=await fetchJson('/actions/runs?head_sha='+sha+'&per_page=100');
+ assert.ok(Array.isArray(result?.workflow_runs),'Actions exact-head run listing unavailable');
+ if(result.workflow_runs.length>=100){
+   pending(source,'GitHub exact-HEAD CI window truncated; refusing incomplete proof',
+     [{type:'pr',value:'#'+source.fixture.pr+' sha='+sha}]);
+   return;
+ }
+ const missing=[],failed=[],proven=[];
+ for(const spec of REQUIRED){
+   const sources=result.workflow_runs.filter(r=>matches(r,spec,sha));
+   const passed=sources.find(r=>r.status==='completed'&&r.conclusion==='success');
+   if(passed){proven.push(spec.label+'='+passed.id+'/'+passed.run_attempt);continue;}
+   const completed=sources.find(r=>r.status==='completed');
+   if(completed)failed.push(spec.label+'='+completed.conclusion+' run='+completed.id);
+   else missing.push(spec.label);
+ }
+ if(failed.length)throw Error('exact-HEAD required run failed: '+failed.join('; '));
+ if(missing.length){
+   pending(source,'Source Qwen PR does not yet have every exact-head CI/E2E/Acceptance success',
+     [{type:'pr',value:'#'+source.fixture.pr+' sha='+sha},
+      {type:'missing',value:missing.join(', ')}]);
+   return;
+ }
+ report('Real source implementation PR HEAD has independently successful exact-SHA Quality, Case Smoke, selected E2E and authenticated Agent Acceptance workflows.',[
+   {type:'pr',value:'#'+source.fixture.pr+' sha='+sha},
+   {type:'runs',value:proven.join('; ')},
+   {type:'store',value:'agent-store='+source.storeSha+
+      ' producer='+source.fixture.producerPath},
+ ]);
 }
 main().catch(fail);
