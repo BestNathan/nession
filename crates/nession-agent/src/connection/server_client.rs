@@ -62,6 +62,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::connection::execution::{self, Lanes, ResourceKey, SHUTDOWN_GRACE};
 use crate::connection::outbox::{Outbox, OutboxFrames};
+use crate::connection::sync_intent::{SyncIntent, SyncToken};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
 use nession_runtime::lane::Work;
@@ -225,32 +226,47 @@ pub struct ServerClientHandle {
     metadata: AgentMetadata,
     /// Set by the supervisor after a reconnection so that the
     /// SessionWatcher can force a full session re-sync to the server.
-    sync_needed: Arc<AtomicBool>,
+    sync_intent: Arc<SyncIntent>,
     /// Set by the supervisor to indicate whether the connection is currently live.
     /// The SessionWatcher checks this to skip sending updates while disconnected.
     connected: Arc<AtomicBool>,
+    /// Test-only deterministic publication fault (#2976). A watcher test arms
+    /// one matching session name to fail or to mark a new reconnect request
+    /// during that publish, so the retry/generation rules are exercised against
+    /// the real watcher and outbox rather than a mocked one.
+    #[cfg(test)]
+    publish_fault: Arc<Mutex<PublishFault>>,
 }
 
 impl ServerClientHandle {
     /// Mark that a full session sync is needed (called by supervisor on reconnect).
     pub fn mark_sync_needed(&self) {
-        self.sync_needed.store(true, Ordering::SeqCst);
+        self.sync_intent.mark();
     }
 
     /// Whether a full session re-sync is required, without clearing the intent.
     ///
-    /// The [`SessionWatcher`] peeks before querying tmux and clears the flag
-    /// with [`Self::take_sync_needed`] only after a successful query: an
-    /// enumeration failure leaves the Server's view just as unknown as it was,
-    /// so it must not consume the intent that says so.
+    /// The [`SessionWatcher`] observes this before querying tmux and clears the
+    /// exact request with [`Self::clear_sync_needed_if`] only after every frame
+    /// of the snapshot was accepted by the outbox: an enumeration or publication
+    /// failure leaves the Server's view just as unknown as it was, so it must not
+    /// consume the intent that says so.
     pub fn is_sync_needed(&self) -> bool {
-        self.sync_needed.load(Ordering::SeqCst)
+        self.sync_intent.is_needed()
     }
 
-    /// Check and clear the sync-needed flag. Returns `true` if a full
-    /// session re-sync is required (server-side registry may be stale).
-    pub fn take_sync_needed(&self) -> bool {
-        self.sync_needed.swap(false, Ordering::SeqCst)
+    /// The full-resync request currently owed, if any.
+    pub(crate) fn sync_needed_token(&self) -> Option<SyncToken> {
+        self.sync_intent.token()
+    }
+
+    /// Clear the observed request only if no newer one arrived since.
+    ///
+    /// Returns `false` when a reconnect or a refused publish marked a newer
+    /// request while the snapshot was being published; that newer request owns
+    /// the intent and the watcher must run another full re-sync.
+    pub(crate) fn clear_sync_needed_if(&self, token: SyncToken) -> bool {
+        self.sync_intent.clear_if_current(token)
     }
 
     /// Returns `true` when the supervisor has an active connection to the server.
@@ -317,6 +333,12 @@ impl ServerClientHandle {
             foreground_command: foreground_command.map(std::string::ToString::to_string),
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
+        #[cfg(test)]
+        if self.take_session_update_fault(session_name) == Some(true) {
+            return Err(anyhow::anyhow!(
+                "injected session-update publication failure"
+            ));
+        }
         self.outbox.send_session_update(session_name, frame(&msg)?)
     }
 
@@ -378,8 +400,61 @@ impl ServerClientHandle {
     }
 }
 
+/// One armed deterministic publish fault (#2976), consumed by the next matching
+/// session-update publish.
+///
+/// A test can make that publish fail, or make it succeed while marking a new
+/// reconnect request — the two interleavings the full-resync ownership rule must
+/// survive. Nothing here exists in a production build.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct PublishFault {
+    session: Option<String>,
+    remaining: usize,
+    fail: bool,
+    mark_sync: bool,
+}
+
 #[cfg(test)]
 impl ServerClientHandle {
+    /// Arm one deterministic fault for the next session-update publish whose
+    /// session name matches `session` (`None` matches any name).
+    ///
+    /// `fail` makes the publish return `Err` (the outbox owner refused it);
+    /// `mark_sync` marks a new full-resync request before the publish proceeds.
+    pub(crate) fn inject_session_update_fault(
+        &self,
+        session: Option<&str>,
+        fail: bool,
+        mark_sync: bool,
+    ) {
+        let mut fault = self
+            .publish_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *fault = PublishFault {
+            session: session.map(str::to_string),
+            remaining: 1,
+            fail,
+            mark_sync,
+        };
+    }
+
+    fn take_session_update_fault(&self, session: &str) -> Option<bool> {
+        let mut fault = self
+            .publish_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if fault.remaining == 0 || fault.session.as_deref().is_some_and(|name| name != session) {
+            return None;
+        }
+        fault.remaining -= 1;
+        if fault.mark_sync {
+            self.sync_intent.mark();
+        }
+        Some(fault.fail)
+    }
+
     /// A handle detached from any supervisor, with the frames it publishes into.
     ///
     /// The receiver comes back with the handle because dropping it is what
@@ -387,8 +462,8 @@ impl ServerClientHandle {
     /// `connected` is the connection-liveness flag the watcher and heartbeat
     /// read; no socket is involved either way.
     pub(crate) fn test_handle(connected: bool) -> (Self, OutboxFrames) {
-        let sync_needed = Arc::new(AtomicBool::new(false));
-        let (outbox, frames) = Outbox::new(Arc::clone(&sync_needed));
+        let sync_intent = Arc::new(SyncIntent::new());
+        let (outbox, frames) = Outbox::new(Arc::clone(&sync_intent));
         let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
         (
             Self {
@@ -401,8 +476,9 @@ impl ServerClientHandle {
                     nession_version: String::new(),
                     image_tag: String::new(),
                 },
-                sync_needed,
+                sync_intent,
                 connected: Arc::new(AtomicBool::new(connected)),
+                publish_fault: Arc::new(Mutex::new(PublishFault::default())),
             },
             frames,
         )
@@ -502,25 +578,27 @@ impl ServerClient {
         // `Ok(None)` on a transient failure, or the server's reason for
         // refusing. `Err` is terminal and travels to the caller.
         let (interval_tx, mut interval_rx) = mpsc::channel::<Result<Option<u64>, String>>(1);
-        let sync_needed = Arc::new(AtomicBool::new(false));
+        let sync_intent = Arc::new(SyncIntent::new());
         let connected = Arc::new(AtomicBool::new(false));
 
         // The outbox is built here rather than inside the supervisor because the
         // handle is what publishes into it, and the supervisor is what drains it.
-        // `sync_needed` is handed to both, and deliberately: it is the one flag
+        // `sync_intent` is handed to both, and deliberately: it is the one flag
         // that says "the Server's view of this agent may be stale", and the two
         // things that make it true — a reconnection, and a session-state publish
         // refused by a full lane — are the same question about the same view. See
-        // `connection::outbox`.
-        let (outbox, outbox_rx) = Outbox::new(Arc::clone(&sync_needed));
+        // `connection::outbox` and `connection::sync_intent`.
+        let (outbox, outbox_rx) = Outbox::new(Arc::clone(&sync_intent));
 
         let handle = ServerClientHandle {
             outbox,
             shutdown_tx,
             agent_id: self.agent_id.clone(),
             metadata: self.metadata.clone(),
-            sync_needed: sync_needed.clone(),
+            sync_intent: sync_intent.clone(),
             connected: connected.clone(),
+            #[cfg(test)]
+            publish_fault: Arc::new(Mutex::new(PublishFault::default())),
         };
 
         // Spawn the supervisor; it owns the reconnect loop and never returns
@@ -531,7 +609,7 @@ impl ServerClient {
                 outbox_rx,
                 shutdown_rx,
                 interval_tx,
-                sync_needed,
+                sync_intent,
                 connected,
                 publish_handle,
             )
@@ -558,7 +636,7 @@ impl ServerClient {
         mut outbox_rx: OutboxFrames,
         mut shutdown_rx: mpsc::Receiver<()>,
         interval_tx: mpsc::Sender<Result<Option<u64>, String>>,
-        sync_needed: Arc<AtomicBool>,
+        sync_intent: Arc<SyncIntent>,
         connected: Arc<AtomicBool>,
         session_publish_handle: ServerClientHandle,
     ) {
@@ -584,7 +662,8 @@ impl ServerClient {
 
                     // Notify the SessionWatcher that a full re-sync is needed
                     // because the server-side session registry may be stale.
-                    sync_needed.store(true, Ordering::SeqCst);
+                    // Every reconnect marks a distinct request (#2976).
+                    sync_intent.mark();
 
                     // Report the heartbeat interval from the first connection so
                     // connect_and_run can unblock.
@@ -2148,21 +2227,38 @@ mod tests {
         let (handle, _frames) = handle_with_outbox();
 
         // Initially not sync needed
-        assert!(!handle.take_sync_needed());
+        assert!(handle.sync_needed_token().is_none());
         assert!(!handle.is_sync_needed());
 
         // Mark; a peek observes the intent without consuming it, so a caller
         // that fails before re-deriving the view can leave it pending.
         handle.mark_sync_needed();
         assert!(handle.is_sync_needed());
+        let token = handle
+            .sync_needed_token()
+            .expect("a marked intent has a token");
         assert!(
             handle.is_sync_needed(),
             "peeking must not consume the intent"
         );
-        assert!(handle.take_sync_needed());
+        assert!(handle.clear_sync_needed_if(token));
+        assert!(
+            !handle.clear_sync_needed_if(token),
+            "a spent token clears nothing"
+        );
+        assert!(!handle.is_sync_needed());
 
-        // Take clears the flag
-        assert!(!handle.take_sync_needed());
+        // A newer request during an older attempt survives that attempt's clear.
+        handle.mark_sync_needed();
+        let older = handle.sync_needed_token().expect("first request");
+        handle.mark_sync_needed();
+        assert!(
+            !handle.clear_sync_needed_if(older),
+            "the older attempt must not erase the newer request"
+        );
+        assert!(handle.is_sync_needed());
+        let latest = handle.sync_needed_token().expect("latest request");
+        assert!(handle.clear_sync_needed_if(latest));
         assert!(!handle.is_sync_needed());
     }
 

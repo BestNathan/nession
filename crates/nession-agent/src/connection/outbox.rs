@@ -66,13 +66,13 @@
 //! ## What a full lane leaves behind
 //!
 //! A refused publish is counted and logged, and for the session-state class it
-//! also marks the connection's `sync_needed` flag — the one `SessionWatcher`
-//! already reads to force a full re-report. So a drop is *recovered* rather than
-//! merely admitted: the next poll re-states every session there is, and the flag
-//! stays set — the drop path sets it again — until a pass gets through with room
-//! to spare. A session whose update was dropped and that then never changes again
-//! would otherwise leave the Server's registry stale for good; this is what stops
-//! that.
+//! also marks a new full-resync request on the connection's `sync_intent` — the
+//! one `SessionWatcher` already reads to force a full re-report. So a drop is
+//! *recovered* rather than merely admitted: the next poll re-states every
+//! session there is, and the request stays owed — a later drop marks a newer
+//! generation — until a pass gets through with room to spare. A session whose
+//! update was dropped and that then never changes again would otherwise leave
+//! the Server's registry stale for good; this is what stops that.
 //!
 //! The resize class is not marked for resync, deliberately: a pane size is
 //! re-established by the attach path (its initial `TmuxOps::window_size`
@@ -97,6 +97,8 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
 use nession_runtime::outbound::{charge, Limits};
+
+use super::sync_intent::SyncIntent;
 
 /// The bound the heartbeat class holds to.
 ///
@@ -252,7 +254,7 @@ impl Class {
     /// Whether a frame of this class being refused leaves the Server's view of
     /// this agent re-derivable rather than merely stale.
     ///
-    /// True for the session registry only: that is what `sync_needed` re-states.
+    /// True for the session registry only: that is what a full re-sync re-states.
     fn needs_resync(self) -> bool {
         matches!(self, Self::SessionState)
     }
@@ -398,11 +400,13 @@ struct Shared {
     /// Set when a session-state publish is refused, because the Server's registry
     /// is then not what this agent last tried to say it was.
     ///
-    /// The same flag the supervisor sets after a reconnection, and the same
+    /// The same intent the supervisor marks after a reconnection, and the same
     /// question it asks — is the Server's view re-derivable? A reconnection makes
     /// it unknown; a refused publish makes it known-stale. `SessionWatcher` reads
-    /// it the same way in either case; see this module's docs.
-    sync_needed: Arc<AtomicBool>,
+    /// it the same way in either case; see this module's docs. A refusal marks a
+    /// new generation, so a watcher whose snapshot was in flight cannot clear the
+    /// refusal's request with that snapshot's success (#2976).
+    sync_intent: Arc<SyncIntent>,
 }
 
 /// The publishing half: what every producer of a business notification holds.
@@ -437,17 +441,17 @@ pub struct OutboxFrames {
 impl Outbox {
     /// An outbox and the one writer that drains it.
     ///
-    /// `sync_needed` is the flag a refused session-state publish marks. It is the
+    /// `sync_intent` is the flag a refused session-state publish marks. It is the
     /// connection's existing one, because the question it answers — may the
     /// Server's view of this agent be stale? — is the same question.
-    pub fn new(sync_needed: Arc<AtomicBool>) -> (Self, OutboxFrames) {
+    pub fn new(sync_intent: Arc<SyncIntent>) -> (Self, OutboxFrames) {
         let state = Arc::new(StdMutex::new(State::default()));
         let available = Arc::new(Notify::new());
         let shared = Arc::new(Shared {
             state: Arc::clone(&state),
             available: Arc::clone(&available),
             closed: AtomicBool::new(false),
-            sync_needed,
+            sync_intent,
         });
         (
             Self {
@@ -561,7 +565,7 @@ impl Outbox {
             }
             Verdict::Refused { total } => {
                 if class.needs_resync() {
-                    self.shared.sync_needed.store(true, Ordering::SeqCst);
+                    self.shared.sync_intent.mark();
                 }
                 // What the peer does about it, per class: the session registry
                 // has no way to ask again, which is why it marks the view; a
@@ -706,12 +710,12 @@ mod tests {
     use nession_runtime::outbound::FRAME_OVERHEAD;
     use std::time::Duration;
 
-    /// An outbox, the writer that drains it, and the flag a refused
+    /// An outbox, the writer that drains it, and the intent a refused
     /// session-state publish marks.
-    fn outbox() -> (Outbox, OutboxFrames, Arc<AtomicBool>) {
-        let sync_needed = Arc::new(AtomicBool::new(false));
-        let (outbox, frames) = Outbox::new(Arc::clone(&sync_needed));
-        (outbox, frames, sync_needed)
+    fn outbox() -> (Outbox, OutboxFrames, Arc<SyncIntent>) {
+        let sync_intent = Arc::new(SyncIntent::new());
+        let (outbox, frames) = Outbox::new(Arc::clone(&sync_intent));
+        (outbox, frames, sync_intent)
     }
 
     fn text(body: &str) -> WsMessage {
@@ -788,7 +792,7 @@ mod tests {
     /// intermediate state of every session.
     #[test]
     fn a_flood_of_session_updates_holds_one_frame_per_session() {
-        let (outbox, frames, sync_needed) = outbox();
+        let (outbox, frames, sync_intent) = outbox();
         const SESSIONS: usize = 4;
         const PUBLISHES: usize = 10_000;
 
@@ -806,7 +810,7 @@ mod tests {
         assert_eq!(snapshot.superseded, (PUBLISHES - SESSIONS) as u64);
         assert_eq!(snapshot.dropped, 0);
         assert!(
-            !sync_needed.load(Ordering::SeqCst),
+            !sync_intent.is_needed(),
             "nothing was refused, so nothing needs re-deriving"
         );
     }
@@ -904,7 +908,7 @@ mod tests {
     /// marked so the Server's view is re-derived rather than left stale.
     #[test]
     fn a_new_session_is_dropped_at_the_bound_and_marks_the_view() {
-        let (outbox, mut frames, sync_needed) = outbox();
+        let (outbox, mut frames, sync_intent) = outbox();
         for n in 0..SESSION_STATE_LIMITS.frames {
             outbox
                 .send_session_update(&format!("s{n}"), text("state"))
@@ -915,7 +919,7 @@ mod tests {
             SESSION_STATE_LIMITS.frames
         );
         assert!(
-            !sync_needed.load(Ordering::SeqCst),
+            !sync_intent.is_needed(),
             "the lane was not at its bound yet"
         );
 
@@ -936,7 +940,7 @@ mod tests {
         }
         assert_eq!(remaining, SESSION_STATE_LIMITS.frames);
         assert!(
-            sync_needed.load(Ordering::SeqCst),
+            sync_intent.is_needed(),
             "a dropped session update leaves the Server's view stale"
         );
     }
@@ -946,7 +950,7 @@ mod tests {
     /// not by re-reporting the session registry.
     #[test]
     fn a_dropped_resize_does_not_mark_the_view() {
-        let (outbox, frames, sync_needed) = outbox();
+        let (outbox, frames, sync_intent) = outbox();
         for n in 0..RESIZE_LIMITS.frames {
             outbox
                 .send_terminal_resize(&format!("agent-1:s{n}"), text("80x24"))
@@ -958,7 +962,7 @@ mod tests {
 
         assert_eq!(frames.snapshot().resize.dropped, 1);
         assert!(
-            !sync_needed.load(Ordering::SeqCst),
+            !sync_intent.is_needed(),
             "a resize is not session state and must not mark the session view"
         );
     }
@@ -1119,8 +1123,8 @@ mod tests {
     /// liveness before looking would end the lane with the frames still in it.
     #[tokio::test]
     async fn the_writer_drains_and_then_ends_when_the_last_publisher_is_dropped() {
-        let sync_needed = Arc::new(AtomicBool::new(false));
-        let (outbox, mut frames) = Outbox::new(Arc::clone(&sync_needed));
+        let sync_intent = Arc::new(SyncIntent::new());
+        let (outbox, mut frames) = Outbox::new(Arc::clone(&sync_intent));
         outbox.send_heartbeat(text("beat")).expect("publish failed");
         outbox
             .send_session_update("s1", text("state"))
