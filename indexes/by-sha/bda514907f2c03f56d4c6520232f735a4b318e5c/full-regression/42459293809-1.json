@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_full_failure_observation_index",
+  "source_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "run_id": 42459293809,
+  "run_attempt": 1,
+  "record_path": "runs/bda514907f2c03f56d4c6520232f735a4b318e5c/full-regression/42459293809-1.json",
+  "record_sha256": "8375d9a4e5e3d0621c86ead403360cb2d31c67cb0692bfb817494e14fc5ece84"
+}
