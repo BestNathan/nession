@@ -29,6 +29,58 @@ type FixtureGitOverlapWindow = Window & {
 };
 
 /**
+ * Deterministic controls the `git=selection-overlap` scenario exposes (#2972).
+ *
+ * The first diff/preview read is held; later reads answer the newer repository
+ * state immediately. The Case releases the held answer to prove it can no
+ * longer replace the newer selection, whether the user reselected the same row
+ * or moved to another path/Session.
+ */
+type FixtureGitSelectionOverlapWindow = Window & {
+  fixtureGitSelectionOverlap?: {
+    diffRequests: () => number;
+    previewRequests: () => number;
+    olderDiffSettled: () => boolean;
+    olderPreviewSettled: () => boolean;
+    releaseOlderDiff: (fail?: boolean) => void;
+    releaseOlderPreview: (fail?: boolean) => void;
+  };
+};
+
+/**
+ * The plugin-surface boilerplate shared by the Git fixture scenarios.
+ *
+ * The real directory is filled by `AgentsPlugin` from the agent list; the
+ * fixture has no agent list request, so it fills the same directory from the
+ * same `FIXTURE_AGENTS` the rest of the fixture renders. Built with the same
+ * `manifestsOf`, so the fixture cannot present a directory the app would not.
+ */
+function fixtureGitPluginSurface(
+  request: <T>(type: string, payload: Record<string, unknown>) => Promise<T>,
+): PluginSurface {
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+  return {
+    connectionState: 'connected',
+    protocols,
+    request,
+    send(): void {},
+    subscribe(): () => void {
+      return () => {};
+    },
+    onBinary(): () => void {
+      return () => {};
+    },
+    waitForConnection(): Promise<void> {
+      return Promise.resolve();
+    },
+    onConnectionStateChange(): () => void {
+      return () => {};
+    },
+  };
+}
+
+/**
  * A canned git backend for the fixture route.
  *
  * The fixture is offline, so the git capability has nothing to talk to. This
@@ -57,9 +109,15 @@ type FixtureGitOverlapWindow = Window & {
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
  *     held until the Case releases it, so a manual Refresh can answer first
  *     with the newer repository state (#2787)
+ *   /#/fixture/workspace?capability=git&git=selection-overlap → the first
+ *     diff/preview read is held; a same-row or different-row reselection
+ *     answers first with newer data (#2972)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
+  if (scenario === 'selection-overlap') {
+    return selectionOverlapGitSurface();
+  }
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
@@ -101,17 +159,8 @@ export function fixtureGitSurface(search: string): PluginSurface {
     };
   };
 
-  // The real directory is filled by `AgentsPlugin` from the agent list; the
-  // fixture has no agent list request, so it fills the same directory from the
-  // same `FIXTURE_AGENTS` the rest of the fixture renders. Built with the same
-  // `manifestsOf`, so the fixture cannot present a directory the app would not.
-  const protocols = new ProtocolDirectory();
-  protocols.publish(manifestsOf(FIXTURE_AGENTS));
-
-  return {
-    connectionState: 'connected',
-    protocols,
-    request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
+  return fixtureGitPluginSurface(
+    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
       if (type === 'git.status') {
         statusRequests += 1;
         if (scenario === 'overlap') {
@@ -130,11 +179,12 @@ export function fixtureGitSurface(search: string): PluginSurface {
         return Promise.resolve(status as T);
       }
       if (type === 'git.diff') {
-        diffRequests.push(String(payload.path));
+        const path = String(payload.path);
+        diffRequests.push(path);
         if (typeof window !== 'undefined') {
           (window as FixtureGitOverlapWindow).fixtureGitDiffRequests = diffRequests;
         }
-        return Promise.resolve(diffFor(String(payload.path), scenario) as T);
+        return Promise.resolve(diffFor(path, scenario) as T);
       }
       if (type === 'git.preview') {
         return Promise.resolve(
@@ -159,20 +209,129 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
-    send(): void {},
-    subscribe(): () => void {
-      return () => {};
-    },
-    onBinary(): () => void {
-      return () => {};
-    },
-    waitForConnection(): Promise<void> {
-      return Promise.resolve();
-    },
-    onConnectionStateChange(): () => void {
-      return () => {};
-    },
+  );
+}
+
+/**
+ * The `git=selection-overlap` surface (#2972).
+ *
+ * The first diff/preview read is held; every later read answers the newer
+ * repository state immediately. The Case releases the held answer to prove the
+ * hook's request identity fence, not a timer.
+ */
+function selectionOverlapGitSurface(): PluginSurface {
+  const diffRequests: string[] = [];
+  const previewRequests: string[] = [];
+  let settleHeldDiff: ((value: GitDiffResponse) => void) | null = null;
+  let failHeldDiff: ((reason: Error) => void) | null = null;
+  let heldDiffPath: string | null = null;
+  let settleHeldPreview: ((value: GitPreviewResponse) => void) | null = null;
+  let failHeldPreview: ((reason: Error) => void) | null = null;
+  let heldPreviewPath: string | null = null;
+  let olderDiffSettled = false;
+  let olderPreviewSettled = false;
+
+  const publish = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    (window as FixtureGitSelectionOverlapWindow).fixtureGitSelectionOverlap = {
+      diffRequests: () => diffRequests.length,
+      previewRequests: () => previewRequests.length,
+      olderDiffSettled: () => olderDiffSettled,
+      olderPreviewSettled: () => olderPreviewSettled,
+      releaseOlderDiff: (fail = false) => {
+        const settle = settleHeldDiff;
+        const reject = failHeldDiff;
+        const path = heldDiffPath;
+        settleHeldDiff = null;
+        failHeldDiff = null;
+        heldDiffPath = null;
+        if (!settle || !reject || path === null) {
+          return;
+        }
+        if (fail) {
+          reject(new Error('the older selection diff failed'));
+        } else {
+          settle(selectionOverlapDiff(path, 'OLD'));
+        }
+        setTimeout(() => {
+          olderDiffSettled = true;
+          publish();
+        }, 0);
+      },
+      releaseOlderPreview: (fail = false) => {
+        const settle = settleHeldPreview;
+        const reject = failHeldPreview;
+        const path = heldPreviewPath;
+        settleHeldPreview = null;
+        failHeldPreview = null;
+        heldPreviewPath = null;
+        if (!settle || !reject || path === null) {
+          return;
+        }
+        if (fail) {
+          reject(new Error('the older selection preview failed'));
+        } else {
+          settle(selectionOverlapPreview(path, 'OLD'));
+        }
+        setTimeout(() => {
+          olderPreviewSettled = true;
+          publish();
+        }, 0);
+      },
+    };
   };
+  publish();
+
+  return fixtureGitPluginSurface(
+    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
+      if (type === 'git.status') {
+        return Promise.resolve(SELECTION_OVERLAP_STATUS as T);
+      }
+      if (type === 'git.diff') {
+        const path = String(payload.path);
+        diffRequests.push(path);
+        publish();
+        if (diffRequests.length === 1) {
+          heldDiffPath = path;
+          return new Promise<T>((resolve, reject) => {
+            settleHeldDiff = (value) => resolve(value as T);
+            failHeldDiff = reject;
+            publish();
+          });
+        }
+        return Promise.resolve(selectionOverlapDiff(path, 'NEW') as T);
+      }
+      if (type === 'git.preview') {
+        const path = String(payload.path);
+        previewRequests.push(path);
+        publish();
+        if (previewRequests.length === 1) {
+          heldPreviewPath = path;
+          return new Promise<T>((resolve, reject) => {
+            settleHeldPreview = (value) => resolve(value as T);
+            failHeldPreview = reject;
+            publish();
+          });
+        }
+        return Promise.resolve(selectionOverlapPreview(path, 'NEW') as T);
+      }
+      if (type === 'git.log') {
+        return Promise.resolve(historyFor(payload.limit) as T);
+      }
+      if (type === 'git.commit') {
+        return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
+      }
+      if (type === 'git.branches') {
+        return Promise.resolve(branchesFor(payload.limit) as T);
+      }
+      if (type === 'git.worktrees') {
+        return Promise.resolve(WORKTREES as T);
+      }
+      return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
+    },
+  );
 }
 
 /** The work tree the fixture pretends to be in — a Peek names its basename. */
@@ -245,6 +404,74 @@ function changedDiff(path: string): string {
     '-  readonly name = "claude-code";',
     '+  readonly name = "git";',
   ].join('\n');
+}
+
+/**
+ * The repository for #2972's selection-overlap Case.
+ *
+ * One tracked row, two untracked rows and one conflicted row: enough to
+ * reselect the same row, move to a different path, or move the Session while
+ * the first read is still in flight. The answers themselves are held by the
+ * surface, not by the repository, so this stays an input shape.
+ */
+const SELECTION_OVERLAP_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  truncated: false,
+  truncatedBytes: 0,
+  status: {
+    branch: 'feat/selection-overlap',
+    detached: false,
+    upstream: 'origin/feat/selection-overlap',
+    ahead: 0,
+    behind: 0,
+    modified: [
+      {
+        path: 'src/reselect.ts',
+        kind: 'modified',
+        staged: false,
+        unstaged: true,
+      },
+    ],
+    untracked: ['notes/reselect.ts', 'notes/reselect-other.ts'],
+    unmerged: ['src/reselect-conflict.ts'],
+  },
+};
+
+/**
+ * One side of the #2972 race, with a marker the Case can assert in the DOM.
+ *
+ * The older answer is also marked truncated, so a stale publication is visible
+ * even if a renderer chooses not to expose the patch text.
+ */
+function selectionOverlapDiff(path: string, marker: 'OLD' | 'NEW'): GitDiffResponse {
+  const text = [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    '@@ -1,2 +1,2 @@',
+    ' const before = 1;',
+    `-const selection = "${marker}_DIFF_RESPONSE";`,
+    `+const selection = "${marker}_DIFF_RESPONSE";`,
+  ].join('\n');
+  return {
+    state: 'ok',
+    diff: {
+      path,
+      text,
+      binary: false,
+      truncated: marker === 'OLD',
+      truncated_bytes: marker === 'OLD' ? 4096 : 0,
+    },
+  };
+}
+
+function selectionOverlapPreview(path: string, marker: 'OLD' | 'NEW'): GitPreviewResponse {
+  const text = path.endsWith('conflict.ts')
+    ? `<<<<<<< HEAD\n${marker}_PREVIEW_RESPONSE ${path}\n=======\ntheirs\n>>>>>>> other\n`
+    : `${marker}_PREVIEW_RESPONSE ${path}\n`;
+  return readyPreview(path, text);
 }
 
 /**
