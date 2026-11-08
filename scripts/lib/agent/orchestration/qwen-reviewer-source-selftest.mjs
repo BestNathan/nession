@@ -9,7 +9,10 @@ import {startDevelopment,validateDevelopmentState,recordDispatch,
 import {writeIssueWorkflowState} from './state-store.mjs';
 import {validateQwenPublisherIntent,qwenPublisherIntentPath}
   from '../publisher/store-intent.mjs';
-import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
+import {qwenReviewerPublishedSource,qwenCommittedReviewIntent}
+  from './qwen-reviewer-source.mjs';
+import {validateQwenRepairPublisherIntent,qwenRepairPublisherIntentPath}
+  from '../publisher/qwen-repair-intent.mjs';
 import {sourceAllowed} from './controller-dispatch.mjs';
 
 const REPO='BestNathan/nession',ISSUE=3001;
@@ -128,6 +131,37 @@ try{
   fs.writeFileSync(file,JSON.stringify(v2)+'\n');
   assert.throws(()=>qwenReviewerPublishedSource(source),
     /Publisher Intent path differs from immutable action/);
+
+  // Qwen Repair has the same historical read/migration contract.
+  fs.unlinkSync(file);
+  const legacyRepair=validateQwenRepairPublisherIntent({
+    schema_version:1,kind:'trusted_qwen_repair_publisher_write_ahead',
+    repository:REPO,issue:ISSUE,action_id:'f'.repeat(64),
+    worker_run_id:302,worker_run_attempt:1,worker_sha:'e'.repeat(40),
+    source_sha:B,original_main_sha:A,original_publisher_run_id:401,
+    branch:'refs/heads/'+intent.branch,
+    checkpoint_version:2,checkpoint_commit_sha:C,
+    checkpoint_ciphertext_sha256:HASH,patch_sha256:HASH,
+    file_manifest_sha256:HASH,file_count:1,
+    publisher_run_id:501,publication:'not_yet_attested'
+  });
+  const legacyRepairFile=path.join(root,qwenRepairPublisherIntentPath(legacyRepair));
+  fs.writeFileSync(legacyRepairFile,JSON.stringify(legacyRepair)+'\n');
+  assert.equal(qwenCommittedReviewIntent({storeRoot:root,issue:ISSUE,
+    publisherRunId:501}).repair,true);
+  const freshRepair=validateQwenRepairPublisherIntent({
+    ...legacyRepair,schema_version:2});
+  const freshRepairRelative=qwenRepairPublisherIntentPath(freshRepair);
+  assert.ok(freshRepairRelative.includes('/publisher-intents/'));
+  const freshRepairFile=path.join(root,freshRepairRelative);
+  fs.writeFileSync(freshRepairFile,JSON.stringify(freshRepair)+'\n');
+  assert.throws(()=>qwenCommittedReviewIntent({storeRoot:root,issue:ISSUE,
+    publisherRunId:501}),/unique Qwen review publication Intent/);
+  fs.unlinkSync(legacyRepairFile);
+  const freshRead=qwenCommittedReviewIntent({storeRoot:root,issue:ISSUE,
+    publisherRunId:501});
+  assert.equal(freshRead.repair,true);
+  assert.equal(freshRead.branch,intent.branch);
 
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen signed Reviewer dispatch: one immutable Store branch, actual SHA fetch, two ancestry checks, untrusted source and replay negatives pass');
