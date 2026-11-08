@@ -91,7 +91,9 @@ try{
   assert.throws(()=>preStagedOriginalZip(2,runnerCache,root),/missing or unsafe/);
   await assert.rejects(()=>stageQwenArtifactBytes({...fixture(),
     token:'fixture-token',outputDir:path.join(root,'pass')}),/fresh and empty/);
-  const badMap=new Map(blobs);badMap.set(producer.sha,Buffer.from('forged'));
+  const badMap=new Map(blobs);
+  const forged=Buffer.from(record);forged[2]^=1;
+  badMap.set(producer.sha,forged);
   await assert.rejects(()=>stageQwenArtifactBytes({
     ...fixture({blobMap:badMap}),token:'fixture-token',
     outputDir:path.join(root,'bad-blob')}),/checksum mismatch/);
