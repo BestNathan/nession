@@ -414,10 +414,11 @@ mod tests {
 
     #[test]
     fn show_keeps_non_secret_values_visible() {
-        // One instance, read twice: `AgentConfig::default()` mints a fresh
-        // `agent_id` per call, so a second `default()` would compare two
-        // different identities and pass or fail for the wrong reason.
+        // Naming an explicit identity keeps the assertion meaningful:
+        // `AgentConfig::default()` now leaves `agent_id` absent (#2973), and
+        // `contains("")` would pass without checking anything.
         let config = AgentConfig {
+            agent_id: "visible-agent-id".to_string(),
             auth_token: TOKEN.to_string(),
             ..AgentConfig::default()
         };

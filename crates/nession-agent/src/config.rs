@@ -114,6 +114,12 @@ pub enum AttachMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     /// Unique identifier for this agent.
+    ///
+    /// Empty means "not explicitly configured": the identity owner reuses the
+    /// persisted id at `~/.nession/agent/identity`, or generates and persists
+    /// `agent-{uuid}` on first run. A non-empty value is an operator override
+    /// and wins over the persisted file (#91, #2973).
+    #[serde(default)]
     pub agent_id: String,
     /// Human-readable display name shown in the web UI.
     /// When absent the UI falls back to the machine hostname.
@@ -246,7 +252,11 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            agent_id: format!("agent-{}", uuid::Uuid::new_v4()),
+            // Absent, not generated (#2973). A fresh UUID here looked like an
+            // explicit override on every startup and replaced the persisted
+            // identity — the instability #91 exists to prevent. The identity
+            // owner generates and persists only when no persisted id exists.
+            agent_id: String::new(),
             display_name: None,
             server_url: "ws://localhost:8443".to_string(),
             auth_token: String::new(),
@@ -343,7 +353,11 @@ mod tests {
     #[test]
     fn test_agent_config_default() {
         let config = AgentConfig::default();
-        assert!(config.agent_id.starts_with("agent-"));
+        // Absent, not generated (#2973). A default config must not masquerade
+        // as an operator-supplied identity: the identity owner reuses a
+        // persisted id for absent config, and generates one only when there is
+        // none. A fresh UUID here overwrote the persisted id on every restart.
+        assert!(config.agent_id.is_empty());
         assert_eq!(config.server_url, "ws://localhost:8443");
         assert_eq!(config.listen_address, "0.0.0.0:8080");
         assert_eq!(config.heartbeat_interval_secs, 10);
@@ -395,6 +409,22 @@ mod tests {
         assert_eq!(config.server_url, "ws://localhost:9090");
         assert_eq!(config.auth_token, "token123");
         assert_eq!(config.listen_address, "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn an_omitted_agent_id_is_an_absent_identity_not_a_parse_error() {
+        // The stable-identity contract treats an absent `agent_id` as "reuse
+        // the persisted identity", so a config that does not mention it must
+        // parse. It previously demanded the key and failed without the
+        // generated default to fall back on.
+        let config: AgentConfig = toml::from_str(
+            r#"
+            server_url = "ws://localhost:9090"
+            auth_token = "token123"
+        "#,
+        )
+        .unwrap();
+        assert!(config.agent_id.is_empty());
     }
 
     #[test]
@@ -520,7 +550,7 @@ mod tests {
     #[test]
     fn test_agent_config_defaults_from_integration() {
         let config = AgentConfig::default();
-        assert!(config.agent_id.starts_with("agent-"));
+        assert!(config.agent_id.is_empty());
         assert_eq!(config.server_url, "ws://localhost:8443");
         assert_eq!(config.auth_token, "");
         assert_eq!(config.listen_address, "0.0.0.0:8080");

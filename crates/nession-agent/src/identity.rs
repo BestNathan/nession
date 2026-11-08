@@ -4,14 +4,16 @@
 //! a plain-text file at `~/.nession/agent/identity`.
 //!
 //! Resolution order:
-//! 1. If the identity file exists and matches the config agent_id -> use it.
-//! 2. If the identity file exists but config differs -> config wins (explicit
-//!    override by the operator), overwrite file.
-//! 3. No identity file -> persist the current config value and use it.
+//! 1. A non-empty config `agent_id` is an explicit operator override: use it
+//!    and overwrite the identity file if it differs.
+//! 2. An empty config `agent_id` with a valid identity file: reuse the
+//!    persisted id (this is the default-config startup, #2973).
+//! 3. An empty config `agent_id` with no/empty/unreadable identity file:
+//!    generate `agent-{uuid}`, persist it, and use it.
 //!
-//! The file is the source of truth for stability; config is the source of
-//! truth for authority. On first run (config auto-generates a UUID or the
-//! operator sets one), the identity is persisted.
+//! The file is the source of truth for stability; a non-empty config value is
+//! the source of truth for authority. Absence is not an identity: an empty id
+//! is never persisted.
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -19,53 +21,59 @@ use tracing::{info, warn};
 
 /// Resolve the agent identity for this machine.
 ///
-/// `config_agent_id` — the agent_id from AgentConfig (always non-empty;
-/// defaults to `agent-{uuid}` when not in config file).
+/// `config_agent_id` — the agent_id from AgentConfig. A non-empty value is an
+/// explicit operator override and wins over the identity file. An empty value
+/// means "not configured": the persisted identity is reused, or `agent-{uuid}`
+/// is generated and persisted when no valid one exists.
 /// `identity_path` — typically `nession_common::paths::agent_identity_path()?`.
 ///
 /// Returns the resolved agent_id.
 pub fn resolve_agent_id(config_agent_id: &str, identity_path: &Path) -> Result<String> {
-    // The contract above says non-empty, and this is where it is enforced. It
-    // matters because every branch below *persists* what it is given: an empty
-    // id would be written to the identity file as this agent's identity, and a
-    // machine that did that would register as a new agent on every start —
-    // the duplicate-identity failure #425 describes.
-    //
-    // Enforced rather than defaulted so the two entrypoints cannot disagree
-    // about the fallback: choosing what an absent id means is the runtime's
-    // call, and it makes it before calling here (#1014).
-    if config_agent_id.is_empty() {
-        anyhow::bail!(
-            "refusing to resolve an empty agent id: it would be persisted as this \
-             agent's identity"
-        );
-    }
-    if identity_path.exists() {
-        match load_identity(identity_path) {
+    let persisted = if identity_path.exists() {
+        load_identity(identity_path)
+    } else {
+        None
+    };
+
+    // A non-empty config value is the operator's explicit choice and is
+    // authoritative — but only then. The default config leaves the id empty
+    // precisely so that this branch is not taken on an ordinary restart
+    // (#2973): a generated default used to arrive here and overwrite the
+    // persisted identity with a new UUID every start.
+    if !config_agent_id.is_empty() {
+        match persisted {
+            Some(file_id) if file_id == config_agent_id => {
+                info!("Identity loaded from {identity_path:?}: {file_id}");
+            }
             Some(file_id) => {
-                if file_id == config_agent_id {
-                    info!("Identity loaded from {identity_path:?}: {file_id}");
-                    return Ok(file_id);
-                }
                 info!(
                     "Config agent_id '{config_agent_id}' differs from persisted \
                      '{file_id}'; using config value"
                 );
                 persist_identity(identity_path, config_agent_id)?;
-                return Ok(config_agent_id.to_string());
             }
             None => {
-                warn!("Identity file at {identity_path:?} is empty; regenerating");
                 persist_identity(identity_path, config_agent_id)?;
-                return Ok(config_agent_id.to_string());
+                info!("Persisted new agent identity: {config_agent_id}");
             }
         }
+        return Ok(config_agent_id.to_string());
     }
 
-    // No file — first run; persist current value.
-    persist_identity(identity_path, config_agent_id)?;
-    info!("Persisted new agent identity: {config_agent_id}");
-    Ok(config_agent_id.to_string())
+    // No explicit id: reuse a valid persisted identity. This is what keeps a
+    // default-config agent stable across restarts (#91, #2973).
+    if let Some(file_id) = persisted {
+        info!("Identity loaded from {identity_path:?}: {file_id}");
+        return Ok(file_id);
+    }
+
+    if identity_path.exists() {
+        warn!("Identity file at {identity_path:?} is empty or unreadable; regenerating");
+    }
+    let generated = format!("agent-{}", uuid::Uuid::new_v4());
+    persist_identity(identity_path, &generated)?;
+    info!("Persisted new agent identity: {generated}");
+    Ok(generated)
 }
 
 /// Read the identity file, returning the trimmed id string or `None` if
@@ -102,25 +110,115 @@ fn persist_identity(path: &Path, agent_id: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// An empty id must not reach the identity file.
+    /// Make the persisted file unwritable, so an attempted rewrite in the code
+    /// under test fails instead of silently succeeding with identical bytes.
+    fn freeze_identity_file(path: &std::path::Path) {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    /// An absent config id must not mint a new identity when the state
+    /// directory already holds one (#2973).
     ///
-    /// Every branch of `resolve_agent_id` persists what it is given, so before
-    /// this check an `agent_id = ""` in a hand-written config wrote an empty
-    /// identity — and the machine then registered as a new agent on every start
-    /// (#425). The caller decides what an absent id means; this refuses to guess
-    /// and refuses to write.
+    /// This is the `config agent_id empty → reuse persisted` rule from the
+    /// stable-identity design. The bug was that `AgentConfig::default()` never
+    /// produced an absent id — it generated a fresh UUID, which looked like an
+    /// operator override and overwrote the persisted one on every restart.
     #[test]
-    fn an_empty_id_is_refused_rather_than_persisted() {
+    fn an_absent_config_id_reuses_the_persisted_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity_path = dir.path().join("identity");
+        std::fs::write(&identity_path, "agent-persisted\n").unwrap();
+        freeze_identity_file(&identity_path);
+
+        // A resolver that rewrites the file (even with the same bytes) now
+        // fails instead of returning Ok.
+        let id = resolve_agent_id("", &identity_path).unwrap();
+
+        assert_eq!(id, "agent-persisted");
+        assert_eq!(
+            std::fs::read_to_string(&identity_path).unwrap().trim(),
+            "agent-persisted"
+        );
+    }
+
+    /// First default startup: no config id and no identity file → generate
+    /// `agent-{uuid}`, persist it, and reuse it on the next startup. An empty
+    /// id is never written as this agent's identity.
+    #[test]
+    fn an_absent_config_id_generates_and_persists_once() {
         let dir = tempfile::tempdir().unwrap();
         let identity_path = dir.path().join("identity");
 
-        let result = resolve_agent_id("", &identity_path);
+        let first = resolve_agent_id("", &identity_path).unwrap();
 
-        assert!(result.is_err(), "an empty id must not resolve: {result:?}");
         assert!(
-            !identity_path.exists(),
-            "nothing may be persisted for an empty id"
+            first.starts_with("agent-"),
+            "a generated identity keeps the documented `agent-{{uuid}}` form: {first}"
         );
+        assert_eq!(
+            std::fs::read_to_string(&identity_path).unwrap().trim(),
+            first
+        );
+
+        // The second startup must reuse, not rewrite: with the file unwritable
+        // a rewrite would fail rather than return the id.
+        freeze_identity_file(&identity_path);
+        let second = resolve_agent_id("", &identity_path).unwrap();
+        assert_eq!(second, first, "the second startup must reuse the identity");
+        assert_eq!(
+            std::fs::read_to_string(&identity_path).unwrap().trim(),
+            first
+        );
+    }
+
+    /// SC-01 at the identity owner's boundary: two consecutive default
+    /// `AgentConfig` startups against one state directory resolve the same
+    /// nonempty id, and the second does not replace it with a fresh UUID.
+    #[test]
+    fn two_default_startups_with_one_state_directory_resolve_the_same_identity() {
+        use crate::config::AgentConfig;
+
+        let dir = tempfile::tempdir().unwrap();
+        let identity_path = dir.path().join("identity");
+
+        let first_config = AgentConfig::default();
+        let first = resolve_agent_id(&first_config.agent_id, &identity_path).unwrap();
+
+        // Prove the restart only reads: an attempted rewrite of the unwritable
+        // file fails instead of returning an id.
+        freeze_identity_file(&identity_path);
+
+        let second_config = AgentConfig::default();
+        let second = resolve_agent_id(&second_config.agent_id, &identity_path).unwrap();
+
+        assert!(!first.is_empty(), "a resolved identity must be nonempty");
+        assert_eq!(
+            second, first,
+            "a restart changed the logical agent identity"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&identity_path).unwrap().trim(),
+            first
+        );
+    }
+
+    /// An empty identity file is "missing", not an identity: an absent config
+    /// id regenerates and persists a valid one (#425's original concern).
+    #[test]
+    fn an_absent_config_id_regenerates_an_empty_identity_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let identity_path = dir.path().join("identity");
+        std::fs::write(&identity_path, "\n").unwrap();
+
+        let id = resolve_agent_id("", &identity_path).unwrap();
+
+        assert!(
+            !id.is_empty(),
+            "a blank file must not resolve to an empty id"
+        );
+        assert_eq!(std::fs::read_to_string(&identity_path).unwrap().trim(), id);
     }
 
     #[test]
@@ -156,6 +254,14 @@ mod tests {
         assert_eq!(id, "new-agent");
         let content = std::fs::read_to_string(&identity_path).unwrap();
         assert_eq!(content.trim(), "new-agent");
+
+        // SC-02: the same explicit config stays stable on the next start.
+        let again = resolve_agent_id("new-agent", &identity_path).unwrap();
+        assert_eq!(again, "new-agent");
+        assert_eq!(
+            std::fs::read_to_string(&identity_path).unwrap().trim(),
+            "new-agent"
+        );
     }
 
     #[test]

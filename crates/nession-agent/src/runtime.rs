@@ -72,7 +72,6 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     )?;
 
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
-    info!("Agent ID: {}", config.agent_id);
     info!("Server URL: {}", config.server_url);
     info!("Listen address: {}", config.listen_address);
 
@@ -98,23 +97,14 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
 
     // 4. Start Agent WebSocket server
     let tls_option = load_tls(&config)?;
-    // Resolve persistent agent identity. On first run this persists the
-    // generated or configured agent_id; on subsequent runs it loads the
-    // persisted identity so the server recognises us as the same agent.
-    //
-    // The empty check is not decoration: `resolve_agent_id` *persists* what it
-    // is given, so an empty `agent_id` in a hand-written config would be written
-    // to the identity file as this agent's identity — the duplicate-identity
-    // failure #425 describes. The CLI carried this guard and this path did not,
-    // which is drift running the other way; it lives here now so both
-    // entrypoints answer alike.
-    let configured_id = if config.agent_id.is_empty() {
-        nession_common::system::get_hostname()
-    } else {
-        config.agent_id.clone()
-    };
+    // Resolve persistent agent identity. A non-empty configured id is an
+    // explicit operator override; an absent one reuses the persisted identity,
+    // or generates and persists `agent-{uuid}` on first run (#91). The
+    // identity owner decides both cases, so this path and `nession agent
+    // start` cannot drift (#1014, #2973).
     let identity_path = nession_common::paths::agent_identity_path()?;
-    let agent_id = identity::resolve_agent_id(&configured_id, &identity_path)?;
+    let agent_id = identity::resolve_agent_id(&config.agent_id, &identity_path)?;
+    info!("Agent ID: {agent_id}");
 
     let file_root = config
         .file_root
