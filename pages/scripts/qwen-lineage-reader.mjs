@@ -30,7 +30,7 @@ const validTreeEntry=e=>e?.type==='blob'&&e.mode==='100644'&&
 export async function loadPinnedQwenLineage({
   ref,issueNumbers,pulls,getTree,getBlob,getOriginalStoreBytes,
   getRun,getArtifacts,getArtifactZip,getPull,getCompare,getCurrentRef,
-  maxRecords=2,
+  maxRecords=2,includeHistorical=false,
 }={}){
  if(ref?.state!=='present'||!SHA.test(ref.sha??'')||
    !Array.isArray(issueNumbers)||issueNumbers.length>12||
@@ -39,6 +39,7 @@ export async function loadPinnedQwenLineage({
    pulls.some(p=>!Number.isSafeInteger(p?.number)||p.number<1||
      !SHA.test(p.head_sha??''))||
    !Number.isSafeInteger(maxRecords)||maxRecords<1||maxRecords>4||
+   typeof includeHistorical!=='boolean'||
    [getTree,getBlob,getOriginalStoreBytes,getRun,getArtifacts,
      getArtifactZip,getPull,getCompare,getCurrentRef].some(x=>typeof x!=='function'))
      return unavailable();
@@ -57,11 +58,18 @@ export async function loadPinnedQwenLineage({
    const candidate=[];
    for(const [path,entry] of paths){
      const match=PRODUCER.exec(path);
-     if(!match||!issues.has(Number(match[1])))continue;
+     if(!match||(!includeHistorical&&!issues.has(Number(match[1]))))continue;
      check(validTreeEntry(entry));
      candidate.push(entry);
    }
-   candidate.sort((a,b)=>a.path.localeCompare(b.path));
+   // Historical producer discovery is sourced from the pinned Store tree,
+   // NOT the open-Issue/open-PR public activity snapshots. This is only a
+   // bounded lookup; the independent Worker/Publisher/Writer attester below
+   // still owns every positive verification assertion.
+   candidate.sort((a,b)=>includeHistorical?
+     Number(PRODUCER.exec(b.path)[2].split('-')[0])-
+       Number(PRODUCER.exec(a.path)[2].split('-')[0])||
+       a.path.localeCompare(b.path):a.path.localeCompare(b.path));
    const truncated=candidate.length>maxRecords;
    const results=[],seen=new Set();
    for(const entry of candidate.slice(0,maxRecords)){
@@ -69,9 +77,13 @@ export async function loadPinnedQwenLineage({
      const doc=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(producerBytes));
      const issue=doc.issue,run=doc.result?.run_id,attempt=doc.result?.run_attempt,
        action=doc.action_id,pr=doc.implementing_pr?.number;
-     check(issues.has(issue)&&Number.isSafeInteger(run)&&run>0&&
+     check((includeHistorical||issues.has(issue))&&
+       Number.isSafeInteger(issue)&&issue>0&&
+       Number.isSafeInteger(run)&&run>0&&
        attempt===1&&HEX.test(action??'')&&
-       prs.get(pr)===doc.result?.target_sha&&
+       (includeHistorical?(Number.isSafeInteger(pr)&&pr>0&&
+         SHA.test(doc.result?.target_sha??'')):
+         prs.get(pr)===doc.result?.target_sha)&&
        doc.source?.agent_id==='dev-qwen-01'&&
        doc.result?.kind==='developer');
      const key=issue+':'+run+':'+attempt+':'+action;
