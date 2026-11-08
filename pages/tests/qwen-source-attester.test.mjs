@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {attestQwenPublisherSource} from '../scripts/qwen-source-attester.mjs';
 import {projectLineage,validateLineageProjection} from '../scripts/lineage.mjs';
+import {loadPinnedQwenLineage} from '../scripts/qwen-lineage-reader.mjs';
 
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const REPO='BestNathan/nession';
@@ -134,4 +135,54 @@ test('foreign, stale, colliding, replayed or missing proofs fail closed',()=>{
  const s=source();s.producerBytes=Buffer.from(JSON.stringify(forged));
  s.originalStoreBytes=s.producerBytes;
  assert.equal(attestQwenPublisherSource(s),null);
+});
+
+test('pinned public reader joins only independently witnessed Qwen source',async()=>{
+ const s=source(),bytes=new Map();
+ function entry(name,doc){
+   const raw=Buffer.from(JSON.stringify(doc)+'\n');
+   const h=createHash('sha1').update('blob '+raw.length+'\0').update(raw).digest('hex');
+   const item={path:name,sha:h,mode:'100644',type:'blob',size:raw.length};
+   bytes.set(h,{sha:h,size:raw.length,encoding:'base64',
+     content:raw.toString('base64')});
+   return item;
+ }
+ const producer=entry(producerPath,record);
+ // Existing fixture has JSON with no newline; construct the record's actual
+ // pinned bytes using the exact producerBytes to prove sha256 fidelity.
+ const b=producerBytes;
+ const exactSha=createHash('sha1').update('blob '+b.length+'\0').update(b).digest('hex');
+ producer.sha=exactSha;producer.size=b.length;
+ bytes.set(exactSha,{sha:exactSha,size:b.length,encoding:'base64',
+   content:b.toString('base64')});
+ const intentPath='workflows/issues/'+issue+'/results/'+workerId+'-1-'+action+'.json';
+ const intent=entry(intentPath,s.intent);
+ const base={ref:{state:'present',sha:store},
+   issueNumbers:[issue],pulls:[{number:prNo,head_sha:head}],
+   getTree:async()=>({tree:[producer,intent],truncated:false}),
+   getBlob:async h=>bytes.get(h),
+   getOriginalStoreBytes:async()=>producerBytes,
+   getRun:async id=>id===workerId?s.workerRun:s.publisherRun,
+   getArtifacts:async id=>id===workerId?s.workerArtifacts:s.publisherArtifacts,
+   getArtifactZip:async id=>id===77?s.workerZip:s.publisherZip,
+   getPull:async()=>s.pull,
+   getCompare:async()=>s.storeAncestry,
+   getCurrentRef:async()=>({state:'present',sha:store})};
+ const verified=await loadPinnedQwenLineage(base);
+ assert.equal(verified.status,'verified');
+ assert.equal(verified.records.length,1);
+ assert.equal(verified.records[0].run_id,workerId);
+ assert.equal(verified.records[0].slice_id,null);
+ for(const tamper of [
+   {...base,getCurrentRef:async()=>({state:'present',sha:'a'.repeat(40)})},
+   {...base,getOriginalStoreBytes:async()=>Buffer.from('forged')},
+   {...base,getArtifacts:async id=>id===publisherId?
+     {total_count:0,artifacts:[]}:s.workerArtifacts},
+   {...base,getPull:async()=>({...s.pull,head:{...s.pull.head,sha:'f'.repeat(40)}})},
+   {...base,issueNumbers:[issue,issue]},
+ ]){
+   const result=await loadPinnedQwenLineage(tamper);
+   assert.equal(result.status,'unavailable');
+   assert.deepEqual(result.records,[]);
+ }
 });
