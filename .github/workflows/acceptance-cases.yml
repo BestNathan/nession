@@ -203,6 +203,29 @@ jobs:
             echo "- Selection: ${selection_status} (not-applicable is not a Case Pass)"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # #1974: only the trusted Main source-preparation step receives an
+      # Actions read token. Original Worker/Publisher ZIPs are authenticated
+      # and staged in runner temp; Case/target code receives NO GH_TOKEN and
+      # independently verifies those original bytes and Store/PR evidence.
+      - name: Pre-stage independently verified Qwen original Artifacts on trusted main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! jq -e 'any(.[]; .issue == 1974)' "$RUNNER_TEMP/selected-cases.json" >/dev/null; then
+            echo "Qwen #1974 original artifact transport not applicable"
+            exit 0
+          fi
+          test "$GITHUB_SHA" = "${{ steps.target.outputs.target_sha }}"
+          export NESSION_QWEN_ARTIFACT_DIR="$RUNNER_TEMP/qwen-lineage-source"
+          node trusted/scripts/ci/qwen-lineage-artifact-prestage-selftest.mjs
+          node trusted/scripts/ci/qwen-lineage-artifact-prestage.mjs
+          # Pass only the private artifact path, never the Actions token,
+          # into the downstream uncredentialed Case process.
+          echo "NSESSION_QWEN_ARTIFACT_DIR=$NSESSION_QWEN_ARTIFACT_DIR" >> "$GITHUB_ENV"
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         if: steps.select.outputs.count != '0'
         with: { cache-workspaces: "workspace", cache-all-crates: "true" }
