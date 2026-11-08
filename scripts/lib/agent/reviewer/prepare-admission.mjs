@@ -93,12 +93,28 @@ export async function prepareQwenReviewAdmission({
   if(!/^[a-f0-9]{40}$/.test(commit?.tree?.sha??''))
     fail('untrusted Qwen Git tree SHA');
   const files=await fetcher('pulls/'+pr.number+'/files?per_page=100');
+  if(!Array.isArray(files)||files.length<1||files.length>8)
+    fail('invalid PR changed-file list');
+  // The Reviewer sees the announced target checkout, not a Git diff. Give it
+  // the exact base bytes of every admitted file so it can distinguish the
+  // authorized change from the PR-head end state.
+  const baseSha=committed.repair?intent.original_main_sha:intent.target_main_sha;
+  const baseFiles=[];
+  for(const file of files){
+    if(!file||typeof file.filename!=='string')fail('invalid PR changed-file entry');
+    const entry=await fetcher('contents/'+file.filename+'?ref='+baseSha);
+    if(entry?.encoding!=='base64'||typeof entry.content!=='string')
+      fail('missing authenticated PR base file');
+    const bytes=Buffer.from(entry.content.replace(/\s/g,''),'base64');
+    if(bytes.length<1||bytes.length>32*1024)fail('unsafe PR base file');
+    baseFiles.push({path:file.filename,content:bytes.toString('utf8')});
+  }
   const tree=await fetcher('git/trees/'+commit.tree.sha+'?recursive=1');
   return committed.repair
     ? admitQwenRepairPublishedReview({state,intent,publisherRun,pullRequests,
-      pr,ref,commit,files,tree,actionId,reviewerAgentId})
+      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles})
     : admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
-      pr,ref,commit,files,tree,actionId,reviewerAgentId});
+      pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles});
 }
 
 async function main(){

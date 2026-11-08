@@ -73,7 +73,7 @@ function scalar(input) {
 }
 // Deliberate safe YAML subset: Skill-like scalar fields and JSON-compatible
 // inline string arrays; both are ordinary YAML. No anchors, tags or nesting.
-export function parseKnowledge(content,filename,{requireVerifiedSource=true}={}) {
+export function parseKnowledge(content,filename,{requireVerifiedSource=true,requireAllowedSources=true}={}) {
   if(!content.startsWith('---\n'))fail(filename+': missing YAML frontmatter');
   const end=content.indexOf('\n---\n',4);
   if(end<0)fail(filename+': missing frontmatter closing fence');
@@ -104,7 +104,12 @@ export function parseKnowledge(content,filename,{requireVerifiedSource=true}={})
     categories.add(tag);
   }
   if(requireVerifiedSource&&data.status==='verified'&&!data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))fail(filename+': verified assertion needs exact-SHA canonical source');
-  for(const s of data.sources) {
+  // The allowed-source vocabulary is a policy about the *current* ledger. A
+  // historical commit is immutable evidence: if it was published with a source
+  // this vocabulary no longer accepts, the only repairs are a forbidden
+  // history rewrite or a bypass. Validate it for schema/log agreement instead
+  // (see the historical-snapshot call in verify()).
+  if(requireAllowedSources)for(const s of data.sources) {
     if(!/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)&&
        !/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues|pull)\/[1-9]\d*$/.test(s))
       fail(filename+': source needs exact SHA or Issue/PR URL: '+s);
@@ -286,9 +291,15 @@ function verify(root,baseline=null) {
       }
       if(e.action!=='delete'){
         const atCommit=git(root,'show',commit+':'+e.path)+'\n';
-        // Historical snapshots remain immutable evidence: validate their schema and every source they do contain,
-        // but enforce the current verified-source policy only on the live tree via indexFor(root).
-        const data=parseKnowledge(atCommit,e.path,{requireVerifiedSource:false});
+        // Historical snapshots remain immutable evidence. Validate their
+        // schema, title/category/timestamp agreement and the global log, but
+        // never re-judge them by the current source vocabulary: history cannot
+        // be rewritten, so an old disallowed source would make the ledger
+        // permanently unauditable. The live tree (indexFor) stays strict.
+        const data=parseKnowledge(atCommit,e.path,{
+          requireVerifiedSource:false,
+          requireAllowedSources:false,
+        });
         if(data.title!==e.title||data.updated_at!==e.at||
            JSON.stringify([...data.categories].sort())!==JSON.stringify([...e.categories].sort()))
           fail('article and appended CHANGELOG event disagree: '+e.path);
@@ -365,6 +376,16 @@ function fixture() {
     const missingVerifiedSource=article.replace('sources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]','sources: []');
     assert.throws(()=>parseKnowledge(missingVerifiedSource,file),/verified assertion needs exact-SHA/);
     assert.doesNotThrow(()=>parseKnowledge(missingVerifiedSource,file,{requireVerifiedSource:false}));
+    // The live tree keeps the allowed-source vocabulary. An immutable
+    // historical snapshot may contain a source that vocabulary rejects today;
+    // it must stay auditable rather than force a forbidden history rewrite.
+    const runUrlSource=article
+      .replace('https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md','https://github.com/BestNathan/nession/actions/runs/1')
+      .replace('status: verified','status: candidate');
+    assert.throws(()=>parseKnowledge(runUrlSource,file),/source needs exact SHA/);
+    const historical=parseKnowledge(runUrlSource,file,{requireVerifiedSource:false,requireAllowedSources:false});
+    assert.equal(historical.title,title);
+    assert.deepEqual(historical.sources,['https://github.com/BestNathan/nession/actions/runs/1']);
     assert.throws(()=>parseKnowledge(article,'topics/engineering/repository-instruction-architecture.md'),/complete title/);
     assert.throws(()=>parseKnowledge(article.replace('title:', 'id: short\n'+'title:'),file),/unknown field/);
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);

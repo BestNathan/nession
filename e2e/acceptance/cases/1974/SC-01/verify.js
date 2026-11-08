@@ -10,7 +10,7 @@ const {pathToFileURL}=require('node:url');
 const {
   REPO,issueRecords,isResultV2,isIntent,fetchJson,HEX40,
 }=require('../../../shared/agent-store-1997.cjs');
-const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
+const {fail}=require('../../../shared/trusted-run-store-proof.cjs');
 
 const root=path.resolve(__dirname,'../../../../..');
 function pending(summary,evidence){
@@ -24,13 +24,13 @@ async function main(){
     'Case checkout SHA mismatch');
   assert.equal(process.env.GITHUB_REF_NAME,'main','post-merge Case must run on main');
 
-  const {storeSha,results}=await issueRecords();
+  const {storeSha,results}=await issueRecords(2961);
   const v2=results.filter(item=>isResultV2(item.doc));
   if(!v2.length){
     const intents=results.filter(item=>isIntent(item.doc));
-    assert.ok(intents.length>0,'no Result v2 and no Publisher intent in the pinned store');
+    assert.ok(intents.length>=2,'real Qwen Publisher and Repair intents are missing from the pinned store');
     pending(
-      'No authenticated Agent Result v2 exists yet; the pinned store holds only a Publisher write-ahead intent, so the producer receipt cannot be accepted.',
+      'Real #2961 Qwen Publisher/Repair intents exist, but an independently attested Agent Result v2 and Writer receipt are not committed. An executed Qwen fixture alone is not v2 lineage proof.',
       [
         {type:'store',value:'agent-store='+storeSha+' result_records='+results.length},
         {type:'blocked',value:'present kinds='+[...new Set(results.map(x=>x.doc.kind))].join(',')+' publication=not_yet_attested'},
@@ -45,11 +45,13 @@ async function main(){
   for(const item of v2){
     try{ validateAuthenticatedAgentReceipt(item.doc); }
     catch(error){ throw new Error('malformed Result v2 at '+item.path+': '+error.message); }
-    if(item.doc.issue!==1997) throw new Error('Result v2 belongs to another Issue: '+item.path);
+    if(item.doc.issue!==2961) throw new Error('Result v2 belongs to another Issue: '+item.path);
     accepted.push(item);
   }
-  assert.equal(accepted.length,1,'expected exactly one authenticated #1997 Result v2');
-  const receipt=accepted[0].doc;
+  const selected=accepted.filter(item=>item.doc.implementing_pr?.number===2963&&
+    item.doc.source?.agent_id==='dev-qwen-01'&&item.doc.result?.kind==='developer');
+  assert.equal(selected.length,1,'expected exactly one Qwen Developer Result v2 for PR #2963');
+  const receipt=selected[0].doc;
 
   // Independent GitHub source identity for the exact Worker Run/Attempt.
   const run=await fetchJson('/actions/runs/'+receipt.result.run_id);
@@ -83,16 +85,16 @@ async function main(){
     item.doc.worker_run_id===receipt.result.run_id&&
     item.doc.worker_run_attempt===receipt.result.run_attempt);
   assert.ok(intent,'missing Publisher intent bound to the Result v2');
-  const publisher=await fetchJson('/actions/runs/'+intent.doc.publisher_issuer_run_id);
-  assert.equal(publisher.name,'Store / Controlled Publisher');
-  assert.equal(publisher.path,'.github/workflows/store-controlled-publisher.yml');
-  assert.equal(publisher.event,'issue_comment');
+  const publisher=await fetchJson('/actions/runs/'+intent.doc.publisher_run_id);
+  assert.equal(publisher.name,'Store / Qwen Publisher');
+  assert.equal(publisher.path,'.github/workflows/store-qwen-publisher.yml');
+  assert.equal(publisher.event,'workflow_run');
   assert.equal(publisher.status,'completed');
   assert.equal(publisher.conclusion,'success');
   assert.equal(publisher.repository?.full_name,REPO);
 
-  report(
-    'A real authenticated Result v2 and its Publisher Store intent are bound to the exact Worker Run/Attempt and implementing PR.',
+  pending(
+    'Qwen source Run and PR were observed, but the independent Store Writer/Artifact byte attester required by SC-01 has not yet been supplied.',
     [
       {type:'store',value:'agent-store='+storeSha+' result='+accepted[0].path+' intent='+intent.path},
       {type:'result',value:'action='+receipt.action_id+' issue='+receipt.issue+' target_sha='+receipt.result.target_sha},

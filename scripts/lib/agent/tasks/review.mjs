@@ -40,7 +40,9 @@ export function reviewModelView(admission,identity){
     base_sha_at_publication: admission.base_sha_at_publication,
   };
   if(admission.kind==='authenticated_qwen_reviewer_admission_only')
-    return Object.freeze({...common,expected_files:admission.expected_files});
+    return Object.freeze({...common,expected_files:admission.expected_files,
+      ...(Array.isArray(admission.base_files)&&admission.base_files.length
+        ?{base_files:admission.base_files}:{})});
   return Object.freeze({...common,expected_file:admission.expected_file,
     expected_file_sha256:admission.expected_file_sha256,
     expected_file_mode:admission.expected_file_mode});
@@ -49,7 +51,8 @@ export function reviewModelView(admission,identity){
 export function renderReviewPrompt(admission,identity){
   const view=reviewModelView(admission,identity);
   return renderAgentPrompt({
-    id:'review',version:'v2',
+    id:'review',version:admission.kind==='authenticated_qwen_reviewer_admission_only'
+      ?'v3':'v2',
     context:{contextJson:JSON.stringify(view,null,2)},
   });
 }

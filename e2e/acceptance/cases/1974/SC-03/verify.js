@@ -33,7 +33,7 @@ async function main(){
     'Case checkout SHA mismatch');
   assert.equal(process.env.GITHUB_REF_NAME,'main','post-merge Case must run on main');
 
-  const {storeSha,results,slices}=await issueRecords();
+  const {storeSha,results,slices}=await issueRecords(2961);
   const v2=results.filter(item=>isResultV2(item.doc));
   if(!v2.length){
     pending(
@@ -41,8 +41,10 @@ async function main(){
       [{type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' slice_records='+slices.length}]);
     return;
   }
-  assert.equal(v2.length,1,'expected exactly one authenticated #1997 Result v2');
-  const receipt=v2[0].doc;
+  const relevant=v2.filter(item=>item.doc?.implementing_pr?.number===2963&&
+    item.doc?.source?.agent_id==='dev-qwen-01');
+  assert.equal(relevant.length,1,'expected one original Qwen Developer v2 record for PR #2963');
+  const receipt=relevant[0].doc;
 
   if(!slices.length){
     pending(

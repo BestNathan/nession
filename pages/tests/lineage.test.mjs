@@ -52,7 +52,16 @@ test('fail closed on foreign, corrupt, conflicting, replay and model-derived lin
   {...edge,pr_number:0},
   {...edge,action_id:'fake'},
   {...edge,attempt:0},
-  {...edge,slice_id:'inferred-slice'},
+  {...edge,slice_id:'<inferred>'},
+  {...edge,slice_id:action},
+  {...edge,slice_id:String(edge.run_id)},
+  {...edge,slice_id:edge.agent_id},
+  {...edge,slice_id:'a'.repeat(129)},
+  {...edge,slice_id:'slice/<script>'},
+  {...edge,slice_id:'../relative'},
+  {...edge,slice_id:'slice id'},
+  {...edge,slice_id:''},
+  {...edge,slice_id:undefined},
   {...edge,verification:'verified_from_issue_comment'},
   {...edge,raw_prompt:'secret'},
   {...edge,agent_id:null},
@@ -91,4 +100,18 @@ test('public projector prevents forged lineage, private spill and missing source
  assert.equal(unrelatedAttempt.status,'unavailable');
  p.work.lineage.edges[0].checkpoint_bytes='secret';
  assert.throws(()=>validateProjection(p),/invalid public causal edge/);
+});
+
+test('producer-attested logical Slice remains separate from action and Run IDs',()=>{
+ const slice='slice-7f6216e9526a';
+ const source=validateLineageProjection(projectLineage(fixture({attested:{
+   status:'verified',source_ref_sha:store,records:[{...edge,slice_id:slice}]
+ }})));
+ assert.equal(source.edges[0].slice_id,slice);
+ const forged=structuredClone(source);
+ forged.work='none';
+ assert.throws(()=>validateLineageProjection(forged),/invalid public lineage contract/);
+ const alias=structuredClone(source);
+ alias.edges[0].slice_id=action;
+ assert.throws(()=>validateLineageProjection(alias),/invalid public causal edge/);
 });
