@@ -5,6 +5,12 @@ GATES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CHECKS_DIR="${GATES_DIR}/checks"
 SUITES_DIR="${GATES_DIR}/suites"
 
+# Only the real pre-commit hook sets this marker after pinning its index.
+# Direct Gate invocations and pre-push retain their normal worktree semantics.
+if [ "${NESSION_PRE_COMMIT_STAGED:-}" = 1 ]; then
+  exec "${GATES_DIR}/run-staged-index" "$@"
+fi
+
 usage() {
   cat <<'USAGE'
 usage:
