@@ -127,7 +127,7 @@ test('foreign, stale, colliding, replayed or missing proofs fail closed',()=>{
   s=>{s.producerPath='workflows/issues/2961/../../secrets';},
  ];
  for(const mutate of cases){
-   const s=structuredClone(source());mutate(s);
+   const s=source();mutate(s);
    assert.equal(attestQwenPublisherSource(s),null);
  }
  const forged=structuredClone(record);forged.source.repository='evil/repo';
