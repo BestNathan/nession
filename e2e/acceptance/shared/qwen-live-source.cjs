@@ -121,10 +121,12 @@ async function attestLatestQwenProducer(){
     const old=await api('/contents/'+file+'?ref='+writer);
     return decodeGitBlob(old,{sha:old.sha,size:old.size});
   };
+  let diagnostic=null;
   const verified=await loadPinnedQwenLineage({
     ref,issueNumbers:[candidate.issue],
     pulls:[{number:doc.implementing_pr.number,head_sha:doc.result.target_sha}],
     maxRecords:1,
+    onDiagnostic:phase=>{if(diagnostic===null)diagnostic=phase;},
     getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
     getBlob:readGitBlob,
     getOriginalStoreBytes,
@@ -139,8 +141,8 @@ async function attestLatestQwenProducer(){
     }
   });
   if(verified.status!=='verified'||verified.records.length!==1){
-    return unavailable('Original Qwen Worker, Publisher, PR and Writer sources not jointly attested',
-      storeSha);
+    return unavailable('Original Qwen Worker, Publisher, PR and Writer sources not jointly attested'+
+      (diagnostic?' (read-only check: '+diagnostic+')':''),storeSha);
   }
   const attested=verified.records[0];
   assert.equal(attested.issue,candidate.issue);
