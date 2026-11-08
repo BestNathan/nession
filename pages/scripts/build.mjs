@@ -185,8 +185,10 @@ const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all(
 // Producer/Publisher attester supplies the explicit lineageEvidence contract.
 // The original v2 is only a *candidate* until the separate Worker and
 // Publisher Actions ZIPs, exact PR and pinned Store Writer can be re-read.
-// Bounded to the same 12 public Issue/PR windows, at most two producers per
-// build; any missing or expired artifact stays Unknown/Unlinked.
+// Historical authenticated producers need their own bounded lookup: a merged
+// implementing PR exits the OPEN Work list. Untrusted Store bytes only locate
+// candidates; the original Worker/Publisher/Writer verifier still gates every
+// public edge. Missing/forged/expired artifacts stay Unknown/Unlinked.
 // Match the Worker ZIP transport cap, not the tiny extracted result.json.
 // Large encrypted native Session bytes are only hashed, never decoded or
 // published; no unbounded download is permitted by this read-only client.
@@ -234,7 +236,7 @@ const lineageEvidence=await loadPinnedQwenLineage({
       /^[a-f0-9]{40}$/.test(x.head?.sha??''))
     .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))
     .slice(0,12).map(x=>({number:x.number,head_sha:x.head.sha})):[],
-  maxRecords:2,
+  maxRecords:2,includeHistorical:true,
   getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
   getBlob:sha=>api('/git/blobs/'+sha),
   getOriginalStoreBytes:originalWriterStoreBytes,
