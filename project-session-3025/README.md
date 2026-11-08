@@ -32,10 +32,12 @@ Web candidate: 246px sidebar hosts Agents, flat Sessions, and a small **Projects
 Deterministic, in-browser state only: all Project, Agent, EROFS, Download, Sandbox, Session and settings actions are simulated. No actual GitHub/Server requests, no secrets, no real tmux, no EROFS bytes, no PVC or mount operations. Prior Nession diagnostic Task measurements of 23.90 MiB Project Source, 57.99 MiB Node and 246.47 MiB Rust are displayed as static evidence-backed examples, not runtime results for this mock.
 
 - Static JS syntax was checked at authoring; relative references use local styles.css/app.js and the shared prototype-frame-2758 frame files.
-- This revision changes navigation semantics, so all earlier screenshots/Chromium results are superseded. Re-run published Pages manifest SHA, real Chromium click-through, keyboard/focus and App/Web responsive tests; production pixel parity still requires separate Fixture comparison.
+- **Publication for this interaction revision:** public Pages manifest/source HTML readback matched source `a0cab3b6fa161a85bc83e4f331754d1c8acbba2b` in the trusted deployment [Run 42499871771](https://github.com/BestNathan/nession/actions/runs/42499871771).
+- **Real Chromium verification for this interaction revision:** [Task 42499995613](https://github.com/BestNathan/nession/actions/runs/42499995613), [archived task-results record](https://github.com/BestNathan/nession/blob/task-results/runs/prototype-project-sidebar-3025-20261109/42499995613-1/record.json): 30/30 browser assertions passed; Web 1180/1024, App 390/375, Sidebar project selection, standalone Detail, settings, Existing/Managed create, fail/retry, App Back, no Session create, collapsed rail, no page errors.
+- **Remaining:** real React Fixture side-by-side/pixel comparison, keyboard/focus accessibility audit beyond tested mouse paths, and production implementation/Acceptance are not proven by this mock. This README documents evidence captured for the immediately preceding, behavior-identical HTML/CSS/JS source. For any new source commit, check publisher manifest SHA before calling live content current.
 - This prototype is not production Acceptance evidence.
 
-Direct HTML (only claim current after publisher SHA readback): https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html
+Direct HTML: https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html
 Source: https://github.com/BestNathan/nession/tree/prototype/project-session-3025
 
 ## Non-goals
