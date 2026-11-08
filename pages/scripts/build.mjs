@@ -187,6 +187,10 @@ const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all(
 // Publisher Actions ZIPs, exact PR and pinned Store Writer can be re-read.
 // Bounded to the same 12 public Issue/PR windows, at most two producers per
 // build; any missing or expired artifact stays Unknown/Unlinked.
+// Match the Worker ZIP transport cap, not the tiny extracted result.json.
+// Large encrypted native Session bytes are only hashed, never decoded or
+// published; no unbounded download is permitted by this read-only client.
+const MAX_SOURCE_ARTIFACT_ZIP_BYTES=32*1024*1024;
 async function optionalArtifactZip(artifactId){
   if(process.env.PAGES_OFFLINE==='1'||!Number.isSafeInteger(artifactId)||
      artifactId<1)throw Error('invalid read-only Publisher Artifact request');
@@ -199,13 +203,13 @@ async function optionalArtifactZip(artifactId){
     {headers,signal:AbortSignal.timeout(20000)});
   if(!response.ok)throw Error('original GitHub Artifact unavailable: '+response.status);
   const size=Number(response.headers.get('content-length'));
-  if(Number.isFinite(size)&&size>512*1024)
+  if(Number.isFinite(size)&&size>MAX_SOURCE_ARTIFACT_ZIP_BYTES)
     throw Error('GitHub Artifact exceeds safe budget');
   if(!response.body)throw Error('GitHub Artifact missing response body');
   const chunks=[];let total=0;
   for await(const part of response.body){
     total+=part.length;
-    if(total>512*1024)throw Error('GitHub Artifact ZIP exceeds budget');
+    if(total>MAX_SOURCE_ARTIFACT_ZIP_BYTES)throw Error('GitHub Artifact ZIP exceeds budget');
     chunks.push(Buffer.from(part));
   }
   return Buffer.concat(chunks,total);
