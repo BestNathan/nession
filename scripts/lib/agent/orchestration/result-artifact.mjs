@@ -352,9 +352,91 @@ export function validateAuthenticatedAgentReceipt(evidence){
   }
   return evidence;
 }
-export function appendAuthenticatedResult(root,evidence) {
+// Qwen's Worker emits an authenticated patch, not a PR SHA. Only the
+// separately credentialed main-owned Publisher, after original ZIP/claim,
+// Store checkpoint, PR readback and exact HEAD have been checked, may bind
+// that original Worker to the resulting immutable PR head. This is a producer
+// RESULT; consumers still independently verify the Run, Artifact and writer.
+export function composeQwenDeveloperResult({
+  receipt,worker,claim,originalResult,resultJsonBytes,readback,publisherRunId,
+}){
+  const validSha=x=>typeof x==='string'&&HEX40.test(x);
+  const validDigest=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}$/.test(x);
+  if(receipt?.schema_version!==1||
+     receipt.kind!=='authenticated_qwen_development_checkpoint_receipt'||
+     !['committed','replayed'].includes(receipt.status)||
+     claim?.inputs?.task!=='implement'||
+     claim.inputs.agent_id!=='dev-qwen-01'||
+     claim.inputs.action_id!==receipt.action_id||
+     Number(claim.inputs.issue_number)!==receipt.issue||
+     claim.inputs.input_sha!==receipt.source_sha||
+     !validSha(receipt.source_sha)||!validSha(receipt.worker_sha)||
+     !positive(receipt.issue)||!HEX64.test(receipt.action_id??'')||
+     !positive(worker?.id)||worker.id!==receipt.run_id||
+     worker.run_attempt!==1||receipt.attempt!==1||
+     worker.head_sha!==receipt.worker_sha||
+     worker.head_branch!=='main'||
+     worker.path!=='.github/workflows/agent-develop.yml'||
+     worker.name!=='Agent / Development'||
+     worker.event!=='workflow_dispatch'||
+     worker.status!=='completed'||worker.conclusion!=='success'||
+     worker.repository?.full_name!==REPO||
+     worker.head_repository?.full_name!==REPO||
+     !positive(originalResult?.id)||
+     originalResult.workflow_run?.id!==worker.id||
+     originalResult.workflow_run?.head_sha!==worker.head_sha||
+     !validDigest(originalResult.digest)||
+     originalResult.expired!==false||
+     !Buffer.isBuffer(resultJsonBytes)||resultJsonBytes.length<2||
+     resultJsonBytes.length>MAX_JSON||
+     readback?.kind!=='authenticated_qwen_publisher_pr_receipt'||
+     readback.status!=='published_verified_by_github'||
+     readback.issue!==receipt.issue||
+     readback.action_id!==receipt.action_id||
+     readback.source_run_id!==worker.id||
+     readback.source_run_attempt!==1||
+     readback.publisher_run_id!==publisherRunId||
+     !positive(publisherRunId)||
+     !positive(readback.pull_request)||!validSha(readback.head_sha)||
+     !validSha(readback.target_main_sha)||
+     !validSha(readback.publication_intent_store_sha)||
+     !validSha(readback.checkpoint_commit_sha)||
+     readback.checkpoint_commit_sha!==receipt.checkpoint_commit_sha||
+     typeof readback.branch!=='string'||
+     readback.branch!=='agent/'+receipt.issue+'/qwen-'+receipt.action_id.slice(0,16))
+    fail('Qwen Developer source or independently authenticated PR head mismatch');
+  return validateAuthenticatedAgentReceipt({
+    schema_version:2,kind:'authenticated_agent_task_result',
+    issue:receipt.issue,action_id:receipt.action_id,
+    result:{kind:'developer',issue:receipt.issue,run_id:worker.id,
+      run_attempt:1,target_sha:readback.head_sha,
+      outcome:'implementation_ready',task_id:receipt.action_id},
+    source:{repository:REPO,path:worker.path,name:worker.name,
+      run_id:worker.id,attempt:1,event:worker.event,
+      ref:'refs/heads/main',issue:receipt.issue,task_id:receipt.action_id,
+      agent_id:'dev-qwen-01',input_sha:receipt.source_sha,
+      output_sha:readback.head_sha,verified:true},
+    artifact:{id:originalResult.id,digest:originalResult.digest,
+      json_sha256:sha(resultJsonBytes),source_run_id:worker.id,
+      source_run_attempt:1},
+    acceptance_result:null,
+    implementing_pr:{repository:REPO,number:readback.pull_request,
+      head_sha_at_attestation:readback.head_sha,
+      relation:PR_RELATION},
+  });
+}
+
+// Preserve existing immutable results/ keys (which Qwen write-ahead intents
+// already occupy). The canonical writer may append producer-owned v2 evidence
+// only to the separate, versioned namespace; never replace an old intent.
+export function appendAuthenticatedResult(root,evidence,{namespace='results'}={}) {
   validateAuthenticatedAgentReceipt(evidence);
-  const parts=['workflows','issues',String(evidence.issue),'results'];
+  if(!['results','producer-results-v2'].includes(namespace)||
+     (namespace==='producer-results-v2'&&
+      (evidence.schema_version!==2||evidence.result.kind!=='developer'||
+       evidence.source.agent_id!=='dev-qwen-01')))
+    fail('unapproved immutable producer-result namespace');
+  const parts=['workflows','issues',String(evidence.issue),namespace];
   let current=path.resolve(root);
   if(!fs.existsSync(current)||!fs.lstatSync(current).isDirectory()||
       fs.lstatSync(current).isSymbolicLink())fail('unsafe results store root');
