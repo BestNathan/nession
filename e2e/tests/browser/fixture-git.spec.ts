@@ -384,7 +384,9 @@ test('offers the three local writes and nothing beyond them (#845)', async ({ pa
   // operations, and counting them made this assertion about the page.
   await expect(
     view.getByRole('button', {
-      name: /push|pull|fetch|checkout|switch|discard|reset|rebase|merge/i,
+      // Word boundaries: `merge` must not match the path
+      // `src/unmerged-missing.ts`, which is a row opener, not a control.
+      name: /\b(?:push|pull|fetch|checkout|switch|discard|reset|rebase|merge)\b/i,
     }),
   ).toHaveCount(0);
 });
