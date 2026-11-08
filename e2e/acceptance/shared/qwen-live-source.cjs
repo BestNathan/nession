@@ -10,7 +10,7 @@ const API='https://api.github.com/repos/'+REPO;
 // This is not a GitHub/Store write credential and is never projected to Pages.
 async function api(route){
   assert.ok(typeof route==='string'&&route.startsWith('/')&&
-    !route.includes('..'),'unsafe source API route');
+    !route.split('/').some(part=>part==='..'||part==='.'),'unsafe source API route');
   const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
   const headers={'Accept':'application/vnd.github+json',
     'X-GitHub-Api-Version':'2022-11-28',
