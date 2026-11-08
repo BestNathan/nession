@@ -226,6 +226,53 @@ fn sampled_metrics_keep_their_units_and_missing_ones_keep_their_reason() {
     assert_eq!(process.io_write_kib_per_s.value, Some(0.0));
 }
 
+/// #3018 SC-02: the value after a recognized sensitive flag is redacted even
+/// when it begins with `-`, and the serialized snapshot carries only the
+/// sanitized command.
+#[test]
+fn a_leading_hyphen_secret_does_not_reach_the_serialized_snapshot() {
+    let table: HashMap<u32, ProcessFacts> = [(42, facts(1))].into_iter().collect();
+    let details = HashMap::from([(
+        42,
+        ProcessDetails {
+            executable: Some("/usr/bin/tool".to_string()),
+            argv: Some(vec![
+                "tool".to_string(),
+                "--token".to_string(),
+                "-secret123".to_string(),
+            ]),
+            io_denied: false,
+        },
+    )]);
+    let first = HashMap::from([(
+        42,
+        Sample {
+            cpu_ns: Some(0),
+            io_read_bytes: Some(0),
+            io_write_bytes: Some(0),
+            alive: true,
+        },
+    )]);
+    let second = HashMap::from([(
+        42,
+        Sample {
+            cpu_ns: Some(0),
+            io_read_bytes: Some(0),
+            io_write_bytes: Some(0),
+            alive: true,
+        },
+    )]);
+
+    let processes = build_processes(&[42], Some(&table), &details, &first, &second, 61_000);
+    let process = &processes[&42];
+    assert_eq!(process.command, "tool --token [REDACTED]");
+    assert!(process.redacted);
+
+    let serialized = serde_json::to_string(&processes).expect("snapshot serializes");
+    assert!(!serialized.contains("-secret123"), "{serialized}");
+    assert!(!serialized.contains("secret123"), "{serialized}");
+}
+
 #[test]
 fn an_unreadable_command_is_not_an_empty_command() {
     let table: HashMap<u32, ProcessFacts> = [(42, facts(1))].into_iter().collect();
@@ -454,4 +501,87 @@ fn a_real_isolated_session_reports_its_pane_and_descendants() {
     assert!(sleep.rss_mib.value.unwrap() > 0.0);
     assert_eq!(sleep.elapsed_ms.state, ProcessMetricState::Sampled);
     assert_eq!(sleep.cpu_percent.state, ProcessMetricState::Sampled);
+}
+
+/// #3018 SC-02: a real isolated tmux Session whose child carries a
+/// leading-hyphen secret value produces a snapshot that never serializes the
+/// raw value. The Pane root and the ordinary discovery tree remain present.
+#[cfg(unix)]
+#[test]
+fn a_real_isolated_session_redacts_a_leading_hyphen_secret_in_its_snapshot() {
+    use nession_tmux::{NewSession, TmuxCommand, TmuxOps};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("tmux.sock");
+    let ops = TmuxOps::new(TmuxCommand::new("tmux", socket));
+    let name = format!("process-discovery-secret-{}", std::process::id());
+    let secret = format!("-e2e-3018-secret-{}", std::process::id());
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        ops.new_session(&NewSession {
+            name: name.clone(),
+            working_dir: dir.path().to_string_lossy().into_owned(),
+            width: 80,
+            height: 24,
+            env: Vec::new(),
+            command: Vec::new(),
+        })
+        .await
+        .expect("create a real isolated session");
+        ops.send_keys(&name, &format!("sh -c 'sleep 30; :' --token {secret} &"))
+            .await
+            .expect("type the secret-bearing child");
+        ops.send_keys(&name, "Enter")
+            .await
+            .expect("submit the command");
+    });
+
+    let mut snapshot = None;
+    for _ in 0..50 {
+        let panes = runtime
+            .block_on(ops.list_panes())
+            .expect("list panes on the real server");
+        let candidate = discover_panes(
+            &name,
+            panes
+                .into_iter()
+                .filter(|pane| pane.session_name == name)
+                .collect(),
+        )
+        .expect("the session exists");
+        let saw_secret_flag = candidate.panes.iter().any(|pane| {
+            pane.processes
+                .iter()
+                .any(|process| process.command.contains("--token"))
+        });
+        if saw_secret_flag {
+            snapshot = Some(candidate);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let result = snapshot.expect("the secret-bearing child is discovered");
+    runtime.block_on(ops.kill_session(&name)).ok();
+
+    let serialized = serde_json::to_string(&result).expect("snapshot serializes");
+    assert!(
+        !serialized.contains(&secret),
+        "the raw leading-hyphen secret reached the serialized snapshot: {serialized}"
+    );
+    let process = result
+        .panes
+        .iter()
+        .flat_map(|pane| pane.processes.iter())
+        .find(|process| process.command.contains("--token"))
+        .expect("the secret-bearing process is in the snapshot");
+    assert!(
+        process.command.contains("--token [REDACTED]"),
+        "{}",
+        process.command
+    );
+    assert!(process.redacted);
+    assert!(!result.panes.is_empty(), "ordinary discovery stays usable");
+    assert!(result.panes.iter().any(|pane| !pane.processes.is_empty()));
 }
