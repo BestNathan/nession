@@ -79,7 +79,9 @@ function preStagedOriginalZip(id,root=process.env.NESSION_QWEN_ARTIFACT_DIR,
   assert.ok(dir.isDirectory()&&!dir.isSymbolicLink(),
     'unsafe Artifact pre-stage directory');
   const source=path.join(root,String(id)+'.zip');
-  const stat=fs.lstatSync(source);
+  let stat;
+  try{stat=fs.lstatSync(source);}
+  catch{throw Error('missing or unsafe pre-staged original Artifact ZIP');}
   assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>=52&&
     stat.size<=MAX_SOURCE_ARTIFACT_ZIP_BYTES,
     'missing or unsafe pre-staged original Artifact ZIP');
