@@ -95,7 +95,7 @@ async function main(){
     [
       {type:'pr',value:'#'+binding.number+' attested_head='+sha},
       {type:'gates',value:'Quality + Case Smoke + E2E + Agent Acceptance completed/success'},
-      {type:'store',value:'agent-store='+storeSha+' result='+v2[0].path},
+      {type:'store',value:'agent-store='+storeSha+' result='+relevant[0].path},
     ]);
 }
 main().catch(fail);
