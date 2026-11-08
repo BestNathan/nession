@@ -39,6 +39,14 @@ test('SC-03: manual storage policy and deep links survive the URL cleanup', asyn
   const remember = page.getByRole('checkbox', { name: /remember me/i });
   await expect(remember).not.toBeChecked();
 
+  // Make the off choice explicit: the stored preference is written on toggle,
+  // not implied by the clean context's default.
+  await remember.click();
+  await expect(remember).toBeChecked();
+  await remember.click();
+  await expect(remember).not.toBeChecked();
+  expect((await readAuthStorage(page)).rememberPreference).toBe('false');
+
   await page.getByLabel('Auth Token').fill(SESSION_TOKEN);
   state.phase = 'hold';
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
