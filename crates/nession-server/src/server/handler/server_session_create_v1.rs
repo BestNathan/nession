@@ -168,7 +168,7 @@ impl ConnectionHandler {
                     .get("success")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
-                let session_id = if success {
+                let (session_id, binding_warning) = if success {
                     let sid = format!("{agent_id}:{name}");
                     // The SessionWatcher may have reported the real pane
                     // command *before* this create ACK was delivered (#2021).
@@ -193,16 +193,23 @@ impl ConnectionHandler {
                     self.session_registry
                         .insert_session_if_absent(session_info)
                         .await;
+                    // Apply the staged binding before the broadcast: the
+                    // create reply is the frame this client expects next, and
+                    // awaiting the binding after the broadcast let the queued
+                    // sessions-changed frame arrive first.
+                    let binding_warning = self
+                        .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
+                        .await;
                     // Broadcast the current registry snapshot, which might
                     // contain a newer Agent report than this create reply.
                     self.broadcast_sessions().await;
-                    Some(sid)
+                    (Some(sid), binding_warning)
                 } else {
                     // The Agent refused the create (a duplicate name or another
                     // refusal). This attempt does not own the Session, so its
                     // staged candidate is discarded without touching the
                     // existing binding.
-                    None
+                    (None, None)
                 };
                 let error = response
                     .get("error")
@@ -218,13 +225,8 @@ impl ConnectionHandler {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                if success {
-                    if let Some(warning) = self
-                        .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
-                        .await
-                    {
-                        warnings.push(warning);
-                    }
+                if let Some(warning) = binding_warning {
+                    warnings.push(warning);
                 }
 
                 Ok(session_create_reply(
