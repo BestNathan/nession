@@ -90,7 +90,7 @@ export function issueBody(plan){
     '',
     '## Acceptance Plan','','FENCE_YAML','acceptance:',
     '  SC-01:','    when: pr','    method: agent',
-    '  SC-02:','    when: merged','    branch: staging','    method: agent','FENCE_YAML','',
+    '  SC-02:','    when: merged','    branch: '+plan.branch,'    method: agent','FENCE_YAML','',
     '## Acceptance Report','','| Criterion | Result | Evidence |','|---|---|---|',
     '| SC-01 | Pending | Awaiting exact-head checks and trusted audit |',
     '| SC-02 | Pending | Awaiting protected merge and deployment receipt |','',
