@@ -2,6 +2,7 @@
 // The public build may show only a small exact Issue/PR window; missing or
 // ambiguous GitHub/Store evidence means unavailable, never an inferred Pass.
 import {createHash} from 'node:crypto';
+import {inflateRawSync} from 'node:zlib';
 import {attestQwenPublisherSource} from './qwen-source-attester.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
@@ -138,11 +139,16 @@ function extractPublisherWriterSha(bytes){
        'qwen-publisher-result.json')return null;
    const local=bytes.readUInt32LE(offset+42),comp=bytes.readUInt32LE(offset+20),
      flags=bytes.readUInt16LE(offset+8),method=bytes.readUInt16LE(offset+10);
-   if(method!==0||flags!==0||bytes.readUInt32LE(local)!==0x04034b50)return null;
+   if(![0,8].includes(method)||(flags&~(0x0800|8))!==0||
+      bytes.readUInt32LE(local)!==0x04034b50)return null;
    const start=local+30+bytes.readUInt16LE(local+26)+
      bytes.readUInt16LE(local+28);
    if(start+comp>offset||comp>8192)return null;
-   const doc=JSON.parse(bytes.subarray(start,start+comp).toString('utf8'));
+   const extracted=method===0?bytes.subarray(start,start+comp):
+     inflateRawSync(bytes.subarray(start,start+comp),{maxOutputLength:8193});
+   if(extracted.length>8192||extracted.length!==bytes.readUInt32LE(offset+24))
+     return null;
+   const doc=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(extracted));
    return SHA.test(doc?.store_commit_sha??'')?doc.store_commit_sha:null;
  }catch{return null;}
 }
