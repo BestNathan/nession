@@ -5,8 +5,8 @@ topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-11-07T09:26:00Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694","https://github.com/BestNathan/nession/blob/af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2656","https://github.com/BestNathan/nession/pull/2708","https://github.com/BestNathan/nession/pull/2709"]
+updated_at: 2026-11-08T07:34:05Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694","https://github.com/BestNathan/nession/blob/af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2656","https://github.com/BestNathan/nession/pull/2708","https://github.com/BestNathan/nession/pull/2709","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/xterm/XtermEmulator.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/controller/TerminalController.ts","https://github.com/BestNathan/nession/issues/2879","https://github.com/BestNathan/nession/pull/2958"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -132,6 +132,21 @@ the handler never synthesises application-specific sequences. A horizontal
 drag (the edge pager and selection keep it, and the axis stays locked for the
 gesture), a second finger and a tap are not claimed, so their owners receive
 the gesture unchanged.
+
+Steady-state **lifetime ownership** of the engine is explicit
+([#2879](https://github.com/BestNathan/nession/issues/2879)). Follow-bottom
+scrolling is one coalesced logical job per `CapsuleOcclusionScroll`: repeated
+output joins the pending double-`requestAnimationFrame` work, `dispose()`
+cancels both handles, and callbacks re-check disposal before touching the
+host. A host's debug/E2E `xtermInstance` reference belongs to the emulator and
+is released by identity on detach, reparent and disposal, so a replaced
+`Terminal` is never retained and a newer reference is never deleted; ordinary
+same-Session detach/reattach keeps the Terminal and its buffer. A link-matcher
+registration is one stable record whose current xterm provider is replaced in
+place when the renderer is rebuilt, so disposing the public registration
+releases the latest provider exactly once. These are lifetime guarantees only;
+scrollback capacity, writer/reconciler bounds, detach semantics and terminal
+interaction behavior are unchanged.
 
 ## Context and evidence
 

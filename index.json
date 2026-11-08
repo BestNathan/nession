@@ -116,7 +116,7 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-07T09:26:00Z"
+        "updated_at": "2026-11-08T07:34:05Z"
       }
     ],
     "web": [
@@ -197,7 +197,7 @@
           "e2e",
           "release"
         ],
-        "updated_at": "2026-11-07T14:12:50Z"
+        "updated_at": "2026-11-08T07:34:05Z"
       },
       {
         "title": "Nession GitHub Actions workflow domains and trust boundaries",

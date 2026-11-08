@@ -5,8 +5,8 @@ topic: workflows
 categories: ["acceptance","ci","e2e","release"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-07T14:12:50Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/docs/architecture/acceptance-sc-format.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/e2e-full-regression.yml","https://github.com/BestNathan/nession/issues/2323","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/ci-quality.yml","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/scripts/ci/quality-scope.mjs","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/acceptance-case-smoke.yml","https://github.com/BestNathan/nession/issues/2917","https://github.com/BestNathan/nession/pull/2931","https://github.com/BestNathan/nession/actions/runs/42379261477"]
+updated_at: 2026-11-08T07:34:05Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/docs/architecture/acceptance-sc-format.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.github/workflows/e2e-full-regression.yml","https://github.com/BestNathan/nession/issues/2323","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/ci-quality.yml","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/scripts/ci/quality-scope.mjs","https://github.com/BestNathan/nession/blob/4a5436a8770fed9367a0820eef38417b77525943/.github/workflows/acceptance-case-smoke.yml","https://github.com/BestNathan/nession/issues/2917","https://github.com/BestNathan/nession/pull/2931"]
 ---
 
 # Nession CI, E2E and acceptance qualification timing

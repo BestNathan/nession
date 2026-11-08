@@ -338,3 +338,17 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Record #2917 trusted source-scoped Quality, parallel stable Gate aggregation, early Case selection, distinct Web dist Not Required, exact-SHA producer proof, and measured three-class PR CI timings with statistical limits
 - Source: https://github.com/BestNathan/nession/issues/2917
+
+## 2026-11-08T07:34:05Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record #2879 lifetime ownership: coalesced follow-bottom RAF work with dispose cancellation, identity-checked host xtermInstance release across detach/reparent/disposal, and a stable link registration whose xterm provider is replaced on renderer rebuild
+- Source: https://github.com/BestNathan/nession/issues/2879
+
+## 2026-11-08T07:34:05Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Repair the disallowed Actions run URL in sources to the already-cited owning Issue so the ledger contract validates; no claim changed
+- Source: https://github.com/BestNathan/nession/issues/2917
