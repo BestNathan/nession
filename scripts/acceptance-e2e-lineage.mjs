@@ -462,6 +462,13 @@ export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) 
   }).sort((a,b)=>a.number-b.number).slice(-MAX_LINKED_PRS);
 }
 
+// Missing gates on an OPTIONAL historical PR are not a broken API or a Pass.
+// The strict verifier still rejects that PR; the collector omits its unproven
+// row so it cannot prevent independent current-Issue Acceptance from running.
+class UnprovenHistoricalMainGate extends Error {
+  constructor(message){super(message);this.name='UnprovenHistoricalMainGate';}
+}
+
 // This is a historical PR-head selected run, not an invented main-SHA test
 // result. The independently verified *ordinary main merge* and ancestry
 // bridge are separate from source Run/Plan/Issue-PATCH provenance.
@@ -490,17 +497,17 @@ export function verifyMainSelectedMerge(pr,mergeCommit,comparison,runs,jobs){
       })[name]&&run.event===(name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request')&&
       goodInt(run.id)&&goodInt(run.run_attempt));
     const winner=matches.sort((a,b)=>b.id-a.id)[0];
-    if(!winner)throw Error('missing verified exact-head pre-merge gate '+name);
+    if(!winner)throw new UnprovenHistoricalMainGate('missing verified exact-head pre-merge gate '+name);
     return {name,run_id:winner.id,run_attempt:winner.run_attempt,
       source_sha:head,conclusion:'success'};
   });
   if(!Array.isArray(jobs))throw Error('missing completed deterministic PR jobs');
   if(!jobs.some(j=>/^pre-merge-acceptance \([1-9]\d*\) \/ Execute acceptance$/.test(j.name)&&
        j.status==='completed'&&j.conclusion==='success'))
-    throw Error('missing read-only pre-merge Agent acceptance');
+    throw new UnprovenHistoricalMainGate('missing read-only pre-merge Agent acceptance');
   for(const name of ['pre-merge-gate','acceptance-pr-gate']){
     if(!jobs.some(j=>j.name===name&&j.status==='completed'&&j.conclusion==='success'))
-      throw Error('missing successful deterministic PR gate '+name);
+      throw new UnprovenHistoricalMainGate('missing successful deterministic PR gate '+name);
   }
   return {merge_sha:sha,pr_head_sha:head,first_parent_sha:mergeCommit.parents[0].sha,
     target_ancestor_verified:true,ordinary_two_parent_merge:true,
@@ -602,11 +609,19 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
       const orchestrator=runs.filter(r=>r.name==='Acceptance / Orchestrator'&&
         r.head_sha===pr.head.sha&&r.status==='completed'&&r.conclusion==='success')
         .sort((a,b)=>b.id-a.id)[0];
-      if(!orchestrator)throw Error('no completed pre-merge Orchestrator to verify');
+      if(!orchestrator)continue; // no historical proof; never a Pass
       const detail=await get('/repos/'+repo+'/actions/runs/'+orchestrator.id+
         '/attempts/'+orchestrator.run_attempt+'/jobs?per_page=100');
-      mainMerge={...verifyMainSelectedMerge(pr,commit,comparison,runs,detail.jobs),
-        evaluation_target_sha:targetSha};
+      let verified;
+      try{verified=verifyMainSelectedMerge(pr,commit,comparison,runs,detail.jobs);}
+      catch(error){
+        // A successful historical E2E selection alone cannot prove a main
+        // merge's full PR-head gates. Drop only this optional candidate.
+        // Malformed ancestry, origin or API data remains a hard failure.
+        if(error instanceof UnprovenHistoricalMainGate)continue;
+        throw error;
+      }
+      mainMerge={...verified,evaluation_target_sha:targetSha};
     }
     const payload=pr.merged_at&&!mergedMain?await get('/repos/'+repo+'/actions/runs?head_sha='+
       pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
@@ -1143,6 +1158,27 @@ async function selfTest() {
   assert.equal(mainProof[0].verified_main_merge.evaluation_target_sha,target);
   assert.equal(mainProof[0].verified_main_merge.merge_sha,mergedSha);
   assert.equal(mainProof[0].verified_selected_runs[0].projections[0].issue,1702);
+  // A cross-referenced historical PR may have authenticated selected E2E
+  // but lack its unrelated Case Smoke or Agent Gate. That historical record
+  // is NOT a verified full main-merge proof and must not block this Issue's
+  // independent post-merge evaluation. Crucially, no partial Pass is returned.
+  const withoutCaseSmoke=async url=>url.endsWith(
+    '/actions/runs?head_sha='+mergedHead+'&per_page=100')?
+    {workflow_runs:gates.filter(g=>g.name!=='Acceptance / Case Smoke')}:
+    mainGet(url);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,
+    withoutCaseSmoke,async()=>mainHistory,target),[]);
+  const withoutDeterministic=async url=>url.endsWith(
+    '/actions/runs/43/attempts/1/jobs?per_page=100')?
+    {jobs:jobs.filter(j=>j.name!=='acceptance-pr-gate')}:mainGet(url);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,
+    withoutDeterministic,async()=>mainHistory,target),[]);
+  const alteredAncestry=async url=>url.endsWith(
+    '/compare/'+mergedSha+'...'+target)?
+    {...ancestry,merge_base_commit:{sha:'8'.repeat(40)}}:mainGet(url);
+  await assert.rejects(()=>collectLinkedIssueE2EEvidence(REPO,1772,
+    alteredAncestry,async()=>mainHistory,target),
+    /unverified ordinary main merge or current-main ancestry/);
   const ownerProof=await collectLinkedIssueE2EEvidence(REPO,1702,
     async url=>url.includes('/issues/1702/timeline?')?mainCrossRefs:mainGet(url),
     async()=>mainHistory,target);
