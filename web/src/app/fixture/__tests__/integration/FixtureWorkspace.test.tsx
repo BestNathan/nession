@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,12 @@ import {
   FIXTURE_AGENT_PROCESS_COMMAND_B,
   type FixtureAgentProcessesWindow,
 } from '@/app/fixture/fixtureAgentProcesses';
+import {
+  FIXTURE_OWNERSHIP_SESSION_A,
+  FIXTURE_OWNERSHIP_SESSION_B,
+  type FixtureSessionMetadataWindow,
+} from '@/app/fixture/fixtureSessionMetadata';
+import { resetSessionMetadataCache } from '@/product/session/state/metadata';
 
 /** The fixture reads its observations from the route, so every render needs one. */
 function renderFixture(route = '/fixture/workspace') {
@@ -114,6 +120,41 @@ describe('FixtureWorkspace', () => {
     expect(await screen.findByText(FIXTURE_AGENT_PROCESS_COMMAND_B)).toBeInTheDocument();
     expect(screen.queryByText(FIXTURE_AGENT_PROCESS_COMMAND_A)).not.toBeInTheDocument();
     expect(controls?.pendingSettled()).toBe(true);
+  });
+
+  it('moves the mounted metadata editor between Sessions while a save is held (#2970)', async () => {
+    resetSessionMetadataCache();
+    const user = userEvent.setup();
+    renderFixture('/fixture/workspace?capability=session&sessionMetadata=ownership-save');
+
+    expect(await screen.findByTestId('session-details')).toBeInTheDocument();
+    expect(await screen.findByTestId('session-metadata-edit')).toBeInTheDocument();
+
+    const controls = (window as FixtureSessionMetadataWindow).fixtureSessionMetadata;
+    expect(controls?.selected()).toBe(FIXTURE_OWNERSHIP_SESSION_A);
+
+    await user.click(screen.getByTestId('session-metadata-edit'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), ' — A draft');
+    await user.click(screen.getByTestId('session-metadata-save'));
+    expect(controls?.saves()).toBe(1);
+
+    // The capability view observes the new Session without remounting; B's
+    // read answers while A's save is still held.
+    act(() => controls?.select(FIXTURE_OWNERSHIP_SESSION_B));
+    await waitFor(() =>
+      expect(screen.getByTestId('session-title')).toHaveTextContent('Design system audit'),
+    );
+    await user.click(await screen.findByTestId('session-metadata-edit'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), ' — B draft');
+
+    // Settling A must not replace B's draft or show A's success under B.
+    act(() => controls?.releaseSave());
+    await waitFor(() =>
+      expect(screen.getByTestId('session-metadata-title-input')).toHaveValue(
+        'Design system audit — B draft',
+      ),
+    );
+    expect(screen.queryByTestId('session-metadata-notice')).not.toBeInTheDocument();
   });
 
   /**

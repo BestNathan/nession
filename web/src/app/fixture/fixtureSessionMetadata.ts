@@ -28,15 +28,43 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *   ?sessionMetadata=offline           → the Agent does not answer
  *   ?sessionMetadata=conflict          → another client saves between the
  *                                        client's read and its save
+ *   ?sessionMetadata=ownership-save    → A's save is held until the Case
+ *                                        releases it (#2970)
+ *   ?sessionMetadata=ownership-reload  → A's save conflicts, and the forced
+ *                                        read is held until the Case releases it
  *
  * `legacy` is the default the canonical routes already render: the fixture's
  * Session rows keep their tmux names, so existing goldens do not move.
+ *
+ * The `ownership-*` scenarios also publish a real in-place Session switch (two
+ * Sessions on the same Agent) and deferred transport controls on the browser
+ * window, so a Case can settle A's answer after moving the Workspace to B.
+ * The switch replaces the selected Session without remounting the capability
+ * view, which is the render condition the editor's ownership rule exists for.
  */
-export type FixtureSessionMetadataScenario = 'normal' | 'legacy' | 'offline' | 'conflict';
+export type FixtureSessionMetadataScenario =
+  | 'normal'
+  | 'legacy'
+  | 'offline'
+  | 'conflict'
+  | 'ownership-save'
+  | 'ownership-reload';
+
+export function isFixtureOwnershipScenario(
+  scenario: FixtureSessionMetadataScenario,
+): boolean {
+  return scenario === 'ownership-save' || scenario === 'ownership-reload';
+}
 
 export function fixtureSessionMetadataScenario(search: string): FixtureSessionMetadataScenario {
   const requested = new URLSearchParams(search).get('sessionMetadata');
-  if (requested === 'normal' || requested === 'offline' || requested === 'conflict') {
+  if (
+    requested === 'normal' ||
+    requested === 'offline' ||
+    requested === 'conflict' ||
+    requested === 'ownership-save' ||
+    requested === 'ownership-reload'
+  ) {
     return requested;
   }
   return 'legacy';
@@ -101,87 +129,213 @@ function failure(kind: string, message: string): SessionMetadataResponse {
   return { success: false, error: message, error_kind: kind, metadata: null };
 }
 
-export function fixtureSessionMetadataSurface(search: string): PluginSurface {
-  const scenario = fixtureSessionMetadataScenario(search);
-  const store = new Map<string, SessionMetadata>(
-    scenario === 'legacy' ? [] : Object.entries(SEED),
-  );
-  // The conflict route changes the store once, standing in for the other
-  // client's save that happens between this client's read and its write.
-  let conflictEscalated = false;
+/** The two Sessions the ownership route can move between, in place. */
+export const FIXTURE_OWNERSHIP_SESSION_A = FIXTURE_SELECTED_ID;
+export const FIXTURE_OWNERSHIP_SESSION_B = 'devbox-01:design-system';
 
-  const protocols = new ProtocolDirectory();
-  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+let ownershipSessionId: string = FIXTURE_OWNERSHIP_SESSION_A;
+const ownershipListeners = new Set<() => void>();
 
-  const current = (sessionId: string): SessionMetadata =>
-    store.get(sessionId) ?? emptyMetadata();
+export function fixtureOwnershipSessionId(): string {
+  return ownershipSessionId;
+}
 
-  function read(sessionId: unknown): SessionMetadataResponse {
-    if (scenario === 'offline') {
-      return failure('unavailable', 'Agent is offline');
-    }
-    return { success: true, metadata: current(String(sessionId)) };
+export function subscribeFixtureOwnershipSession(listener: () => void): () => void {
+  ownershipListeners.add(listener);
+  return () => {
+    ownershipListeners.delete(listener);
+  };
+}
+
+/**
+ * Move the fixture Workspace to the other Session, as the product's Workspace
+ * move does — `SessionDetails` (and its metadata editor) observes a changed
+ * `session` without remounting.
+ */
+export function selectFixtureOwnershipSession(sessionId: string): void {
+  if (
+    sessionId === ownershipSessionId ||
+    (sessionId !== FIXTURE_OWNERSHIP_SESSION_A &&
+      sessionId !== FIXTURE_OWNERSHIP_SESSION_B)
+  ) {
+    return;
+  }
+  ownershipSessionId = sessionId;
+  for (const listener of [...ownershipListeners]) {
+    listener();
+  }
+}
+
+function resetFixtureOwnershipSession(): void {
+  if (ownershipSessionId === FIXTURE_OWNERSHIP_SESSION_A) {
+    return;
+  }
+  ownershipSessionId = FIXTURE_OWNERSHIP_SESSION_A;
+  for (const listener of [...ownershipListeners]) {
+    listener();
+  }
+}
+
+/** Browser-window controls the #2970 Cases drive the deferred transport with. */
+export interface FixtureSessionMetadataControls {
+  select(sessionId: string): void;
+  selected(): string;
+  /** Hold the next `metadata.get` answer until `releaseRead()`. */
+  holdNextRead(): void;
+  releaseRead(): void;
+  releaseSave(): void;
+  /** How many `metadata.update` requests this surface was asked for. */
+  saves(): number;
+  heldRead(): boolean;
+}
+
+export interface FixtureSessionMetadataWindow {
+  fixtureSessionMetadata?: FixtureSessionMetadataControls;
+}
+
+interface FixtureSessionMetadataTransport {
+  scenario: FixtureSessionMetadataScenario;
+  ownership: boolean;
+  store: Map<string, SessionMetadata>;
+  conflictEscalated: boolean;
+  saveCount: number;
+  releaseHeldSave: (() => void) | null;
+  holdRead: boolean;
+  releaseHeldRead: (() => void) | null;
+  readHeld: boolean;
+}
+
+function currentMetadata(
+  state: FixtureSessionMetadataTransport,
+  sessionId: string,
+): SessionMetadata {
+  return state.store.get(sessionId) ?? emptyMetadata();
+}
+
+function readMetadata(
+  state: FixtureSessionMetadataTransport,
+  sessionId: unknown,
+): SessionMetadataResponse | Promise<SessionMetadataResponse> {
+  if (state.scenario === 'offline') {
+    return failure('unavailable', 'Agent is offline');
+  }
+  const answer: SessionMetadataResponse = {
+    success: true,
+    metadata: currentMetadata(state, String(sessionId)),
+  };
+  if (!state.ownership || !state.holdRead) {
+    return answer;
+  }
+  // The answer is captured now and delivered after the Case moves to B.
+  // This is the in-flight forced read SC-02 fences, not a rendering.
+  state.holdRead = false;
+  state.readHeld = true;
+  return new Promise((resolve) => {
+    state.releaseHeldRead = () => {
+      state.readHeld = false;
+      resolve(answer);
+    };
+  });
+}
+
+function normalUpdate(
+  state: FixtureSessionMetadataTransport,
+  payload: Record<string, unknown>,
+): SessionMetadataResponse {
+  const sessionId = String(payload.session_id);
+  const expectedRevision = Number(payload.expected_revision ?? 0);
+  const metadata = currentMetadata(state, sessionId);
+
+  if (state.scenario === 'conflict' && !state.conflictEscalated) {
+    state.conflictEscalated = true;
+    state.store.set(sessionId, REMOTE_CONFLICT);
+    return failure(
+      'conflict',
+      `expected revision ${expectedRevision}, current revision ${REMOTE_CONFLICT.revision}`,
+    );
+  }
+  if (metadata.revision !== expectedRevision) {
+    return failure(
+      'conflict',
+      `expected revision ${expectedRevision}, current revision ${metadata.revision}`,
+    );
   }
 
-  function update(payload: Record<string, unknown>): SessionMetadataResponse {
-    if (scenario === 'offline') {
-      return failure('unavailable', 'Agent is offline');
-    }
+  const title = typeof payload.title === 'string' ? payload.title : '';
+  const description = typeof payload.description === 'string' ? payload.description : '';
+  const tags = Array.isArray(payload.tags)
+    ? payload.tags.filter((tag): tag is string => typeof tag === 'string')
+    : [];
+  const normalized = normalizeSessionMetadataDraft({ title, description, tags });
+  const invalid = validateSessionMetadataDraft({
+    title: title,
+    description: description,
+    tags: normalized.tags,
+  });
+  if (invalid !== null) {
+    return failure('invalid', invalid);
+  }
+
+  const next: SessionMetadata = {
+    revision: metadata.revision + 1,
+    title: normalized.title,
+    description: normalized.description,
+    tags: normalized.tags,
+    created_at: metadata.created_at ?? CREATED_AT,
+    updated_at: UPDATED_AT,
+  };
+  state.store.set(sessionId, next);
+  return { success: true, metadata: next };
+}
+
+function updateMetadata(
+  state: FixtureSessionMetadataTransport,
+  payload: Record<string, unknown>,
+): SessionMetadataResponse | Promise<SessionMetadataResponse> {
+  if (state.scenario === 'offline') {
+    return failure('unavailable', 'Agent is offline');
+  }
+  if (state.scenario === 'ownership-reload') {
+    // The forced-read Case needs a conflict before its held reload. The
+    // remote keeps winning on later writes too, so the same-Session
+    // negative control can be exercised on the `conflict` route without
+    // depending on this route's store state.
+    state.saveCount += 1;
     const sessionId = String(payload.session_id);
     const expectedRevision = Number(payload.expected_revision ?? 0);
-    const metadata = current(sessionId);
-
-    if (scenario === 'conflict' && !conflictEscalated) {
-      conflictEscalated = true;
-      store.set(sessionId, REMOTE_CONFLICT);
-      return failure(
-        'conflict',
-        `expected revision ${expectedRevision}, current revision ${REMOTE_CONFLICT.revision}`,
-      );
+    if (!state.conflictEscalated) {
+      state.conflictEscalated = true;
+      state.store.set(sessionId, REMOTE_CONFLICT);
     }
-    if (metadata.revision !== expectedRevision) {
-      return failure(
-        'conflict',
-        `expected revision ${expectedRevision}, current revision ${metadata.revision}`,
-      );
-    }
-
-    const title = typeof payload.title === 'string' ? payload.title : '';
-    const description = typeof payload.description === 'string' ? payload.description : '';
-    const tags = Array.isArray(payload.tags)
-      ? payload.tags.filter((tag): tag is string => typeof tag === 'string')
-      : [];
-    const normalized = normalizeSessionMetadataDraft({ title, description, tags });
-    const invalid = validateSessionMetadataDraft({
-      title: title,
-      description: description,
-      tags: normalized.tags,
-    });
-    if (invalid !== null) {
-      return failure('invalid', invalid);
-    }
-
-    const next: SessionMetadata = {
-      revision: metadata.revision + 1,
-      title: normalized.title,
-      description: normalized.description,
-      tags: normalized.tags,
-      created_at: metadata.created_at ?? CREATED_AT,
-      updated_at: UPDATED_AT,
-    };
-    store.set(sessionId, next);
-    return { success: true, metadata: next };
+    return failure(
+      'conflict',
+      `expected revision ${expectedRevision}, current revision ${REMOTE_CONFLICT.revision}`,
+    );
   }
+  const answer = normalUpdate(state, payload);
+  if (state.scenario !== 'ownership-save') {
+    return answer;
+  }
+  // The save is applied now and its answer delivered after the Case moves
+  // to B. This is the in-flight save SC-01 fences.
+  state.saveCount += 1;
+  return new Promise((resolve) => {
+    state.releaseHeldSave = () => resolve(answer);
+  });
+}
 
+function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSurface {
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
   return {
     connectionState: 'connected',
     protocols,
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === 'server.session.metadata.get') {
-        return Promise.resolve(read(payload.session_id) as T);
+        return Promise.resolve(readMetadata(state, payload.session_id)) as Promise<T>;
       }
       if (type === 'server.session.metadata.update') {
-        return Promise.resolve(update(payload) as T);
+        return Promise.resolve(updateMetadata(state, payload)) as Promise<T>;
       }
       return Promise.reject(
         new Error(`fixture session metadata surface does not answer ${type}`),
@@ -203,8 +357,82 @@ export function fixtureSessionMetadataSurface(search: string): PluginSurface {
   };
 }
 
+function createMetadataControls(
+  state: FixtureSessionMetadataTransport,
+): FixtureSessionMetadataControls | null {
+  if (!state.ownership) {
+    return null;
+  }
+  return {
+    select: selectFixtureOwnershipSession,
+    selected: fixtureOwnershipSessionId,
+    holdNextRead: () => {
+      state.holdRead = true;
+    },
+    releaseRead: () => {
+      state.releaseHeldRead?.();
+      state.releaseHeldRead = null;
+    },
+    releaseSave: () => {
+      state.releaseHeldSave?.();
+      state.releaseHeldSave = null;
+    },
+    saves: () => state.saveCount,
+    heldRead: () => state.readHeld,
+  };
+}
+
+export function createFixtureSessionMetadataHarness(search: string): {
+  surface: PluginSurface;
+  controls: FixtureSessionMetadataControls | null;
+} {
+  const scenario = fixtureSessionMetadataScenario(search);
+  const state: FixtureSessionMetadataTransport = {
+    scenario,
+    ownership: isFixtureOwnershipScenario(scenario),
+    store: new Map(scenario === 'legacy' ? [] : Object.entries(SEED)),
+    // The conflict route changes the store once, standing in for the other
+    // client's save that happens between this client's read and its write.
+    conflictEscalated: false,
+    // The ownership route holds exactly the answer a Case asks it to hold.
+    saveCount: 0,
+    releaseHeldSave: null,
+    holdRead: false,
+    releaseHeldRead: null,
+    readHeld: false,
+  };
+  return {
+    surface: createMetadataSurface(state),
+    controls: createMetadataControls(state),
+  };
+}
+
+/**
+ * The Agent-process surface delegates its metadata wires to this; it needs no
+ * browser controls, only the answers.
+ */
+export function fixtureSessionMetadataSurface(search: string): PluginSurface {
+  return createFixtureSessionMetadataHarness(search).surface;
+}
+
 /** Bind the stub for a fixture route's lifetime, one surface per scenario. */
 export function useFixtureSessionMetadata(search: string): void {
-  const surface = useMemo(() => fixtureSessionMetadataSurface(search), [search]);
-  useEffect(() => sessionsApi.install(surface), [surface]);
+  const harness = useMemo(() => createFixtureSessionMetadataHarness(search), [search]);
+  useEffect(() => {
+    if (harness.controls) {
+      resetFixtureOwnershipSession();
+      (window as FixtureSessionMetadataWindow).fixtureSessionMetadata = harness.controls;
+    }
+    const release = sessionsApi.install(harness.surface);
+    return () => {
+      release();
+      if (harness.controls) {
+        const windowWithControls = window as FixtureSessionMetadataWindow;
+        if (windowWithControls.fixtureSessionMetadata === harness.controls) {
+          delete windowWithControls.fixtureSessionMetadata;
+        }
+        resetFixtureOwnershipSession();
+      }
+    };
+  }, [harness]);
 }

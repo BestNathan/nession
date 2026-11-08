@@ -26,7 +26,13 @@ import {
   installFixtureAgentProcessSurface,
   subscribeFixtureAgentProcessSession,
 } from './fixtureAgentProcesses';
-import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import {
+  fixtureOwnershipSessionId,
+  fixtureSessionMetadataScenario,
+  isFixtureOwnershipScenario,
+  subscribeFixtureOwnershipSession,
+  useFixtureSessionMetadata,
+} from './fixtureSessionMetadata';
 
 // Module-stable — the stub is immutable and stateless, so a single instance
 // is safe to share across renders (same pattern as fixtureRoute).
@@ -71,7 +77,19 @@ export function FixtureWorkspace() {
   const agents = agentProcessScenario
     ? fixtureAgentProcessesAgents(agentProcessScenario)
     : FIXTURE_AGENTS;
-  const selectedId = agentProcessScenario ? agentProcessSessionId : FIXTURE_SELECTED_ID;
+  // The metadata ownership route (#2970) moves between two Sessions on the
+  // same Agent through the same in-place selection store; the capability view
+  // observes a changed Session without remounting.
+  const metadataOwnership = isFixtureOwnershipScenario(fixtureSessionMetadataScenario(search));
+  const ownershipSessionId = useSyncExternalStore(
+    subscribeFixtureOwnershipSession,
+    fixtureOwnershipSessionId,
+  );
+  const selectedId = agentProcessScenario
+    ? agentProcessSessionId
+    : metadataOwnership
+      ? ownershipSessionId
+      : FIXTURE_SELECTED_ID;
   const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
   const selectedAgent = agents.find((a) => a.agent_id === selectedSession?.agent_id);
   const domain = selectedSession
