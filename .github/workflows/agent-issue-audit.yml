@@ -1,4 +1,5 @@
 name: Agent / Issue Audit
+run-name: Issue Audit #${{ github.event.issue.number || inputs.issue_number || 'unknown' }}
 
 on:
   issues:
