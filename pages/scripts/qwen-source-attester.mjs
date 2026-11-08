@@ -32,7 +32,7 @@ function zipMember(zip,name,maxBytes=65536){
      nameLen=zip.readUInt16LE(ptr+28),extra=zip.readUInt16LE(ptr+30),
      comment=zip.readUInt16LE(ptr+32),local=zip.readUInt32LE(ptr+42);
    ensure((flags&~(0x0800|8))===0&&[0,8].includes(method)&&
-     compressed<=512*1024&&plain<=maxBytes&&nameLen>0&&nameLen<100&&
+     compressed<=512*1024&&plain<=32*1024*1024&&nameLen>0&&nameLen<100&&
      ptr+46+nameLen+extra+comment<=end&&
      zip.readUInt16LE(ptr+34)===0);
    const file=zip.subarray(ptr+46,ptr+46+nameLen).toString('utf8');
@@ -41,6 +41,7 @@ function zipMember(zip,name,maxBytes=65536){
    const type=(zip.readUInt32LE(ptr+38)>>>16)&0o170000;
    ensure(type===0||type===0o100000);
    if(file===name){
+     ensure(plain<=maxBytes);
      ensure(found===null&&local+30<=offset&&zip.readUInt32LE(local)===0x04034b50);
      const localName=zip.readUInt16LE(local+26),localExtra=zip.readUInt16LE(local+28);
      ensure(localName===nameLen&&
