@@ -350,7 +350,10 @@ test('the diff remains usable at desktop and App-like phone width (#2791 SC-03)'
   expect(longScroll.scrollTop).toBeGreaterThan(0);
 
   expect(
-    await page.getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 });
 
@@ -376,9 +379,11 @@ test('offers the three local writes and nothing beyond them (#845)', async ({ pa
     page.getByRole('button', { name: /stage src\/conflict\.ts|unstage src\/conflict\.ts/i }),
   ).toHaveCount(0);
 
-  // No remote or history-rewriting operation is expressible.
+  // No remote or history-rewriting operation is expressible in the Git
+  // surface. Scoped to the view: the shell's own controls are not Git
+  // operations, and counting them made this assertion about the page.
   await expect(
-    page.getByRole('button', {
+    view.getByRole('button', {
       name: /push|pull|fetch|checkout|switch|discard|reset|rebase|merge/i,
     }),
   ).toHaveCount(0);

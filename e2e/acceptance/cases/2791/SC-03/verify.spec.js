@@ -34,7 +34,10 @@ test('SC-03: desktop and phone widths keep the diff readable and scrollable', as
   );
   expect(desktopOverflow).toBeLessThanOrEqual(1);
   expect(
-    await page.getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 
   // A patch longer than the pane scrolls inside its own body.
@@ -87,7 +90,10 @@ test('SC-03: desktop and phone widths keep the diff readable and scrollable', as
   expect(phone.left).toBeGreaterThanOrEqual(0);
   expect(phone.right).toBeLessThanOrEqual(391);
   expect(
-    await page.getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 
   test.info().annotations.push({

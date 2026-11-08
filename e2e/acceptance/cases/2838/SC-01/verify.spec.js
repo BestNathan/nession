@@ -23,7 +23,13 @@ test('SC-01: an untracked file opens a bounded preview and stays recoverable at 
   );
   await expect(page.getByTestId('git-file-preview-text')).toContainText('untracked');
   await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /stage|commit|push/i })).toHaveCount(0);
+  // The preview itself is a reader. The row outside it may offer the #845
+  // Stage action; the preview pane must not.
+  await expect(
+    page
+      .getByTestId('git-file-preview')
+      .getByRole('button', { name: /stage|commit|push|pull|checkout|discard/i }),
+  ).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(row).toBeFocused();
@@ -42,8 +48,9 @@ test('SC-01: an untracked file opens a bounded preview and stays recoverable at 
     type: 'evidence',
     description:
       'exact SHA ' + sha + ': notes/new.ts selected from the Untracked group and rendered its ' +
-      'actual content with the no-Git-baseline status and no diff/stage control; at 390x844 the ' +
-      'row stayed focused, the path stayed visible, the preview body scrolled with positive ' +
-      'Capsule clearance, and the page did not overflow horizontally',
+      'actual content with the no-Git-baseline status and no diff or write control inside the ' +
+      'preview pane; at 390x844 the row stayed focused, the path stayed visible, the preview ' +
+      'body scrolled with positive Capsule clearance, and the page did not overflow ' +
+      'horizontally',
   });
 });

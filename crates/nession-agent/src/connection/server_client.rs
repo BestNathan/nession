@@ -1602,6 +1602,7 @@ mod tests {
     /// Mock server that sends a session create command after registration.
     async fn start_mock_server_with_session_create(
         session_name: String,
+        working_dir: String,
     ) -> (
         std::net::SocketAddr,
         tokio::task::JoinHandle<()>,
@@ -1642,7 +1643,8 @@ mod tests {
                         "request_id": "req-123",
                         "name": session_name,
                         "width": 100,
-                        "height": 30
+                        "height": 30,
+                        "working_dir": working_dir
                     }
                 });
                 let _ = sink.send(WsMessage::Text(create_cmd.to_string())).await;
@@ -1663,9 +1665,11 @@ mod tests {
     async fn test_server_session_create_command() {
         let session = TestSession::new("server-create");
         let session_name = session.name().to_string();
+        let working_dir = tempfile::tempdir().expect("working dir");
+        let working_path = working_dir.path().to_string_lossy().to_string();
 
         let (addr, server_handle, mut msg_rx) =
-            start_mock_server_with_session_create(session_name.clone()).await;
+            start_mock_server_with_session_create(session_name.clone(), working_path.clone()).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let metadata = AgentMetadata {
@@ -1711,6 +1715,21 @@ mod tests {
         assert_eq!(parsed["payload"]["command"], "session.create");
         assert_eq!(parsed["payload"]["success"], true);
         assert_eq!(parsed["payload"]["session_name"], session_name.as_str());
+
+        // The contract's `working_dir` must be honoured on the relayed path,
+        // not silently replaced by the Agent default (/tmp here) — #845's
+        // acceptance Cases create real repositories outside the default dir.
+        let cwd = SessionManager::new()
+            .get_session_cwd(&session_name)
+            .await
+            .expect("session cwd");
+        let expected = std::fs::canonicalize(&working_path).expect("canonical working dir");
+        let actual = std::fs::canonicalize(cwd.trim())
+            .unwrap_or_else(|error| panic!("canonical session cwd {cwd:?}: {error}"));
+        assert_eq!(
+            actual, expected,
+            "relayed create must use the requested working_dir"
+        );
 
         // Clean up the created session.
         let tmux = SessionManager::new();
@@ -3858,6 +3877,36 @@ core_routes!(agent, msg, responses;
                     let terminal_cols = payload
                         .terminal_cols
                         .unwrap_or(nession_common::config::DEFAULT_TERMINAL_COLS);
+                    // A relayed create may name its starting directory — the
+                    // field is on the shared contract and the direct path has
+                    // always honoured it. Ignoring it here silently created the
+                    // Session in the Agent default instead (#845 acceptance).
+                    let initial_working_dir = match payload
+                        .working_dir
+                        .as_deref()
+                        .map(SessionManager::validate_initial_working_dir)
+                        .transpose()
+                    {
+                        Ok(Some(path)) => path,
+                        Ok(None) => agent.default_working_dir.clone(),
+                        Err(error) => {
+                            let response = serde_json::json!({
+                                "msg_type": "server.agent.command-response",
+                                "id": uuid::Uuid::new_v4().to_string(),
+                                "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                "payload": {
+                                    "request_id": request_id,
+                                    "command": "session.create",
+                                    "success": false,
+                                    "error": error.to_string(),
+                                    "session_name": null,
+                                    "warnings": [],
+                                }
+                            });
+                            responses.send(WsMessage::Text(response.to_string())).await?;
+                            return Ok(());
+                        }
+                    };
                     let revision = payload
                         .binding_revision
                         .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
@@ -3867,7 +3916,7 @@ core_routes!(agent, msg, responses;
                             &name,
                             terminal_cols,
                             payload.height,
-                            &agent.default_working_dir,
+                            &initial_working_dir,
                             SessionBindingInput {
                                 revision,
                                 profiles: &profiles,

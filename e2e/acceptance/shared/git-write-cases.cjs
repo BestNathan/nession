@@ -193,7 +193,20 @@ async function createSession(stack, name, workingDir) {
   while (Date.now() < deadline) {
     const list = await stack.ask('server.session.list', { force: true });
     const sessions = Array.isArray(list?.sessions) ? list.sessions : [];
-    if (sessions.some((item) => item.session_id === sessionId)) return sessionId;
+    if (sessions.some((item) => item.session_id === sessionId)) {
+      // The pane exists; give the Agent a bounded moment to resolve its live
+      // directory into the repository the Case just created.
+      const readyDeadline = Date.now() + 15_000;
+      for (;;) {
+        const probe = await gitAsk(stack, 'git.status', {
+          session: sessionId,
+          contract_version: 2,
+        });
+        if (probe?.state === 'ok' || Date.now() >= readyDeadline) break;
+        await sleep(250);
+      }
+      return sessionId;
+    }
     await sleep(200);
   }
   throw new Error('created Session never appeared in server.session.list');
@@ -208,7 +221,21 @@ function gitAsk(stack, wire, payload) {
 }
 
 async function status(stack, session, version = 2) {
-  const response = await gitAsk(stack, 'git.status', { session, contract_version: version });
+  // A freshly created tmux Session may not have reported its pane cwd yet;
+  // `session_workdir_unknown` is a readiness answer, not a product failure.
+  const deadline = Date.now() + 15_000;
+  let response;
+  for (;;) {
+    response = await gitAsk(stack, 'git.status', { session, contract_version: version });
+    if (
+      response?.state !== 'unavailable' ||
+      response?.reason !== 'session_workdir_unknown' ||
+      Date.now() >= deadline
+    ) {
+      break;
+    }
+    await sleep(250);
+  }
   assert.equal(response?.state, 'ok', 'git.status failed: ' + JSON.stringify(response));
   return response;
 }

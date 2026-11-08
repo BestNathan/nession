@@ -344,7 +344,9 @@ mod tests {
     impl Fixture {
         fn unborn() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            git(dir.path(), &["init", "-q"]);
+            // Pin the branch name: CI's git may default to `master`, and the
+            // conflict fixture checks out `main` by name.
+            git(dir.path(), &["init", "-q", "-b", "main"]);
             Self { dir }
         }
 
