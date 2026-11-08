@@ -4,6 +4,8 @@
 // The independently authenticated Pages attester remains the one verifier.
 const assert=require('node:assert/strict');
 const {createHash}=require('node:crypto');
+const fs=require('node:fs');
+const path=require('node:path');
 const {HEX40,REPO}=require('./agent-store-1997.cjs');
 const API='https://api.github.com/repos/'+REPO;
 // Cases use only the scoped read-only token of the trusted Acceptance Runner.
@@ -62,8 +64,33 @@ function selectNewestQwenProducer(tree,{maxEntries=8}={}){
 // (encrypted native checkpoint included) is used by Pages and Case Runner.
 // The privileged Publisher proof remains independently restricted to 512 KiB.
 const MAX_SOURCE_ARTIFACT_ZIP_BYTES=32*1024*1024;
+// Trusted main-only workflow fetches and digest-verifies the original ZIPs
+// in a separate credentialed step. Case code receives *only those bytes*;
+// it independently checks GitHub Artifact Run metadata/digest and Store Writer.
+// No GITHUB_TOKEN/GH_TOKEN is supplied to the Case or PR-head execution.
+function preStagedOriginalZip(id,root=process.env.NESSION_QWEN_ARTIFACT_DIR,
+  runnerTemp=process.env.RUNNER_TEMP){
+  assert.ok(positive(id),'invalid original Actions Artifact id');
+  assert.ok(typeof root==='string'&&typeof runnerTemp==='string'&&
+    path.isAbsolute(root)&&path.isAbsolute(runnerTemp)&&
+    root===path.join(runnerTemp,'qwen-lineage-source'),
+    'missing trusted main-only Artifact transport');
+  const dir=fs.lstatSync(root);
+  assert.ok(dir.isDirectory()&&!dir.isSymbolicLink(),
+    'unsafe Artifact pre-stage directory');
+  const source=path.join(root,String(id)+'.zip');
+  let stat;
+  try{stat=fs.lstatSync(source);}
+  catch{throw Error('missing or unsafe pre-staged original Artifact ZIP');}
+  assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>=52&&
+    stat.size<=MAX_SOURCE_ARTIFACT_ZIP_BYTES,
+    'missing or unsafe pre-staged original Artifact ZIP');
+  return fs.readFileSync(source);
+}
 async function originalZip(id){
   assert.ok(positive(id),'invalid original Actions Artifact id');
+  if(process.env.NESSION_QWEN_ARTIFACT_DIR)
+    return preStagedOriginalZip(id);
   const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
   assert.ok(typeof token==='string'&&token.length>=8,
     'read-only GitHub Actions Artifact token unavailable');
@@ -153,4 +180,5 @@ async function attestLatestQwenProducer(){
       actionId:candidate.actionId},
     attested};
 }
-module.exports={selectNewestQwenProducer,attestLatestQwenProducer};
+module.exports={selectNewestQwenProducer,attestLatestQwenProducer,
+  preStagedOriginalZip};
