@@ -846,9 +846,7 @@ async fn unauthenticated_session_kill_rejected() {
 /// Registering via `agent.register` marks the agent Online but does not
 /// give it a CommandBroker control connection, so a force refresh will
 /// find it unreachable — exactly the "agent went away" case.
-async fn handler_with_online_agent() -> ConnectionHandler {
-    let mut h = test_handler("").await;
-    h.authenticated_client = true;
+async fn register_online_agent(h: &mut ConnectionHandler) {
     h.handle_message(proto_msg(
         "server.agent.register",
         json!({
@@ -865,6 +863,12 @@ async fn handler_with_online_agent() -> ConnectionHandler {
     ))
     .await
     .unwrap();
+}
+
+async fn handler_with_online_agent() -> ConnectionHandler {
+    let mut h = test_handler("").await;
+    h.authenticated_client = true;
+    register_online_agent(&mut h).await;
     h
 }
 
