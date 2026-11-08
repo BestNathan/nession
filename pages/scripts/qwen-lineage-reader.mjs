@@ -30,7 +30,7 @@ const validTreeEntry=e=>e?.type==='blob'&&e.mode==='100644'&&
 export async function loadPinnedQwenLineage({
   ref,issueNumbers,pulls,getTree,getBlob,getOriginalStoreBytes,
   getRun,getArtifacts,getArtifactZip,getPull,getCompare,getCurrentRef,
-  maxRecords=2,
+  maxRecords=2,onDiagnostic=null,
 }={}){
  if(ref?.state!=='present'||!SHA.test(ref.sha??'')||
    !Array.isArray(issueNumbers)||issueNumbers.length>12||
@@ -42,9 +42,11 @@ export async function loadPinnedQwenLineage({
    [getTree,getBlob,getOriginalStoreBytes,getRun,getArtifacts,
      getArtifactZip,getPull,getCompare,getCurrentRef].some(x=>typeof x!=='function'))
      return unavailable();
+ let stage='source-window';
  try{
    check(new Set(issueNumbers).size===issueNumbers.length&&
      new Set(pulls.map(p=>p.number)).size===pulls.length);
+   stage='pinned-tree';
    const tree=await getTree(ref.sha);
    check(Array.isArray(tree?.tree)&&tree.truncated===false&&tree.tree.length<=5000);
    const issues=new Set(issueNumbers),prs=new Map(pulls.map(p=>[p.number,p.head_sha]));
@@ -65,6 +67,7 @@ export async function loadPinnedQwenLineage({
    const truncated=candidate.length>maxRecords;
    const results=[],seen=new Set();
    for(const entry of candidate.slice(0,maxRecords)){
+     stage='producer-blob';
      const producerBytes=bytes(await getBlob(entry.sha),entry);
      const doc=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(producerBytes));
      const issue=doc.issue,run=doc.result?.run_id,attempt=doc.result?.run_attempt,
@@ -74,15 +77,18 @@ export async function loadPinnedQwenLineage({
        prs.get(pr)===doc.result?.target_sha&&
        doc.source?.agent_id==='dev-qwen-01'&&
        doc.result?.kind==='developer');
+     stage='producer-contract';
      const key=issue+':'+run+':'+attempt+':'+action;
      check(!seen.has(key));seen.add(key);
      const intentPath=INTENT_PREFIX(issue)+run+'-'+attempt+'-'+action+'.json';
      const intentEntry=paths.get(intentPath);
      check(validTreeEntry(intentEntry));
+     stage='intent-blob';
      const intent=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(
        bytes(await getBlob(intentEntry.sha),intentEntry)));
      const publisherId=intent.publisher_run_id;
      check(Number.isSafeInteger(publisherId)&&publisherId>0);
+     stage='source-runs';
      const [workerRun,workerArtifacts,publisherRun,publisherArtifacts,pull]
        =await Promise.all([
          getRun(run),getArtifacts(run),getRun(publisherId),
@@ -93,6 +99,7 @@ export async function loadPinnedQwenLineage({
      const publisherArt=publisherArtifacts?.artifacts?.filter(a=>
        a.name==='qwen-developer-v2-'+publisherId+'-1');
      check(workerArt?.length===1&&publisherArt?.length===1);
+     stage='original-artifacts';
      const [workerZip,publisherZip]=await Promise.all([
        getArtifactZip(workerArt[0].id),getArtifactZip(publisherArt[0].id)
      ]);
@@ -101,26 +108,35 @@ export async function loadPinnedQwenLineage({
      // contents and ancestry before any public edge may be emitted.
      // Never let a candidate self-authorize its own Store writer SHA.
      // The attester will re-verify this Artifact's digest and identity.
+     stage='writer-proof-zip';
      const writerRaw=extractPublisherWriterSha(publisherZip);
      check(SHA.test(writerRaw??''));
+     stage='writer-source-readback';
      const [originalStoreBytes,storeAncestry]=await Promise.all([
        getOriginalStoreBytes(entry.path,writerRaw),
        getCompare(writerRaw,ref.sha),
      ]);
+     stage='independent-attestation';
      const attested=attestQwenPublisherSource({
        storeSha:ref.sha,producerPath:entry.path,producerBytes,
        originalStoreBytes,intent,workerRun,workerArtifacts,workerZip,
        publisherRun,publisherArtifacts,publisherZip,pull,storeAncestry,
+       onDiagnostic:typeof onDiagnostic==='function'?
+         detail=>onDiagnostic('independent-attestation/'+detail):null,
      });
      check(attested!==null);
      results.push(attested);
    }
+   stage='ref-recheck';
    const current=await getCurrentRef();
    check(current?.state==='present'&&current.sha===ref.sha);
    if(!results.length)return unavailable();
    return {status:truncated?'truncated':'verified',source_ref_sha:ref.sha,
      records:results,truncated};
- }catch{return unavailable();}
+ }catch{
+   if(typeof onDiagnostic==='function')onDiagnostic(stage);
+   return unavailable();
+ }
 }
 // Extracts exactly ONE allowed public Writer SHA; not an authentication claim.
 // The full ZIP/Artifact metadata is reauthenticated by attestQwenPublisherSource
