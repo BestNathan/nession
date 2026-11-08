@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42504428868,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2999-duplicate-create-binding",
+    "target_sha": "4090f6fcb5e954e3ee559bb9d12e6bcf75466fab",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42504428868",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "6783964a1fb5273ae0007ac0768b3a12884357ad38ff36cd68dc05a331fe6782"
+  },
+  "record": "runs/2026-11-08/42504428868-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "323b29a1935f3e9abe3b325ec729627d4b2d49a9a1498f73b6730b7b402a0080"
+}
