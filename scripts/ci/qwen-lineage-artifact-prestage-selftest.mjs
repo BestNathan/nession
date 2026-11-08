@@ -148,6 +148,16 @@ try{
   fs.writeFileSync(raw,pristine);
   assert.deepEqual(readPinnedQwenApi(entry.route,verifiedDir,root),
     {number:3017,head:{sha:target}});
+  fs.unlinkSync(raw);
+  assert.throws(()=>readPinnedQwenApi(entry.route,verifiedDir,root),
+    /missing or unsafe original GitHub source body/);
+  fs.writeFileSync(raw,pristine);
+  const manifestFile=path.join(verifiedDir,'api-manifest.json');
+  const originalManifest=fs.readFileSync(manifestFile);
+  fs.unlinkSync(manifestFile);
+  assert.throws(()=>readPinnedQwenApi(entry.route,verifiedDir,root),
+    /missing or unsafe Qwen source readback manifest/);
+  fs.writeFileSync(manifestFile,originalManifest);
   const runnerCache=verifiedDir;
   assert.deepEqual(preStagedOriginalZip(1,runnerCache,root),zipA);
   assert.throws(()=>preStagedOriginalZip(3,runnerCache,root),/missing or unsafe/);
