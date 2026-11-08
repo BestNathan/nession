@@ -448,7 +448,33 @@ function renderWork(){
   root.append(node('p','hint',w.workflow_runs_status==='available'
     ? 'Run evidence is sampled from the 100 most recent GitHub Actions runs. Not observed does not imply no historical run.'
     : 'CI/E2E workflow source unavailable; missing evidence is not a successful or failed run.'));
-  root.append(node('div','callout','The trusted Issue → PR → Agent run/attempt → exact-SHA Acceptance graph is not yet publicly projected. Until that data is verified, it is intentionally not presented as complete.'));
+  // Authenticated historical sources stay visible even after the Issue/PR
+  // leaves the recent OPEN activity window. No inferred current SC/Review.
+  const history=w.lineage;
+  if(['verified','truncated'].includes(history?.status)&&
+     Array.isArray(history?.edges)&&history.edges.length){
+    const sectionEl=section('SOURCE-AUTHENTICATED HISTORY',
+      'Verified historical Agent lineage',
+      'Independent original Worker, Publisher, Writer, Store and PR HEAD proof. Historical identity only; not current approval or SC Pass.');
+    const panel=node('article','panel');
+    for(const e of history.edges.slice(0,12)){
+      const entry=node('div','issue-pr-evidence');
+      entry.append(local('Issue #'+e.issue+' · inspect authenticated source',
+        '/work/issue/'+e.issue,'source-link'));
+      entry.append(local('PR #'+e.pr_number+' · historical HEAD '+e.pr_head_sha.slice(0,12),
+        '/work/pr/'+e.pr_number,'source-link'));
+      entry.append(ext('Developer '+e.agent_id+' · Run '+e.run_id+' / attempt '+e.attempt,
+        e.source_url));
+      entry.append(node('span','',
+        'Logical Slice: '+(e.slice_id??'Unlinked')+
+        ' · current Review: Unknown · Acceptance SC: Unknown'));
+      panel.append(entry);
+    }
+    if(history.truncated)panel.append(node('p','hint',
+      'Historical source window truncated; additional verified edges may be absent.'));
+    sectionEl.append(panel);root.append(sectionEl);
+  }else root.append(node('div','callout',
+    'No independently verified causal edge in this bounded source window. Missing authenticated producer data remains Unknown / Unlinked.'));
 }
 // Evidence-only drilldown uses the already-validated, bounded public JSON.
 // A GitHub Timeline mention or observed Issue Run is NEVER a causal PR edge.
@@ -522,6 +548,19 @@ function renderWorkDetail(kind, number){
   const sourceState=isIssue?snapshot.work?.issues_status:snapshot.work?.pulls_status;
   const item=sourceState==='available'&&source.find(x=>x.number===number);
   if(!item){
+    // A merged PR or completed Issue must remain navigable from its own
+    // independently authenticated historical source edge, without pretending
+    // it is currently OPEN or synthesizing Issue title/Review/SC evidence.
+    const historical=snapshot.work?.lineage;
+    const matched=['verified','truncated'].includes(historical?.status)&&
+      historical.edges?.some(e=>isIssue?e.issue===number:e.pr_number===number);
+    if(matched){
+      root.append(pageHead('HISTORICAL SOURCE',
+        (isIssue?'Issue #':'PR #')+number+' · authenticated historical lineage',
+        'Read-only original Producer/Publisher proof. Current Issue, Review and SC state are not inferred.'));
+      renderLineageDetail(kind,number);
+      return;
+    }
     root.append(empty('Evidence unavailable in this bounded snapshot',
       'The requested '+(isIssue?'Issue':'PR')+' is not among the recent public records. This is not evidence that it does not exist or was accepted.'));
     return;
