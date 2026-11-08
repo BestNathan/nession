@@ -4,8 +4,8 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
-const {REPO,fetchJson,HEX40}=require('../../../shared/agent-store-1997.cjs');
-const {attestLatestQwenProducer}=require('../../../shared/qwen-live-source.cjs');
+const {REPO,HEX40}=require('../../../shared/agent-store-1997.cjs');
+const {attestLatestQwenProducer,qwenApi}=require('../../../shared/qwen-live-source.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 const root=path.resolve(__dirname,'../../../../..');
 const REQUIRED=[
@@ -46,11 +46,11 @@ async function main(){
    return;
  }
  const sha=source.fixture.sha;
- const pull=await fetchJson('/pulls/'+source.fixture.pr);
+ const pull=await qwenApi('/pulls/'+source.fixture.pr);
  assert.equal(pull.head?.sha,sha,'PR HEAD moved since source attestation');
  assert.equal(pull.base?.ref,'main');
  assert.equal(pull.head?.repo?.full_name,REPO);
- const result=await fetchJson('/actions/runs?head_sha='+sha+'&per_page=100');
+ const result=await qwenApi('/actions/runs?head_sha='+sha+'&per_page=100');
  assert.ok(Array.isArray(result?.workflow_runs),'Actions exact-head run listing unavailable');
  if(result.workflow_runs.length>=100){
    pending(source,'GitHub exact-HEAD CI window truncated; refusing incomplete proof',
