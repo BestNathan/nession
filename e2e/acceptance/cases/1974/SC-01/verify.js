@@ -111,10 +111,10 @@ async function main(){
   pending(
     'Qwen source Run and PR were observed, but the independent Store Writer/Artifact byte attester required by SC-01 has not yet been supplied.',
     [
-      {type:'store',value:'agent-store='+storeSha+' result='+accepted[0].path+' intent='+intent.path},
+      {type:'store',value:'agent-store='+storeSha+' result='+selected[0].path+' intent='+intent.path},
       {type:'result',value:'action='+receipt.action_id+' issue='+receipt.issue+' target_sha='+receipt.result.target_sha},
       {type:'worker',value:'run='+run.id+'/'+run.run_attempt+' Agent / Development success'},
-      {type:'publisher',value:'run='+publisher.id+' Store / Controlled Publisher success'},
+      {type:'publisher',value:'run='+publisher.id+' Store / Qwen Publisher success'},
       {type:'pr',value:'#'+binding.number+' attested_head='+binding.head_sha_at_attestation},
     ]);
 }
