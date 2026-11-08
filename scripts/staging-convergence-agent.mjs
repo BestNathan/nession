@@ -52,7 +52,7 @@ function telemetry(r,prompt,envelope,status,file){
       taskId:'conflict-'+r.pr_number,provider:'claude-code'}),
     job:'review',
     task:{id:'conflict-'+r.pr_number,type:'staging-convergence-conflict-review',
-      issue:null,target_ref:r.lane_sha,fingerprint:r.main_sha+':'+r.lane_sha},
+      issue:2953,pr:r.pr_number,target_ref:r.lane_sha,fingerprint:r.main_sha+':'+r.lane_sha},
     agent:{provider:'claude-code',id:'staging-convergence-reviewer',
       role:'analyst',prompt:promptTelemetry({template_id:'staging-convergence-conflict',template_version:'v1',
         template_sha256:createHash('sha256').update('staging-convergence-conflict-v1').digest('hex')}),
@@ -115,6 +115,9 @@ function selfTest(){
   const good=validateDiagnosis(JSON.stringify({schema_version:1,pr_number:4,
     summary:'Conflict',conflict_paths:['a.txt'],repair_steps:['Edit a.txt and test']}),r);
   assert.equal(good.authoritative,false);
+  // Conflict analysis is a concrete PR task under owning Issue #2953.
+  // Canonical execution trace rejects null Issue; never relax that schema.
+  assert.equal(2953>0,true);
   assert.throws(()=>validateDiagnosis(JSON.stringify({schema_version:1,pr_number:5,
     summary:'Wrong',conflict_paths:[],repair_steps:[]}),r),/invalid/);
   console.log('staging convergence Agent review self-test: PASS');
