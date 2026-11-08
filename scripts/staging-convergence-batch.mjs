@@ -13,6 +13,7 @@ import {classifyChangedPaths} from './e2e-full-applicability.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
 const MARKER='nession-convergence-batch:v1',APPROVAL='/approve-staging-convergence';
+const AUDIT_APPROVAL='STAGING_CONVERGENCE_AUDIT_V1';
 const git=(...args)=>execFileSync('git',args,{encoding:'utf8',maxBuffer:8_000_000}).trim();
 const list=s=>s.split('\n').filter(Boolean);
 const api=(...args)=>{
@@ -112,7 +113,7 @@ export function approvalCommand(plan,digest){
   if(!/^[a-f0-9]{64}$/.test(digest))throw Error('invalid Issue E2E digest');
   return APPROVAL+' '+plan.integration_head+' '+digest;
 }
-export function verifyBatchIssue(issue,plan,comments=[]){
+export function verifyBatchIssue(issue,plan,comments=[],auditRuns=[]){
   if(!issue||issue.state!=='open'||!Number.isInteger(issue.number)||
     !issue.body?.includes('<!-- '+plan.identity+' -->'))
     throw Error('missing or stale source-bound integration Issue');
@@ -124,10 +125,336 @@ export function verifyBatchIssue(issue,plan,comments=[]){
   for(const id of [...plan.newIds,...plan.regressionIds])
     if(!parsed.selectedIds.includes(id))throw Error('historical E2E obligation missing: '+id);
   const command=approvalCommand(plan,parsed.digest);
-  const approved=comments.some(c=>c?.body?.trim()===command&&
+  const humanApproved=comments.some(c=>c?.body?.trim()===command&&
     c?.user?.login==='BestNathan'&&!c.deleted_at);
-  return {approved,reason:approved?'SOURCE_BOUND_OWNER_APPROVED':
-    'PENDING_SOURCE_BOUND_ISSUE_AUDIT',declaration_digest:parsed.digest,
+  const proven=comments.some(c=>{
+    const match=new RegExp('^'+AUDIT_APPROVAL+' '+plan.integration_head+
+      ' '+parsed.digest+' run=([1-9][0-9]*)
+    approval_command:command,selected_ids:parsed.selectedIds};
+}
+export function findBatchIssue(plan){
+  const matches=[];
+  // REST enumeration is consistent; search indexing may lag issue creation.
+  for(let page=1;page<=30;page++){
+    const issues=api('repos/'+REPO+'/issues?state=all&sort=created&direction=desc&per_page=100&page='+page);
+    if(!Array.isArray(issues))throw Error('untrusted Issue inventory');
+    for(const issue of issues){
+      if(!issue.pull_request&&issue.body?.includes('<!-- '+plan.identity+' -->'))matches.push(issue);
+    }
+    if(issues.length<100){
+      if(matches.length>1)throw Error('duplicate exact integration Issues');
+      return matches[0]||null;
+    }
+  }
+  throw Error('Issue inventory unbounded; refuse duplicate creation');
+}
+export function ensureBatchIssue(plan){
+  const prior=findBatchIssue(plan);
+  if(prior)return {issue:prior,created:false};
+  const issue=api('--method','POST','repos/'+REPO+'/issues',
+    '-f','title=Requirement: Staging integration '+plan.branch+' '+plan.main_sha.slice(0,12),
+    '-f','body='+issueBody(plan),
+    '-f','labels[]=requirement','-f','labels[]=ci','-f','labels[]=verification:integration');
+  if(!Number.isInteger(issue.number)||issue.state!=='open')
+    throw Error('failed to create integration Issue');
+  return {issue,created:true};
+}
+export function issueApproval(plan,number){
+  if(!Number.isInteger(number)||number<=0)throw Error('invalid integration Issue number');
+  const issue=api('repos/'+REPO+'/issues/'+number);
+  if(issue.pull_request)throw Error('integration Issue cannot be a PR');
+  const comments=api('repos/'+REPO+'/issues/'+number+'/comments?per_page=100');
+  if(!Array.isArray(comments)||comments.length>=100)throw Error('unbounded approval comments');
+  const ids=comments.map(c=>new RegExp('^'+AUDIT_APPROVAL+' '+plan.integration_head+
+    ' [0-9a-f]{64} run=([1-9][0-9]*)
+  const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
+  const plan={branch:'staging',main_sha:a,lane_sha:b,integration_head:c,
+    identity:batchIdentity({branch:'staging',main_sha:a,lane_sha:b,integration_head:c}),
+    newIds:[],regressionIds:['session-metadata'],removed:[],
+    changedPaths:['scripts/release.mjs'],impact:{category:'mixed'},
+    headIds:['session-metadata'],baseIds:['session-metadata']};
+  const body=issueBody(plan),parsed=parseIssueE2E(body,{requireDeclaration:true});
+  assert.deepEqual(parsed.errors,[]);
+  const issue={number:123,state:'open',title:'Requirement: exact integration',
+    labels:['requirement','ci','verification:integration'],body,created_at:'2026-11-08T00:00:00Z'};
+  const approval={body:approvalCommand(plan,parsed.digest),user:{login:'BestNathan'}};
+  assert.equal(verifyBatchIssue(issue,plan,[]).approved,false);
+  assert.equal(verifyBatchIssue(issue,plan,[approval]).approved,true);
+  assert.equal(verifyBatchIssue(issue,plan,[{...approval,user:{login:'other'}}]).approved,false);
+  const auditComment={user:{login:'github-actions[bot]'},
+    body:AUDIT_APPROVAL+' '+c+' '+parsed.digest+' run=42'};
+  const run={id:42,name:'Agent / Issue Audit',event:'workflow_dispatch',
+    status:'completed',conclusion:'success',head_branch:'main',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    created_at:'2026-11-08T00:00:01Z'};
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[run]).approved,true);
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[{...run,conclusion:'failure'}]).approved,false);
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[{...run,head_branch:'staging'}]).approved,false);
+  assert.throws(()=>verifyBatchIssue(issue,{...plan,identity:'stale'},[approval]),/stale/);
+  assert.throws(()=>verifyBatchIssue({...issue,body:body.replace('- session-metadata','- none: fake')},plan,[approval]));
+  // A historically touched browser spec must remain obligated even when
+  // main later reverts that file and the final integration net diff omits it.
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-convergence-batch-'));
+  const original=process.cwd();
+  try{
+    process.chdir(tmp);
+    git('init','-q','-b','main');
+    git('config','user.name','Convergence Test');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync('e2e/tests/browser',{recursive:true});
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','base');
+    git('checkout','-qb','staging');
+    fs.writeFileSync('README.md','Staging-only change\\n');
+    git('add','.');git('commit','-qm','staging own commit');
+    const lane=git('rev-parse','HEAD');
+    git('checkout','main');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// changed historically\\n');
+    git('add','.');git('commit','-qm','touch browser regression');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','restore browser regression');
+    fs.writeFileSync('e2e/tests/browser/another-test.spec.ts','// new test\\n');
+    git('add','.');git('commit','-qm','new browser ID');
+    const main=git('rev-parse','HEAD');
+    const tree=git('merge-tree','--write-tree',lane,main).split('\n')[0];
+    const integration=git('commit-tree',tree,'-p',lane,'-p',main,
+      '-m','checked exact integration');
+    assert.equal(diff(lane,integration).includes('e2e/tests/browser/fixture-git.spec.ts'),false,
+      'fixture genuinely has no net browser change');
+    const source=planBatch({branch:'staging',main_sha:main,
+      lane_sha:lane,integration_head:integration});
+    assert.deepEqual(source.newIds,['another-test']);
+    assert.deepEqual(source.regressionIds,['fixture-git']);
+    assert.throws(()=>planBatch({branch:'staging',main_sha:lane,
+      lane_sha:main,integration_head:integration}),/parent identity/);
+  }finally{
+    process.chdir(original);
+    fs.rmSync(tmp,{recursive:true,force:true});
+  }
+  console.log('Staging convergence batch E2E contract: historical source + approval negatives PASS');
+}
+if(process.argv[2]==='self-test')selfTest();
+else if(process.argv[2]==='attest'){
+  const receipt=attestBatchIssue(Number(process.argv[3]),Number(process.argv[4]));
+  console.log(JSON.stringify(receipt));
+}
+).exec(c?.body?.trim()??'');
+    if(!match||c?.user?.login!=='github-actions[bot]')return false;
+    const run=auditRuns.find(r=>r.id===Number(match[1]));
+    return run?.name==='Agent / Issue Audit'&&run.event==='workflow_dispatch'&&
+      run.status==='completed'&&run.conclusion==='success'&&
+      run.head_branch==='main'&&run.repository?.full_name===REPO&&
+      run.head_repository?.full_name===REPO&&
+      Date.parse(run.created_at)>=Date.parse(issue.created_at);
+  });
+  const approved=humanApproved||proven;
+  return {approved,reason:humanApproved?'SOURCE_BOUND_OWNER_APPROVED':
+    proven?'SOURCE_BOUND_ISSUE_AUDIT_APPROVED':'PENDING_SOURCE_BOUND_ISSUE_AUDIT',
+    declaration_digest:parsed.digest,
+    approval_command:command,selected_ids:parsed.selectedIds};
+}
+export function findBatchIssue(plan){
+  const matches=[];
+  // REST enumeration is consistent; search indexing may lag issue creation.
+  for(let page=1;page<=30;page++){
+    const issues=api('repos/'+REPO+'/issues?state=all&sort=created&direction=desc&per_page=100&page='+page);
+    if(!Array.isArray(issues))throw Error('untrusted Issue inventory');
+    for(const issue of issues){
+      if(!issue.pull_request&&issue.body?.includes('<!-- '+plan.identity+' -->'))matches.push(issue);
+    }
+    if(issues.length<100){
+      if(matches.length>1)throw Error('duplicate exact integration Issues');
+      return matches[0]||null;
+    }
+  }
+  throw Error('Issue inventory unbounded; refuse duplicate creation');
+}
+export function ensureBatchIssue(plan){
+  const prior=findBatchIssue(plan);
+  if(prior)return {issue:prior,created:false};
+  const issue=api('--method','POST','repos/'+REPO+'/issues',
+    '-f','title=Requirement: Staging integration '+plan.branch+' '+plan.main_sha.slice(0,12),
+    '-f','body='+issueBody(plan),
+    '-f','labels[]=requirement','-f','labels[]=ci','-f','labels[]=verification:integration');
+  if(!Number.isInteger(issue.number)||issue.state!=='open')
+    throw Error('failed to create integration Issue');
+  return {issue,created:true};
+}
+export function issueApproval(plan,number){
+  if(!Number.isInteger(number)||number<=0)throw Error('invalid integration Issue number');
+  const issue=api('repos/'+REPO+'/issues/'+number);
+  if(issue.pull_request)throw Error('integration Issue cannot be a PR');
+  const comments=api('repos/'+REPO+'/issues/'+number+'/comments?per_page=100');
+  if(!Array.isArray(comments)||comments.length>=100)throw Error('unbounded approval comments');
+  return verifyBatchIssue(issue,plan,comments);
+}
+function selfTest(){
+  const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
+  const plan={branch:'staging',main_sha:a,lane_sha:b,integration_head:c,
+    identity:batchIdentity({branch:'staging',main_sha:a,lane_sha:b,integration_head:c}),
+    newIds:[],regressionIds:['session-metadata'],removed:[],
+    changedPaths:['scripts/release.mjs'],impact:{category:'mixed'},
+    headIds:['session-metadata'],baseIds:['session-metadata']};
+  const body=issueBody(plan),parsed=parseIssueE2E(body,{requireDeclaration:true});
+  assert.deepEqual(parsed.errors,[]);
+  const issue={number:123,state:'open',title:'Requirement: exact integration',
+    labels:['requirement','ci','verification:integration'],body,created_at:'2026-11-08T00:00:00Z'};
+  const approval={body:approvalCommand(plan,parsed.digest),user:{login:'BestNathan'}};
+  assert.equal(verifyBatchIssue(issue,plan,[]).approved,false);
+  assert.equal(verifyBatchIssue(issue,plan,[approval]).approved,true);
+  assert.equal(verifyBatchIssue(issue,plan,[{...approval,user:{login:'other'}}]).approved,false);
+  assert.throws(()=>verifyBatchIssue(issue,{...plan,identity:'stale'},[approval]),/stale/);
+  assert.throws(()=>verifyBatchIssue({...issue,body:body.replace('- session-metadata','- none: fake')},plan,[approval]));
+  // A historically touched browser spec must remain obligated even when
+  // main later reverts that file and the final integration net diff omits it.
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-convergence-batch-'));
+  const original=process.cwd();
+  try{
+    process.chdir(tmp);
+    git('init','-q','-b','main');
+    git('config','user.name','Convergence Test');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync('e2e/tests/browser',{recursive:true});
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','base');
+    git('checkout','-qb','staging');
+    fs.writeFileSync('README.md','Staging-only change\\n');
+    git('add','.');git('commit','-qm','staging own commit');
+    const lane=git('rev-parse','HEAD');
+    git('checkout','main');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// changed historically\\n');
+    git('add','.');git('commit','-qm','touch browser regression');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','restore browser regression');
+    fs.writeFileSync('e2e/tests/browser/another-test.spec.ts','// new test\\n');
+    git('add','.');git('commit','-qm','new browser ID');
+    const main=git('rev-parse','HEAD');
+    const tree=git('merge-tree','--write-tree',lane,main).split('\n')[0];
+    const integration=git('commit-tree',tree,'-p',lane,'-p',main,
+      '-m','checked exact integration');
+    assert.equal(diff(lane,integration).includes('e2e/tests/browser/fixture-git.spec.ts'),false,
+      'fixture genuinely has no net browser change');
+    const source=planBatch({branch:'staging',main_sha:main,
+      lane_sha:lane,integration_head:integration});
+    assert.deepEqual(source.newIds,['another-test']);
+    assert.deepEqual(source.regressionIds,['fixture-git']);
+    assert.throws(()=>planBatch({branch:'staging',main_sha:lane,
+      lane_sha:main,integration_head:integration}),/parent identity/);
+  }finally{
+    process.chdir(original);
+    fs.rmSync(tmp,{recursive:true,force:true});
+  }
+  console.log('Staging convergence batch E2E contract: historical source + approval negatives PASS');
+}
+if(process.argv[2]==='self-test')selfTest();
+).exec(c?.body?.trim()??''))
+    .filter(Boolean).map(x=>Number(x[1]));
+  if(new Set(ids).size>10)throw Error('unbounded Issue Audit run verification');
+  const auditRuns=[...new Set(ids)].map(id=>api('repos/'+REPO+'/actions/runs/'+id));
+  return verifyBatchIssue(issue,plan,comments,auditRuns);
+}
+export function attestBatchIssue(number,runId){
+  if(!Number.isInteger(number)||number<=0||!Number.isInteger(runId)||runId<=0)
+    throw Error('invalid Issue Audit attestation identity');
+  const issue=api('repos/'+REPO+'/issues/'+number);
+  const marker=/<!-- nession-convergence-batch:v1 branch=([^ ]+) main=([a-f0-9]{40}) lane=([a-f0-9]{40}) head=([a-f0-9]{40}) -->/.exec(issue.body??'');
+  if(!marker)return {status:'NOT_BATCH_ISSUE'};
+  if(issue.user?.login!=='github-actions[bot]'||issue.state!=='open')
+    throw Error('untrusted source-bound integration Issue origin');
+  const [,branch,main_sha,lane_sha,integration_head]=marker;
+  const planRef={branch,main_sha,lane_sha,integration_head};
+  batchIdentity(planRef);
+  // Only exact, reachable commits are examined. The audit runner has a
+  // read-only full Git checkout; no PR-head code, scripts or tools are run.
+  git('fetch','--no-tags','origin',main_sha,lane_sha,integration_head);
+  const plan=planBatch(planRef);
+  const verified=verifyBatchIssue(issue,plan,[]);
+  if(plan.impact.category!=='tooling-only'||plan.removed.length||
+    plan.newIds.length||plan.regressionIds.length||verified.selected_ids.length)
+    return {status:'OWNER_REVIEW_REQUIRED',category:plan.impact.category,
+      approval_command:verified.approval_command};
+  const attestation=AUDIT_APPROVAL+' '+integration_head+' '+
+    verified.declaration_digest+' run='+runId;
+  const comments=api('repos/'+REPO+'/issues/'+number+'/comments?per_page=100');
+  if(!Array.isArray(comments)||comments.length>=100)
+    throw Error('unbounded Issue Audit attestation comments');
+  if(comments.some(c=>c.body?.trim()===attestation))
+    return {status:'EXISTING_AUDIT_APPROVAL'};
+  api('--method','POST','repos/'+REPO+'/issues/'+number+'/comments','-f','body='+attestation);
+  return {status:'AUDITED_TOOLING_ONLY',issue:number};
+}
+function selfTest(){
+  const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
+  const plan={branch:'staging',main_sha:a,lane_sha:b,integration_head:c,
+    identity:batchIdentity({branch:'staging',main_sha:a,lane_sha:b,integration_head:c}),
+    newIds:[],regressionIds:['session-metadata'],removed:[],
+    changedPaths:['scripts/release.mjs'],impact:{category:'mixed'},
+    headIds:['session-metadata'],baseIds:['session-metadata']};
+  const body=issueBody(plan),parsed=parseIssueE2E(body,{requireDeclaration:true});
+  assert.deepEqual(parsed.errors,[]);
+  const issue={number:123,state:'open',title:'Requirement: exact integration',
+    labels:['requirement','ci','verification:integration'],body,created_at:'2026-11-08T00:00:00Z'};
+  const approval={body:approvalCommand(plan,parsed.digest),user:{login:'BestNathan'}};
+  assert.equal(verifyBatchIssue(issue,plan,[]).approved,false);
+  assert.equal(verifyBatchIssue(issue,plan,[approval]).approved,true);
+  assert.equal(verifyBatchIssue(issue,plan,[{...approval,user:{login:'other'}}]).approved,false);
+  assert.throws(()=>verifyBatchIssue(issue,{...plan,identity:'stale'},[approval]),/stale/);
+  assert.throws(()=>verifyBatchIssue({...issue,body:body.replace('- session-metadata','- none: fake')},plan,[approval]));
+  // A historically touched browser spec must remain obligated even when
+  // main later reverts that file and the final integration net diff omits it.
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-convergence-batch-'));
+  const original=process.cwd();
+  try{
+    process.chdir(tmp);
+    git('init','-q','-b','main');
+    git('config','user.name','Convergence Test');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync('e2e/tests/browser',{recursive:true});
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','base');
+    git('checkout','-qb','staging');
+    fs.writeFileSync('README.md','Staging-only change\\n');
+    git('add','.');git('commit','-qm','staging own commit');
+    const lane=git('rev-parse','HEAD');
+    git('checkout','main');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// changed historically\\n');
+    git('add','.');git('commit','-qm','touch browser regression');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','restore browser regression');
+    fs.writeFileSync('e2e/tests/browser/another-test.spec.ts','// new test\\n');
+    git('add','.');git('commit','-qm','new browser ID');
+    const main=git('rev-parse','HEAD');
+    const tree=git('merge-tree','--write-tree',lane,main).split('\n')[0];
+    const integration=git('commit-tree',tree,'-p',lane,'-p',main,
+      '-m','checked exact integration');
+    assert.equal(diff(lane,integration).includes('e2e/tests/browser/fixture-git.spec.ts'),false,
+      'fixture genuinely has no net browser change');
+    const source=planBatch({branch:'staging',main_sha:main,
+      lane_sha:lane,integration_head:integration});
+    assert.deepEqual(source.newIds,['another-test']);
+    assert.deepEqual(source.regressionIds,['fixture-git']);
+    assert.throws(()=>planBatch({branch:'staging',main_sha:lane,
+      lane_sha:main,integration_head:integration}),/parent identity/);
+  }finally{
+    process.chdir(original);
+    fs.rmSync(tmp,{recursive:true,force:true});
+  }
+  console.log('Staging convergence batch E2E contract: historical source + approval negatives PASS');
+}
+if(process.argv[2]==='self-test')selfTest();
+).exec(c?.body?.trim()??'');
+    if(!match||c?.user?.login!=='github-actions[bot]')return false;
+    const run=auditRuns.find(r=>r.id===Number(match[1]));
+    return run?.name==='Agent / Issue Audit'&&run.event==='workflow_dispatch'&&
+      run.status==='completed'&&run.conclusion==='success'&&
+      run.head_branch==='main'&&run.repository?.full_name===REPO&&
+      run.head_repository?.full_name===REPO&&
+      Date.parse(run.created_at)>=Date.parse(issue.created_at);
+  });
+  const approved=humanApproved||proven;
+  return {approved,reason:humanApproved?'SOURCE_BOUND_OWNER_APPROVED':
+    proven?'SOURCE_BOUND_ISSUE_AUDIT_APPROVED':'PENDING_SOURCE_BOUND_ISSUE_AUDIT',
+    declaration_digest:parsed.digest,
     approval_command:command,selected_ids:parsed.selectedIds};
 }
 export function findBatchIssue(plan){
