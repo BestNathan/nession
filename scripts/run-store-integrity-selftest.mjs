@@ -77,6 +77,13 @@ assert.equal(classifyRunStorePath(M,'agent-metrics.json'),'projection');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/head.json'),'cas-pointer');
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/states/00000001.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/results/33-1-'+'a'.repeat(64)+'.json'),'immutable');
+const v2Intent='workflows/issues/1664/publisher-intents/33-1-'+
+  'a'.repeat(64)+'.json';
+assert.equal(classifyRunStorePath(S,v2Intent),'immutable');
+assert.equal(validateRunStoreChange(S,'A',v2Intent).kind,'immutable');
+for(const action of ['M','D','T'])
+  assert.throws(()=>validateRunStoreChange(S,action,v2Intent),/forbidden/);
+assert.equal(classifyRunStorePath(S,'workflows/issues/1664/publisher-intents/not-a-result.json'),'unclassified');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/checkpoints/00000001.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/runs/33-1.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'e2e-failures/'+'a'.repeat(64)+'/states/00000001.json'),'immutable');
