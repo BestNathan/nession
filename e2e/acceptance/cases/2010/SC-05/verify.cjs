@@ -6,9 +6,10 @@ const {
   assert, api, runNode, requireSummary, pass, fail,
 } = require('../../../shared/agent-1664-cases.cjs');
 
-// First commit of the PR that introduced this executable check. Its
-// pull_request checks are complete before the Case is merged to main.
-const PRODUCER_SHA = 'PENDING_PRODUCER_SHA';
+// Exact-head producer PR #2968 (merged main Case work). Its pull_request
+// Quality, E2E and Case Smoke runs completed successfully before this Case was
+// merged, so the SC-05 check requirement is bound to a finished exact SHA.
+const PRODUCER_SHA = 'b1d8fc3698c9f444d1394a552b048df37ea9fc80';
 
 async function main() {
   const dispatch = runNode('scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs');
