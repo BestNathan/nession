@@ -7,7 +7,9 @@ import { base64ToBlobUrl } from '@/shared/lib/blob';
 
 export type GitPreviewKind = 'untracked' | 'unmerged';
 
-/** A caller-owned media URL for the selected Git row. */
+/** A caller-owned media URL for the selected Git row. A media extension asks
+ * the same preview operation for complete bounded bytes; a stale response,
+ * new selection, Session change or unmount must revoke its Blob URL. */
 export interface GitMediaView {
   url: string;
   mimeType: string;
@@ -43,13 +45,9 @@ function message(error: unknown): string {
  * One request per opened Git row, with the row kind choosing the operation.
  *
  * A tracked row asks for its bounded diff. An untracked or unmerged row asks
- * for the worktree preview read, carrying the row kind it was selected from;
- * a media extension asks the same operation for complete bounded bytes.
+ * for the worktree preview read, carrying the row kind it was selected from.
  * Responses are dropped when the Session moved on or the selection changed;
  * the Agent independently rechecks the row's status before and after reading.
- *
- * The Blob URL for a media answer belongs to this hook: a stale response, a
- * new selection, a Session change and unmount all revoke it (#2876 SC-04).
  */
 export function useGitSelection({
   agentId,
@@ -84,10 +82,8 @@ export function useGitSelection({
       return;
     }
     const forGeneration = generation.current;
-    const token = ++selectionToken.current;
     const mode = row.kind === 'tracked' ? 'diff' : 'preview';
     const previewKind = row.kind === 'tracked' ? null : row.kind;
-    const wantsMedia = row.kind !== 'tracked' && mediaHintForPath(row.path) !== null;
 
     clearMediaUrl();
     setState({
@@ -101,6 +97,9 @@ export function useGitSelection({
       error: null,
     });
 
+    // Both are established before any async Git request can begin.
+    const token = ++selectionToken.current;
+    const wantsMedia = row.kind !== 'tracked' && mediaHintForPath(row.path) !== null;
     const isCurrent = () =>
       generation.current === forGeneration && selectionToken.current === token;
 
