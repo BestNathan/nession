@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "erofs-main-size-20261108",
+  "source_sha": "86aa167d4a3ff2f75dd09cdf96d84284fd902165",
+  "source_digest": "642ad1bb18cba3e6414702db38acb33c407109a0e329fe5ab9dce3e1ca1294e1",
+  "entry": "measure.mjs",
+  "workflow": {
+    "id": 42468875207,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42468875207",
+    "event": "push",
+    "branch": "task/erofs-main-size-20261108",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-08T09:50:40.038Z",
+    "finished_at": "2026-11-08T09:50:53.243Z",
+    "result": {
+      "purpose": "Nession main EROFS sizing",
+      "repository": "https://github.com/BestNathan/nession.git",
+      "branch": "main",
+      "source_sha": "7a2b2b99c5c53a55d46858a3e58a192224fb413a",
+      "image_format": "erofs",
+      "compression": "lz4hc",
+      "sizes_bytes": {
+        "source_without_git_apparent": 26220506,
+        "git_dir_apparent": 9501016,
+        "shallow_clone_total_apparent": 35721522,
+        "source_without_git_disk": 38223872,
+        "git_dir_disk": 9633792,
+        "erofs_source_only": 15798272,
+        "erofs_with_shallow_git": 25063424,
+        "git_metadata_image_increment": 9265152
+      },
+      "git_objects": "count: 0\nsize: 0\nin-pack: 4279\npacks: 1\nsize-pack: 8833\nprune-packable: 0\ngarbage: 0\nsize-garbage: 0",
+      "steps": [
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 2,
+          "exit_code": 0
+        },
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs-utils",
+          "command": "sudo",
+          "seconds": 4,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs-utils",
+          "command": "sudo",
+          "seconds": 3,
+          "exit_code": 0
+        },
+        {
+          "stage": "erofs-version",
+          "command": "dpkg-query",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "build-source-only-erofs",
+          "command": "mkfs.erofs",
+          "seconds": 1,
+          "exit_code": 0
+        },
+        {
+          "stage": "build-source-and-git-erofs",
+          "command": "mkfs.erofs",
+          "seconds": 3,
+          "exit_code": 0
+        }
+      ],
+      "erofs_version": "1.7.1-1build2",
+      "mkfs_options": [
+        "-zlz4hc,12",
+        "-C65536",
+        "-T0"
+      ],
+      "status": "success",
+      "completed_stage": "completed"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/86aa167d4a3ff2f75dd09cdf96d84284fd902165/erofs-main-size-20261108.json"
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "erofs-main-size-20261108",
+  "source_sha": "86aa167d4a3ff2f75dd09cdf96d84284fd902165",
+  "run_id": 42468875207,
+  "run_attempt": 1,
+  "record_path": "runs/erofs-main-size-20261108/42468875207-1/record.json",
+  "source_path": "sources/86aa167d4a3ff2f75dd09cdf96d84284fd902165/erofs-main-size-20261108.json"
+}
