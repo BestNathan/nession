@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "erofs-main-size-20261108",
+  "source_sha": "4eff8105feb9be85546d5acd44ebaec21ef0ffe2",
+  "source_digest": "383b3f34c8f99027504d04cd896e1a71efe68d263bdf20806837fc1e981b64ea",
+  "entry": "measure.mjs",
+  "workflow": {
+    "id": 42468765660,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42468765660",
+    "event": "push",
+    "branch": "task/erofs-main-size-20261108",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-08T09:49:09.808Z",
+    "finished_at": "2026-11-08T09:49:25.727Z",
+    "result": {
+      "purpose": "Nession main EROFS sizing",
+      "repository": "https://github.com/BestNathan/nession.git",
+      "branch": "main",
+      "source_sha": "7a2b2b99c5c53a55d46858a3e58a192224fb413a",
+      "image_format": "erofs",
+      "compression": "lz4hc",
+      "sizes_bytes": {
+        "source_without_git_apparent": 26220506,
+        "git_dir_apparent": 9500974,
+        "shallow_clone_total_apparent": 35721480,
+        "source_without_git_disk": 38223872,
+        "git_dir_disk": 9633792
+      },
+      "git_objects": "count: 0\nsize: 0\nin-pack: 4279\npacks: 1\nsize-pack: 8833\nprune-packable: 0\ngarbage: 0\nsize-garbage: 0",
+      "steps": [
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 1,
+          "exit_code": 0
+        },
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "clone",
+          "command": "git",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "measure-input",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs-utils",
+          "command": "sudo",
+          "seconds": 7,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs-utils",
+          "command": "sudo",
+          "seconds": 6,
+          "exit_code": 0
+        },
+        {
+          "stage": "erofs-version",
+          "command": "mkfs.erofs",
+          "seconds": 0,
+          "exit_code": 1
+        }
+      ],
+      "status": "failed",
+      "error": {
+        "stage": "erofs-version",
+        "message": "mkfs.erofs failed (1):    set block size to # (# = page size by default)\n -d#                   set output message level to # (maximum 9)\n -x#                   set xattr tolerance to # (< 0, disable xattrs; default 2)\n -zX[,Y][:..]          X=compressor (Y=compression level, optional)\n                       alternative algorithms can be separated by colons(:)\n -C#                   specify the size of compress physical cluster in bytes\n -EX[,...]             X=extended options\n -L volume-label       set the volume label (maximum 16)\n -T#                   set a fixed UNIX timestamp # to all files\n -UX                   use a given filesystem UUID\n --all-root            make all files owned by root\n --blobdev=X           specify an extra device X to store chunked data\n --chunksize=#         generate chunk-based files with #-byte chunks\n --compress-hints=X    specify a file to configure per-file compression strategy\n --exclude-path=X      avoid including file X (X = exact literal path)\n --exclude-regex=X     avoid including files that match X (X = regular expression)\n --file-contexts=X     specify a file contexts file to setup selinux labels\n --force-uid=#         set all file uids to # (# = UID)\n --force-gid=#         set all file gids to # (# = GID)\n --uid-offset=#        add offset # to all file uids (# = id offset)\n --gid-offset=#        add offset # to all file gids (# = id offset)\n --gzip                try to filter the tarball stream through gzip\n --help                display this help and exit\n --ignore-mtime        use build time instead of strict per-file modification time\n --max-extent-bytes=#  set maximum decompressed extent size # in bytes\n --preserve-mtime      keep per-file modification time strictly\n --aufs                replace aufs special files with overlayfs metadata\n --tar=[fi]            generate an image from tarball(s)\n --ovlfs-strip=[01]    strip overlayfs metadata in the target image (e.g. whiteouts)\n --quiet               quiet execution (do not write anything to standard output.)\n --xattr-prefix=X      X=extra xattr name prefix\n --mount-point=X       X=prefix of target fs path (default: /)\n\nAvailable compressors are: lz4, lz4hc, lzma, deflate, libdeflate\n"
+      },
+      "completed_stage": "erofs-version"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/4eff8105feb9be85546d5acd44ebaec21ef0ffe2/erofs-main-size-20261108.json"
+}
