@@ -7,7 +7,7 @@ const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const {pathToFileURL}=require('node:url');
 const {REPO,issueRecords,HEX40}=require('../../../shared/agent-store-1997.cjs');
-const {attestLatestQwenProducer}=require('../../../shared/qwen-live-source.cjs');
+const {attestLatestQwenProducer,qwenApi}=require('../../../shared/qwen-live-source.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 
 const root=path.resolve(__dirname,'../../../../..');
@@ -35,7 +35,7 @@ async function main(){
     pending(source,'Original Qwen Developer Result v2 is not authenticated: '+source.reason);
     return;
   }
-  const a=source.attested,{slices}=await issueRecords(source.fixture.issue);
+  const a=source.attested,{slices}=await issueRecords(source.fixture.issue,qwenApi);
   // The owning SC explicitly accepts an honestly reported PARTIAL: when a
   // real Qwen Result v2, original Worker, Publisher and Writer have already
   // been independently attested, absence of any canonical Slice must remain
@@ -93,8 +93,7 @@ async function main(){
       bound.push(item);
   }
   assert.equal(bound.length,1,'exactly one independently attested Slice join required');
-  const run=await require('../../../shared/trusted-run-store-proof.cjs')
-    .fetchJson('/actions/runs/'+a.run_id);
+  const run=await qwenApi('/actions/runs/'+a.run_id);
   assert.equal(run.id,a.run_id);
   assert.equal(run.run_attempt,a.attempt);
   assert.equal(run.status,'completed');
