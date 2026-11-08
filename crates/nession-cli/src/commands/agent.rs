@@ -394,10 +394,11 @@ fn load_agent_config(
 
 /// Resolve stable agent identity (config + persisted `~/.nession/agent/identity`),
 /// matching `nession-agent` binary startup.
+///
+/// An empty config id means "not configured", not the hostname: the identity
+/// owner reuses the persisted id or generates and persists one (#2973). A
+/// non-empty id remains an explicit override.
 fn finalize_agent_identity(config: &mut AgentConfig) -> Result<()> {
-    if config.agent_id.is_empty() {
-        config.agent_id = nession_common::system::get_hostname();
-    }
     let identity_path = nession_common::paths::agent_identity_path()?;
     config.agent_id = nession_agent::identity::resolve_agent_id(&config.agent_id, &identity_path)?;
     Ok(())
