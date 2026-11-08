@@ -98,14 +98,16 @@ const PROOF=['schema_version','kind','issue','action_id','developer_run_id',
 export function attestQwenPublisherSource({
  storeSha,producerPath,producerBytes,originalStoreBytes,intent,workerRun,
  workerArtifacts,workerZip,publisherRun,publisherArtifacts,publisherZip,
- pull,storeAncestry,
+ pull,storeAncestry,onDiagnostic=null,
 }={}){
+ let stage='producer-json';
  try{
    const match=String(producerPath).match(SOURCE);
    ensure(match&&SHA.test(storeSha??'')&&Buffer.isBuffer(producerBytes)&&
      producerBytes.length>2&&producerBytes.length<=65536&&
      Buffer.isBuffer(originalStoreBytes)&&producerBytes.equals(originalStoreBytes));
    const record=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(producerBytes));
+   stage='candidate-schema';
    const candidate=decodeAgentResultCandidate(record,Number(match[1]),match[2],
      storeSha,sha(producerBytes));
    ensure(record.schema_version===2&&candidate.role==='developer'&&
@@ -113,10 +115,13 @@ export function attestQwenPublisherSource({
      candidate.run_id===workerRun.id&&candidate.attempt===workerRun.run_attempt&&
      candidate.target_sha===record.implementing_pr.head_sha_at_attestation&&
      record.source.input_sha===workerRun.head_sha);
+   stage='worker-artifact-identity';
    const a=artifactFor(workerArtifacts,originalName(workerRun.id,1),workerRun);
+   stage='worker-zip-bytes';
    ensure(a.id===record.artifact.id&&a.digest===record.artifact.digest&&
      sha(workerZip)===a.digest.slice(7)&&
      sha(zipMember(workerZip,'result.json'))===record.artifact.json_sha256);
+   stage='publisher-intent-identity';
    ensure(runMatches(publisherRun,'publisher')&&
      intent?.kind==='trusted_qwen_publisher_write_ahead_intent'&&
      intent.schema_version===1&&intent.issue===record.issue&&
@@ -126,10 +131,13 @@ export function attestQwenPublisherSource({
      intent.publisher_run_id===publisherRun.id&&
      intent.source_sha===publisherRun.head_sha&&
      intent.checkpoint_commit_sha&&SHA.test(intent.checkpoint_commit_sha));
+   stage='writer-artifact-identity';
    const writerArtifact=artifactFor(publisherArtifacts,
      'qwen-developer-v2-'+publisherRun.id+'-1',publisherRun);
+   stage='writer-zip-bytes';
    ensure(sha(publisherZip)===writerArtifact.digest.slice(7));
    const raw=zipMember(publisherZip,'qwen-publisher-result.json',8192);
+   stage='writer-receipt-contract';
    const proof=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(raw));
    ensure(fields(proof,PROOF)&&proof.schema_version===1&&
      proof.kind==='trusted_qwen_publisher_handoff'&&
@@ -142,6 +150,7 @@ export function attestQwenPublisherSource({
      SHA.test(proof.store_commit_sha??'')&&
      proof.pull_request===record.implementing_pr.number&&
      proof.pr_head_sha===record.result.target_sha);
+   stage='pr-and-writer-ancestry';
    ensure(pull?.number===proof.pull_request&&
      pull.base?.ref==='main'&&pull.base.repo?.full_name===REPO&&
      pull.head?.repo?.full_name===REPO&&
@@ -159,5 +168,10 @@ export function attestQwenPublisherSource({
        source_url:'https://github.com/'+REPO+'/actions/runs/'+workerRun.id},
      verification:'authenticated_at_attestation',
    });
- }catch{return null;}
+ }catch{
+   // Bounded static stage identifiers only. Never log source exceptions,
+   // ZIP bytes, native checkpoints, raw model JSON or authorization tokens.
+   if(typeof onDiagnostic==='function')onDiagnostic(stage);
+   return null;
+ }
 }
