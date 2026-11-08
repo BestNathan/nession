@@ -15,6 +15,7 @@ import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
+import { useBootstrapTokenConsumption } from './useBootstrapToken';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
@@ -72,6 +73,11 @@ export function useAppConnection() {
   const [serverUrl, setServerUrl] = useState(
     () => params.get('server_url') || localStorage.getItem('nession_server_url') || DEFAULT_SERVER_URL,
   );
+  // The initializers above have already read `token` into auth state and
+  // storage. Remove the credential-bearing URL copy now, before the handshake
+  // settles, so success, rejection and Disconnect all leave a non-reloadable
+  // URL while preserving route, hash and unrelated parameters.
+  useBootstrapTokenConsumption();
   // The service instance this render currently owns. Cleanup disposes only
   // when it is still the owner — a later connectInternal() replaces the ref
   // before the effect cleanup of the superseded instance runs (StrictMode
