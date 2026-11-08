@@ -27,7 +27,7 @@ async function main(){
   }
   const s=result.fixture,a=result.attested;
   assert.equal(a.verification,'authenticated_at_attestation');
-  assert.equal(a.source_url,'https://github.com/BestNathan/nession/actions/runs/'+s.runId);
+  assert.equal(a.origin.source_url,'https://github.com/BestNathan/nession/actions/runs/'+s.runId);
   assert.match(a.origin.result_digest,/^[a-f0-9]{64}$/);
   assert.match(a.origin.writer_receipt_digest,/^[a-f0-9]{64}$/);
   report('Independent original Worker ZIP, authenticated Publisher receipt, immutable Store Writer ancestor and exact implementing PR head jointly attest a real Qwen Developer Result v2.',[
