@@ -173,6 +173,29 @@ test('pinned public reader joins only independently witnessed Qwen source',async
  assert.equal(verified.records.length,1);
  assert.equal(verified.records[0].run_id,workerId);
  assert.equal(verified.records[0].slice_id,null);
+ // Actual source PRs are merged/closed and leave the public Open Work
+ // snapshot. Historical lookup does not trust the v2 Store claim alone:
+ // the same independent Worker/Publisher/Writer/PR attester runs unchanged.
+ const historical=await loadPinnedQwenLineage({
+   ...base,issueNumbers:[],pulls:[],includeHistorical:true,
+   getPull:async()=>({...s.pull,state:'closed',merged_at:'2026-11-08T14:00:00Z'})
+ });
+ assert.equal(historical.status,'verified');
+ assert.equal(historical.records.length,1);
+ assert.equal(historical.records[0].issue,issue);
+ assert.equal(historical.records[0].pr_number,prNo);
+ assert.equal(historical.records[0].slice_id,null);
+ assert.equal((await loadPinnedQwenLineage({
+   ...base,issueNumbers:[],pulls:[],includeHistorical:false
+ })).status,'unavailable');
+ assert.equal((await loadPinnedQwenLineage({
+   ...base,issueNumbers:[],pulls:[],includeHistorical:true,
+   getArtifacts:async id=>id===workerId?s.workerArtifacts:{artifacts:[],total_count:0},
+ })).status,'unavailable');
+ assert.equal((await loadPinnedQwenLineage({
+   ...base,issueNumbers:[],pulls:[],includeHistorical:true,
+   getCurrentRef:async()=>({state:'present',sha:'f'.repeat(40)})
+ })).status,'unavailable');
  for(const tamper of [
    {...base,getCurrentRef:async()=>({state:'present',sha:'a'.repeat(40)})},
    {...base,getOriginalStoreBytes:async()=>Buffer.from('forged')},
