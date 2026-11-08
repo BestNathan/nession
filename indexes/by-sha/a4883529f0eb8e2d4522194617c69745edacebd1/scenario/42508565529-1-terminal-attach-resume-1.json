@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42508565529,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3018-leading-hyphen-secret",
+    "target_sha": "a4883529f0eb8e2d4522194617c69745edacebd1",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42508565529",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "bb8a7086d0dbedff947812d3ec76f36afb143151dc82e996d7c08a0b8102906e"
+  },
+  "record": "runs/2026-11-08/42508565529-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "b277435ff781e6c5ab804735c49fdd59f5193b0b0d853100c29a378fe61ccefd"
+}
