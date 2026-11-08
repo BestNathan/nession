@@ -180,6 +180,15 @@ test('pinned public reader joins only independently witnessed Qwen source',async
      {total_count:0,artifacts:[]}:s.workerArtifacts},
    {...base,getPull:async()=>({...s.pull,head:{...s.pull.head,sha:'f'.repeat(40)}})},
    {...base,issueNumbers:[issue,issue]},
+   {...base,getTree:async()=>({tree:[producer,intent],truncated:true})},
+   {...base,getTree:async()=>({tree:[{...producer,mode:'120000'},intent],
+     truncated:false})},
+   {...base,getBlob:async id=>id===producer.sha?
+     {...bytes.get(id),content:'not base64'}:bytes.get(id)},
+   {...base,getCompare:async()=>({merge_base_commit:{sha:'f'.repeat(40)},
+     status:'ahead'})},
+   {...base,getRun:async id=>id===workerId?
+     {...s.workerRun,run_attempt:2}:s.publisherRun},
  ]){
    const result=await loadPinnedQwenLineage(tamper);
    assert.equal(result.status,'unavailable');
