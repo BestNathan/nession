@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "prototype-project-sidebar-final-3025-20261109",
+  "source_sha": "6cbc14789e447e40ff9acc459dfde56c24df8e79",
+  "source_digest": "d6f178e2be21b9898e3dfd52afc565b8b241e840cb8d6ce68d79c3ba815cc8da",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 42500395005,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42500395005",
+    "event": "push",
+    "branch": "task/prototype-project-sidebar-final-3025-20261109",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-08T16:32:30.054Z",
+    "finished_at": "2026-11-08T16:32:58.966Z",
+    "result": {
+      "task": "Project Sidebar/standalone Detail browser verification #3025",
+      "source_sha": "709b4449c08d57e55c1138aae003cfdd211835b5",
+      "url": "https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html?revision=709b4449c08d57e55c1138aae003cfdd211835b5",
+      "checks": [
+        {
+          "name": "published_manifest_and_pinned_html",
+          "pass": true,
+          "source_sha": "709b4449c08d57e55c1138aae003cfdd211835b5",
+          "html_bytes": 5637
+        }
+      ],
+      "browser": {
+        "status": "passed",
+        "checks": [
+          {
+            "name": "initial_web_terminal",
+            "actual": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "web_product_width",
+            "actual": 1180,
+            "expected": 1180,
+            "pass": true
+          },
+          {
+            "name": "web_projects_section",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "sidebar_to_standalone_detail",
+            "actual": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "selected_project_nav",
+            "actual": "page",
+            "expected": "page",
+            "pass": true
+          },
+          {
+            "name": "project_settings",
+            "actual": "settings",
+            "expected": "settings",
+            "pass": true
+          },
+          {
+            "name": "settings_returns_project",
+            "actual": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "existing_terminal",
+            "actual": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "image_build_visible",
+            "actual": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "name": "managed_download_fail",
+            "actual": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "name": "managed_created",
+            "actual": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "collapsed_one_action",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "reexpand_project_entry",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "web_no_errors",
+            "actual": 0,
+            "expected": 0,
+            "pass": true
+          },
+          {
+            "name": "web_1024",
+            "actual": 1024,
+            "expected": 1024,
+            "pass": true
+          },
+          {
+            "name": "stage_overflow",
+            "actual": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "name": "stage_right_scroll",
+            "actual": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "name": "app_mode",
+            "actual": "app",
+            "expected": "app",
+            "pass": true
+          },
+          {
+            "name": "app_390",
+            "actual": 390,
+            "expected": 390,
+            "pass": true
+          },
+          {
+            "name": "app_sessions",
+            "actual": "sessions",
+            "expected": "sessions",
+            "pass": true
+          },
+          {
+            "name": "app_projects_under_sessions",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "app_project_detail",
+            "actual": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "single_app_header",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "app_back_to_sessions",
+            "actual": "sessions",
+            "expected": "sessions",
+            "pass": true
+          },
+          {
+            "name": "app_no_errors",
+            "actual": 0,
+            "expected": 0,
+            "pass": true
+          },
+          {
+            "name": "empty_sessions",
+            "actual": 0,
+            "expected": 0,
+            "pass": true
+          },
+          {
+            "name": "empty_project_nav",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "empty_can_open_project",
+            "actual": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "empty_first_session_created",
+            "actual": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "empty_no_errors",
+            "actual": 0,
+            "expected": 0,
+            "pass": true
+          }
+        ],
+        "executable": "/usr/bin/google-chrome",
+        "screens": {
+          "web": 68028,
+          "app": 74880,
+          "empty": 58186
+        }
+      },
+      "status": "success"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/6cbc14789e447e40ff9acc459dfde56c24df8e79/prototype-project-sidebar-final-3025-20261109.json"
+}
