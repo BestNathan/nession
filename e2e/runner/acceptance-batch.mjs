@@ -202,3 +202,14 @@ export async function executeAcceptanceBatches({
 
   return { records, errors, sharedRuntimeCount };
 }
+
+// A Pending Case is acceptance data, not a workflow failure: the trusted Issue
+// projector records it and keeps the Success Criterion open. Only a Fail or an
+// execution error makes the batch command non-zero.
+export function batchOutcome(records, errors) {
+  const failed = records.filter((record) => record.result === 'Fail').length;
+  const pending = records.filter((record) => record.result === 'Pending').length;
+  const errored = records.filter((record) => record.result === 'Error').length;
+  const exitCode = errors.length || errored ? 2 : failed ? 1 : 0;
+  return { failed, pending, errored, exitCode };
+}

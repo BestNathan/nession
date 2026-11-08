@@ -11,6 +11,7 @@ import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 
 import {
+  batchOutcome,
   executeAcceptanceBatches,
   planAcceptanceBatches,
 } from '../../runner/acceptance-batch.mjs';
@@ -107,15 +108,13 @@ async function main() {
     process.stderr.write(ACCEPTANCE_BATCH_LOG_PREFIX + JSON.stringify(receipt) + '\n');
   }
 
-  const failed = records.filter((record) => record.result !== 'Pass');
+  const outcome = batchOutcome(records, errors);
   // Bounded, non-sensitive measurement (#1866 SC-08): how many runtimes a batch
   // of N Cases actually needed.
   process.stderr.write('[acceptance-batch] summary cases=' + records.length +
-    ' shared_runtimes=' + sharedRuntimeCount + ' failed=' + failed.length +
-    ' errors=' + errors.length + '\n');
-
-  if (errors.length || failed.some((record) => record.result === 'Error')) process.exitCode = 2;
-  else if (failed.length) process.exitCode = 1;
+    ' shared_runtimes=' + sharedRuntimeCount + ' failed=' + outcome.failed +
+    ' pending=' + outcome.pending + ' errors=' + errors.length + '\n');
+  process.exitCode = outcome.exitCode;
 }
 
 main().catch((error) => {
