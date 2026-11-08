@@ -37,6 +37,21 @@ test('closed producer Issue/PR history does not depend on the OPEN Work snapshot
    lineageEvidence:{...attested,records:[edge,{...edge,pr_head_sha:'f'.repeat(40)}]}}));
  assert.equal(conflicting.work.lineage.status,'unavailable');
 });
+test('a historical authenticated edge does not displace open Issue/PR activity',()=>{
+ const attested={status:'verified',source_ref_sha:store,records:[edge]};
+ const projection=validateProjection(makeProjection({
+   issues:[{number:55,title:'Active Issue',state:'open',
+     updated_at:'2026-11-08T18:00:00Z'}],
+   pulls:[{number:56,title:'Active PR',state:'open',
+     updated_at:'2026-11-08T18:00:00Z',head:{sha:'f'.repeat(40)}}],
+   lineageEvidence:attested,
+ }));
+ assert.deepEqual(projection.work.issues.map(x=>x.number),[55]);
+ assert.deepEqual(projection.work.pulls.map(x=>x.number),[56]);
+ assert.equal(projection.work.lineage.status,'verified');
+ assert.deepEqual(projection.work.lineage.edges.map(x=>[x.issue,x.pr_number]),[[6,7]]);
+ assert.equal(projection.work.lineage.edges[0].pr_head_sha,sha);
+});
 test('only exact authenticated attestation-time PR bindings yield a typed edge',()=>{
  const p=validateLineageProjection(projectLineage(fixture()));
  assert.equal(p.status,'verified');assert.equal(p.edges.length,1);
