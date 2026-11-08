@@ -66,7 +66,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          # Scheduled/comment events can queue while protected Main advances.
+          # Always execute the current trusted Main, never event-stale code.
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
@@ -77,7 +79,13 @@ jobs:
       - name: Verify trusted main and deterministic negative fixtures
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          # Revalidate latest protected Main after checkout. Planner independently
+          # re-reads main and deploy-eligible lane heads before any write.
+          trusted_main="$(git rev-parse HEAD)"
+          live_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$trusted_main" == "$live_main" ]] || {
+            echo "::error::Protected Main advanced during checkout; retry on latest ref"; exit 1;
+          }
           node scripts/staging-branch-convergence.mjs self-test
           node scripts/staging-convergence-batch.mjs self-test
 
@@ -95,7 +103,7 @@ jobs:
           {
             echo '## Staging branch convergence (#2926)'
             echo
-            echo '- Main SHA: `'${{ github.sha }}'`'
+            echo "- Trusted Main SHA: `$(git rev-parse HEAD)`"
             echo '- Scheduled cadence: every two hours (UTC); runs may be delayed by GitHub'
             echo
             echo '| Deploy-eligible branch | Ahead main | Behind main | Planned actions |'
