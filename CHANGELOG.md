@@ -352,3 +352,10 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Repair the disallowed Actions run URL in sources to the already-cited owning Issue so the ledger contract validates; no claim changed
 - Source: https://github.com/BestNathan/nession/issues/2917
+
+## 2026-11-08T13:51:42Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, ci, security, workflows
+- Reason: Record #2953's authenticated source-bound Staging integration batch, historical E2E selection, exact Issue approval/wake-up, protected merge and live-ref conflict review, distinguishing manually initiated staging merge from controller evidence
+- Source: https://github.com/BestNathan/nession/issues/2953
