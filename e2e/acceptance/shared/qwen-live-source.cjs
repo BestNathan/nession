@@ -58,6 +58,10 @@ function selectNewestQwenProducer(tree,{maxEntries=8}={}){
     a.entry.path.localeCompare(b.entry.path));
   return matches;
 }
+// The same independently bounded 32 MiB original Worker transport
+// (encrypted native checkpoint included) is used by Pages and Case Runner.
+// The privileged Publisher proof remains independently restricted to 512 KiB.
+const MAX_SOURCE_ARTIFACT_ZIP_BYTES=32*1024*1024;
 async function originalZip(id){
   assert.ok(positive(id),'invalid original Actions Artifact id');
   const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
@@ -71,12 +75,12 @@ async function originalZip(id){
     signal:AbortSignal.timeout(20000)});
   assert.equal(res.ok,true,'original GitHub Artifact unavailable');
   const size=Number(res.headers.get('content-length'));
-  assert.ok(!Number.isFinite(size)||size<=512*1024,'oversized Actions Artifact');
+  assert.ok(!Number.isFinite(size)||size<=MAX_SOURCE_ARTIFACT_ZIP_BYTES,'oversized Actions Artifact');
   let total=0;const parts=[];
   assert.ok(res.body,'missing Actions Artifact stream');
   for await(const part of res.body){
     total+=part.length;
-    assert.ok(total<=512*1024,'oversized Actions Artifact stream');
+    assert.ok(total<=MAX_SOURCE_ARTIFACT_ZIP_BYTES,'oversized Actions Artifact stream');
     parts.push(Buffer.from(part));
   }
   return Buffer.concat(parts,total);
