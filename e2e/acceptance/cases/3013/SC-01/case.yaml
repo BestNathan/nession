@@ -1,7 +1,7 @@
 schema_version: 1
 issue: 3013
 criterion: SC-01
-stage: pre-merge
+stage: post-merge
 runtime: full-stack-local
 verifiers:
   - type: runtime
