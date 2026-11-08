@@ -102,6 +102,21 @@ test('public projector prevents forged lineage, private spill and missing source
  assert.throws(()=>validateProjection(p),/invalid public causal edge/);
 });
 
+test('a fully attested source may honestly report partial logical Slice without inventing identity',()=>{
+ const verified=validateLineageProjection(projectLineage(fixture()));
+ assert.equal(verified.status,'verified','producer/PR/Run origin is authenticated');
+ assert.equal(verified.edges.length,1);
+ assert.equal(verified.edges[0].verification,'authenticated_at_attestation');
+ assert.equal(verified.edges[0].slice_id,null,'partial logical Slice must be Unlinked');
+ assert.notEqual(verified.edges[0].slice_id,verified.edges[0].action_id);
+ const withoutWriter=projectLineage(fixture({
+   attested:{status:'unavailable',source_ref_sha:store,records:[edge]},
+ }));
+ assert.equal(withoutWriter.status,'unavailable',
+   'a partial Slice cannot authenticate an untrusted producer');
+ assert.deepEqual(withoutWriter.edges,[]);
+});
+
 test('producer-attested logical Slice remains separate from action and Run IDs',()=>{
  const slice='slice-7f6216e9526a';
  const source=validateLineageProjection(projectLineage(fixture({attested:{

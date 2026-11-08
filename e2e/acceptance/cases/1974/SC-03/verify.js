@@ -5,6 +5,7 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
+const {pathToFileURL}=require('node:url');
 const {REPO,issueRecords,HEX40}=require('../../../shared/agent-store-1997.cjs');
 const {attestLatestQwenProducer}=require('../../../shared/qwen-live-source.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
@@ -35,8 +36,37 @@ async function main(){
     return;
   }
   const a=source.attested,{slices}=await issueRecords(source.fixture.issue);
-  if(a.slice_id===null||!slices.length){
-    pending(source,'No separately authenticated logical Slice exists for Qwen Run '+
+  // The owning SC explicitly accepts an honestly reported PARTIAL: when a
+  // real Qwen Result v2, original Worker, Publisher and Writer have already
+  // been independently attested, absence of any canonical Slice must remain
+  // an unlinked public Slice — not a fabricated ID or a failed source edge.
+  if(a.slice_id===null&&slices.length===0){
+    const {projectLineage,validateLineageProjection}=await import(pathToFileURL(
+      path.join(root,'pages/scripts/lineage.mjs')).href);
+    const publicProjection=validateLineageProjection(projectLineage({
+      issueNumbers:[source.fixture.issue],
+      pulls:[{number:source.fixture.pr,head_sha:source.fixture.sha}],
+      attested:{status:'verified',source_ref_sha:source.storeSha,records:[a]},
+    }));
+    assert.equal(publicProjection.status,'verified',
+      'independently verified source still must be present');
+    assert.equal(publicProjection.edges.length,1,
+      'source must produce exactly one public causal edge');
+    assert.equal(publicProjection.edges[0].slice_id,null,
+      'missing logical Slice must remain explicitly Unlinked');
+    report(
+      'Original Qwen Developer/Publisher/Store source is independently attested; logical Slice proof is explicitly Partial and the public #1906 edge remains Unlinked, never inferred from action_id.',
+      [
+        {type:'store',value:'agent-store='+source.storeSha+' slice_records=0'},
+        {type:'source',value:'run='+a.run_id+'/'+a.attempt+
+          ' pr=#'+a.pr_number+' head='+a.pr_head_sha},
+        {type:'partial',value:'logical_slice=Unlinked action_id_is_not_slice_id'},
+        {type:'public',value:'verified Producer/PR/Agent/Run edge; slice_id=null'},
+      ]);
+    return;
+  }
+  if(a.slice_id===null||slices.length===0){
+    pending(source,'Inconsistent logical Slice record and attested source for Qwen Run '+
       a.run_id+'/'+a.attempt);
     return;
   }
