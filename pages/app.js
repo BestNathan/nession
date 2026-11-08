@@ -482,7 +482,8 @@ function renderLineageDetail(kind, number) {
       block.append(node('span','mono','Producer source ref '+e.source_ref_sha.slice(0,12)+
         ' · exact historical PR HEAD '+e.pr_head_sha));
       block.append(node('span','',
-        'Logical Slice: Unlinked · current PR approval: Unknown · Acceptance SC: Unknown'));
+        'Logical Slice: '+(e.slice_id??'Unlinked')+
+        ' · current PR approval: Unknown · Acceptance SC: Unknown'));
       panel.append(block);
     }
   }
