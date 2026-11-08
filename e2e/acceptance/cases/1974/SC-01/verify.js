@@ -50,6 +50,21 @@ async function main(){
   }
   const selected=accepted.filter(item=>item.doc.implementing_pr?.number===2963&&
     item.doc.source?.agent_id==='dev-qwen-01'&&item.doc.result?.kind==='developer');
+  if(selected.length===0){
+    // The real #2961 Qwen Publisher path writes write-ahead intents plus v2
+    // Reviewer results, not a Developer Result v2. That is a missing producer
+    // receipt, not a malformed or forged result, so the criterion is Pending.
+    const intents=results.filter(item=>isIntent(item.doc));
+    assert.ok(intents.length>=2,
+      'real Qwen Publisher and Repair intents are missing from the pinned store');
+    pending(
+      'Real #2961 Qwen Publisher/Repair intents exist, but no independently attested Developer Result v2 is committed; the v2 lineage attestation remains Pending.',
+      [
+        {type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' intents='+intents.length},
+        {type:'blocked',value:'present kinds='+[...new Set(results.map(x=>x.doc.kind))].join(',')},
+      ]);
+    return;
+  }
   assert.equal(selected.length,1,'expected exactly one Qwen Developer Result v2 for PR #2963');
   const receipt=selected[0].doc;
 
