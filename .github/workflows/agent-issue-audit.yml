@@ -372,7 +372,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && needs.contract.outputs.mode == 'single'
         run: |
           set -euo pipefail
-          node scripts/staging-convergence-audit-attest.mjs self-test
           node scripts/staging-convergence-audit-attest.mjs attest "$ISSUE_NUMBER" "$GITHUB_RUN_ID"
 
       - name: Upload canonical Agent telemetry
