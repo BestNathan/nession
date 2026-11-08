@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+// Attested Issue Audit approval for the narrow, deterministically tooling-only
+// case. Risk-bearing or unknown integration batches always need owner review.
+// Never execute files from the integration head or let a model issue a Gate Pass.
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {planBatch,verifyBatchIssue,AUDIT_APPROVAL} from './staging-convergence-batch.mjs';
+
+const SHA='[a-f0-9]{40}';
+const MARKER=new RegExp('<!-- nession-convergence-batch:v1 branch=([^ ]+) main=('+SHA+') lane=('+SHA+') head=('+SHA+') -->');
+const REPO='BestNathan/nession';
+const gh=(...args)=>JSON.parse(execFileSync('gh',['api',...args],{
+  encoding:'utf8',env:process.env,maxBuffer:8_000_000}));
+const git=(...args)=>execFileSync('git',args,{encoding:'utf8'}).trim();
+export function sourceFromIssue(issue){
+  const m=MARKER.exec(issue?.body??'');
+  if(!m)return null;
+  if(issue.state!=='open'||issue.user?.login!=='github-actions[bot]'||
+    issue.repository_url!=='https://api.github.com/repos/'+REPO)
+    throw Error('untrusted generated batch Issue identity');
+  const [,branch,main_sha,lane_sha,integration_head]=m;
+  return {branch,main_sha,lane_sha,integration_head};
+}
+export function attest(number,runId){
+  if(!Number.isInteger(number)||number<=0||!Number.isInteger(runId)||runId<=0)
+    throw Error('invalid Issue Audit identity');
+  const issue=gh('repos/'+REPO+'/issues/'+number);
+  const ref=sourceFromIssue(issue);
+  if(!ref)return {status:'NOT_A_CONVERGENCE_BATCH'};
+  if(git('rev-parse','--is-shallow-repository')!=='false')
+    throw Error('Issue Audit needs complete, source-bound git history');
+  git('fetch','--no-tags','origin',ref.main_sha,ref.lane_sha,ref.integration_head);
+  const plan=planBatch(ref),verified=verifyBatchIssue(issue,plan);
+  if(plan.impact.category!=='tooling-only'||plan.removed.length||
+    plan.newIds.length||plan.regressionIds.length||verified.selected_ids.length)
+    return {status:'OWNER_APPROVAL_REQUIRED',category:plan.impact.category,
+      issue:number,approval_command:verified.approval_command};
+  const receipt=AUDIT_APPROVAL+' '+plan.integration_head+' '+
+    verified.declaration_digest+' run='+runId;
+  const comments=gh('repos/'+REPO+'/issues/'+number+'/comments?per_page=100');
+  if(!Array.isArray(comments)||comments.length>=100)
+    throw Error('Issue audit approval inventory unbounded');
+  if(comments.some(c=>c.body?.trim()===receipt))
+    return {status:'EXISTING_APPROVAL',issue:number};
+  gh('--method','POST','repos/'+REPO+'/issues/'+number+'/comments',
+    '-f','body='+receipt);
+  return {status:'AUDITED_TOOLING_ONLY',issue:number};
+}
+function selfTest(){
+  const issue={state:'open',user:{login:'github-actions[bot]'},
+    repository_url:'https://api.github.com/repos/'+REPO,
+    body:'<!-- nession-convergence-batch:v1 branch=staging main='+
+      'a'.repeat(40)+' lane='+'b'.repeat(40)+' head='+'c'.repeat(40)+' -->'};
+  assert.equal(sourceFromIssue(issue).branch,'staging');
+  assert.equal(sourceFromIssue({...issue,body:'manual'}),null);
+  assert.throws(()=>sourceFromIssue({...issue,user:{login:'external'}}),/untrusted/);
+  assert.throws(()=>sourceFromIssue({...issue,state:'closed'}),/untrusted/);
+  console.log('Source-bound Staging Issue Audit attestor: identity fixtures PASS');
+}
+if(process.argv[2]==='self-test')selfTest();
+else if(process.argv[2]==='attest')
+  console.log(JSON.stringify(attest(Number(process.argv[3]),Number(process.argv[4]))));
