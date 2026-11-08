@@ -4,6 +4,7 @@
 // push branch refs, waive Gates, or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
+import {planBatch,ensureBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -272,9 +273,21 @@ function closeSupersededSyncPrs(repo,lane,currentHead) {
   return closed;
 }
 
-function ensurePr(repo, owner, head, base, plan) {
+function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
   const found = existingPr(repo, owner, head, base);
-  if (found) return { action: 'reused', number: found.number, url: found.html_url };
+  if (found) {
+    // Only automation-owned PRs may have their missing source association
+    // repaired. A body edit never counts as a successful E2E re-run.
+    if(batchIssueNumber && !found.body?.includes('Refs #'+batchIssueNumber)) {
+      if(!found.body?.startsWith('Staging Convergence automated proposal') ||
+         !found.head?.ref.startsWith('chore/staging-sync-'))
+        reject('untrusted preexisting integration PR cannot be relinked');
+      gh(['--method','PATCH','repos/'+repo+'/pulls/'+found.number,
+        '-f','body='+found.body+'\n\nRefs #'+batchIssueNumber]);
+      return {action:'relinked',number:found.number,url:found.html_url};
+    }
+    return { action: 'reused', number: found.number, url: found.html_url };
+  }
   const sync = base !== 'main';
   const title = sync
     ? 'chore(release): integrate main into ' + base + ' via checked head'
@@ -291,6 +304,7 @@ function ensurePr(repo, owner, head, base, plan) {
     '**This PR is a proposal, not release or acceptance evidence.**',
     'Preserve merge commits; verify exact-head CI, applicable Acceptance/E2E, conflicts and deployment before merging.',
     'The controller may request a merge commit only after the independent exact-head Gates approve. It never bypasses checks, force-pushes, bumps versions or deploys Production.',
+    ...(batchIssueNumber ? ['', 'Refs #'+batchIssueNumber] : []),
   ].join('\n');
   try {
     const created = gh(['--method', 'POST', 'repos/' + repo + '/pulls',
@@ -304,6 +318,15 @@ function ensurePr(repo, owner, head, base, plan) {
     if (after) return { action: 'reused-race', number: after.number, url: after.html_url };
     throw error;
   }
+}
+
+function dispatchBatchAudit(repo,issueNumber){
+  const token=process.env.DISPATCH_GITHUB_TOKEN;
+  if(!token)reject('trusted Issue Audit dispatcher token missing');
+  shell('gh',['api','--method','POST','repos/'+repo+
+    '/actions/workflows/agent-issue-audit.yml/dispatches',
+    '-f','ref=main','-f','inputs[issue_number]='+issueNumber],{
+    env:{...process.env,GH_TOKEN:token}});
 }
 
 function dispatchConflictReview(repo, receipt, action, plan, lane) {
@@ -365,18 +388,40 @@ function reconcile(plan) {
         results.push(result);
         continue;
       }
+      let batch=null,batchIssueNumber=null;
+      if(sync){
+        // The immutable integration ref was materialized remotely; fetch and
+        // verify the real two-parent Git object before deriving Issue E2E IDs.
+        fetchForComparison(integration.branch);
+        batch=planBatch({branch:lane.branch,main_sha:plan.main_sha,
+          lane_sha:lane.sha,integration_head:integration.sha});
+        const prepared=ensureBatchIssue(batch);
+        batchIssueNumber=prepared.issue.number;
+        if(prepared.created)dispatchBatchAudit(repo,batchIssueNumber);
+      }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
       const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
-      const receipt=ensurePr(repo,owner,head,base,plan);
+      const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber);
       const record={branch:lane.branch,direction:action,...receipt,
-        ...(sync?{integration_head:integration.sha,superseded_prs:superseded}: {})};
+        ...(sync?{integration_head:integration.sha,issue_number:batchIssueNumber,
+          superseded_prs:superseded}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
-      if (receipt.action === 'created') {
+      if (receipt.action === 'created'||receipt.action === 'relinked') {
         record.outcome = 'AWAITING_EXACT_HEAD_CHECKS';
         results.push(record);
         continue;
+      }
+      if(sync){
+        const approval=issueApproval(batch,batchIssueNumber);
+        if(!approval.approved){
+          record.outcome='BLOCKED';
+          record.reason=approval.reason;
+          record.issue_approval_command=approval.approval_command;
+          results.push(record);
+          continue;
+        }
       }
       const decision = qualify({action,prNumber:receipt.number,
         mainSha:plan.main_sha,laneSha:lane.sha,branch:lane.branch,
