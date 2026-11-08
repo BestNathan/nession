@@ -243,7 +243,7 @@ export function resolveTrustedIngestSource({environment,event}){
     return {run_id:source.id,source};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
-     [2817,2906,2912,2946,2951,2961].includes(event?.issue?.number)){
+     [2817,2906,2912,2946,2951,2961,3001].includes(event?.issue?.number)){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
     // before any Store writer is used; this comment only locates it.
@@ -255,6 +255,7 @@ export function resolveTrustedIngestSource({environment,event}){
         event.issue?.pull_request||
         event.comment?.user?.login!=='BestNathan'||
         !command||Number(command[1])!==event.issue.number||
+        (event.issue.number===3001&&Number(command[2])!==42488022265)||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual Qwen Ingest requires exact owner/main Issue comment');
     return {run_id:Number(command[2]),source:null,qwen_recovery:true,attempt:1};
