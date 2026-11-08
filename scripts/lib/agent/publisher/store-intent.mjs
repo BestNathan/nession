@@ -155,7 +155,10 @@ export function commitControlledPublisherIntent({
 
 // #2274: extend the SAME immutable Store Intent owner to authenticated Qwen
 // Developer proposals. One file under the canonical results/ path is the
-// durable no-redelivery fence. Never retry a GitHub PR POST after ambiguity.
+// durable no-redelivery fence. V2 intents use a separate immutable namespace
+// so the canonical results/ path is reserved for authenticated Result v2.
+// Historical V1 intents remain at their original results/ location.
+// Never retry a GitHub PR POST after ambiguity.
 const QWEN_INTENT_FIELDS=['schema_version','kind','repository','issue',
   'action_id','worker_run_id','worker_run_attempt','worker_sha','source_sha',
   'worker_source_sha',
@@ -194,7 +197,7 @@ export function planQwenPublisherIntent({preflight,target_main_sha,publisher_run
         !Number.isSafeInteger(x.new_bytes)||x.new_bytes<0))
     reject('unsafe Qwen Publisher checked-file manifest');
   const record={
-    schema_version:1,kind:'trusted_qwen_publisher_write_ahead_intent',
+    schema_version:2,kind:'trusted_qwen_publisher_write_ahead_intent',
     repository:REPO,issue:e.issue,action_id:e.action_id,
     worker_run_id:e.worker_run_id,worker_run_attempt:1,
     worker_sha:e.worker_sha,source_sha:e.source_sha,
@@ -214,7 +217,7 @@ export function validateQwenPublisherIntent(x){
   if(!x||typeof x!=='object'||Array.isArray(x)||
       Object.keys(x).length!==QWEN_INTENT_FIELDS.length||
       Object.keys(x).some(k=>!QWEN_INTENT_FIELDS.includes(k))||
-      x.schema_version!==1||
+      ![1,2].includes(x.schema_version)||
       x.kind!=='trusted_qwen_publisher_write_ahead_intent'||
       x.repository!==REPO||!positive(x.issue)||
       !HEX.test(x.action_id??'')||!positive(x.worker_run_id)||
@@ -234,7 +237,8 @@ export function validateQwenPublisherIntent(x){
 }
 export function qwenPublisherIntentPath(record){
   const r=validateQwenPublisherIntent(record);
-  return 'workflows/issues/'+r.issue+'/results/'+r.worker_run_id+
+  return 'workflows/issues/'+r.issue+'/' +
+    (r.schema_version===1?'results':'publisher-intents')+'/' +r.worker_run_id+
     '-'+r.worker_run_attempt+'-'+r.action_id+'.json';
 }
 function confirmQwenSourceInStore(root,record){
