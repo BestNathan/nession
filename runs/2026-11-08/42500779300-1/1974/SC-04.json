@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "3971089e1f29467ddf764820ad3acb7028674505e524818b3fcf68cbd1556b4f",
+  "run_id": 42500779300,
+  "run_attempt": 1,
+  "issue": 1974,
+  "criterion": "SC-04",
+  "criterion_text": "Quality, Case Smoke and source-aligned end-to-end fixture, plus canonical Acceptance, independently pass at the owning exact SHA. No manual SC checkbox or parent acceptance propagation.",
+  "stage": "post-merge",
+  "target_sha": "be29361bc1ee7ee76bca121ba65358815b477267",
+  "contract_sha256": "8f89fc0ce98e48ec081cf458439c18223e3a90681b5da03b55ecc1c8f6800ab9",
+  "case_revision": "be29361bc1ee7ee76bca121ba65358815b477267",
+  "case_tree_sha": "ffa01be92591ef3eed04384f222e4efd2fc537b6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T16:39:59.570Z",
+  "finished_at": "2026-11-08T16:40:05.508Z",
+  "duration_ms": 5938,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Real source implementation PR HEAD has independently successful exact-SHA Quality, Case Smoke, selected E2E and authenticated Agent Acceptance workflows.",
+      "evidence": [
+        {
+          "type": "pr",
+          "value": "#3017 sha=2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed"
+        },
+        {
+          "type": "runs",
+          "value": "Quality=42489219178/1; Case Smoke=42489219298/1; E2E=42489219354/1; Agent Acceptance=42489507347/1"
+        },
+        {
+          "type": "store",
+          "value": "agent-store=c4cff6589374d288a35b4ed81fb150a9775eb037 producer=workflows/issues/3001/producer-results-v2/42488022265-1-6d3e897855afe017225c907ee5df39803f1b6adf4c6ddcb3947f0ee7722719b9.json"
+        }
+      ],
+      "duration_ms": 70,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42500779300,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "be29361bc1ee7ee76bca121ba65358815b477267",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42500779300",
+    "record_path": "runs/2026-11-08/42500779300-1/1974/SC-04.json",
+    "source_result_sha256": "b3de96df5524cffe2e978e72782910b07d959526c884655b3bb603f01db0c0d4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42500779300-1",
+    "sha256": "b3de96df5524cffe2e978e72782910b07d959526c884655b3bb603f01db0c0d4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42500779300",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1f9eb0b5cab4b798e9870e7a7224c8644217cd08b6b11a3d1fe0e7bf8b8e3f0c",
+  "run_id": 42500779300,
+  "run_attempt": 1,
+  "issue": 1974,
+  "criterion": "SC-03",
+  "criterion_text": "A genuine logical Slice identifier is separately demonstrated and joins the real Agent→Run, or the source is explicitly Partial and #1906 remains Unlinked; no fake Slice identity.",
+  "stage": "post-merge",
+  "target_sha": "be29361bc1ee7ee76bca121ba65358815b477267",
+  "contract_sha256": "8f89fc0ce98e48ec081cf458439c18223e3a90681b5da03b55ecc1c8f6800ab9",
+  "case_revision": "be29361bc1ee7ee76bca121ba65358815b477267",
+  "case_tree_sha": "89962af7f04d1c8a5d2476e08dacce1428fab2c2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T16:39:53.636Z",
+  "finished_at": "2026-11-08T16:39:59.570Z",
+  "duration_ms": 5934,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Original Qwen Developer/Publisher/Store source is independently attested; logical Slice proof is explicitly Partial and the public #1906 edge remains Unlinked, never inferred from action_id.",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store=c4cff6589374d288a35b4ed81fb150a9775eb037 slice_records=0"
+        },
+        {
+          "type": "source",
+          "value": "run=42488022265/1 pr=#3017 head=2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed"
+        },
+        {
+          "type": "partial",
+          "value": "logical_slice=Unlinked action_id_is_not_slice_id"
+        },
+        {
+          "type": "public",
+          "value": "verified Producer/PR/Agent/Run edge; slice_id=null"
+        }
+      ],
+      "duration_ms": 72,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42500779300,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "be29361bc1ee7ee76bca121ba65358815b477267",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42500779300",
+    "record_path": "runs/2026-11-08/42500779300-1/1974/SC-03.json",
+    "source_result_sha256": "5f4af660e07ec8aa0027f1544a9cc5012321a9f3e5049e90da1cb43c5c7186a8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42500779300-1",
+    "sha256": "5f4af660e07ec8aa0027f1544a9cc5012321a9f3e5049e90da1cb43c5c7186a8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42500779300",
+    "durability": "time-limited; object archival not configured"
+  }
+}
