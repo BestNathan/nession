@@ -62,8 +62,8 @@ async function main(){
     pending(
       'The authenticated Result v2 has no genuine logical Slice identity; action_id is not a Slice ID. The source remains explicitly Partial and #1906 stays Unlinked.',
       [
-        {type:'store',value:'agent-store='+storeSha+' result='+v2[0].path},
-        {type:'blocked',value:'missing workflows/issues/1997/slices/<slice_id>.json'},
+        {type:'store',value:'agent-store='+storeSha+' result='+relevant[0].path},
+        {type:'blocked',value:'missing workflows/issues/2961/slices/<slice_id>.json'},
       ]);
     return;
   }
@@ -77,7 +77,7 @@ async function main(){
     assert.equal(doc.schema_version,1);
     assert.equal(doc.kind,'agent_slice_identity');
     assert.equal(doc.repository,REPO);
-    assert.equal(doc.issue,1997);
+    assert.equal(doc.issue,2961);
     assert.match(String(doc.slice_id??''),SLICE,'invalid slice_id');
     assert.notEqual(doc.slice_id,receipt.action_id,'action_id is not a Slice ID');
     assert.match(String(doc.action_id??''),HEX64,'invalid slice action_id');
