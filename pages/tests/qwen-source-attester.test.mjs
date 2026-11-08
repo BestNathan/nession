@@ -137,6 +137,17 @@ test('foreign, stale, colliding, replayed or missing proofs fail closed',()=>{
  assert.equal(attestQwenPublisherSource(s),null);
 });
 
+test('trusted-only diagnostics identify a bounded failed proof phase, never raw source',()=>{
+ const recorded=[];
+ const altered=source();
+ altered.workerArtifacts.artifacts[0].digest='sha256:'+'f'.repeat(64);
+ const result=attestQwenPublisherSource({
+   ...altered,onDiagnostic:stage=>recorded.push(stage)});
+ assert.equal(result,null);
+ assert.deepEqual(recorded,['worker-zip-bytes']);
+ assert.ok(!JSON.stringify(recorded).includes('ciphertext'));
+});
+
 test('pinned public reader joins only independently witnessed Qwen source',async()=>{
  const s=source(),bytes=new Map();
  function entry(name,doc){
@@ -170,6 +181,14 @@ test('pinned public reader joins only independently witnessed Qwen source',async
    getCurrentRef:async()=>({state:'present',sha:store})};
  const verified=await loadPinnedQwenLineage(base);
  assert.equal(verified.status,'verified');
+ const diagnostics=[];
+ const rejected=await loadPinnedQwenLineage({
+   ...base,onDiagnostic:phase=>diagnostics.push(phase),
+   getOriginalStoreBytes:async()=>Buffer.from('forged'),
+ });
+ assert.equal(rejected.status,'unavailable');
+ assert.deepEqual(diagnostics,[
+   'independent-attestation/producer-json','independent-attestation']);
  assert.equal(verified.records.length,1);
  assert.equal(verified.records[0].run_id,workerId);
  assert.equal(verified.records[0].slice_id,null);
