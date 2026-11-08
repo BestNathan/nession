@@ -224,7 +224,7 @@ jobs:
           node trusted/scripts/ci/qwen-lineage-artifact-prestage.mjs
           # Pass only the private artifact path, never the Actions token,
           # into the downstream uncredentialed Case process.
-          echo "NSESSION_QWEN_ARTIFACT_DIR=$NSESSION_QWEN_ARTIFACT_DIR" >> "$GITHUB_ENV"
+          echo "NESSION_QWEN_ARTIFACT_DIR=$NESSION_QWEN_ARTIFACT_DIR" >> "$GITHUB_ENV"
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         if: steps.select.outputs.count != '0'
