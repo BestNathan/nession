@@ -42,6 +42,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read # Verify original Worker and trusted Publisher Artifacts at build time
       issues: read
       pull-requests: read
     outputs:
