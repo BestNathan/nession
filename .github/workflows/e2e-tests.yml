@@ -238,15 +238,21 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
 
-      - uses: extractions/setup-just@v2
-        if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
-
-      # tmux is required by nession-agent to create sessions. The runner
-      # image may or may not have it pre-installed; install it explicitly.
-      - name: Install tmux
+      # Noble (ubuntu-24.04) publishes a fixed Just package in the trusted
+      # Ubuntu archive. Avoid the GitHub Releases latest-release API used by
+      # extractions/setup-just, which twice returned HTTP 504 before any E2E
+      # test could start (#1974 PR #2991). The existing Justfile needs only
+      # standard recipes supported by Noble's 1.21.0.
+      - name: Install pinned Just and tmux from Ubuntu 24.04
         id: tmux
         if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends just=1.21.0-1 tmux
+          just --version
+          tmux -V
 
       # Restore browser cache BEFORE install — a cache hit means the install
       # below skips the download entirely.
