@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "prototype-project-management-3025-20261109",
+  "source_sha": "d81df747b8bfa7225edbe7e75effbbe43408de63",
+  "source_digest": "9bb3fe9d95d8e4a8141f529c03235a5386b28af69429399912e6617c032c786a",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 42501662011,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42501662011",
+    "event": "push",
+    "branch": "task/prototype-project-management-3025-20261109",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-08T16:47:35.767Z",
+    "finished_at": "2026-11-08T16:47:54.098Z",
+    "result": {
+      "task": "Project CRUD and standalone navigation Chromium verification #3025",
+      "source_sha": "7371d2a7ff466499d69b6993c613a766de6858e1",
+      "url": "https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html?revision=7371d2a7ff466499d69b6993c613a766de6858e1",
+      "checks": [
+        {
+          "name": "published_manifest_and_pinned_html",
+          "pass": true,
+          "source_sha": "7371d2a7ff466499d69b6993c613a766de6858e1",
+          "html_bytes": 5664
+        }
+      ],
+      "browser": {
+        "status": "failed",
+        "checks": [
+          {
+            "name": "initial_web_terminal",
+            "actual": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "web_product_width",
+            "actual": 1180,
+            "expected": 1180,
+            "pass": true
+          },
+          {
+            "name": "web_projects_section",
+            "actual": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "new_project_form",
+            "actual": "new-project",
+            "expected": "new-project",
+            "pass": true
+          },
+          {
+            "name": "name_only_project_detail",
+            "actual": "new-project",
+            "expected": "project",
+            "pass": false
+          }
+        ],
+        "executable": "/usr/bin/google-chrome"
+      },
+      "status": "failed",
+      "error": "Error: name_only_project_detail expected \"project\" got \"new-project\"\n    at chk (file:///home/runner/work/nession/nession/workspace/.task/verify.mjs:12:131)\n    at file:///home/runner/work/nession/nession/workspace/.task/verify.mjs:40:4"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/d81df747b8bfa7225edbe7e75effbbe43408de63/prototype-project-management-3025-20261109.json"
+}
