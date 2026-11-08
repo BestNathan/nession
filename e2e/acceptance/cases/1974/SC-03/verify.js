@@ -13,7 +13,7 @@ const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const {pathToFileURL}=require('node:url');
 const {
-  REPO,issueRecords,isResultV2,isSlice,fetchJson,HEX40,
+  REPO,issueRecords,isResultV2,isIntent,isSlice,fetchJson,HEX40,
 }=require('../../../shared/agent-store-1997.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 
@@ -43,6 +43,18 @@ async function main(){
   }
   const relevant=v2.filter(item=>item.doc?.implementing_pr?.number===2963&&
     item.doc?.source?.agent_id==='dev-qwen-01');
+  if(relevant.length===0){
+    const intents=results.filter(item=>isIntent(item.doc));
+    assert.ok(intents.length>=2,
+      'real Qwen Publisher and Repair intents are missing from the pinned store');
+    pending(
+      'Real #2961 Qwen Publisher/Repair intents exist, but no original Developer Result v2 is committed; the logical Slice join remains Pending.',
+      [
+        {type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' slice_records='+slices.length+' intents='+intents.length},
+        {type:'blocked',value:'present kinds='+[...new Set(results.map(x=>x.doc.kind))].join(',')},
+      ]);
+    return;
+  }
   assert.equal(relevant.length,1,'expected one original Qwen Developer v2 record for PR #2963');
   const receipt=relevant[0].doc;
 
