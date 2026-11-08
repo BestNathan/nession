@@ -172,3 +172,27 @@ The **Prototypes** link is a native hash route in the independent public Pages a
 The prototype sources remain in the isolated `prototype` branch. Trusted `Deploy / Public Pages` checks out its exact SHA read-only and publishes a bounded, static-asset-only copy into `pages/dist/prototypes/`; the published HTML shows a separate **View source** link pinned to that SHA. The generated `prototypes/manifest.json` declares the exact published prototype source SHA and available paths. No prototype code executes in CI and no runtime Nession credentials are embedded.
 
 Publication is **event-driven** ([Requirement #2519](https://github.com/BestNathan/nession/issues/2519)). On every ordinary push to the orphan `prototype` branch, the unprivileged branch-local `.github/workflows/prototype-changed.yml` emits a tiny successful `Prototype / Change Signal` workflow run; the default-branch, main-owned `Deploy / Public Pages` listens to that workflow via a tightly scoped `workflow_run: completed` event. The trusted Pages workflow checks the upstream branch/repository/event/conclusion and publishes the **current read-only prototype branch SHA** through the existing static-asset-only sanitizer and independent HTTPS digest verification. The signal uses only `contents: read` and cannot publish, dispatch privileged workflows, read private Agent state, or execute prototype assets. The existing 4-hour full rebuild, main push and manual dispatch remain unchanged; there is **no 15-minute polling**. A push made with GitHub Actions' ordinary `GITHUB_TOKEN` does not generate new workflow runs; automated prototype writers using that token must use an approved GitHub App token or a separately trusted explicit dispatch. Verify live manifest SHA and HTML URL before claiming the preview is online. Browser delivery, mock behavior and production Acceptance remain distinct evidence.
+
+
+## Phase 2-C — pinned Agent Store result observations (#1906)
+
+The public Work Issue detail can expose *observed, unverified* Developer/Reviewer
+Run+Attempt metadata from genuine, pinned `agent-store` Git blobs. At build
+time, the reader validates the original result path, Git blob SHA-1 against
+byte content, strict canonical v1/v2 result schema, bounded record/Issue window
+and unchanged Store branch ref. A malformed, drifted, ambiguous or unsafe
+snapshot fails closed to `unavailable`; an incomplete scan reports `truncated`.
+Write-ahead Publisher intent files are **not** authenticated task results and
+never become visible Agent observations.
+
+The public `work.agent_result_observations` payload contains only safe
+Issue/role/Agent/Run+Attempt identity and canonical GitHub Actions links.
+Claimed PR metadata is retained in the allowlisted record for validation but
+**never promoted into a verified causal edge or a displayed implementing PR
+relationship**. Every observed candidate is labeled `unverified_candidate`;
+the UI continues to show `Unknown / Unlinked` for implementing PR/Slice and
+`Unknown` for SC Acceptance. Only a *separate*, independently authenticated
+producer/artifact/Publisher/writer attester may supply `lineageEvidence` to
+`projectLineage()`. A source record's own `verified` field, an authentic Git
+blob, or matching Issue/PR IDs cannot perform that authentication. Strong
+orphan-write protection remains owned by #1690, not this Pages projection.
