@@ -7,7 +7,8 @@ import path from 'node:path';
 import {startDevelopment,validateDevelopmentState,recordDispatch,
   acceptAttestedQwenPublication} from './outbox.mjs';
 import {writeIssueWorkflowState} from './state-store.mjs';
-import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
+import {validateQwenPublisherIntent,qwenPublisherIntentPath}
+  from '../publisher/store-intent.mjs';
 import {qwenReviewerPublishedSource} from './qwen-reviewer-source.mjs';
 import {sourceAllowed} from './controller-dispatch.mjs';
 
@@ -104,5 +105,29 @@ try{
     /published Qwen PR source ref unavailable or changed/);
   fs.writeFileSync(file,JSON.stringify({...intent,publisher_run_id:402}));
   assert.throws(()=>qwenReviewerPublishedSource(source),/unique Qwen review publication Intent/);
+
+  // V2 reserves results/ for actual immutable Developer Result receipts.
+  // Historical v1 bytes must be accepted read-only, never rewritten.
+  const v2=validateQwenPublisherIntent({...intent,schema_version:2});
+  const v2Relative=qwenPublisherIntentPath(v2);
+  assert.equal(v2Relative,'workflows/issues/'+ISSUE+
+    '/publisher-intents/301-1-'+developerAction.id+'.json');
+  assert.equal(qwenPublisherIntentPath(intent),
+    'workflows/issues/'+ISSUE+'/results/301-1-'+developerAction.id+'.json');
+  const v2File=path.join(root,v2Relative);
+  fs.mkdirSync(path.dirname(v2File),{recursive:true});
+  fs.writeFileSync(v2File,JSON.stringify(v2)+'\\n');
+  fs.writeFileSync(file,JSON.stringify(intent)+'\\n');
+  assert.throws(()=>qwenReviewerPublishedSource(source),
+    /unique Qwen review publication Intent/,
+    'duplicate old+new publisher identity must not produce an ambiguous Review');
+  fs.unlinkSync(file);
+  assert.equal(qwenReviewerPublishedSource(source).branch,
+    'refs/heads/'+v2.branch);
+  // A well-formed v2 copied into the legacy directory is a spoofed path.
+  fs.writeFileSync(file,JSON.stringify(v2)+'\\n');
+  assert.throws(()=>qwenReviewerPublishedSource(source),
+    /Publisher Intent path differs from immutable action/);
+
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Qwen signed Reviewer dispatch: one immutable Store branch, actual SHA fetch, two ancestry checks, untrusted source and replay negatives pass');
