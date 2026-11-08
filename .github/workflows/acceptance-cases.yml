@@ -48,7 +48,6 @@ jobs:
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: ""
-      NESSION_QWEN_ARTIFACT_DIR: ${{ runner.temp }}/qwen-lineage-source
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
@@ -220,8 +219,12 @@ jobs:
             exit 0
           fi
           test "$GITHUB_SHA" = "${{ steps.target.outputs.target_sha }}"
+          export NESSION_QWEN_ARTIFACT_DIR="$RUNNER_TEMP/qwen-lineage-source"
           node trusted/scripts/ci/qwen-lineage-artifact-prestage-selftest.mjs
           node trusted/scripts/ci/qwen-lineage-artifact-prestage.mjs
+          # Pass only the private artifact path, never the Actions token,
+          # into the downstream uncredentialed Case process.
+          echo "NSESSION_QWEN_ARTIFACT_DIR=$NSESSION_QWEN_ARTIFACT_DIR" >> "$GITHUB_ENV"
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         if: steps.select.outputs.count != '0'
