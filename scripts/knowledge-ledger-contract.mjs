@@ -14,6 +14,27 @@ const UTC=/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/;
 const ENTRY=/^topics\/([a-z0-9]+(?:-[a-z0-9]+)*)\/([^/]+)\.md$/u;
 const TITLE_BASE='8e5ab335212841898dac7a4be719ceed60750591';
 const SHA=/^[a-f0-9]{40}$/;
+// #2953: One immutable historical split-index repair (not a reusable permission).
+// The parent had the fully authenticated article+CHANGELOG transaction, but
+// omitted its derived index timestamp; the exact child changed *only* index.
+// Preserve both immutable commits instead of force-pushing/replacing history.
+const PINNED_INDEX_REPAIR=Object.freeze({
+  article:'0c4afc9847c4fbc0331f4816e44bcf30f5015a5f',
+  index:'dc444164777f9f1ef259d260107a341eea2d52d8',
+  path:'topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md',
+  timestamp:'2026-11-08T13:51:42Z',
+});
+export function isPinnedSplitIndexRepair({commit,parent,diff,before,after,oldIndex,newIndex}) {
+  if(commit!==PINNED_INDEX_REPAIR.index||parent!==PINNED_INDEX_REPAIR.article||
+     !Array.isArray(diff)||diff.length!==1||
+     diff[0].status!=='M'||diff[0].file!=='index.json'||
+     before!==after||!oldIndex||!newIndex) return false;
+  const expected=structuredClone(oldIndex);
+  const target=expected.topics?.workflows?.find(x=>x.path===PINNED_INDEX_REPAIR.path);
+  if(!target||target.updated_at!=='2026-11-03T09:34:15Z')return false;
+  target.updated_at=PINNED_INDEX_REPAIR.timestamp;
+  return JSON.stringify(expected)===JSON.stringify(newIndex);
+}
 const ACTIONS=new Set(['create','update','delete','rename','move','migrate']);
 const HEADER='# Knowledge Changelog\n\n';
 // #2683: one byte-pinned read-only push notification on the orphan branch;
@@ -266,6 +287,19 @@ function verify(root,baseline=null) {
       .filter(Boolean).map(x=>{const [status,file]=x.split('\t');return {status,file};});
     const before=git(root,'show',parent+':CHANGELOG.md')+'\n';
     const after=git(root,'show',commit+':CHANGELOG.md')+'\n';
+    // One prior source+changelog commit accidentally omitted its generated
+    // index timestamp. Its immediately-following immutable child contains
+    // only that timestamp correction. Validate the *exact* pair and byte-
+    // equivalent index derivation; all other commits still require a same-
+    // commit article mutation and appended global CHANGELOG.
+    if(commit===PINNED_INDEX_REPAIR.index){
+      const oldIndex=JSON.parse(git(root,'show',parent+':index.json'));
+      const newIndex=JSON.parse(git(root,'show',commit+':index.json'));
+      if(!isPinnedSplitIndexRepair({commit,parent,diff,before,after,oldIndex,newIndex}))
+        fail('pinned historical derived-index repair differs from audited exact commit');
+      parent=commit;
+      continue;
+    }
     if(!after.startsWith(before)||after===before)fail('global CHANGELOG was rewritten or not appended');
     const added=logEntries(after).slice(logEntries(before).length);
     const articles=diff.filter(c=>c.file.startsWith('topics/'));
@@ -343,6 +377,22 @@ function fixture() {
   try {
     assert.equal(slug,'nession-instruction-architecture-and-knowledge-ownership');
     assert.equal(titleSlug('终端 tmux 控制模式'),'终端-tmux-控制模式');
+    const splitRecord={path:PINNED_INDEX_REPAIR.path,updated_at:'2026-11-03T09:34:15Z'};
+    const oldIndex={topics:{workflows:[splitRecord]},categories:{workflows:[PINNED_INDEX_REPAIR.path]}};
+    const newIndex=structuredClone(oldIndex);
+    newIndex.topics.workflows[0].updated_at=PINNED_INDEX_REPAIR.timestamp;
+    const caseRecord={commit:PINNED_INDEX_REPAIR.index,parent:PINNED_INDEX_REPAIR.article,
+      diff:[{status:'M',file:'index.json'}],before:'unchanged ledger\n',after:'unchanged ledger\n',
+      oldIndex,newIndex};
+    assert.equal(isPinnedSplitIndexRepair(caseRecord),true);
+    for(const bad of [
+      {commit:'f'.repeat(40)}, {parent:'e'.repeat(40)},
+      {diff:[{status:'M',file:'CHANGELOG.md'}]},
+      {diff:[{status:'M',file:'index.json'},{status:'M',file:PINNED_INDEX_REPAIR.path}]},
+      {after:'missing append'}, {newIndex:{topics:{workflows:[]}}},
+      {oldIndex:{topics:{workflows:[]}}},
+    ])assert.equal(isPinnedSplitIndexRepair({...caseRecord,...bad}),false,
+      'index repair exemption must be exact and unreusable');
     put(file,article);
     const idx=indexFor(d);
     assert.equal(idx.topics.engineering[0].title,title);
