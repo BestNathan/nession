@@ -137,9 +137,17 @@ try{
   const entry=manifest.entries.find(e=>e.route==='/pulls/3017');
   assert.ok(entry);
   const raw=path.join(verifiedDir,'api',h(Buffer.from(entry.route))+'.json');
+  const pristine=fs.readFileSync(raw);
   fs.appendFileSync(raw,' ');
   assert.throws(()=>readPinnedQwenApi(entry.route,verifiedDir,root),
     /stale or unsafe|checksum mismatch/);
+  const forged=Buffer.from(pristine);forged[0]^=1;
+  fs.writeFileSync(raw,forged);
+  assert.throws(()=>readPinnedQwenApi(entry.route,verifiedDir,root),
+    /checksum mismatch/);
+  fs.writeFileSync(raw,pristine);
+  assert.deepEqual(readPinnedQwenApi(entry.route,verifiedDir,root),
+    {number:3017,head:{sha:target}});
   const runnerCache=verifiedDir;
   assert.deepEqual(preStagedOriginalZip(1,runnerCache,root),zipA);
   assert.throws(()=>preStagedOriginalZip(3,runnerCache,root),/missing or unsafe/);
@@ -149,8 +157,8 @@ try{
   await assert.rejects(()=>stageQwenArtifactBytes({...fixture(),
     token:'fixture-token',outputDir:path.join(root,'pass')}),/fresh and empty/);
   const badMap=new Map(blobs);
-  const forged=Buffer.from(record);forged[2]^=1;
-  badMap.set(producer.sha,forged);
+  const forgedBlob=Buffer.from(record);forgedBlob[2]^=1;
+  badMap.set(producer.sha,forgedBlob);
   await assert.rejects(()=>stageQwenArtifactBytes({
     ...fixture({blobMap:badMap}),token:'fixture-token',
     outputDir:path.join(root,'bad-blob')}),/checksum mismatch/);
