@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42504852592,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2997-offline-grace-epoch",
+    "target_sha": "b8f14522aa748b8764d092af59461c4052c731b3",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42504852592",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "98dce54c0ecde93b0f7e24a4b0d1aa042af49585dfd5b8c8f111a39497850945"
+  },
+  "record": "runs/2026-11-08/42504852592-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "7da316a9b4970502db004ec86fb885e6843ec359eea31cdcccf03a177714e5e7"
+}
