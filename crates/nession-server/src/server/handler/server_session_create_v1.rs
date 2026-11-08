@@ -100,29 +100,23 @@ impl ConnectionHandler {
             .collect();
         let binding_revision = if env_refs.is_empty() { 0 } else { 1 };
         let session_id_for_binding = format!("{agent_id}:{name}");
-        if env_refs.is_empty() {
-            // A row can outlive its Session after an Agent crash. A new
-            // same-named Session starts with an empty binding, never with the
-            // previous one's desired profiles.
-            self.env_service
-                .bindings
-                .clear_session(&session_id_for_binding)
-                .await;
+        // Stage the attempt's desired binding; do not persist it yet. An Agent
+        // that refuses a duplicate name never owned this Session, so writing
+        // here would replace or clear the live Session's binding before that
+        // refusal arrives (#2999). The candidate is applied only after a
+        // successful create, or on the ambiguous answer where the Agent may
+        // have created the Session.
+        let candidate_binding = if env_refs.is_empty() {
+            None
         } else {
-            let record = crate::env::BindingRecord {
+            Some(crate::env::BindingRecord {
                 session_id: session_id_for_binding.clone(),
                 agent_id: agent_id.to_string(),
                 desired_revision: binding_revision,
                 profiles: materialized,
                 updated_at: i64::try_from(super::current_timestamp()).unwrap_or(0),
-            };
-            if let Err(e) = self.env_service.bindings.put(&record).await {
-                return Ok(session_create_reply(
-                    &msg.id,
-                    refusal(&format!("could not persist the Session binding: {e:#}")),
-                ));
-            }
-        }
+            })
+        };
 
         info!(
             "Client requested session create on agent {}: name={}, env_files={}",
@@ -204,23 +198,17 @@ impl ConnectionHandler {
                     self.broadcast_sessions().await;
                     Some(sid)
                 } else {
-                    // The Session was never created, so the desired binding
-                    // persisted above describes nothing. Remove it rather than
-                    // leave a record that a later same-named Session could pick
-                    // up as a stale baseline.
-                    if !env_refs.is_empty() {
-                        self.env_service
-                            .bindings
-                            .clear_session(&session_id_for_binding)
-                            .await;
-                    }
+                    // The Agent refused the create (a duplicate name or another
+                    // refusal). This attempt does not own the Session, so its
+                    // staged candidate is discarded without touching the
+                    // existing binding.
                     None
                 };
                 let error = response
                     .get("error")
                     .and_then(|v| v.as_str())
                     .map(std::string::ToString::to_string);
-                let warnings = response
+                let mut warnings = response
                     .get("warnings")
                     .and_then(|value| value.as_array())
                     .map(|warnings| {
@@ -230,6 +218,14 @@ impl ConnectionHandler {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                if success {
+                    if let Some(warning) = self
+                        .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
+                        .await
+                    {
+                        warnings.push(warning);
+                    }
+                }
 
                 Ok(session_create_reply(
                     &msg.id,
@@ -242,14 +238,57 @@ impl ConnectionHandler {
                 ))
             }
             // The Agent may have processed the create even though its answer
-            // did not arrive. The desired binding is kept: losing a real
+            // did not arrive. Preserve the existing ambiguous-disconnect
+            // semantics: apply the staged candidate, because losing a real
             // Session's intent is worse than a stale row a later session list
             // can clean up.
-            Ok(Err(_)) => Ok(session_create_reply(&msg.id, refusal("Agent disconnected"))),
-            Err(_) => Ok(session_create_reply(
-                &msg.id,
-                refusal("Timeout waiting for agent response"),
-            )),
+            Ok(Err(_)) => {
+                let _ = self
+                    .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
+                    .await;
+                Ok(session_create_reply(&msg.id, refusal("Agent disconnected")))
+            }
+            Err(_) => {
+                let _ = self
+                    .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
+                    .await;
+                Ok(session_create_reply(
+                    &msg.id,
+                    refusal("Timeout waiting for agent response"),
+                ))
+            }
+        }
+    }
+
+    /// Apply a create's staged Environment Binding once the Agent has answered.
+    ///
+    /// A successful create owns the Session, so the attempt may replace a stale
+    /// row or start a new Session empty. The candidate is `None` when the
+    /// request selected no profiles; a successful Session then clears any stale
+    /// same-named row rather than inheriting it. A refusal never calls this.
+    async fn apply_create_binding(
+        &self,
+        session_id: &str,
+        candidate: Option<&crate::env::BindingRecord>,
+    ) -> Option<String> {
+        match candidate {
+            Some(record) => match self.env_service.bindings.put(record).await {
+                Ok(()) => None,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to persist env binding for {session_id} after create: {e:#}"
+                    );
+                    Some(format!(
+                        "Session created, but the Environment Binding could not be persisted: {e:#}"
+                    ))
+                }
+            },
+            None => {
+                // A new Session with no selected profiles starts empty; a row
+                // from a dead same-named Session must not leak into it.
+                self.env_service.bindings.clear_session(session_id).await;
+                None
+            }
         }
     }
 }
