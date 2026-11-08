@@ -77,7 +77,7 @@ render();}
 
 root.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(btn&&root.contains(btn)){e.preventDefault();action(btn.dataset.action,btn);}});
 root.addEventListener('input',e=>{const key=e.target.dataset.field;if(['project','repo','ref','path','name','filter','draftName','draftRepo','draftRef','draftPath'].includes(key)){state[key]=e.target.value;if(key==='filter')render();}});
-root.addEventListener('change',e=>{const key=e.target.dataset.field;if(!key)return;if(key==='useNode'||key==='useRust')state[key]=e.target.checked;else state[key]=e.target.value;if(['digest','agent','useNode','useRust'].includes(key))resetPrep();render();});
+root.addEventListener('change',e=>{const key=e.target.dataset.field;if(!key)return;if(e.target.tagName==='INPUT'&&e.target.type!=='checkbox')return;if(key==='useNode'||key==='useRust')state[key]=e.target.checked;else state[key]=e.target.value;if(['digest','agent','useNode','useRust'].includes(key))resetPrep();render();});
 review.addEventListener('np:resize',e=>{state.width=Number(e.detail?.width||1180);render();});
 review.querySelectorAll('[data-fixture]').forEach(btn=>btn.addEventListener('click',()=>{const next=btn.dataset.fixture;if(next==='no-session'){state.seedSessions=state.sessions.slice();state.sessions=[];state.active='';state.view='sessions';}else if(state.fixture==='no-session'&&state.sessions.length===0){state.sessions=state.seedSessions.slice();state.active=state.sessions[0]?.name||'';state.view=state.active?'terminal':'sessions';}state.fixture=next;resetPrep();review.querySelectorAll('[data-fixture]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.fixture===next)));render();}));
 render();
