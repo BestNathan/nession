@@ -98,6 +98,11 @@ jobs:
           set -e
           [[ "$merge_exit" == 1 ]] || {
             echo "::error::Expected an actual Git merge conflict, got exit $merge_exit"; exit 1; }
+          # Display only Git's own bounded CONFLICT diagnostics. Source text
+          # remains untrusted and is never executed or used as a merge verdict.
+          echo '### Exact-SHA merge-tree conflict summary' >> "$GITHUB_STEP_SUMMARY"
+          awk '/^CONFLICT / {print; if (++n >= 40) exit}' "$RUNNER_TEMP/merge-tree.txt" |
+            tee -a "$GITHUB_STEP_SUMMARY"
           mkdir -p "$RUNNER_TEMP/convergence-agent"
           head -c 40000 "$RUNNER_TEMP/merge-tree.txt" > "$RUNNER_TEMP/merge-tree-bounded.txt"
           jq -n --argjson pr "$PR_NUMBER" --arg branch "$BRANCH" \
