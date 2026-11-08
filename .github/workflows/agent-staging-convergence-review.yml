@@ -80,10 +80,14 @@ jobs:
           else
             head="$BRANCH"; base=main; source="$LANE_SHA"; target="$MAIN_SHA"
           fi
+          # GitHub pull_request.base.sha is a snapshot and can lag behind a
+          # branch push. The live remote target SHA was verified above; never
+          # replace that proof with the cached PR base.sha.
           jq -e --arg head "$head" --arg base "$base" \
-            --arg source "$source" --arg target "$target" '
+            --arg source "$source" --arg repo "$GITHUB_REPOSITORY" '
             .state == "open" and .head.ref == $head and .base.ref == $base and
-            .head.sha == $source and .base.sha == $target and
+            .head.sha == $source and
+            .head.repo.full_name == $repo and .base.repo.full_name == $repo and
             .mergeable_state == "dirty" and
             (.body | startswith("Staging Convergence automated proposal"))' \
             "$RUNNER_TEMP/convergence-pr.json" >/dev/null
@@ -166,6 +170,8 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           MAIN_SHA: ${{ inputs.main_sha }}
           LANE_SHA: ${{ inputs.lane_sha }}
+          BRANCH: ${{ inputs.branch }}
+          DIRECTION: ${{ inputs.direction }}
         shell: bash
         run: |
           set -euo pipefail
@@ -178,11 +184,27 @@ jobs:
             (.repair_steps | type == "array" and length <= 12) and
             ([.repair_steps[] | type == "string" and length <= 600] | all)
           ' "$diagnosis" >/dev/null
+          [[ "$MAIN_SHA" =~ ^[a-f0-9]{40}$ && "$LANE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$ && "$BRANCH" != main && "$BRANCH" != *..* ]]
+          # Revalidate current refs in the privileged publisher job. PR base.sha
+          # may still reflect an old webhook snapshot after the branch advances.
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          current_lane="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)"
+          [[ "$current_main" == "$MAIN_SHA" && "$current_lane" == "$LANE_SHA" ]] || {
+            echo "::error::Conflict review source refs changed before publication"; exit 1; }
+          if [[ "$DIRECTION" == sync-main-to-lane ]]; then
+            head=main; base="$BRANCH"; source="$MAIN_SHA"
+          elif [[ "$DIRECTION" == promote-lane-to-main ]]; then
+            head="$BRANCH"; base=main; source="$LANE_SHA"
+          else
+            echo "::error::Invalid conflict analysis direction"; exit 1
+          fi
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/conflict-pr.json"
-          jq -e --arg main "$MAIN_SHA" --arg lane "$LANE_SHA" '
-            .state == "open" and .mergeable_state == "dirty" and
-            ((.head.sha == $main and .base.sha == $lane) or
-             (.head.sha == $lane and .base.sha == $main)) and
+          jq -e --arg head "$head" --arg base "$base" \
+            --arg source "$source" --arg repo "$GITHUB_REPOSITORY" '
+            .state == "open" and .head.ref == $head and .base.ref == $base and
+            .head.sha == $source and .head.repo.full_name == $repo and
+            .base.repo.full_name == $repo and .mergeable_state == "dirty" and
             (.body | startswith("Staging Convergence automated proposal"))
           ' "$RUNNER_TEMP/conflict-pr.json" >/dev/null
 
