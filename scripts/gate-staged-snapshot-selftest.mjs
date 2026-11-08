@@ -52,6 +52,7 @@ function fixture() {
     'dev-workspace-commit\nrust-format\nweb-eslint\n');
   write(repo, 'crates/demo/src/lib.rs', 'fn clean() {}\n');
   write(repo, 'web/src/Owner.tsx', 'export const clean = true;\n');
+  write(repo, 'web/package.json', '{"name":"staged-snapshot-fixture","private":true}\n');
   write(repo, 'README.md', 'Gate snapshot fixture\n');
 
   git(repo, 'init', '-q', '-b', 'main');
