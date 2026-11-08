@@ -45,7 +45,7 @@ export function validateQwenRepairPublisherIntent(record){
   if(!record||typeof record!=='object'||Array.isArray(record)||
       Object.keys(record).length!==fields.length||
       Object.keys(record).some(x=>!fields.includes(x))||
-      record.schema_version!==1||
+      ![1,2].includes(record.schema_version)||
       record.kind!=='trusted_qwen_repair_publisher_write_ahead'||
       record.repository!==REPO||
       !positive(record.issue)||!HEX.test(record.action_id??'')||
@@ -100,7 +100,7 @@ export function planQwenRepairPublisherIntent({preflight,publisher_run_id}){
       !positive(publisher_run_id))
     fail('no signed Qwen Repair Publisher preflight');
   return validateQwenRepairPublisherIntent({
-    schema_version:1,kind:'trusted_qwen_repair_publisher_write_ahead',
+    schema_version:2,kind:'trusted_qwen_repair_publisher_write_ahead',
     repository:REPO,issue:e.issue,action_id:e.action_id,
     worker_run_id:e.developer_run_id,worker_run_attempt:1,
     worker_sha:e.worker_sha,source_sha:e.source_sha,
@@ -118,7 +118,8 @@ export function planQwenRepairPublisherIntent({preflight,publisher_run_id}){
 }
 export function qwenRepairPublisherIntentPath(record){
   const x=validateQwenRepairPublisherIntent(record);
-  return 'workflows/issues/'+x.issue+'/results/'+x.worker_run_id+
+  return 'workflows/issues/'+x.issue+'/' +
+    (x.schema_version===1?'results':'publisher-intents')+'/' +x.worker_run_id+
     '-1-'+x.action_id+'.json';
 }
 function confirmStore(root,record){
