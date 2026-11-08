@@ -32,7 +32,7 @@ test('both Work detail routes use the identical exact-source lineage panel',()=>
  assert.match(detail,/e\.source_url/);
  assert.match(detail,/e\.source_ref_sha/);
  assert.match(detail,/Logical Slice:/);
- assert.match(detail,/e\\.slice_id/);
+ assert.match(detail,/e\.slice_id/);
  assert.match(detail,/Acceptance SC: Unknown/);
  assert.match(detail,/historical PR HEAD/);
  assert.match(detail,/Lineage window is truncated/);
