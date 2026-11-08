@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| Project / EROFS / Session creation (Existing + Managed, Web/App) | [#3025](https://github.com/BestNathan/nession/issues/3025), [#3021](https://github.com/BestNathan/nession/issues/3021), [#3022](https://github.com/BestNathan/nession/issues/3022) | [Interactive HTML](project-session-3025/index.html) · [Scenario & fidelity](project-session-3025/README.md) |
+
+
 | App Sessions · four-action overflow menu, metadata and typed Kill (App spatial layers) | [#2875](https://github.com/BestNathan/nession/issues/2875) | [Interactive HTML](app-session-actions-2875/index.html) · [Scenario & fidelity](app-session-actions-2875/README.md) · [UI Spec](app-session-actions-2875/UI-SPEC.md) |
 
 | Session-first Web Sidebar (Claude/ChatGPT-inspired; candidate) | [#2851](https://github.com/BestNathan/nession/issues/2851) | [Interactive HTML](sidebar-session-first-2851/index.html) · [Scenario & fidelity](sidebar-session-first-2851/README.md) |

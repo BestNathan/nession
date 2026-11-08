@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Nession · Project / EROFS / Session · #3025</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Project / EROFS</span></nav>
+<span class="np-eyebrow">PROJECT · WORKSPACE · SESSION / DESIGN EXPLORATION</span>
+<div class="np-header-main"><div><h1 class="np-title">Project · EROFS · 创建 Session</h1><p class="np-subtitle">Project 是可持久引用源代码、已有目录和全局 EROFS 镜像的上下文；在真实 Nession Workspace 结构内准备环境并创建 Session。</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3025">Issue #3025</a><a href="https://github.com/BestNathan/nession/issues/3021">Project #3021</a><a href="https://github.com/BestNathan/nession/issues/3022">EROFS #3022</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div>
+<div class="np-meta"><span>Surface: <strong>WebLayout / AppLayers → WorkspaceShell → Project</strong></span><span>Modes: <strong>Existing / Managed</strong></span><span>Evidence: <strong>Mock only</strong></span></div>
+</header>
+<main><section class="np-preview"><div class="np-section-heading"><div><h2>交互产品预览 · 1:1 CSS px</h2><p>先从 Project 工作区进入 Existing 或 Managed 创建流程。模拟故障条件在产品预览下方，绝不属于真实产品 UI。</p></div>
+<div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button><button type="button" data-np-size="1024">Web 1024</button><button type="button" data-np-size="390">App 390</button><button type="button" data-np-size="375">App 375</button><button type="button" data-np-reset>Reset</button></div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"><div id="project-product" class="project-product" data-mode="web"></div></div></div>
+<p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p><div class="np-fixtures" aria-label="External scenario controls"><span class="np-fixtures-title">模拟输入条件</span><button type="button" data-fixture="normal" aria-pressed="true">正常</button><button type="button" data-fixture="offline">节点离线</button><button type="button" data-fixture="download-fail">下载失败</button><button type="button" data-fixture="policy-fail">Sandbox 不可用</button><button type="button" data-fixture="cache-warm">镜像已缓存</button></div></section>
+<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">两种创建方法属于一个 Project。图中 Agent、构建、缓存、Mount、Session 均为演示数据，不对外发起 API 请求。</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>完整可点流程</h3><ol class="np-steps"><li>查看 Project Git Source、MacBook 已有位置和全局 EROFS 引用，点击「项目设置」保存 Source ref 和路径。</li><li>点击「新建 Session」→ Existing → MacBook → 填写名称并提交 → 返回 Terminal。</li><li>再打开 Project → Managed → 选 Linux 节点、Source Digest 和 Node/Rust →「准备镜像」→「创建 Session」。</li><li>测试外部输入「下载失败」「Sandbox 不可用」和「节点离线」，验证错误提示、保留填写内容、不能绕过 Sandbox。</li><li>在 Project 中「构建 EROFS」产生新的不可变 Digest，现有 Session 保持原 Digest。</li><li>Web 1180 → App 390 → Web 1180；App 保持一个 PageHeader/Back，无嵌套桌面侧栏。</li></ol></article>
+<article class="np-detail"><h3>职责边界</h3><p>Project #3021 定义 Source、Locations、Session 默认值。独立 EROFS Manager #3022 构建、存储及分发共享镜像。Agent #3023 负责 PVC 缓存，Sandbox #3024 只 Mount。Session #3025 固定最终 Agent、镜像版本和 ENV Binding。</p><p>不引入 ProjectEnvironment 对象，不分 ExistingProject / ManagedProject。</p></article>
+<article class="np-detail"><h3>信息架构与视觉</h3><p>Web: WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Project capability。App: AppLayers → WorkspacePanel → 单一 AppPageHeader → WorkspaceShell → Project capability。Project 是候选能力，不是已上线的全局导航项。</p><p>CSS 采用当前生成 Nession token 的局部快照，Web Sidebar 246px、App Header 55px；精确像素与真实 Fixture 的 Chromium 对照仍待完成。</p></article>
+<article class="np-detail"><h3>验证与限制</h3><p>在此前 GitHub Task 中实测过 Nession Source EROFS 23.90 MiB、Node+NPM 57.99 MiB、Rust+Clippy 246.47 MiB；本原型仅引用这些数字，不发生真实下载或 Mount。</p><p>Pages 发布 SHA、原型静态检查、真实浏览器体验和生产 Acceptance 是不同证据。</p><details class="np-inspector"><summary>查看状态与 UI Spec</summary><pre id="project-inspector">Project → Existing location | reusable image refs
+Managed → digest resolution → Agent cache → Sandbox → Session</pre></details></article>
+</div></section></main><footer class="np-footer">Nession design prototype · Local deterministic state only · Not production or Acceptance evidence</footer></div>
+<script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script></body></html>
