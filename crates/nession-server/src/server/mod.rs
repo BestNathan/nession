@@ -3,6 +3,7 @@ pub mod client_registry;
 pub mod command_broker;
 pub mod execution;
 mod handler;
+pub mod offline_grace;
 mod orphan_sweep;
 pub mod outbound;
 
