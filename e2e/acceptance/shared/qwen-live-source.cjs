@@ -4,8 +4,23 @@
 // The independently authenticated Pages attester remains the one verifier.
 const assert=require('node:assert/strict');
 const {createHash}=require('node:crypto');
-const {fetchJson,HEX40,REPO}=require('./agent-store-1997.cjs');
+const {HEX40,REPO}=require('./agent-store-1997.cjs');
 const API='https://api.github.com/repos/'+REPO;
+// Cases use only the scoped read-only token of the trusted Acceptance Runner.
+// This is not a GitHub/Store write credential and is never projected to Pages.
+async function api(route){
+  assert.ok(typeof route==='string'&&route.startsWith('/')&&
+    !route.includes('..'),'unsafe source API route');
+  const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
+  const headers={'Accept':'application/vnd.github+json',
+    'X-GitHub-Api-Version':'2022-11-28',
+    'User-Agent':'nession-qwen-case-source'};
+  if(typeof token==='string'&&token.length>=8)
+    headers.Authorization='Bearer '+token;
+  const res=await fetch(API+route,{headers,signal:AbortSignal.timeout(15000)});
+  assert.equal(res.ok,true,'trusted read-only Qwen source API unavailable: '+res.status);
+  return res.json();
+}
 const PRODUCER=/^workflows\/issues\/([1-9][0-9]*)\/producer-results-v2\/([1-9][0-9]*)-([1-9][0-9]*)-([a-f0-9]{64})\.json$/;
 const sha1=bytes=>createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');
 const unavailable=(reason,storeSha=null)=>({status:'unavailable',reason,storeSha,fixture:null,attested:null});
@@ -67,15 +82,15 @@ async function originalZip(id){
   return Buffer.concat(parts,total);
 }
 async function attestLatestQwenProducer(){
-  const store=await fetchJson('/git/ref/heads/agent-store');
+  const store=await api('/git/ref/heads/agent-store');
   const storeSha=store?.object?.sha;
   assert.match(storeSha??'',HEX40,'missing pinned agent-store identity');
-  const tree=await fetchJson('/git/trees/'+storeSha+'?recursive=1');
+  const tree=await api('/git/trees/'+storeSha+'?recursive=1');
   const entries=selectNewestQwenProducer(tree);
   if(!entries.length)return {status:'missing',
     reason:'No real Qwen Developer Result v2 committed yet',storeSha,
     fixture:null,attested:null};
-  const candidate=entries[0],blob=await fetchJson('/git/blobs/'+candidate.entry.sha);
+  const candidate=entries[0],blob=await api('/git/blobs/'+candidate.entry.sha);
   const bytes=decodeGitBlob(blob,candidate.entry);
   const doc=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
   assert.equal(doc.schema_version,2);
@@ -88,34 +103,34 @@ async function attestLatestQwenProducer(){
   assert.equal(doc.result?.kind,'developer');
   assert.ok(positive(doc.implementing_pr?.number));
   assert.match(doc.result.target_sha??'',HEX40);
-  const secondRef=await fetchJson('/git/ref/heads/agent-store');
+  const secondRef=await api('/git/ref/heads/agent-store');
   assert.equal(secondRef?.object?.sha,storeSha,'agent-store ref drift during discovery');
   // The candidate's PR is an untrusted discovery pointer. Neither its
   // self-declared verified flag nor this Blob grants a causal edge.
   const {loadPinnedQwenLineage}=await import(
     '../../../pages/scripts/qwen-lineage-reader.mjs');
   const ref={state:'present',sha:storeSha};
-  const readGitBlob=async sha=>fetchJson('/git/blobs/'+sha);
+  const readGitBlob=async sha=>api('/git/blobs/'+sha);
   const getOriginalStoreBytes=async(file,writer)=>{
     assert.match(writer??'',HEX40);
     assert.match(file,/^workflows\/issues\/[1-9][0-9]*\/producer-results-v2\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\.json$/);
-    const old=await fetchJson('/contents/'+file+'?ref='+writer);
+    const old=await api('/contents/'+file+'?ref='+writer);
     return decodeGitBlob(old,{sha:old.sha,size:old.size});
   };
   const verified=await loadPinnedQwenLineage({
     ref,issueNumbers:[candidate.issue],
     pulls:[{number:doc.implementing_pr.number,head_sha:doc.result.target_sha}],
     maxRecords:1,
-    getTree:sha=>fetchJson('/git/trees/'+sha+'?recursive=1'),
+    getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
     getBlob:readGitBlob,
     getOriginalStoreBytes,
-    getRun:id=>fetchJson('/actions/runs/'+id),
-    getArtifacts:id=>fetchJson('/actions/runs/'+id+'/artifacts?per_page=100'),
+    getRun:id=>api('/actions/runs/'+id),
+    getArtifacts:id=>api('/actions/runs/'+id+'/artifacts?per_page=100'),
     getArtifactZip:originalZip,
-    getPull:id=>fetchJson('/pulls/'+id),
-    getCompare:(writer,current)=>fetchJson('/compare/'+writer+'...'+current),
+    getPull:id=>api('/pulls/'+id),
+    getCompare:(writer,current)=>api('/compare/'+writer+'...'+current),
     getCurrentRef:async()=>{
-      const current=await fetchJson('/git/ref/heads/agent-store');
+      const current=await api('/git/ref/heads/agent-store');
       return {state:'present',sha:current?.object?.sha};
     }
   });
