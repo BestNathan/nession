@@ -195,3 +195,42 @@ test('pinned public reader joins only independently witnessed Qwen source',async
    assert.deepEqual(result.records,[]);
  }
 });
+
+// Real Qwen Artifacts contain a full encrypted native Session, not a tiny ZIP.
+// Its opaque companion may exceed 512 KiB while result.json remains 64 KiB.
+// The attester must hash all transport bytes but extract only the bounded
+// result member and never export ciphertext into the public Pages projection.
+test('original Worker ZIP with >512 KiB encrypted native companion is valid',()=>{
+ const encryptedJson='{"ciphertext":"'+'x'.repeat(768*1024)+'"}';
+ const largeWorkerZip=zip([
+   ['result.json',resultJson],
+   ['proof.json','{"metadata":"bounded"}'],
+   ['ciphertext.json',encryptedJson],
+ ]);
+ assert.ok(largeWorkerZip.length>512*1024);
+ const alteredRecord={...record,artifact:{...record.artifact,
+   digest:'sha256:'+sha(largeWorkerZip)}};
+ const largeBytes=Buffer.from(JSON.stringify(alteredRecord)+'\n');
+ const largePublisherProof={...publisherProof,
+   producer_result_sha256:sha(largeBytes)};
+ const largePublisherZip=zip([['qwen-publisher-result.json',
+   JSON.stringify(largePublisherProof)]]);
+ const state=source();
+ state.workerZip=largeWorkerZip;
+ state.workerArtifacts.artifacts[0].digest='sha256:'+sha(largeWorkerZip);
+ state.producerBytes=largeBytes;
+ state.originalStoreBytes=largeBytes;
+ state.publisherZip=largePublisherZip;
+ state.publisherArtifacts.artifacts[0].digest='sha256:'+sha(largePublisherZip);
+ const verified=attestQwenPublisherSource(state);
+ assert.equal(verified?.issue,issue);
+ assert.equal(verified?.run_id,workerId);
+ assert.equal(verified?.origin.result_digest,sha(largeBytes));
+ assert.equal(verified?.slice_id,null);
+ assert.equal(JSON.stringify(verified).includes('ciphertext'),false);
+ // A Publisher Artifact must still observe its separate 512 KiB cap.
+ state.publisherZip=zip([['qwen-publisher-result.json',
+   JSON.stringify(largePublisherProof)+' '.repeat(600*1024)]]);
+ state.publisherArtifacts.artifacts[0].digest='sha256:'+sha(state.publisherZip);
+ assert.equal(attestQwenPublisherSource(state),null);
+});
