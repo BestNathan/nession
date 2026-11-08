@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Run content Gates against the exact Git index, never a partially staged
+# developer worktree. dev-workspace-commit alone checks live Git metadata.
+set -euo pipefail
+
+GATES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${GATES_DIR}/.." && pwd -P)"
+cd "$REPO_ROOT"
+
+error() { printf '[ERROR] pre-commit staged snapshot: %s\n' "$*" >&2; exit 2; }
+[ "$#" -gt 0 ] || error 'no Gates were selected'
+[ -n "${NESSION_INDEX_TREE:-}" ] || error 'hook did not pin an index tree'
+# SHA-1 or SHA-256 Git repositories; only a real Git write-tree result is valid.
+[[ "$NESSION_INDEX_TREE" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]] ||
+  error 'invalid pinned index tree'
+
+assert_index_unchanged() {
+  local current
+  if ! current="$(git write-tree 2>/dev/null)" || [ "$current" != "$NESSION_INDEX_TREE" ]; then
+    error 'Git index changed or became unreadable during validation; retry the commit'
+  fi
+}
+assert_index_unchanged
+
+content_ids=()
+workspace_ids=()
+for id in "$@"; do
+  case "$id" in
+    dev-workspace-commit) workspace_ids+=("$id") ;;
+    *) content_ids+=("$id") ;;
+  esac
+done
+
+# The workspace policy needs the real linked worktree's .git metadata.
+# Run the canonical Gate without granting other checks access to unstaged files.
+unset NESSION_PRE_COMMIT_STAGED
+result=0
+if [ "${#workspace_ids[@]}" -gt 0 ]; then
+  if "$GATES_DIR/run" "${workspace_ids[@]}"; then :; else
+    result=$?
+  fi
+fi
+
+if [ "${#content_ids[@]}" -gt 0 ]; then
+  snapshot="$(mktemp -d "${TMPDIR:-/tmp}/nession-staged-index.XXXXXX")" ||
+    error 'could not create a private staged snapshot'
+  trap 'rm -rf "$snapshot"' EXIT
+
+  # git archive reads the pinned tree object, including partially staged blobs.
+  # It creates no worktree or index mutations and preserves tracked symlinks.
+  if ! git archive --format=tar "$NESSION_INDEX_TREE" | tar -xf - -C "$snapshot"; then
+    error 'could not export the pinned staged tree'
+  fi
+
+  # Tool installation is deliberately not versioned in Git. Reuse local
+  # dependencies without reading unstaged application/configuration sources.
+  for dependency in node_modules web/node_modules; do
+    if [ -d "$REPO_ROOT/$dependency" ] &&
+       [ ! -e "$snapshot/$dependency" ] && [ ! -L "$snapshot/$dependency" ]; then
+      if ! ln -s "$REPO_ROOT/$dependency" "$snapshot/$dependency"; then
+        error "could not link local tooling: $dependency"
+      fi
+    fi
+  done
+
+  # Git exports repository variables into hooks. Clear those in the foreign
+  # snapshot so a nested Git call cannot accidentally inspect the caller's
+  # index. Gate scripts and sources are resolved inside this pinned snapshot.
+  if (
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+    unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+    unset NESSION_INDEX_TREE
+    cd "$snapshot"
+    ./gates/run "${content_ids[@]}"
+  ); then :; else
+    status=$?
+    if [ "$status" -eq 2 ]; then result=2
+    elif [ "$result" -ne 2 ]; then result=1
+    fi
+  fi
+fi
+
+# Do not authorize a commit whose index was restaged while Gates were running.
+assert_index_unchanged
+exit "$result"
