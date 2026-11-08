@@ -165,4 +165,22 @@ assert.throws(()=>resolveTrustedIngestSource({environment:{...env,GITHUB_ACTOR:'
   /exact owner\/main/);
 assert.throws(()=>resolveTrustedIngestSource({environment:{...env,GITHUB_REF:'refs/pull/1/merge'},event}),
   /main-owned/);
+// New #3001 Qwen v2 canary remains an exact, owner-only recovery locator.
+// The real Worker Run and signed original Artifacts are re-read by Ingest.
+const qwen3001='/nession ingest-qwen issue=3001 worker_run=42488022265';
+const real3001={...event,issue:{number:3001,state:'open'},comment:{
+  id:456,body:qwen3001,user:{login:'BestNathan'}
+}};
+assert.deepEqual(resolveTrustedIngestSource({environment:env,event:real3001}),{
+  run_id:42488022265,source:null,qwen_recovery:true,attempt:1
+});
+for(const patch of [
+  {comment:{...real3001.comment,body:qwen3001+' '}},
+  {comment:{...real3001.comment,body:qwen3001.replace('42488022265','42488022266')}},
+  {comment:{...real3001.comment,user:{login:'foreign'}}},
+  {issue:{number:3002}},{action:'edited'},
+])assert.throws(()=>resolveTrustedIngestSource({
+  environment:env,event:{...real3001,...patch}
+}),/exact owner\/main/);
+
 console.log('Development Ingest v2: signed parent, exact Worker/Action owner fallback and forgery negatives passed');
