@@ -71,12 +71,16 @@ state.
   `nession-tmux` carries no business fields; it only exposes the tmux Session's
   `@nession_instance_id` user option through `SessionSummary`/`show-option`.
 - **Identity fence:** the directory key is the tmux Session's
-  `@nession_instance_id`, not its name. The Agent creates and persists that
-  opaque UUID on first metadata access. It survives an Agent restart while the
-  tmux Session survives; killing and recreating the same
+  `@nession_instance_id`, not its name. The Agent fixes that opaque UUID when it
+  creates the Session — the same `new-session` delivers it to the Session's
+  environment and the create records it as the durable option — while a legacy
+  Session initializes one on first access. It survives an Agent restart
+  while the tmux Session survives; killing and recreating the same
   `agent_id:session_name` yields a new instance and therefore no inherited
   metadata. Absent metadata is revision 0 — a legacy Session needs no
-  migration step.
+  migration step. The Claude binding file is fenced by the same instance id
+  (`#2974`), so a recreated same-name Session cannot read a deleted Session's
+  conversation either.
 - **Mutation contract:** writes are validated in the Protocol Kernel
   (`SessionMetadata` / `validate_session_metadata`), atomic (temp + rename) and
   guarded by an optimistic revision under one per-instance lock. A stale
