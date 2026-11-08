@@ -7,13 +7,13 @@ const SHA=/^[a-f0-9]{40}$/;
 const RESULT=/^workflows\/issues\/([1-9][0-9]*)\/results\/([1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\.json)$/;
 const validIssue=n=>Number.isSafeInteger(n)&&n>0;
 const unavailable=()=>({status:'unavailable',source_ref_sha:null,records:[],truncated:false});
-const gitBlobSha=bytes=>createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex');
+const gitBlobSha=bytes=>createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');
 const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
 function decodeBlob(blob,entry){
   if(blob?.encoding!=='base64'||blob.sha!==entry.sha||
      !Number.isSafeInteger(blob.size)||blob.size<2||blob.size>65536||
      typeof blob.content!=='string'||blob.content.length>100000)throw Error('invalid pinned blob');
-  const b64=blob.content.replace(/\\s/g,'');
+  const b64=blob.content.replace(/\s/g,'');
   if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64))
     throw Error('invalid blob encoding');
   const bytes=Buffer.from(b64,'base64');
