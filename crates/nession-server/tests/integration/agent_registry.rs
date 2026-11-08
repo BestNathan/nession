@@ -43,6 +43,7 @@ async fn test_agent_registration() {
         active_sessions: 0,
         protocol_manifest: None,
         probe_generation: 0,
+        offline_generation: 0,
     };
 
     registry.register(agent.clone()).await;
@@ -77,6 +78,7 @@ async fn test_agent_heartbeat_update() {
         active_sessions: 0,
         protocol_manifest: None,
         probe_generation: 0,
+        offline_generation: 0,
     };
 
     registry.register(agent).await;
@@ -119,6 +121,7 @@ async fn test_heartbeat_status_transition_is_meaningful() {
         active_sessions: 0,
         protocol_manifest: None,
         probe_generation: 0,
+        offline_generation: 0,
     };
     registry.register(agent).await;
 
@@ -155,6 +158,7 @@ async fn test_agent_list_all() {
             active_sessions: 0,
             protocol_manifest: None,
             probe_generation: 0,
+            offline_generation: 0,
         })
         .await;
     registry
@@ -179,6 +183,7 @@ async fn test_agent_list_all() {
             active_sessions: 0,
             protocol_manifest: None,
             probe_generation: 0,
+            offline_generation: 0,
         })
         .await;
 
@@ -211,6 +216,7 @@ async fn test_agent_unregister() {
             active_sessions: 0,
             protocol_manifest: None,
             probe_generation: 0,
+            offline_generation: 0,
         })
         .await;
 
@@ -244,11 +250,17 @@ async fn test_agent_check_offline() {
         active_sessions: 0,
         protocol_manifest: None,
         probe_generation: 0,
+        offline_generation: 0,
     };
     registry.register(agent.clone()).await;
 
     let offline = registry.check_offline_agents().await;
-    assert_eq!(offline, vec!["stale"]);
+    assert_eq!(offline.len(), 1, "one Online→Offline transition");
+    assert_eq!(offline[0].agent_id, "stale");
+    assert_eq!(
+        offline[0].offline_generation, 1,
+        "the transition opens the agent's first offline episode"
+    );
 
     let updated = registry.get("stale").await.unwrap();
     assert_eq!(updated.status, AgentStatus::Offline);
@@ -279,6 +291,7 @@ async fn test_agent_check_offline_skips_already_offline() {
         active_sessions: 0,
         protocol_manifest: None,
         probe_generation: 0,
+        offline_generation: 0,
     };
     registry.register(agent).await;
 

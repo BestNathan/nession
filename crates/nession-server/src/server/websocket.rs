@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 use super::handler::{ConnectionHandler, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
-use crate::registry::{AgentRegistry, AgentStatus, SessionRegistry};
+use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
 use crate::server::execution::{
@@ -147,7 +147,8 @@ impl WebSocketServer {
                 loop {
                     ticker.tick().await;
                     let offline = agent_registry.check_offline_agents().await;
-                    for agent_id in offline {
+                    for transition in offline {
+                        let agent_id = transition.agent_id;
                         info!("Agent {} marked offline (heartbeat timeout)", agent_id);
                         // A liveness verdict, not a disconnect: nobody is
                         // heartbeating for this agent, so there is no owner to
@@ -157,42 +158,20 @@ impl WebSocketServer {
                         // went quiet without dropping its WebSocket.
                         command_broker.evict_agent(&agent_id).await;
 
-                        // Schedule session cleanup after 30s grace period.
-                        // If the agent reconnects before the grace period
-                        // expires, its sessions are preserved.
-                        let session_registry = Arc::clone(&session_registry);
-                        let agent_registry = Arc::clone(&agent_registry);
-                        let env_service = Arc::clone(&env_service);
-                        let web_client_registry = Arc::clone(&web_client_registry);
-                        let agent_id_clone = agent_id.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                            // Only clean if agent is still offline after grace period.
-                            if let Some(agent) = agent_registry.get(&agent_id_clone).await {
-                                if agent.status == AgentStatus::Offline {
-                                    info!(
-                                        "Cleaning sessions for offline agent {} (grace period expired)",
-                                        agent_id_clone
-                                    );
-                                    // Collect session IDs first so we can clear their
-                                    // env usage locks after removal.
-                                    let removed =
-                                        session_registry.remove_by_agent(&agent_id_clone).await;
-                                    for session_id in &removed {
-                                        env_service.clear_session_state(session_id).await;
-                                    }
-                                    if !removed.is_empty() {
-                                        // Push the shrunken list so browsers stop
-                                        // showing sessions that are now gone.
-                                        web_client_registry
-                                            .broadcast_sessions_changed(Arc::clone(
-                                                &session_registry,
-                                            ))
-                                            .await;
-                                    }
-                                }
-                            }
-                        });
+                        // Schedule session cleanup after the grace period,
+                        // bound to the offline episode this transition opened.
+                        // If the agent heartbeats or re-registers before the
+                        // grace expires, the cleanup stands down; if a later
+                        // offline interval begins, this task cannot remove its
+                        // Sessions (#2997).
+                        tokio::spawn(super::offline_grace::schedule_expired_offline_cleanup(
+                            Arc::clone(&agent_registry),
+                            Arc::clone(&session_registry),
+                            Arc::clone(&env_service),
+                            Arc::clone(&web_client_registry),
+                            agent_id,
+                            transition.offline_generation,
+                        ));
                     }
                 }
             });
