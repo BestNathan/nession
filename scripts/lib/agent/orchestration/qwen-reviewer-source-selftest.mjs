@@ -116,8 +116,8 @@ try{
     'workflows/issues/'+ISSUE+'/results/301-1-'+developerAction.id+'.json');
   const v2File=path.join(root,v2Relative);
   fs.mkdirSync(path.dirname(v2File),{recursive:true});
-  fs.writeFileSync(v2File,JSON.stringify(v2)+'\\n');
-  fs.writeFileSync(file,JSON.stringify(intent)+'\\n');
+  fs.writeFileSync(v2File,JSON.stringify(v2)+'\n');
+  fs.writeFileSync(file,JSON.stringify(intent)+'\n');
   assert.throws(()=>qwenReviewerPublishedSource(source),
     /unique Qwen review publication Intent/,
     'duplicate old+new publisher identity must not produce an ambiguous Review');
@@ -125,7 +125,7 @@ try{
   assert.equal(qwenReviewerPublishedSource(source).branch,
     'refs/heads/'+v2.branch);
   // A well-formed v2 copied into the legacy directory is a spoofed path.
-  fs.writeFileSync(file,JSON.stringify(v2)+'\\n');
+  fs.writeFileSync(file,JSON.stringify(v2)+'\n');
   assert.throws(()=>qwenReviewerPublishedSource(source),
     /Publisher Intent path differs from immutable action/);
 
