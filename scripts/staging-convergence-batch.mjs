@@ -3,6 +3,9 @@
 // Model suggestions never authorize a merge or a "not required" decision.
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {catalogFromPaths} from './issue-e2e-plan.mjs';
 import {parseIssueE2E,verifyIssueE2EAgainstCatalog} from './issue-e2e-contract.mjs';
 import {auditIssue} from './issue-contract.mjs';
@@ -179,6 +182,45 @@ function selfTest(){
   assert.equal(verifyBatchIssue(issue,plan,[{...approval,user:{login:'other'}}]).approved,false);
   assert.throws(()=>verifyBatchIssue(issue,{...plan,identity:'stale'},[approval]),/stale/);
   assert.throws(()=>verifyBatchIssue({...issue,body:body.replace('- session-metadata','- none: fake')},plan,[approval]));
-  console.log('Staging convergence batch E2E contract: positive/negative fixtures PASS');
+  // A historically touched browser spec must remain obligated even when
+  // main later reverts that file and the final integration net diff omits it.
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-convergence-batch-'));
+  const original=process.cwd();
+  try{
+    process.chdir(tmp);
+    git('init','-q','-b','main');
+    git('config','user.name','Convergence Test');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync('e2e/tests/browser',{recursive:true});
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','base');
+    git('checkout','-qb','staging');
+    fs.writeFileSync('README.md','Staging-only change\\n');
+    git('add','.');git('commit','-qm','staging own commit');
+    const lane=git('rev-parse','HEAD');
+    git('checkout','main');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// changed historically\\n');
+    git('add','.');git('commit','-qm','touch browser regression');
+    fs.writeFileSync('e2e/tests/browser/fixture-git.spec.ts','// base\\n');
+    git('add','.');git('commit','-qm','restore browser regression');
+    fs.writeFileSync('e2e/tests/browser/another-test.spec.ts','// new test\\n');
+    git('add','.');git('commit','-qm','new browser ID');
+    const main=git('rev-parse','HEAD');
+    const tree=git('merge-tree','--write-tree',lane,main).split(/\\s+/)[0];
+    const integration=git('commit-tree',tree,'-p',lane,'-p',main,
+      '-m','checked exact integration');
+    assert.equal(diff(lane,integration).includes('e2e/tests/browser/fixture-git.spec.ts'),false,
+      'fixture genuinely has no net browser change');
+    const source=planBatch({branch:'staging',main_sha:main,
+      lane_sha:lane,integration_head:integration});
+    assert.deepEqual(source.newIds,['another-test']);
+    assert.deepEqual(source.regressionIds,['fixture-git']);
+    assert.throws(()=>planBatch({branch:'staging',main_sha:lane,
+      lane_sha:main,integration_head:integration}),/parent identity/);
+  }finally{
+    process.chdir(original);
+    fs.rmSync(tmp,{recursive:true,force:true});
+  }
+  console.log('Staging convergence batch E2E contract: historical source + approval negatives PASS');
 }
 if(process.argv[2]==='self-test')selfTest();
