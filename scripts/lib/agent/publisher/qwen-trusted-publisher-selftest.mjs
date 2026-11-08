@@ -93,7 +93,7 @@ assert.equal(good.source.output_sha,readback.head_sha);
 assert.equal(good.implementing_pr.head_sha_at_attestation,readback.head_sha);
 assert.equal(good.artifact.id,originalResult.id);
 for(const bad of [
-  {receipt:{...attReceipt,source_sha:'e'.repeat(40)}},
+  {claim:{inputs:{...claim.inputs,input_sha:'e'.repeat(40)}}},
   {worker:{...worker,run_attempt:2}},
   {worker:{...worker,repository:{full_name:'evil/repo'}}},
   {worker:{...worker,path:'.github/workflows/foreign.yml'}},
