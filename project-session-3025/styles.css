@@ -42,3 +42,16 @@
 .project-product[data-mode=app] .app-projects{border-top:1px solid var(--nession-border);padding-top:18px}
 .project-product[data-mode=app] .app-projects .project-entry{min-height:50px;padding:13px 8px}
 .project-product .side-row:focus-visible{outline:2px solid var(--nession-ring);outline-offset:-2px}
+
+.project-product .project-navrow{display:flex;position:relative;align-items:center;gap:2px}.project-product .project-navrow .project-entry{flex:1;min-width:0}
+.project-product .project-add,.project-product .project-menu-trigger{min-width:30px;height:30px;border-radius:8px;font-size:20px}
+.project-product .project-add:hover,.project-product .project-menu-trigger:hover{background:var(--nession-muted)}
+.project-product .project-context-menu{position:absolute;right:0;top:100%;z-index:30;background:#fff;border:1px solid var(--nession-border);border-radius:9px;min-width:165px;box-shadow:0 9px 25px #10182724;padding:4px}
+.project-product .project-context-menu .menu-item{display:block;text-align:left;padding:9px 12px;width:100%;border-radius:6px;font-size:12px}
+.project-product .project-context-menu .menu-item:hover{background:var(--nession-surface)}
+.project-product .project-context-menu .danger{color:var(--nession-danger)}
+.project-product .project-dialog-scrim{position:absolute;z-index:120;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:#10203055}
+.project-product .project-dialog{background:#fff;border:1px solid var(--nession-border);border-radius:12px;max-width:440px;width:100%;padding:23px;box-shadow:0 20px 45px #12223b35}
+.project-product .project-dialog h2{font-size:18px;margin:0 0 10px}.project-product .project-dialog p{font-size:12px;line-height:1.7;color:var(--nession-text-secondary);margin:0 0 24px}
+.project-product .project-dialog .negative{background:#a23b34;color:white;border-color:#a23b34}
+.project-product .side-projects{max-height:240px;overflow:visible}

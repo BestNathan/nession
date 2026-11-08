@@ -43,3 +43,7 @@ Source: https://github.com/BestNathan/nession/tree/prototype/project-session-302
 ## Non-goals
 
 No extra EROFS Manager top-level dashboard, automatic scheduler, real session creation, OCI layers, private Github auth, sandbox privileged host test, real browser production parity, or ProjectEnvironment object.
+
+## Project maintenance decision
+
+Projects in the Web Sidebar and App Sessions are direct maintenance entry points: + creates a name-only Project, rows select the standalone detail, ··· opens Rename/Settings or Delete (confirmation required). Detail settings control name, optional GitHub Source/ref and Existing Agent directory. Project deletion does not destroy Sessions, owned directories or globally shared EROFS. Multi-project mock state is not Server persistence. Browser tests and public SHA must be renewed for this revision.

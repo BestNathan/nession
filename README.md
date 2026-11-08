@@ -136,3 +136,7 @@ Following the cross-gallery defect repair, the next scoped iteration compares mo
 ## 2026-11-09 · Project navigation decision (#3021/#3025)
 
 The Project prototype now tests a **first-class Projects section in Web Sidebar**, plus **Projects in App's Sessions layer**. Clicking opens a standalone Project detail, independent of any selected Session; Existing/Managed creation remains within detail. This supersedes the former Project-only-as-Session-Workspace-capability presentation. A No Session fixture proves that Project can still open and seed a first Session. Backend Project and EROFS ownership are unchanged. Source/publisher/Chromium checks for this revision are tracked on #3025, not inherited from the previous prototype SHA.
+
+## Project maintenance refinement
+
+The Project/EROFS prototype now provides Projects + Create, per-row edit/delete action menu, explicit delete confirmation, optional Project Source and Agent location, and per-Project detail selection. Project deletion does not touch existing Sessions or shared image data. UI is a mock; see #3021/#3025 for API implementation and verification.
