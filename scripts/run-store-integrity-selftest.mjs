@@ -78,7 +78,7 @@ assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/hea
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/states/00000001.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/results/33-1-'+'a'.repeat(64)+'.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/producer-results-v2/33-1-'+'a'.repeat(64)+'.json'),'immutable');
-assert.equal(classifyRunStorePath(S,'workflows/issues/1664/producer-results-v2/../secrets'),'unclassified');
+assert.throws(()=>classifyRunStorePath(S,'workflows/issues/1664/producer-results-v2/../secrets'),/unsafe/);
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/checkpoints/00000001.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/runs/33-1.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'e2e-failures/'+'a'.repeat(64)+'/states/00000001.json'),'immutable');
