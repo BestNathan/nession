@@ -13,6 +13,7 @@ import {classifyChangedPaths} from './e2e-full-applicability.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
 const MARKER='nession-convergence-batch:v1',APPROVAL='/approve-staging-convergence';
+export const AUDIT_APPROVAL='STAGING_CONVERGENCE_AUDIT_V1';
 const git=(...args)=>execFileSync('git',args,{encoding:'utf8',maxBuffer:8_000_000}).trim();
 const list=s=>s.split('\n').filter(Boolean);
 const api=(...args)=>{
@@ -112,7 +113,7 @@ export function approvalCommand(plan,digest){
   if(!/^[a-f0-9]{64}$/.test(digest))throw Error('invalid Issue E2E digest');
   return APPROVAL+' '+plan.integration_head+' '+digest;
 }
-export function verifyBatchIssue(issue,plan,comments=[]){
+export function verifyBatchIssue(issue,plan,comments=[],auditRuns=[]){
   if(!issue||issue.state!=='open'||!Number.isInteger(issue.number)||
     !issue.body?.includes('<!-- '+plan.identity+' -->'))
     throw Error('missing or stale source-bound integration Issue');
@@ -124,10 +125,23 @@ export function verifyBatchIssue(issue,plan,comments=[]){
   for(const id of [...plan.newIds,...plan.regressionIds])
     if(!parsed.selectedIds.includes(id))throw Error('historical E2E obligation missing: '+id);
   const command=approvalCommand(plan,parsed.digest);
-  const approved=comments.some(c=>c?.body?.trim()===command&&
+  const humanApproved=comments.some(c=>c?.body?.trim()===command&&
     c?.user?.login==='BestNathan'&&!c.deleted_at);
-  return {approved,reason:approved?'SOURCE_BOUND_OWNER_APPROVED':
-    'PENDING_SOURCE_BOUND_ISSUE_AUDIT',declaration_digest:parsed.digest,
+  const auditApproved=comments.some(c=>{
+    const match=new RegExp('^'+AUDIT_APPROVAL+' '+plan.integration_head+
+      ' '+parsed.digest+' run=([1-9][0-9]*)$').exec(c?.body?.trim()??'');
+    if(!match||c?.user?.login!=='github-actions[bot]')return false;
+    const run=auditRuns.find(r=>r.id===Number(match[1]));
+    return run?.name==='Agent / Issue Audit'&&run.event==='workflow_dispatch'&&
+      run.status==='completed'&&run.conclusion==='success'&&
+      run.head_branch==='main'&&run.repository?.full_name===REPO&&
+      run.head_repository?.full_name===REPO&&
+      Date.parse(run.created_at)>=Date.parse(issue.created_at);
+  });
+  const approved=humanApproved||auditApproved;
+  return {approved,reason:humanApproved?'SOURCE_BOUND_OWNER_APPROVED':
+    auditApproved?'SOURCE_BOUND_ISSUE_AUDIT_APPROVED':'PENDING_SOURCE_BOUND_ISSUE_AUDIT',
+    declaration_digest:parsed.digest,
     approval_command:command,selected_ids:parsed.selectedIds};
 }
 export function findBatchIssue(plan){
@@ -163,7 +177,12 @@ export function issueApproval(plan,number){
   if(issue.pull_request)throw Error('integration Issue cannot be a PR');
   const comments=api('repos/'+REPO+'/issues/'+number+'/comments?per_page=100');
   if(!Array.isArray(comments)||comments.length>=100)throw Error('unbounded approval comments');
-  return verifyBatchIssue(issue,plan,comments);
+  const ids=comments.map(c=>new RegExp('^'+AUDIT_APPROVAL+' '+plan.integration_head+
+    ' [0-9a-f]{64} run=([1-9][0-9]*)$').exec(c?.body?.trim()??''))
+    .filter(Boolean).map(x=>Number(x[1]));
+  if(new Set(ids).size>10)throw Error('unbounded Issue Audit run verification');
+  const auditRuns=[...new Set(ids)].map(id=>api('repos/'+REPO+'/actions/runs/'+id));
+  return verifyBatchIssue(issue,plan,comments,auditRuns);
 }
 function selfTest(){
   const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
@@ -180,6 +199,15 @@ function selfTest(){
   assert.equal(verifyBatchIssue(issue,plan,[]).approved,false);
   assert.equal(verifyBatchIssue(issue,plan,[approval]).approved,true);
   assert.equal(verifyBatchIssue(issue,plan,[{...approval,user:{login:'other'}}]).approved,false);
+  const auditComment={user:{login:'github-actions[bot]'},
+    body:AUDIT_APPROVAL+' '+c+' '+parsed.digest+' run=42'};
+  const run={id:42,name:'Agent / Issue Audit',event:'workflow_dispatch',
+    status:'completed',conclusion:'success',head_branch:'main',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    created_at:'2026-11-08T00:00:01Z'};
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[run]).approved,true);
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[{...run,conclusion:'failure'}]).approved,false);
+  assert.equal(verifyBatchIssue(issue,plan,[auditComment],[{...run,head_branch:'staging'}]).approved,false);
   assert.throws(()=>verifyBatchIssue(issue,{...plan,identity:'stale'},[approval]),/stale/);
   assert.throws(()=>verifyBatchIssue({...issue,body:body.replace('- session-metadata','- none: fake')},plan,[approval]));
   // A historically touched browser spec must remain obligated even when
