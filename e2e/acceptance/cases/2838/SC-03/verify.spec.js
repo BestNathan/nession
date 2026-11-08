@@ -12,20 +12,20 @@ test('SC-03: tracked diffs stay intact and missing/unsupported paths are explici
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/fixture/workspace?capability=git');
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').first().click();
+  await page.getByTestId('git-row-unstaged').first().click();
   await expect(page.getByTestId('git-diff-patch').locator('diffs-container')).toBeVisible();
   await expect(page.getByTestId('git-diff-path')).toHaveText('web/src/capabilities/git/GitPlugin.ts');
 
   await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
   await page.reload();
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/large.ts' }).click();
+  await page.getByTestId('git-row-unstaged').filter({ hasText: 'src/large.ts' }).click();
   await expect(page.getByTestId('git-diff-truncated')).toContainText('4.0 KB');
 
   await page.goto('/#/fixture/workspace?capability=git&git=preview-states');
   await page.reload();
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/deleted.ts' }).click();
+  await page.getByTestId('git-row-unstaged').filter({ hasText: 'src/deleted.ts' }).click();
   await expect(page.getByTestId('git-diff-unavailable')).toContainText('no longer available');
 
   await page.getByTestId('git-row-untracked').filter({ hasText: 'src/link' }).click();

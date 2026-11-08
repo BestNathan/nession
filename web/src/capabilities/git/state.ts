@@ -8,28 +8,61 @@ import type {
 /**
  * The repository listing, shaped for the view.
  *
- * The kind is the preview mode: tracked rows open a bounded `HEAD → worktree`
- * diff, while untracked and conflicted rows open their actual worktree bytes.
- * #750 made untracked rows inert because Git has no diff for them; #2838
- * supersedes that interaction limitation without pretending the row has a
- * diff.
+ * A tracked path can appear twice: once in the index and once in the worktree.
+ * Those are two different reviewed states, so they are two rows with different
+ * identities, and the row itself selects the diff source (`HEAD → INDEX` or
+ * `INDEX → WORKTREE`) rather than letting a renderer infer it from one combined
+ * patch. Untracked and conflicted rows open their worktree bytes instead —
+ * Git has no diff baseline for them (#2838).
+ *
+ * `key` exists because `path` alone no longer identifies a row: a file staged
+ * and then edited again is both `staged:path` and `unstaged:path`.
  */
 export type GitRow =
-  /** Tracked and changed — opens the bounded combined diff. */
-  | { kind: 'tracked'; path: string; file: GitChangedFile }
-  /** Git has no baseline; opens a bounded worktree file preview. */
-  | { kind: 'untracked'; path: string }
   /** Mid-merge/rebase conflict; opens the current worktree bytes. */
-  | { kind: 'unmerged'; path: string };
+  | { kind: 'unmerged'; path: string; key: string }
+  /** In the index — opens `HEAD → INDEX` and offers Unstage. */
+  | { kind: 'staged'; path: string; key: string; file: GitChangedFile }
+  /** Changed in the worktree — opens `INDEX → WORKTREE` and offers Stage. */
+  | { kind: 'unstaged'; path: string; key: string; file: GitChangedFile }
+  /** Git has no baseline; opens a bounded worktree file preview and offers Stage. */
+  | { kind: 'untracked'; path: string; key: string };
+
+export function rowKey(kind: GitRow['kind'], path: string): string {
+  return `${kind}:${path}`;
+}
 
 export function statusRows(status: GitStatus): GitRow[] {
-  return [
-    ...status.unmerged.map((path): GitRow => ({ kind: 'unmerged', path })),
-    ...status.modified.map(
-      (file): GitRow => ({ kind: 'tracked', path: file.path, file }),
-    ),
-    ...status.untracked.map((path): GitRow => ({ kind: 'untracked', path })),
-  ];
+  const rows: GitRow[] = [];
+
+  for (const path of status.unmerged) {
+    rows.push({ kind: 'unmerged', path, key: rowKey('unmerged', path) });
+  }
+  for (const file of status.modified) {
+    if (file.staged) {
+      rows.push({
+        kind: 'staged',
+        path: file.path,
+        key: rowKey('staged', file.path),
+        file,
+      });
+    }
+  }
+  for (const file of status.modified) {
+    if (file.unstaged) {
+      rows.push({
+        kind: 'unstaged',
+        path: file.path,
+        key: rowKey('unstaged', file.path),
+        file,
+      });
+    }
+  }
+  for (const path of status.untracked) {
+    rows.push({ kind: 'untracked', path, key: rowKey('untracked', path) });
+  }
+
+  return rows;
 }
 
 /**
@@ -169,6 +202,11 @@ export function stagedSplit(status: GitStatus): { staged: number; unstaged: numb
     staged: status.modified.filter((file) => file.staged).length,
     unstaged: status.modified.filter((file) => file.unstaged).length,
   };
+}
+
+/** How many tracked paths the index holds — the commit form's subject. */
+export function stagedCount(status: GitStatus): number {
+  return stagedSplit(status).staged;
 }
 
 /** The porcelain-ish letter a compact listing leads with. */

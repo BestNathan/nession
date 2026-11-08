@@ -66,13 +66,13 @@ describe('consumer contract resolution end to end', () => {
   }
 
   it('carries the version the agent advertised all the way to the request', async () => {
-    await listAgents([agent('a1', [1])]);
+    await listAgents([agent('a1', [2])]);
 
     const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
     expect(surface.requests[0].payload).toEqual({
       agent_id: 'a1',
       session: 'a1:work',
-      contract_version: 1,
+      contract_version: 2,
     });
     surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
@@ -99,15 +99,14 @@ describe('consumer contract resolution end to end', () => {
   it('resolves each agent against its own manifest', async () => {
     await listAgents([agent('a1', [2]), agent('a2', [1])]);
 
-    await expect(git.gitStatus({ agent_id: 'a1', session: 'a1:work' })).rejects.toThrow(
-      '`a1` offers `git.status` at [v2]',
-    );
-    expect(surface.requests, 'the refused call never left').toHaveLength(0);
-
-    const pending = git.gitStatus({ agent_id: 'a2', session: 'a2:work' });
-    expect(surface.requests[0].payload).toMatchObject({ contract_version: 1 });
+    const pending = git.gitStatus({ agent_id: 'a1', session: 'a1:work' });
+    expect(surface.requests[0].payload).toMatchObject({ contract_version: 2 });
     surface.resolveNext('git.status', statusResponse);
     await expect(pending).resolves.toEqual(statusResponse);
+
+    await expect(git.gitStatus({ agent_id: 'a2', session: 'a2:work' })).rejects.toThrow(
+      '`a2` offers `git.status` at [v1]',
+    );
   });
 
   it('stops resolving once the agent list stops listing the agent', async () => {

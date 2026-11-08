@@ -23,7 +23,10 @@ test('SC-02: an unmerged row opens one truthful conflict preview or a missing st
   await expect(page.getByTestId('git-file-preview-text')).toContainText('>>>>>>> other');
   await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
   await expect(
-    page.getByTestId('git-row-tracked').filter({ hasText: 'src/conflict.ts' }),
+    page.getByTestId('git-row-staged').filter({ hasText: 'src/conflict.ts' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByTestId('git-row-unstaged').filter({ hasText: 'src/conflict.ts' }),
   ).toHaveCount(0);
 
   const missing = page.getByTestId('git-row-unmerged').filter({

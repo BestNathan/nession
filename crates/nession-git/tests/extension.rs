@@ -39,6 +39,27 @@ fn run(ext: &GitAgentExtension, command: &str, payload: Value) -> Result<Value> 
         .block_on(async { ext.handle_command(command, payload).await })
 }
 
+/// Run git for a fixture with inherited repository variables scrubbed.
+///
+/// A test run under a git hook inherits `GIT_DIR` (and friends); without this,
+/// `git -C <tempdir>` still addresses the caller's checkout — the isolation bug
+/// the #845 pre-push run exposed.
+fn git_output(root: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(args);
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+    ] {
+        command.env_remove(var);
+    }
+    command.output()
+}
+
 /// A committed repository, built the same way `repository.rs` builds one.
 fn repo() -> Result<tempfile::TempDir> {
     let dir = tempfile::tempdir()?;
@@ -47,28 +68,20 @@ fn repo() -> Result<tempfile::TempDir> {
         vec!["config", "user.email", "test@example.com"],
         vec!["config", "user.name", "Test"],
     ] {
-        let mut cmd = Command::new("git");
-        cmd.arg("-C")
-            .arg(dir.path())
-            .args(&args)
-            .env_remove("GIT_DIR");
-        let out = cmd.output()?;
+        let out = git_output(dir.path(), &args)?;
         anyhow::ensure!(out.status.success(), "fixture `git {args:?}` failed");
     }
     std::fs::write(dir.path().join("a.txt"), "x\n")?;
-    let mut add = Command::new("git");
-    add.arg("-C")
-        .arg(dir.path())
-        .args(["add", "a.txt"])
-        .env_remove("GIT_DIR");
-    anyhow::ensure!(add.output()?.status.success(), "fixture add failed");
-    let mut commit = Command::new("git");
-    commit
-        .arg("-C")
-        .arg(dir.path())
-        .args(["commit", "--quiet", "-m", "init"])
-        .env_remove("GIT_DIR");
-    anyhow::ensure!(commit.output()?.status.success(), "fixture commit failed");
+    anyhow::ensure!(
+        git_output(dir.path(), &["add", "a.txt"])?.status.success(),
+        "fixture add failed"
+    );
+    anyhow::ensure!(
+        git_output(dir.path(), &["commit", "--quiet", "-m", "init"])?
+            .status
+            .success(),
+        "fixture commit failed"
+    );
     Ok(dir)
 }
 
@@ -284,12 +297,253 @@ fn the_extension_declares_the_wire_types_the_registry_routes_on() {
         "git.preview",
         "git.root",
         "git.log",
+        "git.commit",
         "git.branches",
         "git.worktrees",
+        "git.stage",
+        "git.unstage",
+        "git.create-commit",
     ] {
         assert!(
             wires.iter().any(|w| w == expected),
             "missing {expected} from {wires:?}"
         );
     }
+}
+
+#[test]
+fn the_extension_declares_its_mutations_as_session_keyed() {
+    // #845 SC-10 / #974: the scheduler must not learn this from the wire name.
+    let policies = extension(None).execution_policies();
+    for wire in ["git.stage", "git.unstage", "git.create-commit"] {
+        assert!(
+            policies.iter().any(|(declared, policy)| {
+                *declared == wire
+                    && *policy == nession_common::extension::ExtensionUnitPolicy::SessionMutation
+            }),
+            "{wire} must be declared a mutation, got {policies:?}"
+        );
+    }
+    assert!(
+        !policies.iter().any(|(wire, _)| *wire == "git.status"),
+        "a read unit must keep the query default"
+    );
+}
+
+/// The v2 status answer carries the snapshot the write units require.
+fn status_v2(ext: &GitAgentExtension) -> Value {
+    match run(
+        ext,
+        "git.status",
+        json!({"session": "agent:s", "contract_version": 2}),
+    ) {
+        Ok(value) => value,
+        Err(error) => panic!("git.status v2 failed: {error}"),
+    }
+}
+
+#[test]
+fn status_v1_is_unchanged_and_v2_adds_the_snapshot() {
+    let dir = repo().unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let v1 = run(&ext, "git.status", json!({"session": "agent:s"})).unwrap();
+    assert_eq!(v1["state"], "ok");
+    assert!(
+        v1.get("snapshot").is_none(),
+        "v1's shipped shape must not grow a field"
+    );
+
+    let v2 = status_v2(&ext);
+    assert_eq!(v2["state"], "ok");
+    assert!(
+        v2["snapshot"]["token"]
+            .as_str()
+            .is_some_and(|t| !t.is_empty()),
+        "v2 must carry an opaque snapshot, got {v2}"
+    );
+    assert!(v2["snapshot"]["head"].as_str().is_some());
+}
+
+#[test]
+fn a_reviewed_stage_is_applied_and_returns_the_new_state() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap();
+
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+
+    assert_eq!(staged["state"], "ok", "got {staged}");
+    assert_ne!(
+        staged["snapshot"]["token"].as_str().unwrap(),
+        token,
+        "the post-state must be a new identity"
+    );
+    assert_eq!(staged["status"]["modified"][0]["path"], "a.txt");
+    assert_eq!(staged["status"]["modified"][0]["staged"], true);
+}
+
+#[test]
+fn a_stale_stage_is_refused_with_the_current_state() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "reviewed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap().to_string();
+
+    // Terminal-side edit after the review.
+    std::fs::write(dir.path().join("a.txt"), "edited after review\n").unwrap();
+
+    let response = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+
+    assert_eq!(response["state"], "repository_changed", "got {response}");
+    assert!(response["snapshot"]["token"].as_str().is_some());
+    assert_eq!(response["status"]["modified"][0]["staged"], false);
+}
+
+#[test]
+fn unstage_keeps_the_worktree_bytes() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "kept\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap().to_string();
+
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+    let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
+
+    let unstaged = run(
+        &ext,
+        "git.unstage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": staged_token}),
+    )
+    .unwrap();
+
+    assert_eq!(unstaged["state"], "ok", "got {unstaged}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "kept\n"
+    );
+    assert_eq!(unstaged["status"]["modified"][0]["staged"], false);
+}
+
+#[test]
+fn a_commit_creates_one_commit_and_a_repeated_request_id_replays_it() {
+    let dir = repo().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "committed\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap().to_string();
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+    let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
+
+    let request = json!({
+        "session": "agent:s",
+        "expectedSnapshot": staged_token,
+        "message": "feat: change a",
+        "requestId": "user-commit-1"
+    });
+    let first = run(&ext, "git.create-commit", request.clone()).unwrap();
+    assert_eq!(first["state"], "ok", "got {first}");
+    assert!(first["commit"]["oid"].as_str().is_some());
+    assert!(
+        first["commit"]["author"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Test"),
+        "the answer states the effective author, got {first}"
+    );
+
+    // A lost response retried with the same identity must not create a second
+    // commit; it replays the first answer.
+    let retry = run(&ext, "git.create-commit", request).unwrap();
+    assert_eq!(retry["state"], "ok");
+    assert_eq!(retry["commit"]["oid"], first["commit"]["oid"]);
+
+    let count = git_output(dir.path(), &["rev-list", "--count", "HEAD"]).unwrap();
+    assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "2");
+}
+
+#[test]
+fn a_commit_without_an_identity_says_so_specifically() {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.name", ""],
+        vec!["config", "user.email", "nobody@example.com"],
+    ] {
+        let out = git_output(dir.path(), &args).unwrap();
+        assert!(out.status.success());
+    }
+    std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let reviewed = status_v2(&ext);
+    let token = reviewed["snapshot"]["token"].as_str().unwrap().to_string();
+    let staged = run(
+        &ext,
+        "git.stage",
+        json!({"session": "agent:s", "path": "a.txt", "expectedSnapshot": token}),
+    )
+    .unwrap();
+    let staged_token = staged["snapshot"]["token"].as_str().unwrap().to_string();
+
+    let response = run(
+        &ext,
+        "git.create-commit",
+        json!({
+            "session": "agent:s",
+            "expectedSnapshot": staged_token,
+            "message": "feat: change",
+            "requestId": "identity-test"
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(response["state"], "missing_identity", "got {response}");
+    assert!(response["message"].as_str().unwrap().contains("user.name"));
+}
+
+#[test]
+fn the_read_only_commit_unit_still_answers_commit_detail() {
+    // #845 SC-15: the new mutation has its own unit; `git.commit` keeps meaning
+    // "read one commit's detail".
+    let dir = repo().unwrap();
+    let ext = extension(Some(dir.path().to_path_buf()));
+    let log = run(&ext, "git.log", json!({"session": "agent:s"})).unwrap();
+    let oid = log["history"]["commits"][0]["hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail = run(
+        &ext,
+        "git.commit",
+        json!({"session": "agent:s", "oid": oid}),
+    )
+    .unwrap();
+    assert_eq!(detail["state"], "ok", "got {detail}");
+    assert_eq!(detail["commit"]["subject"], "init");
 }

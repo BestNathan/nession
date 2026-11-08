@@ -38,14 +38,19 @@
 
 pub mod branches;
 pub mod commit;
+pub mod create_commit;
 pub mod diff;
 pub mod log;
 pub mod preview;
 pub mod root;
+pub mod stage;
 pub mod status;
+pub mod unstage;
 pub mod worktrees;
 
 use serde::Serialize;
+
+use crate::protocol::status::v1::RepoStatus;
 
 use nession_protocol::{ContractDescriptor, ContractVersion, IdentityError, ProtocolDescriptor};
 
@@ -127,6 +132,104 @@ impl GitFailure {
     }
 }
 
+/// An opaque identity of the repository state a client reviewed.
+///
+/// Equality is the only operation. The token is produced agent-side from HEAD,
+/// the index, the observed status and the worktree metadata of every changed
+/// path; a mutation carries the token it was reviewed against and is refused if
+/// the repository no longer matches. `head` and `root` ride along so a client
+/// can show what was reviewed without parsing the token (#845 SC-02).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct GitSnapshotV1 {
+    /// Compare for equality; never parse or construct.
+    pub token: String,
+    /// HEAD commit id, absent before the repository's first commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// The work tree root this snapshot describes.
+    pub root: String,
+}
+
+/// The authoritative repository state a successful mutation returns.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct MutationStateOkV1 {
+    pub snapshot: GitSnapshotV1,
+    pub status: RepoStatus,
+    /// True when the post-mutation listing had to be cut off.
+    pub truncated: bool,
+    pub truncated_bytes: usize,
+}
+
+/// What a repository mutation answers.
+///
+/// Deliberately not [`GitResponseV1`]: a mutation has outcomes a read does not.
+/// A stale review, a refusal before any command ran, a hook failure with a
+/// changed repository, and a missing identity are four different things the
+/// user cannot act on correctly if they all read as `error` (#845 SC-03..SC-08).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GitMutationResponseV1<T> {
+    Ok {
+        #[serde(flatten)]
+        data: T,
+    },
+    /// The repository is no longer the state the caller reviewed. Nothing was
+    /// applied; the payload is the current authoritative state.
+    RepositoryChanged {
+        message: String,
+        snapshot: GitSnapshotV1,
+        status: RepoStatus,
+        truncated: bool,
+        #[serde(rename = "truncatedBytes")]
+        truncated_bytes: usize,
+    },
+    /// The request was rejected before any mutating command ran.
+    Refused {
+        message: String,
+    },
+    /// The command ran and failed — a hook, signing, or Git itself. The state
+    /// is re-read afterwards because a failure is not "nothing changed".
+    Failed {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        snapshot: Option<GitSnapshotV1>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Option<RepoStatus>,
+    },
+    /// Commit needs an author identity the Agent host does not have.
+    MissingIdentity {
+        message: String,
+    },
+    Unavailable {
+        reason: String,
+        message: String,
+    },
+    NotARepository {
+        message: String,
+    },
+}
+
+impl<T> GitMutationResponseV1<T> {
+    /// The shared failure states, in this response's vocabulary.
+    pub fn from_failure(failure: GitFailure) -> Self {
+        match failure {
+            GitFailure::Unavailable { reason, message } => Self::Unavailable { reason, message },
+            GitFailure::NotARepository { message } => Self::NotARepository { message },
+            // `GitFailure::Error` is a pre-mutation failure: no typed state
+            // exists yet, and `refused` is the honest answer.
+            GitFailure::Error { message } => Self::Refused { message },
+        }
+    }
+}
+
 /// A git invocation that failed is this provider's `error` state.
 ///
 /// Only for the *unexpected* kind. The expected outcomes — not a repository, no
@@ -163,17 +266,35 @@ pub fn descriptors() -> Result<Vec<ProtocolDescriptor>, IdentityError> {
         commit::descriptor()?,
         branches::descriptor()?,
         worktrees::descriptor()?,
+        stage::descriptor()?,
+        unstage::descriptor()?,
+        create_commit::descriptor()?,
     ])
 }
 
 /// One version, one wire message type. Shared by every unit here because they
 /// are all shaped alike; a unit that needs something else states it itself.
 pub(crate) fn v1_descriptor(id: &str, wire: &str) -> Result<ProtocolDescriptor, IdentityError> {
-    ProtocolDescriptor::new(
-        id,
-        OWNER,
-        vec![ContractDescriptor::new(ContractVersion::V1, &[wire])],
-    )
+    versioned_descriptor(id, wire, &[1])
+}
+
+/// A Unit that answers several Contract Versions over its one wire.
+///
+/// The wire locates the Unit and `contract_version` selects the generation
+/// (`docs/architecture/protocol.md`), so both generations are declared on the
+/// same wire rather than as `git.status.v2`.
+pub(crate) fn versioned_descriptor(
+    id: &str,
+    wire: &str,
+    versions: &[u32],
+) -> Result<ProtocolDescriptor, IdentityError> {
+    let contracts = versions
+        .iter()
+        .map(|version| {
+            ContractVersion::new(*version).map(|version| ContractDescriptor::new(version, &[wire]))
+        })
+        .collect::<Result<Vec<_>, IdentityError>>()?;
+    ProtocolDescriptor::new(id, OWNER, contracts)
 }
 
 #[cfg(test)]
@@ -185,7 +306,7 @@ mod tests {
     /// These are what `v1_descriptor` validates, so asserting them here names
     /// the offending id instead of leaving it to whichever caller composes
     /// first.
-    const EXPECTED_IDS: [&str; 8] = [
+    const EXPECTED_IDS: [&str; 11] = [
         "git.status",
         "git.diff",
         "git.preview",
@@ -194,6 +315,9 @@ mod tests {
         "git.commit",
         "git.branches",
         "git.worktrees",
+        "git.stage",
+        "git.unstage",
+        "git.create-commit",
     ];
 
     #[test]
@@ -220,17 +344,23 @@ mod tests {
 
     #[test]
     fn no_two_units_claim_the_same_wire_type() {
-        // The failure this rules out is two contracts reachable by one message
+        // The failure this rules out is two *units* reachable by one message
         // type, which would leave the transport unable to tell which arrived.
-        let mut seen: Vec<String> = Vec::new();
+        // One unit answering two Contract Versions over its one wire is the
+        // model's shape, not a collision (`docs/architecture/protocol.md`).
+        let mut seen: Vec<(String, String)> = Vec::new();
         for descriptor in descriptors().unwrap() {
             for contract in &descriptor.contracts {
                 for wire in &contract.wire {
-                    assert!(
-                        !seen.contains(wire),
-                        "`{wire}` is claimed by more than one contract"
-                    );
-                    seen.push(wire.clone());
+                    if let Some((unit, _)) = seen.iter().find(|(claimed, _)| claimed == wire) {
+                        assert_eq!(
+                            unit,
+                            descriptor.id.as_str(),
+                            "`{wire}` is claimed by two different units"
+                        );
+                    } else {
+                        seen.push((wire.clone(), descriptor.id.as_str().to_string()));
+                    }
                 }
             }
         }
@@ -238,15 +368,25 @@ mod tests {
 
     #[test]
     fn a_descriptor_list_is_what_a_manifest_would_advertise() {
-        // Eight units, one version each — the manifest a composed git provider
-        // produces, and the thing the Server can route without knowing any
-        // payload schema.
+        // One unit per capability, and `git.status` / `git.diff` now answer
+        // two generations each over their one wire — the manifest a composed
+        // git provider produces, and the thing the Server can route without
+        // knowing any payload schema.
         let manifest =
             nession_protocol::ProtocolManifest::from_descriptors(OWNER, &descriptors().unwrap());
-        assert_eq!(manifest.protocols.len(), 8);
+        assert_eq!(manifest.protocols.len(), 11);
         for id in EXPECTED_IDS {
             let id = nession_protocol::ProtocolId::new(id).unwrap();
             assert!(manifest.offers(&id), "manifest is missing {id}");
+        }
+        for id in ["git.status", "git.diff"] {
+            let id = nession_protocol::ProtocolId::new(id).unwrap();
+            let versions: Vec<u32> = manifest.protocols[&id]
+                .versions
+                .iter()
+                .map(|version| version.get())
+                .collect();
+            assert_eq!(versions, vec![1, 2], "{id} must offer both generations");
         }
     }
 }

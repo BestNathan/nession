@@ -14,7 +14,11 @@ test('SC-02: binary, empty, mode-only, truncated and malformed patches stay hone
   await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
   await page.getByTestId('git-change-list').waitFor();
 
-  const row = (path) => page.getByTestId('git-row-tracked').filter({ hasText: path });
+  const row = (path) =>
+    page
+      .getByTestId('git-row-staged')
+      .or(page.getByTestId('git-row-unstaged'))
+      .filter({ hasText: path });
   const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
 
   await row('assets/logo.png').click();

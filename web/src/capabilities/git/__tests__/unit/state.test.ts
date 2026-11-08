@@ -36,7 +36,22 @@ describe('statusRows', () => {
       }),
     );
 
-    expect(rows.map((row) => row.kind)).toEqual(['tracked', 'untracked']);
+    expect(rows.map((row) => row.kind)).toEqual(['unstaged', 'untracked']);
+  });
+
+  it('splits the index side from the worktree side of one file', () => {
+    // `MM` — staged and edited again. Those are two reviewed states and must be
+    // two rows, or Unstage and Stage would act on the same selection.
+    const rows = statusRows(
+      status({
+        modified: [{ path: 'src/a.ts', kind: 'modified', staged: true, unstaged: true }],
+      }),
+    );
+
+    expect(rows.map((row) => [row.kind, row.key])).toEqual([
+      ['staged', 'staged:src/a.ts'],
+      ['unstaged', 'unstaged:src/a.ts'],
+    ]);
   });
 
   it('lists conflicts before ordinary changes', () => {
@@ -48,7 +63,11 @@ describe('statusRows', () => {
         ],
       }),
     );
-    expect(rows[0]).toEqual({ kind: 'unmerged', path: 'both.ts' });
+    expect(rows[0]).toEqual({
+      kind: 'unmerged',
+      path: 'both.ts',
+      key: 'unmerged:both.ts',
+    });
   });
 });
 
@@ -66,7 +85,7 @@ describe('statusRows openability', () => {
 
     expect(rows.map((row) => [row.kind, row.path])).toEqual([
       ['unmerged', 'both.ts'],
-      ['tracked', 'src/a.ts'],
+      ['unstaged', 'src/a.ts'],
       ['untracked', 'notes.txt'],
     ]);
   });

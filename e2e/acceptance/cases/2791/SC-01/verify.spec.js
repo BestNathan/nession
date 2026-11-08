@@ -13,7 +13,7 @@ test('SC-01: a changed file renders the exact patch in both Git surfaces', async
   await page.goto('/#/fixture/workspace?capability=git');
   await page.getByTestId('git-change-list').waitFor();
 
-  const row = page.getByTestId('git-row-tracked').first();
+  const row = page.getByTestId('git-row-unstaged').first();
   const path = await row.getAttribute('data-path');
   expect(path).toBeTruthy();
   await row.click();

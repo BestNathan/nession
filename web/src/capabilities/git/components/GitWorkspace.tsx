@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { GitBranch, RefreshCw } from 'lucide-react';
+import { GitBranch, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { useGitStatus } from '../hooks/useGitStatus';
+import { useGitMutations, type GitMutationController, type GitMutationNotice } from '../hooks/useGitMutations';
 import {
   describeStatus,
   describeUnavailable,
   formatBytes,
+  stagedCount,
   statusRows,
   worktreeName,
   type GitRow,
@@ -19,6 +21,7 @@ import type { GitStatusResponse } from '../types';
 import { useGitSelection, type GitSelectionState } from '../hooks/useGitSelection';
 import { GitBranchesView } from './GitBranchesView';
 import { GitChangeList } from './GitChangeList';
+import { GitCommitForm } from './GitCommitForm';
 import { GitDiffView } from './GitDiffView';
 import { GitFilePreviewView } from './GitFilePreviewView';
 import { GitHistoryView } from './GitHistoryView';
@@ -28,10 +31,10 @@ import { GitWorktreesView } from './GitWorktreesView';
 /**
  * What the Git surface can show (`#826` §4).
  *
- * Everything on that list that is a **read**: the working tree, what happened
- * here, what other branches there are, and what other checkouts there are.
- * Staging and commit authoring are the write half and need their own decision —
- * `#750`'s Non-Goals drew the read-only boundary for a reason (#845).
+ * The read sections are the working tree, what happened here, what other
+ * branches there are, and what other checkouts there are. The Changes section
+ * is also where the deliberate local writes live: stage, unstage and commit
+ * (#845). There is still no checkout, push, reset or arbitrary command.
  *
  * Four short, stable labels for the current context, which is the case
  * `workspace-navigation.md` allows segments in — this chooses what the
@@ -65,6 +68,14 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     () => (status.status?.state === 'ok' ? statusRows(status.status.status) : null),
     [status.status],
   );
+  const snapshot = status.status?.state === 'ok' ? status.status.snapshot : null;
+  const mutations = useGitMutations({
+    agentId,
+    sessionId,
+    snapshot,
+    applyStatus: status.apply,
+    reload: status.refresh,
+  });
   const { state: selection, selectRow } = useGitSelection({
     agentId,
     sessionId,
@@ -103,7 +114,13 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
       ) : section === 'worktrees' ? (
         <GitWorktreesView ctx={ctx} />
       ) : (
-        <GitBody status={status} rows={rows} selection={selection} onSelect={selectRow} />
+        <GitBody
+          status={status}
+          rows={rows}
+          selection={selection}
+          mutations={mutations}
+          onSelect={selectRow}
+        />
       )}
     </div>
   );
@@ -212,11 +229,13 @@ function GitBody({
   status,
   rows,
   selection,
+  mutations,
   onSelect,
 }: {
   status: ReturnType<typeof useGitStatus>;
   rows: readonly GitRow[] | null;
   selection: GitSelectionState;
+  mutations: GitMutationController;
   onSelect: (row: GitRow) => void;
 }) {
   if (status.loading) {
@@ -257,6 +276,8 @@ function GitBody({
     );
   }
 
+  const staged = stagedCount(status.status.status);
+
   // Side by side when there is room, stacked when there is not. The breakpoint
   // is about available width, not about the experience: a phone in a desktop
   // browser has the same problem as an App, and a tablet has neither's room.
@@ -266,10 +287,33 @@ function GitBody({
   // user just picked out of view. A flex column rather than a grid, because the
   // cap is a share of the pane and a percentage inside an auto-sized grid row
   // resolves against that row, which is the thing being sized.
+  //
+  // The commit form sits above the scrolling list: committing is the gesture
+  // the staged rows exist for, and at the bottom of a long change list it
+  // would be the one control the user has to hunt for.
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
-      <aside className={cn('max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r', workspaceScrollClearanceClass)}>
-        <GitChangeList rows={rows} selectedPath={selection.selectedPath} onSelect={onSelect} />
+      <aside className="flex max-h-[50%] min-h-0 shrink-0 flex-col overflow-hidden border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r">
+        {mutations.notice ? (
+          <MutationNotice notice={mutations.notice} onDismiss={mutations.dismissNotice} />
+        ) : null}
+        {staged > 0 ? (
+          <GitCommitForm
+            stagedCount={staged}
+            busy={mutations.commitBusy}
+            onCommit={mutations.commit}
+          />
+        ) : null}
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}>
+          <GitChangeList
+            rows={rows}
+            selectedKey={selection.selectedKey}
+            onSelect={onSelect}
+            busyKey={mutations.busyKey}
+            onStage={mutations.stage}
+            onUnstage={mutations.unstage}
+          />
+        </div>
       </aside>
       <main className="flex min-h-0 flex-1 flex-col lg:flex-none">
         {selection.mode === 'preview' ? (
@@ -284,6 +328,45 @@ function GitBody({
           <GitDiffView response={selection.diff} loading={selection.loading} error={selection.error} />
         )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * The last mutation's answer, when it was not plain success.
+ *
+ * A stale review is not an error: nothing was applied and the list now shows
+ * what changed, which is why it reads muted rather than destructive. A refusal,
+ * hook failure or missing identity is actionable and reads as a failure.
+ */
+function MutationNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: GitMutationNotice;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      data-testid="git-mutation-notice"
+      data-tone={notice.tone}
+      role="status"
+      className={cn(
+        'flex items-start gap-2 border-b px-3 py-2',
+        chromeSansRole('metadata'),
+        notice.tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground',
+      )}
+    >
+      <span className="min-w-0 flex-1">{notice.message}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label="Dismiss"
+        onClick={() => onDismiss()}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden />
+      </Button>
     </div>
   );
 }

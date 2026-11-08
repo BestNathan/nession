@@ -192,12 +192,12 @@ pub enum ExecutionPolicy {
 /// the reader.
 ///
 /// It is the *query* lane rather than a lane of their own because a key is
-/// something a unit declares and an extension declares none, and every
-/// extension unit this agent composes today is read-only (`claude-code.list`,
-/// `claude-code.read`, `git.status` and its siblings). An extension that grew a
-/// **mutation** would be dispatched here unordered — a real hole, and also the
-/// point at which the extension declaration has to grow a policy column. That
-/// is a change to what a provider declares, which is not this stage's to make.
+/// something a unit declares. Since #974 a provider can declare that its unit is
+/// a mutation and name the Session it mutates; `ServerClient::extension_policy`
+/// reads that declaration first and this value remains the answer for every
+/// unit whose provider declares nothing. That keeps every existing read-only
+/// extension's behaviour unchanged while making a mutation's lane a provider
+/// statement rather than a guess about a wire's spelling.
 pub const UNSERVED: ExecutionPolicy = ExecutionPolicy::Query;
 
 #[cfg(test)]

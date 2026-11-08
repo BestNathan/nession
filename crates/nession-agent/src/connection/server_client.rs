@@ -37,6 +37,7 @@
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use nession_common::extension::ExtensionUnitPolicy;
 use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
@@ -879,6 +880,33 @@ impl ServerClient {
         outcome
     }
 
+    /// The lane a provider declared for one extension unit (#974).
+    ///
+    /// Absence of a declaration is the runtime's read-only default, which is
+    /// every unit that existed before mutations did. A declared keyed mutation
+    /// takes its resource from the request's `session` field — the only thing
+    /// the scheduler can read before the provider resolves a repository. A
+    /// declared mutation arriving without one stays on the default lane and is
+    /// refused by its typed handler before any repository is touched.
+    fn extension_policy(
+        &self,
+        msg: &ProtocolMessage<serde_json::Value>,
+    ) -> execution::ExecutionPolicy {
+        let Some(registry) = self.extension_registry.as_ref() else {
+            return execution::UNSERVED;
+        };
+        match registry.unit_policy(&msg.msg_type) {
+            Some(ExtensionUnitPolicy::Query) | None => execution::UNSERVED,
+            Some(ExtensionUnitPolicy::SessionMutation) => msg
+                .payload
+                .get("session")
+                .and_then(serde_json::Value::as_str)
+                .map_or(execution::UNSERVED, |session| {
+                    Key(ResourceKey::Session(session.to_string()))
+                }),
+        }
+    }
+
     /// Read this connection's frames and dispatch them, until the stream ends.
     ///
     /// The reading half of a live connection, and the only half that may park:
@@ -938,11 +966,11 @@ impl ServerClient {
                         // its whole handler is a log line — so it is applied
                         // where it stands. See `is_control`.
                         None if is_control(&msg.msg_type) => Inline,
-                        // Everything else is an extension's own command unit:
-                        // a request the Server is waiting for an answer to,
-                        // whose handler does backend I/O. See
-                        // `execution::UNSERVED`.
-                        None => execution::UNSERVED,
+                        // Everything else is an extension's own command unit.
+                        // Its provider declares whether that is a read or a
+                        // mutation (#974); an undeclared unit keeps the
+                        // read-only default. See `extension_policy`.
+                        None => self.extension_policy(&msg),
                     };
 
                     let this = Arc::clone(&self);
@@ -2097,6 +2125,120 @@ mod tests {
 
         handle.shutdown().await.ok();
         server_handle.abort();
+    }
+
+    /// A provider that declares one read unit and one keyed mutation (#974).
+    struct PolicyExtension;
+
+    #[async_trait::async_trait]
+    impl nession_common::extension::AgentExtension for PolicyExtension {
+        fn name(&self) -> &'static str {
+            "demo"
+        }
+
+        fn descriptors(
+            &self,
+        ) -> Result<Vec<nession_protocol::ProtocolDescriptor>, nession_protocol::IdentityError>
+        {
+            Ok(vec![
+                nession_protocol::ProtocolDescriptor::new(
+                    "demo.read",
+                    "test",
+                    vec![nession_protocol::ContractDescriptor::new(
+                        nession_protocol::ContractVersion::V1,
+                        &["demo.read"],
+                    )],
+                )?,
+                nession_protocol::ProtocolDescriptor::new(
+                    "demo.run",
+                    "test",
+                    vec![nession_protocol::ContractDescriptor::new(
+                        nession_protocol::ContractVersion::V1,
+                        &["demo.run"],
+                    )],
+                )?,
+            ])
+        }
+
+        fn execution_policies(
+            &self,
+        ) -> Vec<(&'static str, nession_common::extension::ExtensionUnitPolicy)> {
+            vec![(
+                "demo.run",
+                nession_common::extension::ExtensionUnitPolicy::SessionMutation,
+            )]
+        }
+
+        async fn handle_command(
+            &self,
+            _command: &str,
+            _payload: serde_json::Value,
+        ) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::Value::Null)
+        }
+    }
+
+    fn client_with_registry(registry: Arc<ExtensionRegistry>) -> ServerClient {
+        ServerClient::new(
+            "ws://127.0.0.1:1".to_string(),
+            "test-token",
+            "test-agent-policy",
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            Some(registry),
+            Arc::new(P2pCredentials::new()),
+            crate::execution::mutation_scheduler(),
+        )
+    }
+
+    /// #974: the scheduler reads the provider's declaration instead of
+    /// guessing from the wire's spelling.
+    #[test]
+    fn a_provider_declared_mutation_is_keyed_by_its_session() {
+        use crate::connection::execution::ExecutionPolicy;
+
+        let registry = Arc::new(
+            ExtensionRegistry::new(
+                "test-agent-policy".to_string(),
+                vec![Box::new(PolicyExtension)],
+                Vec::new(),
+            )
+            .expect("the policy extension composes"),
+        );
+        let client = client_with_registry(registry);
+
+        let mutation =
+            ProtocolMessage::new("demo.run", "1", 0, serde_json::json!({"session": "a:work"}));
+        assert_eq!(
+            client.extension_policy(&mutation),
+            ExecutionPolicy::Key(ResourceKey::Session("a:work".to_string())),
+            "a declared mutation must leave the query lane"
+        );
+
+        let read = ProtocolMessage::new(
+            "demo.read",
+            "2",
+            0,
+            serde_json::json!({"session": "a:work"}),
+        );
+        assert_eq!(
+            client.extension_policy(&read),
+            ExecutionPolicy::Query,
+            "an undeclared unit keeps the read-only default"
+        );
+
+        // Malformed rather than mis-scheduled: a declared mutation without a
+        // session stays on the default lane and its typed handler refuses it
+        // before any backend is touched.
+        let malformed = ProtocolMessage::new("demo.run", "3", 0, serde_json::json!({}));
+        assert_eq!(client.extension_policy(&malformed), ExecutionPolicy::Query);
     }
 
     // -----------------------------------------------------------------------

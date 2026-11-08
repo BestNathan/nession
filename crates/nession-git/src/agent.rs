@@ -30,11 +30,12 @@
 //! payload carrying one is not an error worth failing on, and accepting it
 //! would be the vulnerability.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
-use nession_common::extension::AgentExtension;
+use nession_common::extension::{AgentExtension, ExtensionUnitPolicy};
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -43,20 +44,29 @@ use tracing::debug;
 
 use crate::protocol::branches::{BranchesOkV1, BranchesRequestV1};
 use crate::protocol::commit::{CommitOkV1, CommitRequestV1};
+use crate::protocol::create_commit::v1::{
+    CreateCommitOkV1, CreateCommitRequestV1, CreateCommitResponseV1,
+};
+use crate::protocol::diff::v2::{DiffOkV2, DiffRequestV2};
 use crate::protocol::diff::{DiffOkV1, DiffRequestV1};
 use crate::protocol::log::{LogOkV1, LogRequestV1};
 use crate::protocol::preview::{PreviewOkV1, PreviewRequestV1};
 use crate::protocol::root::{RootOkV1, RootRequestV1};
+use crate::protocol::stage::v1::{StageOkV1, StageRequestV1, StageResponseV1};
+use crate::protocol::status::v2::{StatusOkV2, StatusRequestV2};
 use crate::protocol::status::{StatusOkV1, StatusRequestV1};
+use crate::protocol::unstage::v1::{UnstageOkV1, UnstageRequestV1, UnstageResponseV1};
 use crate::protocol::worktrees::{WorktreesOkV1, WorktreesRequestV1};
-use crate::protocol::{self, GitFailure, GitResponseV1};
+use crate::protocol::{self, GitFailure, GitMutationResponseV1, GitResponseV1};
 use crate::runtime::branches;
 use crate::runtime::cmd::GitCmd;
 use crate::runtime::commit;
 use crate::runtime::diff;
 use crate::runtime::log;
+use crate::runtime::mutate;
 use crate::runtime::preview as preview_runtime;
 use crate::runtime::security::MAX_STATUS_BYTES;
+use crate::runtime::snapshot;
 use crate::runtime::status;
 use crate::runtime::worktrees;
 
@@ -84,6 +94,18 @@ fn decode<T: DeserializeOwned>(payload: Value) -> Result<T, GitFailure> {
     })
 }
 
+/// The contract generation a request names.
+///
+/// Absent means v1 — the rule the protocol model states for a message that
+/// predates versions. The registry has already refused a named version this
+/// unit does not offer, so this only has to choose between served generations.
+fn named_version(payload: &Value) -> u64 {
+    payload
+        .get("contract_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+}
+
 /// Wrap an operation's typed outcome into the erased boundary's shape.
 ///
 /// The single mapper every `handle_*` goes through, so the six operations
@@ -100,6 +122,46 @@ fn respond_with<T: Serialize>(outcome: Result<T, GitFailure>) -> anyhow::Result<
 pub struct GitAgentExtension {
     bin: String,
     resolve_workdir: Arc<dyn WorkdirResolver>,
+    /// One async mutex per resolved repository root.
+    ///
+    /// The keyed execution lane serializes mutations of one Session; the same
+    /// repository can be reachable from two Sessions, and Git's index lock is a
+    /// process-global failure waiting to happen rather than an ordering policy.
+    /// This is the provider-owned part of #845's concurrency rule; the lane is
+    /// the runtime-owned part.
+    repo_locks: Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>,
+    /// Bounded replay of commit outcomes by `(repository, request id)`.
+    ///
+    /// A response lost after a successful commit must not turn a transport
+    /// retry into a second commit (#845 SC-09). The snapshot check alone makes
+    /// a retry fail rather than duplicate; replaying the original answer makes
+    /// it truthful as well.
+    commit_results: Mutex<CommitResults>,
+}
+
+/// How long a commit outcome is remembered, by request id.
+const MAX_REMEMBERED_COMMITS: usize = 128;
+
+#[derive(Default)]
+struct CommitResults {
+    entries: HashMap<(String, String), Value>,
+    order: VecDeque<(String, String)>,
+}
+
+impl CommitResults {
+    fn get(&self, key: &(String, String)) -> Option<Value> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: (String, String), value: Value) {
+        while self.order.len() >= MAX_REMEMBERED_COMMITS {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+    }
 }
 
 impl GitAgentExtension {
@@ -107,7 +169,41 @@ impl GitAgentExtension {
         Self {
             bin: bin.into(),
             resolve_workdir,
+            repo_locks: Mutex::new(HashMap::new()),
+            commit_results: Mutex::new(CommitResults::default()),
         }
+    }
+
+    /// The per-repository lock, created on first use and forgotten once no
+    /// mutation holds it.
+    fn repository_lock(&self, root: &Path) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self
+            .repo_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = locks.get(root).and_then(Weak::upgrade) {
+            return existing;
+        }
+        if locks.len() >= 64 {
+            locks.retain(|_, weak| weak.strong_count() > 0);
+        }
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        locks.insert(root.to_path_buf(), Arc::downgrade(&lock));
+        lock
+    }
+
+    fn remembered_commit(&self, key: &(String, String)) -> Option<Value> {
+        self.commit_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+    }
+
+    fn remember_commit(&self, key: (String, String), value: Value) {
+        self.commit_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, value);
     }
 
     /// Resolve the session's directory and bind a git command to it.
@@ -202,6 +298,150 @@ impl GitAgentExtension {
         })
     }
 
+    /// v2: the patch plus the state it was read from, from a typed source.
+    ///
+    /// The snapshot is read **before** the patch, so the token can only be
+    /// older than the bytes the client sees. The reverse order would let a
+    /// token describe a state newer than the reviewed patch.
+    async fn file_diff_v2(&self, payload: Value) -> Result<DiffOkV2, GitFailure> {
+        let request: DiffRequestV2 = decode(payload)?;
+        let cmd = self.cmd_for(&request.target.session).await?;
+        let root = self.ready(&cmd).await?;
+
+        let state = snapshot::read(&cmd, &root).await?;
+        Ok(DiffOkV2 {
+            diff: diff::file_diff_scoped(&cmd, &request.path, &request.source).await?,
+            snapshot: state.snapshot,
+        })
+    }
+
+    /// v2: the listing plus the snapshot it describes.
+    async fn status_v2(&self, payload: Value) -> Result<StatusOkV2, GitFailure> {
+        let request: StatusRequestV2 = decode(payload)?;
+        let cmd = self.cmd_for(&request.target.session).await?;
+        let root = self.ready(&cmd).await?;
+
+        let state = snapshot::read(&cmd, &root).await?;
+        Ok(StatusOkV2 {
+            status: state.status,
+            root: root.to_string_lossy().to_string(),
+            snapshot: state.snapshot,
+            truncated: state.truncated,
+            truncated_bytes: state.truncated_bytes,
+        })
+    }
+
+    // ── Mutations (#845) ─────────────────────────────────────────────────
+
+    /// The checks and the repository lock every mutation shares.
+    async fn mutation_ready(
+        &self,
+        session: &str,
+    ) -> Result<(GitCmd, PathBuf, tokio::sync::OwnedMutexGuard<()>), GitFailure> {
+        let cmd = self.cmd_for(session).await?;
+        let root = self.ready(&cmd).await?;
+        let lock = self.repository_lock(&root);
+        let guard = lock.lock_owned().await;
+        Ok((cmd, root, guard))
+    }
+
+    async fn stage_operation(&self, request: StageRequestV1) -> StageResponseV1 {
+        let (cmd, root, _guard) = match self.mutation_ready(&request.target.session).await {
+            Ok(ready) => ready,
+            Err(failure) => return GitMutationResponseV1::from_failure(failure),
+        };
+        match mutate::stage(&cmd, &root, &request.path, &request.expected_snapshot).await {
+            Ok(state) => GitMutationResponseV1::Ok { data: state.into() },
+            Err(failure) => failure.into_response(),
+        }
+    }
+
+    async fn unstage_operation(&self, request: UnstageRequestV1) -> UnstageResponseV1 {
+        let (cmd, root, _guard) = match self.mutation_ready(&request.target.session).await {
+            Ok(ready) => ready,
+            Err(failure) => return GitMutationResponseV1::from_failure(failure),
+        };
+        match mutate::unstage(&cmd, &root, &request.path, &request.expected_snapshot).await {
+            Ok(state) => GitMutationResponseV1::Ok { data: state.into() },
+            Err(failure) => failure.into_response(),
+        }
+    }
+
+    /// Create a commit, replaying a repeated `requestId` instead of repeating
+    /// the commit.
+    async fn create_commit_operation(&self, request: CreateCommitRequestV1) -> Value {
+        let cmd = match self.cmd_for(&request.target.session).await {
+            Ok(cmd) => cmd,
+            Err(failure) => {
+                return serde_json::to_value(
+                    GitMutationResponseV1::<CreateCommitOkV1>::from_failure(failure),
+                )
+                .unwrap_or_default()
+            }
+        };
+        let root = match self.ready(&cmd).await {
+            Ok(root) => root,
+            Err(failure) => {
+                return serde_json::to_value(
+                    GitMutationResponseV1::<CreateCommitOkV1>::from_failure(failure),
+                )
+                .unwrap_or_default()
+            }
+        };
+
+        let key = (
+            root.to_string_lossy().to_string(),
+            request.request_id.clone(),
+        );
+        if let Some(previous) = self.remembered_commit(&key) {
+            return previous;
+        }
+
+        let lock = self.repository_lock(&root);
+        let _guard = lock.lock_owned().await;
+
+        // The first attempt may have finished between the lookup above and this
+        // lock; replaying it here closes that window.
+        if let Some(previous) = self.remembered_commit(&key) {
+            return previous;
+        }
+
+        let response: CreateCommitResponseV1 =
+            match mutate::create_commit(&cmd, &root, &request.message, &request.expected_snapshot)
+                .await
+            {
+                Ok(applied) => GitMutationResponseV1::Ok {
+                    data: CreateCommitOkV1 {
+                        commit: applied.commit,
+                        state: applied.state.into(),
+                    },
+                },
+                Err(failure) => failure.into_response(),
+            };
+
+        // A refusal before Git ran is not an outcome to replay: the caller may
+        // legitimately fix its state and retry with the same id. An attempt that
+        // reached Git is, because a lost response must not repeat it.
+        let value = match serde_json::to_value(&response) {
+            Ok(value) => value,
+            Err(err) => {
+                return serde_json::json!({ "state": "failed", "message": err.to_string() });
+            }
+        };
+        match &response {
+            GitMutationResponseV1::Ok { .. }
+            | GitMutationResponseV1::Failed { .. }
+            | GitMutationResponseV1::MissingIdentity { .. } => {
+                self.remember_commit(key, value.clone());
+            }
+            GitMutationResponseV1::RepositoryChanged { .. }
+            | GitMutationResponseV1::Refused { .. }
+            | GitMutationResponseV1::Unavailable { .. }
+            | GitMutationResponseV1::NotARepository { .. } => {}
+        }
+        value
+    }
+
     /// Current worktree bytes for an untracked or unmerged row (#2838).
     ///
     /// This is not a diff and not a filesystem browser: the path is checked
@@ -284,11 +524,57 @@ impl GitAgentExtension {
     // ── The erased boundary ──────────────────────────────────────────────
 
     async fn handle_status(&self, payload: Value) -> anyhow::Result<Value> {
-        respond_with(self.status(payload).await)
+        if named_version(&payload) >= 2 {
+            respond_with(self.status_v2(payload).await)
+        } else {
+            respond_with(self.status(payload).await)
+        }
     }
 
     async fn handle_diff(&self, payload: Value) -> anyhow::Result<Value> {
-        respond_with(self.file_diff(payload).await)
+        if named_version(&payload) >= 2 {
+            respond_with(self.file_diff_v2(payload).await)
+        } else {
+            respond_with(self.file_diff(payload).await)
+        }
+    }
+
+    async fn handle_stage(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: StageRequestV1 = match decode(payload) {
+            Ok(request) => request,
+            Err(failure) => {
+                return Ok(serde_json::to_value(
+                    GitMutationResponseV1::<StageOkV1>::from_failure(failure),
+                )?)
+            }
+        };
+        Ok(serde_json::to_value(self.stage_operation(request).await)?)
+    }
+
+    async fn handle_unstage(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: UnstageRequestV1 = match decode(payload) {
+            Ok(request) => request,
+            Err(failure) => {
+                return Ok(serde_json::to_value(
+                    GitMutationResponseV1::<UnstageOkV1>::from_failure(failure),
+                )?)
+            }
+        };
+        Ok(serde_json::to_value(self.unstage_operation(request).await)?)
+    }
+
+    async fn handle_create_commit(&self, payload: Value) -> anyhow::Result<Value> {
+        let request: CreateCommitRequestV1 = match decode(payload) {
+            Ok(request) => request,
+            Err(failure) => {
+                return Ok(serde_json::to_value(GitMutationResponseV1::<
+                    CreateCommitOkV1,
+                >::from_failure(
+                    failure
+                ))?)
+            }
+        };
+        Ok(self.create_commit_operation(request).await)
     }
 
     async fn handle_preview(&self, payload: Value) -> anyhow::Result<Value> {
@@ -330,6 +616,29 @@ impl AgentExtension for GitAgentExtension {
         crate::protocol::descriptors()
     }
 
+    /// Scheduling is provider-owned and separate from the manifest (#974).
+    ///
+    /// The three mutations are serialized per Session by the runtime's keyed
+    /// lane; the extension adds a per-repository lock because two Sessions can
+    /// address one repository. Every read unit keeps the default query policy,
+    /// so their existing concurrency is unchanged.
+    fn execution_policies(&self) -> Vec<(&'static str, ExtensionUnitPolicy)> {
+        vec![
+            (
+                protocol::stage::v1::WIRE,
+                ExtensionUnitPolicy::SessionMutation,
+            ),
+            (
+                protocol::unstage::v1::WIRE,
+                ExtensionUnitPolicy::SessionMutation,
+            ),
+            (
+                protocol::create_commit::v1::WIRE,
+                ExtensionUnitPolicy::SessionMutation,
+            ),
+        ]
+    }
+
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value> {
         // Matching on the contracts' ids rather than re-spelled strings: the
         // registry hands the wire over verbatim and the wire *is* the
@@ -343,6 +652,9 @@ impl AgentExtension for GitAgentExtension {
             protocol::commit::ID => self.handle_commit(payload).await,
             protocol::branches::ID => self.handle_branches(payload).await,
             protocol::worktrees::ID => self.handle_worktrees(payload).await,
+            protocol::stage::ID => self.handle_stage(payload).await,
+            protocol::unstage::ID => self.handle_unstage(payload).await,
+            protocol::create_commit::ID => self.handle_create_commit(payload).await,
             other => anyhow::bail!("unknown git command: {other}"),
         }
     }
@@ -365,6 +677,12 @@ mod tests {
             (
                 crate::protocol::worktrees::v1::WIRE,
                 protocol::worktrees::ID,
+            ),
+            (crate::protocol::stage::v1::WIRE, protocol::stage::ID),
+            (crate::protocol::unstage::v1::WIRE, protocol::unstage::ID),
+            (
+                crate::protocol::create_commit::v1::WIRE,
+                protocol::create_commit::ID,
             ),
         ]
     }
@@ -393,16 +711,16 @@ mod tests {
     #[test]
     fn the_advertised_wire_types_are_the_contracts_own() {
         // The registry routes on these and the manifest is built from them, so
-        // "advertised" and "routed" are one set. This asserts the set is the
-        // one the contracts name — a contract missing from `descriptors()` is
-        // one nobody can reach.
-        let advertised: Vec<String> = extension()
+        // "advertised" and "routed" are one set. A unit that answers several
+        // versions advertises its one wire once per version; the test compares
+        // the wire names as a set, because that is what the registry indexes.
+        let advertised: std::collections::BTreeSet<String> = extension()
             .descriptors()
             .unwrap()
             .into_iter()
             .flat_map(|d| d.contracts.into_iter().flat_map(|c| c.wire))
             .collect();
-        let expected: Vec<String> = contracts()
+        let expected: std::collections::BTreeSet<String> = contracts()
             .into_iter()
             .map(|(wire, _)| wire.to_string())
             .collect();
@@ -442,6 +760,9 @@ mod tests {
             protocol::commit::ID,
             protocol::branches::ID,
             protocol::worktrees::ID,
+            protocol::stage::ID,
+            protocol::unstage::ID,
+            protocol::create_commit::ID,
         ]
         .contains(&command)
     }

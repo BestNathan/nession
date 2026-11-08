@@ -14,6 +14,7 @@
 //! byte cap, and the view already gives untracked entries no expander.
 
 use crate::protocol::diff::v1::FileDiff;
+use crate::protocol::diff::v2::DiffSourceV2;
 use crate::runtime::cmd::GitCmd;
 use crate::runtime::security::{self, MAX_DIFF_BYTES, MAX_LINE_BYTES};
 
@@ -30,43 +31,97 @@ pub async fn file_diff(
     relative_path: &str,
     commit: Option<&str>,
 ) -> anyhow::Result<FileDiff> {
+    let source = match commit {
+        Some(oid) => DiffSourceV2::Commit {
+            oid: oid.to_string(),
+        },
+        None => DiffSourceV2::Worktree,
+    };
+    file_diff_scoped(cmd, relative_path, &source).await
+}
+
+/// Diff one path from a typed source (#845 SC-01).
+///
+/// `Worktree` is v1's combined view; `Staged` and `Unstaged` are the two halves
+/// a staging workflow must show separately. An unborn branch has no HEAD, so
+/// both staged and combined use Git's empty-tree equivalent rather than
+/// inventing a baseline.
+pub async fn file_diff_scoped(
+    cmd: &GitCmd,
+    relative_path: &str,
+    source: &DiffSourceV2,
+) -> anyhow::Result<FileDiff> {
     let path = security::validate_repo_relative_path(relative_path)?;
 
-    let out = if let Some(oid) = commit {
-        let full = crate::runtime::commit::resolve_revision(cmd, oid).await?;
-        let parent = crate::runtime::commit::diff_parent(cmd, &full).await?;
-        cmd.run(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                &parent,
-                &full,
-                "--",
-                &path,
-            ],
-            MAX_DIFF_BYTES,
-        )
-        .await?
-    } else {
-        let baseline = workspace_diff_baseline(cmd).await?;
-        cmd.run(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                // Without this, a repository-local `diff.external` would run an
-                // arbitrary program. The capability is read-only; that must not
-                // depend on the repository's own configuration.
-                "--no-textconv",
-                &baseline,
-                "--",
-                &path,
-            ],
-            MAX_DIFF_BYTES,
-        )
-        .await?
+    let out = match source {
+        DiffSourceV2::Commit { oid } => {
+            let full = crate::runtime::commit::resolve_revision(cmd, oid).await?;
+            let parent = crate::runtime::commit::diff_parent(cmd, &full).await?;
+            cmd.run(
+                &[
+                    "diff",
+                    "--no-color",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    &parent,
+                    &full,
+                    "--",
+                    &path,
+                ],
+                MAX_DIFF_BYTES,
+            )
+            .await?
+        }
+        DiffSourceV2::Staged => {
+            cmd.run(
+                &[
+                    "diff",
+                    "--no-color",
+                    "--no-ext-diff",
+                    // Repository-local `diff.external`/`textconv` must not run
+                    // an arbitrary program for a view (#750's read boundary).
+                    "--no-textconv",
+                    "--cached",
+                    "--",
+                    &path,
+                ],
+                MAX_DIFF_BYTES,
+            )
+            .await?
+        }
+        DiffSourceV2::Unstaged => {
+            cmd.run(
+                &[
+                    "diff",
+                    "--no-color",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--",
+                    &path,
+                ],
+                MAX_DIFF_BYTES,
+            )
+            .await?
+        }
+        DiffSourceV2::Worktree => {
+            let baseline = workspace_diff_baseline(cmd).await?;
+            cmd.run(
+                &[
+                    "diff",
+                    "--no-color",
+                    "--no-ext-diff",
+                    // Without this, a repository-local `diff.external` would run an
+                    // arbitrary program. The capability is read-only; that must not
+                    // depend on the repository's own configuration.
+                    "--no-textconv",
+                    &baseline,
+                    "--",
+                    &path,
+                ],
+                MAX_DIFF_BYTES,
+            )
+            .await?
+        }
     };
 
     let text = out.stdout_string().into_owned();
@@ -246,6 +301,56 @@ mod tests {
         assert!(diff.text.contains("-original"));
         assert!(diff.text.contains("+changed"));
         assert!(!diff.text.contains("new file mode"));
+    }
+
+    #[tokio::test]
+    async fn the_three_change_views_are_separately_observable() {
+        // #845 SC-01: a staging UI must never infer staged and unstaged state
+        // from the combined patch.
+        let repo = new_repo(&["init", "-q"]);
+        fs::write(repo.path().join("123"), "original\n").unwrap();
+        git_setup(repo.path(), &["add", "--", "123"]);
+        git_setup(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=Nession Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "initial",
+            ],
+        );
+
+        fs::write(repo.path().join("123"), "staged\n").unwrap();
+        git_setup(repo.path(), &["add", "--", "123"]);
+        fs::write(repo.path().join("123"), "staged\nunstaged\n").unwrap();
+
+        let cmd = GitCmd::new("git", repo.path());
+        let combined = file_diff_scoped(&cmd, "123", &DiffSourceV2::Worktree)
+            .await
+            .unwrap();
+        assert!(combined.text.contains("+staged"));
+        assert!(combined.text.contains("+unstaged"));
+
+        let staged = file_diff_scoped(&cmd, "123", &DiffSourceV2::Staged)
+            .await
+            .unwrap();
+        assert!(staged.text.contains("+staged"));
+        assert!(
+            !staged.text.contains("+unstaged"),
+            "the staged view must not show the worktree-only change"
+        );
+
+        let unstaged = file_diff_scoped(&cmd, "123", &DiffSourceV2::Unstaged)
+            .await
+            .unwrap();
+        assert!(unstaged.text.contains("+unstaged"));
+        assert!(
+            !unstaged.text.contains("+staged"),
+            "the unstaged view must not show the index change"
+        );
     }
 
     #[tokio::test]
