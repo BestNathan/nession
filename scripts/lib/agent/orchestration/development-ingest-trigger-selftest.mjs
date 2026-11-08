@@ -81,37 +81,47 @@ const qwenEvent={action:'created',repository:{full_name:'BestNathan/nession'},
   comment:{id:90910,user:{login:'BestNathan'},
     body:'/nession ingest-qwen issue=2817 worker_run=42344231027'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,event:qwenEvent}),
-  {run_id:42344231027,source:null,qwen_recovery:true,attempt:1});
+  {run_id:42344231027,source:null,qwen_recovery:true,issue:2817,attempt:1});
 const qwenRepairEvent={...qwenEvent,issue:{number:2906},
   comment:{...qwenEvent.comment,
     body:'/nession ingest-qwen issue=2906 worker_run=42365960306'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
   event:qwenRepairEvent}),
-{run_id:42365960306,source:null,qwen_recovery:true,attempt:1});
+{run_id:42365960306,source:null,qwen_recovery:true,issue:2906,attempt:1});
 const qwenRepair2={...qwenEvent,issue:{number:2912},
   comment:{...qwenEvent.comment,
     body:'/nession ingest-qwen issue=2912 worker_run=42368100929'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
   event:qwenRepair2}),
-{run_id:42368100929,source:null,qwen_recovery:true,attempt:1});
+{run_id:42368100929,source:null,qwen_recovery:true,issue:2912,attempt:1});
 const qwenRepair3={...qwenEvent,issue:{number:2946},
   comment:{...qwenEvent.comment,
     body:'/nession ingest-qwen issue=2946 worker_run=42396535371'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
   event:qwenRepair3}),
-{run_id:42396535371,source:null,qwen_recovery:true,attempt:1});
+{run_id:42396535371,source:null,qwen_recovery:true,issue:2946,attempt:1});
 const qwenRepair4={...qwenEvent,issue:{number:2951},
   comment:{...qwenEvent.comment,
     body:'/nession ingest-qwen issue=2951 worker_run=42398182736'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
   event:qwenRepair4}),
-{run_id:42398182736,source:null,qwen_recovery:true,attempt:1});
+{run_id:42398182736,source:null,qwen_recovery:true,issue:2951,attempt:1});
 const qwenRepair5={...qwenEvent,issue:{number:2961},
   comment:{...qwenEvent.comment,
     body:'/nession ingest-qwen issue=2961 worker_run=42410000000'}};
 assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
   event:qwenRepair5}),
-{run_id:42410000000,source:null,qwen_recovery:true,attempt:1});
+{run_id:42410000000,source:null,qwen_recovery:true,issue:2961,attempt:1});
+const qwenV2Issue={...qwenEvent,issue:{number:3001,state:'open'},
+  comment:{...qwenEvent.comment,
+    body:'/nession ingest-qwen issue=3001 worker_run=42488022265'}};
+assert.deepEqual(resolveTrustedIngestSource({environment:qwenEnv,
+  event:qwenV2Issue}),
+  {run_id:42488022265,source:null,qwen_recovery:true,issue:3001,attempt:1});
+assert.throws(()=>resolveTrustedIngestSource({environment:qwenEnv,
+  event:{...qwenV2Issue,comment:{...qwenV2Issue.comment,
+    body:'/nession ingest-qwen issue=3002 worker_run=42488022265'}}}),
+  /exact owner\/main/);
 for(const bad of [
   {environment:{...qwenEnv,GITHUB_ACTOR:'fork'}},
   {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
