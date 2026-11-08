@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "25d6d27355557b5929c9aff4f8a328fff78a1d87fc6d2b57ae65f62c33a0e4f8",
+  "run_id": 42467961897,
+  "run_attempt": 1,
+  "issue": 1974,
+  "criterion": "SC-04",
+  "criterion_text": "Quality, Case Smoke and source-aligned end-to-end fixture, plus canonical Acceptance, independently pass at the owning exact SHA. No manual SC checkbox or parent acceptance propagation.",
+  "stage": "post-merge",
+  "target_sha": "7a2b2b99c5c53a55d46858a3e58a192224fb413a",
+  "contract_sha256": "8f89fc0ce98e48ec081cf458439c18223e3a90681b5da03b55ecc1c8f6800ab9",
+  "case_revision": "7a2b2b99c5c53a55d46858a3e58a192224fb413a",
+  "case_tree_sha": "1ecf790e4764d897a8ea43fc586ca0a22c0331b2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T09:40:02.700Z",
+  "finished_at": "2026-11-08T09:40:08.903Z",
+  "duration_ms": 6203,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pending",
+      "summary": "Real #2961 Qwen Publisher/Repair intents exist, but no original Developer Result v2 is committed; the owning PR exact-HEAD gate proof remains Pending.",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store=64746defd2192a31e88beb3ea14420affa54ad27 result_records=4 intents=2"
+        },
+        {
+          "type": "blocked",
+          "value": "present kinds=trusted_qwen_publisher_write_ahead_intent,authenticated_agent_task_result,trusted_qwen_repair_publisher_write_ahead"
+        }
+      ],
+      "duration_ms": 331,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42467961897,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "7a2b2b99c5c53a55d46858a3e58a192224fb413a",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42467961897",
+    "record_path": "runs/2026-11-08/42467961897-1/1974/SC-04.json",
+    "source_result_sha256": "508f4b7adbdcd74f34c7cead7bf9ed8d78b66e1c95c483c545299dec5f8a3a81"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42467961897-1",
+    "sha256": "508f4b7adbdcd74f34c7cead7bf9ed8d78b66e1c95c483c545299dec5f8a3a81",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42467961897",
+    "durability": "time-limited; object archival not configured"
+  }
+}
