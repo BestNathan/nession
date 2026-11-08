@@ -8,11 +8,67 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {HEX40,REPO}=require('./agent-store-1997.cjs');
 const API='https://api.github.com/repos/'+REPO;
-// Cases use only the scoped read-only token of the trusted Acceptance Runner.
-// This is not a GitHub/Store write credential and is never projected to Pages.
+// #1974: only the trusted Main pre-stage can fetch authenticated API bytes.
+// Case code never sees its token. The pinned private snapshot still undergoes
+// all canonical original SHA, ZIP, Run/Artifact, PR and Store checks.
+function readPinnedQwenApi(route,root=process.env.NESSION_QWEN_ARTIFACT_DIR,
+  runnerTemp=process.env.RUNNER_TEMP){
+  assert.ok(typeof route==='string'&&route.startsWith('/')&&
+    route.length<=550&&!/[\\\r\n]/.test(route)&&
+    !route.split('/').some(x=>x==='.'||x==='..'),
+    'unsafe cached GitHub source route');
+  assert.ok(typeof root==='string'&&typeof runnerTemp==='string'&&
+    path.isAbsolute(root)&&path.isAbsolute(runnerTemp)&&
+    root===path.join(runnerTemp,'qwen-lineage-source'),
+    'missing trusted private Qwen readback directory');
+  const dir=fs.lstatSync(root);
+  assert.ok(dir.isDirectory()&&!dir.isSymbolicLink(),
+    'unsafe private Qwen readback directory');
+  const manifestPath=path.join(root,'api-manifest.json');
+  let stat;
+  try{stat=fs.lstatSync(manifestPath);}
+  catch{throw Error('missing or unsafe Qwen source readback manifest');}
+  assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>=40&&
+    stat.size<=65536,'missing or unsafe Qwen source readback manifest');
+  const m=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+  assert.ok(m?.schema_version===1&&
+    m.kind==='nession_qwen_github_readback_v1'&&m.repository===REPO&&
+    /^[a-f0-9]{40}$/.test(m.source_ref_sha??'')&&positive(m.issue)&&
+    Array.isArray(m.entries)&&m.entries.length>=8&&m.entries.length<=32,
+    'untrusted Qwen readback source manifest');
+  const candidates=m.entries.filter(e=>e.route===route);
+  assert.equal(candidates.length,1,'missing or ambiguous pinned GitHub API route');
+  const e=candidates[0];
+  assert.ok(e.sha256&&/^[a-f0-9]{64}$/.test(e.sha256)&&
+    Number.isSafeInteger(e.size)&&e.size>=2&&e.size<=2*1024*1024,
+    'invalid pinned read-only GitHub source bounds');
+  const apiDir=path.join(root,'api');
+  let d;
+  try{d=fs.lstatSync(apiDir);}
+  catch{throw Error('unsafe pinned source API directory');}
+  assert.ok(d.isDirectory()&&!d.isSymbolicLink(),
+    'unsafe pinned source API directory');
+  const file=path.join(apiDir,
+    createHash('sha256').update(route).digest('hex')+'.json');
+  let fileStat;
+  try{fileStat=fs.lstatSync(file);}
+  catch{throw Error('missing or unsafe original GitHub source body');}
+  assert.ok(fileStat.isFile()&&!fileStat.isSymbolicLink()&&
+    fileStat.size===e.size,'stale or unsafe original GitHub source body');
+  const bytes=fs.readFileSync(file);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),e.sha256,
+    'original GitHub source metadata checksum mismatch');
+  const json=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));
+  if(route==='/git/ref/heads/agent-store')
+    assert.equal(json?.object?.sha,m.source_ref_sha,
+      'pinned agent-store source identity mismatch');
+  return json;
+}
 async function api(route){
   assert.ok(typeof route==='string'&&route.startsWith('/')&&
     !route.split('/').some(part=>part==='..'||part==='.'),'unsafe source API route');
+  if(process.env.NESSION_QWEN_ARTIFACT_DIR)
+    return readPinnedQwenApi(route);
   const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
   const headers={'Accept':'application/vnd.github+json',
     'X-GitHub-Api-Version':'2022-11-28',
@@ -181,4 +237,4 @@ async function attestLatestQwenProducer(){
     attested};
 }
 module.exports={selectNewestQwenProducer,attestLatestQwenProducer,
-  preStagedOriginalZip};
+  preStagedOriginalZip,readPinnedQwenApi,qwenApi:api};

@@ -125,7 +125,7 @@ export async function loadPinnedQwenLineage({
 // Extracts exactly ONE allowed public Writer SHA; not an authentication claim.
 // The full ZIP/Artifact metadata is reauthenticated by attestQwenPublisherSource
 // before the caller can get an edge. No native or arbitrary member is exposed.
-function extractPublisherWriterSha(bytes){
+export function extractPublisherWriterSha(bytes){
  try{
    if(!Buffer.isBuffer(bytes)||bytes.length<52||bytes.length>512*1024)return null;
    const end=bytes.length-22;
