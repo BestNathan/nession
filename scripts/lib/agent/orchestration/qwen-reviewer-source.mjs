@@ -5,8 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {readIssueWorkflowState} from './state-store.mjs';
-import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
-import {validateQwenRepairPublisherIntent}
+import {validateQwenPublisherIntent,qwenPublisherIntentPath}
+  from '../publisher/store-intent.mjs';
+import {validateQwenRepairPublisherIntent,qwenRepairPublisherIntentPath}
   from '../publisher/qwen-repair-intent.mjs';
 
 const SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
@@ -14,75 +15,70 @@ function fail(m){throw Error('trusted Qwen Reviewer source: '+m);}
 // The immutable Publisher Intent is the single source of Qwen published
 // Developer/Reviewer/Repair lineage, not the Issue body or a model field.
 // All consumers must check their own current State phase and target SHA.
+// The old v1 intents share results/ with canonical Result receipts. New v2
+// intents have a collision-free, immutable publisher-intents/ namespace.
+// Read both exact layouts, never move or rewrite historical Store objects.
+function readQwenPublisherIntents(storeRoot,issue){
+  const prefix='workflows/issues/'+issue+'/';
+  const matched=[];
+  let total=0;
+  for(const bucket of ['results','publisher-intents']){
+    const folder=path.join(storeRoot,prefix,bucket);
+    let entries;
+    try{entries=fs.readdirSync(folder,{withFileTypes:true});}
+    catch(error){if(error.code==='ENOENT')continue;throw error;}
+    total+=entries.length;
+    if(total>512)fail('unbounded Publisher Intent history');
+    for(const file of entries){
+      if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\\.json$/.test(file.name))continue;
+      if(!file.isFile()||file.isSymbolicLink())fail('unsafe Store result entry');
+      const full=path.join(folder,file.name),stat=fs.lstatSync(full);
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>65536)
+        fail('unsafe Publisher Intent bytes');
+      let record;
+      try{record=JSON.parse(fs.readFileSync(full,'utf8'));}
+      catch{fail('invalid Publisher result JSON');}
+      if(record?.kind==='trusted_qwen_publisher_write_ahead_intent'){
+        if(stat.size>8192)fail('oversized Qwen Publisher intent');
+        const checked=validateQwenPublisherIntent(record);
+        if(prefix+bucket+'/'+file.name!==qwenPublisherIntentPath(checked))
+          fail('Publisher Intent path differs from immutable action');
+        matched.push({repair:false,record:checked});
+      }else if(record?.kind==='trusted_qwen_repair_publisher_write_ahead'){
+        if(stat.size>8192)fail('oversized Qwen Repair intent');
+        const checked=validateQwenRepairPublisherIntent(record);
+        if(prefix+bucket+'/'+file.name!==qwenRepairPublisherIntentPath(checked))
+          fail('Repair Intent path differs from immutable action');
+        matched.push({repair:true,record:checked});
+      }else if(bucket==='publisher-intents'){
+        fail('publisher-intents contains non-Intent content');
+      }
+    }
+  }
+  return matched;
+}
 export function qwenCommittedPublisherIntent({storeRoot,issue,publisherRunId}){
   if(typeof storeRoot!=='string'||!storeRoot||
      !Number.isSafeInteger(issue)||issue<1||
      !Number.isSafeInteger(publisherRunId)||publisherRunId<1)
     fail('missing authenticated Publisher Intent lookup');
-  const folder=path.join(storeRoot,'workflows/issues',String(issue),'results');
-  const entries=fs.readdirSync(folder,{withFileTypes:true});
-  if(entries.length>512)fail('unbounded Publisher Intent history');
-  const candidates=[];
-  for(const file of entries){
-    if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\.json$/.test(file.name))continue;
-    if(!file.isFile()||file.isSymbolicLink())fail('unsafe Store result entry');
-    const full=path.join(folder,file.name),stat=fs.lstatSync(full);
-    if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>8192)
-      fail('unsafe Publisher Intent bytes');
-    let record;
-    try{record=JSON.parse(fs.readFileSync(full,'utf8'));}
-    catch{fail('invalid Publisher result JSON');}
-    if(record?.kind==='trusted_qwen_publisher_write_ahead_intent'&&
-       record.issue===issue&&record.publisher_run_id===publisherRunId){
-      if(file.name!==record.worker_run_id+'-'+record.worker_run_attempt+
-          '-'+record.action_id+'.json')
-        fail('Publisher Intent path differs from immutable action');
-      candidates.push(validateQwenPublisherIntent(record));
-    }
-  }
-  if(candidates.length!==1)fail('missing unique Qwen publication Intent');
-
-  return candidates[0];
+  const matches=readQwenPublisherIntents(storeRoot,issue).filter(x=>
+    !x.repair&&x.record.publisher_run_id===publisherRunId);
+  if(matches.length!==1)fail('missing unique Qwen publication Intent');
+  return matches[0].record;
 }
-
-// A review may follow either the initial publication or a same-PR Repair
-// update. Both are immutable Publisher write-ahead records at the same
-// branch; a Repair record additionally binds SHA A (`source_sha`) and the
-// original main/base + publisher. Return exactly the record for the current
-// Publisher Run, tagged so the admission can select the right parent check.
 export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
   if(typeof storeRoot!=='string'||!storeRoot||
      !Number.isSafeInteger(issue)||issue<1||
      !Number.isSafeInteger(publisherRunId)||publisherRunId<1)
     fail('missing authenticated Publisher Intent lookup');
-  const folder=path.join(storeRoot,'workflows/issues',String(issue),'results');
-  const entries=fs.readdirSync(folder,{withFileTypes:true});
-  if(entries.length>512)fail('unbounded Publisher Intent history');
-  const candidates=[];
-  for(const file of entries){
-    if(!/^[1-9][0-9]*-1-[a-f0-9]{64}\.json$/.test(file.name))continue;
-    if(!file.isFile()||file.isSymbolicLink())fail('unsafe Store result entry');
-    const full=path.join(folder,file.name),stat=fs.lstatSync(full);
-    if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>8192)
-      fail('unsafe Publisher Intent bytes');
-    let record;
-    try{record=JSON.parse(fs.readFileSync(full,'utf8'));}
-    catch{fail('invalid Publisher result JSON');}
-    if(record?.issue!==issue||record?.publisher_run_id!==publisherRunId)continue;
-    if(record.kind==='trusted_qwen_publisher_write_ahead_intent'){
-      candidates.push({repair:false,record:validateQwenPublisherIntent(record),
-        branch:record.branch});
-    }else if(record.kind==='trusted_qwen_repair_publisher_write_ahead'){
-      const valid=validateQwenRepairPublisherIntent(record);
-      candidates.push({repair:true,record:valid,
-        branch:valid.branch.replace(/^refs\/heads\//,'')});
-    }
-  }
-  if(candidates.length!==1)
-    fail('missing unique Qwen review publication Intent');
-  return Object.freeze(candidates[0]);
+  const matches=readQwenPublisherIntents(storeRoot,issue).filter(x=>
+    x.record.publisher_run_id===publisherRunId);
+  if(matches.length!==1)fail('missing unique Qwen review publication Intent');
+  const chosen=matches[0],record=chosen.record;
+  return Object.freeze({repair:chosen.repair,record,
+    branch:chosen.repair?record.branch.replace(/^refs\\/heads\\//,''):record.branch});
 }
-
 export function qwenReviewerPublishedSource({storeRoot,issue,actionId,sha}){
   if(typeof storeRoot!=='string'||!storeRoot||
       !Number.isSafeInteger(issue)||issue<1||
