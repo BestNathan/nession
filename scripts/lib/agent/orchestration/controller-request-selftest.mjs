@@ -6,7 +6,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {buildControllerRequest,verifyControllerRequestSource,
-  inspectControllerRequestZip} from './controller-request.mjs';
+  inspectControllerRequestZip,qwenV2OwnerCommentInput,
+  QWEN_V2_BOOTSTRAP_COMMENT} from './controller-request.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const sourceSha='a'.repeat(40),issue=3001;
@@ -80,6 +81,49 @@ assert.throws(()=>buildControllerRequest(inputs,{...context,actor:'external'},re
 assert.throws(()=>buildControllerRequest(inputs,{...context,ref:'refs/heads/feature'},registry),
   /untrusted/);
 
+// Owner-only source-comment admission is not a generic Issue, provider,
+// token or SHA override. Malformed/foreign/comment edits are rejected.
+const commentEnvironment={GITHUB_ACTIONS:'true',
+  GITHUB_REPOSITORY:'BestNathan/nession',
+  GITHUB_WORKFLOW:'Acceptance / Agent Controller',
+  GITHUB_ACTOR:'BestNathan',
+  GITHUB_EVENT_NAME:'issue_comment',GITHUB_REF:'refs/heads/main',
+  GITHUB_SHA:sourceSha,GITHUB_RUN_ATTEMPT:'1'};
+const commentEvent={action:'created',
+  repository:{full_name:'BestNathan/nession'},
+  issue:{number:3001,state:'open'},
+  comment:{id:99110,body:QWEN_V2_BOOTSTRAP_COMMENT,
+    user:{login:'BestNathan'}}};
+const canaryInput=qwenV2OwnerCommentInput(commentEvent,commentEnvironment);
+const canaryRun={...context,event:'issue_comment'};
+assert.deepEqual(buildControllerRequest(canaryInput,canaryRun,registry).request,{
+  issue:3001,sha:sourceSha,developer:'dev-qwen-01',
+  reviewer:'review-qwen-01',acceptor:'accept-qwen-01'});
+for(const altered of [
+  {...commentEvent,issue:{number:3002,state:'open'}},
+  {...commentEvent,issue:{number:3001,state:'closed'}},
+  {...commentEvent,comment:{...commentEvent.comment,id:0}},
+  {...commentEvent,comment:{...commentEvent.comment,body:QWEN_V2_BOOTSTRAP_COMMENT+' '}},
+  {...commentEvent,comment:{...commentEvent.comment,user:{login:'other'}}},
+  {...commentEvent,action:'edited'},
+  {...commentEvent,repository:{full_name:'other/fork'}},
+])assert.throws(()=>qwenV2OwnerCommentInput(altered,commentEnvironment),
+  /noncanonical owner-only/);
+for(const env of [
+  {...commentEnvironment,GITHUB_ACTOR:'other'},
+  {...commentEnvironment,GITHUB_REF:'refs/heads/staging'},
+  {...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'},
+  {...commentEnvironment,GITHUB_SHA:'broken'},
+])assert.throws(()=>qwenV2OwnerCommentInput(commentEvent,env),
+  /noncanonical owner-only/);
+assert.throws(()=>buildControllerRequest({...canaryInput,issue_number:'3002'},
+  canaryRun,registry),/untrusted/);
+assert.throws(()=>buildControllerRequest({...canaryInput,reviewer:'review-cursor-01'},
+  canaryRun,registry),/untrusted/);
+assert.throws(()=>buildControllerRequest({...canaryInput,input_sha:'b'.repeat(40)},
+  canaryRun,registry),/untrusted/);
+assert.throws(()=>buildControllerRequest(inputs,canaryRun,registry),/untrusted/);
+
 const upstream={id:1001,run_attempt:1,head_sha:sourceSha,
   name:'Acceptance / Agent Controller',
   path:'.github/workflows/acceptance-agent-controller.yml',
@@ -94,6 +138,8 @@ const artifact={id:555,name:'agent-controller-request-1001-1',
 const listing={artifacts:[artifact]};
 assert.deepEqual(verifyControllerRequestSource(upstream,listing,expected),
   {artifact_id:555,digest:artifact.digest});
+assert.deepEqual(verifyControllerRequestSource({...upstream,event:'issue_comment'},
+  listing,expected),{artifact_id:555,digest:artifact.digest});
 for(const change of [
   {actor:{login:'untrusted'}},{head_repository:{full_name:'other/fork'}},
   {head_branch:'feature'},{run_attempt:2},{conclusion:'failure'},
