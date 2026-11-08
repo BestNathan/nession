@@ -1,5 +1,6 @@
 // Strictly allowlisted, read-only public projection. No raw Agent events or private IDs.
 import {projectLineage,validateLineageProjection} from './lineage.mjs';
+import {validateAgentResultObservations} from './agent-result-observations.mjs';
 import {validateAgentStoreReadiness} from './agent-store-readiness.mjs';
 import {validatePublicE2E} from './acceptance-e2e.mjs';
 const REPO = 'BestNathan/nession';
@@ -242,7 +243,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, refs={}, storeMeta={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, agentResultObservations, refs={}, storeMeta={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -336,6 +337,8 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       acceptance_e2e:acceptanceE2E||{status:'unavailable',source_sha:null,records:[]},
       agent_store_readiness:validateAgentStoreReadiness(agentStoreSource||
         {status:'unavailable',sha:null,url:GH+'/tree/agent-store'}),
+      agent_result_observations:validateAgentResultObservations(agentResultObservations||
+        {status:'unavailable',source_ref_sha:null,records:[],truncated:false}),
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
         pr_references:timelineReferences(x.number,issueTimelines?.[String(x.number)]),
@@ -371,9 +374,16 @@ export function validateProjection(p) {
   allowedFields(p.source,['repository','main_sha','metrics_sha','acceptance_results_sha','issues_status','pulls_status','workflow_runs_status'],'source');
   allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
   allowedFields(p.agents,['available','generated_at','freshness','roster','outcomes','distribution','summary'],'agents');
-  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','agent_store_readiness','issues','pulls'],'work');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','agent_store_readiness','agent_result_observations','issues','pulls'],'work');
   validateLineageProjection(p.work.lineage);
   validateAgentStoreReadiness(p.work.agent_store_readiness);
+  validateAgentResultObservations(p.work.agent_result_observations);
+  const observed=p.work.agent_result_observations;
+  if(observed.status!=='unavailable'&&
+     (p.work.agent_store_readiness.status!=='present_unverified'||
+      observed.source_ref_sha!==p.work.agent_store_readiness.sha||
+      observed.records.some(r=>!p.work.issues.some(x=>x.number===r.issue))))
+    throw Error('Agent Store observations do not match pinned source/scope');
   // Readiness of an orphan ref is never a verified causal producer.
   if(p.work.agent_store_readiness.status==='empty'&&p.work.lineage.edges.length)
     throw Error('empty Agent Store cannot provide verified lineage');
