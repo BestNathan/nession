@@ -320,13 +320,30 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
   }
 }
 
-function dispatchBatchAudit(repo,issueNumber){
+function dispatchBatchAudit(repo,issue){
   const token=process.env.DISPATCH_GITHUB_TOKEN;
   if(!token)reject('trusted Issue Audit dispatcher token missing');
+  const env={...process.env,GH_TOKEN:token};
+  // A dispatch can succeed remotely while the Controller loses its reply.
+  // Reconcile the immutable Issue identity against actual GitHub runs before
+  // spending another model invocation; do not rely on the created flag.
+  const raw=shell('gh',['api','repos/'+repo+
+    '/actions/workflows/agent-issue-audit.yml/runs?event=workflow_dispatch&per_page=100'],{env});
+  const inventory=JSON.parse(raw);
+  if(!Array.isArray(inventory.workflow_runs))reject('untrusted Issue Audit run inventory');
+  const expected='Issue Audit #'+issue.number;
+  const found=inventory.workflow_runs.find(run=>run.display_title===expected&&
+    run.event==='workflow_dispatch'&&run.head_branch==='main'&&
+    run.repository?.full_name===repo&&run.head_repository?.full_name===repo&&
+    Date.parse(run.created_at)>=Date.parse(issue.created_at));
+  if(found)return {status:'EXISTING_AUDIT',run_id:found.id};
+  if(inventory.workflow_runs.length===100 &&
+    Date.parse(inventory.workflow_runs[99].created_at)>Date.parse(issue.created_at))
+    return {status:'BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED'};
   shell('gh',['api','--method','POST','repos/'+repo+
     '/actions/workflows/agent-issue-audit.yml/dispatches',
-    '-f','ref=main','-f','inputs[issue_number]='+issueNumber],{
-    env:{...process.env,GH_TOKEN:token}});
+    '-f','ref=main','-f','inputs[issue_number]='+issue.number],{env});
+  return {status:'AUDIT_DISPATCHED'};
 }
 
 function dispatchConflictReview(repo, receipt, action, plan, lane) {
@@ -397,7 +414,12 @@ function reconcile(plan) {
           lane_sha:lane.sha,integration_head:integration.sha});
         const prepared=ensureBatchIssue(batch);
         batchIssueNumber=prepared.issue.number;
-        if(prepared.created)dispatchBatchAudit(repo,batchIssueNumber);
+        const approval=issueApproval(batch,batchIssueNumber);
+        if(!approval.approved){
+          const audit=dispatchBatchAudit(repo,prepared.issue);
+          if(audit.status==='BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED')
+            reject('source-bound Issue Audit run inventory too old for safe redispatch');
+        }
       }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
