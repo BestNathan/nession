@@ -243,6 +243,32 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
+// Keep the public activity lists OPEN-only while making a small, independently
+// attested historical source discoverable after its implementing PR merges.
+// Only the separate original Worker/Publisher/Writer verifier may supply these
+// historical records; mutable Store/GitHub titles are never a trusted join.
+export function lineageLookupScope(issues,pulls,attested){
+ const activeIssues=list(issues,'issue').map(x=>x.number);
+ const activePulls=list(pulls,'pr').map(x=>({number:x.number,
+   head_sha:pulls.find(p=>p.number===x.number)?.head?.sha}));
+ const historical=['verified','truncated'].includes(attested?.status)&&
+   Array.isArray(attested?.records)?attested.records:[];
+ if(historical.length>4)return null;
+ const historicalIssues=new Set(),historicalPrs=new Map();
+ for(const row of historical){
+   if(!Number.isSafeInteger(row?.issue)||row.issue<1||
+      !Number.isSafeInteger(row?.pr_number)||row.pr_number<1||
+      !safeSha(row.pr_head_sha))return null;
+   const prior=historicalPrs.get(row.pr_number);
+   if(prior&&prior!==row.pr_head_sha)return null; // ambiguous PR HEAD
+   historicalIssues.add(row.issue);historicalPrs.set(row.pr_number,row.pr_head_sha);
+ }
+ const issueNumbers=[...historicalIssues,...activeIssues.filter(n=>!historicalIssues.has(n))]
+   .slice(0,12);
+ const historicalPulls=[...historicalPrs].map(([number,head_sha])=>({number,head_sha}));
+ return {issueNumbers,pulls:[...historicalPulls,
+   ...activePulls.filter(x=>!historicalPrs.has(x.number))].slice(0,12)};
+}
 export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, agentResultObservations, refs={}, storeMeta={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
@@ -251,6 +277,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
   const aw30 = a?.windows?.['30d'] || {};
   const tok = aw?.tokens?.total || {}, tool=aw?.tools||{}, cost=aw?.cost_usd?.charged || {},
     duration=aw?.duration_ms||{};
+  const lineageScope=lineageLookupScope(issues,pulls,lineageEvidence);
   const record = (name,purpose)=>{
     const v=refs[name], m=storeMeta[name]||{};
     return {
@@ -330,10 +357,9 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
       workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
       agent_run_source:['available','truncated'].includes(issueRunSource?.status)?issueRunSource.status:'unavailable',
-      lineage:projectLineage({issueNumbers:list(issues,'issue').map(x=>x.number),
-        pulls:list(pulls,'pr').map(x=>({number:x.number,
-          head_sha:pulls?.find(p=>p.number===x.number)?.head?.sha})),
-        attested:lineageEvidence}),
+      lineage:projectLineage({issueNumbers:lineageScope?.issueNumbers,
+        pulls:lineageScope?.pulls,
+        attested:lineageScope?lineageEvidence:null}),
       acceptance_e2e:acceptanceE2E||{status:'unavailable',source_sha:null,records:[]},
       agent_store_readiness:validateAgentStoreReadiness(agentStoreSource||
         {status:'unavailable',sha:null,url:GH+'/tree/agent-store'}),
