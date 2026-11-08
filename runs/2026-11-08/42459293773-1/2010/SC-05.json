@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "087cdcc051e12076e83c77163971ecac4371abd97764ab05161190d162b278a2",
+  "run_id": 42459293773,
+  "run_attempt": 1,
+  "issue": 2010,
+  "criterion": "SC-05",
+  "criterion_text": "Negative tests cover stale Store CAS, wrong Run, replayed/forged Ticket, role escalation, cross-Issue routing, crash between POST and ACK; Quality, E2E and Acceptance Case Smoke pass",
+  "stage": "post-merge",
+  "target_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "contract_sha256": "f2d4a1d38486c34f095feaf759cab09b8d3ce4c322d4f4768d8a5f4a60cf68be",
+  "case_revision": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "case_tree_sha": "e3f25f26e8211f6c6649bdf73be8c1dd660e9836",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T07:35:55.020Z",
+  "finished_at": "2026-11-08T07:36:04.262Z",
+  "duration_ms": 9242,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Negative fixtures cover stale Store CAS, wrong Run, replayed/forged Ticket, role escalation, cross-Issue routing and crash between POST and ACK; CI Quality, E2E and Acceptance Case Smoke all completed successfully at the producer PR head.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "dispatch-intent-selftest: crash/no-redelivery, exact HMAC ticket and replay denial passed; worker-preflight-selftest: wrong Run/ACK, forged ticket, role escalation and cross-Issue negatives passed; controller-dispatch-selftest: untrusted source, ancestry and replay negatives passed"
+        },
+        {
+          "type": "runtime",
+          "value": "CI / Quality Gate, E2E / Tests and Acceptance / Case Smoke completed successfully at b1d8fc3698c9f444d1394a552b048df37ea9fc80"
+        }
+      ],
+      "duration_ms": 3332,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42459293773,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "record_path": "runs/2026-11-08/42459293773-1/2010/SC-05.json",
+    "source_result_sha256": "49817f3e1ca29990d17ac5ed755e20665aec1390f0db368c879ace5d74f6db0c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42459293773-1",
+    "sha256": "49817f3e1ca29990d17ac5ed755e20665aec1390f0db368c879ace5d74f6db0c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "durability": "time-limited; object archival not configured"
+  }
+}

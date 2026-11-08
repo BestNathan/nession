@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f7852b4d88a12290652605feaa0178a474733ebe2b5af97617b1a0ec6c042ee8",
+  "run_id": 42459293773,
+  "run_attempt": 1,
+  "issue": 2137,
+  "criterion": "SC-07",
+  "criterion_text": "A real separate-fixture, executable post-merge Case proves crash/replay/missed-event paths and terminal outcomes; parent #1664 SC-03/04/05/07/17 are independently verified by their own post-merge Cases.",
+  "stage": "post-merge",
+  "target_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "contract_sha256": "3ac662ac79b16abf25e78911f26d28f451411a992fad8d8c8a6e0df2a91af1d1",
+  "case_revision": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "case_tree_sha": "e86e79d64001f38f32a3a1ff65c08262ca7579ef",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T07:36:49.955Z",
+  "finished_at": "2026-11-08T07:36:58.648Z",
+  "duration_ms": 8693,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The controlled Qwen fixture provides a real separate post-merge Case, and the canonical failure/replay/outbox fixtures prove crash, missed-event, duplicate and terminal outcomes; parent #1664 SC-03/04/05/07/17 are independently verified by their own post-merge Cases.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "real Qwen Developer run 42401513247/1 published SHA A 1f925d21129fe5731aec4235a9ff680ac7453785; Reviewer run 42402597971/1 recorded changes_requested; the SAME dev-qwen-01 resumed checkpoint v1 and run 42403004351/1 produced SHA B cfe6eacdce242086b6f549645fbf8a7b05c100ad; Reviewer run 42403363557/1 approved SHA B"
+        },
+        {
+          "type": "store",
+          "value": "agent-store state v14 commits publisher:42402434528=published@1f925d21129fe5731aec4235a9ff680ac7453785, reviewer:42402597971=changes_requested@1f925d21129fe5731aec4235a9ff680ac7453785, publisher:42403209086=published@cfe6eacdce242086b6f549645fbf8a7b05c100ad, reviewer:42403363557=approved@cfe6eacdce242086b6f549645fbf8a7b05c100ad; checkpoint commits 1841f76e2a3fa8d87a70937977b0005706ce9736 and e7ba4e329cfcf8372f23cf1f332ecafc95812954 are committed Store objects"
+        },
+        {
+          "type": "runtime",
+          "value": "exact-SHA PR #2963 head cfe6eacdce242086b6f549645fbf8a7b05c100ad changed only e2e/fixtures/agent-development/qwen-repair-source-v4.md from implementation pending/verification missing to implementation qwen-verified/verification complete; CI / Quality Gate 42403269834 and Acceptance / Orchestrator 42403268820 completed successfully at that exact head; the owner merged it at 6de4b645c75255e1762ac8ba7de8657aabbeab4e; init and merge SHAs are ancestors of target bda514907f2c03f56d4c6520232f735a4b318e5c"
+        },
+        {
+          "type": "runtime",
+          "value": "repair-runtime-failure-selftest: exact Run/Artifact/Stage proof, bounded CAS successor, no blind POST; dispatch-intent-selftest: crash/no-redelivery and replay denial; outbox-selftest: durable CAS and terminal transitions"
+        },
+        {
+          "type": "runtime",
+          "value": "parent #1664 is closed with 18/18 SC rows Pass, including SC-03/04/05/07/17"
+        }
+      ],
+      "duration_ms": 2845,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42459293773,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "record_path": "runs/2026-11-08/42459293773-1/2137/SC-07.json",
+    "source_result_sha256": "e6d04a98811b84c27be654ce792781a81301d140b224d9e837806c724187a528"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42459293773-1",
+    "sha256": "e6d04a98811b84c27be654ce792781a81301d140b224d9e837806c724187a528",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "durability": "time-limited; object archival not configured"
+  }
+}

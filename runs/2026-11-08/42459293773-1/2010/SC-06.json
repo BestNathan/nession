@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "53b1bd8e66771c31ce6d80bef1805f07414aa418590fdc9c60f8b80cfbd03b5f",
+  "run_id": 42459293773,
+  "run_attempt": 1,
+  "issue": 2010,
+  "criterion": "SC-06",
+  "criterion_text": "Update #1664 and #2274 with exact URLs/digests; check parent success criteria only after formal acceptance, not source merge alone. The #1997 Cursor path is out of scope by owner decision",
+  "stage": "post-merge",
+  "target_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "contract_sha256": "f2d4a1d38486c34f095feaf759cab09b8d3ce4c322d4f4768d8a5f4a60cf68be",
+  "case_revision": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+  "case_tree_sha": "e602c20b71916093ef92943b75fa9304daa13548",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T07:36:04.263Z",
+  "finished_at": "2026-11-08T07:36:10.571Z",
+  "duration_ms": 6308,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Parent #1664 and #2274 are closed with every Success Criterion Pass and exact Run/Case receipts recorded; their success was checked only after formal Acceptance, not from source merge alone.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "parent #1664 is closed with 18/18 SC rows Pass and exact run/case receipts"
+        },
+        {
+          "type": "runtime",
+          "value": "parent #2274 is closed with 5/5 SC rows Pass and exact run/case receipts"
+        }
+      ],
+      "duration_ms": 453,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42459293773,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bda514907f2c03f56d4c6520232f735a4b318e5c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "record_path": "runs/2026-11-08/42459293773-1/2010/SC-06.json",
+    "source_result_sha256": "383119746a2fb66db3d996ef691807e5f7e7dd1f90204c5d6a986c87750cb155"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42459293773-1",
+    "sha256": "383119746a2fb66db3d996ef691807e5f7e7dd1f90204c5d6a986c87750cb155",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42459293773",
+    "durability": "time-limited; object archival not configured"
+  }
+}
