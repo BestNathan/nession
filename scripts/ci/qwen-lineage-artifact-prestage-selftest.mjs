@@ -140,14 +140,12 @@ try{
   fs.appendFileSync(raw,' ');
   assert.throws(()=>readPinnedQwenApi(entry.route,verifiedDir,root),
     /stale or unsafe|checksum mismatch/);
-  const runnerCache=path.join(root,'qwen-lineage-source');
-  fs.mkdirSync(runnerCache);
-  fs.copyFileSync(path.join(root,'pass','1.zip'),path.join(runnerCache,'1.zip'));
+  const runnerCache=verifiedDir;
   assert.deepEqual(preStagedOriginalZip(1,runnerCache,root),zipA);
-  assert.throws(()=>preStagedOriginalZip(2,runnerCache,root),/missing or unsafe/);
+  assert.throws(()=>preStagedOriginalZip(3,runnerCache,root),/missing or unsafe/);
   assert.throws(()=>preStagedOriginalZip(1,runnerCache,root+'-foreign'),/missing trusted/);
-  fs.symlinkSync(path.join(root,'pass','2.zip'),path.join(runnerCache,'2.zip'));
-  assert.throws(()=>preStagedOriginalZip(2,runnerCache,root),/missing or unsafe/);
+  fs.symlinkSync(path.join(root,'pass','2.zip'),path.join(runnerCache,'3.zip'));
+  assert.throws(()=>preStagedOriginalZip(3,runnerCache,root),/missing or unsafe/);
   await assert.rejects(()=>stageQwenArtifactBytes({...fixture(),
     token:'fixture-token',outputDir:path.join(root,'pass')}),/fresh and empty/);
   const badMap=new Map(blobs);
