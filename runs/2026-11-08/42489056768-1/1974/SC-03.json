@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "51ea807820b3ae7fde141e6a76d913b4a3f5618b547f03be1469a434a61e9104",
+  "run_id": 42489056768,
+  "run_attempt": 1,
+  "issue": 1974,
+  "criterion": "SC-03",
+  "criterion_text": "A genuine logical Slice identifier is separately demonstrated and joins the real Agent→Run, or the source is explicitly Partial and #1906 remains Unlinked; no fake Slice identity.",
+  "stage": "post-merge",
+  "target_sha": "042b262eeb522ae067187d271e3d039b1b979914",
+  "contract_sha256": "8f89fc0ce98e48ec081cf458439c18223e3a90681b5da03b55ecc1c8f6800ab9",
+  "case_revision": "042b262eeb522ae067187d271e3d039b1b979914",
+  "case_tree_sha": "daf21d7e742560a659dc72911cfeb4769ef9de8f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-08T14:22:20.254Z",
+  "finished_at": "2026-11-08T14:22:26.532Z",
+  "duration_ms": 6278,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pending",
+      "summary": "Original Qwen Developer Result v2 is not authenticated: Original Qwen Worker, Publisher, PR and Writer sources not jointly attested Source is explicitly Partial; #1906 remains Unlinked.",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store=cb337f92912b0da5b446aec0f3531b1b75f1980e"
+        },
+        {
+          "type": "blocked",
+          "value": "No action_id-to-Slice inference or unsigned Store-only Slice projection"
+        }
+      ],
+      "duration_ms": 413,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42489056768,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "042b262eeb522ae067187d271e3d039b1b979914",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42489056768",
+    "record_path": "runs/2026-11-08/42489056768-1/1974/SC-03.json",
+    "source_result_sha256": "40f99e5cd4756dc9236d0cd2fd3c7dfee4bce6761e1253c450f7dd792f781108"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42489056768-1",
+    "sha256": "40f99e5cd4756dc9236d0cd2fd3c7dfee4bce6761e1253c450f7dd792f781108",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42489056768",
+    "durability": "time-limited; object archival not configured"
+  }
+}
