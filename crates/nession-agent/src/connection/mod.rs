@@ -14,6 +14,11 @@ pub mod execution;
 /// this agent *do*, the other is what this agent *says* about itself.
 pub mod outbox;
 mod server_client;
+/// The "Server's view may be stale" intent (`#2976`): marked by a reconnect or
+/// a refused session-state publish, cleared by the watcher only after a full
+/// snapshot was accepted. Its generation keeps an older attempt from clearing a
+/// newer request.
+pub mod sync_intent;
 
 // `core_descriptors` is generated in `server_client` because the handlers it
 // describes need that module's private state; it is re-exported here so callers
