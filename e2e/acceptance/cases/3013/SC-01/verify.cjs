@@ -1,5 +1,7 @@
 'use strict';
 // #3013 SC-01: the filtered Sessions Linux baselines carry the quiet
+// Regression proof for the two named visual specs; this Case checks the
+// exact baseline bytes and their migration-parity pins.
 // bordered-field focus state and their migration-parity pins agree with the
 // exact files. The named E2E specs are the browser-level proof.
 const assert = require('node:assert/strict');
