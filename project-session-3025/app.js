@@ -27,7 +27,7 @@ case 'project':state.view='project';break;case 'settings':state.view='settings';
 case 'existing':state.method='existing';state.view='create';resetPrep();break;
 case 'managed':state.method='managed';state.view='create';resetPrep();break;
 case 'terminal':state.view='terminal';break;case 'sessions':state.view='sessions';break;
-case 'go-back':state.view=state.view==='terminal'?'sessions':state.view==='project'?'terminal':'project';break;
+case 'go-back':state.view=state.view==='terminal'?(state.width<600?'sessions':'project'):state.view==='project'?'terminal':state.view==='sessions'?'terminal':'project';break;
 case 'collapse':state.collapsed=true;break;case 'expand':state.collapsed=false;break;
 case 'open-session':state.active=button.dataset.id;state.view='terminal';break;
 case 'build':state.built=true;state.digest='sha256:bd49f002';state.notice='新的 EROFS Artifact 已模拟构建，sha256:bd49f002。已有 Session 继续使用原镜像。';break;
