@@ -9,6 +9,7 @@ const REPO='BestNathan/nession';
 const STORE='agent-store';
 const RESULT_PATH=/^workflows\/issues\/[1-9][0-9]*\/results\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\.json$/;
 const SLICE_PATH=/^workflows\/issues\/[1-9][0-9]*\/slices\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\.json$/;
+const PRODUCER_RESULT_PATH=/^workflows\/issues\/[1-9][0-9]*\/producer-results-v2\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\.json$/;
 async function pinnedStore(){
   const ref=await fetchJson('/git/ref/heads/'+STORE);
   const sha=ref?.object?.sha;
@@ -32,7 +33,8 @@ async function issueRecords(issue=1997){
   for(const entry of tree.tree){
     if(entry.type!=='blob')continue;
     if(!entry.path.startsWith(prefix))continue;
-    if(RESULT_PATH.test(entry.path))results.push({path:entry.path,sha:entry.sha,...await blob(entry,sha)});
+    if(RESULT_PATH.test(entry.path)||PRODUCER_RESULT_PATH.test(entry.path))
+      results.push({path:entry.path,sha:entry.sha,...await blob(entry,sha)});
     else if(SLICE_PATH.test(entry.path))slices.push({path:entry.path,sha:entry.sha,...await blob(entry,sha)});
   }
   return {storeSha:sha,results,slices};
