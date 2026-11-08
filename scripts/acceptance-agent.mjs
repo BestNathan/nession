@@ -317,6 +317,14 @@ async function selfTest() {
   assert.match(prompt, /Agent judgment must NEVER replace a required Case-method/);
   assert.match(prompt, /not where the old Worker executed/);
   assert.match(prompt, /never substitutes PR results for a criterion explicitly requiring new execution/);
+  // A main push may run unrelated post-merge Case-method SCs that return
+  // Pending/Fail. They must not override independently verified PR-head
+  // Agent-method acceptance for this Issue, nor excuse its own failed Case.
+  assert.match(prompt, /Workflow names are NOT interchangeable/);
+  assert.match(prompt, /for unrelated Issues/);
+  assert.match(prompt, /contains only Pending\/Fail Cases for OTHER Issues/);
+  assert.match(prompt, /Never convert a genuine failing Case owned by the current criterion into a Pass/);
+  assert.match(prompt, /same exact PR HEAD/i);
   assert.deepEqual(parseJsonText('{"criteria":[]}'), { criteria: [] });
   assert.deepEqual(parseJsonText('```json\n{"criteria":[]}\n```'), { criteria: [] });
   assert.deepEqual(await parseModelJsonWithRepair('not json', async prior => {
