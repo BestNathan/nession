@@ -369,8 +369,9 @@ export function composeQwenDeveloperResult({
      claim.inputs.agent_id!=='dev-qwen-01'||
      claim.inputs.action_id!==receipt.action_id||
      Number(claim.inputs.issue_number)!==receipt.issue||
-     claim.inputs.input_sha!==receipt.source_sha||
-     !validSha(receipt.source_sha)||!validSha(receipt.worker_sha)||
+     !validSha(claim.inputs.input_sha)||
+     claim.inputs.input_sha!==worker?.head_sha||
+     !validSha(receipt.worker_sha)||
      !positive(receipt.issue)||!HEX64.test(receipt.action_id??'')||
      !positive(worker?.id)||worker.id!==receipt.run_id||
      worker.run_attempt!==1||receipt.attempt!==1||
@@ -414,7 +415,7 @@ export function composeQwenDeveloperResult({
     source:{repository:REPO,path:worker.path,name:worker.name,
       run_id:worker.id,attempt:1,event:worker.event,
       ref:'refs/heads/main',issue:receipt.issue,task_id:receipt.action_id,
-      agent_id:'dev-qwen-01',input_sha:receipt.source_sha,
+      agent_id:'dev-qwen-01',input_sha:claim.inputs.input_sha,
       output_sha:readback.head_sha,verified:true},
     artifact:{id:originalResult.id,digest:originalResult.digest,
       json_sha256:sha(resultJsonBytes),source_run_id:worker.id,
