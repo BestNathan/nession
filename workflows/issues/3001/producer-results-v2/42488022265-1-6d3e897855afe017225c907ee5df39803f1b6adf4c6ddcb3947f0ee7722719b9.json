@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "kind": "authenticated_agent_task_result",
+  "issue": 3001,
+  "action_id": "6d3e897855afe017225c907ee5df39803f1b6adf4c6ddcb3947f0ee7722719b9",
+  "result": {
+    "kind": "developer",
+    "issue": 3001,
+    "run_id": 42488022265,
+    "run_attempt": 1,
+    "target_sha": "2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed",
+    "outcome": "implementation_ready",
+    "task_id": "6d3e897855afe017225c907ee5df39803f1b6adf4c6ddcb3947f0ee7722719b9"
+  },
+  "source": {
+    "repository": "BestNathan/nession",
+    "path": ".github/workflows/agent-develop.yml",
+    "name": "Agent / Development",
+    "run_id": 42488022265,
+    "attempt": 1,
+    "event": "workflow_dispatch",
+    "ref": "refs/heads/main",
+    "issue": 3001,
+    "task_id": "6d3e897855afe017225c907ee5df39803f1b6adf4c6ddcb3947f0ee7722719b9",
+    "agent_id": "dev-qwen-01",
+    "input_sha": "7edd6787cce426c1ab76d1c9392653ecb52b78a6",
+    "output_sha": "2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed",
+    "verified": true
+  },
+  "artifact": {
+    "id": 13620024074,
+    "digest": "sha256:a1f3de1bb6ba8f33b4c8a0c9777fe675dda8b55b64b202147601e1dbf2367271",
+    "json_sha256": "4b6803d595ca1655ea43dc384032b56cdd7ce163e6cd27ad2fc7d22e7b3b6567",
+    "source_run_id": 42488022265,
+    "source_run_attempt": 1
+  },
+  "acceptance_result": null,
+  "implementing_pr": {
+    "repository": "BestNathan/nession",
+    "number": 3017,
+    "head_sha_at_attestation": "2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed",
+    "relation": "trusted_pr_head_at_result_attestation"
+  }
+}
