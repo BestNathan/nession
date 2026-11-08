@@ -7,6 +7,9 @@ import {Readable} from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
+const {preStagedOriginalZip}=require('../../e2e/acceptance/shared/qwen-live-source.cjs');
 import {selectQwenSource,selectOriginalArtifact,stageQwenArtifactBytes}
   from './qwen-lineage-artifact-prestage.mjs';
 const h=(b,alg='sha256')=>createHash(alg).update(b).digest('hex');
@@ -78,6 +81,14 @@ try{
     producer_issue:3001,producer_run:run});
   assert.deepEqual(fs.readFileSync(path.join(root,'pass','1.zip')),zipA);
   assert.deepEqual(fs.readFileSync(path.join(root,'pass','2.zip')),zipB);
+  const runnerCache=path.join(root,'qwen-lineage-source');
+  fs.mkdirSync(runnerCache);
+  fs.copyFileSync(path.join(root,'pass','1.zip'),path.join(runnerCache,'1.zip'));
+  assert.deepEqual(preStagedOriginalZip(1,runnerCache,root),zipA);
+  assert.throws(()=>preStagedOriginalZip(2,runnerCache,root),/missing or unsafe/);
+  assert.throws(()=>preStagedOriginalZip(1,runnerCache,root+'-foreign'),/missing trusted/);
+  fs.symlinkSync(path.join(root,'pass','2.zip'),path.join(runnerCache,'2.zip'));
+  assert.throws(()=>preStagedOriginalZip(2,runnerCache,root),/missing or unsafe/);
   await assert.rejects(()=>stageQwenArtifactBytes({...fixture(),
     token:'fixture-token',outputDir:path.join(root,'pass')}),/fresh and empty/);
   const badMap=new Map(blobs);badMap.set(producer.sha,Buffer.from('forged'));
