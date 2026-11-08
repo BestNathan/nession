@@ -23,9 +23,9 @@
 //! a stronger guarantee than detecting either after the fact.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use nession_common::extension::AgentExtension;
+use nession_common::extension::{AgentExtension, ExtensionUnitPolicy};
 use nession_protocol::{
     ContractVersion, DescriptorError, IdentityError, ProtocolDescriptor, ProtocolId,
     ProtocolManifest,
@@ -59,6 +59,10 @@ struct Route {
 /// Built once at startup; shared immutably across all connections.
 pub struct ExtensionRegistry {
     routes: HashMap<String, Route>,
+    /// Scheduling declarations, by wire. Absent means the runtime's read-only
+    /// default; this lives outside the manifest because it is not contract
+    /// data (#974).
+    policies: HashMap<String, ExtensionUnitPolicy>,
     manifest: ProtocolManifest,
     extensions: Vec<Box<dyn AgentExtension>>,
 }
@@ -122,6 +126,9 @@ pub enum RegistryError {
         first: String,
         second: String,
     },
+
+    #[error("`{owner}` declares an execution policy for `{wire}`, which it does not serve")]
+    PolicyForUnknownWire { owner: &'static str, wire: String },
 }
 
 impl ExtensionRegistry {
@@ -145,6 +152,7 @@ impl ExtensionRegistry {
         core: Vec<ProtocolDescriptor>,
     ) -> Result<Self, RegistryError> {
         let mut routes: HashMap<String, Route> = HashMap::new();
+        let mut policies: HashMap<String, ExtensionUnitPolicy> = HashMap::new();
         let mut declared: Vec<ProtocolDescriptor> = Vec::new();
         // Which extension owns each Protocol Unit, for the duplicate check.
         let mut owner_of: BTreeMap<String, &'static str> = BTreeMap::new();
@@ -159,6 +167,10 @@ impl ExtensionRegistry {
             if descriptors.is_empty() {
                 return Err(RegistryError::DeclaresNothing { owner });
             }
+
+            // The wires this extension actually serves, so a scheduling
+            // declaration cannot name somebody else's unit.
+            let mut provider_wires: BTreeSet<String> = BTreeSet::new();
 
             for descriptor in descriptors {
                 descriptor
@@ -177,6 +189,7 @@ impl ExtensionRegistry {
 
                 for contract in &descriptor.contracts {
                     for wire in &contract.wire {
+                        provider_wires.insert(wire.clone());
                         match routes.entry(wire.clone()) {
                             Entry::Occupied(mut occupied) => {
                                 let route = occupied.get_mut();
@@ -218,6 +231,19 @@ impl ExtensionRegistry {
                 }
 
                 declared.push(descriptor);
+            }
+
+            // Scheduling declarations are validated against the provider's own
+            // routes, then kept out of the manifest: they are implementation,
+            // not contract (#974).
+            for (wire, policy) in unit.execution_policies() {
+                if !provider_wires.contains(wire) {
+                    return Err(RegistryError::PolicyForUnknownWire {
+                        owner,
+                        wire: wire.to_string(),
+                    });
+                }
+                policies.insert(wire.to_string(), policy);
             }
         }
 
@@ -281,6 +307,7 @@ impl ExtensionRegistry {
 
         Ok(Self {
             routes,
+            policies,
             // Derived from what was actually composed. A contract that exists in
             // a crate but is declared by no extension is absent here, which is
             // the whole point of deriving rather than listing.
@@ -292,6 +319,15 @@ impl ExtensionRegistry {
     /// What this runtime offers — the manifest a peer resolves against.
     pub fn manifest(&self) -> &ProtocolManifest {
         &self.manifest
+    }
+
+    /// The scheduling declaration for an extension wire, or `None` for the
+    /// runtime's read-only default.
+    ///
+    /// Absence is the existing behaviour every read-only provider relies on,
+    /// which is why it is an `Option` rather than a defaulted enum value.
+    pub fn unit_policy(&self, wire: &str) -> Option<ExtensionUnitPolicy> {
+        self.policies.get(wire).copied()
     }
 
     /// Try to dispatch a message. Returns `Some(response)` if handled, `None` to
@@ -718,6 +754,83 @@ mod tests {
             "got {err:?}"
         );
         assert!(err.to_string().contains("shared.thing"));
+    }
+
+    /// A provider that serves one read unit and declares scheduling for it.
+    struct PolicyProvider {
+        declared: Vec<(&'static str, ExtensionUnitPolicy)>,
+    }
+
+    impl PolicyProvider {
+        fn new(declared: Vec<(&'static str, ExtensionUnitPolicy)>) -> Self {
+            Self { declared }
+        }
+    }
+
+    #[async_trait]
+    impl AgentExtension for PolicyProvider {
+        fn name(&self) -> &'static str {
+            "demo"
+        }
+
+        fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+            Ok(vec![ProtocolDescriptor::new(
+                "demo.run",
+                "test",
+                vec![ContractDescriptor::new(ContractVersion::V1, &["demo.run"])],
+            )?])
+        }
+
+        fn execution_policies(&self) -> Vec<(&'static str, ExtensionUnitPolicy)> {
+            self.declared.clone()
+        }
+
+        async fn handle_command(&self, _command: &str, _payload: Value) -> anyhow::Result<Value> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn a_provider_declares_a_units_lane_beside_its_contracts() {
+        // #974: scheduling is provider-owned and separate from the manifest.
+        let registry = compose(vec![Box::new(PolicyProvider::new(vec![(
+            "demo.run",
+            ExtensionUnitPolicy::SessionMutation,
+        )]))])
+        .unwrap();
+
+        assert_eq!(
+            registry.unit_policy("demo.run"),
+            Some(ExtensionUnitPolicy::SessionMutation)
+        );
+        assert_eq!(
+            registry.unit_policy("demo.other"),
+            None,
+            "an undeclared unit keeps the read-only default"
+        );
+
+        // Policy is implementation, not contract: it must not appear in the
+        // manifest a consumer resolves against.
+        let manifest = serde_json::to_string(registry.manifest()).unwrap();
+        assert!(
+            !manifest.contains("SessionMutation") && !manifest.contains("session_mutation"),
+            "scheduling must not leak into the consumer-visible contract: {manifest}"
+        );
+    }
+
+    #[test]
+    fn a_policy_for_a_unit_the_provider_does_not_serve_fails_composition() {
+        let err = compose(vec![Box::new(PolicyProvider::new(vec![(
+            "demo.other",
+            ExtensionUnitPolicy::SessionMutation,
+        )]))])
+        .unwrap_err();
+        assert!(
+            matches!(err, RegistryError::PolicyForUnknownWire { .. }),
+            "got {err:?}"
+        );
+        let text = err.to_string();
+        assert!(text.contains("demo.other"), "must name the wire: {text}");
     }
 
     #[test]

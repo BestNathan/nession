@@ -1,0 +1,5 @@
+<<<<<<< HEAD
+feature
+=======
+other
+>>>>>>> other

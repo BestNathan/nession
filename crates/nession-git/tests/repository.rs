@@ -36,7 +36,7 @@ use nession_git::{branches, diff, log, preview, security, status, worktrees};
 /// runs tests in parallel threads — without this, that test's environment would
 /// redirect a *fixture* command in another test and fail it at random. Fixture
 /// setup and the capability must not be able to interfere.
-fn git(dir: &Path, args: &[&str]) -> Result<()> {
+fn git_output(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(dir).args(args);
     for var in [
@@ -49,9 +49,12 @@ fn git(dir: &Path, args: &[&str]) -> Result<()> {
     ] {
         cmd.env_remove(var);
     }
-    let out = cmd
-        .output()
-        .with_context(|| format!("fixture `git {args:?}` failed to start"))?;
+    cmd.output()
+        .with_context(|| format!("fixture `git {args:?}` failed to start"))
+}
+
+fn git(dir: &Path, args: &[&str]) -> Result<()> {
+    let out = git_output(dir, args)?;
     ensure!(
         out.status.success(),
         "fixture `git {args:?}` failed: {}",
@@ -152,14 +155,7 @@ fn conflicted_repo() -> Result<tempfile::TempDir> {
     git(dir.path(), &["add", "tracked.txt"])?;
     git(dir.path(), &["commit", "--quiet", "-m", "feature"])?;
 
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir.path())
-        .args(["merge", "other"])
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .context("fixture merge")?;
+    let output = git_output(dir.path(), &["merge", "other"]).context("fixture merge")?;
     ensure!(!output.status.success(), "the fixture merge must conflict");
     Ok(dir)
 }

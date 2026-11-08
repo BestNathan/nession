@@ -6,14 +6,14 @@
 const { test, expect } = require('@playwright/test');
 const { verifiedRuntime } = require('../../../shared/foreground-resume-browser.cjs');
 
-test('SC-03: desktop and phone widths keep the diff readable, scrollable and read-only', async ({ page }) => {
+test('SC-03: desktop and phone widths keep the diff readable and scrollable', async ({ page }) => {
   test.setTimeout(180_000);
   const { sha } = verifiedRuntime('SC-03');
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/fixture/workspace?capability=git');
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').first().click();
+  await page.getByTestId('git-row-unstaged').first().click();
 
   const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
   await expect(patch).toBeVisible();
@@ -34,14 +34,17 @@ test('SC-03: desktop and phone widths keep the diff readable, scrollable and rea
   );
   expect(desktopOverflow).toBeLessThanOrEqual(1);
   expect(
-    await page.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 
   // A patch longer than the pane scrolls inside its own body.
   await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
   await page.reload();
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/long.ts' }).click();
+  await page.getByTestId('git-row-unstaged').filter({ hasText: 'src/long.ts' }).click();
   await expect(patch.locator('[data-line]')).toHaveCount(101);
   const longBody = page.getByTestId('git-diff-body');
   await expect(longBody).toHaveCSS('overflow-y', 'auto');
@@ -87,7 +90,10 @@ test('SC-03: desktop and phone widths keep the diff readable, scrollable and rea
   expect(phone.left).toBeGreaterThanOrEqual(0);
   expect(phone.right).toBeLessThanOrEqual(391);
   expect(
-    await page.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 
   test.info().annotations.push({
@@ -97,6 +103,6 @@ test('SC-03: desktop and phone widths keep the diff readable, scrollable and rea
       'horizontal overflow; a 101-line patch scrolled inside git-diff-body; 390x844 ' +
       'kept the single presentation, code scrolled inside the renderer, diff text ' +
       'rendered at ' + phone.fontSize + 'px, and the Workspace stayed within 0..390px; ' +
-      'no write-labelled control existed',
+      'no remote or history-rewriting control existed',
   });
 });

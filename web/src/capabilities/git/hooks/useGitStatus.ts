@@ -24,12 +24,16 @@ export function useGitStatus({
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
-}): GitStatusState & { refresh: () => void } {
+}): GitStatusState & {
+  refresh: () => void;
+  /** Adopt a status the caller already holds (a mutation's post-state). */
+  apply: (status: GitStatusResponse) => void;
+} {
   const load = useCallback(
     (target: { agent_id: string; session: string }) => gitApi.gitStatus(target),
     [],
   );
-  const { data, loading, error, refresh } = useGitRequest({ agentId, sessionId, load });
+  const { data, loading, error, refresh, apply } = useGitRequest({ agentId, sessionId, load });
 
-  return { status: data, loading, error, refresh };
+  return { status: data, loading, error, refresh, apply };
 }

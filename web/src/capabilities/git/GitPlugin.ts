@@ -7,12 +7,27 @@ import {
   PROTOCOL as DIFF_PROTOCOL,
   VERSION as DIFF_VERSION,
   WIRE as DIFF_WIRE,
-} from '@/generated/protocol/git/diff/v1';
+} from '@/generated/protocol/git/diff/v2';
 import {
   PROTOCOL as COMMIT_PROTOCOL,
   VERSION as COMMIT_VERSION,
   WIRE as COMMIT_WIRE,
 } from '@/generated/protocol/git/commit/v1';
+import {
+  PROTOCOL as CREATE_COMMIT_PROTOCOL,
+  VERSION as CREATE_COMMIT_VERSION,
+  WIRE as CREATE_COMMIT_WIRE,
+} from '@/generated/protocol/git/create-commit/v1';
+import {
+  PROTOCOL as STAGE_PROTOCOL,
+  VERSION as STAGE_VERSION,
+  WIRE as STAGE_WIRE,
+} from '@/generated/protocol/git/stage/v1';
+import {
+  PROTOCOL as UNSTAGE_PROTOCOL,
+  VERSION as UNSTAGE_VERSION,
+  WIRE as UNSTAGE_WIRE,
+} from '@/generated/protocol/git/unstage/v1';
 import {
   PROTOCOL as LOG_PROTOCOL,
   VERSION as LOG_VERSION,
@@ -27,7 +42,7 @@ import {
   PROTOCOL as STATUS_PROTOCOL,
   VERSION as STATUS_VERSION,
   WIRE as STATUS_WIRE,
-} from '@/generated/protocol/git/status/v1';
+} from '@/generated/protocol/git/status/v2';
 import {
   PROTOCOL as WORKTREES_PROTOCOL,
   VERSION as WORKTREES_VERSION,
@@ -48,11 +63,17 @@ import type {
   GitDiffResponse,
   GitCommitRequest,
   GitCommitResponse,
+  GitCreateCommitRequest,
+  GitCreateCommitResponse,
   GitLogRequest,
   GitLogResponse,
   GitRootResponse,
+  GitStageRequest,
+  GitStageResponse,
   GitStatusRequest,
   GitStatusResponse,
+  GitUnstageRequest,
+  GitUnstageResponse,
   GitWorktreesResponse,
   GitPreviewRequest,
   GitPreviewResponse,
@@ -81,13 +102,16 @@ const CONSUMER_REQUIREMENTS = {
   [BRANCHES_PROTOCOL]: [BRANCHES_VERSION],
   [WORKTREES_PROTOCOL]: [WORKTREES_VERSION],
   [PREVIEW_PROTOCOL]: [PREVIEW_VERSION],
+  [STAGE_PROTOCOL]: [STAGE_VERSION],
+  [UNSTAGE_PROTOCOL]: [UNSTAGE_VERSION],
+  [CREATE_COMMIT_PROTOCOL]: [CREATE_COMMIT_VERSION],
 } as const satisfies Record<string, readonly number[]>;
 
 type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
 
 /**
- * git capability — repository state and file diffs for the current Session
- * (`git.{status,diff,root}`, #750).
+ * git capability — repository state, diffs, and local write operations
+ * (`git.*`, #750, #845).
  *
  * The request objects are forwarded whole, exactly as the Claude Code plugin
  * does: the transport never sees individual fields. The wire strings and the
@@ -101,10 +125,11 @@ type GitUnit = keyof typeof CONSUMER_REQUIREMENTS;
  * Legacy Peer and gets the request exactly as it always went — naming no
  * version is not a downgrade, it is the absence of a claim.
  *
- * **Read-only.** The agent refuses mutating subcommands outright, so there is
- * deliberately no method here that could ask for one. #750 SC5 asserts the view
- * contains no control that would; this class is the other half of that — there
- * is nothing to call.
+ * **Writes are three narrow units, not a general command runner.** `git.stage`,
+ * `git.unstage` and `git.create-commit` each carry the snapshot the user
+ * reviewed and are refused by the agent if the repository moved on. There is
+ * still no method here that can express push, checkout, reset or arbitrary
+ * argv (#845 Non-Goals).
  */
 export class GitPlugin implements TransportPlugin {
   readonly name = 'git';
@@ -177,6 +202,46 @@ export class GitPlugin implements TransportPlugin {
     return this.requireConnection().request<GitDiffResponse>(
       DIFF_WIRE,
       this.addressed(DIFF_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * Stage one path, conditional on the snapshot the user reviewed.
+   *
+   * The agent refuses without applying anything if the repository no longer
+   * matches; the answer carries the authoritative post-state either way.
+   */
+  async gitStage(req: GitStageRequest): Promise<GitStageResponse> {
+    return this.requireConnection().request<GitStageResponse>(
+      STAGE_WIRE,
+      this.addressed(STAGE_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * Restore one path's index entry, conditional on the reviewed snapshot.
+   *
+   * Never discards worktree content: unstage is an index mutation.
+   */
+  async gitUnstage(req: GitUnstageRequest): Promise<GitUnstageResponse> {
+    return this.requireConnection().request<GitUnstageResponse>(
+      UNSTAGE_WIRE,
+      this.addressed(UNSTAGE_PROTOCOL, req.agent_id, req),
+    );
+  }
+
+  /**
+   * Create one local commit from the staged state, conditional on the reviewed
+   * snapshot.
+   *
+   * `requestId` is the mutation's idempotency identity: a retry that carries
+   * the same id is answered with the first attempt's outcome rather than
+   * creating a second commit (#845 SC-09).
+   */
+  async gitCreateCommit(req: GitCreateCommitRequest): Promise<GitCreateCommitResponse> {
+    return this.requireConnection().request<GitCreateCommitResponse>(
+      CREATE_COMMIT_WIRE,
+      this.addressed(CREATE_COMMIT_PROTOCOL, req.agent_id, req),
     );
   }
 

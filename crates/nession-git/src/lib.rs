@@ -50,7 +50,9 @@ pub mod runtime;
 // while the *directory* says which half is the contract and which is the
 // implementation. A re-export is a path, not a second definition; there is
 // still one file behind each of these.
-pub use runtime::{branches, cmd, diff, log, preview, security, status, worktrees};
+pub use runtime::{
+    branches, cmd, diff, log, mutate, preview, security, snapshot, status, worktrees,
+};
 
 pub use agent::{GitAgentExtension, WorkdirResolver};
 pub use cmd::{GitCmd, GitOutput};
@@ -66,3 +68,4 @@ pub use protocol::diff::v1::FileDiff;
 pub use protocol::log::v1::{Commit, History};
 pub use protocol::status::v1::{ChangeKind, ChangedFile, RepoStatus};
 pub use protocol::worktrees::v1::{Worktree, Worktrees};
+pub use protocol::{GitMutationResponseV1, GitSnapshotV1, MutationStateOkV1};
