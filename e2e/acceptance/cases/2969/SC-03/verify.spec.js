@@ -115,6 +115,13 @@ test('SC-03: manual storage policy and deep links survive the URL cleanup', asyn
 
   // ---- A bootstrap deep link keeps its route while consuming the token ----
   state.phase = 'accept';
+  // The remembered page above left both a durable token and the on preference
+  // in this shared context. Make the documented remember-off policy explicit
+  // for this tab, so the bootstrap token's storage scope is observable.
+  await page.evaluate(() => {
+    localStorage.removeItem('token');
+    localStorage.setItem('remember', 'false');
+  });
   await page.goto(
     '/?token=' + DEEP_TOKEN + '&server_url=' + encodeURIComponent(SERVER) + '&keep=1' + HASH,
   );
