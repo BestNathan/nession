@@ -52,6 +52,18 @@ test('a historical authenticated edge does not displace open Issue/PR activity',
  assert.deepEqual(projection.work.lineage.edges.map(x=>[x.issue,x.pr_number]),[[6,7]]);
  assert.equal(projection.work.lineage.edges[0].pr_head_sha,sha);
 });
+test('unverified historical hints alone cannot enter the public graph',()=>{
+ const fake={...edge,verification:'verified_from_shared_issue'};
+ const projected=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{status:'verified',source_ref_sha:store,records:[fake]},
+ }));
+ assert.equal(projected.work.lineage.status,'unavailable');
+ assert.deepEqual(projected.work.lineage.edges,[]);
+ const absent=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{status:'unavailable',source_ref_sha:null,records:[]},
+ }));
+ assert.equal(absent.work.lineage.status,'unavailable');
+});
 test('only exact authenticated attestation-time PR bindings yield a typed edge',()=>{
  const p=validateLineageProjection(projectLineage(fixture()));
  assert.equal(p.status,'verified');assert.equal(p.edges.length,1);
