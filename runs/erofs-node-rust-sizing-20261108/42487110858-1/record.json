@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "erofs-node-rust-sizing-20261108",
+  "source_sha": "ec75184c47b2ff4e7406fceb6262ceffb1c03e80",
+  "source_digest": "d05fd7e15f2cbf70c51ff3284109257dcb8ec6545f8058370b662824d8726b0c",
+  "entry": "measure.mjs",
+  "workflow": {
+    "id": 42487110858,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42487110858",
+    "event": "push",
+    "branch": "task/erofs-node-rust-sizing-20261108",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-08T13:53:48.290Z",
+    "finished_at": "2026-11-08T13:57:23.469Z",
+    "result": {
+      "experiment": "Node.js 24 and Rust stable EROFS sizes",
+      "platform": {
+        "system": "linux",
+        "arch": "x64"
+      },
+      "erofs": {
+        "compressor": "lz4hc",
+        "level": 12,
+        "cluster_bytes": 65536,
+        "timestamp": 0
+      },
+      "version": {
+        "node": "v24.22.2",
+        "erofs_utils": "1.7.1-1build2",
+        "node_executable": "/opt/hostedtoolcache/node/24.22.2/x64/bin/node",
+        "npm": "11.19.1",
+        "rustup": "/home/runner/.cargo/bin/rustup",
+        "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+        "rust_toolchain": "stable-x86_64-unknown-linux-gnu",
+        "rustfmt": "rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)",
+        "clippy": "clippy 0.1.99 (58cf8f9c35 2026-10-13)"
+      },
+      "measurements": [
+        {
+          "name": "node-binary",
+          "source_apparent_bytes": 126881248,
+          "source_disk_bytes": 126894080,
+          "image_bytes": 53465088,
+          "image_mib": 50.99
+        },
+        {
+          "name": "node-runtime",
+          "source_apparent_bytes": 139694628,
+          "source_disk_bytes": 146653184,
+          "image_bytes": 60809216,
+          "image_mib": 57.99
+        },
+        {
+          "name": "node-full",
+          "source_apparent_bytes": 201760290,
+          "source_disk_bytes": 217862144,
+          "image_bytes": 81788928,
+          "image_mib": 78
+        },
+        {
+          "name": "rust-minimal",
+          "source_apparent_bytes": 621105178,
+          "source_disk_bytes": 621522944,
+          "image_bytes": 246956032,
+          "image_mib": 235.52
+        },
+        {
+          "name": "rust-dev",
+          "source_apparent_bytes": 646008663,
+          "source_disk_bytes": 646463488,
+          "image_bytes": 258445312,
+          "image_mib": 246.47
+        }
+      ],
+      "stages": [
+        {
+          "stage": "install-erofs",
+          "command": "sudo",
+          "seconds": 5,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs",
+          "command": "sudo",
+          "seconds": 4,
+          "exit_code": 0
+        },
+        {
+          "stage": "install-erofs",
+          "command": "dpkg-query",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-binary",
+          "command": "mkfs.erofs",
+          "seconds": 13,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-binary",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-binary",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-runtime",
+          "command": "mkfs.erofs",
+          "seconds": 14,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-runtime",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-runtime",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-full",
+          "command": "mkfs.erofs",
+          "seconds": 32,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-full",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-node-full",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-install",
+          "command": "which",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-install",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 8,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-install",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-install",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-install",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-minimal",
+          "command": "mkfs.erofs",
+          "seconds": 66,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-minimal",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-minimal",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-add-dev",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 1,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-add-dev",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "rust-add-dev",
+          "command": "/home/runner/.cargo/bin/rustup",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-dev",
+          "command": "mkfs.erofs",
+          "seconds": 68,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-dev",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        },
+        {
+          "stage": "image-rust-dev",
+          "command": "du",
+          "seconds": 0,
+          "exit_code": 0
+        }
+      ],
+      "caveats": [
+        "Source is installed toolchain payload, not a standalone RootFS; dynamic libraries, linker, /etc and sandbox mounts are excluded.",
+        "Rust stable is resolved when the Task runs; exact rustc version is recorded.",
+        "Node distribution comes from the setup-node@v4 Node 24 Linux x64 runner tool cache."
+      ],
+      "status": "success",
+      "completed_stage": "image-rust-dev"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/ec75184c47b2ff4e7406fceb6262ceffb1c03e80/erofs-node-rust-sizing-20261108.json"
+}
