@@ -6,6 +6,11 @@ const positive=n=>Number.isSafeInteger(n)&&n>0;
 const edgeId=r=>r.issue+':'+r.pr_number+':'+r.run_id+':'+r.attempt+':'+r.action_id;
 const validAgent=s=>typeof s==='string'&&/^[a-z][a-z0-9-]{1,80}$/.test(s);
 const validAction=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+// A logical Slice is an authenticated producer-owned identity, never an Outbox
+// action, GitHub Run, or Agent instance. Missing Slice proof remains null.
+const validSlice=(slice,action,run,agent)=>slice===null||
+  (typeof slice==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(slice)&&
+   slice!==action&&slice!==String(run)&&slice!==agent);
 const isObject=o=>o!==null&&typeof o==='object'&&!Array.isArray(o);
 const fields=(r,allow)=>isObject(r)&&Object.keys(r).every(x=>allow.includes(x));
 const keys=['issue','pr_number','pr_head_sha','role','agent_id','run_id','attempt',
@@ -18,7 +23,8 @@ function canonicalEdge(raw){
  if(!fields(raw,keys)||!positive(raw.issue)||!positive(raw.pr_number)||
     !exact(raw.pr_head_sha)||!['developer','reviewer'].includes(raw.role)||
     !validAgent(raw.agent_id)||!positive(raw.run_id)||!positive(raw.attempt)||
-    !validAction(raw.action_id)||raw.slice_id!==null||
+    !validAction(raw.action_id)||
+    !validSlice(raw.slice_id,raw.action_id,raw.run_id,raw.agent_id)||
     raw.verification!=='authenticated_at_attestation'||!fields(raw.origin,originKeys)||
     raw.origin.repository!==REPO||!exact(raw.origin.source_ref_sha)||
     !positive(raw.origin.producer_run_id)||!positive(raw.origin.producer_attempt)||
@@ -33,7 +39,7 @@ function canonicalEdge(raw){
  return {
    issue:raw.issue,pr_number:raw.pr_number,pr_head_sha:raw.pr_head_sha,
    role:raw.role,agent_id:raw.agent_id,run_id:raw.run_id,attempt:raw.attempt,
-   action_id:raw.action_id,slice_id:null,verification:'authenticated_at_attestation',
+   action_id:raw.action_id,slice_id:raw.slice_id,verification:'authenticated_at_attestation',
    source_ref_sha:raw.origin.source_ref_sha,
    source_url:raw.origin.source_url
  };
@@ -86,7 +92,8 @@ export function validateLineageProjection(v){
      !positive(e.issue)||!positive(e.pr_number)||!exact(e.pr_head_sha)||
      !['developer','reviewer'].includes(e.role)||!validAgent(e.agent_id)||
      !positive(e.run_id)||!positive(e.attempt)||!validAction(e.action_id)||
-     e.slice_id!==null||e.verification!=='authenticated_at_attestation'||
+     !validSlice(e.slice_id,e.action_id,e.run_id,e.agent_id)||
+     e.verification!=='authenticated_at_attestation'||
      // Every public source link must identify THIS Agent Run, not merely
      // another syntactically valid Actions run in the same repository.
      !exact(e.source_ref_sha)||e.source_url!=='https://github.com/'+REPO+'/actions/runs/'+e.run_id)
