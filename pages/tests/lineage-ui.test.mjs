@@ -31,7 +31,8 @@ test('both Work detail routes use the identical exact-source lineage panel',()=>
  assert.match(detail,/e\.run_id.*e\.attempt/);
  assert.match(detail,/e\.source_url/);
  assert.match(detail,/e\.source_ref_sha/);
- assert.match(detail,/Logical Slice: Unlinked/);
+ assert.match(detail,/Logical Slice:/);
+ assert.match(detail,/e\.slice_id/);
  assert.match(detail,/Acceptance SC: Unknown/);
  assert.match(detail,/historical PR HEAD/);
  assert.match(detail,/Lineage window is truncated/);
@@ -61,4 +62,12 @@ test('a candidate historical edge cannot become current proof after PR HEAD drif
    attested:{...attested,records:[{...e,origin:{...e.origin,producer_run_id:72}}]}});
  assert.equal(fake.status,'unavailable');
  assert.match(detail,/does not prove current HEAD, merge approval/);
+});
+
+test('attested logical Slice is retained but absent lineage stays unlinked',()=>{
+ const source={status:'verified',source_ref_sha:ref,records:[
+   {...e,slice_id:'slice-runtime-2961'}]};
+ const available=projection(source);
+ assert.equal(available.edges[0].slice_id,'slice-runtime-2961');
+ assert.equal(projection({...source,records:[e]}).edges[0].slice_id,null);
 });

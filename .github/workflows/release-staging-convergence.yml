@@ -3,6 +3,8 @@ name: Release / Staging Convergence
 # #2926. Runs on trusted main only. This is a deterministic PR planner/writer,
 # NOT an Agent runtime, Acceptance evaluator or permission to auto-merge.
 # Eligible branches come from checked-in push-triggered Staging deploy workflows.
+# Protected staging syncs use immutable checked two-parent integration heads,
+# so rust-check/web-check can qualify the actual tested merge content.
 on:
   schedule:
     - cron: '0 */2 * * *'
@@ -23,7 +25,7 @@ on:
 permissions:
   contents: read
   actions: write
-  issues: read
+  issues: write # exact, main-owned batch Requirement creation (#2953)
   pull-requests: read
 
 concurrency:
@@ -51,6 +53,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           node scripts/staging-branch-convergence.mjs self-test
+          node scripts/staging-convergence-batch.mjs self-test
 
       - name: Discover actual auto-deploy branch sources and plan exact refs
         id: plan
@@ -91,13 +94,14 @@ jobs:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
           READ_GITHUB_TOKEN: ${{ github.token }}
           DISPATCH_GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
           {
             echo
             echo '### Pull requests'
-            jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + "; " + .outcome + (if .reason then "; " + .reason else "" end) + ")"' "$RUNNER_TEMP/convergence-results.json"
+            jq -r '.[] | "- " + .direction + ": " + .url + " (" + .action + "; " + .outcome + (if .reason then "; " + .reason else "" end) + (if .issue_number then "; Issue #" + (.issue_number|tostring) else "" end) + (if .integration_head then "; integration " + .integration_head else "" end) + ")"' "$RUNNER_TEMP/convergence-results.json"
             echo
             echo 'Merges require authenticated exact-head PR Quality/Case/E2E, clean GitHub mergeability and promotion-specific staging/Issue acceptance. Blockers remain open for repair.'
           } >> "$GITHUB_STEP_SUMMARY"

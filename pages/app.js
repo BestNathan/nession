@@ -482,13 +482,35 @@ function renderLineageDetail(kind, number) {
       block.append(node('span','mono','Producer source ref '+e.source_ref_sha.slice(0,12)+
         ' · exact historical PR HEAD '+e.pr_head_sha));
       block.append(node('span','',
-        'Logical Slice: Unlinked · current PR approval: Unknown · Acceptance SC: Unknown'));
+        'Logical Slice: '+(e.slice_id??'Unlinked')+
+        ' · current PR approval: Unknown · Acceptance SC: Unknown'));
       panel.append(block);
     }
   }
   if(status==='truncated'||source?.truncated===true)
     panel.append(node('p','',
       'Lineage window is truncated; additional historical edges may be absent.'));
+  // Pinned Store candidates are genuinely observed source bytes, NOT an
+  // authenticated Producer/Publisher receipt or an implementing PR relation.
+  // Keep them separate from the verified edge collection, even if a candidate
+  // happens to name the same Issue or PR number.
+  const observations=snapshot.work?.agent_result_observations;
+  if(kind==='issue'&&['available','truncated'].includes(observations?.status)){
+    const observed=(observations.records||[]).filter(e=>e.issue===number).slice(0,12);
+    if(observed.length){
+      panel.append(node('p','','Pinned Agent Store observations · unverified source claims only'));
+      for(const e of observed){
+        const entry=node('div','issue-pr-evidence');
+        entry.append(ext('Observed '+e.role+' / '+e.agent_id+
+          ' · Run '+e.run_id+' / attempt '+e.attempt+' ↗',e.source_url));
+        entry.append(node('span','',
+          'Claimed implementing PR: Unknown / Unlinked · Logical Slice: Unlinked · Acceptance SC: Unknown'));
+        panel.append(entry);
+      }
+    }
+    if(observations.truncated)panel.append(node('p','',
+      'Pinned Store observation window truncated; absence does not mean no run.'));
+  }
   panel.append(node('p','',
     'A historical attested PR HEAD does not prove current HEAD, merge approval, successful SC or orphan Store immutability.'));
   sectionEl.append(panel);root.append(sectionEl);

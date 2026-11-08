@@ -5,6 +5,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// Git exports GIT_DIR/GIT_WORK_TREE to pre-push hooks. This test creates and
+// commits in throwaway repositories; ambient hook variables would redirect
+// those Git commands into the caller's real checkout.
+for (const key of ['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY','GIT_COMMON_DIR']) delete process.env[key];
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitStub = [
   '#!/usr/bin/env bash',
@@ -106,6 +112,10 @@ const cases = [
     expected: ['server-handler-locality', 'server-handler-locality-selftest', 'server-handler-concurrency-selftest'] },
   { hook: 'pre-push', changed: 'scripts/check-dev-workspace.sh',
     expected: ['dev-workspace-selftest'] },
+  { hook: 'pre-push', changed: 'scripts/filtered-test.sh',
+    expected: ['rust-test-unit'], absent: ['rust-clippy', 'web-test-unit'] },
+  { hook: 'pre-push', changed: 'scripts/filtered-web-test.sh',
+    expected: ['web-test-unit'], absent: ['rust-test-unit', 'web-typecheck'] },
   { hook: 'pre-push', changed: 'gates/route',
     expected: ['gate-runtime-contract', 'gate-router-contract', 'pre-push-diff-base-selftest'] },
   { hook: 'pre-push', changed: 'scripts/protocol-gate.mjs', diffError: true,
@@ -165,3 +175,103 @@ for (const [hook, changed, id] of [
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 console.log('gate-router-selftest: ' + cases.length + ' positive, 2 fail-closed, 2 mutation fixtures passed');
+
+// Prove the real Git rename boundary, not just mocked path strings. With
+// rename detection enabled Git's --name-only reports only the destination;
+// the Gate router must inspect BOTH old and new paths for deleted owners.
+function git(dir, ...args) {
+  const result = spawnSync('git', args, { cwd: dir, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.error, undefined, 'unable to run git ' + args.join(' '));
+  assert.equal(result.status, 0, 'git ' + args.join(' ') + ' failed:\n' +
+    result.stdout + '\n' + result.stderr);
+  return result.stdout.trim();
+}
+
+function executeRealHook(dir, hook, baseSha) {
+  const capture = path.join(dir, 'gates-capture.txt');
+  fs.rmSync(capture, { force: true });
+  const localSha = git(dir, 'rev-parse', 'HEAD');
+  const input = hook === 'pre-push'
+    ? 'refs/heads/main ' + localSha + ' refs/heads/main ' + baseSha + '\n'
+    : '';
+  const result = spawnSync('bash', [path.join(dir, '.githooks', hook)], {
+    cwd: dir,
+    env: { ...process.env, GATE_ROUTER_CAPTURE: capture },
+    input, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(result.error, undefined, 'cannot execute real Git fixture');
+  const ids = fs.existsSync(capture)
+    ? fs.readFileSync(capture, 'utf8').split(/\r?\n/).filter(Boolean)
+    : [];
+  return { ...result, ids };
+}
+
+const renameCases = [
+  { from: 'docs/AGENTS.md', to: 'docs/instructions.txt',
+    commit: ['instruction-contract'], push: ['instruction-contract'] },
+  { from: 'crates/nession-agent/src/owner.rs', to: 'docs/owner.txt',
+    commit: ['rust-format', 'test-isolation'], push: ['rust-clippy', 'rust-test-unit'] },
+  { from: 'web/src/Owner.tsx', to: 'docs/Owner.txt',
+    commit: ['web-eslint', 'design-system-fast'], push: ['web-typecheck', 'web-test-unit'] },
+  { from: 'scripts/filtered-test.sh', to: 'docs/rust-runner.txt',
+    commit: [], push: ['rust-test-unit'] },
+  { from: 'scripts/filtered-web-test.sh', to: 'docs/web-runner.txt',
+    commit: [], push: ['web-test-unit'] },
+];
+
+function verifyRenameCase(c, mutate = false) {
+  const dir = createFixture();
+  try {
+    // Use the real system git, not the PATH stub used by the other scenarios.
+    git(dir, 'init', '-q');
+    git(dir, 'config', 'user.name', 'Gate fixture');
+    git(dir, 'config', 'user.email', 'gate-fixture@example.invalid');
+    git(dir, 'config', 'diff.renames', 'true');
+    fs.mkdirSync(path.dirname(path.join(dir, c.from)), { recursive: true });
+    fs.mkdirSync(path.dirname(path.join(dir, c.to)), { recursive: true });
+    fs.writeFileSync(path.join(dir, c.from), 'stable file content\n');
+    git(dir, 'add', c.from);
+    git(dir, 'commit', '-qm', 'before rename');
+    const baseSha = git(dir, 'rev-parse', 'HEAD');
+
+    if (mutate) {
+      const router = path.join(dir, 'gates/route');
+      const original = fs.readFileSync(router, 'utf8');
+      assert.equal((original.match(/ --no-renames/g) ?? []).length, 2);
+      fs.writeFileSync(router, original.replaceAll(' --no-renames', ''));
+    }
+
+    git(dir, 'mv', c.from, c.to);
+    const naiveCommitPaths = git(dir, 'diff', '--cached', '--name-only').split('\n');
+    assert.ok(!naiveCommitPaths.includes(c.from), 'fixture must expose rename-source loss');
+    assert.ok(naiveCommitPaths.includes(c.to));
+
+    const commit = executeRealHook(dir, 'pre-commit', baseSha);
+    assert.equal(commit.status, 0, 'real rename commit hook failed:\n' + commit.stderr);
+    if (mutate) {
+      for (const id of c.commit) assert.ok(!commit.ids.includes(id), 'mutation still selected ' + id);
+    } else {
+      requireIds(commit.ids, c.commit, 'real Git staged rename ' + c.from);
+    }
+
+    git(dir, 'commit', '-qm', 'rename owner');
+    const naivePushPaths = git(dir, 'diff', '--name-only', baseSha, 'HEAD').split('\n');
+    assert.ok(!naivePushPaths.includes(c.from), 'fixture must expose push rename-source loss');
+    const push = executeRealHook(dir, 'pre-push', baseSha);
+    assert.equal(push.status, 0, 'real rename push hook failed:\n' + push.stderr);
+    if (mutate) {
+      for (const id of c.push) assert.ok(!push.ids.includes(id), 'mutation still selected ' + id);
+    } else {
+      requireIds(push.ids, c.push, 'real Git pushed rename ' + c.from);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+for (const c of renameCases) verifyRenameCase(c);
+// Mutation proves the real Git fixture fails to select instruction owners
+// if --no-renames is removed from both pre-commit and pre-push routing.
+verifyRenameCase(renameCases[0], true);
+console.log('real-git rename fixtures: ' + renameCases.length + ' positive, 1 mutation passed');
+
