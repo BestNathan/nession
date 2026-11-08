@@ -7,7 +7,7 @@ a Provider prompt, an Acceptance verdict, or a replacement for source-aligned st
 
 ## Fixture state
 
-implementation: qwen-verified
+implementation: qwen-v2-proven
 review: pending
 
 The original source stays immutable in Git history. A new, explicitly
