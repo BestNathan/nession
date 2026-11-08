@@ -15,7 +15,7 @@
 
 ## Catalog
 
-| Project / EROFS / Session creation (Existing + Managed, Web/App) | [#3025](https://github.com/BestNathan/nession/issues/3025), [#3021](https://github.com/BestNathan/nession/issues/3021), [#3022](https://github.com/BestNathan/nession/issues/3022) | [Interactive HTML](project-session-3025/index.html) · [Scenario & fidelity](project-session-3025/README.md) |
+| Project in Sidebar / App Sessions → standalone detail → Existing + Managed Session creation | [#3025](https://github.com/BestNathan/nession/issues/3025), [#3021](https://github.com/BestNathan/nession/issues/3021), [#3022](https://github.com/BestNathan/nession/issues/3022) | [Interactive HTML](project-session-3025/index.html) · [Scenario & fidelity](project-session-3025/README.md) |
 
 
 | App Sessions · four-action overflow menu, metadata and typed Kill (App spatial layers) | [#2875](https://github.com/BestNathan/nession/issues/2875) | [Interactive HTML](app-session-actions-2875/index.html) · [Scenario & fidelity](app-session-actions-2875/README.md) · [UI Spec](app-session-actions-2875/UI-SPEC.md) |
@@ -132,3 +132,7 @@ Following the cross-gallery defect repair, the next scoped iteration compares mo
 **Current test commands:** `node --test environment-session-2654/ia-smoke.test.mjs agent-process-discovery-2514/ia-smoke.test.mjs`; the actual checked-in scripts were evaluated in a V8 DOM-stub harness here, not executed via a native Node runner. Complete Chromium side-by-side/current production fixture comparison remains open.
 
 **Testing commands recorded for a repository checkout:** `node --test files-workspace-2751/visual-fidelity.test.mjs work-contract-2541/smoke.test.mjs` and `node git-github-1290/smoke-test.mjs`. In the present environment the actual scripts were fetched through the GitHub connector and evaluated with a V8/DOM-stub harness; they were not executed as Node CLI commands.
+
+## 2026-11-09 · Project navigation decision (#3021/#3025)
+
+The Project prototype now tests a **first-class Projects section in Web Sidebar**, plus **Projects in App's Sessions layer**. Clicking opens a standalone Project detail, independent of any selected Session; Existing/Managed creation remains within detail. This supersedes the former Project-only-as-Session-Workspace-capability presentation. A No Session fixture proves that Project can still open and seed a first Session. Backend Project and EROFS ownership are unchanged. Source/publisher/Chromium checks for this revision are tracked on #3025, not inherited from the previous prototype SHA.

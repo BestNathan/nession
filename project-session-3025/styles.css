@@ -32,3 +32,13 @@
 .project-product[data-mode=app] .cards{grid-template-columns:1fr}.project-product[data-mode=app] .content{padding:23px 18px 36px}.project-product[data-mode=app] h1{font-size:23px}.project-product[data-mode=app] .form-grid{grid-template-columns:1fr}
 .project-product[data-mode=app] .list-row{padding:12px 11px}.project-product[data-mode=app] .list-row small{font-size:10px}.project-product[data-mode=app] .bottom{min-height:64px;padding-bottom:13px}.project-product[data-mode=app] .capsule{width:100%;justify-content:space-between}
 .project-product[data-mode=web] .app-head{display:none}.project-product [hidden]{display:none!important}
+
+/* #3021/#3025 candidate: Projects are a primary selectable resource, not Session children. */
+.project-product .side-projects{flex:0 0 auto;border-top:1px solid var(--nession-border);padding:0 9px 9px;max-height:155px;overflow:auto}
+.project-product .side-projects .sidebar-section{padding:12px 6px 8px}
+.project-product .project-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;font-size:15px;color:var(--nession-text-secondary)}
+.project-product .project-entry strong{font-weight:640}
+.project-product .project-entry[aria-current=page]{background:var(--nession-muted);box-shadow:inset 2px 0 var(--nession-text-secondary)}
+.project-product[data-mode=app] .app-projects{border-top:1px solid var(--nession-border);padding-top:18px}
+.project-product[data-mode=app] .app-projects .project-entry{min-height:50px;padding:13px 8px}
+.project-product .side-row:focus-visible{outline:2px solid var(--nession-ring);outline-offset:-2px}
