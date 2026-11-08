@@ -7,6 +7,8 @@ import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
+import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
+import {createHash} from 'node:crypto';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -181,6 +183,64 @@ const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all(
 // Original Git blob bytes are checked against the pinned Store ref, but the
 // Store record is still an UNVERIFIED claim until a separate trusted
 // Producer/Publisher attester supplies the explicit lineageEvidence contract.
+// The original v2 is only a *candidate* until the separate Worker and
+// Publisher Actions ZIPs, exact PR and pinned Store Writer can be re-read.
+// Bounded to the same 12 public Issue/PR windows, at most two producers per
+// build; any missing or expired artifact stays Unknown/Unlinked.
+async function optionalArtifactZip(artifactId){
+  if(process.env.PAGES_OFFLINE==='1'||!Number.isSafeInteger(artifactId)||
+     artifactId<1)throw Error('invalid read-only Publisher Artifact request');
+  const headers={Accept:'application/vnd.github+json',
+    'X-GitHub-Api-Version':'2022-11-28',
+    'User-Agent':'nession-pages-lineage-attester'};
+  if(token)headers.Authorization='Bearer '+token;
+  const response=await fetch(
+    'https://api.github.com/repos/'+repo+'/actions/artifacts/'+artifactId+'/zip',
+    {headers,signal:AbortSignal.timeout(20000)});
+  if(!response.ok)throw Error('original GitHub Artifact unavailable: '+response.status);
+  const size=Number(response.headers.get('content-length'));
+  if(Number.isFinite(size)&&size>512*1024)
+    throw Error('GitHub Artifact exceeds safe budget');
+  if(!response.body)throw Error('GitHub Artifact missing response body');
+  const chunks=[];let total=0;
+  for await(const part of response.body){
+    total+=part.length;
+    if(total>512*1024)throw Error('GitHub Artifact ZIP exceeds budget');
+    chunks.push(Buffer.from(part));
+  }
+  return Buffer.concat(chunks,total);
+}
+async function originalWriterStoreBytes(file,sha){
+  if(!/^[a-f0-9]{40}$/.test(sha)||!/^[a-zA-Z0-9/_-]+\.json$/.test(file)||
+     file.includes('..'))throw Error('unsafe committed Writer receipt path');
+  const response=await api('/contents/'+file+'?ref='+sha);
+  if(response?.encoding!=='base64'||response?.type!=='file'||
+     typeof response.content!=='string'||response.content.length>100000||
+     response.size>65536)throw Error('missing independently pinned Writer blob');
+  const raw=Buffer.from(response.content.replace(/\s/g,''),'base64');
+  if(raw.length!==response.size||
+     createHash('sha1').update('blob '+raw.length+'\0').update(raw).digest('hex')!==
+       response.sha)throw Error('Writer original Store object drift');
+  return raw;
+}
+const lineageEvidence=await loadPinnedQwenLineage({
+  ref:allRefs[3],issueNumbers:selectedIssueNumbers,
+  pulls:Array.isArray(pulls)?pulls
+    .filter(x=>Number.isSafeInteger(x.number)&&x.number>0&&
+      /^[a-f0-9]{40}$/.test(x.head?.sha??''))
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))
+    .slice(0,12).map(x=>({number:x.number,head_sha:x.head.sha})):[],
+  maxRecords:2,
+  getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
+  getBlob:sha=>api('/git/blobs/'+sha),
+  getOriginalStoreBytes:originalWriterStoreBytes,
+  getRun:id=>api('/actions/runs/'+id),
+  getArtifacts:id=>api('/actions/runs/'+id+'/artifacts?per_page=100'),
+  getArtifactZip:optionalArtifactZip,
+  getPull:id=>api('/pulls/'+id),
+  getCompare:(writer,store)=>api('/compare/'+writer+'...'+store),
+  getCurrentRef:()=>optionalRef('agent-store'),
+});
 const agentResultObservations=await loadPinnedAgentResultObservations({
   ref:allRefs[3],issueNumbers:selectedIssueNumbers,maxFiles:16,
   getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
@@ -194,7 +254,8 @@ const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceS
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
   repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
-  issueRunSource,acceptanceE2E,agentStoreSource,agentResultObservations,refs,storeMeta,
+  issueRunSource,acceptanceE2E,agentStoreSource,agentResultObservations,
+  lineageEvidence,refs,storeMeta,
   meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
     acceptance_results_sha:acceptanceSha }
 }));
