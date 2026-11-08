@@ -1,109 +1,78 @@
 'use strict';
-// #1974 SC-03: a genuine logical Slice identity joins the real Agent -> Run.
-// A dispatch action_id is NOT a Slice ID. Until the producer emits a real slice
-// record the source is explicitly Partial and #1906 remains Unlinked.
-//
-// Executable contract proposed here (owner: #1664/#1974): a pinned store record
-// workflows/issues/<issue>/slices/<slice_id>.json with
-//   {schema_version:1, kind:'agent_slice_identity', repository, issue, slice_id,
-//    task_id, action_id, agent_id, role, run_id, run_attempt, target_sha}
-// binding the same Agent/Run/Attempt as the authenticated Result v2.
+// #1974 SC-03: a real Slice has its OWN identity, never the dispatch
+// action_id or a fabricated sequence. A missing independently attested
+// identity is an explicit Partial, so #1906 must remain Unlinked.
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
-const {pathToFileURL}=require('node:url');
-const {
-  REPO,issueRecords,isResultV2,isIntent,isSlice,fetchJson,HEX40,
-}=require('../../../shared/agent-store-1997.cjs');
+const {REPO,issueRecords,HEX40}=require('../../../shared/agent-store-1997.cjs');
+const {attestLatestQwenProducer}=require('../../../shared/qwen-live-source.cjs');
 const {report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 
 const root=path.resolve(__dirname,'../../../../..');
 const HEX64=/^[a-f0-9]{64}$/;
 const SLICE=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-function pending(summary,evidence){
-  console.log(JSON.stringify({status:'pending',summary,evidence}));
+const fields=['schema_version','kind','repository','issue','slice_id','task_id',
+  'action_id','agent_id','role','run_id','run_attempt','target_sha'];
+const only=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&
+  Object.keys(value).length===keys.length&&Object.keys(value).every(k=>keys.includes(k));
+function pending(source,description){
+  console.log(JSON.stringify({status:'pending',
+    summary:description+' Source is explicitly Partial; #1906 remains Unlinked.',
+    evidence:[{type:'store',value:'agent-store='+(source?.storeSha||'unavailable')},
+      {type:'blocked',value:'No action_id-to-Slice inference or unsigned Store-only Slice projection'}]}));
 }
-const only=(value,fields)=>value&&typeof value==='object'&&!Array.isArray(value)&&
-  Object.keys(value).length===fields.length&&Object.keys(value).every(k=>fields.includes(k));
-
 async function main(){
   const target=process.env.NESSION_ACCEPTANCE_TARGET_SHA||'';
   assert.match(target,HEX40,'exact target SHA required');
-  assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),target,
-    'Case checkout SHA mismatch');
-  assert.equal(process.env.GITHUB_REF_NAME,'main','post-merge Case must run on main');
+  assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),
+    target,'Case checkout SHA mismatch');
+  assert.equal(process.env.GITHUB_REF_NAME,'main');
 
-  const {storeSha,results,slices}=await issueRecords(2961);
-  const v2=results.filter(item=>isResultV2(item.doc));
-  if(!v2.length){
-    pending(
-      'No authenticated Result v2 exists, so a logical Slice cannot be joined. The source remains explicitly Partial and #1906 stays Unlinked.',
-      [{type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' slice_records='+slices.length}]);
+  const source=await attestLatestQwenProducer();
+  if(source.status!=='verified'){
+    pending(source,'Original Qwen Developer Result v2 is not authenticated: '+source.reason);
     return;
   }
-  const relevant=v2.filter(item=>item.doc?.implementing_pr?.number===2963&&
-    item.doc?.source?.agent_id==='dev-qwen-01');
-  if(relevant.length===0){
-    const intents=results.filter(item=>isIntent(item.doc));
-    assert.ok(intents.length>=2,
-      'real Qwen Publisher and Repair intents are missing from the pinned store');
-    pending(
-      'Real #2961 Qwen Publisher/Repair intents exist, but no original Developer Result v2 is committed; the logical Slice join remains Pending.',
-      [
-        {type:'store',value:'agent-store='+storeSha+' result_records='+results.length+' slice_records='+slices.length+' intents='+intents.length},
-        {type:'blocked',value:'present kinds='+[...new Set(results.map(x=>x.doc.kind))].join(',')},
-      ]);
+  const a=source.attested,{slices}=await issueRecords(source.fixture.issue);
+  if(a.slice_id===null||!slices.length){
+    pending(source,'No separately authenticated logical Slice exists for Qwen Run '+
+      a.run_id+'/'+a.attempt);
     return;
   }
-  assert.equal(relevant.length,1,'expected one original Qwen Developer v2 record for PR #2963');
-  const receipt=relevant[0].doc;
-
-  if(!slices.length){
-    pending(
-      'The authenticated Result v2 has no genuine logical Slice identity; action_id is not a Slice ID. The source remains explicitly Partial and #1906 stays Unlinked.',
-      [
-        {type:'store',value:'agent-store='+storeSha+' result='+relevant[0].path},
-        {type:'blocked',value:'missing workflows/issues/2961/slices/<slice_id>.json'},
-      ]);
-    return;
-  }
-
-  const fields=['schema_version','kind','repository','issue','slice_id','task_id',
-    'action_id','agent_id','role','run_id','run_attempt','target_sha'];
-  let joined=null;
+  assert.match(String(a.slice_id),SLICE);
+  assert.notEqual(a.slice_id,a.action_id,'action_id cannot double as Slice');
+  const bound=[];
   for(const item of slices){
     const doc=item.doc;
-    if(!only(doc,fields)) throw new Error('malformed slice record: '+item.path);
+    assert.ok(only(doc,fields),'unsafe logical Slice record: '+item.path);
     assert.equal(doc.schema_version,1);
     assert.equal(doc.kind,'agent_slice_identity');
     assert.equal(doc.repository,REPO);
-    assert.equal(doc.issue,2961);
-    assert.match(String(doc.slice_id??''),SLICE,'invalid slice_id');
-    assert.notEqual(doc.slice_id,receipt.action_id,'action_id is not a Slice ID');
-    assert.match(String(doc.action_id??''),HEX64,'invalid slice action_id');
-    assert.match(String(doc.task_id??''),HEX64,'invalid slice task_id');
-    assert.match(String(doc.target_sha??''),HEX40,'invalid slice target SHA');
-    assert.ok(Number.isSafeInteger(doc.run_id)&&doc.run_id>0,'invalid slice run id');
-    assert.ok(Number.isSafeInteger(doc.run_attempt)&&doc.run_attempt>0,'invalid slice attempt');
-    if(doc.action_id!==receipt.action_id||doc.run_id!==receipt.result.run_id||
-       doc.run_attempt!==receipt.result.run_attempt||doc.target_sha!==receipt.result.target_sha||
-       doc.task_id!==receipt.action_id||doc.role!==receipt.result.kind||
-       doc.agent_id!==receipt.source.agent_id)continue;
-    joined={item,doc};
+    assert.equal(doc.issue,source.fixture.issue);
+    assert.match(String(doc.slice_id??''),SLICE);
+    assert.match(String(doc.task_id??''),HEX64);
+    assert.match(String(doc.action_id??''),HEX64);
+    assert.match(String(doc.target_sha??''),HEX40);
+    assert.ok(Number.isSafeInteger(doc.run_id)&&doc.run_id>0);
+    assert.ok(Number.isSafeInteger(doc.run_attempt)&&doc.run_attempt>0);
+    if(doc.slice_id===a.slice_id&&doc.action_id===a.action_id&&
+       doc.task_id===a.action_id&&doc.run_id===a.run_id&&
+       doc.run_attempt===a.attempt&&doc.target_sha===a.pr_head_sha&&
+       doc.agent_id===a.agent_id&&doc.role===a.role)
+      bound.push(item);
   }
-  assert.ok(joined,'no slice record binds the authenticated Result v2 Agent/Run/Attempt');
-  const run=await fetchJson('/actions/runs/'+joined.doc.run_id);
-  assert.equal(run.run_attempt,joined.doc.run_attempt);
+  assert.equal(bound.length,1,'exactly one independently attested Slice join required');
+  const run=await require('../../../shared/trusted-run-store-proof.cjs')
+    .fetchJson('/actions/runs/'+a.run_id);
+  assert.equal(run.id,a.run_id);
+  assert.equal(run.run_attempt,a.attempt);
   assert.equal(run.status,'completed');
   assert.equal(run.conclusion,'success');
-
-  report(
-    'A genuine logical Slice identity is recorded in the pinned store and joins the authenticated Agent -> Run/Attempt without reusing action_id.',
-    [
-      {type:'store',value:'agent-store='+storeSha+' slice='+joined.item.path},
-      {type:'slice',value:'slice_id='+joined.doc.slice_id+' task_id='+joined.doc.task_id},
-      {type:'join',value:'agent='+joined.doc.agent_id+' role='+joined.doc.role+' run='+joined.doc.run_id+'/'+joined.doc.run_attempt},
-      {type:'source',value:'action='+joined.doc.action_id+' target_sha='+joined.doc.target_sha},
-    ]);
+  report('Real independently authenticated Slice identity joined original Qwen Agent Run/Attempt without conflating the dispatch action.',[
+    {type:'store',value:'agent-store='+source.storeSha+' slice='+bound[0].path},
+    {type:'slice',value:'slice_id='+a.slice_id+' action='+a.action_id},
+    {type:'source',value:'run='+a.run_id+'/'+a.attempt+' pr=#'+a.pr_number},
+  ]);
 }
 main().catch(fail);
