@@ -6,6 +6,7 @@ import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs'
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
+import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -177,6 +178,15 @@ const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all(
     issues:selectedIssueNumbers,at:generatedAt}),
   optionalScopedE2ERuns(),
 ]);
+// Original Git blob bytes are checked against the pinned Store ref, but the
+// Store record is still an UNVERIFIED claim until a separate trusted
+// Producer/Publisher attester supplies the explicit lineageEvidence contract.
+const agentResultObservations=await loadPinnedAgentResultObservations({
+  ref:allRefs[3],issueNumbers:selectedIssueNumbers,maxFiles:16,
+  getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
+  getBlob:sha=>api('/git/blobs/'+sha),
+  getCurrentRef:()=>optionalRef('agent-store'),
+});
 const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceSha,
   prHeads:Array.isArray(pulls)?pulls.slice(0,12).map(x=>x.head?.sha).filter(Boolean):[],
   workflowRuns:scopedE2ERuns?.runs??null,
@@ -184,7 +194,7 @@ const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceS
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
   repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
-  issueRunSource,acceptanceE2E,agentStoreSource,refs,storeMeta,
+  issueRunSource,acceptanceE2E,agentStoreSource,agentResultObservations,refs,storeMeta,
   meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
     acceptance_results_sha:acceptanceSha }
 }));
@@ -211,6 +221,8 @@ console.log(JSON.stringify({
   published_e2e_ids:result.work.acceptance_e2e.records.length,
   lineage_status:result.work.lineage.status,
   agent_store_readiness:result.work.agent_store_readiness.status,
+  agent_result_observations:result.work.agent_result_observations.status,
+  agent_result_count:result.work.agent_result_observations.records.length,
   stores:result.evidence.stores.map(x=>[x.name,x.state]),
   knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null}
 }));
