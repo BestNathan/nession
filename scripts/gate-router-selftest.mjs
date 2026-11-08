@@ -275,3 +275,15 @@ for (const c of renameCases) verifyRenameCase(c);
 verifyRenameCase(renameCases[0], true);
 console.log('real-git rename fixtures: ' + renameCases.length + ' positive, 1 mutation passed');
 
+ // Real pre-commit staged-index fixture: exercises the actual hook, selector,
+ // runner and canonical Rust/Web Gate adapters (only binaries are mocked).
+ const stagedIndex = spawnSync(process.execPath,
+   [path.join(root, 'scripts/gate-staged-snapshot-selftest.mjs')], {
+     cwd: root, env: process.env, encoding: 'utf8', timeout: 180000,
+   });
+ assert.equal(stagedIndex.error, undefined, 'unable to spawn staged-index selftest');
+ assert.equal(stagedIndex.status, 0,
+   'staged-index selftest failed:\\n' + stagedIndex.stdout + '\\n' + stagedIndex.stderr);
+ console.log(stagedIndex.stdout.trim());
+
+
