@@ -14,8 +14,14 @@ const SOURCE=/^workflows\/issues\/([1-9][0-9]*)\/producer-results-v2\/([1-9][0-9
 function ensure(ok){if(!ok)throw Error('untrusted Qwen producer or Store writer');}
 // ZIP extraction is constrained to named regular JSON files, not arbitrary
 // paths. It rechecks BOTH original ZIP digests against GitHub Artifact API.
+// Worker ZIP includes a bounded encrypted native checkpoint (up to 24 MiB),
+// even though only its small result.json member is extracted. Honor the exact
+// existing Worker transport budget; the Publisher receipt stays 512 KiB.
+const MAX_WORKER_ZIP=32*1024*1024;
+const MAX_PUBLISHER_ZIP=512*1024;
 function zipMember(zip,name,maxBytes=65536){
- ensure(Buffer.isBuffer(zip)&&zip.length>=52&&zip.length<=512*1024);
+ const maxZip=name==='result.json'?MAX_WORKER_ZIP:MAX_PUBLISHER_ZIP;
+ ensure(Buffer.isBuffer(zip)&&zip.length>=52&&zip.length<=maxZip);
  const end=zip.length-22;
  ensure(zip.readUInt32LE(end)===0x06054b50&&
    zip.readUInt16LE(end+4)===0&&zip.readUInt16LE(end+6)===0&&
@@ -32,7 +38,7 @@ function zipMember(zip,name,maxBytes=65536){
      nameLen=zip.readUInt16LE(ptr+28),extra=zip.readUInt16LE(ptr+30),
      comment=zip.readUInt16LE(ptr+32),local=zip.readUInt32LE(ptr+42);
    ensure((flags&~(0x0800|8))===0&&[0,8].includes(method)&&
-     compressed<=512*1024&&plain<=32*1024*1024&&nameLen>0&&nameLen<100&&
+     compressed<=maxZip&&plain<=24*1024*1024&&nameLen>0&&nameLen<100&&
      ptr+46+nameLen+extra+comment<=end&&
      zip.readUInt16LE(ptr+34)===0);
    const file=zip.subarray(ptr+46,ptr+46+nameLen).toString('utf8');
