@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "prototype-project-3025-browser-20261108",
+  "source_sha": "d10d598f07909b8ed7540eebcf73a60126928988",
+  "source_digest": "c94db37fa627ae652aa09561e4d4281080a8881e0f060225e09f520c66eb4e58",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 42497381779,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42497381779",
+    "event": "push",
+    "branch": "task/prototype-project-3025-browser-20261108",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-08T15:57:24.490Z",
+    "finished_at": "2026-11-08T15:57:34.298Z",
+    "result": {
+      "task": "Project 3025 published prototype browser verification",
+      "source_sha": "2fd74ba8309ad2adf5f51f6a43b12fab6dd3c8c1",
+      "html_url": "https://bestnathan.github.io/nession/prototypes/project-session-3025/index.html?revision=2fd74ba8309ad2adf5f51f6a43b12fab6dd3c8c1",
+      "manifest_url": "https://bestnathan.github.io/nession/prototypes/manifest.json?revision=2fd74ba8309ad2adf5f51f6a43b12fab6dd3c8c1",
+      "checks": [
+        {
+          "name": "published_manifest_sha",
+          "pass": true,
+          "detail": "{\"expected\":\"2fd74ba8309ad2adf5f51f6a43b12fab6dd3c8c1\",\"actual\":\"2fd74ba8309ad2adf5f51f6a43b12fab6dd3c8c1\"}"
+        },
+        {
+          "name": "published_interactive_html",
+          "pass": true,
+          "detail": "{\"bytes\":5294}"
+        },
+        {
+          "name": "trusted_pinned_source_link",
+          "pass": true,
+          "detail": "publisher should embed immutable HTML source URL"
+        },
+        {
+          "name": "new_erofs_digest_visible",
+          "pass": true,
+          "detail": "new immutable artifact rendered"
+        },
+        {
+          "name": "download_failure_visible",
+          "pass": true,
+          "detail": "explicit failure"
+        },
+        {
+          "name": "managed_ready",
+          "pass": true,
+          "detail": "prepare succeeded"
+        },
+        {
+          "name": "narrow_stage_horizontal_scroll",
+          "pass": true,
+          "detail": "{\"max\":337,\"left\":0}"
+        }
+      ],
+      "browser": {
+        "status": "passed",
+        "executable": "/usr/bin/google-chrome",
+        "checks": [
+          {
+            "name": "web_mode",
+            "value": "web",
+            "expected": "web",
+            "pass": true
+          },
+          {
+            "name": "wide_css_px",
+            "value": 1180,
+            "expected": 1180,
+            "pass": true
+          },
+          {
+            "name": "existing_session_created",
+            "value": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "web_back_to_project",
+            "value": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "managed_session_created",
+            "value": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "name": "app_mode",
+            "value": "app",
+            "expected": "app",
+            "pass": true
+          },
+          {
+            "name": "app_css_px",
+            "value": 390,
+            "expected": 390,
+            "pass": true
+          },
+          {
+            "name": "single_app_header",
+            "value": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "name": "app_workspace_project",
+            "value": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "name": "web_round_trip",
+            "value": "web",
+            "expected": "web",
+            "pass": true
+          },
+          {
+            "name": "no_pageerrors",
+            "value": 0,
+            "expected": 0,
+            "pass": true
+          }
+        ],
+        "screenshot_sha256": "5ca76f877fd8a3028b3abe6ee42c99307bb59c788fa4230a8c69a70cd0cab803"
+      },
+      "status": "success",
+      "manifest_sha256": "d54ab2fa795bb9625af8e5c47e6e8c91d0eb6cdb4b422cbf55816e0652b453a9",
+      "html_sha256": "a66c852face2c5eac401a5f6c20bd8a82f6e5946c0db871385009cbe626c11a1"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/d10d598f07909b8ed7540eebcf73a60126928988/prototype-project-3025-browser-20261108.json"
+}
