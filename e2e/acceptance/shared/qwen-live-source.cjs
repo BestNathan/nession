@@ -25,7 +25,9 @@ function readPinnedQwenApi(route,root=process.env.NESSION_QWEN_ARTIFACT_DIR,
   assert.ok(dir.isDirectory()&&!dir.isSymbolicLink(),
     'unsafe private Qwen readback directory');
   const manifestPath=path.join(root,'api-manifest.json');
-  const stat=fs.lstatSync(manifestPath);
+  let stat;
+  try{stat=fs.lstatSync(manifestPath);}
+  catch{throw Error('missing or unsafe Qwen source readback manifest');}
   assert.ok(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>=40&&
     stat.size<=65536,'missing or unsafe Qwen source readback manifest');
   const m=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
@@ -40,12 +42,17 @@ function readPinnedQwenApi(route,root=process.env.NESSION_QWEN_ARTIFACT_DIR,
   assert.ok(e.sha256&&/^[a-f0-9]{64}$/.test(e.sha256)&&
     Number.isSafeInteger(e.size)&&e.size>=2&&e.size<=2*1024*1024,
     'invalid pinned read-only GitHub source bounds');
-  const apiDir=path.join(root,'api'),d=fs.lstatSync(apiDir);
+  const apiDir=path.join(root,'api');
+  let d;
+  try{d=fs.lstatSync(apiDir);}
+  catch{throw Error('unsafe pinned source API directory');}
   assert.ok(d.isDirectory()&&!d.isSymbolicLink(),
     'unsafe pinned source API directory');
   const file=path.join(apiDir,
     createHash('sha256').update(route).digest('hex')+'.json');
-  const fileStat=fs.lstatSync(file);
+  let fileStat;
+  try{fileStat=fs.lstatSync(file);}
+  catch{throw Error('missing or unsafe original GitHub source body');}
   assert.ok(fileStat.isFile()&&!fileStat.isSymbolicLink()&&
     fileStat.size===e.size,'stale or unsafe original GitHub source body');
   const bytes=fs.readFileSync(file);
