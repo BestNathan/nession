@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SessionMetadataResponse } from '@/product/session/types';
 import type { DomainState } from '@/product/session/model/domainState';
@@ -39,11 +39,29 @@ const session: Session = {
   last_activity: '2026-11-06T00:00:00Z',
 };
 
+const otherSession: Session = {
+  session_id: 'devbox-01:design',
+  agent_id: 'devbox-01',
+  session_name: 'design-system',
+  status: 'active',
+  window_count: 1,
+  attached_clients: 0,
+  last_activity: '2026-11-06T01:00:00Z',
+};
+
 const domain: DomainState = {
   agent: { channel: 'online', copy: null },
   session: { channel: 'active', copy: null },
   attachment: { channel: 'detached', copy: null },
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function ok(overrides: Record<string, unknown> = {}): SessionMetadataResponse {
   return {
@@ -193,5 +211,99 @@ describe('SessionDetails metadata', () => {
   it('does not show a creation time when none was recorded', async () => {
     await renderLoaded(ok({ created_at: null }));
     expect(screen.queryByTestId('session-metadata-created')).not.toBeInTheDocument();
+  });
+
+  it('discards a save whose answer arrives after the user switched Sessions', async () => {
+    const user = userEvent.setup();
+    const pendingSave = deferred<SessionMetadataResponse>();
+    getMetadataMock.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === session.session_id
+          ? ok({ revision: 1, title: 'Release triage' })
+          : ok({ revision: 3, title: 'Design system' }),
+      ),
+    );
+    updateMetadataMock.mockReturnValue(pendingSave.promise);
+
+    const { rerender } = render(<SessionDetails session={session} state={domain} />);
+    await waitFor(() => expect(screen.getByTestId('session-metadata-edit')).toBeInTheDocument());
+
+    // Start a save for the first Session, then switch before the Agent answers.
+    await user.click(screen.getByTestId('session-metadata-edit'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), ' — A draft');
+    await user.click(screen.getByTestId('session-metadata-save'));
+
+    rerender(<SessionDetails session={otherSession} state={domain} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('session-title')).toHaveTextContent('Design system'),
+    );
+
+    // The new Session's editor owns its own draft.
+    await user.click(screen.getByTestId('session-metadata-edit'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), ' — B draft');
+
+    // The first Session's success must not close B's editor, replace B's
+    // draft with A's saved metadata, or surface A's success in B's panel.
+    await act(async () => {
+      pendingSave.resolve(ok({ revision: 2, title: 'Saved A title' }));
+      await pendingSave.promise;
+    });
+
+    expect(screen.getByTestId('session-metadata-title-input')).toHaveValue(
+      'Design system — B draft',
+    );
+    expect(screen.queryByTestId('session-metadata-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-title')).toHaveTextContent('Design system');
+  });
+
+  it('discards a conflict reload whose answer arrives after the user switched Sessions', async () => {
+    const user = userEvent.setup();
+    const pendingReload = deferred<SessionMetadataResponse>();
+    let firstSessionReads = 0;
+    getMetadataMock.mockImplementation((id: string) => {
+      if (id === session.session_id) {
+        firstSessionReads += 1;
+        return firstSessionReads === 1
+          ? Promise.resolve(ok({ revision: 4, title: 'Old title' }))
+          : pendingReload.promise;
+      }
+      return Promise.resolve(ok({ revision: 3, title: 'Design system' }));
+    });
+    updateMetadataMock.mockResolvedValue({
+      success: false,
+      error_kind: 'conflict',
+      error: 'expected revision 4, current revision 5',
+      metadata: null,
+    });
+
+    const { rerender } = render(<SessionDetails session={session} state={domain} />);
+    await waitFor(() => expect(screen.getByTestId('session-metadata-edit')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('session-metadata-edit'));
+    await user.clear(screen.getByTestId('session-metadata-title-input'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), 'Stale A draft');
+    await user.click(screen.getByTestId('session-metadata-save'));
+    await screen.findByTestId('session-metadata-conflict');
+
+    // The forced read is in flight when the user switches Sessions.
+    await user.click(screen.getByTestId('session-metadata-reload'));
+
+    rerender(<SessionDetails session={otherSession} state={domain} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('session-title')).toHaveTextContent('Design system'),
+    );
+    await user.click(screen.getByTestId('session-metadata-edit'));
+    await user.type(screen.getByTestId('session-metadata-title-input'), ' — B draft');
+
+    await act(async () => {
+      pendingReload.resolve(ok({ revision: 5, title: 'Remote A title' }));
+      await pendingReload.promise;
+    });
+
+    expect(screen.getByTestId('session-metadata-title-input')).toHaveValue(
+      'Design system — B draft',
+    );
+    expect(screen.queryByTestId('session-metadata-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-title')).toHaveTextContent('Design system');
   });
 });
