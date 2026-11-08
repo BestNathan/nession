@@ -150,7 +150,7 @@ pub enum AgentAction {
         #[arg(short, long)]
         config: Option<String>,
 
-        /// Path to PID file (forwarded to the service and the immediate start)
+        /// Path to PID file (forwarded to the managed service process)
         #[arg(long)]
         pid_file: Option<String>,
     },
