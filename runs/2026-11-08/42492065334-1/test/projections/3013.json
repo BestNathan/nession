@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 3013,
+  "run_id": 42492065334,
+  "run_attempt": 1,
+  "target_sha": "32e583ce76eaa25c6c26bc904e77444de5247fcd",
+  "plan_digest": "7571c9835821be2ecd2d238c52c19788d6c2cd31a7de22ab2035ab4a89f5386c",
+  "artifact_digest": "sha256:9d4e7a7b13283cc0ab5599c980ecd4e6a94254acbb52ed9fa2cdca1fd524d01c",
+  "ingest_run_id": 42492460726,
+  "ingest_attempt": 1,
+  "declaration_digest": "41b76ae8589e63cba6d6b933c0eed510c28b4a2b7fe31bc6a3d71caa17ff3148",
+  "before_body_sha256": "8b12e911f74684cd6d29aa1a2f83f4ff0ba2170107510c5f7ba23f0ef22ff831",
+  "body_sha256": "8d639e961ace1f38a57eb0909b7a1779ca2172f9e120b88a9d7908439b019ec2",
+  "readback_body": "## Description\n\nThe Linux Playwright baselines for the filtered Sessions screen still contain the retired outset focus halo. #2750 replaced that with a border repaint on bordered fields, so Full Regression reports a ~1% pixel diff on every non-tooling-only main push. The filtered 3-row state and the functional assertions are correct; only the baseline bytes and their migration-parity pins are stale.\n\n## Reproduction\n\n- Full Regression run 42462221057 at `b25a192133be4700925f8d64a3bc5066e94d2e5d`.\n- `fixture-visual-app.spec.ts` (390×844) and `fixture-visual-app-compact.spec.ts` (375×812), test `Sessions layer, filtered`.\n- Expected/actual/diff images show only the search input's outer focus halo.\n\n## Root Cause\n\nThe two `app-sessions-filtered*-linux.png` baselines predate #2750 and still include the outset halo. `e2e/tests/browser/migration-parity.json` pins those old blob hashes.\n\n## Impact\n\nMain Full Regression is red for unrelated pushes; there is no product behavior failure.\n\n## Fix Direction\n\nRegenerate the two Linux baselines from the actual filtered state and update their migration-parity pins. Add a deterministic Case that checks the baseline/manifest agreement and the bordered-field focus contract.\n\n## Location\n\n- `e2e/tests/browser/__snapshots__/fixture-visual-app.spec.ts/app-sessions-filtered-linux.png`\n- `e2e/tests/browser/__snapshots__/fixture-visual-app-compact.spec.ts/app-sessions-filtered-375-linux.png`\n- `e2e/tests/browser/migration-parity.json`\n\n### Success Criteria\n\n- [ ] SC-01 The two filtered Sessions visual tests pass at the PR head with the quiet bordered-field focus treatment, and their Linux baseline bytes are pinned consistently in `migration-parity.json`.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: merged\n    branch: main\n    method: case\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n| --- | --- | --- |\n| SC-01 | Pending | awaiting PR-head Case and E2E evidence |\n\n## E2E Verification\n\n### New\n- none: this Bug changes only existing filtered Sessions baselines and their migration-parity pins; no new browser spec is added.\n\n### Regression\n- fixture-visual-app\n- fixture-visual-app-compact\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| fixture-visual-app | Regression | Pass | run 42492065334/1, SHA 32e583ce76eaa25c6c26bc904e77444de5247fcd, contract 41b76ae8589e63cba6d6b933c0eed510c28b4a2b7fe31bc6a3d71caa17ff3148, plan 7571c9835821be2ecd2d238c52c19788d6c2cd31a7de22ab2035ab4a89f5386c, tests 22/22 (https://github.com/BestNathan/nession/actions/runs/42492065334) |\n| fixture-visual-app-compact | Regression | Pass | run 42492065334/1, SHA 32e583ce76eaa25c6c26bc904e77444de5247fcd, contract 41b76ae8589e63cba6d6b933c0eed510c28b4a2b7fe31bc6a3d71caa17ff3148, plan 7571c9835821be2ecd2d238c52c19788d6c2cd31a7de22ab2035ab4a89f5386c, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42492065334) |\n\n## Product alignment\n\n- [x] This moves Nession toward VISION.md by keeping the visual regression signal trustworthy.\n- [x] It obeys PRINCIPLE.md: the UI keeps the approved quiet focus treatment.\n- [x] Relevant `docs/design/design-system/components.md` focus contract was checked.\n- [x] No product behavior or design deviation is introduced.\n\n### Knowledge Impact\n\n- Decision: None\n- Related knowledge: none\n- Reason: test-baseline correction only; no durable product or architecture contract changes.\n- Owner and timing: none\n- Evidence: this Bug and the linked PR.\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-11-08T14:59:30Z",
+  "readback_updated_at": "2026-11-08T14:59:30Z",
+  "rows": [
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "evidence": "run 42492065334/1, SHA 32e583ce76eaa25c6c26bc904e77444de5247fcd, contract 41b76ae8589e63cba6d6b933c0eed510c28b4a2b7fe31bc6a3d71caa17ff3148, plan 7571c9835821be2ecd2d238c52c19788d6c2cd31a7de22ab2035ab4a89f5386c, tests 22/22 (https://github.com/BestNathan/nession/actions/runs/42492065334)"
+    },
+    {
+      "id": "fixture-visual-app-compact",
+      "result": "Pass",
+      "evidence": "run 42492065334/1, SHA 32e583ce76eaa25c6c26bc904e77444de5247fcd, contract 41b76ae8589e63cba6d6b933c0eed510c28b4a2b7fe31bc6a3d71caa17ff3148, plan 7571c9835821be2ecd2d238c52c19788d6c2cd31a7de22ab2035ab4a89f5386c, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42492065334)"
+    }
+  ]
+}
