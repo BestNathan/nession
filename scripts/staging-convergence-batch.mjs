@@ -206,7 +206,7 @@ function selfTest(){
     fs.writeFileSync('e2e/tests/browser/another-test.spec.ts','// new test\\n');
     git('add','.');git('commit','-qm','new browser ID');
     const main=git('rev-parse','HEAD');
-    const tree=git('merge-tree','--write-tree',lane,main).split(/\\s+/)[0];
+    const tree=git('merge-tree','--write-tree',lane,main).split('\n')[0];
     const integration=git('commit-tree',tree,'-p',lane,'-p',main,
       '-m','checked exact integration');
     assert.equal(diff(lane,integration).includes('e2e/tests/browser/fixture-git.spec.ts'),false,
