@@ -36,7 +36,7 @@ test('SC-08: the public preview operates the content-sized Select and Env anatom
 
   // Web Project → New Session: the selected trigger contains Agent, the
   // wrapped long path and status; the menu overlays without shifting fields.
-  await product.locator('[data-act="create-project-session"]').click();
+  await product.locator('.project-detail [data-act="create-project-session"]').click();
   const dialog = page.locator('.web-dialog[role="dialog"]');
   await expect(dialog).toBeVisible();
   const trigger = dialog.locator('[data-location-trigger]');
@@ -92,7 +92,7 @@ test('SC-08: the public preview operates the content-sized Select and Env anatom
 
   // New Project Agent/Directory: the ordinary one-line control is 42px and
   // the textarea grows only when its own content wraps.
-  await dialog.locator('[data-act="cancel"]').click();
+  await dialog.locator('.dialog-footer [data-act="cancel"]').click();
   await expect(dialog).toHaveCount(0);
   await product.locator('[data-act="project-create"]').click();
   const projectDialog = page.locator('.web-dialog[role="dialog"][aria-label="New Project"]');
@@ -120,6 +120,7 @@ test('SC-08: the public preview operates the content-sized Select and Env anatom
   // not the Web dialog's nested fixed-height box.
   await page.locator('[data-np-size="390"][data-np-experience="app"]').click();
   await expect(product).toHaveAttribute('data-experience', 'app');
+  await product.locator('[data-act="show-project"]').click();
   await product.locator('[data-act="create-project-session"]').click();
   await product.locator('[data-act="choose-env"]').click();
   const appEnv = product.locator('.app-operation [data-env-multi]');

@@ -95,20 +95,24 @@ test('SC-07: Existing Location trigger and options contain long content', async 
     expect(await page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(viewport.width + 1);
 
-    // Pointer selection lands the first location; the menu closes.
-    await trigger.click();
+    // Escape closes only the Select and returns focus to its trigger.
+    await page.keyboard.press('Escape');
     await expect(page.getByRole('option')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+
+    // Keyboard selection moves to the second location.
+    await trigger.press('ArrowDown');
+    const secondOption = page.getByRole('option').nth(1);
+    await expect(secondOption).toBeVisible();
+    await secondOption.focus();
+    await page.keyboard.press('Enter');
+    await expect(trigger).toContainText('devbox-01');
+
+    // Pointer selection returns to the first location.
     await trigger.click();
     await page.getByRole('option').first().click();
     await expect(trigger).toContainText('macbook');
-    await expect(trigger).toContainText('very-long-directory-name-for-geometry');
-
-    // Keyboard selection moves to the second location.
-    await trigger.focus();
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Enter');
-    await expect(trigger).toContainText('devbox-01');
+    await expect(trigger).toContainText('fix-3089-select-location-geometry');
     const selectedBox = await trigger.boundingBox();
     expect(selectedBox).not.toBeNull();
     expect(selectedBox!.y + selectedBox!.height).toBeLessThanOrEqual(
@@ -141,9 +145,12 @@ test('SC-07: offline and empty Existing Location states stay explicit', async ({
   await expect(offlineDialog.getByTestId('project-location-offline')).toBeVisible();
   await expect(offlineDialog.getByTestId('create-session-submit')).toBeDisabled();
   await expectInsideTrigger(page, 1180);
+  await offlineDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(offlineDialog).toHaveCount(0);
 
   // The second canonical Project declares no Existing Location.
   await page.goto('/#/fixture?experience=web&projects=canonical');
+  await page.reload();
   await page.getByTestId('project-item-row').nth(1).click();
   await page.getByTestId('project-detail-create-session').click();
   const emptyDialog = page.getByRole('dialog').filter({ hasText: 'Create Session in' });

@@ -144,21 +144,23 @@ test.describe('Project Existing-location Session creation', () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth))
         .toBeLessThanOrEqual(viewport.width + 1);
 
-      // Pointer selection lands the first location.
-      await trigger.click();
+      // Escape closes only the Select; keyboard selection moves to the second
+      // Existing Location and the content-sized trigger still contains its
+      // longer path.
+      await page.keyboard.press('Escape');
       await expect(page.getByRole('option')).toHaveCount(0);
-      await trigger.click();
-      await page.getByRole('option').first().click();
-      await expect(trigger).toContainText('macbook');
-
-      // Keyboard selection moves to the second Existing Location and the
-      // content-sized trigger still contains its longer path.
-      await trigger.focus();
-      await page.keyboard.press('ArrowDown');
-      await page.keyboard.press('ArrowDown');
+      await trigger.press('ArrowDown');
+      const secondOption = page.getByRole('option').nth(1);
+      await expect(secondOption).toBeVisible();
+      await secondOption.focus();
       await page.keyboard.press('Enter');
       await expect(trigger).toContainText('devbox-01');
       await expect(trigger).toContainText('very-long-directory-name-for-geometry');
+
+      // Pointer selection returns to the first location.
+      await trigger.click();
+      await page.getByRole('option').first().click();
+      await expect(trigger).toContainText('macbook');
       const selectedBox = await trigger.boundingBox();
       expect(selectedBox).not.toBeNull();
       expect(selectedBox!.y + selectedBox!.height).toBeLessThanOrEqual(
