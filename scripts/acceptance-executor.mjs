@@ -370,6 +370,24 @@ function implicitCiEvidenceFile(outFile) {
   return evidenceFile;
 }
 
+// A source-bound batch was already accepted on its original PR, but the old
+// workflow definition intentionally supplied "-" (no generic PR CI readback).
+// GitHub re-runs load that original workflow definition. The trusted main
+// harness alone may recover *this exact historical PR* after authenticating
+// its owner-approved E2E digest, native PR merge and four original check Runs.
+// Do not turn on the full post-merge collector for ordinary PRs.
+function originalStagingPrEvidence(issueNumber, stage, targetRef, outFile, explicitFile) {
+  if (Number(issueNumber) !== 2984 || stage !== 'pre-merge' ||
+      targetRef !== '91af0907d508224d55e469adfa6442f440b70432' ||
+      explicitFile !== '-') return null;
+  const output=outFile+'.original-staging-pr.json';
+  const source=fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url));
+  execFileSync(process.execPath,[source,'collect',targetRef,output],{
+    env:process.env,stdio:'inherit',
+  });
+  return output;
+}
+
 function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
@@ -382,8 +400,8 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   // historical re-runs cannot silently degrade to ci_evidence=null.
   // An explicit '-' suppresses the old implicit collector for PR-stage proof.
   // An omitted argument still preserves historical rerun compatibility.
-  const evidencePath = ciEvidenceFile === '-' ? null :
-    (ciEvidenceFile || implicitCiEvidenceFile(outFile));
+  const evidencePath = originalStagingPrEvidence(issueNumber, stage, targetRef, outFile, ciEvidenceFile) ||
+    (ciEvidenceFile === '-' ? null : (ciEvidenceFile || implicitCiEvidenceFile(outFile)));
   const ciEvidence = evidencePath
     ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
