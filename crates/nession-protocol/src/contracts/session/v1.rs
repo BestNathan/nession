@@ -4,6 +4,7 @@ use crate::contracts::agent::v1::ProbedAddress;
 use crate::contracts::env::v1::{
     ActiveEnvFile, EnvFileRef, EnvSnapshot, SessionEnvBindingState, SessionEnvProfile,
 };
+use crate::contracts::sandbox::v1::{SandboxExecutionReport, SandboxPolicy};
 
 // --- Server → Agent command payloads ---
 
@@ -41,6 +42,21 @@ pub struct ServerSessionCreatePayload {
     /// parameter only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    ///
+    /// Absent means the Session is created exactly as before: Native. The
+    /// Agent validates and compiles the policy before it creates any host
+    /// resource; an explicitly requested guarantee that the host cannot
+    /// install refuses the create instead of falling back to Native.
+    ///
+    /// The Web projection omits the field deliberately: V1 has no Web surface
+    /// for Sandbox configuration, and the policy's native cgroup keys
+    /// (`memory.max`) cannot be generated under the Web naming rule. The Rust
+    /// contract is the wire owner; `nession-sandbox` is the validator.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -72,6 +88,12 @@ pub struct AgentCommandResponsePayload {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_name: Option<String>,
+    /// The sandbox mechanisms the Agent verified for a sandboxed create.
+    /// Omitted from the Web projection for the same reason as the policy.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 // --- Client → Server session command payloads ---
@@ -94,6 +116,12 @@ pub struct ClientSessionCreatePayload {
     /// having to notice it.
     #[serde(default)]
     pub env_files: Vec<EnvFileRef>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    /// The Server routes it to the Agent, which is the validating owner.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -118,6 +146,11 @@ pub struct ClientSessionCreateResponsePayload {
     /// Binding (reserved-key collisions, parse warnings). Empty on refusal.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -713,6 +746,12 @@ pub struct SessionCreatePayload {
     /// Session keeps its pane's width.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    /// The direct path and the relayed path carry the same policy type.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -926,6 +965,11 @@ pub struct WebSessionCreatePayload {
     /// `None` means the Agent's own configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_cols: Option<u16>,
+    /// Optional, versioned Sandbox policy binding for this Session (#2681).
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxPolicy>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -935,6 +979,11 @@ pub struct WebSessionCreateResponse {
     pub success: bool,
     pub session_id: Option<String>,
     pub error: Option<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1043,6 +1092,11 @@ pub struct SessionCreateResponse {
     /// Non-fatal warnings from materializing the initial Environment Binding.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The sandbox mechanisms verified in effect, for a sandboxed create.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxExecutionReport>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

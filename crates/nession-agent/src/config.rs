@@ -110,6 +110,58 @@ pub enum AttachMode {
     Control,
 }
 
+/// Host-local Sandbox backend configuration (#2681).
+///
+/// These are operator facts about this host. A Session's policy never chooses
+/// an executable, a cgroup root or a state directory; this section does.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxConfig {
+    /// Master switch. When false, every explicit Sandbox policy request is
+    /// refused; Native Sessions are unaffected.
+    #[serde(default = "default_sandbox_enabled")]
+    pub enabled: bool,
+    /// Bubblewrap executable (searched on PATH when a bare name).
+    #[serde(default)]
+    pub bubblewrap_path: Option<std::path::PathBuf>,
+    /// macOS `sandbox-exec` executable.
+    #[serde(default)]
+    pub sandbox_exec_path: Option<std::path::PathBuf>,
+    /// Optional cgroup v2 execution root, as a **kernel-relative** path
+    /// (`/proc/<pid>/cgroup` form), not a `/sys/fs/cgroup` mount path.
+    /// Defaults to a `nession` subtree under the Agent's own delegated cgroup.
+    #[serde(default)]
+    pub cgroup_root: Option<std::path::PathBuf>,
+    /// Execution records, profiles and channel sockets. Defaults to
+    /// `~/.nession/agent/sandbox`.
+    #[serde(default)]
+    pub state_dir: Option<std::path::PathBuf>,
+    /// Executable that provides the hidden in-sandbox bridge subcommand.
+    /// Defaults to this Agent binary.
+    #[serde(default)]
+    pub bridge_executable: Option<std::path::PathBuf>,
+    /// Bound for the launch-verification wait, in seconds.
+    #[serde(default)]
+    pub launch_timeout_secs: Option<u64>,
+}
+
+fn default_sandbox_enabled() -> bool {
+    true
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bubblewrap_path: None,
+            sandbox_exec_path: None,
+            cgroup_root: None,
+            state_dir: None,
+            bridge_executable: None,
+            launch_timeout_secs: None,
+        }
+    }
+}
+
 /// Agent configuration loaded from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -247,6 +299,10 @@ pub struct AgentConfig {
     /// when the environment sets it.
     #[serde(default = "default_terminal_cols")]
     pub terminal_cols: u16,
+
+    /// Host-local Sandbox backend configuration (#2681).
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
 }
 
 impl Default for AgentConfig {
@@ -280,6 +336,7 @@ impl Default for AgentConfig {
             logging: LoggingConfig::default(),
             memory_threshold_percent: default_memory_threshold_percent(),
             terminal_cols: default_terminal_cols(),
+            sandbox: SandboxConfig::default(),
         }
     }
 }

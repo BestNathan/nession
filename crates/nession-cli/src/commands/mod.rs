@@ -12,7 +12,7 @@ pub mod server;
 pub mod sessions;
 pub mod update;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::args::{
     AgentAction, AgentsAction, Cli, Commands, ConfigAction, ConfigSubAction, ServerAction,
@@ -194,10 +194,24 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 let token = connection::resolve_auth_token(auth_token);
                 sessions::attach::run(&url, &token, &session_id, mode.as_deref()).await?
             }
-            SessionsAction::Create { agent_id, name } => {
+            SessionsAction::Create {
+                agent_id,
+                name,
+                sandbox_policy,
+            } => {
                 let url = connection::resolve_server_url(server_url);
                 let token = connection::resolve_auth_token(auth_token);
-                sessions::create::run(&url, &token, &agent_id, &name).await?
+                let policy = sandbox_policy
+                    .map(|path| {
+                        let text = std::fs::read_to_string(&path)
+                            .with_context(|| format!("read Sandbox policy {}", path.display()))?;
+                        serde_json::from_str::<
+                            nession_protocol::contracts::sandbox::v1::SandboxPolicy,
+                        >(&text)
+                        .with_context(|| format!("parse Sandbox policy {} as JSON", path.display()))
+                    })
+                    .transpose()?;
+                sessions::create::run(&url, &token, &agent_id, &name, policy).await?
             }
             SessionsAction::Kill { session_id, force } => {
                 let url = connection::resolve_server_url(server_url);

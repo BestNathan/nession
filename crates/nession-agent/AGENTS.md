@@ -28,6 +28,25 @@ Nession never relies on the user's default tmux server.
   Membership is observed, never asserted; the OS readers and command
   sanitization live under `src/session/process_discovery/`.
 
+## Sandbox execution (#2681)
+
+Execution isolation belongs to `nession-sandbox`, not to this Agent:
+
+- The Agent compiles/prepares a Session's Sandbox policy **before**
+  `new-session`, passes the trusted launcher argv as `NewSession.command`, and
+  verifies/releases the launch barrier after the Session exists. An explicit
+  policy this host cannot honour refuses the create; there is no Native
+  fallback.
+- Sandbox host configuration lives under `[sandbox]` in the Agent config. Do
+  not read policy keys from the environment or invent a second backend switch.
+- Owned-resource cleanup is tied to Session termination and a reaper; a failed
+  tmux listing is never treated as "the Session is gone".
+- The Agent never spawns Bubblewrap or `sandbox-exec` itself. The only process
+  construction is the trusted launcher argv handed to `nession-tmux`; the
+  in-sandbox bridge is dispatched by `main.rs` before the Agent runtime starts.
+- Do not add a second isolation, cgroup or proxy owner beside
+  `crates/nession-sandbox/AGENTS.md`.
+
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 
 ```bash

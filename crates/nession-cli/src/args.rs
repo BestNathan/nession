@@ -242,6 +242,14 @@ pub enum SessionsAction {
         /// Name for the new session
         #[arg(short = 'n', long)]
         name: String,
+
+        /// JSON file with a versioned SandboxPolicy to bind to the Session.
+        ///
+        /// The Agent validates and compiles it; an explicitly requested
+        /// guarantee this host cannot install refuses the create rather than
+        /// falling back to a Native Session.
+        #[arg(long)]
+        sandbox_policy: Option<std::path::PathBuf>,
     },
     /// Kill a tmux session on an agent
     Kill {
@@ -389,7 +397,7 @@ mod tests {
             ),
             (
                 "sessions create".to_string(),
-                strings(&["--agent-id", "--name"]),
+                strings(&["--agent-id", "--name", "--sandbox-policy"]),
             ),
             (
                 "sessions kill".to_string(),

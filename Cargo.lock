@@ -1956,6 +1956,7 @@ dependencies = [
  "nession-git",
  "nession-protocol",
  "nession-runtime",
+ "nession-sandbox",
  "nession-server",
  "nession-tmux",
  "portable-pty",
@@ -2129,6 +2130,22 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+]
+
+[[package]]
+name = "nession-sandbox"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nession-protocol",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

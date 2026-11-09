@@ -22,6 +22,7 @@ pub mod netwatch;
 pub mod p2p_credentials;
 pub mod protocol;
 pub mod runtime;
+pub mod sandbox_runtime;
 pub mod server;
 pub mod session;
 pub mod sync;
