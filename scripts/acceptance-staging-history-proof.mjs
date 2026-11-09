@@ -163,7 +163,7 @@ export async function collectExactStagingBatchProof({ repo, targetSha, body, get
   });
 }
 
-async function selfTest() {
+export async function selfTest() {
   const main = 'a'.repeat(40), lane = 'b'.repeat(40),
     head = 'c'.repeat(40), target = 'd'.repeat(40);
   const batch = '<!-- nession-convergence-batch:v1 branch=staging main=' +
