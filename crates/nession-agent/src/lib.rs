@@ -11,6 +11,7 @@ pub mod claude_session_context;
 pub mod config;
 pub mod connection;
 pub mod env;
+pub mod erofs_cache;
 pub mod execution;
 pub mod extension;
 pub mod fs;

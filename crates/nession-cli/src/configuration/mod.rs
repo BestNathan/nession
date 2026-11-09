@@ -364,6 +364,10 @@ pub const AGENT_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::OptionalString,
     },
     FieldSpec {
+        key: "erofs.storage_dir",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
         key: "logging.level",
         kind: FieldKind::LogLevel,
     },
@@ -1027,10 +1031,9 @@ mod tests {
     fn every_serialized_field_has_a_schema_entry() {
         let agent = toml::Value::try_from(AgentConfig::default()).expect("agent defaults");
         let agent_table = agent.as_table().expect("agent table");
-        for key in agent_table
-            .keys()
-            .filter(|key| *key != "logging" && *key != "sandbox" && *key != "mcp")
-        {
+        for key in agent_table.keys().filter(|key| {
+            *key != "logging" && *key != "sandbox" && *key != "mcp" && *key != "erofs"
+        }) {
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == key),
                 "AgentConfig field '{key}' is missing from AGENT_FIELDS"
@@ -1042,6 +1045,17 @@ mod tests {
             .expect("agent sandbox table");
         for key in agent_sandbox.keys() {
             let dotted = format!("sandbox.{key}");
+            assert!(
+                AGENT_FIELDS.iter().any(|field| field.key == dotted),
+                "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
+            );
+        }
+        let agent_erofs = agent_table
+            .get("erofs")
+            .and_then(toml::Value::as_table)
+            .expect("agent erofs table");
+        for key in agent_erofs.keys() {
+            let dotted = format!("erofs.{key}");
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == dotted),
                 "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"

@@ -64,7 +64,11 @@ RUN printf 'set -g mouse on\nsetw -g mode-keys vi\nset -g focus-events on\n' > /
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-agent.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-RUN mkdir -p /etc/nession
+# Durable Agent data root (#3023). A Kubernetes deployment mounts its
+# existing PVC at /data and sets the EROFS cache under it. An OCI `VOLUME` is
+# NOT a PVC: without an explicitly mounted durable volume, /data (and therefore
+# this cache) belongs to the container writable layer and disappears with it.
+RUN mkdir -p /data /data/erofs /etc/nession
 
 # Volatile files last — only these layers rebuild on each commit
 # Web UI static files (built once, shared across archs)
