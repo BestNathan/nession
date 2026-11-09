@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42553877751,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2953-explicit-staging-integration-5f35446-860cd4b",
+    "target_sha": "917544da0db36a3cfb06373bbb0d35d7783a699a",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42553877751",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "057710106f53ffce14a2c3e8072195d92eac8705eadb6a22d73fdd9ca15c1215"
+  },
+  "record": "runs/2026-11-09/42553877751-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4bebec36e34624b1bee7d6b71bde346e417863293bd4e287e859ca0fa8b7856c"
+}
