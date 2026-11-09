@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2bb60f69ba498b76f203a8af189710c8ee2e2950a9f657c518a489216e5bdcf9",
+  "run_id": 42562665651,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-03",
+  "criterion_text": "Network modes allow/deny/restricted enforce domain/IP/port rules, wildcard/deny precedence, validated DNS destinations and no direct/private/host-local/proxy-identity bypass for requested restricted execution.",
+  "stage": "staging",
+  "target_sha": "31bc4073d443ff6e5c529fff1fcc817501a95254",
+  "contract_sha256": "b8d996fa5c87deb8cbb297967383abdec50e43abd74da73f058ef59aef0a0f7f",
+  "case_revision": "31bc4073d443ff6e5c529fff1fcc817501a95254",
+  "case_tree_sha": "f7042496defea8231e15495a43bd815fe5129dc2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T04:38:29.418Z",
+  "finished_at": "2026-11-09T04:38:35.585Z",
+  "duration_ms": 6167,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "This runner cannot create a network namespace plus the trusted bridge/proxy channel",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "platform=linux backend=unavailable: bubblewrap is not executable on this host namespaces={\"cgroup\":false,\"ipc\":false,\"net\":false,\"pid\":false,\"user\":false,\"uts\":false} seccomp=false filesystem=false network_deny=false network_restricted=false cgroup_v2=unavailable"
+        }
+      ],
+      "duration_ms": 310,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42562665651,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "31bc4073d443ff6e5c529fff1fcc817501a95254",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42562665651",
+    "record_path": "runs/2026-11-09/42562665651-1/2681/SC-03.json",
+    "source_result_sha256": "3561f3eb2cb85c38e3b9fb4bc98ff89dd399520f2d90fa87de8e413a6ffecdd1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42562665651-1",
+    "sha256": "3561f3eb2cb85c38e3b9fb4bc98ff89dd399520f2d90fa87de8e413a6ffecdd1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42562665651",
+    "durability": "time-limited; object archival not configured"
+  }
+}
