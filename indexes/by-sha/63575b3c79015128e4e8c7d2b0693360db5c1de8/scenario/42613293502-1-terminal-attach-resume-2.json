@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42613293502,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3022-erofs-image-manager",
+    "target_sha": "63575b3c79015128e4e8c7d2b0693360db5c1de8",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42613293502",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "929f95572ed23269e39cc0c8f7dc2d01cc44f8e4fc0e36156aa8f5ef4d1a30ac"
+  },
+  "record": "runs/2026-11-09/42613293502-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "9a3b789db14dfaf776c0b4af4333fed95727e3019f8459247b0d3e5c04469236"
+}
