@@ -113,8 +113,8 @@
     return '<aside class="web-sidebar"><div class="brand"><span class="brand-symbol">N</span> nession</div>'+
       '<div class="navgroup"><div class="navtitle">Sessions</div>'+
       '<div class="row"><button class="navrow grow" data-act="show-terminal"><span class="name">▣ &nbsp;'+esc(s.activeSession)+'</span></button><button class="btn ghost" data-act="session-menu" aria-label="Session actions">···</button></div>'+
-      '<button class="navrow" data-act="create-ordinary-session">＋ &nbsp; New Session</button></div>'+
-      '<div class="navgroup"><div class="navtitle">Projects</div><button class="navrow '+(s.page==='project'?'current':'')+'" data-act="show-project"><span class="name">◇ &nbsp;'+esc(s.projectName)+'</span></button><button class="navrow" data-act="project-create">＋ &nbsp; New Project</button></div>'+
+      '<button class="navrow nav-create" data-act="create-ordinary-session"><span class="nav-icon" aria-hidden="true">＋</span><span>New Session</span></button></div>'+
+      '<div class="navgroup"><div class="navtitle">Projects</div><button class="navrow '+(s.page==='project'?'current':'')+'" data-act="show-project"><span class="name">◇ &nbsp;'+esc(s.projectName)+'</span></button><button class="navrow nav-create" data-act="project-create"><span class="nav-icon" aria-hidden="true">＋</span><span>New Project</span></button></div>'+
       '<div style="margin-top:auto" class="muted twelve">Agents · 2 configured</div></aside>';
   }
   function webShell() {
@@ -178,8 +178,8 @@
       return isApp()?appFull(title,body,foot,'attach-back'):webDialog(saving?'Attach settings':'Attach Session',body,button('Cancel','cancel','')+button(saving?'Save settings':'Attach','attach-config-submit','primary',isOffline()?'disabled':''),720);
     }
     if(kind==='create-session') {
-      const body='<div class="stack"><div class="muted twelve">'+(s.projectContext?'Project / '+esc(s.projectName):'Session / No Project')+'</div>'+createFields(isApp())+'</div>';
-      const foot=button('Create Session','create-submit','primary',isOffline()?'disabled':'');
+      const body=createFields(isApp());
+      const foot=button('Create Session','create-submit','primary',(isOffline()||(s.projectContext&&!s.locations.length))?'disabled':'');
       return isApp()?appFull('New Session',body,foot,'cancel'):webDialog(s.projectContext?'Create Session in '+s.projectName:'Create Session',body,button('Cancel','cancel','')+foot,640);
     }
     if(kind==='choose-location') {
@@ -203,7 +203,7 @@
     product.setAttribute('data-experience',s.experience);
     product.innerHTML=(isApp()?appShell():webShell())+renderOverlay()+(s.status?'<div class="toast" role="status">'+esc(s.status)+'</div>':'');
     const inspector=document.getElementById('state-inspector');
-    if(inspector) inspector.textContent=JSON.stringify({experience:s.experience,width:s.width,page:s.page,operation:isApp()?s.depth:s.modal,scenario:s.scenario,attachMode:s.mode,configureOrigin:s.configureFrom,projectContext:s.projectContext,location:s.location,env:[...s.env],draftSessionName:s.sessionName,activeSession:s.activeSession,status:s.status,error:s.error},null,2);
+    if(inspector) inspector.textContent=JSON.stringify({experience:s.experience,width:s.width,page:s.page,operation:isApp()?s.depth:s.modal,scenario:s.scenario,attachMode:s.mode,configureOrigin:s.configureFrom,projectContext:s.projectContext,location:s.location,projectDraftLocations:s.projectDraftLocations,env:[...s.env],draftSessionName:s.sessionName,activeSession:s.activeSession,status:s.status,error:s.error},null,2);
   }
   function showOperation(kind){
     s.error='';s.copyStatus='';s.status='';s.locationOpen=false;
@@ -215,6 +215,7 @@
   }
   function submitCreate(){
     if(!s.sessionName.trim()){s.error='Enter a Session name.';render();return;}
+    if(s.projectContext&&!s.locations.length){s.error='Add an Existing Location in Project settings first.';render();return;}
     if(isOffline()){s.error='Build Agent is offline.';render();return;}
     s.activeSession=s.sessionName.trim();s.page='terminal';s.depth=null;s.modal=null;s.error='';
     s.status='Session created · '+s.activeSession;render();
@@ -266,13 +267,24 @@
       case 'select-child-location':s.location=idx;render();break;
       case 'child-back':s.depth='create-session';render();break;
       case 'create-submit':submitCreate();break;
-      case 'project-create':s.editedProjectName='';showOperation('project-create');break;
-      case 'project-settings':s.editedProjectName=s.projectName;showOperation('project-settings');break;
-      case 'add-location':s.locations.push({agent:'New Agent',path:'/workspace/new',online:true});render();break;
-      case 'remove-location':s.locations.splice(idx,1);if(!s.locations.length)s.locations.push({agent:'Build Agent',path:'/workspace',online:true});s.location=Math.min(s.location,s.locations.length-1);render();break;
+      case 'project-create':
+        s.editedProjectName='';s.draftDescription='';s.draftSourceUrl='';s.draftSourceRef='';s.draftImageDigest='';
+        s.projectDraftLocations=[];showOperation('project-create');break;
+      case 'project-settings':
+        s.editedProjectName=s.projectName;s.draftDescription=s.projectDescription;
+        s.draftSourceUrl=s.sourceUrl;s.draftSourceRef=s.sourceRef;s.draftImageDigest=s.imageDigest;
+        s.projectDraftLocations=s.locations.map(x=>({...x}));showOperation('project-settings');break;
+      case 'add-location':
+        s.projectDraftLocations.push({agent:'Build Agent',path:''});render();break;
+      case 'remove-location':
+        s.projectDraftLocations.splice(idx,1);render();break;
       case 'project-submit':
         if(!s.editedProjectName.trim()){s.error='Enter a Project name.';render();return;}
-        s.projectName=s.editedProjectName.trim();s.page='project';s.depth=null;s.modal=null;s.error='';s.status='Project saved · '+s.projectName;render();break;
+        s.projectName=s.editedProjectName.trim();s.projectDescription=s.draftDescription;
+        s.sourceUrl=s.draftSourceUrl;s.sourceRef=s.draftSourceRef;s.imageDigest=s.draftImageDigest;
+        s.locations=s.projectDraftLocations.map(x=>({...x}));
+        s.location=Math.min(s.location,Math.max(0,s.locations.length-1));
+        s.page='project';s.depth=null;s.modal=null;s.error='';s.status='Project saved · '+s.projectName;render();break;
       case 'dismiss-overlay':case 'cancel':cancel();break;
       default:break;
     }
@@ -285,13 +297,28 @@
     if(act.dataset.act==='dismiss-overlay' && target.closest('[data-stop]'))return;
     if(act===target || !target.closest('[data-stop]') || act.dataset.act!=='dismiss-overlay')action(act.dataset.act,act);
   });
+  product.addEventListener('change',ev=>{
+    const el=ev.target;
+    if(el instanceof HTMLSelectElement && el.name.startsWith('agent-')){
+      const idx=Number(el.name.split('-')[1]);
+      if(s.projectDraftLocations[idx])s.projectDraftLocations[idx].agent=el.value;
+    }
+  });
   product.addEventListener('input',ev=>{
     const el=ev.target;
-    if(!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement))return;
+    if(!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement))return;
     if(el.name==='sessionName')s.sessionName=el.value;
     else if(el.name==='projectName')s.editedProjectName=el.value;
-    else if(el.name.startsWith('agent-')){const idx=Number(el.name.split('-')[1]);if(s.locations[idx])s.locations[idx].agent=el.value;}
-    else if(el.name.startsWith('directory-')){const idx=Number(el.name.split('-')[1]);if(s.locations[idx])s.locations[idx].path=el.value;}
+    else if(el.name==='projectDescription')s.draftDescription=el.value;
+    else if(el.name==='repositoryUrl'){
+      s.draftSourceUrl=el.value;
+      const input=product.querySelector('[name="repositoryRef"]');
+      if(input)input.disabled=!el.value.trim();
+    }
+    else if(el.name==='repositoryRef')s.draftSourceRef=el.value;
+    else if(el.name==='imageDigest')s.draftImageDigest=el.value;
+    else if(el.name.startsWith('agent-')){const idx=Number(el.name.split('-')[1]);if(s.projectDraftLocations[idx])s.projectDraftLocations[idx].agent=el.value;}
+    else if(el.name.startsWith('directory-')){const idx=Number(el.name.split('-')[1]);if(s.projectDraftLocations[idx])s.projectDraftLocations[idx].path=el.value;}
     else if(el.name==='env')el.checked?s.env.add(el.value):s.env.delete(el.value);
   });
   document.addEventListener('keydown',ev=>{
