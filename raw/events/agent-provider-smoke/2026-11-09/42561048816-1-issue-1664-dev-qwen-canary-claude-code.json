@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_run_id": 42561048816,
+    "github_run_attempt": 1,
+    "unique_run_name": "42561048816-1-issue-1664-dev-qwen-canary-claude-code",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1664-dev-qwen-canary",
+    "type": "develop",
+    "issue": 1664,
+    "target_sha": "8b6083856698b95cc0b0fbca8e64ad83c9ddf64e"
+  },
+  "agent": {
+    "id": "dev-qwen-01",
+    "role": "developer",
+    "provider": "claude-code",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-11-09T04:18:52.126Z",
+    "finished_at": "2026-11-09T04:19:01.541Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "partial",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 1,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_13cf2f9acaaa4e5ca36efb56",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "Read",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 2,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 3,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_13cf2f9acaaa4e5ca36efb56",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "Read",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 4,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 5,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_a30635a9abdb42f2a458fa97",
+        "tool": {
+          "id": "repo.edit",
+          "native_name": "Edit",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 6,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 7,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_a30635a9abdb42f2a458fa97",
+        "tool": {
+          "id": "repo.edit",
+          "native_name": "Edit",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 8,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 9,
+      "identity": {
+        "agent_id": "dev-qwen-01",
+        "role": "developer",
+        "issue": 1664,
+        "github_run_id": 42561048816,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 1964,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
