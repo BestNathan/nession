@@ -20,7 +20,9 @@
 
 | App Sessions · four-action overflow menu, metadata and typed Kill (App spatial layers) | [#2875](https://github.com/BestNathan/nession/issues/2875) | [Interactive HTML](app-session-actions-2875/index.html) · [Scenario & fidelity](app-session-actions-2875/README.md) · [UI Spec](app-session-actions-2875/UI-SPEC.md) |
 
-| Session-first Web Sidebar (Claude/ChatGPT-inspired; candidate) | [#2851](https://github.com/BestNathan/nession/issues/2851) | [Interactive HTML](sidebar-session-first-2851/index.html) · [Scenario & fidelity](sidebar-session-first-2851/README.md) |
+| Web Sidebar 56px reserved Navigation Rail; Expand/New/Search/Projects; narrow Web/App separation (supersedes #2851 collapsed 0px) | [#3075](https://github.com/BestNathan/nession/issues/3075) | [Interactive HTML](sidebar-navigation-rail-3075/index.html) · [Scenario & fidelity](sidebar-navigation-rail-3075/README.md) |
+
+| Session-first Web Sidebar (historical 0px fully-tucked-away collapse; new rail is #3075) | [#2851](https://github.com/BestNathan/nession/issues/2851) | [Interactive HTML](sidebar-session-first-2851/index.html) · [Scenario & fidelity](sidebar-session-first-2851/README.md) |
 
 
 | Workspace Work capability / WorkContract, revisions, Criteria, Thread and source adapters | [#2541](https://github.com/BestNathan/nession/issues/2541) | [Interactive HTML](work-contract-2541/index.html) · [Scenario & fidelity](work-contract-2541/README.md) |
