@@ -82,6 +82,21 @@ pub(super) fn env_file_key(payload: &Value) -> ResourceKey {
     }
 }
 
+/// The Project a payload names by its Server-minted identity (#3021).
+///
+/// Update and delete both address one stored declaration, so they share this
+/// key and are serialised against each other. Create mints a new identity and
+/// therefore takes no existing resource's queue.
+pub(super) fn project_by_id(payload: &Value) -> ResourceKey {
+    ResourceKey::Project(
+        payload
+            .get("project_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 server_routes!(handler, msg, payload;
     "server.agent.register" => "server.agent.register" => 1 => Ordered => handler.handle_agent_register(msg).await,
     // `control.heartbeat` is deliberately **not** an arm here. It is a control
@@ -144,4 +159,13 @@ server_routes!(handler, msg, payload;
     "server.commands.add" => "server.commands.add" => 1 => Inline => handler.handle_client_commands_add(msg).await,
     "server.commands.remove" => "server.commands.remove" => 1 => Inline => handler.handle_client_commands_remove(msg).await,
     "server.commands.update" => "server.commands.update" => 1 => Inline => handler.handle_client_commands_update(msg).await,
+    // First-class Project declarations (#3021). Reads are independent of
+    // Session/Agent selection; the two units that address an existing
+    // declaration share its key lane so concurrent edits of one Project are
+    // ordered, while create mints a new identity and needs no existing key.
+    "server.project.list" => "server.project.list" => 1 => Query => handler.handle_client_project_list(msg).await,
+    "server.project.get" => "server.project.get" => 1 => Query => handler.handle_client_project_get(msg).await,
+    "server.project.create" => "server.project.create" => 1 => Inline => handler.handle_client_project_create(msg).await,
+    "server.project.update" => "server.project.update" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_update(msg).await,
+    "server.project.delete" => "server.project.delete" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_delete(msg).await,
 );

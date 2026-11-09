@@ -15,8 +15,11 @@ pub mod migration;
 pub mod schema;
 
 use anyhow::{Context, Result};
-use entities::{agents, env_files, quick_commands, session_env_bindings, sessions};
+use entities::{agents, env_files, projects, quick_commands, session_env_bindings, sessions};
 use migration::Migrator;
+use nession_protocol::contracts::project::v1::{
+    ProjectLocation, ProjectSessionDefaults, ProjectSource,
+};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait,
@@ -107,6 +110,25 @@ pub struct SessionEnvBindingRow {
     pub desired_revision: u64,
     /// JSON-encoded ordered materialized profiles.
     pub profiles_json: String,
+    pub updated_at: i64,
+}
+
+/// One persisted Project (#3021).
+///
+/// The row is the Server's durable declaration. `source`, `locations` and
+/// `session_defaults` are stored as JSON because the Server is the only writer
+/// and the API's canonical validation rejects anything it could not have
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRow {
+    pub project_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub source: Option<ProjectSource>,
+    pub locations: Vec<ProjectLocation>,
+    pub session_defaults: Option<ProjectSessionDefaults>,
+    pub image_digest: Option<String>,
+    pub created_at: i64,
     pub updated_at: i64,
 }
 
@@ -603,6 +625,152 @@ impl Database {
             .context("failed to delete quick command")?;
         Ok(res.rows_affected > 0)
     }
+
+    // ── Projects (#3021) ──────────────────────────────────────────────
+
+    /// Insert one Project.
+    ///
+    /// A conflicting `project_id` is an error rather than an overwrite: the
+    /// Server mints identities, so a collision means something is wrong and
+    /// silently replacing a Project would lose declared state.
+    pub async fn insert_project(&self, row: &ProjectRow) -> Result<()> {
+        let model = projects::ActiveModel {
+            project_id: Set(row.project_id.clone()),
+            name: Set(row.name.clone()),
+            description: Set(row.description.clone()),
+            source_json: Set(encode_optional_project_json(
+                row.source.as_ref(),
+                "project source",
+            )?),
+            locations_json: Set(serde_json::to_string(&row.locations)
+                .context("failed to encode project locations")?),
+            session_defaults_json: Set(encode_optional_project_json(
+                row.session_defaults.as_ref(),
+                "project session defaults",
+            )?),
+            image_digest: Set(row.image_digest.clone()),
+            created_at: Set(row.created_at),
+            updated_at: Set(row.updated_at),
+        };
+        projects::Entity::insert(model)
+            .exec(&self.conn)
+            .await
+            .context("failed to insert project")?;
+        Ok(())
+    }
+
+    /// List every Project, oldest first. Identity order breaks timestamp ties.
+    pub async fn list_projects(&self) -> Result<Vec<ProjectRow>> {
+        let rows = projects::Entity::find()
+            .order_by_asc(projects::Column::CreatedAt)
+            .order_by_asc(projects::Column::ProjectId)
+            .all(&self.conn)
+            .await
+            .context("failed to list projects")?;
+        rows.into_iter().map(project_row_from_model).collect()
+    }
+
+    /// Read one Project by identity. `None` when it does not exist.
+    pub async fn get_project(&self, project_id: &str) -> Result<Option<ProjectRow>> {
+        let row = projects::Entity::find_by_id(project_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read project")?;
+        row.map(project_row_from_model).transpose()
+    }
+
+    /// Replace one Project's mutable fields.
+    ///
+    /// `row.created_at` is ignored: the stored creation time is preserved, so
+    /// an edit never reassigns identity or age. Returns the updated row, or
+    /// `None` when the identity does not exist.
+    pub async fn update_project(&self, row: &ProjectRow) -> Result<Option<ProjectRow>> {
+        let Some(existing) = projects::Entity::find_by_id(row.project_id.clone())
+            .one(&self.conn)
+            .await
+            .context("failed to load project for update")?
+        else {
+            return Ok(None);
+        };
+        let mut model: projects::ActiveModel = existing.into();
+        model.name = Set(row.name.clone());
+        model.description = Set(row.description.clone());
+        model.source_json = Set(encode_optional_project_json(
+            row.source.as_ref(),
+            "project source",
+        )?);
+        model.locations_json =
+            Set(serde_json::to_string(&row.locations)
+                .context("failed to encode project locations")?);
+        model.session_defaults_json = Set(encode_optional_project_json(
+            row.session_defaults.as_ref(),
+            "project session defaults",
+        )?);
+        model.image_digest = Set(row.image_digest.clone());
+        model.updated_at = Set(row.updated_at);
+        let updated = model
+            .update(&self.conn)
+            .await
+            .context("failed to update project")?;
+        Ok(Some(project_row_from_model(updated)?))
+    }
+
+    /// Delete one Project by identity. Returns `true` if a row was removed.
+    ///
+    /// Only this declaration is deleted. Existing Locations are user-owned
+    /// directories and EROFS digests are references to globally shared
+    /// artifacts; neither is touched here.
+    pub async fn delete_project(&self, project_id: &str) -> Result<bool> {
+        let res = projects::Entity::delete_by_id(project_id.to_owned())
+            .exec(&self.conn)
+            .await
+            .context("failed to delete project")?;
+        Ok(res.rows_affected > 0)
+    }
+}
+
+fn encode_optional_project_json<T: serde::Serialize>(
+    value: Option<&T>,
+    what: &str,
+) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            serde_json::to_string(value).with_context(|| format!("failed to encode {what}"))
+        })
+        .transpose()
+}
+
+fn project_row_from_model(model: projects::Model) -> Result<ProjectRow> {
+    let project_id = model.project_id;
+    let source = model
+        .source_json
+        .as_deref()
+        .map(|json| {
+            serde_json::from_str(json)
+                .with_context(|| format!("project {project_id} has an undecodable source"))
+        })
+        .transpose()?;
+    let locations = serde_json::from_str(&model.locations_json)
+        .with_context(|| format!("project {project_id} has undecodable locations"))?;
+    let session_defaults = model
+        .session_defaults_json
+        .as_deref()
+        .map(|json| {
+            serde_json::from_str(json)
+                .with_context(|| format!("project {project_id} has undecodable session defaults"))
+        })
+        .transpose()?;
+    Ok(ProjectRow {
+        project_id,
+        name: model.name,
+        description: model.description,
+        source,
+        locations,
+        session_defaults,
+        image_digest: model.image_digest,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+    })
 }
 
 /// Normalize a path or URL into a SeaORM SQLite connection URL.
@@ -1090,6 +1258,16 @@ mod tests {
         db.upsert_env_file("new.env", "X=1").await.unwrap();
         assert_eq!(db.list_env_files().await.unwrap().len(), 1);
 
+        // The Project migration applies to an old database too, and the legacy
+        // Session above remains valid alongside it (SC-04).
+        let project = project_row("project-123e4567-e89b-42d3-a456-426614174000");
+        db.insert_project(&project).await.unwrap();
+        assert_eq!(
+            db.get_project(&project.project_id).await.unwrap().unwrap(),
+            project
+        );
+        assert_eq!(db.list_all_sessions().await.unwrap().len(), 1);
+
         let cmd = QuickCommandRow {
             id: "migrate-cmd".to_owned(),
             label: "migrate".to_owned(),
@@ -1102,6 +1280,148 @@ mod tests {
         assert_eq!(db.list_quick_commands().await.unwrap().len(), 1);
 
         // Cleanup.
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(format!("{path}-wal")).ok();
+        std::fs::remove_file(format!("{path}-shm")).ok();
+    }
+
+    // ── Projects (#3021) ──────────────────────────────────────────────
+
+    fn project_row(id: &str) -> ProjectRow {
+        ProjectRow {
+            project_id: id.to_owned(),
+            name: "Nession".to_owned(),
+            description: Some("work".to_owned()),
+            source: Some(ProjectSource {
+                repository_url: "https://github.com/BestNathan/nession.git".to_owned(),
+                reference: "main".to_owned(),
+            }),
+            locations: vec![
+                ProjectLocation {
+                    agent_id: "agent-a".to_owned(),
+                    path: "/srv/nession".to_owned(),
+                },
+                ProjectLocation {
+                    agent_id: "offline-agent".to_owned(),
+                    path: "/srv/nession-two".to_owned(),
+                },
+            ],
+            session_defaults: Some(ProjectSessionDefaults {
+                shell: Some("/bin/zsh".to_owned()),
+                env_profile_ids: vec!["dev".to_owned(), "prod".to_owned()],
+                sandbox_policy_ref: None,
+            }),
+            image_digest: Some(format!("sha256:{}", "a".repeat(64))),
+            created_at: 100,
+            updated_at: 100,
+        }
+    }
+
+    #[tokio::test]
+    async fn project_crud() {
+        let db = new_db().await;
+        assert!(db.list_projects().await.unwrap().is_empty());
+        assert!(db
+            .get_project("project-123e4567-e89b-42d3-a456-426614174000")
+            .await
+            .unwrap()
+            .is_none());
+
+        let row = project_row("project-123e4567-e89b-42d3-a456-426614174000");
+        db.insert_project(&row).await.unwrap();
+
+        let projects = db.list_projects().await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0], row);
+
+        let read = db.get_project(&row.project_id).await.unwrap().unwrap();
+        assert_eq!(read, row);
+
+        db.delete_project(&row.project_id).await.unwrap();
+        assert!(db.list_projects().await.unwrap().is_empty());
+        assert!(!db.delete_project(&row.project_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn project_update_preserves_created_at_and_identity() {
+        let db = new_db().await;
+        let row = project_row("project-123e4567-e89b-42d3-a456-426614174000");
+        db.insert_project(&row).await.unwrap();
+
+        let mut replacement = row.clone();
+        replacement.name = "Nession renamed".to_owned();
+        replacement.source = None;
+        replacement.locations = Vec::new();
+        replacement.image_digest = None;
+        // The DAO ignores this value and keeps the stored creation time.
+        replacement.created_at = 0;
+        replacement.updated_at = 200;
+
+        let updated = db
+            .update_project(&replacement)
+            .await
+            .unwrap()
+            .expect("the Project exists");
+        assert_eq!(updated.project_id, row.project_id);
+        assert_eq!(updated.created_at, 100);
+        assert_eq!(updated.updated_at, 200);
+        assert_eq!(updated.name, "Nession renamed");
+        assert!(updated.source.is_none());
+        assert!(updated.locations.is_empty());
+        assert!(updated.image_digest.is_none());
+
+        let missing = db
+            .update_project(&project_row("project-00000000-0000-4000-8000-000000000000"))
+            .await
+            .unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_insert_refuses_a_duplicate_identity() {
+        let db = new_db().await;
+        let row = project_row("project-123e4567-e89b-42d3-a456-426614174000");
+        db.insert_project(&row).await.unwrap();
+        assert!(
+            db.insert_project(&row).await.is_err(),
+            "a Project identity is minted once and never silently reused"
+        );
+    }
+
+    /// SC-04: restart restores Project identities and references, while a
+    /// legacy Session (which has no project association) remains valid.
+    #[tokio::test]
+    async fn project_state_survives_restart_without_reassigning_identity() {
+        let path = format!("/tmp/nession_test_projects_{}.db", uuid::Uuid::new_v4());
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000".to_owned();
+        let image_digest = format!("sha256:{}", "b".repeat(64));
+
+        {
+            let db = Database::new(&path).await.unwrap();
+            let mut row = project_row(&project_id);
+            row.image_digest = Some(image_digest.clone());
+            db.insert_project(&row).await.unwrap();
+            db.insert_session(
+                &sess_info("legacy-session", SessionStatus::Active),
+                "active",
+            )
+            .await
+            .unwrap();
+        }
+
+        {
+            let db = Database::new(&path).await.unwrap();
+            let project = db.get_project(&project_id).await.unwrap().unwrap();
+            assert_eq!(project.project_id, project_id);
+            assert_eq!(project.source.as_ref().unwrap().reference, "main");
+            assert_eq!(project.locations.len(), 2);
+            assert_eq!(project.image_digest.as_deref(), Some(image_digest.as_str()));
+
+            let sessions = db.list_all_sessions().await.unwrap();
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].session_id, "legacy-session");
+        }
+
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(format!("{path}-wal")).ok();
         std::fs::remove_file(format!("{path}-shm")).ok();

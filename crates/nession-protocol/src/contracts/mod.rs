@@ -9,6 +9,7 @@
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
 //! ├── client/v1.rs     server.auth — the peer-to-peer door
 //! ├── commands/v1.rs   commands.{list,add,remove,update}
+//! ├── project/v1.rs    server.project.{list,get,create,update,delete}
 //! ├── server/v1.rs     server.info
 //! ├── terminal/v1.rs   terminal.{input,resize,output} — the P2P stream
 //! └── file/v1.rs       file.{list,read,write,delete,create_dir,rename,cwd}
@@ -38,6 +39,7 @@ pub mod file;
 #[cfg(test)]
 mod fixtures;
 pub mod p2p;
+pub mod project;
 pub mod server;
 pub mod session;
 pub mod terminal;

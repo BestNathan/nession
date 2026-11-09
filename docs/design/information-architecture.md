@@ -39,6 +39,8 @@ Users should be able to return directly to work without navigating through Agent
 
 The primary Session list therefore remains flat by default. Agent, location, workload, and recency may appear as compact metadata, but they are not required navigation parents.
 
+Projects are also first-class selectable resources in the navigation layer (Web Sidebar and App Sessions): selecting a Project opens a standalone detail independent of any selected Session, and create/row-menu actions belong to [#3025](https://github.com/BestNathan/nession/issues/3025). A Project is not a mandatory parent of Session navigation, and a Session with no Project remains valid. See [project.md](project.md).
+
 ```text
 Sessions
 

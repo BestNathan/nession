@@ -14,7 +14,10 @@
 #   ./scripts/check-design-tokens.sh
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
+# Resolve from this script, not `git rev-parse`: pre-commit content Gates run
+# inside an exported staged snapshot that intentionally has no `.git`, and the
+# capsule tree sits at the same relative path there.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT/web"
 
 CAPSULE_DIR="src/product/terminal/capsule"
