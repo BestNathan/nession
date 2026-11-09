@@ -290,6 +290,7 @@ jobs:
           # cutoff, retain the old comment snapshot and read-only archive.
           # Later Issues must declare exact sources instead of using prose.
           if [[ "${ACCEPTANCE_STAGE}" != 'pre-merge' ]]; then exit 0; fi
+          if jq -e '.criteria | length == 0' "${context}" >/dev/null; then exit 0; fi
           if ! jq -e '
             (.issue.created_at // "") as $created |
             ($created != "" and $created < "2026-11-09T05:00:00Z") and
