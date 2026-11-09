@@ -230,21 +230,29 @@ test('collapse returns 246px to the work surface and preserves state (#2851 SC-0
   });
 
   await page.getByTestId('sidebar-collapse').click();
-  await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(0);
-  await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
-  const open = page.getByTestId('sidebar-open');
-  await expect(open).toBeVisible();
-  const openBox = await open.boundingBox();
-  expect(openBox?.width).toBe(36);
-  expect(openBox?.height).toBe(36);
-  await expect.poll(async () => (await main.boundingBox())?.width ?? 0).toBeGreaterThan(
-    expandedMain + expanded * 0.9,
+  const railWidth = await page.evaluate(() =>
+    parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--nession-shell-rail-width'),
+    ),
   );
+  expect(railWidth).toBe(56);
+  await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(railWidth);
+  const rail = page.getByTestId('sidebar-rail');
+  await expect(rail).toBeVisible();
+  await expect(page.getByTestId('sidebar-open')).toHaveCount(0);
+  await expect(rail.getByTestId('sidebar-rail-expand')).toHaveAccessibleName('Expand sidebar');
+  await expect.poll(async () => (await main.boundingBox())?.width ?? 0).toBeGreaterThan(
+    expandedMain + (expanded - railWidth) * 0.9,
+  );
+  // The rail is a flex sibling: Main starts at its right edge, never behind it.
+  const railBox = await rail.boundingBox();
+  const mainBox = await main.boundingBox();
+  expect(mainBox?.x ?? 0).toBeGreaterThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0) - 0.5);
   const marker = await main.evaluate((element) => (element as HTMLElement).dataset.marker);
   expect(marker).toBe('kept');
   await expect(terminal).toBeVisible();
 
-  await page.getByTestId('sidebar-open').click();
+  await rail.getByTestId('sidebar-rail-expand').click();
   await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(expanded);
   await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toContainText(
     'design-system',
@@ -255,9 +263,11 @@ test('collapse returns 246px to the work surface and preserves state (#2851 SC-0
   await search.fill('design');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
   await page.getByTestId('sidebar-collapse').click();
-  await expect(open).toBeVisible();
-  await page.getByTestId('sidebar-open').click();
+  await expect(page.getByTestId('sidebar-rail')).toBeVisible();
+  // Search is one state: the rail shortcut expands and focuses the same field.
+  await page.getByTestId('sidebar-rail-search').click();
   await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(expanded);
+  await expect(page.getByLabel('Search sessions')).toBeFocused();
   await expect(page.getByLabel('Search sessions')).toHaveValue('design');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
 });
@@ -288,7 +298,16 @@ test('narrow Web uses the overlay drawer and App stays spatial (#2851 SC-04)', a
   expect(await narrowActions.boundingBox()).toMatchObject({ width: 44, height: 44 });
   await narrowActions.click();
   await expect(page.getByRole('menu')).toBeVisible();
-  await expect(page.getByRole('menuitem')).toHaveCount(4);
+  await expect(page.getByRole('menuitem')).toHaveCount(5);
+  for (const label of [
+    'Session details',
+    'Edit details',
+    'Attach settings',
+    'Project…',
+    'Kill session',
+  ]) {
+    await expect(page.getByRole('menuitem', { name: label })).toBeVisible();
+  }
   await page.keyboard.press('Escape');
   await page.getByTestId('session-item-devbox-01:design-system').click();
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);
@@ -358,7 +377,7 @@ for (const viewport of [
   { width: 390, height: 844 },
   { width: 375, height: 812 },
 ]) {
-  test(`App rows expose the four actions without selecting or remounting Terminal at ${viewport.width}x${viewport.height} (#2875 SC-01)`, async ({ page }) => {
+  test(`App rows expose all row actions without selecting or remounting Terminal at ${viewport.width}x${viewport.height} (#2875 SC-01)`, async ({ page }) => {
     await openAppSessions(page, viewport);
 
     const selectedRow = page.locator('[data-testid="session-item-row"][data-selected="true"]');
@@ -374,8 +393,14 @@ for (const viewport of [
 
     await openRowMenu(page);
     const menu = page.getByRole('menu');
-    await expect(menu.getByRole('menuitem')).toHaveCount(4);
-    for (const label of ['Session details', 'Edit details', 'Attach settings', 'Kill session']) {
+    await expect(menu.getByRole('menuitem')).toHaveCount(5);
+    for (const label of [
+      'Session details',
+      'Edit details',
+      'Attach settings',
+      'Project…',
+      'Kill session',
+    ]) {
       await expect(menu.getByRole('menuitem', { name: label })).toBeVisible();
     }
     await expect(menu.getByRole('separator')).toHaveCount(1);

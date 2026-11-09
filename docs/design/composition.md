@@ -47,13 +47,25 @@ Session navigation must remain fast and discoverable while yielding space to the
 Preferred composition families include:
 
 - overlay drawer;
-- collapsible sidebar (full tuck-away);
+- collapsible sidebar (expanded column or reserved rail);
 - compact Session switcher;
 - search/command entry with a visible navigation affordance.
 
 A wide permanent sidebar is not an invariant. On a layout where it materially helps repeated Session switching, it must still remain visually secondary and should collapse when space or focus requires it.
 
-The collapsed form is a **full tuck-away**: the navigation column reserves 0px and one minimal floating control returns it — its anatomy and interaction rules are specified in [interaction/web.md](interaction/web.md) (#2851, superseding #1196's static rail). What this layer owns is the composition rule behind it: **collapse is one state, held by the shell composition** (#1195). The composition decides both what the navigation column renders and how much width it reserves; a navigation component must not privately know it is collapsed while the frame around it keeps reserving the expanded width — that split is what made collapse free no space for the work surface.
+The collapsed form is a **reserved navigation rail**: the column keeps 56px in
+flow and offers a small set of purposeful shortcuts (Expand, New Session,
+Search, and Projects when navigable) — its anatomy and interaction rules are
+specified in [interaction/web.md](interaction/web.md) (#3075, superseding
+#2851's 0px floating control and #1196's static rail). What this layer owns is
+the composition rule behind it: **collapse is one state, held by the shell
+composition** (#1195). The composition decides both what the navigation column
+renders and how much width it reserves; a navigation component must not
+privately know it is collapsed while the frame around it keeps reserving the
+expanded width — that split is what made collapse free no space for the work
+surface. The rail is a sibling of Main, so the work surface can never sit behind
+navigation; the narrow overlay drawer keeps its own opening control and never
+reserves a rail.
 
 Extra viewport width belongs to the work surface before it belongs to navigation — including the width a collapse releases, which the work surface reclaims through the normal resize pipeline, not by rebuilding the surface.
 

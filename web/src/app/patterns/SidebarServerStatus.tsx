@@ -1,14 +1,8 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { ServerInfoMenu } from '@/platform/server/components/ServerInfoMenu';
+import { SERVER_LABEL } from '@/app/patterns/serverStatusLabel';
 import type { ConnectionState } from '@/platform/socket/types';
-
-const SERVER_LABEL: Record<ConnectionState, string> = {
-  connected: 'Server connected',
-  connecting: 'Server connecting',
-  reconnecting: 'Server reconnecting',
-  disconnected: 'Server disconnected',
-};
 
 /**
  * The Web sidebar's service footer (#2851).

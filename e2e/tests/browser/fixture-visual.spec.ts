@@ -336,8 +336,9 @@ test.describe('Web 1440×900', () => {
     });
   });
 
-  // #2851 — the Session-first sidebar fully tucks away: 0px, no rail, one
-  // floating reopen control, and the work surface keeps its mounted Terminal.
+  // #3075 — the Session-first sidebar collapses to a reserved 56px in-flow
+  // rail: purposeful shortcuts, no floating control, and the work surface keeps
+  // its mounted Terminal without ever sitting behind navigation.
   test('Sidebar collapse', async ({ page }) => {
     await gotoFixtureShell(page);
     await waitForFixtureTerminal(page);
@@ -348,6 +349,12 @@ test.describe('Web 1440×900', () => {
       ),
     );
     expect(sidebarWidth).toBe(246);
+    const railWidth = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--nession-shell-rail-width'),
+      ),
+    );
+    expect(railWidth).toBe(56);
     const column = page.getByTestId('sidebar-column');
     const main = page.locator('main');
     const xterm = page.locator('.xterm').first();
@@ -368,30 +375,33 @@ test.describe('Web 1440×900', () => {
 
     await page.getByTestId('sidebar-collapse').click();
 
-    // The column returns all of its width, with no rail in its place.
-    await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(0);
-    await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
-    const openButton = page.getByTestId('sidebar-open');
-    await expect(openButton).toBeVisible();
-    const openBox = await openButton.boundingBox();
-    expect(openBox?.width).toBe(36);
-    expect(openBox?.height).toBe(36);
-    expect(await glyphCenterOffset('sidebar-open')).toBeLessThanOrEqual(0.5);
+    // The column keeps a real 56px rail in flow; no control floats over Main.
+    await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(railWidth);
+    const rail = page.getByTestId('sidebar-rail');
+    await expect(rail).toBeVisible();
+    await expect(page.getByTestId('sidebar-open')).toHaveCount(0);
+    expect(await glyphCenterOffset('sidebar-rail-expand')).toBeLessThanOrEqual(0.5);
+    const railBox = await rail.boundingBox();
+    const mainBox = await main.boundingBox();
+    expect(mainBox?.x ?? 0).toBeGreaterThanOrEqual(
+      (railBox?.x ?? 0) + (railBox?.width ?? 0) - 0.5,
+    );
 
-    // The Terminal was not remounted, and the work surface received the width.
+    // The Terminal was not remounted, and the work surface received the
+    // released width minus the reserved rail.
     await expect(xterm).toBeVisible();
     await expect
       .poll(async () => (await main.boundingBox())?.width ?? 0)
-      .toBeGreaterThan(expandedMain + expandedColumn * 0.9);
+      .toBeGreaterThan(expandedMain + (expandedColumn - railWidth) * 0.9);
 
     await expect(page).toHaveScreenshot('web-sidebar-collapsed.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
     });
 
-    // Keyboard path back out: the one floating control is focusable and
-    // activates on Enter. Selection and navigation survive the round trip.
-    await openButton.focus();
+    // Keyboard path back out: the rail's Expand is focusable and activates on
+    // Enter. Selection and navigation survive the round trip.
+    await rail.getByTestId('sidebar-rail-expand').focus();
     await page.keyboard.press('Enter');
     await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(expandedColumn);
     await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toHaveCount(1);

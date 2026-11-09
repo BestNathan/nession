@@ -153,6 +153,10 @@
       "$description": "Expanded sidebar column. The mockup draws 246px; the shell's grid is `246px 1fr`.",
       "value": "246px"
     },
+    "railWidth": {
+      "$description": "Collapsed Web navigation column (#3075). A reserved in-flow rail, not a floating overlay: the work surface starts at its right edge and the shell keeps its shortcuts reachable. 56px holds one 36px control band plus the shell's edge insets.",
+      "value": "56px"
+    },
     "sessionRowPadY": {
       "$owner": "pattern.session-item",
       "$description": "Session row vertical padding. The mockup draws 7px, tighter than `shell.space-2` (8px) because the row's two lines already carry leading; horizontal padding is `shell.space-2`.",

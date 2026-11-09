@@ -54,18 +54,20 @@ SessionList is a navigation **capability/pattern**, not a guarantee of a fixed s
 
 Acceptable placements include:
 
-- collapsible sidebar (full tuck-away);
+- collapsible sidebar (expanded column or reserved rail);
 - overlay drawer;
 - compact Session switcher that opens the list;
 - on-demand panel combined with search/command navigation.
 
 A persistent left column may still be appropriate on some desktop compositions, but it is an implementation choice. It must remain secondary to the active Session and should yield when space/focus makes that beneficial.
 
-Where the placement is a collapsible sidebar, the collapsed form is **not a miniature
-SessionList** (#2851, superseding #1196's rail): the column fully tucks away to 0px and
-leaves one minimal floating reopening control. The full list, its search, its history
-grouping and its filters exist only in the expanded placement; selection, search and
-scroll survive the round trip because the column stays mounted while clipped.
+Where the placement is a collapsible sidebar, the collapsed form is a **reserved
+navigation rail**, not a miniature SessionList and not a floating overlay (#3075,
+superseding #2851's 0px tuck-away and #1196's static rail): the column keeps its
+canonical rail width in flow and exposes only purposeful shortcuts. The full
+list, its search, its history grouping and its filters exist only in the
+expanded placement; selection, search and scroll survive the round trip because
+the column stays mounted and `inert` while collapsed.
 
 ### App
 

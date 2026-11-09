@@ -191,6 +191,9 @@ export function FixtureShell() {
     surface, setSurface,
     tool, setTool,
   } = useFixtureShellUi();
+  const [createOpen, setCreateOpen] = useState(
+    operationState.operation === 'create-session',
+  );
 
   const filteredSessions = useFixtureFilteredSessions(sessions, agents, {
     statusFilter,
@@ -242,7 +245,7 @@ export function FixtureShell() {
           surface={surface}
           tool={tool}
           fileOps={null}
-          onCreate={() => {}}
+          onCreate={() => setCreateOpen(true)}
           onRefresh={() => {}}
           onSelect={(session) => {
             projectLayer.projectShell.onClose();
@@ -267,6 +270,48 @@ export function FixtureShell() {
           )}
         />
       </div>
+      <FixtureShellDialogs
+        sessionDetails={sessionDetails}
+        projectLayer={projectLayer}
+        agents={agents}
+        selectedSession={selectedSession}
+        operationState={operationState}
+        operationsReady={operationsReady}
+        createOpen={createOpen}
+        setCreateOpen={setCreateOpen}
+        isWide={isWide}
+        experienceOverride={experienceOverride}
+      />
+    </div>
+  );
+}
+
+/** The fixture route's dialog set, composed outside the main screen body. */
+function FixtureShellDialogs({
+  sessionDetails,
+  projectLayer,
+  agents,
+  selectedSession,
+  operationState,
+  operationsReady,
+  createOpen,
+  setCreateOpen,
+  isWide,
+  experienceOverride,
+}: {
+  sessionDetails: ReturnType<typeof useSessionDetails>;
+  projectLayer: ReturnType<typeof useFixtureProjectShell>;
+  agents: Agent[];
+  selectedSession: Session | null;
+  operationState: ReturnType<typeof useFixtureOperation>;
+  operationsReady: boolean;
+  createOpen: boolean;
+  setCreateOpen: (open: boolean) => void;
+  isWide: boolean;
+  experienceOverride: ReturnType<typeof experienceFromSearch>;
+}) {
+  return (
+    <>
       <SessionDetailsDialog
         session={sessionDetails.target?.session ?? null}
         state={sessionDetails.domain}
@@ -279,13 +324,23 @@ export function FixtureShell() {
         experience={resolveExperienceMode(isWide, experienceOverride)}
       />
       <FixtureOperationDialogs
-        operation={operationState.operation}
+        operation={
+          operationState.operation === 'create-session'
+            ? null
+            : operationState.operation
+        }
         open={operationState.open && operationsReady}
         session={selectedSession}
-        agents={agents}
         onClose={operationState.close}
       />
-    </div>
+      <CreateSessionDialog
+        isOpen={createOpen && operationsReady}
+        agents={agents}
+        preselectedAgentId={null}
+        onCreated={() => setCreateOpen(false)}
+        onClose={() => setCreateOpen(false)}
+      />
+    </>
   );
 }
 
@@ -294,28 +349,15 @@ function FixtureOperationDialogs({
   operation,
   open,
   session,
-  agents,
   onClose,
 }: {
   operation: ReturnType<typeof fixtureOperation>;
   open: boolean;
   session: Session | null;
-  agents: Agent[];
   onClose: () => void;
 }) {
-  if (operation === null) {
+  if (operation === null || operation === 'create-session') {
     return null;
-  }
-  if (operation === 'create-session') {
-    return (
-      <CreateSessionDialog
-        isOpen={open}
-        agents={agents}
-        preselectedAgentId={null}
-        onCreated={onClose}
-        onClose={onClose}
-      />
-    );
   }
   return (
     <AttachDialog

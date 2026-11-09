@@ -70,7 +70,7 @@
     "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "5016bc56f8c835196ed7783c32dc5d37ed73b9a5",
     "__snapshots__/fixture-visual.spec.ts/app-terminal-keys-ctrl-linux.png": "6a47c7f03431e9867c864d764a6a91e7e5b07df8",
     "__snapshots__/fixture-visual.spec.ts/app-quick-commands-linux.png": "7da7ce6ab15976a2f3db0ac90ff4c6430cd63be3",
-    "__snapshots__/fixture-visual.spec.ts/web-sidebar-collapsed-linux.png": "893c84666fb36f8187767ab314998b6b0addd6c9"
+    "__snapshots__/fixture-visual.spec.ts/web-sidebar-collapsed-linux.png": "f4f61f5702d231d2022baee7c3c246712891665f"
   },
   "baseline_set_updated": {
     "requirement": 2487,
