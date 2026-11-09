@@ -30,7 +30,8 @@ run(({ evidence }) => {
   requireText('.github/workflows/acceptance-cases.yml', [
     'execute-macos:',
     'runs-on: macos-15-intel',
-    'if: github.event_name != \'workflow_dispatch\' || inputs.platform == \'macos\'',
+    'needs.execute.outputs.macos_count != \'0\'',
+    'inputs.platform == \'macos\'',
     'ACCEPTANCE_PLATFORM: macos',
     'ACCEPTANCE_PLATFORM: linux',
     'name: acceptance-case-results-macos-${{ github.run_id }}-${{ github.run_attempt }}',
