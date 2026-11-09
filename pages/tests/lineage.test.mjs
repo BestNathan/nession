@@ -18,6 +18,52 @@ test('no trusted source is never a verified causal edge',()=>{
  assert.equal(projectLineage(fixture({pulls:[{number:7,head_sha:'f'.repeat(40)}]})).edges.length,0);
  assert.equal(projectLineage(fixture({issueNumbers:[8]})).edges.length,0);
 });
+test('closed producer Issue/PR history does not depend on the OPEN Work snapshots',()=>{
+ const attested={status:'verified',source_ref_sha:store,records:[edge]};
+ const p=validateProjection(makeProjection({
+   issues:[],pulls:[],lineageEvidence:attested,
+ }));
+ assert.equal(p.work.issues.length,0,'active Issues remain OPEN-only');
+ assert.equal(p.work.pulls.length,0,'active PRs remain OPEN-only');
+ assert.equal(p.work.lineage.status,'verified');
+ assert.deepEqual(p.work.lineage.edges.map(x=>[x.issue,x.pr_number]),[[6,7]]);
+ assert.equal(p.work.lineage.edges[0].slice_id,null);
+ const spoofed=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{...attested,records:[{...edge,
+     origin:{...source,producer_run_id:999}}]}}));
+ assert.equal(spoofed.work.lineage.status,'unavailable');
+ assert.deepEqual(spoofed.work.lineage.edges,[]);
+ const conflicting=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{...attested,records:[edge,{...edge,pr_head_sha:'f'.repeat(40)}]}}));
+ assert.equal(conflicting.work.lineage.status,'unavailable');
+});
+test('a historical authenticated edge does not displace open Issue/PR activity',()=>{
+ const attested={status:'verified',source_ref_sha:store,records:[edge]};
+ const projection=validateProjection(makeProjection({
+   issues:[{number:55,title:'Active Issue',state:'open',
+     updated_at:'2026-11-08T18:00:00Z'}],
+   pulls:[{number:56,title:'Active PR',state:'open',
+     updated_at:'2026-11-08T18:00:00Z',head:{sha:'f'.repeat(40)}}],
+   lineageEvidence:attested,
+ }));
+ assert.deepEqual(projection.work.issues.map(x=>x.number),[55]);
+ assert.deepEqual(projection.work.pulls.map(x=>x.number),[56]);
+ assert.equal(projection.work.lineage.status,'verified');
+ assert.deepEqual(projection.work.lineage.edges.map(x=>[x.issue,x.pr_number]),[[6,7]]);
+ assert.equal(projection.work.lineage.edges[0].pr_head_sha,sha);
+});
+test('unverified historical hints alone cannot enter the public graph',()=>{
+ const fake={...edge,verification:'verified_from_shared_issue'};
+ const projected=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{status:'verified',source_ref_sha:store,records:[fake]},
+ }));
+ assert.equal(projected.work.lineage.status,'unavailable');
+ assert.deepEqual(projected.work.lineage.edges,[]);
+ const absent=validateProjection(makeProjection({issues:[],pulls:[],
+   lineageEvidence:{status:'unavailable',source_ref_sha:null,records:[]},
+ }));
+ assert.equal(absent.work.lineage.status,'unavailable');
+});
 test('only exact authenticated attestation-time PR bindings yield a typed edge',()=>{
  const p=validateLineageProjection(projectLineage(fixture()));
  assert.equal(p.status,'verified');assert.equal(p.edges.length,1);
