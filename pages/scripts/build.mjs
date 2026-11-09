@@ -287,6 +287,8 @@ console.log(JSON.stringify({
   acceptance_e2e:result.work.acceptance_e2e.status,
   published_e2e_ids:result.work.acceptance_e2e.records.length,
   lineage_status:result.work.lineage.status,
+  lineage_edges:result.work.lineage.edges.slice(0,12).map(e=>({issue:e.issue,
+    pr_number:e.pr_number,run_id:e.run_id,attempt:e.attempt})),
   agent_store_readiness:result.work.agent_store_readiness.status,
   agent_result_observations:result.work.agent_result_observations.status,
   agent_result_count:result.work.agent_result_observations.records.length,
