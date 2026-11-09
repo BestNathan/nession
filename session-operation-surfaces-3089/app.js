@@ -10,6 +10,8 @@
     experience: 'web', width: 1440, page: 'project', depth: null, modal: null,
     scenario: 'normal', mode: 'auto', configureFrom: null, projectContext: true,
     sessionName: 'feature-review', projectName: 'Nession', editedProjectName: 'Nession',
+    projectDescription:'', sourceUrl:'', sourceRef:'', imageDigest:'',
+    draftDescription:'', draftSourceUrl:'', draftSourceRef:'', draftImageDigest:'', projectDraftLocations:[],
     locations: [
       {agent:'Build Agent',path:'/srv/workspaces/nession',online:true},
       {agent:'Test Agent',path:'/workspaces/nession-test',online:true}
@@ -30,6 +32,7 @@
   const region = (title, body) => '<div class="stack"><div class="section-label">'+title+'</div>'+body+'</div>';
   function projectLocation(idx, selected = false) {
     const loc = location(idx);
+    if (!loc) return '<span class="choice-body"><strong>No Existing Location</strong><span class="muted twelve">Add an Agent directory in Project settings.</span></span>';
     const offline = isOffline() && idx === 0;
     return '<span class="choice-body"><strong>'+esc(loc.agent)+'</strong><span class="mono path">'+esc(visiblePath(loc.path))+'</span><span class="tiny '+(offline ? 'offline-chip' : 'muted')+'"><span class="dot '+(offline ? 'offline' : '')+'"></span>'+(offline?'Offline':'Online')+'</span></span>';
   }
@@ -40,6 +43,7 @@
   // scroll owner. Both the selected trigger and menu rows have intrinsic height:
   // a long directory wraps instead of protruding from a 32px Select outline.
   function webLocationSelector() {
+    if (!s.locations.length) return '<div class="form-empty">No Existing Location. Add an Agent directory in Project settings.</div>';
     const trigger = '<button type="button" class="location-trigger" data-location-trigger data-act="toggle-location" aria-haspopup="listbox" aria-controls="project-location-options" aria-expanded="'+s.locationOpen+'"><span class="location-trigger-text">'+projectLocation(s.location)+'</span><span class="location-chevron" aria-hidden="true">'+(s.locationOpen?'⌃':'⌄')+'</span></button>';
     const options = s.locationOpen ? '<div class="location-options" id="project-location-options" role="listbox" aria-label="Existing Location">'+s.locations.map((loc,i)=>
       '<button type="button" class="location-option '+(i===s.location?'current':'')+'" role="option" aria-selected="'+(i===s.location)+'" data-location-option data-act="select-location" data-idx="'+i+'">'+projectLocation(i)+'</button>'
@@ -50,12 +54,14 @@
     return '<button class="app-select-row" data-act="choose-env"><strong>Environment files</strong><span class="twelve muted">'+(s.env.size ? esc([...s.env].join(', ')) : 'Optional · None selected')+'</span><span class="tiny muted">Manage selection →</span></button>';
   }
   function createFields(app) {
-    const name = '<label class="field"><span class="label">Session name</span><input name="sessionName" maxlength="90" placeholder="e.g. feature-review" value="'+esc(s.sessionName)+'" autocomplete="off"></label>';
     const locations = s.projectContext
-      ? app ? region('Existing location',locationSelector()) : region('Existing location',webLocationSelector())
-      : region('Agent',app?locationSelector():'<button class="choice selected"><span class="radio"></span>'+projectLocation(s.location)+'</button>');
-    const env = app ? envSelector() : '<div class="card stack" style="gap:9px"><div class="row between"><strong class="twelve">Environment files</strong><span class="tiny muted">Optional</span></div>'+['.env.development','.env.local','.env.test'].map(x=>'<label class="checkline"><input type="checkbox" name="env" value="'+esc(x)+'" '+(s.env.has(x)?'checked':'')+'>'+esc(x)+'</label>').join('')+'</div>';
-    return '<div class="stack">'+name+locations+env+(s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
+      ? '<div class="field"><span class="label">Existing Location</span>'+(app?locationSelector():webLocationSelector())+'</div>'
+      : '<div class="field"><span class="label">Agent</span>'+(app?locationSelector():'<button type="button" class="location-trigger" aria-label="Agent selection">'+projectLocation(s.location)+'</button>')+'</div>';
+    const name = '<label class="field"><span class="label">Session Name</span><input name="sessionName" maxlength="90" placeholder="my-session" value="'+esc(s.sessionName)+'" autocomplete="off"></label>';
+    const env = app
+      ? '<div class="field"><span class="label">Env Files (optional)</span>'+envSelector()+'</div>'
+      : '<div class="field"><span class="label">Env Files (optional)</span><div class="env-editor">'+['.env.development','.env.local','.env.test'].map(x=>'<label class="checkline"><input type="checkbox" name="env" value="'+esc(x)+'" '+(s.env.has(x)?'checked':'')+'>'+esc(x)+'</label>').join('')+'</div></div>';
+    return '<div class="dialog-form" data-form="new-session">'+locations+name+env+(s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
   }
   function attachModes(app) {
     const modes = [
@@ -75,10 +81,23 @@
     );
   }
   function projectFields(app) {
-    return '<div class="stack"><label class="field"><span class="label">Project name</span><input name="projectName" maxlength="72" value="'+esc(s.editedProjectName)+'" placeholder="Project name"></label>'+
-      region('Existing Agent locations',
-        '<div class="stack">'+s.locations.map((loc,i)=>'<div class="card location-editor"><label class="field"><span class="label">Agent</span><input aria-label="Agent '+(i+1)+'" name="agent-'+i+'" value="'+esc(loc.agent)+'"></label><label class="field"><span class="label">Working directory</span><textarea aria-label="Directory '+(i+1)+'" name="directory-'+i+'" rows="2">'+esc(visiblePath(loc.path))+'</textarea></label>'+button('Remove','remove-location','ghost','data-idx="'+i+'"')+'</div>').join('')+button('＋ Add location','add-location','')+'</div>'
-      )+
+    const locations = s.projectDraftLocations;
+    const rows = locations.length ? '<div class="locations-stack">'+locations.map((loc,i)=>
+      '<div class="location-editor" data-location-editor="'+i+'">'+
+      '<label class="field"><span class="label">Agent</span><select name="agent-'+i+'" aria-label="Agent '+(i+1)+'"><option'+(loc.agent==='Build Agent'?' selected':'')+'>Build Agent</option><option'+(loc.agent==='Test Agent'?' selected':'')+'>Test Agent</option></select></label>'+
+      '<label class="field"><span class="label">Directory</span><textarea aria-label="Directory '+(i+1)+'" name="directory-'+i+'" rows="'+(app?3:2)+'" placeholder="/workspace/project">'+esc(loc.path)+'</textarea></label>'+
+      button('Remove','remove-location','ghost remove-location','data-idx="'+i+'" aria-label="Remove Existing Location '+(i+1)+'"')+
+      '</div>').join('')+'</div>' :
+      '<p class="form-empty">No Existing Locations. You can create a Project now and add one later.</p>';
+    return '<div class="dialog-form" data-form="new-project">'+
+      '<label class="field"><span class="label">Name</span><input name="projectName" maxlength="72" value="'+esc(s.editedProjectName)+'" placeholder="Nession" autocomplete="off"></label>'+
+      '<label class="field"><span class="label">Description (optional)</span><textarea name="projectDescription" rows="2" placeholder="What is this Project for?">'+esc(s.draftDescription)+'</textarea></label>'+
+      '<div class="source-fields">'+
+        '<label class="field"><span class="label">Git repository URL (optional)</span><input name="repositoryUrl" value="'+esc(s.draftSourceUrl)+'" placeholder="https://github.com/owner/repo.git" autocomplete="off"></label>'+
+        '<label class="field"><span class="label">Branch or full commit SHA</span><input name="repositoryRef" value="'+esc(s.draftSourceRef)+'" placeholder="main" '+(!s.draftSourceUrl.trim()?'disabled':'')+' autocomplete="off"></label>'+
+      '</div>'+
+      '<div class="field"><div class="section-heading"><span class="label">Existing Locations (optional)</span>'+button('＋ Add Location','add-location','ghost')+'</div>'+rows+'</div>'+
+      '<label class="field"><span class="label">Image digest reference (optional)</span><input name="imageDigest" value="'+esc(s.draftImageDigest)+'" placeholder="sha256:…"><span class="form-help">A reference only. The Project never owns image bytes.</span></label>'+
       (s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
   }
   function terminal() {
