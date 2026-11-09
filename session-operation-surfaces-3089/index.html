@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Nession · Web/App Session operations · #3089</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb" aria-label="Review navigation"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Session operation surfaces</span></nav>
+<span class="np-eyebrow">WEB / APP · RESPONSIVE INTERACTION STUDY</span>
+<div class="np-header-main"><div>
+<h1 class="np-title">Attach &amp; create Session · Web / App</h1>
+<p class="np-subtitle">Web uses roomy, content-aware dialogs; App uses a quick Attach sheet and full-depth configuration / creation pages. Switch devices and walk through the same task with long paths, an offline Agent, child selectors, and Back.</p>
+</div><div class="np-links">
+<a href="https://github.com/BestNathan/nession/issues/3089" target="_blank" rel="noopener noreferrer">Issue #3089</a>
+<a href="https://github.com/BestNathan/nession/issues/3025" target="_blank" rel="noopener noreferrer">Project baseline #3025</a>
+<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a>
+</div></div>
+<div class="np-meta"><span>Web: <strong>responsive Dialog</strong></span><span>App: <strong>Sheet + pushed operation depth</strong></span><span>Source data: <strong>sanitized mock only</strong></span></div>
+</header>
+<main>
+<section class="np-preview" aria-label="Interactive Web and App prototype">
+<div class="np-section-heading">
+<div><h2>Interactive product preview · 1:1 CSS pixels</h2><p>Use the product's Session and Project actions inside the viewport. Device and scenario controls are outside it.</p></div>
+<div class="np-preview-toolbar" role="group" aria-label="Preview viewport">
+<button type="button" data-np-size="1440" data-np-experience="web" aria-pressed="true">Web 1440</button>
+<button type="button" data-np-size="1180" data-np-experience="web">Web 1180</button>
+<button type="button" data-np-size="1024" data-np-experience="web">Web 1024</button>
+<button type="button" data-np-size="390" data-np-experience="app">App 390</button>
+<button type="button" data-np-size="375" data-np-experience="app">App 375</button>
+<button type="button" data-np-size="430" data-np-experience="app">App 430</button>
+<button type="button" data-np-size="844" data-np-experience="app">App landscape</button>
+<button type="button" data-np-reset>Reset</button>
+</div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1440px;--np-device-height:900px">
+<div id="nession-product" class="nession-product" data-experience="web" aria-label="Simulated Nession application"></div>
+</div></div>
+<p class="np-stage-label" data-np-current-size>1440 CSS px · 1:1</p>
+<div class="fixture-bar" aria-label="Mock scenario controls"><strong>Simulation</strong><button data-fixture="normal" aria-pressed="true">Normal</button><button data-fixture="long">Very long path / address</button><button data-fixture="offline">Agent offline</button><span>All controls here are review-only, outside the product viewport.</span></div>
+</section>
+<section class="np-details" aria-label="Design decisions and verification">
+<h2>Functional design &amp; verification</h2>
+<p class="np-details-lede">This prototype exercises presentation and return semantics; it does not create Sessions, probe real addresses, configure a remote Agent, or connect to a Terminal.</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>Attach — two intents</h3><ol class="np-steps">
+<li>Web: Session → Attach; compare Auto/P2P/Relay, inspect complete candidate address, re-test, confirm.</li>
+<li>App: Sessions → Attach opens a compact sheet; Connection settings pushes a full view; Back restores the sheet and its draft; Attach is explicit.</li>
+<li>Session → Attach settings enters the full configuration directly on App. Save changes preference only; it must never attach.</li></ol></article>
+<article class="np-detail"><h3>Project → new Session</h3><ol class="np-steps">
+<li>Web: Project detail → New Session opens a 640px responsive dialog. Location shows Agent, path and status separately.</li>
+<li>App: Project detail → New Session pushes one full-height operation page. Location and ENV each open child selectors. Back preserves the draft.</li>
+<li>Submit a non-empty name. Offline fixture blocks confirmation without erasing the draft. Cancel preserves the previous Terminal.</li></ol></article>
+<article class="np-detail"><h3>Project maintenance</h3><p>Project Create and Settings remain desktop dialogs on Web. On App they become full operation depths, with stacked Agent / Directory rows and bottom action. Existing location means real Project configuration semantics, not a new Project subtype.</p></article>
+<article class="np-detail"><h3>Fidelity &amp; boundary</h3><p>Presentation is a candidate based on the current WebLayout, AppLayers, AttachDialog, CreateSessionDialog and ProjectDialogs ownership. Product palette is a localized token snapshot. An actual side-by-side React screenshot comparison and production Chromium Case evidence remain pending.</p><details class="np-inspector"><summary>Live mock state</summary><pre id="state-inspector">Initialization pending</pre></details></article>
+</div>
+</section>
+</main>
+<footer class="np-footer">Nession design prototype · Explicit mock actions only · Not production Acceptance.</footer>
+</div>
+<script src="./app.js"></script>
+<script src="../prototype-frame-2758/frame.js"></script>
+</body></html>
