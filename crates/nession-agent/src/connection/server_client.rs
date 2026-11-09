@@ -4082,7 +4082,7 @@ core_routes!(agent, msg, responses;
                                 outcome.sandbox,
                             )
                         }
-                        Err(e) => (false, Some(e.to_string()), None, Vec::new(), None),
+                        Err(e) => (false, Some(format!("{e:#}")), None, Vec::new(), None),
                     };
 
                     let response = serde_json::json!({

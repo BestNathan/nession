@@ -1,7 +1,7 @@
 'use strict';
 // #565 SC-06: local Session tools act on the explicitly named Agent and refuse
 // a missing or mismatched target; no mode falls back to the MCP host.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -15,12 +15,14 @@ run(({ evidence }) => {
     'nession-agent',
     ['--test', 'integration', 'mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server'],
     900000,
+    isolatedTmuxEnv('nession-565-sc06-agent'),
   );
   assertRan(agent, ['mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server']);
   const standalone = crateTests(
     'nession-mcp',
     ['--test', 'integration', 'standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint'],
     900000,
+    isolatedTmuxEnv('nession-565-sc06-node'),
   );
   assertRan(standalone, ['standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint']);
   evidence.push(

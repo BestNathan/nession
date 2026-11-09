@@ -9,10 +9,28 @@
 // merged-staging, source-aligned proof that the named evidence belongs to the
 // acceptance target SHA, not a second implementation of the behavior.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '../../..');
+
+/// Isolate a Case that starts its own tmux-backed Agent.
+///
+/// The full-stack batch keeps a runtime Agent on its own socket. These Cases
+/// spawn an additional Agent inside a cargo test process; giving that process
+/// a private socket and state home keeps the two runtimes from sharing one
+/// tmux server and one identity directory (the documented Case isolation in
+/// `e2e/README.md`).
+function isolatedTmuxEnv(prefix = 'nession-565-case') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix + '-'));
+  const home = path.join(dir, 'home');
+  fs.mkdirSync(home, { recursive: true });
+  return {
+    NESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'),
+    NESSION_HOME: home,
+  };
+}
 
 function targetSha() {
   const sha = String(process.env.NESSION_ACCEPTANCE_TARGET_SHA || '');
@@ -79,4 +97,4 @@ function run(fn) {
   }
 }
 
-module.exports = { run, targetSha, checked, crateTests, assertRan, read };
+module.exports = { run, targetSha, checked, crateTests, assertRan, read, isolatedTmuxEnv };
