@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 3049,
+  "run_id": 42553877677,
+  "run_attempt": 1,
+  "target_sha": "917544da0db36a3cfb06373bbb0d35d7783a699a",
+  "plan_digest": "a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41",
+  "artifact_digest": "sha256:81f416ae89056ad062f248cfc57279b462a2d07bf04474ed64620d73f8494961",
+  "ingest_run_id": 42554584346,
+  "ingest_attempt": 1,
+  "declaration_digest": "f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7",
+  "before_body_sha256": "be25ca012c793320c78b0f6bd136fa04921fb4dc9f107d4cc26260652c359ef2",
+  "body_sha256": "c4433540d723471d88ac36fb417e91068b3de736e1090b6e4287e02fb0d458bb",
+  "readback_body": "## Requirements: reviewed explicit Staging integration\n\nThis is the **one-time, manually reviewed conflict-resolution bridge** for #2953. It is not a controller-owned automatic merge and cannot itself satisfy #2953 SC-03.\n- Planned main SHA: `860cd4b5355dcbc850abe42958d296466158e5ad`\n- Planned staging SHA: `5f35446f01ab07d8460f3ee3d28906324ed83085`\n- Two-parent candidate SHA: `09b2acd85c392383ad22f0931ddfbd7617b4e242` (staging first, main second)\n- Source Git merge-base: `8352d3abb6f3c73b07db2fed1357566aa17f74b2`\n- Scope: 162 main-only file deltas, 15 reviewed overlapping paths, one CLI identity parity fix; no force-push, no direct staging write\n- Critical decisions: retain modular CLI commands under staging, discard legacy `agent.rs`/`config.rs` duplicates after porting identity resolution; preserve staged/unstaged Git diff semantics, selection/media Blob lifecycle and browser fixture behavior\n- This explicit merge candidate is not native `git merge-tree` output. Independent Rust/Web/Browser/Issue checks must validate the resulting tree before any protected merge.\n\n### Success Criteria\n- [ ] SC-01 Exact two-parent integration PR passes canonical Quality, Case Smoke and Issue-selected E2E, including Git preview and CLI identity tests.\n- [ ] SC-02 Protected merge to staging preserves its source history, followed by successful authenticated staging artifact/deployment receipt.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: merged\n    branch: staging\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Fail | run 42553876008; ref 917544da0db36a3cfb06373bbb0d35d7783a699a; source agent-qwen; workflow: E2E run 42553019255 shows all 12 regression tests (including fixture-git) in Error status with 0/0 tests executed at SHA 09b2acd85c392383ad22f0931ddfbd7617b4e242; other: ci_evidence is null - no authenticated CI evidence provided to verify Quality or Case Smoke workflows passed; other: Issue E2E Report documents Error status across all regression suites including explicitly required Git preview tests; summary: E2E tests show Error status (failed to execute) across all 12 regression suites, contradicting the criterion requirement that E2E must pass |\n| SC-02 | Pending | Awaiting protected merge and authenticated staging deployment |\n\n## E2E Verification\n\n### New\n- none: all runnable browser spec IDs exist on the staging base; no new E2E spec is added by this bridge\n\n### Regression\n- agent-process-discovery\n- attach-critical-path\n- fixture-git\n- fixture-visual\n- fixture-visual-app\n- fixture-visual-app-compact\n- pages-overview\n- session-lifecycle\n- sidebar-session-first\n- terminal-consistency-faults\n- ui-contract-assertions\n- ui-contract-web\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| agent-process-discovery | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| attach-critical-path | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| fixture-git | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 13/13 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| fixture-visual | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| fixture-visual-app | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 22/22 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| fixture-visual-app-compact | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| pages-overview | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| session-lifecycle | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 5/5 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| sidebar-session-first | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 10/10 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| terminal-consistency-faults | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 15/15 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| ui-contract-assertions | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 21/21 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n| ui-contract-web | Regression | Pass | run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 36/36 (https://github.com/BestNathan/nession/actions/runs/42553877677) |\n\n## Product alignment\n- [x] Preserves existing Git Workspace and modular CLI capabilities; no product feature or user history is intentionally removed.\n- [x] Preserves canonical E2E/Acceptance gates, protected merge commits, and controller trust boundaries.\n\n**Status:** In Discussion",
+  "patch_updated_at": "2026-11-09T03:07:33Z",
+  "readback_updated_at": "2026-11-09T03:07:33Z",
+  "rows": [
+    {
+      "id": "agent-process-discovery",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "attach-critical-path",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "fixture-git",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 13/13 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 22/22 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "fixture-visual-app-compact",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 5/5 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "sidebar-session-first",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 10/10 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 15/15 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 21/21 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "evidence": "run 42553877677/1, SHA 917544da0db36a3cfb06373bbb0d35d7783a699a, contract f76a92c5e401209dce2a4415e3776301ca7dc08490a3ef6d5fea81d5137111a7, plan a6f807377f2c73ab3a8c8b41e6d5bc0c4c0689d75fed7d6de85a526962f34b41, tests 36/36 (https://github.com/BestNathan/nession/actions/runs/42553877677)"
+    }
+  ]
+}
