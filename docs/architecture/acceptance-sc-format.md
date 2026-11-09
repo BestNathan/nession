@@ -37,6 +37,43 @@ acceptance:
 | SC-02 | Pending | Awaiting merged staging SHA source-aligned Case |
 ````
 
+## Optional read-only Acceptance Sources (#3068)
+
+Only an SC with an explicit `method: agent` Acceptance Plan entry may
+declare additional evidence files from an allowlisted orphan branch. The
+independent `## Acceptance Sources` section is an evidence **input**, not
+a new stage, method or verdict:
+
+```yaml
+acceptance_sources:
+  SC-07:
+    - branch: prototype
+      sha: c6a1b0fe5695712603b1fd36ed83b0ce5652d840
+      files:
+        - project-session-3025/index.html
+```
+
+The authoritative parser and limits are in `scripts/acceptance-sources.mjs`.
+The trusted workflow resolves the pinned commit against the approved orphan
+branch, validates explicit regular UTF-8 files and writes
+`.nession-acceptance-sources/manifest.json` within a reserved read-only
+workspace view. Each entry binds SC, branch, exact commit, path, byte length
+and SHA-256. A model citing an orphan source for a Pass must supply a
+`source` evidence item with the exact
+`branch@commit:path#sha256=content_hash` string from that manifest. The
+trusted normalizer validates it. Changes to declarations invalidate the
+Acceptance contract digest and stale prior verdicts; Issues without a
+declaration preserve their historical digest.
+
+This is **source proof only**: staged HTML does not prove published Pages
+HTML, GitOps desired state does not prove actual reconciliation and a
+Knowledge article does not prove public readback. Runtime and publication
+claims still require the appropriate independently authenticated Case or
+existing trusted readback; notably, #3025 SC-06 remains Case-based.
+The read-only model does not gain Bash, HTTP, Git credentials or Issue write.
+`task-results`, `acceptance-results` and `metrics` stay with existing
+source-authenticated Store/Case consumers rather than generic staging.
+
 ## Exact dimensions
 
 | Field | Values | Interpretation |

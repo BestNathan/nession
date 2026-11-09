@@ -54,6 +54,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      macos_count: ${{ steps.macos-select.outputs.count }}
     env:
       RUSTC_WRAPPER: ""
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
@@ -211,6 +213,28 @@ jobs:
             echo "- Cases: ${count}"
             echo "- Selection: ${selection_status} (not-applicable is not a Case Pass)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Gate the macOS runner on an actual macOS Case. Without this, every
+      # push queues a macOS job that selects nothing and holds the workflow
+      # concurrency group while the runner is slow or unavailable.
+      - name: Count macOS Cases for the platform job
+        id: macos-select
+        if: github.event_name != 'workflow_dispatch' && steps.select.outcome == 'success'
+        env:
+          ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
+          ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
+          ACCEPTANCE_PLATFORM: macos
+          DEPLOYMENT_BINDING_FILE: ${{ steps.deployment.outputs.binding }}
+        run: |
+          set -euo pipefail
+          node trusted/scripts/select-acceptance-cases.mjs select \
+            "workspace/e2e/acceptance/cases" \
+            "${RUNNER_TEMP}/acceptance-contracts" \
+            "${RUNNER_TEMP}/macos-selected-cases.json" \
+            "${RUNNER_TEMP}/macos-case-coverage.json"
+          echo "count=$(jq 'length' "${RUNNER_TEMP}/macos-selected-cases.json")" >> "${GITHUB_OUTPUT}"
 
       # #1974: only the trusted Main source-preparation step receives an
       # Actions read token. Original Worker/Publisher ZIPs are authenticated
@@ -409,10 +433,17 @@ jobs:
           retention-days: 90
 
   execute-macos:
+    needs: execute
     # macOS-native capabilities (Seatbelt) cannot be observed on the Linux
-    # runner. The trusted selector routes only `platform: macos` Cases here;
-    # an ordinary push runs both platform jobs. A manual dispatch targets one.
-    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'macos'
+    # runner. The trusted selector routes only `platform: macos` Cases here.
+    # Start the macOS runner only when the Linux preflight selected a macOS
+    # Case, or an explicit manual macOS dispatch asked for it; otherwise a
+    # queued macOS job would hold the workflow concurrency group for nothing.
+    if: |
+      always() && (
+        (github.event_name == 'workflow_dispatch' && inputs.platform == 'macos') ||
+        (github.event_name != 'workflow_dispatch' && needs.execute.outputs.macos_count != '0')
+      )
     # Current hosted Intel macOS labels are macos-15-intel / macos-26-intel;
     # macos-13 is retired (its jobs queue forever) and the arm64 configuration
     # is unavailable to this repository. The Case only needs cargo and
@@ -422,6 +453,10 @@ jobs:
     env:
       RUSTC_WRAPPER: ""
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
+      # macOS $TMPDIR is a long /var/folders/... path; the acceptance runtime
+      # derives its tmux socket name from it and exceeds the 103-byte unix
+      # socket limit. /tmp keeps the socket path short.
+      TMPDIR: /tmp
     steps:
       - name: Checkout trusted discovery tooling
         uses: actions/checkout@v4
@@ -570,6 +605,25 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         if: steps.select.outputs.count != '0'
         with: { cache-workspaces: "workspace", cache-all-crates: "true" }
+
+      # The full-stack-local runtime is provisioned even for a runtime-only
+      # Case, so the macOS job needs the same Web and Rust artifacts as the
+      # Ubuntu job before the batch starts.
+      - name: Install tmux
+        if: steps.select.outputs.count != '0'
+        run: brew install tmux
+
+      - name: Install Web preview dependencies
+        if: steps.select.outputs.count != '0'
+        run: cd workspace/web && npm ci
+
+      - name: Build Web
+        if: steps.select.outputs.count != '0'
+        run: cd workspace/web && npm run build
+
+      - name: Build Rust runtime
+        if: steps.select.outputs.count != '0'
+        run: cd workspace && cargo build -p nession-server -p nession-agent
 
       - name: Execute selected Cases in one job-scoped batch
         id: cases

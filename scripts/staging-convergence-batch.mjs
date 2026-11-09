@@ -145,21 +145,51 @@ export function verifyBatchIssue(issue,plan,comments=[],auditRuns=[]){
     declaration_digest:parsed.digest,
     approval_command:command,selected_ids:parsed.selectedIds};
 }
-export function findBatchIssue(plan){
+// The immutable integration commit is minted before any matching Issue can
+// exist. GitHub's creation-ordered REST inventory can stop once it crosses
+// that birth fence; scanning *all* historical Issues is not a bounded lookup.
+// A 15-minute cushion covers runner/GitHub clock skew without depending on
+// eventually consistent search indexing.
+export function batchIssueBirthFence(committerIso,now=Date.now()){
+  const born=Date.parse(committerIso);
+  if(!Number.isFinite(born)||born>now+5*60_000)
+    throw Error('untrusted integration commit time');
+  return born-15*60_000;
+}
+export function inspectBatchIssuePage(issues,identity,birthFence){
+  if(!Array.isArray(issues)||issues.length>100||
+    typeof identity!=='string'||!identity||!Number.isFinite(birthFence))
+    throw Error('untrusted bounded Issue inventory');
   const matches=[];
-  // REST enumeration is consistent; search indexing may lag issue creation.
+  let previous=Infinity;
+  for(const issue of issues){
+    const created=Date.parse(issue?.created_at);
+    if(!Number.isFinite(created)||created>previous)
+      throw Error('untrusted Issue creation order');
+    previous=created;
+    if(!issue.pull_request&&issue.body?.includes('<!-- '+identity+' -->'))
+      matches.push(issue);
+  }
+  return {matches,complete:issues.length<100||previous<birthFence};
+}
+export function findBatchIssue(plan){
+  // The controller validates this exact two-parent integration before lookup.
+  // An implausibly future-dated commit fails closed rather than making a
+  // creation-time search silently miss a preexisting Issue.
+  const fence=batchIssueBirthFence(git('show','-s','--format=%cI',plan.integration_head));
+  const matches=new Map();
   for(let page=1;page<=30;page++){
     const issues=api('repos/'+REPO+'/issues?state=all&sort=created&direction=desc&per_page=100&page='+page);
-    if(!Array.isArray(issues))throw Error('untrusted Issue inventory');
-    for(const issue of issues){
-      if(!issue.pull_request&&issue.body?.includes('<!-- '+plan.identity+' -->'))matches.push(issue);
+    const found=inspectBatchIssuePage(issues,plan.identity,fence);
+    for(const issue of found.matches){
+      if(!Number.isSafeInteger(issue.number)||issue.number<=0)
+        throw Error('invalid exact integration Issue identity');
+      matches.set(issue.number,issue);
     }
-    if(issues.length<100){
-      if(matches.length>1)throw Error('duplicate exact integration Issues');
-      return matches[0]||null;
-    }
+    if(matches.size>1)throw Error('duplicate exact integration Issues');
+    if(found.complete)return [...matches.values()][0]||null;
   }
-  throw Error('Issue inventory unbounded; refuse duplicate creation');
+  throw Error('recent Issue inventory unbounded; refuse duplicate creation');
 }
 export function ensureBatchIssue(plan){
   const prior=findBatchIssue(plan);
@@ -192,6 +222,28 @@ function selfTest(){
     newIds:[],regressionIds:['session-metadata'],removed:[],
     changedPaths:['scripts/release.mjs'],impact:{category:'mixed'},
     headIds:['session-metadata'],baseIds:['session-metadata']};
+  // A large historical repository is not a reason to scan its entire Issue
+  // history: only Issues created after the source integration can match.
+  const now=Date.parse('2026-11-09T06:10:00Z');
+  const fence=batchIssueBirthFence('2026-11-09T06:00:00Z',now);
+  assert.equal(fence,Date.parse('2026-11-09T05:45:00Z'));
+  assert.throws(()=>batchIssueBirthFence('invalid',now),/untrusted/);
+  assert.throws(()=>batchIssueBirthFence('2026-11-09T06:20:00Z',now),/untrusted/);
+  const dummy={created_at:'2026-11-09T05:50:00Z',body:'no exact marker'};
+  const recent=Array.from({length:100},(_,i)=>({...dummy,number:i+1}));
+  assert.equal(inspectBatchIssuePage(recent,'batch',fence).complete,false);
+  const expired=recent.map((i,index)=>index===99?
+    {...i,created_at:'2026-11-09T05:44:59Z'}:i);
+  assert.equal(inspectBatchIssuePage(expired,'batch',fence).complete,true);
+  const matched=inspectBatchIssuePage([{
+    number:3,created_at:'2026-11-09T06:04:00Z',
+    body:'<!-- batch -->',state:'closed'
+  }],'batch',fence);
+  assert.equal(matched.matches[0].number,3,'closed exact identities also block duplicates');
+  assert.throws(()=>inspectBatchIssuePage([
+    {created_at:'2026-11-09T05:40:00Z'},
+    {created_at:'2026-11-09T06:00:00Z'}
+  ],'batch',fence),/creation order/);
   const body=issueBody(plan),parsed=parseIssueE2E(body,{requireDeclaration:true});
   assert.deepEqual(parsed.errors,[]);
   const issue={number:123,state:'open',title:'Requirement: exact integration',

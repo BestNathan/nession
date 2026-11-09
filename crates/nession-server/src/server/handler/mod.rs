@@ -109,6 +109,8 @@ pub struct ConnectionHandler {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    /// Server-owned global EROFS image manager (#3022).
+    image_manager: Arc<crate::image::ImageManager>,
     /// Database handle for quick-command CRUD (issue #95, part 3).
     db: Arc<crate::db::Database>,
     config: ConnectionHandlerConfig,
@@ -165,6 +167,7 @@ impl Clone for ConnectionHandler {
             client_registry: Arc::clone(&self.client_registry),
             web_client_registry: Arc::clone(&self.web_client_registry),
             env_service: Arc::clone(&self.env_service),
+            image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
             // Shared, not connection-local: the ledger is the Server's, and a
             // clone that took a copy of it would be a clone that could not mint.
@@ -204,6 +207,8 @@ pub struct ConnectionHandlerDeps {
     pub client_registry: Arc<ClientRegistry>,
     pub web_client_registry: Arc<WebClientRegistry>,
     pub env_service: Arc<EnvService>,
+    /// Server-owned global EROFS image manager (#3022).
+    pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
     /// The P2P credential ledger (#1013).
     ///
@@ -225,6 +230,7 @@ impl ConnectionHandler {
             client_registry: deps.client_registry,
             web_client_registry: deps.web_client_registry,
             env_service: deps.env_service,
+            image_manager: deps.image_manager,
             db: deps.db,
             p2p_broker: deps.p2p_broker,
             config,
@@ -1365,6 +1371,7 @@ pub(crate) use routes::{dispatch_server, server_descriptors, unit_policy, SERVER
 use routes::{env_file_key, session_by_id, session_by_parts};
 
 mod control;
+mod image;
 mod project;
 mod relay;
 mod routes;
@@ -1387,6 +1394,10 @@ mod server_env_delete_v1;
 mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
+mod server_image_access_v1;
+mod server_image_build_v1;
+mod server_image_get_v1;
+mod server_image_list_v1;
 mod server_info_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;

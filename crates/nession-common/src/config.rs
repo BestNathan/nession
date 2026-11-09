@@ -103,6 +103,20 @@ pub struct ServerConfig {
     pub heartbeat_timeout_secs: u64,
     #[serde(default = "default_db_path")]
     pub db_path: String,
+    /// Content-addressed EROFS blob root (#3022). The Server is its only
+    /// writer; Projects only reference digests.
+    #[serde(default = "default_image_blob_dir")]
+    pub image_blob_dir: String,
+    /// Private workspace for Git checkout + `mkfs.erofs` builds (#3022).
+    #[serde(default = "default_image_build_dir")]
+    pub image_build_dir: String,
+    /// Maximum concurrent EROFS builds. Bounded so a burst of requests cannot
+    /// exhaust the host's disk or process table.
+    #[serde(default = "default_image_max_concurrent_builds")]
+    pub image_max_concurrent_builds: usize,
+    /// Lifetime of a Project-scoped blob access grant, in seconds.
+    #[serde(default = "default_image_access_token_expiry")]
+    pub image_access_token_expiry_secs: u64,
     /// How long a relayed terminal frame may wait for room in a client's
     /// outbound queue before the Server gives up on that client (#961).
     ///
@@ -296,6 +310,15 @@ impl ServerConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
         validate_terminal_web_font_size(self.terminal_web_font_size).map_err(anyhow::Error::msg)?;
+        if self.image_blob_dir.trim().is_empty() || self.image_build_dir.trim().is_empty() {
+            anyhow::bail!("image_blob_dir and image_build_dir must not be empty");
+        }
+        if !(1..=8).contains(&self.image_max_concurrent_builds) {
+            anyhow::bail!("image_max_concurrent_builds must be in [1, 8]");
+        }
+        if !(30..=3600).contains(&self.image_access_token_expiry_secs) {
+            anyhow::bail!("image_access_token_expiry_secs must be in [30, 3600]");
+        }
         self.mcp.validate_for_host(&self.auth_token, "auth_token")?;
         Ok(())
     }
@@ -334,6 +357,10 @@ impl Default for ServerConfig {
             heartbeat_interval_secs: default_heartbeat_interval(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
+            image_blob_dir: default_image_blob_dir(),
+            image_build_dir: default_image_build_dir(),
+            image_max_concurrent_builds: default_image_max_concurrent_builds(),
+            image_access_token_expiry_secs: default_image_access_token_expiry(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
             p2p_token_expiry_secs: default_p2p_token_expiry(),
@@ -371,6 +398,36 @@ fn default_heartbeat_interval() -> u64 {
 
 fn default_heartbeat_timeout() -> u64 {
     30
+}
+
+fn default_image_blob_dir() -> String {
+    crate::paths::server_dir()
+        .map(|dir| {
+            dir.join("images")
+                .join("blobs")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_else(|_| "images/blobs".to_string())
+}
+
+fn default_image_build_dir() -> String {
+    crate::paths::server_dir()
+        .map(|dir| {
+            dir.join("images")
+                .join("build")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_else(|_| "images/build".to_string())
+}
+
+fn default_image_max_concurrent_builds() -> usize {
+    2
+}
+
+fn default_image_access_token_expiry() -> u64 {
+    300
 }
 
 fn default_db_path() -> String {

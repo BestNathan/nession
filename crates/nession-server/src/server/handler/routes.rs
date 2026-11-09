@@ -171,4 +171,10 @@ server_routes!(handler, msg, payload;
     "server.project.create" => "server.project.create" => 1 => Inline => handler.handle_client_project_create(msg).await,
     "server.project.update" => "server.project.update" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_update(msg).await,
     "server.project.delete" => "server.project.delete" => 1 => Key(project_by_id(payload)) => handler.handle_client_project_delete(msg).await,
+    // Global image manager (#3022). Build is a bounded worker on the
+    // connection's inline lane; reads are queries; a grant is a small write.
+    "server.image.build" => "server.image.build" => 1 => Inline => handler.handle_client_image_build(msg).await,
+    "server.image.list" => "server.image.list" => 1 => Query => handler.handle_client_image_list(msg).await,
+    "server.image.get" => "server.image.get" => 1 => Query => handler.handle_client_image_get(msg).await,
+    "server.image.access" => "server.image.access" => 1 => Inline => handler.handle_client_image_access(msg).await,
 );

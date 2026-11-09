@@ -2080,6 +2080,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-erofs"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "nession-protocol",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "nession-git"
 version = "0.35.0"
 dependencies = [
@@ -2190,6 +2205,7 @@ dependencies = [
  "futures-util",
  "nession-agent",
  "nession-common",
+ "nession-erofs",
  "nession-mcp",
  "nession-protocol",
  "nession-runtime",

@@ -1,0 +1,220 @@
+//! Content-addressed blob bytes for immutable EROFS images (#3022).
+//!
+//! The digest is the name. A blob is written to a private temporary file,
+//! fsynced, and renamed into place, so a partial write is never visible under a
+//! digest. A second publication of the same digest reuses the existing bytes;
+//! different bytes never overwrite it.
+
+use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+
+use nession_protocol::contracts::image::v1::{is_valid_image_digest, IMAGE_DIGEST_PREFIX};
+
+/// The verified identity of one stored blob.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobDigest {
+    /// `sha256:<64 lowercase hex>`.
+    pub digest: String,
+    pub size_bytes: u64,
+    pub path: PathBuf,
+}
+
+/// A filesystem-backed content-addressed store.
+#[derive(Debug, Clone)]
+pub struct BlobStore {
+    root: PathBuf,
+}
+
+impl BlobStore {
+    /// Open (and create) a store rooted at `root`.
+    ///
+    /// The layout is `root/sha256/<hex>` and `root/.tmp`; a digest can never
+    /// escape the store because every path is derived from validated hex.
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
+        let root = root.into();
+        fs::create_dir_all(root.join("sha256"))
+            .with_context(|| format!("failed to create blob directory {}", root.display()))?;
+        fs::create_dir_all(root.join(".tmp"))
+            .with_context(|| format!("failed to create blob temp directory {}", root.display()))?;
+        Ok(Self { root })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The path for a validated digest.
+    pub fn path_for(&self, digest: &str) -> Result<PathBuf> {
+        if !is_valid_image_digest(digest) {
+            anyhow::bail!("invalid image digest");
+        }
+        let Some(hex) = digest.strip_prefix(IMAGE_DIGEST_PREFIX) else {
+            anyhow::bail!("invalid image digest");
+        };
+        Ok(self.root.join("sha256").join(hex))
+    }
+
+    /// Whether a blob with this digest exists.
+    pub fn contains(&self, digest: &str) -> Result<bool> {
+        Ok(self.path_for(digest)?.is_file())
+    }
+
+    /// The size of a stored blob.
+    pub fn size(&self, digest: &str) -> Result<u64> {
+        let path = self.path_for(digest)?;
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("blob for {digest} is not readable: {}", path.display()))?;
+        Ok(metadata.len())
+    }
+
+    /// Open a stored blob for streaming.
+    pub fn open(&self, digest: &str) -> Result<File> {
+        let path = self.path_for(digest)?;
+        File::open(&path).with_context(|| format!("blob for {digest} is not readable"))
+    }
+
+    /// Publish `source` atomically.
+    ///
+    /// The returned digest is computed from the bytes actually stored, not from
+    /// a caller claim. If the destination already exists, those bytes are
+    /// reused: identical content is an idempotent replay; different content can
+    /// never land under a digest because the digest is its hash.
+    pub fn put_file(&self, source: &Path) -> Result<BlobDigest> {
+        let mut reader = BufReader::new(
+            File::open(source)
+                .with_context(|| format!("failed to open build output {}", source.display()))?,
+        );
+        let mut hasher = Sha256::new();
+        let temp = self
+            .root
+            .join(".tmp")
+            .join(format!("blob-{}", uuid::Uuid::new_v4()));
+        let mut writer = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)
+            .with_context(|| format!("failed to create blob temp file {}", temp.display()))?;
+        let mut size = 0_u64;
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .context("failed to read build output")?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(buffer.get(..read).unwrap_or_default());
+            writer
+                .write_all(buffer.get(..read).unwrap_or_default())
+                .context("failed to write blob")?;
+            size += read as u64;
+        }
+        writer.sync_all().context("failed to fsync blob")?;
+        drop(writer);
+
+        let hex = format!("{:x}", hasher.finalize());
+        let digest = format!("{IMAGE_DIGEST_PREFIX}{hex}");
+        let destination = self.path_for(&digest)?;
+        if destination.exists() {
+            let existing = fs::metadata(&destination)
+                .with_context(|| format!("failed to stat {}", destination.display()))?;
+            if existing.len() != size {
+                let _ = fs::remove_file(&temp);
+                anyhow::bail!("existing blob for {digest} has a different size");
+            }
+            let _ = fs::remove_file(&temp);
+        } else {
+            fs::rename(&temp, &destination).with_context(|| {
+                format!(
+                    "failed to publish blob {} as {}",
+                    temp.display(),
+                    destination.display()
+                )
+            })?;
+        }
+        Ok(BlobDigest {
+            digest,
+            size_bytes: size,
+            path: destination,
+        })
+    }
+
+    /// Recompute and compare the digest of a stored blob.
+    ///
+    /// Used by readers and tests before bytes are offered as ready; a store that
+    /// lost or mutated bytes is a failure, not a warning.
+    pub fn verify(&self, digest: &str) -> Result<()> {
+        let mut file = self.open(digest)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer).context("failed to read blob")?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(buffer.get(..read).unwrap_or_default());
+        }
+        let actual = format!("{IMAGE_DIGEST_PREFIX}{:x}", hasher.finalize());
+        if actual != digest {
+            anyhow::bail!("blob digest mismatch: expected {digest}, stored bytes hash to {actual}");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn file_with(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = dir.join(name);
+        let mut file = File::create(&path).unwrap();
+        file.write_all(bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn storing_identical_bytes_reuses_one_physical_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let input = file_with(dir.path(), "image.bin", b"immutable image bytes");
+        let first = store.put_file(&input).unwrap();
+        let second = store.put_file(&input).unwrap();
+        assert_eq!(first.digest, second.digest);
+        assert_eq!(first.path, second.path);
+        assert_eq!(first.size_bytes, 21);
+        assert_eq!(
+            fs::read_dir(dir.path().join("store/sha256"))
+                .unwrap()
+                .count(),
+            1
+        );
+        store.verify(&first.digest).unwrap();
+    }
+
+    #[test]
+    fn a_different_input_gets_a_different_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let a = file_with(dir.path(), "a.bin", b"a");
+        let b = file_with(dir.path(), "b.bin", b"b");
+        assert_ne!(
+            store.put_file(&a).unwrap().digest,
+            store.put_file(&b).unwrap().digest
+        );
+    }
+
+    #[test]
+    fn a_corrupted_blob_fails_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let input = file_with(dir.path(), "image.bin", b"original");
+        let stored = store.put_file(&input).unwrap();
+        fs::write(&stored.path, b"tampered").unwrap();
+        assert!(store.verify(&stored.digest).is_err());
+    }
+}

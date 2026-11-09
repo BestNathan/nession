@@ -21,9 +21,9 @@ on:
         required: false
         type: boolean
         default: false
-  # React to an exact owner/attested batch approval immediately. The comment
-  # is only a wake-up signal: trusted main replans and rechecks every SHA,
-  # Issue declaration, run, and protected merge qualification independently.
+  # Permit an owner-only no-approval recheck or exact source-bound approval.
+  # Comments are wake-up signals only; the planner independently authenticates
+  # every SHA, Issue declaration, approval, check and protected merge.
   issue_comment:
     types: [created]
 
@@ -39,6 +39,7 @@ concurrency:
 
 jobs:
   converge:
+    # The no-approval recheck wakes the same fail-closed controller.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
@@ -51,7 +52,10 @@ jobs:
             (
               github.actor == github.repository_owner &&
               github.event.comment.user.type == 'User' &&
-              startsWith(github.event.comment.body, '/approve-staging-convergence ')
+              (
+                startsWith(github.event.comment.body, '/approve-staging-convergence ') ||
+                github.event.comment.body == '/run-staging-convergence'
+              )
             ) ||
             (
               github.actor == 'github-actions[bot]' &&

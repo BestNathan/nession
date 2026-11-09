@@ -188,6 +188,16 @@ Historical four-column Reports (`Criterion | Stage | Result | Evidence`) remain 
 
 Results are `Pending`, `Pass`, `Fail`, or justified `N/A`; infrastructure errors are separately recorded.
 
+### Optional Agent source declaration
+
+When an existing `method: agent` SC needs exact files on an orphan branch,
+write an `## Acceptance Sources` section with criterion, allowlisted
+branch, full commit SHA and exact file paths. The executable grammar and
+budgets belong to `scripts/acceptance-sources.mjs`; see
+[Acceptance SC format](../../../docs/architecture/acceptance-sc-format.md).
+Do not encode sources as extra `Acceptance Plan` keys, broaden the Agent
+tool set, or treat source presence as proof of publication or deployed behavior.
+
 ## 4. Good Success Criteria
 
 A criterion states an externally verifiable outcome, not an implementation todo.
