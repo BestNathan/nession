@@ -59,6 +59,29 @@ attested source SHA and must not be called live deployed-environment E2E.
 Remote Case execution remains disabled until its trusted read-only collector,
 profile admission and evidence ingestion are actually implemented.
 
+## Job-owned GOST tunnel and fault cleanup
+
+`scripts/ci/deploy-identity-tunnel.sh` is the single lifecycle owner for
+`Deploy / Identity` on the pinned Ubuntu runner. It refuses a preexisting
+`192.168.2.162/32` loopback alias instead of borrowing it, creates an
+explicit owned-alias marker only after successful `ip addr add`, and starts
+GOST directly as the job user (6443 is unprivileged). The PID marker binds
+the executable, approved listener argument and Linux /proc start-ticks to
+protect against PID reuse; cleanup never broad-kills an unrelated process.
+The workflow's `if: always()` step invokes the same owner for shutdown
+after failure, timeout or ordinary completion; `start` also self-cleans if
+startup fails. The script removes only its job-owned alias, tunnel, temporary
+kubeconfig, observations and downloaded provenance. A failed privileged alias
+inspection is an Error, not permission to delete an unverified address.
+
+The existing `deployment-identity-selftest` Gate tests actual isolated
+sleep subprocess signal/termination, PID replay rejection, malformed markers,
+unowned subprocess and file preservation, owned-alias cleanup and idempotent
+retries. These are **local lifecycle proofs**, not substitute evidence for
+an actual cancelled Actions run or runner destruction. An independent
+cancel/timeout run must still show job cleanup or hosted runner teardown
+before SC-05 is asserted from infrastructure.
+
 ## Read-only remote-staging observation (implementation boundary)
 
 The existing main-controlled `Deploy / Identity` job now invokes
