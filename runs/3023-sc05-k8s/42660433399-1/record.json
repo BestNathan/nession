@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "3023-sc05-k8s",
+  "source_sha": "2a222998e5bc134fb77ad6dc06f2e828fec7e7e1",
+  "source_digest": "a17dc9d85b31314451b323477726159e7f87642a5ec88fd6f0f407f3aef8e0e1",
+  "entry": "run.mjs",
+  "workflow": {
+    "id": 42660433399,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42660433399",
+    "event": "push",
+    "branch": "task/3023-sc05-k8s",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-09T17:00:57.373Z",
+    "finished_at": "2026-11-09T17:02:16.267Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "k8s_pod_pvc_recreation_fixture",
+      "issue": 3023,
+      "source_sha": "2a222998e5bc134fb77ad6dc06f2e828fec7e7e1",
+      "cluster": {
+        "kind_version": "kind v0.25.0 go1.22.9 linux/amd64",
+        "kubernetes": "v1.31.2",
+        "node": "sc05-control-plane",
+        "node_kind": "v1.31.2",
+        "kernel": "7.0.0-1017-azure"
+      },
+      "pvc": {
+        "name": "sc05-pvc",
+        "uid": "4a26bf67-9c13-4cac-bdd1-b0e6e42483c4",
+        "phase": "Bound",
+        "pv": "sc05-pv",
+        "pv_uid": "9c47abb3-f35d-405c-90a9-0410312bdd2a",
+        "volume": "sc05-pv"
+      },
+      "pods": {
+        "first": {
+          "from_cache": false,
+          "pod_uid": "7e980c48-4444-4f97-8acf-40e1c0d8402e",
+          "sha256": "abda3c5137f62eca5c77c825a31ba1b747f7ba05f34d1b922c834ed2e2b76d1f",
+          "size": 266240,
+          "name": "sc05-agent-1"
+        },
+        "second": {
+          "from_cache": true,
+          "pod_uid": "7ff54b46-9c41-4a78-a0d6-632a223e66c7",
+          "sha256": "abda3c5137f62eca5c77c825a31ba1b747f7ba05f34d1b922c834ed2e2b76d1f",
+          "size": 266240,
+          "name": "sc05-agent-2"
+        }
+      },
+      "blob": {
+        "format": "EROFS",
+        "packaging": {
+          "timestamp": 0,
+          "uuid": "11111111-1111-4111-8111-111111111111",
+          "block_size": 4096
+        },
+        "sha256": "abda3c5137f62eca5c77c825a31ba1b747f7ba05f34d1b922c834ed2e2b76d1f",
+        "size": 266240,
+        "path": "sha256/abda3c5137f62eca5c77c825a31ba1b747f7ba05f34d1b922c834ed2e2b76d1f"
+      },
+      "transfers": {
+        "http_get_blob": 0,
+        "first_pod_from_cache": false,
+        "second_pod_from_cache": true,
+        "first_pod_bytes": 266240,
+        "second_pod_bytes": 266240
+      },
+      "assertions": {
+        "first_pod_downloaded": true,
+        "second_pod_reused_cache": true,
+        "same_digest_after_recreation": true,
+        "same_bytes_after_recreation": true,
+        "pods_are_distinct": true,
+        "exactly_one_blob_get": false,
+        "pvc_bound": true
+      },
+      "result": "fail",
+      "error": "fixture assertions failed: exactly_one_blob_get"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/2a222998e5bc134fb77ad6dc06f2e828fec7e7e1/3023-sc05-k8s.json"
+}

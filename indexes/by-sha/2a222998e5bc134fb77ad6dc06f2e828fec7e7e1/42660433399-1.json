@@ -1,0 +1,8 @@
+{
+  "task_id": "3023-sc05-k8s",
+  "source_sha": "2a222998e5bc134fb77ad6dc06f2e828fec7e7e1",
+  "run_id": 42660433399,
+  "run_attempt": 1,
+  "record_path": "runs/3023-sc05-k8s/42660433399-1/record.json",
+  "source_path": "sources/2a222998e5bc134fb77ad6dc06f2e828fec7e7e1/3023-sc05-k8s.json"
+}
