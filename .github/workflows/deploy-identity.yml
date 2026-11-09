@@ -22,11 +22,18 @@ concurrency:
 
 jobs:
   attest:
+    # The existing relay/cluster secrets must never run on a dispatch from
+    # another branch, fork, or repository. Environment protection rules are
+    # configured in GitHub and must restrict this environment to trusted main.
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    environment:
+      name: nession-staging-identity
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -74,40 +81,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${GOST_RELAY_URL:-}" ]] || { echo "::error::GOST_RELAY_URL unavailable as repository-level secret"; exit 1; }
-          [[ -n "${KUBE_CONFIG_CI:-}" ]] || { echo "::error::KUBE_CONFIG_CI unavailable as repository-level secret"; exit 1; }
-          echo "Both CI secrets are non-empty and available to this job. No secret values logged."
+          [[ -n "${GOST_RELAY_URL:-}" ]] || { echo "::error::GOST_RELAY_URL unavailable for the protected identity environment"; exit 1; }
+          [[ -n "${KUBE_CONFIG_CI:-}" ]] || { echo "::error::KUBE_CONFIG_CI unavailable for the protected identity environment"; exit 1; }
+          echo "Required CI secrets are available. Their values are not logged."
 
       - name: Install gost and check kubectl client
         shell: bash
         run: |
           set -euo pipefail
           # Pinned to the server-side gost major.minor (relay+wss protocol).
-          curl -sSL --retry 3 -o /tmp/gost.tgz https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
-          tar -xzf /tmp/gost.tgz -C /tmp gost
-          chmod +x /tmp/gost
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod +x "$RUNNER_TEMP/gost"
           command -v kubectl >/dev/null || { echo "::error::kubectl not installed on runner"; exit 1; }
 
-      - name: Establish gost tunnel via HK relay (do not expose configuration)
+      - name: Establish owned gost tunnel via existing HK relay
         env:
           GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
         shell: bash
-        run: |
-          set -euo pipefail
-          # The CI kubeconfig targets https://192.168.2.162:6443. Alias that
-          # address onto lo so the API-server TLS SAN check passes unchanged,
-          # then forward it through the authenticated relay+wss entry on HK.
-          sudo ip addr add 192.168.2.162/32 dev lo
-          sudo nohup /tmp/gost -L tcp://192.168.2.162:6443/192.168.2.162:6443 -F "$GOST_RELAY_URL" >/tmp/gost-ci.log 2>&1 &
-          for i in $(seq 1 15); do
-            if curl -sk -m 2 https://192.168.2.162:6443/healthz >/dev/null 2>&1; then
-              echo "gost tunnel to the k8s API is up (relay endpoint redacted)."
-              exit 0
-            fi
-            sleep 2
-          done
-          sed -E 's#//[^/@]*@#//<redacted>@#g' /tmp/gost-ci.log || true
-          echo "::error::gost tunnel to the k8s API is not ready"; exit 1
+        run: bash scripts/ci/deploy-identity-tunnel.sh start
 
       - name: Verify read-only Kubernetes identity
         env:
@@ -123,10 +115,13 @@ jobs:
             printf '%s' "$KUBE_CONFIG_CI" | base64 -d > "$KUBECONFIG"
           fi
           chmod 600 "$KUBECONFIG"
-          kubectl --request-timeout=20s auth can-i get deployments -n "$NAMESPACE" --quiet \
-            || { echo "::error::kubeconfig cannot read deployments in $NAMESPACE"; exit 1; }
-          # Identity observation must never carry secret or mutation authority.
-          for action in "get secrets" "list secrets" "create deployments" "delete pods" "create pods/exec"; do
+          for resource in deployments pods; do
+            kubectl --request-timeout=20s auth can-i get "$resource" -n "$NAMESPACE" --quiet \
+              || { echo "::error::kubeconfig cannot read $resource in $NAMESPACE"; exit 1; }
+          done
+          # Positive namespace reads do not authorize cluster-wide discovery,
+          # secret access, exec, writes or lateral movement.
+          for action in "get secrets" "list secrets" "create deployments" "delete pods" "create pods/exec" "get nodes" "list namespaces"; do
             if kubectl --request-timeout=20s auth can-i $action -n "$NAMESPACE" --quiet; then
               echo "::error::CI kubeconfig is overprivileged ($action). Provision a read-only service account."; exit 1
             fi
@@ -187,17 +182,34 @@ jobs:
             --out "$RUNNER_TEMP/deployment-attestation.json"
           cat "$RUNNER_TEMP/deployment-attestation.json" >> "$GITHUB_STEP_SUMMARY"
 
+      # Runs only on trusted main with the existing read-only tunnel and
+      # kubeconfig. Never execute source-SHA Cases/Playwright or arbitrary
+      # scripts with the connection credentials.
+      - name: Collect bounded remote-staging observations through existing tunnel
+        shell: bash
+        env:
+          KUBECONFIG: ${{ runner.temp }}/nession-ci-kubeconfig
+        run: |
+          set -euo pipefail
+          node scripts/remote-staging-observe.mjs run \
+            --profile remote-staging \
+            --attestation "$RUNNER_TEMP/deployment-attestation.json" \
+            --overlay-path "$OVERLAY_PATH" \
+            --overlay "$RUNNER_TEMP/overlay.yaml" \
+            --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
+            --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
+            --out "$RUNNER_TEMP/deployment-attestation.json"
+          # A remote observation is a zero-verdict identity/readiness fact, not
+          # an Acceptance Case Pass. Trust/source provenance is bound on ingest.
+          echo "Two real read-only Staging snapshots observed; Acceptance evaluation remains null." >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: nession-deployment-attestation-${{ github.event.inputs.environment }}
           path: ${{ runner.temp }}/deployment-attestation.json
           retention-days: 90
 
-      - name: Remove temporary tunnel and kubeconfig
+      - name: Remove only job-owned tunnel, alias and temporary evidence
         if: always()
         shell: bash
-        run: |
-          sudo pkill -f 'gost -L tcp://192.168.2.162:6443' >/dev/null 2>&1 || true
-          sudo ip addr del 192.168.2.162/32 dev lo >/dev/null 2>&1 || true
-          rm -f "$RUNNER_TEMP/nession-ci-kubeconfig"
-          echo "Temporary tunnel and kubeconfig files cleared."
+        run: bash scripts/ci/deploy-identity-tunnel.sh cleanup

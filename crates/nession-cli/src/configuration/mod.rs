@@ -411,6 +411,38 @@ pub const AGENT_FIELDS: &[FieldSpec] = &[
         key: "sandbox.launch_timeout_secs",
         kind: FieldKind::U64,
     },
+    FieldSpec {
+        key: "mcp.enabled",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
+        key: "mcp.path",
+        kind: FieldKind::String,
+    },
+    FieldSpec {
+        key: "mcp.listen_address",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.auth_token",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tls_cert_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tls_key_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tool_timeout_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "mcp.max_concurrent_calls",
+        kind: FieldKind::UsizeNonZero,
+    },
 ];
 
 /// Every editable `ServerConfig` field.
@@ -474,6 +506,38 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         key: "logging.retention_days",
         kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "mcp.enabled",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
+        key: "mcp.path",
+        kind: FieldKind::String,
+    },
+    FieldSpec {
+        key: "mcp.listen_address",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.auth_token",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tls_cert_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tls_key_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "mcp.tool_timeout_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "mcp.max_concurrent_calls",
+        kind: FieldKind::UsizeNonZero,
     },
 ];
 
@@ -949,7 +1013,7 @@ mod tests {
         let agent_table = agent.as_table().expect("agent table");
         for key in agent_table
             .keys()
-            .filter(|key| *key != "logging" && *key != "sandbox")
+            .filter(|key| *key != "logging" && *key != "sandbox" && *key != "mcp")
         {
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == key),
@@ -962,6 +1026,17 @@ mod tests {
             .expect("agent sandbox table");
         for key in agent_sandbox.keys() {
             let dotted = format!("sandbox.{key}");
+            assert!(
+                AGENT_FIELDS.iter().any(|field| field.key == dotted),
+                "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
+            );
+        }
+        let agent_mcp = agent_table
+            .get("mcp")
+            .and_then(toml::Value::as_table)
+            .expect("agent mcp table");
+        for key in agent_mcp.keys() {
+            let dotted = format!("mcp.{key}");
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == dotted),
                 "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
@@ -981,10 +1056,24 @@ mod tests {
 
         let server = toml::Value::try_from(ServerConfig::default()).expect("server defaults");
         let server_table = server.as_table().expect("server table");
-        for key in server_table.keys().filter(|key| *key != "logging") {
+        for key in server_table
+            .keys()
+            .filter(|key| *key != "logging" && *key != "mcp")
+        {
             assert!(
                 SERVER_FIELDS.iter().any(|field| field.key == key),
                 "ServerConfig field '{key}' is missing from SERVER_FIELDS"
+            );
+        }
+        let server_mcp = server_table
+            .get("mcp")
+            .and_then(toml::Value::as_table)
+            .expect("server mcp table");
+        for key in server_mcp.keys() {
+            let dotted = format!("mcp.{key}");
+            assert!(
+                SERVER_FIELDS.iter().any(|field| field.key == dotted),
+                "ServerConfig field '{dotted}' is missing from SERVER_FIELDS"
             );
         }
         let server_logging = server_table

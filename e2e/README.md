@@ -150,6 +150,21 @@ and commit approved differences. The workflow uses
 `--update-snapshots=all`; an unqualified update may silently leave
 small-but-real drift below the comparison tolerance.
 
+## Deployed Staging: read-only observation, not a remote Case
+
+`Deploy / Identity` runs `scripts/remote-staging-observe.mjs` on trusted
+`main` through the existing GOST/WSS Kubernetes API tunnel. The
+`remote-staging` observation profile reads two bounded Deployment/Pod
+snapshots and persists a sanitized, source/digest/UID-bound
+`remote_observation` within the canonical deployment Run Store record. Its
+`evaluation` is always `null` and the source workflow has no Issue-write
+permission.
+
+The `./e2e/run acceptance` CLI and `Acceptance / Cases` still admit only
+`full-stack-local` execution: no target-source Case or Playwright code may
+run with tunnel credentials. Do not label a successful deployed observation a
+remote Application E2E Pass; see [the remote profile contract](../docs/architecture/e2e-remote-profiles.md).
+
 ## Observation is not acceptance
 
 `e2e/runner/collectors/opt-in-observations.cjs` is **default-disabled**.

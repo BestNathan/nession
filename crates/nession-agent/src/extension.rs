@@ -1012,23 +1012,30 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // The core and peer-to-peer lists share five ids (`session.create`,
-        // `session.kill`, `session.capture-preview`, and since #2789
-        // `session.metadata.get` / `session.metadata.update`), so the union is
-        // one entry per id — the derived assertion below states that relation.
+        // The core and peer-to-peer lists share six ids (`session.create`,
+        // `session.kill`, `session.capture-preview`, `session.metadata.get` /
+        // `session.metadata.update` since #2789, and `session.list` since #565,
+        // where the Server-hosted MCP node tools ask the Agent over the control
+        // channel for the same answer a direct client gets over P2P), so the
+        // union is one entry per id — the derived assertion below states that
+        // relation.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 5,
-            "the union is by id, so the five shared units are counted once"
+            core.len() + p2p.len() - 6,
+            "the union is by id, so the six shared units are counted once"
         );
-        // Three, not four: `session.list` stopped being shared when the core
-        // side became `session.report`. The two arms answer different questions
-        // — the registry's five-field report against the full `SessionInfo` —
-        // so they are two protocols, and only the exception needs justifying.
+        // The literal count is unchanged by #565: `session.list` was already in
+        // the peer-to-peer list, so adding its control-channel arm grows both
+        // `core` and the overlap by one. It is asserted separately so a change
+        // that silently drops or invents a unit still fails loudly.
+        //
+        // `session.list` did *not* become a new capability here: it answers the
+        // same `SessionListResponse` question on both transports, which is why
+        // the id is shared and the wire name is the same.
         //
         // Both this and the derived count above have moved more than once, which
         // is the argument for keeping the two together: the derived one catches
