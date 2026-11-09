@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42621753556,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3075-sidebar-navigation-rail",
+    "target_sha": "fc8e2b718227ccd84d93e9826204c067e6d4e8d3",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42621753556",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3988f2f16cfeafef5f2659e636d03251297ba1ad83b5060cb95b6aadc5f9484a"
+  },
+  "record": "runs/2026-11-09/42621753556-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "0c6f5aa84b9bd57c59bf69a396904cece2d208506385a055ab3686c68fb0e6a8"
+}
