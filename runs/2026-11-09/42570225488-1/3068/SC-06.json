@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a2aee6c6d3a8bd55a1e0871abb44cafc7371f1212fcd1d772d6e336cbe2e49d3",
+  "run_id": 42570225488,
+  "run_attempt": 1,
+  "issue": 3068,
+  "criterion": "SC-06",
+  "criterion_text": "Historical GitOps acceptance remains usable through the explicit compatibility path, but structured/no-source Issues neither fall through to an implicit whole-branch archive nor snapshot unrelated Issue comments.",
+  "stage": "post-merge",
+  "target_sha": "185cd5fbcf9934a5ad4adeccbdca75ec2f178262",
+  "contract_sha256": "ad327c779c03088b22a427d9302a208a61d80dfe9591a986a4942180586cab94",
+  "case_revision": "185cd5fbcf9934a5ad4adeccbdca75ec2f178262",
+  "case_tree_sha": "18df8a8f4d30918c229ccddcf80c749be7087a10",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T06:00:24.392Z",
+  "finished_at": "2026-11-09T06:00:30.628Z",
+  "duration_ms": 6235,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Main workflow routes structured source staging without losing historical GitOps behavior",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact main SHA 185cd5fbcf9934a5ad4adeccbdca75ec2f178262: main-owned router prioritizes structured sources; historical pre-merge GitOps comment/archive compatibility is cutoff-bounded and source selftests pass"
+        }
+      ],
+      "duration_ms": 320,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42570225488,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "185cd5fbcf9934a5ad4adeccbdca75ec2f178262",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42570225488",
+    "record_path": "runs/2026-11-09/42570225488-1/3068/SC-06.json",
+    "source_result_sha256": "9d985b6621e38608b3c0a5378e1077726657cd2e5657523ac9b4ea5e4ce2cda7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42570225488-1",
+    "sha256": "9d985b6621e38608b3c0a5378e1077726657cd2e5657523ac9b4ea5e4ce2cda7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42570225488",
+    "durability": "time-limited; object archival not configured"
+  }
+}
