@@ -59,6 +59,28 @@ attested source SHA and must not be called live deployed-environment E2E.
 Remote Case execution remains disabled until its trusted read-only collector,
 profile admission and evidence ingestion are actually implemented.
 
+## Bounded Staging rollout reconciliation (read-only)
+
+A freshly published GitOps revision is not immediate proof that its Pod is
+Running. The trusted `Deploy / Identity` source attempts a read-only
+`kubectl get deployments/pods` refresh for at most 18 attempts separated by
+10 seconds while the **canonical** `deployment-identity-collect.mjs` reports
+an allowlisted temporary rollout state (exit 75). A wrong environment,
+forged source, ambiguous identity, invalid namespace or mismatched immutable
+image digest remains a non-retryable Error. No attempt creates a Run Record
+until *all three* roles are verified as Running/Ready and tied to the pinned
+GitOps revision and trusted build provenance.
+
+The workflow emits exactly one bounded attestation log receipt after success,
+then observes two additional live snapshots with `evaluation: null`. It
+re-fetches GitOps before the artifact upload to reject a branch revision that
+moved during observation. A timeout or changed desired revision has no
+successful artifact and always proceeds through job-owned GOST/alias cleanup.
+Only sanitized retry counters leave the runner's private temporary directory;
+stdout/stderr attempts are deleted by the lifecycle owner. This is
+eventual-consistency handling, **not** a relaxation of readiness, digest,
+source or environment identity requirements.
+
 ## Main-owned identity revalidation after verifier changes
 
 The existing `E2E / Staging Lanes` admission job already reads trusted GitOps

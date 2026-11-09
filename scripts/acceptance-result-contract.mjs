@@ -2,6 +2,8 @@
 // Owner: canonical Acceptance result contract. The trusted executor and the
 // Agent runner share this module so a structurally invalid model result is
 // rejected by exactly the same rule wherever it is first observed.
+import { validateSourceEvidence } from './acceptance-sources.mjs';
+
 const RESULTS = new Map([
   ['pass', 'Pass'],
   ['pending', 'Pending'],
@@ -59,6 +61,9 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     if (!expected.has(normalized.criterion)) throw new Error('unknown or wrong-stage criterion ' + normalized.criterion);
     if (seen.has(normalized.criterion)) throw new Error('duplicate criterion ' + normalized.criterion);
     seen.add(normalized.criterion);
+    if (String(source) === 'agent' || String(source).startsWith('agent-')) {
+      validateSourceEvidence(context, normalized);
+    }
     return normalized;
   });
   const missing = [...expected].filter((id) => !seen.has(id));
@@ -73,6 +78,7 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     deployment: context.deployment,
     source: String(source || 'unknown'),
     selected_criteria: [...expected],
+    ...(context.source_manifest ? { source_manifest_sha256: context.source_manifest.sha256 } : {}),
     criteria,
   };
 }
