@@ -70,6 +70,58 @@ export function fixtureSessionMetadataScenario(search: string): FixtureSessionMe
   return 'legacy';
 }
 
+function fixtureAttachScenario(search: string): 'normal' | 'long' | 'relay' | 'offline' {
+  const requested = new URLSearchParams(search).get('attach');
+  if (requested === 'long' || requested === 'relay' || requested === 'offline') {
+    return requested;
+  }
+  return 'normal';
+}
+
+const FIXTURE_LONG_ADDRESS =
+  'wss://gateway-01.example.test:8443/nession/connection/candidate/sessions/dev-session/long-readable-address/endpoint';
+
+/** The deterministic attach reply a fixture Case renders (#3089). */
+function fixtureAttachInfo(
+  state: FixtureSessionMetadataTransport,
+  payload: Record<string, unknown>,
+): unknown {
+  if (state.attachScenario === 'offline') {
+    throw new Error('Agent is offline');
+  }
+  const sessionId = String(payload.session_id ?? 'agent:session');
+  const sessionName = sessionId.split(':').slice(1).join(':') || sessionId;
+  const relay = state.attachScenario === 'relay';
+  const long = state.attachScenario === 'long';
+  return {
+    mode: relay ? 'relay' : 'p2p',
+    session_id: sessionId,
+    session_name: sessionName,
+    connection_token: relay ? undefined : 'fixture-attach-token',
+    terminal_cols: 96,
+    addresses: [
+      {
+        url: long
+          ? FIXTURE_LONG_ADDRESS
+          : 'wss://agent.example.test:8443/ws/session',
+        label: 'Direct / private network',
+        network_type: 'lan',
+        priority: 0,
+        status: relay ? 'reachable' : 'unknown',
+        rtt_ms: relay ? 12 : undefined,
+      },
+      {
+        url: 'wss://relay.example.test/attach',
+        label: 'Relay endpoint',
+        network_type: 'tunnel',
+        priority: 1,
+        status: relay ? 'unreachable' : 'unknown',
+        rtt_ms: relay ? 48 : undefined,
+      },
+    ],
+  };
+}
+
 function emptyMetadata(): SessionMetadata {
   return {
     revision: 0,
@@ -202,6 +254,8 @@ export interface FixtureSessionProjectControls {
 
 interface FixtureSessionMetadataTransport {
   scenario: FixtureSessionMetadataScenario;
+  /** The attach-info answer a #3089 presentation Case reads. */
+  attachScenario: 'normal' | 'long' | 'relay' | 'offline';
   ownership: boolean;
   store: Map<string, SessionMetadata>;
   conflictEscalated: boolean;
@@ -360,6 +414,13 @@ function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSu
           revision: projectId === null ? 0 : 1,
         }) as Promise<T>;
       }
+      if (type === 'server.session.attach') {
+        try {
+          return Promise.resolve(fixtureAttachInfo(state, payload)) as Promise<T>;
+        } catch (error) {
+          return Promise.reject(error) as Promise<T>;
+        }
+      }
       return Promise.reject(
         new Error(`fixture session metadata surface does not answer ${type}`),
       );
@@ -419,6 +480,7 @@ export function createFixtureSessionMetadataHarness(
   const scenario = fixtureSessionMetadataScenario(search);
   const state: FixtureSessionMetadataTransport = {
     scenario,
+    attachScenario: fixtureAttachScenario(search),
     ownership: isFixtureOwnershipScenario(scenario),
     store: new Map(scenario === 'legacy' ? [] : Object.entries(SEED)),
     // The conflict route changes the store once, standing in for the other

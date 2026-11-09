@@ -21,6 +21,7 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { EnvFileMultiSelect } from '@/capabilities/env';
 import { useCreateSessionForm } from '@/product/session/hooks/useCreateSessionForm';
 import type { Project, ProjectLocation } from '@/product/project/types';
+import { ProjectLocationDetails } from './CreateSessionParts';
 
 interface CreateSessionDialogProps {
   isOpen: boolean;
@@ -111,19 +112,25 @@ function ProjectLocationSelect({
           onValueChange={(value) => value && onIndexChange(Number(value))}
           disabled={disabled}
         >
-          <SelectTrigger id="project-location" className="w-full">
-            <span className="truncate">
-              {selectedLocation
-                ? `${selectedAgent ? agentDisplayName(selectedAgent) : selectedLocation.agent_id} · ${selectedLocation.path}`
-                : 'Select a location'}
-            </span>
+          {/* Agent and path are their own lines (#3089). The old single line
+              concatenated them, so a long directory could hide the Agent. */}
+          <SelectTrigger
+            id="project-location"
+            className="h-auto min-h-10 w-full py-2 [&>span]:min-w-0"
+            data-testid="project-location-trigger"
+          >
+            {selectedLocation ? (
+              <ProjectLocationDetails location={selectedLocation} agent={selectedAgent} showStatus />
+            ) : (
+              <span className="truncate">Select a location</span>
+            )}
           </SelectTrigger>
           <SelectContent>
             {locations.map((location, index) => {
               const agent = agents.find((candidate) => candidate.agent_id === location.agent_id);
               return (
                 <SelectItem key={`${location.agent_id}:${location.path}`} value={String(index)}>
-                  {agent ? agentDisplayName(agent) : location.agent_id} · {location.path}
+                  <ProjectLocationDetails location={location} agent={agent} />
                 </SelectItem>
               );
             })}
@@ -183,6 +190,8 @@ function SessionFields({
           onChange={setSelectedEnv}
           disabled={loading}
           emptyLabel="No env files — create one in Env Files"
+          /* The roomy dialog can show more than the old 160px nested list. */
+          listClassName="h-56"
         />
       </div>
     </>
@@ -208,8 +217,8 @@ export function CreateSessionDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[40rem]" data-testid="create-session-dialog">
+        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>
             {project ? `Create Session in “${project.name}”` : 'Create Session'}
           </DialogTitle>
@@ -242,10 +251,12 @@ export function CreateSessionDialog({
             loading={form.loading}
           />
           {form.error && (
-            <p className={cn('text-destructive', chromeSansRole('body'))}>{form.error}</p>
+            <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="create-session-error">
+              {form.error}
+            </p>
           )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={form.loading}>
+          <DialogFooter className="sticky bottom-0 z-10">
+            <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.loading}>
               Cancel
             </Button>
             <Button

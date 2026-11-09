@@ -21,20 +21,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CreateSessionDialog } from '@/product/session/components/CreateSessionDialog';
 import { projectsApi } from '@/product/project';
-import {
-  draftOf,
-  emptyProjectDraft,
-  hasSource,
-  normalizedLocations,
-  updatePayload,
-  validateProjectDraft,
-} from '@/product/project/model/projectDraft';
+import { updatePayload, draftOf } from '@/product/project/model/projectDraft';
+import { useProjectDraftForm } from '@/product/project/hooks/useProjectDraftForm';
 import { ProjectFormFields } from './ProjectFormFields';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { Agent } from '@/types';
-import type { Project, ProjectDraft } from '@/product/project/types';
+import type { Project } from '@/product/project/types';
 import type { ProjectDialogState } from '@/product/project/hooks/useProjectDialogs';
 
 
@@ -59,75 +53,41 @@ export function CreateProjectDialog({
   onCreated: (project: Project) => void;
   onChanged: () => Promise<void> | void;
 }) {
-  const [draft, setDraft] = useState<ProjectDraft>(emptyProjectDraft);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reset = useCallback(() => {
-    setDraft(emptyProjectDraft());
-    setBusy(false);
-    setError(null);
-  }, []);
-  useDialogReset(isOpen, reset);
-
-  const submit = async () => {
-    const invalid = validateProjectDraft(draft);
-    if (invalid) {
-      setError(invalid);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const project = await projectsApi.createProject({
-        name: draft.name.trim(),
-        description: draft.description?.trim() || undefined,
-        source: hasSource(draft)
-          ? {
-              repository_url: draft.source?.repository_url.trim() ?? '',
-              ref: draft.source?.ref.trim() ?? '',
-            }
-          : undefined,
-        locations: normalizedLocations(draft),
-        image_digest: draft.image_digest?.trim() || undefined,
-      });
-      await onChanged();
-      onCreated(project);
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Project could not be saved');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const form = useProjectDraftForm({
+    kind: 'create',
+    isOpen,
+    onChanged,
+    onSaved: onCreated,
+    onClose,
+  });
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[45rem]" data-testid="create-project-dialog">
+        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>Create Project</DialogTitle>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void submit();
+            void form.submit();
           }}
         >
           <ProjectFormFields
-            draft={draft}
-            onChange={setDraft}
+            draft={form.draft}
+            onChange={form.setDraft}
             agents={agents}
-            disabled={busy}
+            disabled={form.busy}
             idPrefix="project-create"
           />
-          <ErrorText error={error} />
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onClose()} disabled={busy}>
+          <ErrorText error={form.error} />
+          <DialogFooter className="sticky bottom-0 z-10">
+            <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
-            <Button type="submit" disabled={busy} data-testid="project-create-submit">
-              {busy ? 'Creating…' : 'Create Project'}
+            <Button type="submit" disabled={form.busy} data-testid="project-create-submit">
+              {form.busy ? 'Creating…' : 'Create Project'}
             </Button>
           </DialogFooter>
         </form>
@@ -230,67 +190,46 @@ export function ProjectSettingsDialog({
   onClose: () => void;
   onChanged: () => Promise<void> | void;
 }) {
-  const [draft, setDraft] = useState<ProjectDraft>(emptyProjectDraft);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reset = useCallback(() => {
-    setDraft(project ? draftOf(project) : emptyProjectDraft());
-    setBusy(false);
-    setError(null);
-  }, [project]);
-  useDialogReset(Boolean(project), reset);
+  const form = useProjectDraftForm({
+    kind: 'settings',
+    isOpen: Boolean(project),
+    project,
+    onChanged,
+    onSaved: () => undefined,
+    onClose,
+  });
 
   if (!project) {
     return null;
   }
 
-  const submit = async () => {
-    const invalid = validateProjectDraft(draft);
-    if (invalid) {
-      setError(invalid);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await projectsApi.updateProject(updatePayload(project, draft));
-      await onChanged();
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Project could not be saved');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[45rem]" data-testid="project-settings-dialog">
+        <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>Project settings</DialogTitle>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void submit();
+            void form.submit();
           }}
         >
           <ProjectFormFields
-            draft={draft}
-            onChange={setDraft}
+            draft={form.draft}
+            onChange={form.setDraft}
             agents={agents}
-            disabled={busy}
+            disabled={form.busy}
             idPrefix="project-settings"
           />
-          <ErrorText error={error} />
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onClose()} disabled={busy}>
+          <ErrorText error={form.error} />
+          <DialogFooter className="sticky bottom-0 z-10">
+            <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
-            <Button type="submit" disabled={busy} data-testid="project-settings-submit">
-              {busy ? 'Saving…' : 'Save'}
+            <Button type="submit" disabled={form.busy} data-testid="project-settings-submit">
+              {form.busy ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
         </form>

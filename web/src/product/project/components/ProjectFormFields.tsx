@@ -132,12 +132,14 @@ export function ProjectFormFields({
   agents,
   disabled,
   idPrefix,
+  locationsLayout = 'responsive',
 }: {
   draft: ProjectDraft;
   onChange: (next: ProjectDraft) => void;
   agents: Agent[];
   disabled: boolean;
   idPrefix: string;
+  locationsLayout?: 'responsive' | 'stacked';
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -159,6 +161,7 @@ export function ProjectFormFields({
         agents={agents}
         disabled={disabled}
         idPrefix={idPrefix}
+        layout={locationsLayout}
       />
       <ProjectImageField
         draft={draft}

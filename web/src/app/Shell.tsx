@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ShellDialogs } from '@/app/ShellDialogs';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { useShellState } from '@/app/useShellState';
-import { currentExperienceMode } from '@/app/experienceMode';
+import { currentExperienceMode, resolveExperienceMode } from '@/app/experienceMode';
 import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
 import { useSessionDetails } from '@/app/useSessionDetails';
 import { useProjectShell } from '@/app/useProjectShell';
@@ -71,6 +71,9 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const state = useShellState();
   const { data } = state;
   const experienceOverride = currentExperienceMode();
+  // One Experience decision for the whole shell: the composition and the
+  // operation surfaces it opens must not disagree about web vs app (#3089).
+  const experience = resolveExperienceMode(state.isWide, experienceOverride);
   const sessionDetails = useSessionDetails({
     agents: data.agents,
     staleAgentIds: data.staleAgents,
@@ -90,7 +93,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
     [data, state],
   );
 
-  const { projectShell, projectDialogs } = useProjectShell(state, handleSessionCreated);
+  const { projectShell, projectDialogs } = useProjectShell(state, handleSessionCreated, experience);
 
   const dialogs = (
     <>
@@ -101,6 +104,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
         onClose={sessionDetails.close}
       />
       <ShellDialogs
+        experience={experience}
         showCreateModal={data.showCreateModal}
         setShowCreateModal={data.setShowCreateModal}
         agents={data.agents}

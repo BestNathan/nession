@@ -15,6 +15,13 @@ interface EnvFileMultiSelectProps {
   disabled?: boolean;
   /** Shown when the file list is empty. */
   emptyLabel?: string;
+  /**
+   * The list's own scroll box height (#3089). A roomy dialog can show more
+   * than the original 160px; an App operation page passes `scroll={false}` so
+   * the page, not a nested box, is the one scroll owner.
+   */
+  listClassName?: string;
+  scroll?: boolean;
 }
 
 /**
@@ -29,6 +36,8 @@ export function EnvFileMultiSelect({
   onChange,
   disabled,
   emptyLabel = 'No env files available',
+  listClassName = 'h-40',
+  scroll = true,
 }: EnvFileMultiSelectProps) {
   const [query, setQuery] = useState('');
 
@@ -64,48 +73,16 @@ export function EnvFileMultiSelect({
           disabled={disabled}
         />
       </div>
-      <ScrollArea className="h-40 rounded-[var(--nession-radius-surface)] border">
-        {filtered.length === 0 ? (
-          <p className={cn('py-6 text-center text-muted-foreground', chromeSansRole('metadata'))}>
-            {files.length === 0 ? emptyLabel : 'No files match your search'}
-          </p>
-        ) : (
-          <div className="divide-y divide-border">
-            {filtered.map((file) => {
-              const isSelected = selectedKeys.has(refKey(file));
-              return (
-                <button
-                  type="button"
-                  key={refKey(file)}
-                  onClick={() => toggle(file)}
-                  disabled={disabled}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-accent/50 transition-colors',
-                    isSelected && 'bg-accent/30',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'w-4 h-4 rounded-[var(--nession-radius-control)] border flex items-center justify-center flex-shrink-0',
-                      isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/40',
-                    )}
-                  >
-                    {isSelected && <Check className="w-3 h-3 text-primary-foreground" />}
-                  </span>
-                  <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className={cn('flex-1 truncate', chromeSansRole('secondary'))}>{file.name}</span>
-                  <Badge variant="outline" className={cn('px-1.5 py-0', chromeSansRole('caption'))}>
-                    {sourceLabel(file)}
-                  </Badge>
-                  <span className={cn('w-10 text-right text-muted-foreground', chromeSansRole('caption'))}>
-                    {file.var_count} var{file.var_count !== 1 ? 's' : ''}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </ScrollArea>
+      <EnvFileList
+        filtered={filtered}
+        total={files.length}
+        selectedKeys={selectedKeys}
+        disabled={disabled}
+        emptyLabel={emptyLabel}
+        onToggle={toggle}
+        scroll={scroll}
+        listClassName={listClassName}
+      />
       {selected.length > 0 && (
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
           {selected.length} file{selected.length !== 1 ? 's' : ''} selected
@@ -113,4 +90,71 @@ export function EnvFileMultiSelect({
       )}
     </div>
   );
+}
+
+function EnvFileList({
+  filtered,
+  total,
+  selectedKeys,
+  disabled,
+  emptyLabel,
+  onToggle,
+  scroll,
+  listClassName,
+}: {
+  filtered: EnvFileInfo[];
+  total: number;
+  selectedKeys: Set<string>;
+  disabled?: boolean;
+  emptyLabel: string;
+  onToggle: (file: EnvFileInfo) => void;
+  scroll: boolean;
+  listClassName: string;
+}) {
+  const list = (
+    <div className={cn('divide-y divide-border', !scroll && 'rounded-[var(--nession-radius-surface)] border')}>
+      {filtered.length === 0 ? (
+        <p className={cn('py-6 text-center text-muted-foreground', chromeSansRole('metadata'))}>
+          {total === 0 ? emptyLabel : 'No files match your search'}
+        </p>
+      ) : (
+        filtered.map((file) => {
+          const isSelected = selectedKeys.has(refKey(file));
+          return (
+            <button
+              type="button"
+              key={refKey(file)}
+              onClick={() => onToggle(file)}
+              disabled={disabled}
+              className={cn(
+                'w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-accent/50 transition-colors',
+                isSelected && 'bg-accent/30',
+              )}
+            >
+              <span
+                className={cn(
+                  'w-4 h-4 rounded-[var(--nession-radius-control)] border flex items-center justify-center flex-shrink-0',
+                  isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/40',
+                )}
+              >
+                {isSelected && <Check className="w-3 h-3 text-primary-foreground" />}
+              </span>
+              <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+              <span className={cn('flex-1 min-w-0 break-words', chromeSansRole('secondary'))}>{file.name}</span>
+              <Badge variant="outline" className={cn('px-1.5 py-0', chromeSansRole('caption'))}>
+                {sourceLabel(file)}
+              </Badge>
+              <span className={cn('w-10 text-right text-muted-foreground', chromeSansRole('caption'))}>
+                {file.var_count} var{file.var_count !== 1 ? 's' : ''}
+              </span>
+            </button>
+          );
+        })
+      )}
+    </div>
+  );
+  if (!scroll) {
+    return list;
+  }
+  return <ScrollArea className={cn('rounded-[var(--nession-radius-surface)] border', listClassName)}>{list}</ScrollArea>;
 }

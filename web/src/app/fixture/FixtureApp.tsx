@@ -41,6 +41,10 @@ import {
   relatedSessionsFor,
 } from '@/product/project/model/focusedProject';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
+import { fixtureOperation } from './fixtureOperations';
+import { fixtureSelectedSession } from './fixtureSelectedSession';
+import { AppAttachSurface } from '@/app/experiences/app/AppAttachSurface';
+import { AppCreateSessionSurface } from '@/app/experiences/app/AppCreateSessionSurface';
 
 // Module-stable — the stub is immutable and stateless (same pattern as
 // FixtureWorkspace's fixtureOps).
@@ -121,6 +125,8 @@ function fixtureSidebarProps({
   sessionDetails,
   projectShell,
   onAssociateProject,
+  onCreate,
+  onConfigure,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
@@ -140,6 +146,8 @@ function fixtureSidebarProps({
   sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
   projectShell: ProjectShellProps;
   onAssociateProject: (session: Session) => void;
+  onCreate: () => void;
+  onConfigure: (session: Session) => void;
 }) {
   return {
     onAssociateProject,
@@ -161,9 +169,9 @@ function fixtureSidebarProps({
     isSearchActive,
     connectionStatus,
     domain,
-    onCreate: () => {},
+    onCreate,
     onRefresh: () => {},
-    onConfigure: () => {},
+    onConfigure,
     onKill: () => {},
     onViewDetails: sessionDetails.onViewDetails,
     onEditDetails: sessionDetails.onEditDetails,
@@ -180,6 +188,7 @@ function fixtureAppMainShared({
   setSurface,
   setTool,
   sessionProject,
+  onCreate,
 }: {
   selectedSession: Session | null;
   selectedAgent: Agent | undefined;
@@ -189,6 +198,7 @@ function fixtureAppMainShared({
   setSurface: (surface: Surface) => void;
   setTool: (tool: CapabilityId) => void;
   sessionProject?: SessionProjectContext;
+  onCreate: () => void;
 }) {
   return {
     selectedSession,
@@ -205,7 +215,7 @@ function fixtureAppMainShared({
     // Inert, like every other handler here: the home's "New Session" opens the
     // product's dialog, and a fixture that opened one would be asserting on a
     // flow it does not own (#1082).
-    onCreate: () => {},
+    onCreate,
   };
 }
 
@@ -236,11 +246,21 @@ function FixtureAppDialogs({
   projectBinding,
   projectLayer,
   agents,
+  selectedSession,
+  attachIntent,
+  onAttachClose,
+  createOpen,
+  onCreateClose,
 }: {
   sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
   projectBinding: ReturnType<typeof useSessionProjectBinding>;
   projectLayer: ReturnType<typeof useFixtureProjectShell>;
   agents: Agent[];
+  selectedSession: Session | null;
+  attachIntent: 'attach' | 'configure' | null;
+  onAttachClose: () => void;
+  createOpen: boolean;
+  onCreateClose: () => void;
 }) {
   return (
     <>
@@ -255,9 +275,68 @@ function FixtureAppDialogs({
         }}
         onClose={projectBinding.close}
       />
-      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
+      <FixtureProjectDialogs shell={projectLayer} agents={agents} experience="app" />
+      <AppAttachSurface
+        isOpen={attachIntent !== null}
+        intent={attachIntent ?? 'attach'}
+        session={selectedSession}
+        agents={agents}
+        onClose={onAttachClose}
+        onConfirm={onAttachClose}
+      />
+      <AppCreateSessionSurface
+        isOpen={createOpen}
+        agents={agents}
+        onClose={onCreateClose}
+        onCreated={onCreateClose}
+      />
     </>
   );
+}
+
+/** The route-named App operation state (#3089). */
+function useFixtureAppOperations(search: string) {
+  const operation = fixtureOperation(search);
+  const [createOpen, setCreateOpen] = useState(operation === 'create-session');
+  const [attachIntent, setAttachIntent] = useState<'attach' | 'configure' | null>(
+    operation === 'attach'
+      ? 'attach'
+      : operation === 'attach-settings'
+        ? 'configure'
+        : null,
+  );
+  return { createOpen, setCreateOpen, attachIntent, setAttachIntent };
+}
+
+/** The selected Session, its Agent and the domain state the shell reads. */
+function fixtureAppSelection({
+  sessions,
+  agents,
+  selectedId,
+  paneCommand,
+  staleAgents,
+}: {
+  sessions: Session[];
+  agents: Agent[];
+  selectedId: string | null;
+  paneCommand: string | null;
+  staleAgents: string[];
+}) {
+  const selectedSession = fixtureSelectedSession(sessions, selectedId, paneCommand);
+  const selectedAgent = agents.find(
+    (agent) => agent.agent_id === selectedSession?.agent_id,
+  );
+  const domain = selectedSession
+    ? mapDomainState({
+        session: selectedSession,
+        agent: selectedAgent,
+        staleAgentIds: staleAgents,
+        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+        attachInFlightId: null,
+        attachFailedId: null,
+      })
+    : null;
+  return { selectedSession, selectedAgent, domain };
 }
 
 export function FixtureApp() {
@@ -267,6 +346,8 @@ export function FixtureApp() {
 
   const projectLayer = useFixtureProjectShell(search);
   const projectBinding = useSessionProjectBinding();
+  const { createOpen, setCreateOpen, attachIntent, setAttachIntent } =
+    useFixtureAppOperations(search);
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
@@ -335,26 +416,13 @@ export function FixtureApp() {
   // The reported foreground command: `?pane=claude.exe` is the canonical
   // screen as if the agent had reported Claude Code in the pane.
   const paneCommand = fixturePaneCommand(search);
-  const selectedSession = useMemo(() => {
-    const base = sessions.find((s) => s.session_id === selectedId) ?? null;
-    return base && paneCommand ? { ...base, foreground_command: paneCommand } : base;
-  }, [sessions, selectedId, paneCommand]);
-  const selectedAgent = agents.find(
-    (a) => a.agent_id === selectedSession?.agent_id,
-  );
-  const domain = selectedSession
-    ? mapDomainState({
-        session: selectedSession,
-        agent: selectedAgent,
-        // The same input the rows are given (`useShellState` hands the product's
-        // footer the whole stale list): a footer that stayed healthy while the
-        // list said otherwise would be a disagreement the product does not have.
-        staleAgentIds: staleAgents,
-        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-        attachInFlightId: null,
-        attachFailedId: null,
-      })
-    : null;
+  const { selectedSession, selectedAgent, domain } = fixtureAppSelection({
+    sessions,
+    agents,
+    selectedId,
+    paneCommand,
+    staleAgents,
+  });
 
   const sessionProject = fixtureSessionProject(
     selectedSession,
@@ -381,11 +449,14 @@ export function FixtureApp() {
     sessionDetails,
     projectShell: projectLayer.projectShell,
     onAssociateProject: (session) => projectBinding.open(session),
+    onCreate: () => setCreateOpen(true),
+    onConfigure: () => setAttachIntent('configure'),
   });
 
 
   const mainShared = fixtureAppMainShared({
     selectedSession, selectedAgent, agents, domain, tool, setSurface, setTool, sessionProject,
+    onCreate: () => setCreateOpen(true),
   });
 
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
@@ -431,6 +502,11 @@ export function FixtureApp() {
         projectBinding={projectBinding}
         projectLayer={projectLayer}
         agents={agents}
+        selectedSession={selectedSession}
+        attachIntent={attachIntent}
+        onAttachClose={() => setAttachIntent(null)}
+        createOpen={createOpen}
+        onCreateClose={() => setCreateOpen(false)}
       />
     </div>
   );
