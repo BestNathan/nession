@@ -67,6 +67,11 @@ pub struct ExecutionRecord {
     /// settings after an Agent restart; the snapshot can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_policy: Option<SandboxPolicy>,
+    /// The short, Agent-owned directory holding this execution's channel
+    /// socket. It is outside `state_dir` because `SUN_LEN` bounds the socket
+    /// path; cleanup removes only a direct child of `runtime_root`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_dir: Option<String>,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -629,6 +634,24 @@ pub(crate) fn remove_owned_paths(
     if safe_dir {
         let _ = std::fs::remove_dir_all(execution_dir);
     }
+    // The channel directory lives under the short runtime root, not the state
+    // dir. Remove only the directory whose name is this execution's id and
+    // whose parent is the configured root; an unknown path is left untouched.
+    if let Some(channel_dir) = record.channel_dir.as_deref() {
+        let channel_dir = Path::new(channel_dir);
+        let root = std::fs::canonicalize(&settings.runtime_root)
+            .unwrap_or_else(|_| settings.runtime_root.clone());
+        let canonical =
+            std::fs::canonicalize(channel_dir).unwrap_or_else(|_| channel_dir.to_path_buf());
+        let owned_name = channel_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == record.execution_id)
+            .unwrap_or(false);
+        if owned_name && canonical.parent() == Some(root.as_path()) {
+            let _ = std::fs::remove_dir_all(channel_dir);
+        }
+    }
     let record_path = record.record_path(settings);
     let _ = std::fs::remove_file(&record_path);
     report.removed = true;
@@ -761,12 +784,14 @@ mod tests {
     use super::*;
 
     fn settings(dir: &Path) -> SandboxSettings {
-        SandboxSettings::new(
+        let mut settings = SandboxSettings::new(
             dir.join("state"),
             dir.join("bridge"),
             PathBuf::from("bwrap"),
             PathBuf::from("/usr/bin/sandbox-exec"),
-        )
+        );
+        settings.runtime_root = dir.join("runtime");
+        settings
     }
 
     fn record(dir: &Path, id: &str, session: &str) -> ExecutionRecord {
@@ -782,6 +807,7 @@ mod tests {
             window_id: None,
             working_dir: String::new(),
             effective_policy: None,
+            channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),
             proxy_endpoint: None,
@@ -843,6 +869,45 @@ mod tests {
         assert!(outcomes
             .iter()
             .any(|outcome| matches!(outcome, ReconcileOutcome::Cleaned(id) if id == "pane-gone")));
+        assert!(!record.record_path(&settings).exists());
+    }
+
+    #[test]
+    fn a_channel_directory_under_the_runtime_root_is_removed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = settings(dir.path());
+        let mut record = record(dir.path(), "channel", "session");
+        let channel_dir = settings.runtime_root.join("channel");
+        std::fs::create_dir_all(&channel_dir).expect("channel dir");
+        std::fs::write(channel_dir.join("channel.sock"), b"").expect("socket file");
+        record.channel_dir = Some(channel_dir.display().to_string());
+        std::fs::create_dir_all(&record.execution_dir).expect("execution dir");
+        write_record(&settings, &record).expect("record");
+        let mut report = CleanupReport::default();
+        cleanup_record(&settings, &record, &mut report).expect("cleanup");
+        assert!(
+            !channel_dir.exists(),
+            "the owned channel directory is removed"
+        );
+        assert!(!record.record_path(&settings).exists());
+    }
+
+    #[test]
+    fn a_channel_directory_outside_the_runtime_root_is_not_removed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = settings(dir.path());
+        let mut record = record(dir.path(), "channel", "session");
+        let foreign = dir.path().join("foreign");
+        std::fs::create_dir_all(&foreign).expect("foreign dir");
+        record.channel_dir = Some(foreign.display().to_string());
+        std::fs::create_dir_all(&record.execution_dir).expect("execution dir");
+        write_record(&settings, &record).expect("record");
+        let mut report = CleanupReport::default();
+        cleanup_record(&settings, &record, &mut report).expect("cleanup");
+        assert!(
+            foreign.exists(),
+            "a path outside the runtime root is untouched"
+        );
         assert!(!record.record_path(&settings).exists());
     }
 
