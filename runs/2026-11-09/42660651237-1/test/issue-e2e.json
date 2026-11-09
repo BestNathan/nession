@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "b462c5de6ceb20f0d99671d949773a33d4b6987e",
+  "run_id": 42660651237,
+  "run_attempt": 1,
+  "plan_digest": "62a085d719d57eb5f384343b5ce2e5f88d0e779fb0dbf8ff9fce2c9059a6409f",
+  "artifact_digest": "sha256:86492ef82b9137b7c7ff100bc2c29dc344a473e870a853547a89b4d8fb34f66f",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 13,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 155
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 61
+    },
+    {
+      "id": "sandbox-workspace-capability",
+      "result": "Pass",
+      "discovered": 8,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 69
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 155
+    }
+  ]
+}
