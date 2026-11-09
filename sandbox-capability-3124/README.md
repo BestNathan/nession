@@ -1,72 +1,64 @@
-# Sandbox capability in Workspace — interactive prototype (#3124)
+# Sandbox capability — inspect current context, or configure and Enter (#3124)
 
-**Owning Requirement:** https://github.com/BestNathan/nession/issues/3124  
-**Related:** [Sandbox runtime #2681](https://github.com/BestNathan/nession/issues/2681), [Capability model #702](https://github.com/BestNathan/nession/issues/702), [Capsule V2 #1347](https://github.com/BestNathan/nession/issues/1347), [Managed Session #3062](https://github.com/BestNathan/nession/issues/3062).  
-**Direct HTML candidate URL (not publication proof):** https://bestnathan.github.io/nession/prototypes/sandbox-capability-3124/index.html  
-**Source:** `prototype/sandbox-capability-3124/`; immutable commit/published SHA recorded in owning Issue after verification.
+**Owner:** https://github.com/BestNathan/nession/issues/3124  
+**Candidate HTML preview (public Pages revision NOT VERIFIED):** https://bestnathan.github.io/nession/prototypes/sandbox-capability-3124/index.html  
+**Source directory:** https://github.com/BestNathan/nession/tree/prototype/sandbox-capability-3124  
+**Related:** #2681 (native Sandbox backend), #1347 / #1455 (Workspace Capsule), #3062 (Managed EROFS Session creation).
 
-## Scenario / fidelity contract (2026-11-09)
+## Corrected product contract — 2026-11-09
 
-### Question and purpose
-Can Nession distinguish Agent/Location support from a **particular Session's verified on-demand initial-Pane Sandbox execution**, then make this a discoverable, context-sensitive Workspace capability without inventing another shell or implying whole-Session confinement?
+**Sandbox is a context-sensitive, actionable Session/Pane capability**, not a read-only Agent status monitor.
 
-**Product surface:** full Web shell and App spatial layers for a selected Session. Review-page harness uses [prototype-frame-2758](../prototype-frame-2758/README.md). Candidate content is **Sandbox's capability-specific read-only Workspace view**; global navigation remains existing Capsule V2.
+1. **Current active Pane inside a verified, Nession-managed Sandbox** → Show `Inside Sandbox`, **observed effective policy** (Filesystem, Network, Process, Resource, Syscall), backend, mechanisms and execution identity. The policy is read-only; it is not the last user-edited draft. Provide `Return to Native Pane` as a focus switch, not a kill.
+2. **Current active Pane outside / Native** → Show `Outside Sandbox`, editable native-versioned Policy draft, `Validate Policy` preflight, explicit `Enter Sandbox` confirmation. Success creates a **new isolated Pane in the same logical Session**, verifies mechanisms before running the new shell, focuses it, and retains the original Native Pane untouched. The real runtime mechanism is not yet implemented in staging #2681.
+3. **Agent offline, unsupported backend or Session instance mismatch** → Precise error/unverified state and no enabled Enter. A previous execution report is not proof that the current Pane is inside.
+4. **Failure** → Refuse operation with a concrete error, preserve draft and Native Pane; never silently fall back to Native while claiming Enter succeeded.
+5. **Supported host != inside**. Same Session may contain both Native and Sandbox Panes; presence is per active Pane and durable instance/execution identity, not simply Agent support or Session name.
 
-**Source baseline:** staging 2026-11-09:
-- `web/src/app/experiences/web/WebLayout.tsx` → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell;
-- `web/src/app/experiences/app/AppLayout.tsx`, `AppLayers.tsx` → Sessions ← Terminal → Workspace; `WorkspacePanel` owns one `AppPageHeader` per depth;
-- `web/src/app/workspace/{WorkspaceShell,CapabilityCapsule,capabilities,viewBindings}.tsx`, `web/src/product/workspace/patterns/workspaceNavigationStyles.ts` → bounded horizontal scroll, no Workspace More/`+`, unavailable hidden;
-- `docs/design/{workspace,capability-emergence,interaction/web,interaction/app}.md`, `docs/design/design-system/patterns/workspace-navigation.md`, `design/generated/web.css`;
-- `crates/nession-protocol/src/contracts/sandbox/v1.rs` and `crates/nession-agent/src/sandbox_runtime.rs` (staging-only native implementation).
+## Baseline and ownership
 
-**Owner hierarchy demonstrated:**
-- Web root/terminal: `WebLayout → Sidebar + ShellMain → Terminal`; controls: Sidebar Session selection, Terminal composer +, Workspace destination circle.
-- Web Workspace: `WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox`; controls: Terminal destination circle + one Workspace capability capsule; Sandbox owns only its own read-only details button.
-- App Terminal: `AppLayout/AppLayers → Terminal → composer` with Sessions/Workspace visible destination controls.
-- App Workspace root: `AppLayers → WorkspacePanel/AppPageHeader(Back) → WorkspaceShell → Sandbox`; controls: **one** Back and the bottom Capsule.
-- App pushed detail: same host AppPageHeader titled `Execution details`, same bottom Capsule and detail content; Back pops to Sandbox root, then Back returns Terminal.
-- Web↔App: one simulated Session identity and shared capability state; simulated product mode driven by `np:resize` emitted from the actual review device, never the surrounding browser width.
+Source-based layout baseline: `staging`, 2026-11-09.
+- `web/src/app/experiences/web/WebLayout.tsx`, `ShellMain.tsx`, `WorkspacePanel.tsx`, `WorkspaceShell.tsx`, `CapabilityCapsule.tsx`, `design/generated/web.css`.
+- `web/src/app/experiences/app/AppLayout.tsx`, `AppLayers.tsx`, `docs/design/interaction/app.md`, `docs/design/design-system/patterns/workspace-navigation.md`.
+- `crates/nession-sandbox/src/{exec,policy,capabilities}.rs`, `crates/nession-agent/src/sandbox_runtime.rs`, `crates/nession-protocol/src/contracts/sandbox/v1.rs`, `docs/architecture/sandbox-policy-and-execution.md`.
 
-### Entry and critical path
-1. Initially show a quiet Terminal and its Conversation capsule: **no permanent Sandbox work ring or fake secure badge**. Open Workspace using the visible destination. The Sandbox capability becomes discoverable in the Capsule if supported.
-2. Select Sandbox and inspect a real-shape (mock) observed status: supported Agent is **not** sufficient to mark a Session isolated; the headline says on-demand initial Pane.
-3. Open verified execution details. Inspect backend, mechanisms, policy digest, execution id, instance id, warning/limits and a deliberate scope limitation. Return without changing the runtime.
-4. Change fixture to Native, offline, unsupported, recreated Session, partial; verify no old execution id is reused, offline stays unknown, unavailable loses its navigation slot but currently opened explanatory view remains.
-5. Switch Web 1180 → App 390 → Web 1180 and App 375; verify real layout-mode changes and matching contextual Session return. On App, pushed detail has one host-owned Back and Capsule remains at the bottom at all depths.
-6. In Web Sidebar (or App Sessions), select `native-debug` and return to `sandbox-review`; the selected Session determines the apparent execution facts.
+**Web DOM owner:** `WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox capability-local view`. The sidebar owns Session selection; the Workspace capsule and Terminal destination circle remain shell-owned. Sandbox only owns its config/detail content.
 
-### States
-- `active`: native Linux backend + verified on-demand SandboxExecution; standard policy dimension summary and details.
-- `native`: host supports Sandbox but current Session has **no** SandboxExecution; supports discoverable, not 'active protected'.
-- `offline`: Agent unreachable, previously known capability but current live state not established; read-only explanation.
-- `unsupported`: host cannot install a backend; Sandbox **not** in Workspace capsule; a previously opened explanation may stay until user changes capability.
-- `recreated`: same-named Session incarnation changed; old report rejected; no verified effective policy.
-- `partial`: initial Pane verified, later Window/Pane not guaranteed and must not inherit a whole-Session label.
+**App DOM owner:** `AppLayout/AppLayers (Sessions ← Terminal → Workspace) → WorkspacePanel host-owned single AppPageHeader/Back → WorkspaceShell + Sandbox local root/confirmation/detail`. App has one Back at every pushed level and the Capsule in the bottom zone (no new Workspace `+` menu). Back on confirmation cancels the action without applying the draft; Back on detail returns to Sandbox root; Back on root returns to Terminal.
 
-### Visual / interaction decisions
-- UI stays within Nession's existing shell, Capsule navigation and generated token vocabulary; no separate Sandbox global sidebar, tab, dashboard, Workspace + menu, or location.
-- Web has broad content, two-column fact grid and deliberate local details disclosure; App has one-column content, 44px Capsule slots, host Back on push, scroll clearance.
-- At rest Terminal remains quiet; explicit '+' may show a small Session-scoped Peek, which offers a direct Workspace destination for meaningful Sandbox context.
-- Sandbox is read-only for this Requirement. Creation / Policy editor is **not modeled as a shipping UI** and remains a separate interaction decision; Managed EROFS is #3062.
+**1:1 geometry:** review frame uses real CSS px (Web 1180/1024, App 390/375) and no transform/zoom. Prototype product contents use Nession semantic color token snapshot; terminal character density, shell pixel parity and native touch/safe-area behavior remain approximations until real browser/fixture comparison.
 
-### Fidelity classification
-| Input/behavior | Source | Fidelity |
-|---|---|---|
-| Agent, Session, name, backend, Policy digest, execution id | Static synthetic fixture | mock |
-| State transitions and Capsule visibility | In-browser JS | mock |
-| Web/App shell ownership and Capsule shapes | staging code and canonical design source inspection | source-informed approximation |
-| RootFS, namespace, seccomp, cgroup, policy authorization, tmux continuity | no runtime connected | **not tested** |
-| Agent capability detection, backend/report/Server protocol | no runtime connected | **not tested** |
-| DOM interactions, scroll, focus, device widths | browser verification status recorded separately | awaiting proof |
+## Critical clickable journey
 
-All product data and IDs are synthetic and contain no private endpoints or secrets. Colors are a **scoped local snapshot** from staging `design/generated/web.css`; the actual React UI / xterm terminal text, font fitter, safe-area geometry and precise pixels may differ. Do not claim 1:1 visual or xterm parity: the 1:1 label refers only to CSS pixel viewport dimensions.
+1. In the default **Native** fixture, open Workspace from Terminal and select Sandbox. UI says **Outside Sandbox** and shows an editable Policy composer, not a diagnostic-only status view.
+2. Set working dir, read/write filesystem path sets, network mode and egress allow-list, Linux namespace flags, cgroup v2 `memory.max`/`pids.max`, and pinned `nession-interactive-v1` seccomp profile. MacOS fixture hides/disables Linux-only inputs and uses measured Seatbelt subset; `enforcement: required` is fixed.
+3. Click `校验配置` to validate draft. Errors block Enter; edits invalidate the prior preflight. This mock performs **synthetic checks only**, not actual filesystem capability probes.
+4. Click `Enter Sandbox` → separate confirmation screen explains new Pane + original Native preservation → confirm.
+5. Successful mock transition shows `Inside Sandbox` and **effective policy** (copy committed at simulated verification), then `Execution details` (backend, execution/pane identity, digest, evidence). Return from details, then `返回 Native Pane`; original Native context resumes; the Sandbox Pane remains available for `切回已有 Sandbox Pane`.
+6. Switch external fixtures: `active` (already inside), `preflight-fail` (kernel controllers not delegated), `enter-fail` (launch barrier rejects), `offline`, `unsupported`, `macos`, and `recreated` (stale instance id); verify no fake protected badge, no auto-fallback, retained draft.
+7. Switch Web 1180 → App 390 → Web 1180, plus App 375. Confirm the actual product composition changes, current scope remains selected, one App header/Back, bounded scroller and scroll clearance.
+8. In Web Sidebar (or App Sessions), select the Native and Sandbox fixture Sessions to observe context-dependent discovery; return to Terminal without changing process state.
 
-### Checks / verification
-- Source and catalog files on the shared `prototype` branch are verified through the GitHub connector.
-- The proposed direct HTML path is not automatically evidence of Pages deployment. **Do not claim live publication until `/nession/prototypes/manifest.json` SHA agrees with the remote commit and its HTTPS HTML is checked.**
-- **Authoring smoke (2026-11-09):** GitHub sources fetched; standalone JS parsed as valid JavaScript; 17/17 deterministic V8 synthetic-DOM assertions passed (initial Terminal, Workspace entry, scoped execution copy, detail open/return, Native/offline/unavailable/recreated/partial negative states, App one-header depth, App→Web mode roundtrip, Terminal return, gallery/catalog links). This is not Chromium and does not prove layout pixels, real focus/scroll or backend security.
-- **Remaining:** real Chromium desktop/mobile click-through, viewport geometry, stage left/right edge reachability, actual focus/scroll, console/network, screenshots and actual React fixture side-by-side. No existing #3025 browser record proves this prototype.
-- Production Acceptance/E2E is independent and remains Pending in #3124.
+## Mock scenario matrix
 
-## Non-goals
-No new global navigation owner, policy hot edit, Agent SDK change, EROFS image mount/download, enforced Session guarantee, persistent mock storage, network request or real Sandbox invocation.
+| Fixture | Active Pane | Visible action | Expected |
+|---|---|---|---|
+| Native / can enter | Native | Compose → Preflight → Enter | Success switches to new verified Sandbox Pane |
+| Already in Sandbox | Managed Sandbox | View effective policy → details / Return to Native | Does not offer duplicate Enter |
+| Preflight fail | Native | Edit → Validate | Capability error blocks Enter |
+| Launch fail | Native | Validate → Confirm Enter | Refuses, Native and draft unchanged |
+| Agent offline | Unknown | Read-only explanation, retained draft | No Enter / false inside |
+| Unsupported | Native/Unknown | Explanation (previous view can remain open) | Capsule has no unavailable slot |
+| macOS Seatbelt | Native | Network deny / allowed subset, Linux-only controls disabled | Restricted/specific Linux controls not promised |
+| Same-name recreated | Unknown (unverified) | No Enter until identity re-established | Old report never reused |
+
+## Verified and unverified
+
+**Fidelity:** synthetic in-page JavaScript fixtures; no network calls, backend writes, durable storage, active tmux PIDs, cgroup resources, Bubblewrap, Seatbelt, Socket proxy, native policy compiler or process reparenting. Clicking Enter only simulates a successful *future* backend command. Read-only effective policy is also synthetic and illustrates the **post-verification** display shape, not proof that a real Agent returned it.
+
+**Verification status:** static GitHub source and JavaScript syntax confirmed; V8 synthetic-DOM interaction assertions cover Native → policy editor → preflight → confirmation → Inside → details → Return to Native, incompatible/offline failures and Web/App mode handoff. Prior revision's `17/17` assertions **do not apply** to this revised interaction and must never be cited as new browser proof. Updated assertion count belongs in a later exact-source verification note. Real Chromium/Playwright screenshots, keyboard/focus, true CSS width/scroll, fixture pixel parity, native runtime/authorization and publication manifest SHA are **not verified** by source or synthetic DOM tests.
+
+**Pages publication:** the direct HTML link above is a *candidate*, not proven live with the revised source. Verify `/nession/prototypes/manifest.json` equals exact source commit and read back the public HTML before calling it current.
+
+## Distinct non-goals
+No new Project, Environment Binding, EROFS resource, independent Workspace Location, global Sandbox page/tab, whole-Session confinement, policy hot-reload, opaque shell command injection, or simulation of actual native security. Production needs a new trusted Agent/Server Enter operation and per-Pane execution lifecycle; those remain Pending in #3124.
