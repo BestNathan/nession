@@ -887,6 +887,11 @@ function selfTest() {
       criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
     }, 'case-runner')), /selected method does not match/);
 
+  // Existing acceptance-executor-selftest Gate also exercises the exact-PR
+  // collector. These fixtures run without GitHub secrets or network calls.
+  execFileSync(process.execPath,
+    [fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url)),'self-test'],
+    {stdio:'inherit'});
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }
 
