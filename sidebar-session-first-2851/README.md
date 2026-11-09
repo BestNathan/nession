@@ -1,3 +1,5 @@
+> **Historical / superseded collapse (2026-11-09):** This #2851 mock preserves the prior 0px fully-tucked-away navigation with an over-work-surface floating reopen control for historical review. The user has approved a new, independently owned **56px in-flow Navigation Rail** and contextual shortcuts in [Requirement #3075](https://github.com/BestNathan/nession/issues/3075). Review the [new interactive rail design](../sidebar-navigation-rail-3075/index.html) for current collapsed-state behavior. #2851's Session-first expanded information architecture still applies. Screenshots/old browser receipts here must **not** be cited as evidence of the new collapsed state.
+
 # Session-first Sidebar · Issue #2851
 
 **Requirement:** https://github.com/BestNathan/nession/issues/2851
