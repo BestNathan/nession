@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "proto-visual-review-3089",
+  "source_sha": "a68f3dd9e0727b2e29bc67bcc9f64cd5af592e7b",
+  "source_digest": "a1c50d207d0f08cb822b4ba2d640b31ada0d28771649dc52bf7bd7ea508af1c9",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42638645523,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42638645523",
+    "event": "push",
+    "branch": "task/proto-visual-review-3089",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-09T14:50:53.567Z",
+    "finished_at": "2026-11-09T14:51:08.524Z",
+    "result": {
+      "ok": true,
+      "source": "6ad8945feede178ed6f5c732cc004f87970c21c7",
+      "shots": [
+        "project",
+        "session",
+        "session-open",
+        "app-session"
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/a68f3dd9e0727b2e29bc67bcc9f64cd5af592e7b/proto-visual-review-3089.json"
+}
