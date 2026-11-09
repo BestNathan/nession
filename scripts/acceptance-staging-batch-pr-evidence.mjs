@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { auditIssue } from './issue-contract.mjs';
+import { issueBody } from './staging-convergence-batch.mjs';
 
 const REPO='BestNathan/nession';
 const ISSUE=2984, PR=2985;
@@ -38,7 +39,8 @@ function validRun(run,kind){
     run?.head_repository?.full_name===REPO &&
     run.name===name && String(run.path).split('@')[0]===path &&
     run.head_sha===HEAD && run.event==='pull_request' &&
-    run.head_branch!==null && run.status==='completed' &&
+    typeof run.head_branch==='string' && run.head_branch.length>0 &&
+    run.status==='completed' &&
     run.conclusion==='success' &&
     Number.isSafeInteger(run.id)&&run.id>0 &&
     Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0;
@@ -69,6 +71,7 @@ export async function verifySourceBoundOriginalPr({issue,pr,runs,comments,headCo
     const matches=runs.filter(r=>validRun(r,kind));
     if(matches.length!==1)fail('missing or ambiguous exact-head '+kind+' GitHub workflow');
     const run=matches[0];
+    if(run.head_branch!==pr.head.ref)fail('PR source branch mismatch');
     if(Date.parse(run.created_at)>Date.parse(pr.merged_at) ||
        !Number.isFinite(Date.parse(run.created_at)))
       fail('workflow was not completed for the original merge-time PR');
@@ -109,49 +112,74 @@ export async function verifySourceBoundOriginalPr({issue,pr,runs,comments,headCo
   });
 }
 
-async function selfTest(){
-  const body=[
-    '## Requirements: exact batch',MARKER,'',
-    '### Success Criteria','- [ ] SC-01 required','- [x] SC-02 required',
-    '## Acceptance Plan','', 'xxx', // Replaced with valid Plan below.
-    '## Acceptance Report','| Criterion | Result | Evidence |','|---|---|---|',
-    '| SC-01 | Pending | cannot verify PR yet |',
-    '| SC-02 | Pass | independently attested exact SHA |',
-    '## E2E Verification','### New','- none: no changed IDs',
-    '### Regression','- none: no changed IDs',
-    '## E2E Report','| ID | Type | Result | Evidence |','|---|---|---|',
-    '## Knowledge Impact','- Decision: Read',
-    '- Related knowledge: nession-cicd',
-    '- Reason: existing E2E obligations',
-    '- Owner and timing: owner before merge',
-    '- Evidence: exact checked integration head',
-    '## Product alignment','- [x] preserves contract',
-  ].join('\n').replace('xxx','');
-  // Test only helper scope rejection without constructing fake trusted Runs.
+export async function selfTestOriginalPr(){
+  const body=issueBody({
+    branch:'staging',main_sha:MAIN,lane_sha:LANE,integration_head:HEAD,
+    impact:{category:'unknown'},changedPaths:Array.from({length:76},(_,i)=>'file'+i),
+    newIds:[],regressionIds:[],removed:[],
+  });
   const digest=parseIssueE2E(body,{requireDeclaration:true}).digest;
   assert.match(digest,/^[a-f0-9]{64}$/);
-  const pr={number:PR,head:{sha:HEAD,repo:{full_name:REPO}},
+  const pr={number:PR,head:{sha:HEAD,ref:'chore/staging-sync-staging-8352d3abb6f3-f7e2d008ed49',
+      repo:{full_name:REPO}},
     base:{sha:LANE,ref:'staging',repo:{full_name:REPO}},merged:true,
     merge_commit_sha:MERGE,merged_at:'2026-11-08T13:33:39Z'};
-  const commits=[
-    {sha:HEAD,parents:[{sha:LANE},{sha:MAIN}]},
-    {sha:MERGE,parents:[{sha:LANE},{sha:HEAD}]},
+  const headCommit={sha:HEAD,parents:[{sha:LANE},{sha:MAIN}]};
+  const mergeCommit={sha:MERGE,parents:[{sha:LANE},{sha:HEAD}]};
+  const issue={number:ISSUE,state:'open',title:'Requirement: Staging integration staging',
+    labels:[{name:'requirement'},{name:'ci'},{name:'verification:integration'}],body};
+  const approval={user:{login:'BestNathan'},
+    body:'/approve-staging-convergence '+HEAD+' '+digest};
+  const runs=Object.entries(WORKFLOWS).map(([kind,[name,route]],i)=>({
+    id:101+i,run_attempt:1,status:'completed',conclusion:'success',
+    event:'pull_request',repository:{full_name:REPO},head_repository:{full_name:REPO},
+    name,path:route,head_branch:pr.head.ref,head_sha:HEAD,created_at:'2026-11-08T08:09:40Z',
+  }));
+  const jobsByRunId=new Map();
+  runs.forEach((run,i)=>{
+    const kind=Object.keys(WORKFLOWS)[i];
+    const jobs=EXPECTED_JOBS[kind].map(name=>({
+      name,run_id:run.id,conclusion:'success',
+      steps:[
+        ...(name==='tooling-check'?[{name:'Verify repository tooling Gates',conclusion:'success'}]:[]),
+        ...(name==='case-smoke'?[{name:'Select PR-linked Case-method proofs (trusted main policy)',conclusion:'success'}]:[]),
+        ...(name==='e2e'?[
+          {name:'Resolve linked Issue E2E obligations',conclusion:'success'},
+          {name:'Enforce authenticated selected-E2E execution result',conclusion:'success'},
+        ]:[]),
+      ],
+    }));
+    jobsByRunId.set(run.id,{jobs});
+  });
+  const get=async route=>{
+    const m=/\/actions\/runs\/([0-9]+)\/attempts\/1\/jobs\?per_page=100$/.exec(route);
+    if(!m||!jobsByRunId.has(Number(m[1])))throw Error('unexpected Job lookup '+route);
+    return jobsByRunId.get(Number(m[1]));
+  };
+  const good={issue,pr,headCommit,mergeCommit,runs,comments:[approval],get};
+  const proof=await verifySourceBoundOriginalPr(good);
+  assert.equal(proof.pr_head_sha,HEAD);
+  assert.equal(proof.checks.quality.run_id,101);
+  assert.equal(proof.checks.e2e.conclusion,'success');
+  assert.deepEqual(proof.e2e_selected_ids,[]);
+  const negative=[
+    [{...good,pr:{...pr,head:{...pr.head,sha:'a'.repeat(40)}}},/wrong Issue/],
+    [{...good,issue:{...issue,body:body.replace(MARKER,'')}},/wrong Issue/],
+    [{...good,headCommit:{...headCommit,parents:[]}},/wrong Issue/],
+    [{...good,comments:[]},/missing exact-head/],
+    [{...good,runs:runs.filter(x=>x.id!==102)},/missing or ambiguous exact-head case/],
+    [{...good,runs:[...runs,{...runs[0]}]},/missing or ambiguous exact-head quality/],
+    [{...good,get:async route=>{
+      const jobs=await get(route);
+      return route.includes('/101/')?{jobs:jobs.jobs.filter(x=>x.name!=='tooling-check')}:jobs;
+    }},/missing successful quality Job tooling-check/],
+    [{...good,runs:[{...runs[0],head_repository:{full_name:'attacker/repo'}},...runs.slice(1)]},
+      /missing or ambiguous exact-head quality/],
   ];
-  const issue={number:ISSUE,state:'open',title:'Requirement: Staging integration',
-    labels:[{name:'requirement'}],body};
-  await assert.rejects(()=>verifySourceBoundOriginalPr({
-    issue,pr:{...pr,head:{...pr.head,sha:'a'.repeat(40)}},
-    headCommit:commits[0],mergeCommit:commits[1],runs:[],comments:[],get:async()=>null,
-  }),/wrong Issue/);
-  await assert.rejects(()=>verifySourceBoundOriginalPr({
-    issue:{...issue,body:body.replace(MARKER,'')},pr,
-    headCommit:commits[0],mergeCommit:commits[1],runs:[],comments:[],get:async()=>null,
-  }),/wrong Issue/);
-  await assert.rejects(()=>verifySourceBoundOriginalPr({
-    issue,pr,headCommit:commits[0],mergeCommit:commits[1],
-    runs:[],comments:[],get:async()=>null,
-  }),/missing exact-head and Issue E2E-digest owner approval|Issue Audit/);
-  console.log('original staging integration PR source proof: wrong PR, wrong SHA, unsigned approval fail closed');
+  for(const [bad,pattern] of negative){
+    await assert.rejects(()=>verifySourceBoundOriginalPr(bad),pattern);
+  }
+  console.log('original staging integration PR source proof: complete original run cohort and negative fixtures passed');
 }
 async function api(path){
   const token=process.env.GITHUB_TOKEN||process.env.GH_TOKEN;
@@ -165,7 +193,7 @@ async function api(path){
   return response.json();
 }
 async function main(){
-  if(process.argv[2]==='self-test'){await selfTest();return;}
+  if(process.argv[2]==='self-test'){await selfTestOriginalPr();return;}
   const [, , mode, target, output]=process.argv;
   if(mode!=='collect'||target!==HEAD||!output)fail('usage: collect ORIGINAL_HEAD_SHA OUTPUT');
   const [issue,pr,headCommit,mergeCommit,comments,runData]=await Promise.all([
