@@ -103,8 +103,9 @@
   function terminal() {
     return '<div class="terminal"><div class="muted tiny">Session / '+esc(s.activeSession)+'</div><div style="margin-top:22px"><span class="prompt">$</span> cd /workspace</div><div><span class="prompt">$</span> git status --short</div><div class="muted">On branch main · working tree clean</div><div><span class="prompt">$</span> <span class="cursor"></span></div><div class="terminal-capsule">＋ &nbsp; Ask Nession about this Session…</div></div>';
   }
-  function projectDetail() {
-    return '<div class="project-detail"><div class="project-banner"><div><div class="section-label">Project</div><h1>'+esc(s.projectName)+'</h1><div class="muted twelve">Source · github.com/example/nession</div></div>'+button('Settings','project-settings','')+'</div>'+
+  function projectDetail(inApp = false) {
+    const heading = inApp ? '' : '<div class="section-label">Project</div><h1>'+esc(s.projectName)+'</h1>';
+    return '<div class="project-detail"><div class="project-banner"><div>'+heading+'<div class="muted twelve">Source · '+esc(s.sourceUrl || 'not configured')+'</div></div>'+button('Settings','project-settings','')+'</div>'+
       '<div class="line"></div><div class="row between"><div><strong>Existing locations</strong><div class="muted twelve">Existing Agent workspace directories</div></div>'+button('New Session','create-project-session','primary')+'</div>'+
       '<div class="two-cols">'+s.locations.map((l,i)=>'<div class="card stack"><strong>'+esc(l.agent)+'</strong><div class="mono path">'+esc(visiblePath(l.path))+'</div><span class="muted tiny"><span class="dot '+(isOffline()&&i===0?'offline':'')+'"></span>'+(isOffline()&&i===0?'Offline':'Online')+'</span></div>').join('')+'</div>'+
       '<div class="card stack"><strong class="twelve">Project defaults</strong><div class="muted twelve">Shell · bash &nbsp; · &nbsp; Environment · optional</div></div></div>';
@@ -130,13 +131,13 @@
     return appHeader('Sessions','show-terminal',button('＋','create-ordinary-session','ghost','aria-label="New Session"'))+
       '<div class="app-contents"><div class="app-list-title">Today</div>'+
       '<div class="app-list-item"><button class="grow" style="text-align:left;border:0;background:none;padding:0" data-act="show-terminal"><strong>'+esc(s.activeSession)+'</strong><small>Shell · Build Agent</small></button>'+button('···','session-menu','ghost','aria-label="Session actions"')+'</div>'+
-      '<div class="row between"><div class="app-list-title">Projects</div>'+button('＋','project-create','ghost','aria-label="Create Project"')+'</div><button class="app-list-item" data-act="show-project"><span><strong>'+esc(s.projectName)+'</strong><small>2 existing locations</small></span><span>›</span></button>'+
+      '<div class="row between"><div class="app-list-title">Projects</div>'+button('＋','project-create','ghost','aria-label="Create Project"')+'</div><button class="app-list-item" data-act="show-project"><span><strong>'+esc(s.projectName)+'</strong><small>'+s.locations.length+' existing locations</small></span><span>›</span></button>'+
       '<div class="app-list-title">Agents</div><div class="muted twelve" style="padding:10px">Build Agent · '+(isOffline()?'offline':'online')+'</div></div>'+
       '<nav class="app-bottom" aria-label="App navigation"><button class="selected-tab">Sessions</button><button data-act="show-terminal">Terminal →</button></nav>';
   }
   function appProject() {
     return appHeader(s.projectName,'show-sessions')+
-      '<div class="app-contents">'+projectDetail()+'</div>';
+      '<div class="app-contents">'+projectDetail(true)+'</div>';
   }
   function appTerminal() {
     return appHeader(s.activeSession,'show-sessions',button('···','session-menu','ghost'))+terminal();
