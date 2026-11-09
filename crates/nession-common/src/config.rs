@@ -160,6 +160,107 @@ pub struct ServerConfig {
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
     pub logging: LoggingConfig,
+    /// MCP access layer (`#565`). Disabled unless `[mcp] enabled = true`.
+    ///
+    /// The same section shape is read by the Agent. In an **embedded** host the
+    /// inbound token is the host's own token (`auth_token` here, `agent_token`
+    /// on the Agent), so `listen_address`, `auth_token` and the TLS fields are
+    /// standalone-only and are ignored by an embedding host.
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+/// The `[mcp]` section (`#565`).
+///
+/// `enabled = false` is the default and registers no route at all. Enabling it
+/// with an empty inbound token is refused at startup rather than served as an
+/// anonymous endpoint: the host's WebSocket may tolerate no-auth deployments,
+/// but an MCP management surface with write tools must not inherit that.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Whether this host mounts `/mcp`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// The HTTP path of the endpoint.
+    #[serde(default = "default_mcp_path")]
+    pub path: String,
+    /// Standalone-only listen address. Embedded hosts reuse their listener.
+    #[serde(default)]
+    pub listen_address: Option<String>,
+    /// Standalone-only inbound token. Embedded hosts reuse their native token.
+    #[serde(default)]
+    pub auth_token: Option<String>,
+    /// Standalone-only TLS certificate.
+    #[serde(default)]
+    pub tls_cert_path: Option<String>,
+    /// Standalone-only TLS private key.
+    #[serde(default)]
+    pub tls_key_path: Option<String>,
+    /// Bound on one MCP tool execution, in seconds.
+    #[serde(default = "default_mcp_tool_timeout_secs")]
+    pub tool_timeout_secs: u64,
+    /// Bound on concurrent MCP tool executions.
+    #[serde(default = "default_mcp_max_concurrent_calls")]
+    pub max_concurrent_calls: usize,
+}
+
+fn default_mcp_path() -> String {
+    "/mcp".to_string()
+}
+
+fn default_mcp_tool_timeout_secs() -> u64 {
+    60
+}
+
+fn default_mcp_max_concurrent_calls() -> usize {
+    16
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: default_mcp_path(),
+            listen_address: None,
+            auth_token: None,
+            tls_cert_path: None,
+            tls_key_path: None,
+            tool_timeout_secs: default_mcp_tool_timeout_secs(),
+            max_concurrent_calls: default_mcp_max_concurrent_calls(),
+        }
+    }
+}
+
+impl McpConfig {
+    /// Refuse a configuration that would expose an unauthenticated endpoint.
+    ///
+    /// `host_token` is the token the host's existing auth uses; `token_name`
+    /// is the config key a user must fill in, named in the error so the fix is
+    /// mechanical.
+    pub fn validate_for_host(&self, host_token: &str, token_name: &str) -> anyhow::Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if !self.path.starts_with('/') || self.path.len() < 2 {
+            anyhow::bail!(
+                "[mcp] path must be an absolute HTTP path such as `/mcp`; got {:?}",
+                self.path
+            );
+        }
+        if host_token.trim().is_empty() {
+            anyhow::bail!(
+                "[mcp] enabled = true requires `{token_name}`: the MCP endpoint carries write \
+                 tools and must not be anonymous, so this start is refused (fail closed)"
+            );
+        }
+        if self.tool_timeout_secs == 0 {
+            anyhow::bail!("[mcp] tool_timeout_secs must be greater than zero");
+        }
+        if self.max_concurrent_calls == 0 {
+            anyhow::bail!("[mcp] max_concurrent_calls must be greater than zero");
+        }
+        Ok(())
+    }
 }
 
 impl ServerConfig {
@@ -195,6 +296,7 @@ impl ServerConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
         validate_terminal_web_font_size(self.terminal_web_font_size).map_err(anyhow::Error::msg)?;
+        self.mcp.validate_for_host(&self.auth_token, "auth_token")?;
         Ok(())
     }
 }
@@ -238,6 +340,7 @@ impl Default for ServerConfig {
             terminal_cols: default_terminal_cols(),
             terminal_web_font_size: default_terminal_web_font_size(),
             logging: LoggingConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -291,6 +394,57 @@ mod tests {
         assert_eq!(config.heartbeat_interval_secs, 10);
         assert_eq!(config.heartbeat_timeout_secs, 30);
         assert!(!config.db_path.is_empty());
+    }
+
+    /// MCP is off unless asked for, and disabling it never demands a token.
+    #[test]
+    fn mcp_is_disabled_by_default() {
+        let config = ServerConfig::default();
+        assert!(!config.mcp.enabled);
+        assert_eq!(config.mcp.path, "/mcp");
+        config
+            .validate()
+            .expect("a disabled MCP section imposes no auth requirement");
+    }
+
+    /// Enabling the endpoint with an empty host token must fail closed rather
+    /// than inherit the WebSocket's no-auth mode.
+    #[test]
+    fn mcp_enabled_requires_the_host_token() {
+        let mut config = ServerConfig {
+            mcp: McpConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let error = config
+            .validate()
+            .expect_err("an empty auth_token must refuse to start MCP");
+        assert!(error.to_string().contains("auth_token"), "{error}");
+
+        config.auth_token = "secret".to_string();
+        config
+            .validate()
+            .expect("a configured token makes MCP startable");
+    }
+
+    /// The section's names are the documented ones.
+    #[test]
+    fn mcp_section_parses_from_toml() {
+        let config: ServerConfig = toml::from_str(
+            "listen_address = \"127.0.0.1:1\"\n\
+             tls_cert_path = \"\"\n\
+             tls_key_path = \"\"\n\
+             auth_token = \"t\"\n\
+             [mcp]\n\
+             enabled = true\n\
+             tool_timeout_secs = 30\n",
+        )
+        .expect("parse");
+        assert!(config.mcp.enabled);
+        assert_eq!(config.mcp.path, "/mcp");
+        assert_eq!(config.mcp.tool_timeout_secs, 30);
     }
 
     #[test]

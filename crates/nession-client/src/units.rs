@@ -11,12 +11,17 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-use nession_protocol::contracts::agent::v1::{AgentListPayload, AgentListReply};
+use nession_protocol::contracts::agent::v1::{
+    AgentListPayload, AgentListReply, AgentRenamePayload, AgentRenameReply,
+    ClientAgentDeletePayload, ClientAgentDeleteResponsePayload,
+};
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
+use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
     ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
-    ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionKillPayload,
-    ClientSessionKillResponsePayload, ServerSessionListPayload, ServerSessionListReply,
+    ClientSessionCapturePreviewPayload, ClientSessionCreatePayload,
+    ClientSessionCreateResponsePayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
+    ServerSessionListPayload, ServerSessionListReply,
 };
 use nession_protocol::Message;
 
@@ -53,6 +58,27 @@ impl UnitRequest for ClientSessionCreatePayload {
 
 impl UnitRequest for ClientSessionKillPayload {
     type Reply = ClientSessionKillResponsePayload;
+}
+
+impl UnitRequest for ServerInfoRequest {
+    type Reply = ServerInfoResponse;
+}
+
+/// Capture preview's replies are a union the contract does not declare: the
+/// Server answers either the Agent's capture or one of its own `{ error }`
+/// refusals. A typed `Reply` would have to invent a shape, so this one returns
+/// the delivered payload whole — the same rule the unions above follow, stated
+/// as `Value` because there is no union to name.
+impl UnitRequest for ClientSessionCapturePreviewPayload {
+    type Reply = serde_json::Value;
+}
+
+impl UnitRequest for AgentRenamePayload {
+    type Reply = AgentRenameReply;
+}
+
+impl UnitRequest for ClientAgentDeletePayload {
+    type Reply = ClientAgentDeleteResponsePayload;
 }
 
 /// How long to wait for a session create.
@@ -138,16 +164,31 @@ impl ClientConnection {
     ///
     /// Always answers from the registry (`force: false`). Asking every online
     /// agent for its live sessions is slower and answers a staleness question
-    /// no consumer of this boundary has asked.
+    /// no consumer of this boundary has asked. A consumer that *does* ask it
+    /// uses [`Self::list_sessions_with_force`].
     pub async fn list_sessions(
         &mut self,
         agent_id: Option<&str>,
+    ) -> Result<ServerSessionListReply, ClientError> {
+        self.list_sessions_with_force(agent_id, false).await
+    }
+
+    /// `server.session.list` with the contract's `force` semantics.
+    ///
+    /// With `force: true` the Server first queries every online Agent for its
+    /// live tmux state and rebuilds the registry, naming Agents that did not
+    /// answer in `stale_agents`. This is still a Server query: the answer is
+    /// the registry it rebuilt, not a direct Agent read.
+    pub async fn list_sessions_with_force(
+        &mut self,
+        agent_id: Option<&str>,
+        force: bool,
     ) -> Result<ServerSessionListReply, ClientError> {
         self.request(proto_msg(
             wire::SERVER_SESSION_LIST,
             ServerSessionListPayload {
                 agent_id: agent_id.map(str::to_owned),
-                force: false,
+                force,
             },
         ))
         .await
@@ -370,6 +411,61 @@ impl ClientConnection {
             wire::SERVER_SESSION_KILL,
             ClientSessionKillPayload {
                 session_id: session_id.to_string(),
+            },
+        ))
+        .await
+    }
+
+    /// `server.info` — version, uptime, counts and the Server's manifest.
+    pub async fn get_server_info(&mut self) -> Result<ServerInfoResponse, ClientError> {
+        self.request(proto_msg(wire::SERVER_INFO, ServerInfoRequest {}))
+            .await
+    }
+
+    /// `server.session.capture-preview` — read-only scrollback capture.
+    ///
+    /// The reply is returned whole because its two arms are not one declared
+    /// contract (see the [`UnitRequest`] impl).
+    pub async fn capture_session_preview(
+        &mut self,
+        session_id: &str,
+        lines: u32,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_SESSION_CAPTURE_PREVIEW,
+            ClientSessionCapturePreviewPayload {
+                session_id: session_id.to_string(),
+                lines,
+            },
+        ))
+        .await
+    }
+
+    /// `server.agent.rename` — set or clear an Agent display name.
+    pub async fn rename_agent(
+        &mut self,
+        agent_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<AgentRenameReply, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_AGENT_RENAME,
+            AgentRenamePayload {
+                agent_id: agent_id.to_string(),
+                display_name: display_name.map(str::to_owned),
+            },
+        ))
+        .await
+    }
+
+    /// `server.agent.delete` — remove an offline Agent.
+    pub async fn delete_agent(
+        &mut self,
+        agent_id: &str,
+    ) -> Result<ClientAgentDeleteResponsePayload, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_AGENT_DELETE,
+            ClientAgentDeletePayload {
+                agent_id: agent_id.to_string(),
             },
         ))
         .await

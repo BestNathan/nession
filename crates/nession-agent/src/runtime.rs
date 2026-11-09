@@ -206,7 +206,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         Arc::clone(&tmux_for_client),
     ));
 
-    let agent_server = AgentServer::new(
+    let mut agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
         tls_option,
@@ -230,6 +230,11 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         },
     )
     .context("failed to create agent server")?;
+    // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
+    // fail-closed configuration error stops the start here, before `ready`.
+    agent_server
+        .mount_mcp(&config)
+        .context("failed to mount the MCP endpoint")?;
     let (server_handle, listen_addr) = agent_server
         .start()
         .await

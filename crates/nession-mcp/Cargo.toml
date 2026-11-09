@@ -1,0 +1,67 @@
+[package]
+name = "nession-mcp"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "nession_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nession-mcp"
+path = "src/bin/nession-mcp.rs"
+
+# `#565`: one MCP access layer, hosted three ways.
+#
+# The library owns the MCP protocol lifecycle, the tool catalog, argument
+# validation, result/error projection, inbound Token auth and the Streamable
+# HTTP transport. Hosts own *who answers*: `nession-server` and
+# `nession-agent` inject their own backends, and the standalone binary wires
+# remote Server/Agent clients.
+#
+# The dependency list is the ownership rule, as it is in `nession-client`:
+#
+#   * no `nession-agent`, no `nession-server` — the shared layer must not know
+#     a host. Host adapters live in the host crates and implement the traits
+#     here.
+#   * no `nession-common` — configuration parsing belongs to the host that
+#     embeds the service. The standalone binary has its own document.
+#   * `nession-client` is optional and only for `remote` — the standalone
+#     backend and the Agent's cluster backend are consumers of the Server, and
+#     the canonical consumer boundary already exists.
+[features]
+default = ["remote"]
+# Out-of-process backends (standalone binary and Agent-embedded cluster tools).
+remote = ["dep:nession-client", "dep:nession-protocol"]
+
+[dependencies]
+async-trait.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
+nession-client = { path = "../nession-client", optional = true }
+nession-protocol = { path = "../nession-protocol", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["full", "test-util"] }
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+rand.workspace = true
+# A real Server proves the standalone path end to end. Dev-only, so the
+# shipped library still cannot name a provider.
+nession-server = { path = "../nession-server" }
+nession-common = { path = "../nession-common" }
+nession-agent = { path = "../nession-agent" }
+
+[lints]
+workspace = true

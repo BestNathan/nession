@@ -3,6 +3,7 @@ pub mod client_registry;
 pub mod command_broker;
 pub mod execution;
 mod handler;
+mod mcp;
 pub mod outbound;
 
 // `server_descriptors` is generated in `handler` because the handlers it
