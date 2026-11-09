@@ -291,6 +291,35 @@ async fn project_delete_unbinds_sessions_without_deleting_them() {
 }
 
 #[tokio::test]
+async fn reconnect_cache_clear_preserves_membership() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID).await;
+    let session = seed_session(&mut h, "s1").await;
+    let associated = set_project(
+        &mut h,
+        json!({ "session_id": session.session_id, "project_id": PROJECT_ID }),
+    )
+    .await;
+    assert_eq!(associated["payload"]["success"], true);
+
+    // Reconnect/re-registration clears the Agent-reported cache, not the
+    // durable membership.
+    h.db.delete_sessions_by_agent("a1").await.unwrap();
+    assert!(h
+        .db
+        .get_session_project_binding(&session.session_id)
+        .await
+        .unwrap()
+        .is_some());
+
+    h.session_registry.update_session(session.clone()).await;
+    assert_eq!(
+        project_id_for(&list_sessions(&mut h).await, &session.session_id).as_deref(),
+        Some(PROJECT_ID)
+    );
+}
+
+#[tokio::test]
 async fn a_reused_session_name_does_not_inherit_membership() {
     let mut h = handler_with_online_agent().await;
     seed_project(&h, PROJECT_ID).await;

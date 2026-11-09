@@ -12,6 +12,8 @@ import { useFixtureProjectShell } from './fixtureProjects';
 import { FixtureProjectDialogs } from './FixtureProjectDialogs';
 import { FixtureAppProjectDetail } from './FixtureAppProjectDetail';
 import type { ProjectShellProps, SessionProjectContext } from '@/product/project/types';
+import { SessionProjectDialog } from '@/product/project/components/SessionProjectDialog';
+import { useSessionProjectBinding } from '@/app/useSessionProjectBinding';
 import type { TerminalChrome } from '@/app/ShellMain';
 import type { Agent, Session } from '@/types';
 import type { SidebarProps } from '@/app/Sidebar';
@@ -118,6 +120,7 @@ function fixtureSidebarProps({
   domain,
   sessionDetails,
   projectShell,
+  onAssociateProject,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
@@ -136,8 +139,10 @@ function fixtureSidebarProps({
   domain: DomainState | null;
   sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
   projectShell: ProjectShellProps;
+  onAssociateProject: (session: Session) => void;
 }) {
   return {
+    onAssociateProject,
     agents,
     filteredSessions,
     // The unfiltered population: this fixture exercises real filters.
@@ -226,12 +231,42 @@ function fixtureSessionProject(
   };
 }
 
+function FixtureAppDialogs({
+  sessionDetails,
+  projectBinding,
+  projectLayer,
+  agents,
+}: {
+  sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
+  projectBinding: ReturnType<typeof useSessionProjectBinding>;
+  projectLayer: ReturnType<typeof useFixtureProjectShell>;
+  agents: Agent[];
+}) {
+  return (
+    <>
+      {sessionDetails.dialog}
+      <SessionProjectDialog
+        session={projectBinding.target}
+        projects={projectLayer.projectShell.projects}
+        busy={projectBinding.busy}
+        error={projectBinding.error}
+        onSave={(projectId) => {
+          void projectBinding.save(projectId);
+        }}
+        onClose={projectBinding.close}
+      />
+      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
+    </>
+  );
+}
+
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
   // #2789: rows and the Workspace Session view read the Agent-owned store.
 
   const projectLayer = useFixtureProjectShell(search);
+  const projectBinding = useSessionProjectBinding();
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
@@ -345,18 +380,12 @@ export function FixtureApp() {
     domain,
     sessionDetails,
     projectShell: projectLayer.projectShell,
+    onAssociateProject: (session) => projectBinding.open(session),
   });
 
 
   const mainShared = fixtureAppMainShared({
-    selectedSession,
-    selectedAgent,
-    agents,
-    domain,
-    tool,
-    setSurface,
-    setTool,
-    sessionProject,
+    selectedSession, selectedAgent, agents, domain, tool, setSurface, setTool, sessionProject,
   });
 
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
@@ -397,8 +426,12 @@ export function FixtureApp() {
           />
         )}
       />
-      {sessionDetails.dialog}
-      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
+      <FixtureAppDialogs
+        sessionDetails={sessionDetails}
+        projectBinding={projectBinding}
+        projectLayer={projectLayer}
+        agents={agents}
+      />
     </div>
   );
 }

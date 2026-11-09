@@ -1892,6 +1892,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_agent_deletion_clears_memberships() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        db.insert_session(&sess_info("a1:s1", SessionStatus::Active), "active")
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 10))
+            .await
+            .unwrap();
+
+        db.delete_sessions_and_project_bindings_by_agent("a1")
+            .await
+            .unwrap();
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db.get_session("a1:s1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn force_refresh_reconciliation_drops_removed_sessions_only() {
         let db = new_db().await;
         let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
