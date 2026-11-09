@@ -44,6 +44,19 @@ test('SC-02: Project create is a roomy dialog whose location row reflows', async
   await noHorizontalOverflow(page, path);
   await noHorizontalOverflow(page, dialog);
 
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.locator('[data-testid^="project-actions-"]').first().click();
+  await page.locator('[data-testid^="project-actions-settings-"]').first().click();
+  const settings = page.getByTestId('project-settings-dialog');
+  await expect(settings).toBeVisible();
+  const settingsBox = await settings.boundingBox();
+  expect(settingsBox).not.toBeNull();
+  expect(settingsBox.width).toBeGreaterThan(680);
+  expect(settingsBox.width).toBeLessThanOrEqual(760);
+  await expect(settings.getByTestId('project-location-editor')).toBeVisible();
+  await noHorizontalOverflow(page, settings);
+
   test.info().annotations.push({
     type: 'evidence',
     description:

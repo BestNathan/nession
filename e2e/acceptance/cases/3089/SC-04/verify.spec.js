@@ -37,7 +37,8 @@ test('SC-04: non-Project create keeps the draft across child Agent and ENV depth
   await createPage.getByTestId('app-session-env').click();
   const envPage = page.getByTestId('app-create-env-page');
   await expect(envPage).toBeVisible();
-  await envPage.locator('button').first().click();
+  await expect(envPage.getByText('staging.env')).toBeVisible();
+  await envPage.locator('button', { hasText: 'staging.env' }).first().click();
   await page.getByTestId('app-create-env-done').click();
   await expect(createPage.locator('#name')).toHaveValue('draft-session-name');
   await expect(createPage.getByTestId('create-session-submit')).toBeEnabled();
@@ -51,7 +52,7 @@ test('SC-04: non-Project create keeps the draft across child Agent and ENV depth
   });
 });
 
-test('SC-04: Project create shows existing-location status and blocks an offline Agent', async ({ page }) => {
+test('SC-04: Project create shows existing-location status and preserves the draft', async ({ page }) => {
   test.setTimeout(180_000);
   const { sha } = verifiedRuntime('SC-04');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -76,8 +77,21 @@ test('SC-04: Project create shows existing-location status and blocks an offline
   await expect(locationPage.getByTestId('project-location-status-online')).toBeVisible();
   await locationPage.getByTestId('app-create-location-done').click();
   await expect(createPage.locator('#name')).toHaveValue('project-draft');
+  await noHorizontalOverflow(page);
 
+  test.info().annotations.push({
+    type: 'evidence',
+    description:
+      'exact SHA ' + sha + ': App Project create rendered Agent/path/status on distinct lines and preserved the draft across the location child',
+  });
+});
+
+test('SC-04: an offline Agent is explicit and disables the single Create action', async ({ page }) => {
+  test.setTimeout(180_000);
+  const { sha } = verifiedRuntime('SC-04');
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/fixture/app?projects=offline');
+
   await page.getByTestId('app-header-sessions').click();
   await page.getByTestId('project-item-row').first().click();
   await page.getByTestId('project-detail-create-session').click();
@@ -91,7 +105,6 @@ test('SC-04: Project create shows existing-location status and blocks an offline
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': App Project create rendered Agent/path/status on distinct lines and preserved the draft; ' +
-      'the offline Agent state was explicit and disabled the single Create action',
+      'exact SHA ' + sha + ': the offline Agent state was explicit on the location row and disabled the single Create action without erasing the draft',
   });
 });

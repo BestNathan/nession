@@ -37,7 +37,6 @@ test('SC-05: App Project create and settings stack touch-sized locations', async
 
   await page.getByTestId('app-page-back').click();
   await expect(createPage).not.toBeVisible();
-  await page.getByTestId('app-header-sessions').click();
   await page.locator('[data-testid^="project-actions-"]').first().click();
   await page.locator('[data-testid^="project-actions-settings-"]').first().click();
   const settingsPage = page.getByTestId('app-project-settings-page');

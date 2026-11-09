@@ -69,6 +69,8 @@ function useFixtureOperation(search: string) {
 function useFixtureShellData(search: string) {
   const agents = useMemo(() => fixtureAgents(search), [search]);
   const sessions = useFixtureSessions(search);
+  const [operationsReady, setOperationsReady] = useState(false);
+  useEffect(() => setOperationsReady(true), []);
   const staleAgents = useMemo(() => fixtureStaleAgents(search), [search]);
   const connectionStatus = fixtureConnection(search);
   const experienceOverride = experienceFromSearch(search);
@@ -84,6 +86,7 @@ function useFixtureShellData(search: string) {
     connectionStatus,
     experienceOverride,
     operationState,
+    operationsReady,
     isWide,
   };
 }
@@ -175,9 +178,9 @@ export function FixtureShell() {
     connectionStatus,
     experienceOverride,
     operationState,
+    operationsReady,
     isWide,
   } = useFixtureShellData(search);
-
   const {
     selectedId, setSelectedId,
     searchQuery, setSearchQuery,
@@ -195,8 +198,6 @@ export function FixtureShell() {
     sortField,
     sortDirection,
   });
-  const isSearchActive = searchQuery.trim().length > 0 || statusFilter !== 'all';
-
   const selectedSession = fixtureSelectedSession(
     sessions,
     selectedId,
@@ -234,7 +235,7 @@ export function FixtureShell() {
           sortField={sortField}
           sortDirection={sortDirection}
           toggleSort={(field) => toggleFixtureSort(field, sortField, setSortField, setSortDirection)}
-          isSearchActive={isSearchActive}
+          isSearchActive={searchQuery.trim().length > 0 || statusFilter !== 'all'}
           selectedSession={selectedSession}
           selectedAgent={selectedAgent}
           domain={domain}
@@ -279,7 +280,7 @@ export function FixtureShell() {
       />
       <FixtureOperationDialogs
         operation={operationState.operation}
-        open={operationState.open}
+        open={operationState.open && operationsReady}
         session={selectedSession}
         agents={agents}
         onClose={operationState.close}

@@ -305,7 +305,9 @@ function useFixtureAppOperations(search: string) {
         ? 'configure'
         : null,
   );
-  return { createOpen, setCreateOpen, attachIntent, setAttachIntent };
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  return { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready };
 }
 
 /** The selected Session, its Agent and the domain state the shell reads. */
@@ -346,7 +348,7 @@ export function FixtureApp() {
 
   const projectLayer = useFixtureProjectShell(search);
   const projectBinding = useSessionProjectBinding();
-  const { createOpen, setCreateOpen, attachIntent, setAttachIntent } =
+  const { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready: operationsReady } =
     useFixtureAppOperations(search);
 
   // A capability projection has to be reachable from a fixture to be captured,
@@ -503,9 +505,9 @@ export function FixtureApp() {
         projectLayer={projectLayer}
         agents={agents}
         selectedSession={selectedSession}
-        attachIntent={attachIntent}
+        attachIntent={operationsReady ? attachIntent : null}
         onAttachClose={() => setAttachIntent(null)}
-        createOpen={createOpen}
+        createOpen={operationsReady && createOpen}
         onCreateClose={() => setCreateOpen(false)}
       />
     </div>
