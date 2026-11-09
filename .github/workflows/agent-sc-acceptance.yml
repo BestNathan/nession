@@ -268,22 +268,34 @@ jobs:
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
-      # Some historical Requirements prove behavior owned by the independent
-      # GitOps branch and documented in authenticated Issue comments. The
-      # Acceptor itself only has Read/Glob/Grep: prepare immutable, read-only
-      # sources on trusted main, never grant it Bash/HTTP or Issue-write access.
+      # Main-owned source parser validates exact orphan commit, allowed paths,
+      # byte budgets and manifest; the model only receives read-only files.
+      # The pre-existing historical GitOps shortcut remains pre-merge only.
       - name: Stage referenced cross-branch read-only evidence
-        if: inputs.stage == 'pre-merge'
+        if: inputs.deterministic_result_json == ''
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Opt in only when the Issue expressly identifies the gitops branch
-          # as a source of truth. Ordinary PR acceptance is unaffected.
-          if ! jq -e '(.requirement_body // "") | contains("gitops:")' \
-            "${RUNNER_TEMP}/acceptance-context.json" >/dev/null; then
+          context="${RUNNER_TEMP}/acceptance-context.json"
+          target="${GITHUB_WORKSPACE}/workspace"
+          if jq -e '.acceptance_sources != null' "${context}" >/dev/null; then
+            node scripts/acceptance-sources.mjs stage "${context}" "${target}"
+            exit 0
+          fi
+
+          # Compatibility only: old GitOps users, created before the contract
+          # cutoff, retain the old comment snapshot and read-only archive.
+          # Later Issues must declare exact sources instead of using prose.
+          if [[ "${ACCEPTANCE_STAGE}" != 'pre-merge' ]]; then exit 0; fi
+          if jq -e '.criteria | length == 0' "${context}" >/dev/null; then exit 0; fi
+          if ! jq -e '
+            (.issue.created_at // "") as $created |
+            ($created != "" and $created < "2026-11-09T05:00:00Z") and
+            ((.requirement_body // "") | contains("gitops:"))
+          ' "${context}" >/dev/null; then
             exit 0
           fi
 
