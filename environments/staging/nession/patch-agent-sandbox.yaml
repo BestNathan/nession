@@ -1,0 +1,33 @@
+# Staging-only Agent Sandbox host capabilities (#2681).
+#
+# The Agent creates one delegated cgroup v2 execution root under the host
+# cgroup tree, and Bubblewrap creates user/mount/PID namespaces with a private
+# mount view. The default containerd security context keeps /sys/fs/cgroup
+# read-only and gives the Pod a private cgroup namespace, so the launch
+# barrier cannot verify membership and Bubblewrap cannot build its mount view.
+#
+# This is the staging acceptance environment only. The base Deployment stays
+# unprivileged; do not copy this patch into preprod or production without a
+# separate security decision.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-agent
+spec:
+  template:
+    spec:
+      containers:
+        - name: nession-agent
+          env:
+            - name: AGENT_SANDBOX_CGROUP_ROOT
+              value: "/nession-staging"
+            - name: AGENT_SANDBOX_STATE_DIR
+              value: "/data/nession-sandbox"
+          securityContext:
+            privileged: true
+      volumes:
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
