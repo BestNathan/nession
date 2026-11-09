@@ -54,8 +54,8 @@ function textResponse(path: string): GitPreviewResponse {
   };
 }
 
-const photo: GitRow = { kind: 'untracked', path: 'assets/photo.png' };
-const notes: GitRow = { kind: 'untracked', path: 'notes/plain.txt' };
+const photo: GitRow = { kind: 'untracked', path: 'assets/photo.png', key: 'untracked:assets/photo.png' };
+const notes: GitRow = { kind: 'untracked', path: 'notes/plain.txt', key: 'untracked:notes/plain.txt' };
 
 describe('Git media selection (#2876 SC-03/SC-04)', () => {
   beforeEach(() => {
