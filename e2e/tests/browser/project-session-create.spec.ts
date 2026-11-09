@@ -37,10 +37,14 @@ test.describe('Project Existing-location Session creation', () => {
     await sessionDialog.getByTestId('create-session-submit').click();
 
     // The created Session appears in the flat list; the Project remains a
-    // declaration, not a parent of that row.
+    // declaration, not a parent of that row. The committed membership is
+    // projected through create/list and shown by the Session Project chip.
     await expect(
       page.locator('[data-testid="session-item-row"]', { hasText: sessionName }),
     ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('session-project-chip')).toHaveText(projectName, {
+      timeout: 15_000,
+    });
 
     // Creating enters the work (the ordinary selection path); a freshly made
     // Session has no stored attach profile, so dismiss its attach prompt.
