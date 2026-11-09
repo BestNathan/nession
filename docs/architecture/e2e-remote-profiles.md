@@ -59,6 +59,20 @@ attested source SHA and must not be called live deployed-environment E2E.
 Remote Case execution remains disabled until its trusted read-only collector,
 profile admission and evidence ingestion are actually implemented.
 
+## Main-owned identity revalidation after verifier changes
+
+The existing `E2E / Staging Lanes` admission job already reads trusted GitOps
+and dispatches `Deploy / Identity` for stale attestations. On a **trusted
+main push** that changes the identity workflow, GOST lifecycle, source
+attester or Staging observer (including the lane router itself), the same
+owner also requests **one** new `Deploy / Identity` dispatch for `staging`,
+unless the stale-lane step already dispatched it. An unrelated main push
+does not open another VPN session. No secrets are passed to the scheduler:
+the protected, read-only identity workflow still receives its own
+`workflow_dispatch` input, retains its exact Run/Attempt provenance and is
+ingested by the unchanged trusted Run Store path. This is not an implicit
+production inspection, deployment, Case evaluation or SC Pass.
+
 ## Job-owned GOST tunnel and fault cleanup
 
 `scripts/ci/deploy-identity-tunnel.sh` is the single lifecycle owner for
