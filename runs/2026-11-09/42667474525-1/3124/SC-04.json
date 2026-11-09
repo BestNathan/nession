@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0657eaa5b00bad37b183ba7ac010e5fdd927eebe949b5deb843fc8e69876542a",
+  "run_id": 42667474525,
+  "run_attempt": 1,
+  "issue": 3124,
+  "criterion": "SC-04",
+  "criterion_text": "Repeated/double Enter, stale generation, blocked launch, missing kernel privilege, Agent restart or detached client cannot leave a falsely active Sandbox or orphan owned resources; failure preserves original Pane and reports error; Return to Native changes focus without silently killing the Sandbox Pane; actual shell exit cleans up the owned isolated Pane.",
+  "stage": "staging",
+  "target_sha": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+  "contract_sha256": "2547e3e1d154b6315c0d5f30919914122bf81360755ef338b317887dfe5bae7a",
+  "case_revision": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+  "case_tree_sha": "00617c83522464d1ad0d08174d54ef50b2eac800",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T17:46:48.118Z",
+  "finished_at": "2026-11-09T17:47:03.404Z",
+  "duration_ms": 15286,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Repeated, stale, blocked and exiting Sandbox transitions fail closed without false state or orphaned resources",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "a duplicate delivery of enter_id sc04-enter-5185 replayed execution f35da991-984b-4d69-af6b-643d53b6ebeb and created no second Pane"
+        },
+        {
+          "type": "protocol",
+          "value": "a pre-Enter generation with a new attempt id was refused as conflict while the context stayed inside"
+        },
+        {
+          "type": "protocol",
+          "value": "a blocked launch left the Native Pane active, created no Pane and wrote no record"
+        },
+        {
+          "type": "protocol",
+          "value": "a detached/reconnected client still observed the same durable execution"
+        },
+        {
+          "type": "protocol",
+          "value": "Return to Native kept the Sandbox Pane alive; focus returned inside without a new Enter"
+        },
+        {
+          "type": "runtime",
+          "value": "the sandboxed shell exit removed the Pane and its durable record within the reaper window"
+        }
+      ],
+      "duration_ms": 9421,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42667474525,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42667474525",
+    "record_path": "runs/2026-11-09/42667474525-1/3124/SC-04.json",
+    "source_result_sha256": "b5f87f52f52b9b8dc4325b46ca5a3a22a66e8593e266c50e5f70b728f8d3117e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42667474525-1",
+    "sha256": "b5f87f52f52b9b8dc4325b46ca5a3a22a66e8593e266c50e5f70b728f8d3117e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42667474525",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d282dd844220348c9919a5bc512bef014f755c6c65f16a5c1deb0a9d1dd93915",
+  "run_id": 42667474525,
+  "run_attempt": 1,
+  "issue": 3124,
+  "criterion": "SC-01",
+  "criterion_text": "For the selected Session **active Pane**, an authenticated context read yields exactly one of `inside-managed + verified effective policy`, `outside/native`, or `unknown/offline/stale`, correctly following pane switch, Agent reconnect, exit, and deletion/recreation of a same-named Session; a host-capability probe never alone yields `inside`.",
+  "stage": "staging",
+  "target_sha": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+  "contract_sha256": "2547e3e1d154b6315c0d5f30919914122bf81360755ef338b317887dfe5bae7a",
+  "case_revision": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+  "case_tree_sha": "efb6006f87c134a11bfc7941fffe015c1c79f030",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T17:46:16.853Z",
+  "finished_at": "2026-11-09T17:46:32.835Z",
+  "duration_ms": 15982,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The authenticated context follows the active Pane, not host support or a Session name",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "the initial active Pane %0 was outside despite an available backend"
+        },
+        {
+          "type": "protocol",
+          "value": "Enter moved the active Pane to the verified sandbox Pane and the durable execution id was stable across reads"
+        },
+        {
+          "type": "protocol",
+          "value": "Return to Native restored the original Pane and kept the Sandbox Pane listed"
+        },
+        {
+          "type": "protocol",
+          "value": "a deleted/recreated same-name Session resolved outside with no execution and no listed Sandbox Panes"
+        },
+        {
+          "type": "runtime",
+          "value": "Agent restart reconciliation is Pane-keyed: a vanished Pane is cleaned while its Session name lives (exact named sandbox tests)"
+        }
+      ],
+      "duration_ms": 10070,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42667474525,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e1a4b89539f5871a0adba034c0c19629af52a16b",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42667474525",
+    "record_path": "runs/2026-11-09/42667474525-1/3124/SC-01.json",
+    "source_result_sha256": "6ad40b8357bc8fc8d37f4d2463a439303d77d7d71e3c92e6228cd229baf78f89"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42667474525-1",
+    "sha256": "6ad40b8357bc8fc8d37f4d2463a439303d77d7d71e3c92e6228cd229baf78f89",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42667474525",
+    "durability": "time-limited; object archival not configured"
+  }
+}
