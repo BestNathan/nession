@@ -114,6 +114,28 @@ PID 1 does not. Operators can point `[sandbox] cgroup_root` at a delegated
 sibling. The backend probes rather than assumes: an unavailable delegation
 reports `UnsupportedPolicy(resource.cgroup_v2)` and the create is refused.
 
+## Deployment packaging and host prerequisites
+
+The Agent image carries the `bubblewrap` launcher (`Dockerfile.agent` and
+`Dockerfile.agent.prebuilt`), but the image alone is not a sandbox-capable host.
+The deployment must also provide, and the probe must measure:
+
+- unprivileged user namespaces (kernel and LSM policy permitting `unshare` and
+  Bubblewrap's baseline namespaces);
+- a writable cgroup v2 subtree with the requested controllers delegated, mapped
+  at the same **kernel-relative** path configured in `[sandbox] cgroup_root`;
+- the pinned seccomp/no-new-privileges path (the bridge installs its own filter;
+  the surrounding container profile must not block it).
+
+The container entrypoint projects operator configuration into `[sandbox]`:
+`AGENT_SANDBOX_ENABLED` (master switch; when false, every explicit policy
+request is refused but Native Sessions are unaffected), and optional
+`AGENT_SANDBOX_BUBBLEWRAP_PATH`, `AGENT_SANDBOX_CGROUP_ROOT` and
+`AGENT_SANDBOX_STATE_DIR`. A Pod whose `/sys/fs/cgroup` is read-only, or whose
+own cgroup hosts processes, still fails closed at policy validation; it does not
+silently degrade to Native. The acceptance lane measures the same capabilities
+and reports Pending with the measured prerequisite when a runner lacks them.
+
 ## Lifecycle and reconciliation
 
 Each execution has a durable record under the Agent sandbox state directory
