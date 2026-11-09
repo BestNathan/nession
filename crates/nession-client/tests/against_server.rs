@@ -15,7 +15,7 @@ use std::sync::Arc;
 use nession_client::{AttachMode, ClientConfig, ClientConnection, ClientError};
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
-use nession_protocol::contracts::agent::v1::AgentListReply;
+use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
 use nession_protocol::contracts::session::v1::{ClientSessionAttachReply, ServerSessionListReply};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
@@ -149,4 +149,63 @@ async fn a_failed_attach_carries_the_servers_reason() {
             panic!("there is no such session, yet the server sent a plan: {attach:?}")
         }
     }
+}
+
+/// The `#565` MCP consumer's additional Server methods all decode the real
+/// replies, including the refusal arms.
+#[tokio::test]
+async fn a_real_server_answers_info_force_list_rename_delete_and_preview() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let info = client.get_server_info().await.expect("info");
+    assert!(!info.version.is_empty(), "the Server states its version");
+
+    match client
+        .list_sessions_with_force(None, true)
+        .await
+        .expect("forced list")
+    {
+        ServerSessionListReply::Listed(list) => {
+            assert!(list.sessions.is_empty(), "no Agent has registered");
+            assert!(list.stale_agents.is_empty(), "there was nothing to ask");
+        }
+        ServerSessionListReply::Refused(refusal) => {
+            panic!("a real server refused the forced list: {}", refusal.message)
+        }
+    }
+
+    match client
+        .rename_agent("ghost-agent", Some("a name"))
+        .await
+        .expect("rename answers with a refusal")
+    {
+        AgentRenameReply::Refused(refusal) => {
+            assert!(refusal.error.contains("not found"), "{}", refusal.error);
+        }
+        AgentRenameReply::Renamed(agent) => {
+            panic!("there is no such Agent, yet it was renamed: {agent:?}")
+        }
+    }
+
+    let deleted = client.delete_agent("ghost-agent").await.expect("delete");
+    assert!(!deleted.success);
+    assert!(
+        deleted
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("not found")),
+        "the Server must name the reason"
+    );
+
+    let preview = client
+        .capture_session_preview("ghost-agent:work", 10)
+        .await
+        .expect("capture answers with a refusal");
+    assert!(
+        preview
+            .get("error")
+            .and_then(|value| value.as_str())
+            .is_some(),
+        "a missing Agent must be a refusal payload, not a transport error"
+    );
 }

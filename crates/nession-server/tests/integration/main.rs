@@ -6,6 +6,7 @@ mod command_broker;
 mod db;
 mod full_stack;
 mod handler;
+mod mcp;
 mod probe_sweep;
 mod relay;
 mod session_command;

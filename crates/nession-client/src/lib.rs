@@ -40,6 +40,7 @@
 //! # }
 //! ```
 
+pub mod agent_connection;
 pub mod connection;
 pub mod error;
 pub mod p2p;
@@ -47,6 +48,7 @@ pub mod unit;
 pub mod units;
 pub mod wire;
 
+pub use agent_connection::AgentConnection;
 pub use connection::{open_ws, ClientConfig, ClientConnection, WsStream, DEFAULT_REQUEST_TIMEOUT};
 pub use error::ClientError;
 pub use p2p::{attach_frame, P2pConnection};

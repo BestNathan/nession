@@ -1954,6 +1954,7 @@ dependencies = [
  "nession-claude-code",
  "nession-common",
  "nession-git",
+ "nession-mcp",
  "nession-protocol",
  "nession-runtime",
  "nession-server",
@@ -2096,6 +2097,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-mcp"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "nession-agent",
+ "nession-client",
+ "nession-common",
+ "nession-protocol",
+ "nession-server",
+ "rand 0.8.7",
+ "rustls 0.22.4",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "tokio-tungstenite",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "nession-protocol"
 version = "0.35.0"
 dependencies = [
@@ -2140,6 +2169,7 @@ dependencies = [
  "futures-util",
  "nession-agent",
  "nession-common",
+ "nession-mcp",
  "nession-protocol",
  "nession-runtime",
  "rand 0.8.7",
