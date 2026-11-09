@@ -217,7 +217,12 @@ async function main(){
   const result=await verifySourceBoundOriginalPr({
     issue,pr,headCommit,mergeCommit,comments,runs:runData.workflow_runs,get:api,
   });
-  fs.writeFileSync(output,JSON.stringify(result,null,2)+'\n');
+  // The immutable PR proof is a bounded field of the existing Acceptance
+  // CI envelope, not a second independent authority or an Agent verdict.
+  fs.writeFileSync(output,JSON.stringify({
+    schema_version:1,kind:'acceptance_ci_evidence',target_sha:HEAD,
+    verified_original_staging_integration_pr:result,
+  },null,2)+'\n');
   console.log('Collected exact source-bound PR #'+PR+' Quality/Case/E2E/Pages evidence for Issue #'+ISSUE);
 }
 if(process.argv[1]?.endsWith('acceptance-staging-batch-pr-evidence.mjs'))
