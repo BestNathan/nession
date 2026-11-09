@@ -28,6 +28,9 @@ const runtime = runtimeFromEnv();
   const name = 'acceptance-3124-sc01-' + process.pid;
   try {
     const sessionId = await createSession(client, name, runtime.home);
+    // Retained after the inner block so the final evidence still names the
+    // original Native Pane (block-scoped `const` is not visible below).
+    let nativePane = null;
     try {
       const outside = await context(client, sessionId);
       if (!outside.success || !outside.context) {
@@ -48,7 +51,7 @@ const runtime = runtimeFromEnv();
         );
         return;
       }
-      const nativePane = outside.context.scope.pane_id;
+      nativePane = outside.context.scope.pane_id;
       assert.ok(nativePane, 'the outside context names its active Pane');
       if (!outside.context.enterable) {
         pending(
