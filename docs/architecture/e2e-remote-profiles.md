@@ -14,6 +14,47 @@ The trusted controller must resolve a deployment identity from an authenticated 
 
 The executable policy for this chain is `scripts/deployment-identity-policy.mjs` (Gate `deployment-identity-selftest`). It parses a trusted GitOps overlay, validates trusted build provenance, and binds one full source SHA to three immutable digests and three ready observed workloads (exact namespace, workload name, UID, generation and imageID). `scripts/deployment-identity-collect.mjs` is the adapter that maps raw read-only `kubectl get deployments/pods` JSON into that observation shape and rejects mid-rollout or ambiguous pods. Neither script performs cluster or registry I/O, emits evidence by itself, or enables a remote profile; a trusted workflow must still supply authenticated inputs.
 
+## Existing CI access path (verified from repository source, not a live route test)
+
+The current `.github/workflows/deploy-identity.yml` uses the project's existing
+**GOST v3 relay over WSS** to forward only the Kubernetes API endpoint, rather
+than provisioning WireGuard on the GitHub-hosted runner. The workflow consumes
+`GOST_RELAY_URL` and `KUBE_CONFIG_CI`; the 2026-10-27 incident notes referring
+to `WG_CI_CONF` describe an older transport and are not instructions to
+create another VPN. The relay and tunnel are networking; only Kubernetes RBAC
+and trusted deployment provenance authorize the subsequent observation.
+
+The `Deploy / Identity` attest job is limited to `BestNathan/nession` on
+`refs/heads/main`, pins the checkout to its triggering SHA, and declares
+GitHub Environment `nession-staging-identity`. **An Environment name in
+workflow YAML does not prove it has protection configured.** The repository
+administrator must independently configure this existing workflow's
+Environment in GitHub Settings: restrict deployment branches/tags to
+`main`, limit the allowed actors/approval policy, store the scoped tunnel
+and Kubernetes read-only credentials as Environment secrets, and remove
+the legacy repository-wide copies. Verify the *effective* Environment
+rules and a rejected non-main dispatch from GitHub API/Run evidence.
+Merely adding this YAML key does not establish SC-02 or a short-lived
+OIDC credential. The current static `KUBE_CONFIG_CI` remains a documented
+migration/blocker for OIDC/short-lived identity until a working provider
+and live readback exist.
+
+Do not mistake negative `kubectl auth can-i` checks for firewall egress
+enforcement: they demonstrate Kubernetes API authorization, not denied
+connectivity to other LAN destinations. Demonstrate the network boundary with
+an explicitly allowlisted API endpoint **and** a separately approved,
+non-sensitive denied-destination probe from the actual workflow environment
+before asserting SC-01. A successful tunnel startup is not an authenticated
+deployment attestation.
+
+The workflow currently collects deployment/pod identity and ingests the
+bounded attestation through `Deploy / Identity Ingest`; this is a
+**deployment identity record**, not an executed `remote-staging` E2E Case.
+The `E2E / Staging Lanes` workflow runs a full-stack-local suite at the
+attested source SHA and must not be called live deployed-environment E2E.
+Remote Case execution remains disabled until its trusted read-only collector,
+profile admission and evidence ingestion are actually implemented.
+
 ## Trust and runner isolation
 
 1. Reuse the **existing project VPN access path** from a trusted main-controlled workflow and protected environment where that execution environment supports it. Do not provision a second VPN or dedicated runner group by default. Only propose additional runner/network infrastructure if a concrete limitation of the existing path is demonstrated.
