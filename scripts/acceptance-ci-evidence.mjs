@@ -50,6 +50,7 @@ import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './accep
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
 import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
+import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance-qwen-3001-pr-evidence.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicPagesLineage,selfTestPublicPagesLineage,shouldCollectPublicPagesLineage} from './acceptance-pages-lineage-readback.mjs';
@@ -3292,6 +3293,7 @@ async function selfTest() {
     [{verdict:'fixture_pass'}]);
   selfTestCiCostStudy();
   selfTestPrQualityCost();
+  selfTestOriginalQwenReview();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
@@ -3323,6 +3325,25 @@ async function main() {
       verified_pr_quality_cost_study:measured,
     },null,2)+'\n');
     console.log('PR Quality CI cost source attested for issue #2917');
+    return;
+  }
+  if (command === 'collect-pr-fixture') {
+    const workspace=process.argv[3],outFile=process.argv[4];
+    if(!workspace||!outFile)throw Error('usage: collect-pr-fixture WORKSPACE OUT');
+    const repo=requireText(process.env.GITHUB_REPOSITORY,'GITHUB_REPOSITORY');
+    const targetSha=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],
+      {encoding:'utf8'}).trim();
+    // The original implementing PR #3017 is the SC source; never treat a
+    // future unrelated PR mentioning #3001 as the implementation.
+    const observed=await collectOriginalQwenReview({
+      repo,issue:Number(process.env.ISSUE_NUMBER??0),
+      stage:process.env.ACCEPTANCE_STAGE,targetSha,get:githubGet,
+    });
+    fs.writeFileSync(outFile,JSON.stringify({
+      schema_version:1,kind:'acceptance_ci_evidence',target_sha:targetSha,
+      verified_qwen_3001_original_review:observed,
+    },null,2)+'\n');
+    console.log('Original #3001 PR #3017 and Reviewer verified independently');
     return;
   }
   if (command === 'collect') {
