@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42637855191,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3023-agent-erofs-cache",
+    "target_sha": "bc91a75ecd1454183ed3bc19b8600c90d634d3a4",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42637855191",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e6be7b3aeb9e6e43a1b145fd850d89c5165a46d6373c21665497c99ad8d358bd"
+  },
+  "record": "runs/2026-11-09/42637855191-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "453a1e86840439bc690115b8620d1eed5e476309c835002d1ca693143ec6f493"
+}
