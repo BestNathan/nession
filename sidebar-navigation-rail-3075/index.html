@@ -209,11 +209,19 @@
  const $ = (s) => document.querySelector(s);
  const product = $('#product');
  const original = [
-  {id:'s1',name:'Fix terminal reconnect',meta:'Claude Code · devbox-01 · just now',tmux:'fix-terminal-reconnect'},
-  {id:'s2',name:'Design sidebar rail',meta:'shell · macbook · 12m',tmux:'design-sidebar-rail'},
-  {id:'s3',name:'Sandbox lifecycle',meta:'Codex · runner-02 · 2h',tmux:'sandbox-lifecycle'},
-  {id:'s4',name:'Review CI workflows',meta:'zsh · devbox-01 · yesterday',tmux:'review-ci'}
- ];
+  {id:'s1',name:'Fix terminal reconnect',meta:'Claude Code · devbox-01 · just now',tmux:'fix-terminal-reconnect',bucket:'Today'},
+  {id:'s2',name:'Design sidebar rail',meta:'shell · macbook · 12m',tmux:'design-sidebar-rail',bucket:'Today'},
+  {id:'s3',name:'Sandbox lifecycle',meta:'Codex · runner-02 · 2h',tmux:'sandbox-lifecycle',bucket:'Today'},
+  {id:'s4',name:'Review CI workflows',meta:'zsh · devbox-01 · yesterday',tmux:'review-ci',bucket:'Previous 7 days'},
+  {id:'s5',name:'Files context navigation',meta:'shell · macbook · 2 days',tmux:'files-context',bucket:'Previous 7 days'},
+  {id:'s6',name:'Project API validation',meta:'Rust · devbox-01 · 3 days',tmux:'project-api',bucket:'Previous 7 days'},
+  {id:'s7',name:'Terminal clipboard',meta:'zsh · macbook · 4 days',tmux:'terminal-clipboard',bucket:'Previous 7 days'},
+  {id:'s8',name:'Session metadata',meta:'Claude Code · devbox-01 · 6 days',tmux:'session-metadata',bucket:'Previous 7 days'},
+  {id:'s9',name:'Capability discovery',meta:'Codex · macbook · 2 weeks',tmux:'capability-discovery',bucket:'Older'},
+  {id:'s10',name:'GitHub issue view',meta:'shell · devbox-01 · 3 weeks',tmux:'github-issue',bucket:'Older'},
+  {id:'s11',name:'Remote attach prototype',meta:'zsh · runner-02 · last month',tmux:'remote-attach',bucket:'Older'},
+  {id:'s12',name:'Workspace context model',meta:'Codex · devbox-01 · last month',tmux:'workspace-model',bucket:'Older'}
+ ];;
  let sessions = original.map(s => ({...s}));
  let dialogOrigin = null;
  const state={collapsed:false,width:1280,mode:'web',narrow:false,drawer:false,selected:'s1',surface:'terminal',beforeProject:'terminal',project:null,search:'',hasProjects:true,serverOffline:false,empty:false,appView:'terminal',menu:null,dialog:null,log:[]};
@@ -225,7 +233,7 @@
    const visible=(state.empty?[]:sessions).filter(s=>s.name.toLowerCase().includes(q)||s.meta.toLowerCase().includes(q));
    $('#session-count').textContent=String(visible.length);
    const prev=$('#session-scroller').scrollTop;
-   rows.innerHTML=visible.length?'<div class="mock-time">Recent work</div>'+visible.map(s=>'<div class="mock-row-wrap"><div class="mock-row" data-selected="'+(s.id===state.selected)+'"><button class="mock-row" style="padding:0;flex:1;min-width:0" data-action="select" data-id="'+escape(s.id)+'"><span class="mock-row-copy"><span class="mock-row-title">'+escape(s.name)+'</span><span class="mock-row-meta">'+escape(s.meta)+'</span></span></button><button class="mock-more" data-action="menu" data-id="'+escape(s.id)+'" aria-label="Actions for '+escape(s.name)+'" title="Session actions">···</button></div>'+(state.menu===s.id?'<div class="mock-inline-menu"><button data-action="menu-details" data-id="'+escape(s.id)+'">Session details</button><button data-action="menu-edit" data-id="'+escape(s.id)+'">Edit details</button><button data-action="menu-attach" data-id="'+escape(s.id)+'">Attach settings</button><button data-action="menu-kill" data-id="'+escape(s.id)+'">Kill session</button></div>':'')+'</div>').join(''):'<p class="mock-empty">'+(q?'No matching sessions.':'No sessions yet. Use New session to start.')+'</p>';
+   rows.innerHTML=visible.length?visible.map((s,i)=>(i===0||(visible[i-1].bucket||'Today')!==(s.bucket||'Today')?'<div class="mock-time">'+escape(s.bucket||'Today')+'</div>':'')+'<div class="mock-row-wrap"><div class="mock-row" data-selected="'+(s.id===state.selected)+'"><button class="mock-row" style="padding:0;flex:1;min-width:0" data-action="select" data-id="'+escape(s.id)+'"><span class="mock-row-copy"><span class="mock-row-title">'+escape(s.name)+'</span><span class="mock-row-meta">'+escape(s.meta)+'</span></span></button><button class="mock-more" data-action="menu" data-id="'+escape(s.id)+'" aria-label="Actions for '+escape(s.name)+'" title="Session actions">···</button></div>'+(state.menu===s.id?'<div class="mock-inline-menu"><button data-action="menu-details" data-id="'+escape(s.id)+'">Session details</button><button data-action="menu-edit" data-id="'+escape(s.id)+'">Edit details</button><button data-action="menu-attach" data-id="'+escape(s.id)+'">Attach settings</button><button data-action="menu-kill" data-id="'+escape(s.id)+'">Kill session</button></div>':'')+'</div>').join(''):'<p class="mock-empty">'+(q?'No matching sessions.':'No sessions yet. Use New session to start.')+'</p>';
    $('#session-scroller').scrollTop=prev;
  }
  function terminalHTML(){
@@ -302,6 +310,7 @@
  function resize(event){
    const chosen=document.querySelector('[data-np-size][aria-pressed="true"]');
    state.width=Number(event.detail.width);state.mode=chosen?.dataset.demoExperience==='app'?'app':'web';
+   const device=$('[data-np-device]');device.style.setProperty('--np-device-height',(state.width===1440?900:state.width===390?844:state.width===375?812:800)+'px');
    state.drawer=false;state.menu=null;
    if(state.mode==='app'){state.appView='terminal'} else if(state.width<1024){state.collapsed=false}
    sync();log('Viewport '+state.width+' CSS px · '+(state.mode==='app'?'App spatial':state.width<1024?'Web drawer':'Web two-column'));
