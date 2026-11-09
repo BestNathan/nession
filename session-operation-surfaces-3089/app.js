@@ -101,7 +101,7 @@
     return appHeader('Sessions','show-terminal',button('＋','create-ordinary-session','ghost','aria-label="New Session"'))+
       '<div class="app-contents"><div class="app-list-title">Today</div>'+
       '<div class="app-list-item"><button class="grow" style="text-align:left;border:0;background:none;padding:0" data-act="show-terminal"><strong>'+esc(s.activeSession)+'</strong><small>Shell · Build Agent</small></button>'+button('···','session-menu','ghost','aria-label="Session actions"')+'</div>'+
-      '<div class="app-list-title">Projects</div><button class="app-list-item" data-act="show-project"><span><strong>'+esc(s.projectName)+'</strong><small>2 existing locations</small></span><span>›</span></button>'+
+      '<div class="row between"><div class="app-list-title">Projects</div>'+button('＋','project-create','ghost','aria-label="Create Project"')+'</div><button class="app-list-item" data-act="show-project"><span><strong>'+esc(s.projectName)+'</strong><small>2 existing locations</small></span><span>›</span></button>'+
       '<div class="app-list-title">Agents</div><div class="muted twelve" style="padding:10px">Build Agent · '+(isOffline()?'offline':'online')+'</div></div>'+
       '<nav class="app-bottom" aria-label="App navigation"><button class="selected-tab">Sessions</button><button data-act="show-terminal">Terminal →</button></nav>';
   }
@@ -136,7 +136,7 @@
     if(kind==='attach-quick') {
       return appSheet('Attach Session',
         '<div class="stack"><div><strong>'+esc(s.activeSession)+'</strong><div class="muted twelve">Build Agent</div></div>'+
-        '<div class="card stack"><div class="row between"><strong class="twelve">Automatic connection</strong><span class="success">✓</span></div><div class="muted twelve">Choose the fastest reachable path; Relay fallback.</div></div>'+
+        '<div class="card stack"><div class="row between"><strong class="twelve">'+(s.mode==='auto'?'Automatic connection':s.mode==='p2p'?'Direct P2P connection':'Relay connection')+'</strong><span class="success">✓</span></div><div class="muted twelve">'+(s.mode==='auto'?'Choose fastest reachable path; Relay fallback.':s.mode==='p2p'?'Connect directly to the selected Agent.':'Connect through the Server relay.')+'</div></div>'+
         '<button class="app-select-row" data-act="attach-advanced"><span class="path-detail"><strong>Connection settings</strong><span>›</span></span><span class="muted twelve">Auto · P2P · Relay · Candidate paths</span></button>'+offlineMsg+'</div>',
         button('Attach','attach-submit','primary',isOffline()?'disabled':'')
       );
@@ -208,7 +208,7 @@
       case 'show-project':s.page='project';cancel();break;
       case 'show-sessions':s.page='sessions';cancel();break;
       case 'session-menu':showOperation('session-menu');break;
-      case 'open-attach':s.mode='auto';s.configureFrom='quick';showOperation(isApp()?'attach-quick':'attach');break;
+      case 'open-attach':s.configureFrom='quick';showOperation(isApp()?'attach-quick':'attach');break;
       case 'open-configure':s.configureFrom='direct';showOperation('attach-config');break;
       case 'attach-advanced':s.configureFrom='quick';showOperation('attach-config');break;
       case 'select-mode':s.mode=el.dataset.value||'auto';render();break;
