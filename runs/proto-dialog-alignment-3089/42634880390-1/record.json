@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "proto-dialog-alignment-3089",
+  "source_sha": "3be4c3dab4eddc940979dce071f34969188a115e",
+  "source_digest": "3e2b259379abf99561ee33be7254da4731dbc63467c470e438808edafa49cd2e",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42634880390,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42634880390",
+    "event": "push",
+    "branch": "task/proto-dialog-alignment-3089",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-09T14:27:46.695Z",
+    "finished_at": "2026-11-09T14:27:46.968Z",
+    "result": null
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/3be4c3dab4eddc940979dce071f34969188a115e/proto-dialog-alignment-3089.json"
+}
