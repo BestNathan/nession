@@ -56,6 +56,8 @@ assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage ==
   'only the two approved per-Issue collectors may receive pre-merge CI evidence');
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-fixture/);
+assert.match(acceptor,/\*\) echo "Unsupported PR-stage collector Issue:/,
+  'unknown PR-stage Issues must still fail closed before receiving CI evidence');
 assert.match(acceptor,/ci_evidence_file="-"/);
 assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 ]]; then'),
   'all other pre-merge contexts must still omit CI evidence');
