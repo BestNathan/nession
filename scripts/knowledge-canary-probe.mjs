@@ -57,7 +57,7 @@ function requireOk(response,label) {
 }
 const prefix = '/repos/' + REPO;
 const refPath = branch => prefix+'/git/refs/heads/'+branch;
-const branchPath = branch => prefix+'/branches/'+encodeURIComponent(branch);
+const branchPath = branch => prefix+'/branches/'+branch;
 const types = r => (r?.rules ?? []).map(x=>x.type).sort();
 
 function validateRuleSetDetails(list,details) {
