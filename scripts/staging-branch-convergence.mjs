@@ -482,6 +482,15 @@ function reconcile(plan) {
 }
 
 function selfTest() {
+  // A YAML comment indented *inside* an `if: >-` block scalar is not a
+  // comment: GitHub parses it as part of the job expression and rejects the
+  // entire workflow before any job is created (#2953, run 42569835883).
+  const workflow = fs.readFileSync(
+    path.join(WORKFLOWS, 'release-staging-convergence.yml'), 'utf8');
+  const jobIf = /^    if: >-\n((?:^ {6,}[^\n]*\n)+)/m.exec(workflow);
+  assert.ok(jobIf, 'staging convergence must retain the guarded job expression');
+  assert.doesNotMatch(jobIf[1], /^\s*#/m,
+    'YAML comment is embedded in GitHub job-if folded expression');
   const deploy = [
     'name: Release / Staging Artifacts', 'on:', '  push:',
     "    branches: ['staging']", '  workflow_dispatch:',
