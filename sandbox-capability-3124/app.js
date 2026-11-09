@@ -76,16 +76,32 @@
       '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
   }
 
-  var nativeResourceKeys=["memory.max","cpu.max","pids.max","memory.oom.group"];
-  var nativeSyscallKeys=["seccomp.profile"];
-  var supportedSeccompProfiles=["nession-interactive-v1"];
+  // Synthetic Agent responses for the design prototype. Production must fetch this
+  // typed catalog from the authenticated Agent, never from frontend literals.
+  function agentFieldCatalog(){
+    var s=settings(),scoped="mock-agent:nession-dev:"+state.fixture;
+    if(!s.online||s.unsupported||s.recreated)
+      return {status:"unknown",source:scoped,generation:"unavailable",resource:[],syscall:[],reason:"Agent/Session 观测不可用"};
+    if(s.macos)
+      return {status:"available",source:scoped,generation:"seatbelt-mock",resource:[],syscall:[],reason:"macOS 不提供 Linux cgroup v2/seccomp"};
+    var controllers=state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids"];
+    var candidates=[
+      {key:"memory.max",controller:"memory",format:"unsigned bytes | max",example:"2147483648"},
+      {key:"cpu.max",controller:"cpu",format:"quota period (microseconds)",example:"200000 100000"},
+      {key:"pids.max",controller:"pids",format:"unsigned tasks | max",example:"256"},
+      {key:"memory.oom.group",controller:"memory",format:"0 | 1",example:"1"}];
+    return {status:"available",source:scoped,generation:"mock-probe-"+state.fixture,
+      resource:candidates.filter(function(x){return controllers.includes(x.controller)}),
+      syscall:[{key:"seccomp.profile",format:"registered profile",example:"nession-interactive-v1",values:["nession-interactive-v1"]}],
+      reason:"Agent 模拟委派控制器 "+controllers.join(", ")};
+  }
   function kvRows(kind,unavailable){
     var rows=state.draft[kind+"Rows"],resource=kind==="resource";
     var suggestionId=resource?"resource-key-suggestions":"syscall-key-suggestions";
-    var suggestions=resource?nativeResourceKeys:nativeSyscallKeys;
-    var note=resource?"KV 对应 cgroup v2 原生控制文件。不预设资源限制。":"当前仅支持 seccomp.profile → nession-interactive-v1；不接受任意 syscall 列表/BPF。";
-    var out='<div class="kv-editor" data-kv-editor="'+kind+'"><p class="hint2">'+note+'</p>'+
-      '<datalist id="'+suggestionId+'">'+suggestions.map(function(key){return '<option value="'+key+'"></option>';}).join('')+'</datalist>';
+    var catalog=agentFieldCatalog(),suggestions=resource?catalog.resource:catalog.syscall;
+    var note=resource?"Agent 可配置的 cgroup v2 字段（已结合委派探测与协议白名单），不预设限制。":"Agent 注册的 seccomp profile，不提供任意 syscall/BPF 编辑。";
+    var out='<div class="kv-editor" data-kv-editor="'+kind+'"><p class="hint2">'+note+'</p>'+'<p class="hint2"><strong>Agent 发现 · '+(catalog.status==="available"?"已探测":"无法查询")+'</strong> · '+suggestions.length+' 个候选 · '+escapeHtml(catalog.reason)+'</p>'+
+      '<datalist id="'+suggestionId+'">'+suggestions.map(function(field){return '<option value="'+escapeHtml(field.key)+'" label="'+escapeHtml(field.format)+'"></option>';}).join('')+'</datalist>';
     if(!rows.length)out+='<p class="kv-empty">'+(resource?"未添加额外的 Resource 限制。":"未添加额外的 Syscall profile；后端基础防护仍生效。")+'</p>';
     rows.forEach(function(row){
       var label=resource?"cgroup v2":"seccomp";
@@ -99,7 +115,8 @@
   }
   function validateRows(rows,kind){
     var seen=new Set();
-    var keys=kind==="resource"?nativeResourceKeys:nativeSyscallKeys;
+    var catalog=agentFieldCatalog(),fields=kind==="resource"?catalog.resource:catalog.syscall;
+    var keys=fields.map(function(field){return field.key});
     for(var i=0;i<rows.length;i++){
       var key=rows[i].key.trim(),value=rows[i].value.trim();
       if(!key||!value)return (kind==="resource"?"Resource":"Syscall")+" 第 "+(i+1)+" 行的 Key 和 Value 都不能为空";
@@ -107,7 +124,8 @@
       if(seen.has(key))return "重复的 "+(kind==="resource"?"Resource":"Syscall")+" Key: "+key;
       seen.add(key);
       if(kind==="syscall"){
-        if(key!=="seccomp.profile"||!supportedSeccompProfiles.includes(value))return "seccomp.profile 只支持 nession-interactive-v1";
+        var profile=fields.find(function(field){return field.key===key});
+        if(key!=="seccomp.profile"||!profile||!profile.values.includes(value))return "seccomp.profile 只支持 Agent 注册的 nession-interactive-v1";
         continue;
       }
       function u64(s){return /^[0-9]+$/.test(s)&&BigInt(s)<=18446744073709551615n;}
@@ -259,7 +277,7 @@
     var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
     mock.setAttribute("data-mode",state.mode);
     mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
-    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
+    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
     var target=mock.querySelector('.cap-item[aria-current="page"]');
     if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
