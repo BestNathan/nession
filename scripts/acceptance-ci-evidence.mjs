@@ -39,6 +39,7 @@ import {
 } from './deployment-identity-collect.mjs';
 import { formatAdmissionReceipt, parseAdmissionReceipt } from './staging-lane-scheduler.mjs';
 import { collectExactStagingBatchProof, selfTest as selfTestStagingHistoryProof } from './acceptance-staging-history-proof.mjs';
+import { selfTestWake as selfTestStagingWake } from './acceptance-staging-deployment-wake.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
   parseE2eFullGateLog,attestE2eFullGateReceipt,
@@ -2071,6 +2072,7 @@ async function selfTest() {
   selfTestStagingAcrEvidence();
   await selfTestLaneEvidenceReceipts();
   await selfTestStagingHistoryProof();
+  await selfTestStagingWake();
   await selfTestDevelopmentReadback();
   selfTestPublicPagesObservation();
   selfTestPublicWorkflowPublication();
