@@ -52,12 +52,22 @@ for(const fragment of [
 assert.match(background,/\n  acceptance-close-guard:/);
 assert.match(background,/\n  merged-agent-acceptance:/);
 assert.match(background,/\n  post-merge-provider-evidence-acceptance:/);
-assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && inputs.issue_number == '2917')"),
-  'only #2917 may collect pre-merge historical CI evidence');
-assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
+// Exactly two trusted Main exceptions are allowed in PR-stage CI evidence
+// collection; all other PR-stage SCs keep their historical null evidence.
+const assertScopedCollectors = text => {
+  assert.ok(text.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001'))"),
+    'only source-pinned #2917 and #3001 may collect PR-stage evidence');
+  assert.ok(text.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 ]]; then'),
+    'all other pre-merge contexts must omit CI evidence');
+  assert.match(text,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
+  assert.match(text,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-fixture/);
+};
+assertScopedCollectors(acceptor);
+assert.throws(()=>assertScopedCollectors(acceptor.replace("inputs.issue_number == '3001'","inputs.issue_number == '3002'")),
+  /only source-pinned/);
+assert.throws(()=>assertScopedCollectors(acceptor.replace('"${ISSUE_NUMBER}" == 3001','"${ISSUE_NUMBER}" == 3002')),
+  /all other pre-merge/);
 assert.match(acceptor,/ci_evidence_file="-"/);
-assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 ]]; then'),
-  'all other pre-merge contexts must still omit CI evidence');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
 console.log('Acceptance PR route: immediate SC selection, no Quality/E2E barrier, no PR blocking Gate, merged/close routes and evidence separation verified');
