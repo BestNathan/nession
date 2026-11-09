@@ -411,3 +411,17 @@
 .nession-product .app-operation .location-editor .remove-location{
   width:100%;min-width:0;padding:9px 12px;font-size:13px;
 }
+
+
+/* Web Project Location: Agent Select and an ordinary one-line directory share
+   a 42px baseline. The directory expands for multiline/long paths instead of
+   permanently occupying a taller two-row box. App still uses a 3-row editor. */
+.nession-product[data-experience="web"] .dialog-form .location-editor .field .project-path-input{
+  box-sizing:border-box;width:100%;min-width:0;
+  height:auto;min-height:42px;max-height:160px;
+  field-sizing:content;resize:vertical;overflow-x:hidden;overflow-y:auto;
+  overflow-wrap:anywhere;word-break:break-all;
+}
+.nession-product[data-experience="app"] .dialog-form .location-editor .field .project-path-input{
+  min-height:80px;field-sizing:fixed;
+}
