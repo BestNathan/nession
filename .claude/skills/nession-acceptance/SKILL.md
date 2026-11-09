@@ -83,6 +83,18 @@ The workflow intentionally separates **verification** from **Issue mutation**:
 
 A Requirement-level `Pass` / `Pending` / `Fail` / `N/A` is acceptance data; it must not be conflated with workflow infrastructure success/failure.
 
+### Read-only orphan source evidence (#3068)
+
+A `method: agent` SC can explicitly declare pinned text files under
+`## Acceptance Sources`, outside the `Acceptance Plan` YAML. Follow the
+single parser/policy owner `scripts/acceptance-sources.mjs` and
+[Acceptance SC format](../../../docs/architecture/acceptance-sc-format.md).
+The trusted main-owned workflow materializes only selected SC declarations
+into a manifest-bound read-only view. The model must cite an exact
+`source` entry for a source-backed Pass; staged HTML/Knowledge/GitOps
+files never substitute for live publication, deployment, or runtime Cases.
+No model-side Git/Bash/network/Issue write access is added.
+
 ## Evidence
 
 Evidence must be concrete enough for another reviewer/validator to understand what was proven.
