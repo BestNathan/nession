@@ -12,7 +12,7 @@ assert.ok(pushArea,'missing main push event');
 assert.doesNotMatch(pushArea,/^    paths(?:-ignore)?:/m,
   'path-filtered fixture evidence strands unrelated new main SHAs as Pending');
 const waker=fs.readFileSync('.github/workflows/acceptance-postrun-waker.yml','utf8');
-assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "CI \/ Run Store Integrity Audit", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/,
+assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "CI \/ Run Store Integrity Audit", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages", "Deploy \/ Identity Ingest"\]/,
   'postmerge acceptance must be awakened after exact-main-SHA fixture success');
 for(const [name,source] of [
   ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
