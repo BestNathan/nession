@@ -453,6 +453,10 @@ jobs:
     env:
       RUSTC_WRAPPER: ""
       NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
+      # macOS $TMPDIR is a long /var/folders/... path; the acceptance runtime
+      # derives its tmux socket name from it and exceeds the 103-byte unix
+      # socket limit. /tmp keeps the socket path short.
+      TMPDIR: /tmp
     steps:
       - name: Checkout trusted discovery tooling
         uses: actions/checkout@v4
