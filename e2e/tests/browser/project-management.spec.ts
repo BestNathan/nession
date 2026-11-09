@@ -52,6 +52,50 @@ test.describe('Project management', () => {
     await expect(page.getByTestId('session-item-row')).toHaveCount(6);
   });
 
+  test('Create Project footer stays opaque and flush with many locations', async ({ page }) => {
+    await page.goto('/#/fixture?projects=canonical');
+    await page.getByTestId('project-create').click();
+    const dialog = page.getByRole('dialog').filter({ hasText: 'Create Project' });
+    await expect(dialog).toBeVisible();
+    for (let i = 0; i < 8; i += 1) {
+      await dialog.getByTestId('project-location-add').click();
+    }
+    expect(
+      await dialog.evaluate((element) => element.scrollHeight > element.clientHeight),
+      'the dialog is scrolling',
+    ).toBe(true);
+
+    const footer = dialog.locator('[data-slot="dialog-footer"]');
+    await expect(footer).toHaveAttribute('data-sticky', 'true');
+    const alpha = await footer.evaluate((element) => {
+      const color = getComputedStyle(element).backgroundColor;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('2d canvas is unavailable');
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return context.getImageData(0, 0, 1, 1).data[3] / 255;
+    });
+    expect(alpha, 'the sticky band is opaque').toBe(1);
+
+    const dialogBox = await dialog.boundingBox();
+    const footerBox = await footer.boundingBox();
+    const submitBox = await dialog.getByTestId('project-create-submit').boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(footerBox).not.toBeNull();
+    expect(submitBox).not.toBeNull();
+    expect(
+      Math.abs(footerBox!.y + footerBox!.height - (dialogBox!.y + dialogBox!.height)),
+    ).toBeLessThanOrEqual(1);
+    expect(submitBox!.y).toBeGreaterThanOrEqual(footerBox!.y - 0.5);
+    expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(
+      footerBox!.y + footerBox!.height + 0.5,
+    );
+  });
+
   test('Projects remain reachable with zero Sessions', async ({ page }) => {
     await page.goto('/#/fixture?sessions=none&selection=none&projects=canonical');
     await expect(page.getByTestId('session-item-row')).toHaveCount(0);
