@@ -20,6 +20,79 @@ GitHub bypass is **ruleset-wide**. Putting `update`, `deletion` and `non_fast_fo
 
 Rulesets compose, so the dedicated App may fast-forward but cannot delete, force-push or introduce merge commits; everyone else cannot update the ref at all. Administrative changes to the rulesets themselves remain an emergency governance capability, requiring independent audit. GitHub docs: [Ruleset layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) and [REST schema](https://docs.github.com/en/rest/repos/rules).
 
+## Dedicated Knowledge Publisher App v1 — identity and deployment design (2026-11-09)
+
+This is **one new GitHub App identity, not a new service, model, or publishing framework**. Existing `PUBLISHER_APP_ID` / `PUBLISHER_APP_PRIVATE_KEY` are used for Agent/PR publication; `RUN_STORE_WRITER_APP_ID` / `RUN_STORE_WRITER_APP_PRIVATE_KEY` are for Run Store writes. **Neither identity or key may be reused** for Knowledge. The canonical validator and `scripts/knowledge-ledger-publish.mjs` remain the sole data-contract and push implementation.
+
+### App registration contract
+
+| Setting | Required v1 value |
+| --- | --- |
+| Display name | `Nession Knowledge Publisher` (GitHub-assigned slug/ID is recorded after creation; do not invent one) |
+| Owner / visibility | Owned by `BestNathan`; private to this account, not discoverable/third-party installable |
+| Installation | `Only select repositories` → `BestNathan/nession`; never `All repositories` |
+| Repository permission | `Contents: Read and write` only; GitHub's implicit `Metadata: Read` is acceptable |
+| Other permissions | No `Pull requests`, `Issues`, `Actions`, `Administration`, `Workflows`, `Checks`, organization or account write permissions |
+| Webhook | **Inactive**, no events/subscriptions or webhook receiver |
+| User authorization / OAuth / device flow | Not required: use App installation tokens only; no end-user login or callback |
+| Deployment | No long-running backend; private key is used solely to mint a short-lived installation token in an approved trusted job |
+
+Installation-token creation follows the already proven `actions/create-github-app-token` pattern, scoped by `repositories: nession` and `permission-contents: write`. Its token is **never** a replacement for the App identity in a Ruleset: the writer-identity Ruleset must refer to the independently verified App ID (`Integration` actor). A mere app install or token mint does **not** mean the live branch is protected.
+
+### Secret owner and authorization boundary
+
+Only a GitHub Actions Environment named `knowledge-publish` holds:
+
+- Environment variable `KNOWLEDGE_PUBLISHER_APP_ID` (numeric App ID, non-secret).
+- Environment secret `KNOWLEDGE_PUBLISHER_APP_PRIVATE_KEY` (PEM private key; never committed, echoed or attached as an artifact).
+
+Choose the Environment's **selected deployment branch `main`**, not the ambiguous "protected branches only" option (which may unintentionally admit more branches if protection is absent). Require the authorized reviewer before the credentialed publishing job proceeds. If using **prevent self-review**, provision a second eligible reviewer first; an owner-only setup must not silently deadlock or bypass approval. Confirm actual availability of Environment protection features for the repository plan/visibility. Keep both identifiers out of the existing `cursor` and Run Store environments and out of repository-level secrets.
+
+The trusted workflow must be main-owned, with one read-only input/source validation phase **before** environment-scoped token mint; its credentialed phase must not invoke a model, arbitrary request-provided command, PR-head code, or downloaded executable. Keep `GITHUB_TOKEN` read-only, checkout exact trusted `main` with `persist-credentials: false`, and require an independently authenticated approved Knowledge content proposal (bounded data files + exact source/manifest digest), previous `knowledge` SHA and owner authorization. An arbitrary `workflow_dispatch` ref, untrusted artifact, issue-comment text or model response cannot authorize publication. The eventual trigger/receipt implementation belongs to one small main-owned workflow using the existing publisher and validator—not a second Git/Knowledge execution engine.
+
+The only permitted production ref mutation is the validated fast-forward `refs/heads/knowledge` push followed by exact remote SHA readback; any stale expected-head, missing source attestation, policy denial, ambiguous publish or divergent replay fails closed and preserves evidence. The existing scheduled `CI / Knowledge Ledger Audit` remains **read-only** and must never inherit the App private key. Acceptance/Cases remain read-only; only the separate privileged canary owner performs disposable Git write attempts.
+
+**Residual authorization limit:** GitHub App `Contents: write` applies at repository scope, not one branch. Therefore an App token could potentially push other *unprotected* refs if stolen or misused. The **dedicated App + limited secret access + protected execution + independent branch rulesets** isolate Knowledge's intended publisher and protect `knowledge`; they do **not** falsely claim the App is cryptographically restricted to a single ref. Review other sensitive refs' effective protection before activation; if single-ref authorization for all refs is mandatory, that requires repository-wide ruleset coverage or separate-repository isolation as a separate architectural decision. Never put the generic PR Publisher into Knowledge's bypass list.
+
+### Owner publication request (after approved activation)
+
+The minimal production router is `.github/workflows/store-knowledge-publisher.yml` (`Store / Knowledge Publisher`), using GitHub `repository_dispatch` with event type `knowledge-publish-v1`. The event runs **the default branch only**, avoiding arbitrary-ref `workflow_dispatch`. Its separate unprivileged prepare and protected publish jobs both independently verify the request using main-owned `scripts/knowledge-publisher-request.mjs`; the protected job never executes candidate source code.
+
+An authorized operator prepares an ordinary **data-only** commit on `refs/heads/knowledge-proposals/<bounded-slug>` whose parent includes the exact existing `knowledge` SHA, and runs the trusted validator before requesting publication. Pushing the candidate branch alone does not publish it.
+
+```bash
+# Operator: use approved, authenticated GitHub owner credentials.
+# The ref and both SHAs below are real values, not placeholders to guess.
+ref='refs/heads/knowledge-proposals/<bounded-slug>'
+proposal_sha='<40-hex-proposal-commit>'
+expected_head='<40-hex-current-knowledge-head>'
+
+# Only the owner may send this exact default-branch request.
+jq -n --arg ref "$ref" --arg source "$proposal_sha" --arg expected "$expected_head" '{
+  event_type:"knowledge-publish-v1",
+  client_payload:{
+    proposal_ref:$ref,
+    proposal_sha:$source,
+    expected_head:$expected
+  }
+}' > /tmp/knowledge-dispatch.json
+gh api -X POST repos/BestNathan/nession/dispatches --input /tmp/knowledge-dispatch.json
+```
+
+Before approving the Environment deployment, review the exact request SHA, source ref, proposal diff, matched Knowledge history and the authenticated Run. If the protected Environment/secret has not been independently verified, **reject** the deployment. The requester and approver must not silently bypass self-review policy. The resulting workflow emits a bounded `knowledge-publisher-<run>-<attempt>` artifact with the trusted main SHA, event, run, dedicated App ID, previous and published Knowledge SHAs, and exact proposal ref. This receipt proves a publisher action only after independent GitHub readback; it **does not** substitute for #2358's canary denial evidence or active production Ruleset readback.
+
+**Dependency:** merge the request verifier PR [#3097](https://github.com/BestNathan/nession/pull/3097) before activating the workflow PR [#3098](https://github.com/BestNathan/nession/pull/3098). The GitHub administrator must install the App and configure both Rulesets and the Environment. Do not trigger publication until all prerequisite proof is complete.
+
+### Minimal rollout, proofs, and handoff
+
+1. **Source/design preparation (non-privileged):** merge this App contract; retain the existing main-owned validator/publisher and their negative tests. Review the proposed minimal publisher job and independently authenticated proposal format before requesting a live token.
+2. **Administrator registration (privileged):** create the private GitHub App with settings above, install on `nession` only, record real App ID and installation ID, configure approved `knowledge-publish` Environment and key. Admin UI/App installation operations are **not** equivalent to source changes or Issue comments.
+3. **Canary before production:** create a disposable covered ref with exact corresponding **two** active Rulesets; prove an ordinary *known-write-capable* token's unprotected control push succeeds and protected canary push gets Ruleset denial; prove this new App's expected-head fast-forward succeeds and its non-fast-forward/delete attempts fail. Capture actor, Rule IDs, Run/Attempt, expected/observed SHA and unchanged ref on denials. Clean up only the owned canary under admin change control.
+4. **Production activation:** apply two exact-`refs/heads/knowledge` Rulesets, identity bypass only this App and append-only with **zero** bypass actors. Re-read the exact IDs, rules, conditions, bypass arrays, live head and `protected: true`; independently verify Environment settings and exclusion of PR/model/ordinary Issue-comment contexts.
+5. **Acceptance:** #2358 SC-01/03 are read-only live API/Run attestations, SC-02 is a read-only Case over separately authenticated privileged-canary receipts, and existing SC-04 remains the accepted runbook deliverable. Until actual GitHub activation and receipts exist, SC-01/02/03 remain **Pending** and the Issue remains open.
+
+Official setup references: [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [GitHub App without webhooks](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps), [Installing your own app](https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app), and [GitHub Actions Environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+
 ## Preflight — before touching the live ref
 
 1. Record the live `knowledge` SHA and original anchored root, the currently applicable rulesets, the repository default branch, and the Issue link. Do **not** reset, rebase or force-push `knowledge`. Record IDs and run URLs in #2358 without publishing credentials.

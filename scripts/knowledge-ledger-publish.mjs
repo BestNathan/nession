@@ -27,9 +27,26 @@ function publish(dir,expected,fixture=false){
   if(['main','staging','knowledge'].includes(branch))throw Error('cannot publish from shared/product checkout');
   if(!fixture){
     if(!/(?:github\.com[:/])BestNathan\/nession(?:\.git)?$/.test(git(dir,'remote','get-url','origin')))throw Error('wrong repository origin');
-    if(process.env.GITHUB_ACTIONS==='true'&&(process.env.GITHUB_REF!=='refs/heads/main'||
-      !['workflow_dispatch','schedule','push'].includes(process.env.GITHUB_EVENT_NAME)))
-      throw Error('untrusted Actions job cannot publish');
+    if(process.env.GITHUB_ACTIONS==='true'){
+      const trustedMain=process.env.GITHUB_REF==='refs/heads/main';
+      const standard=['workflow_dispatch','schedule','push'].includes(process.env.GITHUB_EVENT_NAME);
+      // repository_dispatch runs the default-branch workflow definition, unlike
+      // workflow_dispatch on an attacker-selected ref. Gate its exact owner/event
+      // identity as defense in depth; request and content checks belong to the
+      // main-owned knowledge-publisher-request entrypoint.
+      let approvedDispatch=false;
+      if(process.env.GITHUB_EVENT_NAME==='repository_dispatch' &&
+         process.env.GITHUB_ACTOR==='BestNathan' &&
+         process.env.GITHUB_RUN_ATTEMPT==='1' && process.env.GITHUB_EVENT_PATH){
+        try {
+          const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+          approvedDispatch=event.action==='knowledge-publish-v1' &&
+            event.sender?.login==='BestNathan';
+        }catch{ approvedDispatch=false; }
+      }
+      if(!trustedMain||(!standard&&!approvedDispatch))
+        throw Error('untrusted Actions job cannot publish');
+    }
   }
   if(git(dir,'status','--porcelain'))throw Error('commit all changes before publishing');
   const head=git(dir,'rev-parse','HEAD');
