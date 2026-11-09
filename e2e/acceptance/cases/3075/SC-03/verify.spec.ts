@@ -114,6 +114,10 @@ test('SC-03: state, Terminal and Workspace context survive the rail round trip',
   await page.locator('[data-testid^="sidebar-rail-project-"]').first().click();
   await expect(page.getByTestId('web-project-detail')).toBeVisible();
   expect(await terminalMarker(page)).toBe('mounted');
+  // The Session list is part of the collapsed column, so returning through
+  // the selected Session first expands the rail.
+  await page.getByTestId('sidebar-rail-expand').click();
+  await expect.poll(() => columnWidth(page)).toBe(246);
   await page
     .locator('[data-testid="session-item-row"][data-selected="true"] button')
     .first()

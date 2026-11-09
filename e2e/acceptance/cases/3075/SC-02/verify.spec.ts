@@ -100,8 +100,13 @@ test('SC-02: rail shortcuts delegate to the existing owners and are never dead',
   await expect(page.getByTestId('web-project-detail')).toBeVisible();
   await expect(page.getByTestId('terminal-surface')).toBeVisible();
 
-  // Returning through the selected Session closes the Project destination and
-  // keeps the same mounted Terminal node.
+  // Returning through the selected Session needs the column: expand the rail,
+  // then pick the still-selected row. The Project destination closes and the
+  // same mounted Terminal node survives.
+  await page.getByTestId('sidebar-rail-expand').click();
+  await expect
+    .poll(async () => (await page.getByTestId('sidebar-column').boundingBox())?.width ?? 0)
+    .toBe(246);
   await page
     .locator('[data-testid="session-item-row"][data-selected="true"] button')
     .first()
@@ -113,13 +118,8 @@ test('SC-02: rail shortcuts delegate to the existing owners and are never dead',
       .evaluate((element) => (element as HTMLElement).dataset.sc02Marker),
   ).toBe('kept');
 
-  // Re-expand from the still-collapsed rail, then collapse again for the
-  // keyboard path: Expand is focusable and Enter performs the expansion,
-  // returning focus to the column's collapse action.
-  await page.getByTestId('sidebar-rail-expand').click();
-  await expect
-    .poll(async () => (await page.getByTestId('sidebar-column').boundingBox())?.width ?? 0)
-    .toBe(246);
+  // Collapse again for the keyboard path: Expand is focusable and Enter
+  // performs the expansion, returning focus to the column's collapse action.
   await page.getByTestId('sidebar-collapse').click();
   const expand = page.getByTestId('sidebar-rail-expand');
   await expand.focus();

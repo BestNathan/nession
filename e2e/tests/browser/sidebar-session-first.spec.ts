@@ -298,7 +298,16 @@ test('narrow Web uses the overlay drawer and App stays spatial (#2851 SC-04)', a
   expect(await narrowActions.boundingBox()).toMatchObject({ width: 44, height: 44 });
   await narrowActions.click();
   await expect(page.getByRole('menu')).toBeVisible();
-  await expect(page.getByRole('menuitem')).toHaveCount(4);
+  await expect(page.getByRole('menuitem')).toHaveCount(5);
+  for (const label of [
+    'Session details',
+    'Edit details',
+    'Attach settings',
+    'Project…',
+    'Kill session',
+  ]) {
+    await expect(page.getByRole('menuitem', { name: label })).toBeVisible();
+  }
   await page.keyboard.press('Escape');
   await page.getByTestId('session-item-devbox-01:design-system').click();
   await expect(page.getByTestId('session-drawer')).toHaveCount(0);
@@ -368,7 +377,7 @@ for (const viewport of [
   { width: 390, height: 844 },
   { width: 375, height: 812 },
 ]) {
-  test(`App rows expose the four actions without selecting or remounting Terminal at ${viewport.width}x${viewport.height} (#2875 SC-01)`, async ({ page }) => {
+  test(`App rows expose all row actions without selecting or remounting Terminal at ${viewport.width}x${viewport.height} (#2875 SC-01)`, async ({ page }) => {
     await openAppSessions(page, viewport);
 
     const selectedRow = page.locator('[data-testid="session-item-row"][data-selected="true"]');
@@ -384,8 +393,14 @@ for (const viewport of [
 
     await openRowMenu(page);
     const menu = page.getByRole('menu');
-    await expect(menu.getByRole('menuitem')).toHaveCount(4);
-    for (const label of ['Session details', 'Edit details', 'Attach settings', 'Kill session']) {
+    await expect(menu.getByRole('menuitem')).toHaveCount(5);
+    for (const label of [
+      'Session details',
+      'Edit details',
+      'Attach settings',
+      'Project…',
+      'Kill session',
+    ]) {
       await expect(menu.getByRole('menuitem', { name: label })).toBeVisible();
     }
     await expect(menu.getByRole('separator')).toHaveCount(1);

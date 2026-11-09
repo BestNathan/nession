@@ -98,7 +98,10 @@ test.describe('Web navigation rail (#3075)', () => {
         .evaluate((element) => (element as HTMLElement).dataset.railMarker),
     ).toBe('kept');
 
-    // Return through the selected Session: the same Terminal node survives.
+    // Return through the selected Session: expand the rail, then pick the
+    // still-selected row. The same Terminal node survives.
+    await page.getByTestId('sidebar-rail-expand').click();
+    await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(246);
     await page.locator('[data-testid="session-item-row"][data-selected="true"] button').first().click();
     await expect(page.getByTestId('web-project-detail')).toHaveCount(0);
     expect(
