@@ -31,8 +31,8 @@ Source-based layout baseline: `staging`, 2026-11-09.
 ## Critical clickable journey
 
 1. In the default **Native** fixture, open Workspace from Terminal and select Sandbox. UI says **Outside Sandbox** and shows an editable Policy composer, not a diagnostic-only status view.
-2. Set working dir, read/write filesystem path sets, network mode and egress allow-list, Linux namespace flags, cgroup v2 `memory.max`/`pids.max`, and pinned `nession-interactive-v1` seccomp profile. MacOS fixture hides/disables Linux-only inputs and uses measured Seatbelt subset; `enforcement: required` is fixed.
-3. Click `校验配置` to validate draft. Errors block Enter; edits invalidate the prior preflight. This mock performs **synthetic checks only**, not actual filesystem capability probes.
+2. Set working dir, filesystem paths, network mode/egress and namespaces. **Resource** and **Syscall** start with zero rows: click **＋ 添加条目** to add Key/Value pairs or remove them; no `cpu.max`, `memory.max`, `pids.max` or profile is preselected. Resource key suggestions (not silent acceptance): `memory.max`, `cpu.max`, `pids.max`, `memory.oom.group`, with native Linux values. Syscall uses the same KV editor, but the current wire supports only `seccomp.profile = nession-interactive-v1`—not arbitrary syscall filtering or user-provided BPF. MacOS disables both Linux-native groups, and `enforcement: required` stays fixed.
+3. Click `校验配置` to validate the draft. Empty Resource/Syscall groups **omit** `resource.cgroup_v2` / `syscall.seccomp` rather than serializing empty objects. For each added pair, reject unknown Key, empty Key/Value, duplicate Key and malformed native Value: `memory.max`/`pids.max` use uint64 or `max`; `cpu.max` uses `quota period` with period 1000–1000000 microseconds; `memory.oom.group` is `0` or `1`; `seccomp.profile` accepts only the pinned profile. Edits and row add/remove invalidate prior preflight. The mock performs **synthetic checks only**—the Agent must still validate real host capabilities before Enter.
 4. Click `Enter Sandbox` → separate confirmation screen explains new Pane + original Native preservation → confirm.
 5. Successful mock transition shows `Inside Sandbox` and **effective policy** (copy committed at simulated verification), then `Execution details` (backend, execution/pane identity, digest, evidence). Return from details, then `返回 Native Pane`; original Native context resumes; the Sandbox Pane remains available for `切回已有 Sandbox Pane`.
 6. Switch external fixtures: `active` (already inside), `preflight-fail` (kernel controllers not delegated), `enter-fail` (launch barrier rejects), `offline`, `unsupported`, `macos`, and `recreated` (stale instance id); verify no fake protected badge, no auto-fallback, retained draft.
@@ -49,8 +49,15 @@ Source-based layout baseline: `staging`, 2026-11-09.
 | Launch fail | Native | Validate → Confirm Enter | Refuses, Native and draft unchanged |
 | Agent offline | Unknown | Read-only explanation, retained draft | No Enter / false inside |
 | Unsupported | Native/Unknown | Explanation (previous view can remain open) | Capsule has no unavailable slot |
-| macOS Seatbelt | Native | Network deny / allowed subset, Linux-only controls disabled | Restricted/specific Linux controls not promised |
+| macOS Seatbelt | Native | Network deny / allowed subset, Resource/Syscall KV add disabled | Linux-only controls are unavailable; no assumed fallback |
 | Same-name recreated | Unknown (unverified) | No Enter until identity re-established | Old report never reused |
+
+### Resource and Syscall wire mapping (UI shape ≠ unrestricted policy)
+
+- **Resource editor** is an empty list of `{key,value}` until the user adds rows. Only the four V1 cgroup v2 control-file keys above may be serialized. The actual nested request maps to `resource: {cgroup_v2: {"cpu.max":"200000 100000"}}`, while a blank list **omits** `resource`.
+- **Syscall editor** uses the same row interaction but maps exactly `seccomp.profile` to `syscall: {seccomp: {profile:"nession-interactive-v1"}}`. Unknown KV keys or profiles fail closed. Empty list **omits** `syscall`; this does not disable the Linux backend's always-on baseline seccomp.
+- Values are strings in their **native kernel syntax**; no unit/core conversion, no permissive passthrough of unknown keys, and no independent UI-owned schema. Agent host validation remains authoritative after mock validation.
+- The current **Inside** fixture may show effective Resource/Syscall rows (as read-back examples); this is distinct from the **Outside** initial draft, which has no rows.
 
 ## Verified and unverified
 
