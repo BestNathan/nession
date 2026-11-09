@@ -4,6 +4,11 @@ import path from 'node:path';
 export const CASE_SCHEMA_VERSION = 1;
 export const CASE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
 export const CASE_RUNTIMES = new Set(['full-stack-local']);
+// The OS whose native capability the Case observes. A macOS-only Case must
+// never be executed on the Linux runner (it would report Pending at best);
+// the trusted selector routes each platform to its own job. Defaults to linux
+// for every historical manifest.
+export const CASE_PLATFORMS = new Set(['linux', 'macos']);
 // Only a Case that provably leaves no observable state may join a shared
 // job-scoped runtime (#1866 SC-05). Anything else keeps its own runtime.
 export const CASE_ISOLATIONS = new Set(['isolated', 'shared']);
@@ -94,6 +99,7 @@ export function validateCaseManifest(raw, caseDir) {
     'issue',
     'criterion',
     'stage',
+    'platform',
     'runtime',
     'isolation',
     'verifiers',
@@ -110,6 +116,8 @@ export function validateCaseManifest(raw, caseDir) {
   const criterion = canonicalCriterion(raw.criterion);
   const stage = String(raw.stage ?? '').trim().toLowerCase();
   if (!CASE_STAGES.has(stage)) throw new Error('unsupported case stage: ' + (stage || '(empty)'));
+  const platform = String(raw.platform ?? 'linux').trim().toLowerCase();
+  if (!CASE_PLATFORMS.has(platform)) throw new Error('unsupported case platform: ' + (platform || '(empty)'));
   const runtime = String(raw.runtime ?? '').trim();
   if (!CASE_RUNTIMES.has(runtime)) throw new Error('unsupported runtime profile: ' + (runtime || '(empty)'));
   const resultPolicy = String(raw.result_policy ?? '').trim();
@@ -164,6 +172,7 @@ export function validateCaseManifest(raw, caseDir) {
     issue,
     criterion,
     stage,
+    platform,
     runtime,
     isolation,
     verifiers,
