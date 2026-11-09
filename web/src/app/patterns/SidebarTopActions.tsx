@@ -1,11 +1,9 @@
 import { PanelLeftClose, Plus, X } from 'lucide-react';
+import type { RefObject } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { shellIconButtonClass, shellMotionClass } from '@/app/shellStyles';
-
-const controlFocus =
-  'focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]';
+import { shellIconButtonClass, shellIconFocusClass, shellMotionClass } from '@/app/shellStyles';
 
 export interface SidebarTopActionsProps {
   /** False in the narrow overlay, where there is no column to collapse. */
@@ -15,6 +13,8 @@ export interface SidebarTopActionsProps {
   onCloseDrawer?: () => void;
   onCreate: () => void;
   createDisabled: boolean;
+  /** The collapsed rail moves focus back here when the column expands. */
+  collapseButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /**
@@ -33,6 +33,7 @@ export function SidebarTopActions({
   onCloseDrawer,
   onCreate,
   createDisabled,
+  collapseButtonRef,
 }: SidebarTopActionsProps) {
   return (
     <div
@@ -42,6 +43,7 @@ export function SidebarTopActions({
       {collapsible ? (
         <button
           type="button"
+          ref={collapseButtonRef}
           data-testid="sidebar-collapse"
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
@@ -49,7 +51,7 @@ export function SidebarTopActions({
           className={cn(
             shellIconButtonClass,
             'rounded-[var(--nession-radius-control)] text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-            controlFocus,
+            shellIconFocusClass,
           )}
         >
           <PanelLeftClose className="size-[length:var(--nession-icon-md)]" aria-hidden />
@@ -84,7 +86,7 @@ export function SidebarTopActions({
             'ml-auto',
             shellIconButtonClass,
             'rounded-[var(--nession-radius-control)] text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-            controlFocus,
+            shellIconFocusClass,
           )}
         >
           <X className="size-[length:var(--nession-icon-md)]" aria-hidden />

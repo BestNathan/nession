@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   WorkspaceRegion,
   type WorkspaceRegionProps,
 } from '@/app/WorkspaceRegion';
 import type { DomainState } from '@/product/session/model/domainState';
+import { emptyProjectShell } from '@/product/project/types';
 import type { Agent, Session } from '@/types';
 
 const agent: Agent = {
@@ -193,20 +194,79 @@ describe('WorkspaceRegion app layer composition', () => {
     await user.click(screen.getByTestId('sidebar-collapse'));
 
     expect(column).toHaveAttribute('data-collapsed', 'true');
-    expect(column.className).toContain('w-0');
+    expect(column.className).toContain('--nession-shell-rail-width');
     expect(column.className).not.toContain('--nession-shell-sidebar-width');
     // The work surface stays mounted — collapse is geometry, not a remount.
     expect(screen.getByTestId('terminal')).toBeInTheDocument();
     // The sidebar itself also stays mounted so its search and scroll survive.
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
-    expect(screen.queryByTestId('sidebar-rail')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-full')).toHaveAttribute('inert');
+    // The reserved rail is the only interactive navigation while collapsed.
+    const rail = screen.getByTestId('sidebar-rail');
+    expect(rail).toBeInTheDocument();
+    expect(within(rail).getByTestId('sidebar-rail-expand')).toHaveAccessibleName('Expand sidebar');
+    expect(within(rail).getByTestId('sidebar-rail-new-session')).toHaveAccessibleName('New Session');
+    expect(within(rail).getByTestId('sidebar-rail-search')).toHaveAccessibleName('Search sessions');
 
-    await user.click(screen.getByTestId('sidebar-open'));
+    await user.click(screen.getByTestId('sidebar-rail-expand'));
 
     expect(column).not.toHaveAttribute('data-collapsed');
     expect(column.className).toContain('--nession-shell-sidebar-width');
+    expect(screen.queryByTestId('sidebar-rail')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-full')).not.toHaveAttribute('inert');
     // Selection and navigation state survive the round trip (#1196 §6).
     expect(screen.getByTestId(`session-item-${sess.session_id}`)).toBeInTheDocument();
+  });
+
+  it('rail shortcuts reuse the existing owners and hide a dead Projects shortcut', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn();
+    const onSelectProject = vi.fn();
+    const project = {
+      project_id: 'project-1',
+      name: 'Nession',
+      locations: [],
+      created_at: 1,
+      updated_at: 1,
+    };
+    const projectShell = {
+      ...emptyProjectShell(),
+      projects: [project],
+      onSelect: onSelectProject,
+    };
+    render(
+      <WorkspaceRegion
+        {...baseProps({
+          isWide: true,
+          onCreate,
+          projectShell,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByTestId('sidebar-collapse'));
+    const rail = screen.getByTestId('sidebar-rail');
+    await user.click(within(rail).getByTestId('sidebar-rail-new-session'));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('sidebar-full')).toHaveAttribute('inert');
+
+    await user.click(within(rail).getByTestId('sidebar-rail-search'));
+    const search = screen.getByLabelText('Search sessions');
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(screen.queryByTestId('sidebar-rail')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('sidebar-collapse'));
+    await user.click(screen.getByTestId('sidebar-rail-projects'));
+    await user.click(await screen.findByTestId('sidebar-rail-project-project-1'));
+    expect(onSelectProject).toHaveBeenCalledWith(project);
+  });
+
+  it('does not render a Projects rail shortcut when Projects are not navigable', async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceRegion {...baseProps({ isWide: true })} />);
+    await user.click(screen.getByTestId('sidebar-collapse'));
+    expect(screen.getByTestId('sidebar-rail')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-rail-projects')).not.toBeInTheDocument();
   });
 
   it('open-workspace header action calls onSurfaceChange(workspace)', async () => {

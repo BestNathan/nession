@@ -352,10 +352,10 @@ test.describe('real fixture surfaces satisfy their contracts', () => {
 
     await page.getByTestId('sidebar-collapse').click();
     await expect.poll(width).toBeGreaterThan(expanded);
-    await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
-    await expect(page.getByTestId('sidebar-open')).toBeVisible();
+    await expect(page.getByTestId('sidebar-rail')).toBeVisible();
+    await expect(page.getByTestId('sidebar-open')).toHaveCount(0);
 
-    await page.getByTestId('sidebar-open').click();
+    await page.getByTestId('sidebar-rail-expand').click();
     await expect.poll(width).toBe(expanded);
     expect(await workSurfaceOverhang(page)).toBeLessThanOrEqual(0);
   });

@@ -230,21 +230,29 @@ test('collapse returns 246px to the work surface and preserves state (#2851 SC-0
   });
 
   await page.getByTestId('sidebar-collapse').click();
-  await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(0);
-  await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
-  const open = page.getByTestId('sidebar-open');
-  await expect(open).toBeVisible();
-  const openBox = await open.boundingBox();
-  expect(openBox?.width).toBe(36);
-  expect(openBox?.height).toBe(36);
-  await expect.poll(async () => (await main.boundingBox())?.width ?? 0).toBeGreaterThan(
-    expandedMain + expanded * 0.9,
+  const railWidth = await page.evaluate(() =>
+    parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--nession-shell-rail-width'),
+    ),
   );
+  expect(railWidth).toBe(56);
+  await expect.poll(async () => (await column.boundingBox())?.width ?? -1).toBe(railWidth);
+  const rail = page.getByTestId('sidebar-rail');
+  await expect(rail).toBeVisible();
+  await expect(page.getByTestId('sidebar-open')).toHaveCount(0);
+  await expect(rail.getByTestId('sidebar-rail-expand')).toHaveAccessibleName('Expand sidebar');
+  await expect.poll(async () => (await main.boundingBox())?.width ?? 0).toBeGreaterThan(
+    expandedMain + (expanded - railWidth) * 0.9,
+  );
+  // The rail is a flex sibling: Main starts at its right edge, never behind it.
+  const railBox = await rail.boundingBox();
+  const mainBox = await main.boundingBox();
+  expect(mainBox?.x ?? 0).toBeGreaterThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0) - 0.5);
   const marker = await main.evaluate((element) => (element as HTMLElement).dataset.marker);
   expect(marker).toBe('kept');
   await expect(terminal).toBeVisible();
 
-  await page.getByTestId('sidebar-open').click();
+  await rail.getByTestId('sidebar-rail-expand').click();
   await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(expanded);
   await expect(page.locator('[data-testid="session-item-row"][data-selected="true"]')).toContainText(
     'design-system',
@@ -255,9 +263,11 @@ test('collapse returns 246px to the work surface and preserves state (#2851 SC-0
   await search.fill('design');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
   await page.getByTestId('sidebar-collapse').click();
-  await expect(open).toBeVisible();
-  await page.getByTestId('sidebar-open').click();
+  await expect(page.getByTestId('sidebar-rail')).toBeVisible();
+  // Search is one state: the rail shortcut expands and focuses the same field.
+  await page.getByTestId('sidebar-rail-search').click();
   await expect.poll(async () => (await column.boundingBox())?.width ?? 0).toBe(expanded);
+  await expect(page.getByLabel('Search sessions')).toBeFocused();
   await expect(page.getByLabel('Search sessions')).toHaveValue('design');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
 });

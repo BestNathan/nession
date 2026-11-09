@@ -51,18 +51,32 @@ The current Web column is **Session-first** (#2851):
   status filter remains visible as a removable chip. Creation is not repeated as a list
   toolbar row.
 
-When the Web sidebar is tucked away it **fully returns its column width to the work
-surface** (#2851, superseding the #1196 static rail):
+When the Web sidebar is collapsed it reserves a **navigation rail**, not a floating
+control over the work surface (#3075, superseding #2851's 0px tuck-away and the
+historical #1196 static Agent/count rail):
 
-- **0px, not a rail.** No clickable rail icons, no icon-strip summaries and no 52px
-  navigation bar remain. One minimal floating reopen control sits at the work surface's
-  top edge; that control is not a new permanent header.
+- **56px, in flow.** The rail is a `shrink-0` sibling of Main and stays inside the
+  shell's flex column. Main begins at the rail's right edge at every desktop
+  width; no absolute or fixed control overlays the Terminal or Workspace. The
+  reserved width comes from the shell's canonical `--nession-shell-rail-width`.
+- **Purposeful shortcuts only.** One Expand, New Session, Search Sessions, and a
+  Projects shortcut only when Projects are navigable. New Session opens the
+  existing create flow without submitting; Search expands the column and focuses
+  the existing Session field; Projects opens the standalone Project destination
+  and preserves the selected Session and Terminal. Server connection status is a
+  passive signal, never an Agent/Session/attachment roll-up. A destination that
+  does not exist is not shown as a dead icon.
 - **Collapse state is owned by the shell composition, once** (#1195/#1196 §5). The
-  same single state drives the column's reserved width and the reopen affordance. The
-  work surface reclaims the freed width through the normal resize pipeline — no
-  detach/reconnect.
-- **The column stays mounted at 0px**, so selection, search and the Session list's scroll
-  position survive the round trip. The clipped controls are inert while tucked away.
+  same state drives the reserved width, the rail, and the expanded column. The
+  work surface reclaims the released width through the normal resize pipeline —
+  no detach/reconnect.
+- **The expanded column stays mounted while collapsed**, so selection, search and
+  the Session list's scroll position survive. Its controls are `inert` and
+  invisible while the rail is interactive; expanding restores focus deliberately
+  (to the chosen action or the column toggle).
+- **Every rail icon has an accessible name, keyboard focus and a tooltip.** The
+  narrow drawer keeps its own floating opening control; the wide overlay control
+  is retired.
 - **Server status stays a separate signal** — never a roll-up of Agent, Session, or
   attachment health (`session-list.md` names that collapse an anti-pattern).
 

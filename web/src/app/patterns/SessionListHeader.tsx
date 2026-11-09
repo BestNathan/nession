@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type RefObject } from 'react';
 import { ArrowDown, ArrowUp, Filter, X } from 'lucide-react';
 import { SearchBar } from '@/product/session/components/SearchBar';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,8 @@ export interface SessionListHeaderProps {
   toggleSort?: (field: SortField) => void;
   onRefresh: () => void;
   loadingSessions: boolean;
+  /** The canonical Session search field, for the collapsed rail's Search action. */
+  searchInputRef?: RefObject<HTMLInputElement | null>;
 }
 
 const STATUS_FILTERS: {
@@ -177,6 +179,7 @@ export function SessionListHeader({
   toggleSort,
   onRefresh,
   loadingSessions,
+  searchInputRef,
 }: SessionListHeaderProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilter = STATUS_FILTERS.find(
@@ -199,6 +202,7 @@ export function SessionListHeader({
         placeholder="Search sessions..."
         inputAriaLabel="Search sessions"
         inputClassName="h-[length:var(--nession-control-lg)] rounded-[var(--nession-radius-control)]"
+        inputRef={searchInputRef}
         fieldAction={
           <Button
             type="button"

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -37,6 +37,12 @@ interface SearchBarProps {
    * passes nothing, so its DOM is what it was.
    */
   fieldAction?: ReactNode;
+  /**
+   * The canonical search input (#3075). A collapsed navigation rail expands
+   * the sidebar and focuses *this* field rather than introducing a second
+   * search state or a rail-local input.
+   */
+  inputRef?: RefObject<HTMLInputElement | null>;
 }
 
 /**
@@ -67,6 +73,7 @@ export function SearchBar({
   inputClassName,
   inputAriaLabel,
   fieldAction,
+  inputRef,
 }: SearchBarProps) {
   const { value: localValue, setValue: setLocalValue, debouncedValue, syncValue } = useDebouncedInput(searchQuery, 200);
   const isFirstRender = useRef(true);
@@ -113,6 +120,7 @@ export function SearchBar({
       <div className="relative flex-1">
         <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={inputRef}
           placeholder={placeholder}
           aria-label={inputAriaLabel}
           value={localValue}

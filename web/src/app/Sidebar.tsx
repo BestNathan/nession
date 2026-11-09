@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type RefObject } from 'react';
 import { SearchX } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -62,6 +62,10 @@ export interface SidebarProps {
   onAssociateProject?: (session: Session) => void;
   /** Projects are a first-class sibling destination, not a Session parent (#3025). */
   projectShell?: ProjectShellProps;
+  /** The canonical search input, focused when the rail's Search shortcut expands. */
+  searchInputRef?: RefObject<HTMLInputElement | null>;
+  /** Focus target after the rail expands the column (#3075). */
+  collapseButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 function WebSearchMiss({
@@ -160,6 +164,8 @@ export function Sidebar({
   onEditDetails,
   onAssociateProject,
   projectShell = emptyProjectShell(),
+  searchInputRef,
+  collapseButtonRef,
 }: SidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -188,6 +194,7 @@ export function Sidebar({
         onCloseDrawer={onCloseDrawer}
         onCreate={onCreate}
         createDisabled={createDisabled}
+        collapseButtonRef={collapseButtonRef}
       />
       <SessionListHeader
         searchQuery={searchQuery}
@@ -201,6 +208,7 @@ export function Sidebar({
         toggleSort={toggleSort}
         onRefresh={onRefresh}
         loadingSessions={loadingSessions}
+        searchInputRef={searchInputRef}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <SidebarSectionHead
