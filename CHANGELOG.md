@@ -436,3 +436,10 @@
 - Categories: architecture, project, workspace, session, ownership, server, protocol
 - Reason: Point the Project declaration article at the Experience-specific composition of Project create/settings and Project-aware Session creation delivered by #3089, keeping the domain authority in this article
 - Source: https://github.com/BestNathan/nession/pull/3109
+
+## 2026-11-09T12:29:33Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the full merged-staging Acceptance run 42615261597 at 0173f403, including SC-06 on the GitHub-hosted macos-15-intel runner; keep only the trusted when:deployed Case lane (#1616) pending
+- Source: https://github.com/BestNathan/nession/pull/3122
