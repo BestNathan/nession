@@ -6,7 +6,7 @@
   var mock=document.getElementById("sandbox-product");
   var output=document.getElementById("sandbox-inspector");
   if(!root||!device||!mock)return;
-  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr,/bin",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,mem:"2147483648",pids:"256",seccomp:true};
+  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,mem:"2147483648",pids:"256",seccomp:true};
   var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:Object.assign({},defaultDraft),preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
@@ -68,9 +68,10 @@
     return '<strong>当前不在 Sandbox：</strong>Agent'+(s.macos?' 提供受限的 Seatbelt 能力':' 可提供原生隔离机制')+'。配置 → 预检 → 确认 Enter 后才会新建隔离 Pane；目前的 Native shell 保持不变。';
   }
   function configInput(id,label,value,type,attr){
+    var disabled=!!(attr&&attr.indexOf('unavailable')>=0);
     return '<div class="field '+(attr||'')+'"><label for="sandbox-'+id+'">'+label+'</label>'+
       (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"><option value="allow"'+(value==="allow"?' selected':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+'>restricted · 白名单</option></select>':
-      '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false">')+'</div>';
+      '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
   }
   function toggler(id,label,checked,disabled){
     return '<label><input type="checkbox" data-draft="'+id+'" '+(checked?'checked':'')+' '+(disabled?'disabled':'')+'>'+label+'</label>';
@@ -80,19 +81,19 @@
     var disabled=m?' disabled':'';
     return '<section class="policy-editor" data-testid="sandbox-policy-editor" aria-label="Sandbox Policy Draft">'+
       '<div class="policy-group"><div><h3>Filesystem</h3><div class="hint2">'+(m?'macOS 本地路径白名单不可保证':'绝对路径 · 按读写权限显式挂载')+'</div></div><div class="policy-fields">'+
-      configInput('readOnly','Read-only paths',m?'(macOS unsupported)':d.readOnly,'input','full')+
-      configInput('write','Writable paths',m?'(macOS unsupported)':d.write,'input','full')+
+      configInput('readOnly','Read-only paths',m?'':d.readOnly,'input','full'+(m?' unavailable':''))+
+      configInput('write','Writable paths',m?'':d.write,'input','full'+(m?' unavailable':''))+
       '</div></div>'+
       '<div class="policy-group"><div><h3>Network</h3><div class="hint2">V1 仅支持 Ingress deny</div></div><div class="policy-fields">'+
       configInput('network','Network mode',d.network,'select')+
-      configInput('egress','Restricted egress allow',d.egress,'input')+
+      configInput('egress','Restricted egress allow',d.egress,'input',d.network==='restricted'?'':'unavailable')+
       '</div></div>'+
       '<div class="policy-group"><div><h3>Process</h3><div class="hint2">Linux namespaces</div></div><div class="checkrow">'+
       toggler('pid','PID',d.pid,m)+toggler('ipc','IPC',d.ipc,m)+toggler('user','USER',d.user,m)+
       (m?'<span class="subtxt">macOS 不提供 Linux namespaces</span>':'')+'</div></div>'+
       '<div class="policy-group"><div><h3>Resource</h3><div class="hint2">'+(m?'macOS 不提供 cgroup v2':'cgroup v2 · 原生控制文件值')+'</div></div><div class="policy-fields">'+
-      configInput('mem','memory.max (bytes)',m?'':d.mem,'input')+
-      configInput('pids','pids.max',m?'':d.pids,'input')+
+      configInput('mem','memory.max (bytes)',m?'':d.mem,'input',m?'unavailable':'')+
+      configInput('pids','pids.max',m?'':d.pids,'input',m?'unavailable':'')+
       '</div></div>'+
       '<div class="policy-group"><div><h3>Syscall</h3><div class="hint2">Linux seccomp</div></div><div class="checkrow">'+
       toggler('seccomp','nession-interactive-v1',d.seccomp,m)+
@@ -148,7 +149,7 @@
       '<div class="info-grid">'+line('Agent / Location',s.offline?'nession-dev · offline':'nession-dev · '+(s.macos?'macOS':'Linux'))+
       line('当前 Pane','Native · %1')+'</div>'+
       '<div class="info-section"><h3>配置 Sandbox</h3><p class="subline">填写 Policy 草稿，预检后明确 Enter；启动新的隔离 Pane，原 Native Pane 不变。</p>'+
-      '<div class="field" style="max-width:530px;margin-top:12px">'+configInput('workingDir','Start working directory',state.draft.workingDir,'input')+'</div>'+
+      '<div style="max-width:530px;margin-top:12px">'+configInput('workingDir','Start working directory',state.draft.workingDir,'input')+'</div>'+
       editor()+'</div>';
     if(state.preflight==='passed')c+='<div class="notice success validated"><strong>预检通过</strong> · Policy 语法与当前 Agent 能力匹配（仅模拟）。进入时还需重新校验实际主机并验证执行机制。</div>';
     if(state.preflight==='failed')c+='<div class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
