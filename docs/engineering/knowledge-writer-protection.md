@@ -54,6 +54,35 @@ The only permitted production ref mutation is the validated fast-forward `refs/h
 
 **Residual authorization limit:** GitHub App `Contents: write` applies at repository scope, not one branch. Therefore an App token could potentially push other *unprotected* refs if stolen or misused. The **dedicated App + limited secret access + protected execution + independent branch rulesets** isolate Knowledge's intended publisher and protect `knowledge`; they do **not** falsely claim the App is cryptographically restricted to a single ref. Review other sensitive refs' effective protection before activation; if single-ref authorization for all refs is mandatory, that requires repository-wide ruleset coverage or separate-repository isolation as a separate architectural decision. Never put the generic PR Publisher into Knowledge's bypass list.
 
+### Owner publication request (after approved activation)
+
+The minimal production router is `.github/workflows/store-knowledge-publisher.yml` (`Store / Knowledge Publisher`), using GitHub `repository_dispatch` with event type `knowledge-publish-v1`. The event runs **the default branch only**, avoiding arbitrary-ref `workflow_dispatch`. Its separate unprivileged prepare and protected publish jobs both independently verify the request using main-owned `scripts/knowledge-publisher-request.mjs`; the protected job never executes candidate source code.
+
+An authorized operator prepares an ordinary **data-only** commit on `refs/heads/knowledge-proposals/<bounded-slug>` whose parent includes the exact existing `knowledge` SHA, and runs the trusted validator before requesting publication. Pushing the candidate branch alone does not publish it.
+
+```bash
+# Operator: use approved, authenticated GitHub owner credentials.
+# The ref and both SHAs below are real values, not placeholders to guess.
+ref='refs/heads/knowledge-proposals/<bounded-slug>'
+proposal_sha='<40-hex-proposal-commit>'
+expected_head='<40-hex-current-knowledge-head>'
+
+# Only the owner may send this exact default-branch request.
+jq -n --arg ref "$ref" --arg source "$proposal_sha" --arg expected "$expected_head" '{
+  event_type:"knowledge-publish-v1",
+  client_payload:{
+    proposal_ref:$ref,
+    proposal_sha:$source,
+    expected_head:$expected
+  }
+}' > /tmp/knowledge-dispatch.json
+gh api -X POST repos/BestNathan/nession/dispatches --input /tmp/knowledge-dispatch.json
+```
+
+Before approving the Environment deployment, review the exact request SHA, source ref, proposal diff, matched Knowledge history and the authenticated Run. If the protected Environment/secret has not been independently verified, **reject** the deployment. The requester and approver must not silently bypass self-review policy. The resulting workflow emits a bounded `knowledge-publisher-<run>-<attempt>` artifact with the trusted main SHA, event, run, dedicated App ID, previous and published Knowledge SHAs, and exact proposal ref. This receipt proves a publisher action only after independent GitHub readback; it **does not** substitute for #2358's canary denial evidence or active production Ruleset readback.
+
+**Dependency:** merge the request verifier PR [#3097](https://github.com/BestNathan/nession/pull/3097) before activating the workflow PR [#3098](https://github.com/BestNathan/nession/pull/3098). The GitHub administrator must install the App and configure both Rulesets and the Environment. Do not trigger publication until all prerequisite proof is complete.
+
 ### Minimal rollout, proofs, and handoff
 
 1. **Source/design preparation (non-privileged):** merge this App contract; retain the existing main-owned validator/publisher and their negative tests. Review the proposed minimal publisher job and independently authenticated proposal format before requesting a live token.
