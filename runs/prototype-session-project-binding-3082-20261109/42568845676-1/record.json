@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "prototype-session-project-binding-3082-20261109",
+  "source_sha": "3ce6e100d913ca35e34041695d96cc7aa2d3f94f",
+  "source_digest": "ac68f9a0917a606b1257742874f9b64b54d324d5cbd6950c5ba134172b8aafb3",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 42568845676,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42568845676",
+    "event": "push",
+    "branch": "task/prototype-session-project-binding-3082-20261109",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-09T05:42:43.067Z",
+    "finished_at": "2026-11-09T05:42:49.289Z",
+    "result": {
+      "task": "Focused Session Project binding/Peek prototype #3082",
+      "source_sha": "3e6d994677a9c10405e862e40abb80154b22995f",
+      "status": "success",
+      "checks": [
+        {
+          "label": "Public Pages manifest and pinned HTML",
+          "pass": true,
+          "sha": "3e6d994677a9c10405e862e40abb80154b22995f"
+        }
+      ],
+      "browser": {
+        "status": "passed",
+        "checks": [
+          {
+            "label": "initial-terminal",
+            "got": 0,
+            "expected": 0,
+            "pass": true
+          },
+          {
+            "label": "web-1180",
+            "got": 1180,
+            "expected": 1180,
+            "pass": true
+          },
+          {
+            "label": "initial-project-chip-text",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "Peek-visible",
+            "got": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "label": "Peek-source",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "Project-capability",
+            "got": "session-project",
+            "expected": "session-project",
+            "pass": true
+          },
+          {
+            "label": "linked-project-identity",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "full-detail",
+            "got": "project",
+            "expected": "project",
+            "pass": true
+          },
+          {
+            "label": "return-to-capability",
+            "got": "session-project",
+            "expected": "session-project",
+            "pass": true
+          },
+          {
+            "label": "open-association-form",
+            "got": "bind-project",
+            "expected": "bind-project",
+            "pass": true
+          },
+          {
+            "label": "unbound-session",
+            "got": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "label": "unbound-context-chip",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "unbound-peek-offers-link",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "rebind-project-context",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "rebind-keeps-terminal",
+            "got": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "label": "created-second-Project",
+            "got": 2,
+            "expected": 2,
+            "pass": true
+          },
+          {
+            "label": "B-session-created",
+            "got": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "label": "B-project-capsule",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "focus-A-nession",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "focus-B-platform",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "B-peek-no-A",
+            "got": false,
+            "expected": false,
+            "pass": true
+          },
+          {
+            "label": "B-remains-on-delete",
+            "got": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "label": "B-no-project-after-delete",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "A-untouched-after-delete",
+            "got": true,
+            "expected": true,
+            "pass": true
+          },
+          {
+            "label": "web-script-errors",
+            "got": 0,
+            "expected": 0,
+            "pass": true
+          },
+          {
+            "label": "App-390",
+            "got": 390,
+            "expected": 390,
+            "pass": true
+          },
+          {
+            "label": "App-Peek",
+            "got": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "label": "App-Workspace-Project",
+            "got": "session-project",
+            "expected": "session-project",
+            "pass": true
+          },
+          {
+            "label": "single-App-Header",
+            "got": 1,
+            "expected": 1,
+            "pass": true
+          },
+          {
+            "label": "App-Back-Terminal",
+            "got": "terminal",
+            "expected": "terminal",
+            "pass": true
+          },
+          {
+            "label": "App-375",
+            "got": 375,
+            "expected": 375,
+            "pass": true
+          },
+          {
+            "label": "App-script-errors",
+            "got": 0,
+            "expected": 0,
+            "pass": true
+          }
+        ],
+        "executable": "/usr/bin/google-chrome",
+        "screenshots": {
+          "webBytes": 97447,
+          "appBytes": 77765
+        }
+      }
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/3ce6e100d913ca35e34041695d96cc7aa2d3f94f/prototype-session-project-binding-3082-20261109.json"
+}
