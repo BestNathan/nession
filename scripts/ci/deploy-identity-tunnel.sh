@@ -93,9 +93,16 @@ start() {
     { fail 'trusted relay or GOST executable unavailable'; return 1; }
   [[ ! -e "$RUNNER_TEMP/gost-ci.pid" && ! -e "$RUNNER_TEMP/gost-ci-alias-owned" ]] ||
     { fail 'stale job-owned network state exists; cleanup required'; return 1; }
+  local inspect_status=0
   if alias_present; then
     fail 'API alias already exists; refusing to borrow or remove unowned state'
     return 1
+  else
+    inspect_status=$?
+    if (( inspect_status != 1 )); then
+      fail 'cannot verify that API alias is unowned; refusing to create tunnel'
+      return 1
+    fi
   fi
   sudo ip addr add "$API_ALIAS/32" dev lo
   : > "$RUNNER_TEMP/gost-ci-alias-owned"
@@ -154,12 +161,15 @@ self_test() {
   fi
   kill -0 "$unrelated"
   # Stub privileged ip to prove ownership-marker-scoped cleanup.
-  local fake_alias=1 deletes=0
+  local fake_alias=1 deletes=0 additions=0 fake_error=0
   sudo() {
     if [[ "$*" == 'ip -o -4 addr show dev lo' ]]; then
+      (( fake_error == 0 )) || return 1
       ((fake_alias)) && echo '1: lo inet 192.168.2.162/32 scope host lo'
     elif [[ "$*" == 'ip addr del 192.168.2.162/32 dev lo' ]]; then
       ((deletes+=1)); fake_alias=0
+    elif [[ "$*" == 'ip addr add 192.168.2.162/32 dev lo' ]]; then
+      ((additions+=1)); fake_alias=1
     else
       fail 'unexpected privileged self-test command'
     fi
@@ -175,8 +185,19 @@ self_test() {
   cleanup
   [[ ! -e "$temp/nession-ci-kubeconfig" && -e "$temp/foreign-owned-file" ]]
   kill -0 "$unrelated"
+  # Failure to inspect the current alias must not lead to borrowing/removing it.
+  GOST_BIN="$exe"
+  GOST_RELAY_URL='fixture-only'
+  fake_alias=0
+  fake_error=1
+  if start >/dev/null 2>&1; then
+    fail 'startup must reject an uninspectable alias'; return 1
+  fi
+  [[ "$additions" == 0 && ! -e "$temp/gost-ci-alias-owned" &&
+    ! -e "$temp/gost-ci.pid" ]]
+  fake_error=0
   kill "$unrelated" 2>/dev/null || true
-  echo 'Deploy / Identity tunnel: live child TERM, forged/replayed PID, alias ownership, scoped cleanup and idempotency passed'
+  echo 'Deploy / Identity tunnel: live child TERM, forged/replayed PID, fail-closed alias inspection, owned cleanup and idempotency passed'
 }
 
 [[ "${1:-}" == 'self-test' ]] || [[ -n "${RUNNER_TEMP:-}" ]] ||
