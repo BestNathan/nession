@@ -70,8 +70,6 @@
 .mock-ws-card{padding:18px;border:1px solid var(--nession-border);border-radius:14px;max-width:580px;background:#fff;margin:20px 0}
 .mock-project-row{display:flex;width:100%;padding:14px 12px;border:1px solid var(--nession-border);border-radius:10px;margin:10px 0;background:#fff;align-items:center;gap:8px;text-align:left}
 .mock-project-row span{margin-left:auto;color:var(--nession-muted-foreground)}
-.mock-work-corner{position:absolute;right:18px;top:14px;z-index:1;display:flex;gap:5px}
-.mock-work-corner button{border:1px solid var(--nession-border);border-radius:9px;padding:7px 10px;background:#fff;color:var(--nession-text-secondary);font-size:12px}
 .mock-drawer-open,.mock-drawer-close,.mock-scrim{display:none}
 .mock[data-narrow="true"] .mock-nav-col{position:absolute;left:0;top:0;bottom:0;width:min(320px,90%);flex:0 0 0;z-index:8;transform:translateX(-105%);transition:transform 180ms ease;overflow:visible}
 .mock[data-narrow="true"][data-drawer="true"] .mock-nav-col{transform:translateX(0)}
@@ -165,7 +163,6 @@
      <button class="mock-scrim" data-action="close-drawer" aria-label="Close session drawer"></button>
      <main class="mock-work" id="work-main">
       <button class="mock-icon mock-drawer-open" data-action="open-drawer" title="Open sessions" aria-label="Open sessions"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
-      <div class="mock-work-corner"><button data-action="terminal">Terminal</button><button data-action="workspace">Workspace</button></div>
       <div class="mock-work-surface" id="surface-output"></div>
      </main>
     </div>
@@ -297,7 +294,7 @@
  function sync(){
    const isApp=state.mode==='app';state.narrow=!isApp&&state.width<1024;
    product.dataset.mode=state.mode;product.dataset.narrow=String(state.narrow);product.dataset.collapsed=String(state.collapsed);product.dataset.drawer=String(state.drawer);product.dataset.server=state.serverOffline?'offline':'connected';
-   const inactive=(state.collapsed&&!state.narrow)||(state.narrow&&!state.drawer)||isApp;$('#full-sidebar').inert=inactive;$('#full-sidebar').setAttribute('aria-hidden',String(inactive));$('#rail').inert=state.narrow||!state.collapsed;$('#rail').setAttribute('aria-hidden',String(state.narrow||!state.collapsed));
+   const inactive=(state.collapsed&&!state.narrow)||(state.narrow&&!state.drawer)||isApp;$('#full-sidebar').inert=inactive;$('#full-sidebar').setAttribute('aria-hidden',String(inactive));$('#rail').inert=isApp||state.narrow||!state.collapsed;$('#rail').setAttribute('aria-hidden',String(isApp||state.narrow||!state.collapsed));
    $('#projects-entry').hidden=!state.hasProjects;$('#rail-projects').hidden=!state.hasProjects;
    document.querySelectorAll('.mock-server-label').forEach(el=>el.textContent=state.serverOffline?'Server disconnected':'Server connected');
    $('#rail-server').title=state.serverOffline?'Server disconnected':'Server connected';$('#rail-server').setAttribute('aria-label',$('#rail-server').title);
