@@ -8,6 +8,29 @@ use std::path::PathBuf;
 
 use nession_sandbox::SandboxSettings;
 
+/// Build the probe settings.
+///
+/// The cgroup root is host configuration, but the acceptance harness owns a
+/// delegated subtree that is not the Agent's own cgroup. The environment
+/// override lets the same probe measure that subtree without pretending the
+/// default `<own cgroup>/nession` delegation exists.
+fn settings(state_dir: PathBuf, bridge: PathBuf, cgroup_root: Option<PathBuf>) -> SandboxSettings {
+    let mut settings = SandboxSettings::new(
+        state_dir,
+        bridge,
+        PathBuf::from("bwrap"),
+        PathBuf::from("/usr/bin/sandbox-exec"),
+    );
+    settings.cgroup_root = cgroup_root;
+    settings
+}
+
+fn cgroup_override() -> Option<PathBuf> {
+    std::env::var_os("SANDBOX_CGROUP_ROOT")
+        .or_else(|| std::env::var_os("NESSON_SANDBOX_CGROUP_ROOT"))
+        .map(PathBuf::from)
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let mut state_dir = None;
@@ -45,12 +68,7 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("nession-sandbox-bridge"));
 
-    let settings = SandboxSettings::new(
-        state_dir,
-        bridge,
-        PathBuf::from("bwrap"),
-        PathBuf::from("/usr/bin/sandbox-exec"),
-    );
+    let settings = settings(state_dir, bridge, cgroup_override());
     let capabilities = nession_sandbox::probe(&settings);
 
     let namespaces = serde_json::json!({
@@ -96,5 +114,25 @@ fn main() {
             eprintln!("nession-sandbox-probe: serialize capabilities: {error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_delegated_cgroup_override_reaches_the_probe_settings() {
+        let base = settings(PathBuf::from("/tmp/state"), PathBuf::from("bridge"), None);
+        assert_eq!(base.cgroup_root, None);
+        let delegated = settings(
+            PathBuf::from("/tmp/state"),
+            PathBuf::from("bridge"),
+            Some(PathBuf::from("/nession-accept")),
+        );
+        assert_eq!(
+            delegated.cgroup_root,
+            Some(PathBuf::from("/nession-accept"))
+        );
     }
 }

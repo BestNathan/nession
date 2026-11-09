@@ -76,5 +76,6 @@ cargo test -p nession-sandbox
 ```
 
 The real Linux path is `tests/linux_runtime.rs`; it requires Bubblewrap and,
-for the cgroup assertions, a delegated writable cgroup v2 subtree. Acceptance
-Cases live under `e2e/acceptance/cases/2681/`.
+for the cgroup assertions, a delegated writable cgroup v2 subtree named by
+`SANDBOX_CGROUP_ROOT` (the capability probe binary reads the same override).
+Acceptance Cases live under `e2e/acceptance/cases/2681/`.
