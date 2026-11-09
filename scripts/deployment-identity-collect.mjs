@@ -24,7 +24,7 @@ import {
 // mismatched registry digests, ambiguous authority or hostile inputs.
 export function deploymentReadinessRetryable(error) {
   const message = String(error instanceof Error ? error.message : error ?? '');
-  return /^(agent|server|ui) (deployment observed generation is stale|deployment is not Available|deployment has no available replica|deployment image does not match the trusted overlay tag|pod is not Running|pod container is not ready|pods disagree on the running imageID|deployment image does not match the trusted overlay tag)$/.test(message) ||
+  return /^(agent|server|ui) (deployment observed generation is stale|deployment is not Available|deployment has no available replica|deployment image does not match the trusted overlay tag|pod is not Running|pod container is not ready|pods disagree on the running imageID)$/.test(message) ||
     /^missing running pod for (agent|server|ui) deployment$/.test(message) ||
     /^no ready pod reports the (agent|server|ui) deployment image$/.test(message) ||
     /^missing (agent|server|ui) deployment nession-(agent|server|ui)-(staging|staging-01)$/.test(message);
