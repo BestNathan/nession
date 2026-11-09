@@ -15,7 +15,7 @@
       {agent:'Test Agent',path:'/workspaces/nession-test',online:true}
     ],
     location: 0, env: new Set(['.env.development']), activeSession: 'dev-session',
-    status: '', error: '', copyStatus:'', selectedAddress:0
+    status: '', error: '', copyStatus:'', selectedAddress:0, locationOpen:false
   };
   const paths = ['wss://agent.example.test:8443/ws/session', 'wss://relay.example.test/attach'];
   const longPath = '/srv/workspaces/nession/infrastructure/experiments/agent-workspaces/very-long-nested-source-root/feature-branches/session-runtime';
@@ -36,13 +36,23 @@
   function locationSelector() {
     return '<button class="app-select-row" data-act="choose-location">'+projectLocation(s.location)+'<span class="tiny muted">Change location →</span></button>';
   }
+  // An inline-anchored dropdown keeps the dialog body as the sole vertical
+  // scroll owner. Both the selected trigger and menu rows have intrinsic height:
+  // a long directory wraps instead of protruding from a 32px Select outline.
+  function webLocationSelector() {
+    const trigger = '<button type="button" class="location-trigger" data-location-trigger data-act="toggle-location" aria-haspopup="listbox" aria-controls="project-location-options" aria-expanded="'+s.locationOpen+'"><span class="location-trigger-text">'+projectLocation(s.location)+'</span><span class="location-chevron" aria-hidden="true">'+(s.locationOpen?'⌃':'⌄')+'</span></button>';
+    const options = s.locationOpen ? '<div class="location-options" id="project-location-options" role="listbox" aria-label="Existing Location">'+s.locations.map((loc,i)=>
+      '<button type="button" class="location-option '+(i===s.location?'current':'')+'" role="option" aria-selected="'+(i===s.location)+'" data-location-option data-act="select-location" data-idx="'+i+'">'+projectLocation(i)+'</button>'
+    ).join('')+'</div>' : '';
+    return '<div class="location-combobox" data-location-combobox>'+trigger+options+'</div>';
+  }
   function envSelector() {
     return '<button class="app-select-row" data-act="choose-env"><strong>Environment files</strong><span class="twelve muted">'+(s.env.size ? esc([...s.env].join(', ')) : 'Optional · None selected')+'</span><span class="tiny muted">Manage selection →</span></button>';
   }
   function createFields(app) {
     const name = '<label class="field"><span class="label">Session name</span><input name="sessionName" maxlength="90" placeholder="e.g. feature-review" value="'+esc(s.sessionName)+'" autocomplete="off"></label>';
     const locations = s.projectContext
-      ? app ? region('Existing location',locationSelector()) : region('Existing location','<div class="stack" style="gap:7px">'+s.locations.map((loc,i)=>'<button class="choice '+(i===s.location?'selected':'')+'" data-act="select-location" data-idx="'+i+'"><span class="radio"></span>'+projectLocation(i)+'</button>').join('')+'</div>')
+      ? app ? region('Existing location',locationSelector()) : region('Existing location',webLocationSelector())
       : region('Agent',app?locationSelector():'<button class="choice selected"><span class="radio"></span>'+projectLocation(s.location)+'</button>');
     const env = app ? envSelector() : '<div class="card stack" style="gap:9px"><div class="row between"><strong class="twelve">Environment files</strong><span class="tiny muted">Optional</span></div>'+['.env.development','.env.local','.env.test'].map(x=>'<label class="checkline"><input type="checkbox" name="env" value="'+esc(x)+'" '+(s.env.has(x)?'checked':'')+'>'+esc(x)+'</label>').join('')+'</div>';
     return '<div class="stack">'+name+locations+env+(s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
@@ -177,12 +187,12 @@
     if(inspector) inspector.textContent=JSON.stringify({experience:s.experience,width:s.width,page:s.page,operation:isApp()?s.depth:s.modal,scenario:s.scenario,attachMode:s.mode,configureOrigin:s.configureFrom,projectContext:s.projectContext,location:s.location,env:[...s.env],draftSessionName:s.sessionName,activeSession:s.activeSession,status:s.status,error:s.error},null,2);
   }
   function showOperation(kind){
-    s.error='';s.copyStatus='';s.status='';
+    s.error='';s.copyStatus='';s.status='';s.locationOpen=false;
     if(isApp()) s.depth=kind;else s.modal=kind;
     render();
   }
   function cancel(){
-    s.depth=null;s.modal=null;s.error='';s.status='';s.configureFrom=null;render();
+    s.depth=null;s.modal=null;s.error='';s.status='';s.configureFrom=null;s.locationOpen=false;render();
   }
   function submitCreate(){
     if(!s.sessionName.trim()){s.error='Enter a Session name.';render();return;}
@@ -224,7 +234,14 @@
       case 'attach-submit':case 'attach-config-submit':confirmAttach();break;
       case 'create-ordinary-session':s.projectContext=false;s.sessionName='new-session';showOperation('create-session');break;
       case 'create-project-session':s.projectContext=true;s.sessionName='feature-review';showOperation('create-session');break;
-      case 'select-location':s.location=idx;render();break;
+      case 'toggle-location':
+        s.locationOpen=!s.locationOpen;render();
+        (s.locationOpen ? product.querySelector('[data-location-option][aria-selected="true"]') : product.querySelector('[data-location-trigger]'))?.focus();
+        break;
+      case 'select-location':
+        s.location=idx;s.locationOpen=false;render();
+        product.querySelector('[data-location-trigger]')?.focus();
+        break;
       case 'choose-location':showOperation('choose-location');break;
       case 'choose-env':showOperation('choose-env');break;
       case 'select-child-location':s.location=idx;render();break;
@@ -258,7 +275,19 @@
     else if(el.name.startsWith('directory-')){const idx=Number(el.name.split('-')[1]);if(s.locations[idx])s.locations[idx].path=el.value;}
     else if(el.name==='env')el.checked?s.env.add(el.value):s.env.delete(el.value);
   });
-  document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&(s.depth||s.modal)){
+  document.addEventListener('keydown',ev=>{
+    if(s.locationOpen && ev.key==='Escape'){
+      ev.preventDefault();s.locationOpen=false;render();
+      product.querySelector('[data-location-trigger]')?.focus();return;
+    }
+    const focused=ev.target;
+    if(s.locationOpen && focused instanceof Element && focused.matches('[data-location-option]') && (ev.key==='ArrowDown'||ev.key==='ArrowUp')){
+      ev.preventDefault();
+      const options=[...product.querySelectorAll('[data-location-option]')];
+      const next=(options.indexOf(focused)+(ev.key==='ArrowDown'?1:-1)+options.length)%options.length;
+      options[next]?.focus();return;
+    }
+    if(ev.key==='Escape'&&(s.depth||s.modal)){
     ev.preventDefault();
     if(s.depth==='choose-location'||s.depth==='choose-env')action('child-back',product);
     else if(s.depth==='attach-config'&&s.configureFrom==='quick')action('attach-back',product);
@@ -269,13 +298,13 @@
     const experience=selected?.dataset.npExperience||(ev.detail.width<=500?'app':'web');
     s.experience=experience;s.width=ev.detail.width;
     device.style.setProperty('--np-device-height',ev.detail.width===844&&experience==='app'?'390px':experience==='app'?(ev.detail.width===375?'812px':ev.detail.width===430?'932px':'844px'):'900px');
-    s.depth=null;s.modal=null;s.error='';s.status='';
+    s.depth=null;s.modal=null;s.error='';s.status='';s.locationOpen=false;
     s.page=experience==='app'?'sessions':'project';
     render();
   });
   root.querySelectorAll('[data-fixture]').forEach(btn=>btn.addEventListener('click',()=>{
     root.querySelectorAll('[data-fixture]').forEach(x=>x.setAttribute('aria-pressed',String(x===btn)));
-    s.scenario=btn.dataset.fixture||'normal';s.error='';s.status='';render();
+    s.scenario=btn.dataset.fixture||'normal';s.error='';s.status='';s.locationOpen=false;render();
   }));
   render();
 })();
