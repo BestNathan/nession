@@ -252,7 +252,9 @@ function mutateFixtureRepository(
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
-  if (scenario === 'selection-overlap') return selectionOverlapGitSurface();
+  if (scenario === 'selection-overlap') {
+    return selectionOverlapGitSurface();
+  }
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
@@ -902,11 +904,15 @@ function previewStateFor(path: string): GitPreviewResponse | null {
 function previewFor(path: string, expected: string, scenario: string, want: 'text' | 'media'): GitPreviewResponse {
   if (want === 'media') {
     const media = mediaFixture(path);
-    if (media) return media;
+    if (media) {
+      return media;
+    }
   }
   if (scenario === 'preview-states') {
     const extra = previewStateFor(path);
-    if (extra) return extra;
+    if (extra) {
+      return extra;
+    }
   }
   if (scenario === 'preview-states') {
     if (path === 'notes/new.ts') {
