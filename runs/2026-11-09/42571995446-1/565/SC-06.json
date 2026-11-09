@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2d1e62d3425f578e2cfe8f15c8e804ff43fbd559912988bb6c27201b8553fe31",
+  "run_id": 42571995446,
+  "run_attempt": 1,
+  "issue": 565,
+  "criterion": "SC-06",
+  "criterion_text": "本地 Session 工具操作明确的目标 Agent；Server/Standalone 不会误操作自身主机的 tmux。",
+  "stage": "staging",
+  "target_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "contract_sha256": "9f6fdca575ede13e7989327f9bcdf29be47a69a3a74f19163fa2051f341f89dc",
+  "case_revision": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "case_tree_sha": "2b888356cdc3a5f0fa602c2551665e67be619b00",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T06:19:30.542Z",
+  "finished_at": "2026-11-09T06:19:32.891Z",
+  "duration_ms": 2349,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Agent tools always act on the explicitly named Agent, and every mode refuses a missing/mismatched target",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Server embedded routes agent.session.* to the named Agent through the command broker at f25aa433f2498202139f5b0d92429ea0a25a7d67"
+        },
+        {
+          "type": "runtime",
+          "value": "Agent embedded refuses a different agent_id instead of acting locally"
+        },
+        {
+          "type": "runtime",
+          "value": "Standalone refuses an agent_id outside [backend.agent] and acts only on the configured node"
+        }
+      ],
+      "duration_ms": 2321,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42571995446,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "record_path": "runs/2026-11-09/42571995446-1/565/SC-06.json",
+    "source_result_sha256": "d6e25405437d4fdc2daf3e8d6228e40eb2c01f4ed62666eb6b3900af64df5b16"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42571995446-1",
+    "sha256": "d6e25405437d4fdc2daf3e8d6228e40eb2c01f4ed62666eb6b3900af64df5b16",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "durability": "time-limited; object archival not configured"
+  }
+}

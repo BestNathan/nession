@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f7411ce3414c3d3a1446ccba38eb0152d742fe14777c19c6f99691eb613dd000",
+  "run_id": 42571995446,
+  "run_attempt": 1,
+  "issue": 565,
+  "criterion": "SC-10",
+  "criterion_text": "嵌入及独立模式正常关闭，无遗留连接/任务，不销毁宿主共享服务。",
+  "stage": "staging",
+  "target_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "contract_sha256": "9f6fdca575ede13e7989327f9bcdf29be47a69a3a74f19163fa2051f341f89dc",
+  "case_revision": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "case_tree_sha": "7157db418749b9343913286740dfe48e071b845f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T06:19:38.897Z",
+  "finished_at": "2026-11-09T06:19:40.862Z",
+  "duration_ms": 1965,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Embedded MCP follows its host shutdown, and standalone MCP exits cleanly on SIGTERM",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Agent shutdown completed with the MCP listener and its connections at f25aa433f2498202139f5b0d92429ea0a25a7d67"
+        },
+        {
+          "type": "runtime",
+          "value": "the standalone binary exited cleanly on SIGTERM (the test asserts the exit status)"
+        }
+      ],
+      "duration_ms": 1937,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42571995446,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "record_path": "runs/2026-11-09/42571995446-1/565/SC-10.json",
+    "source_result_sha256": "e3682a2dadb1b2b88dd5427998fe975494f4b83defa4931f6891705f32c6cb72"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42571995446-1",
+    "sha256": "e3682a2dadb1b2b88dd5427998fe975494f4b83defa4931f6891705f32c6cb72",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "durability": "time-limited; object archival not configured"
+  }
+}

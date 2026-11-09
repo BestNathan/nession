@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ae5cacd74a21ab32d0f1957461cdce99d055f2690bab0cbc2e9ec8c360a3e2eb",
+  "run_id": 42571995446,
+  "run_attempt": 1,
+  "issue": 565,
+  "criterion": "SC-12",
+  "criterion_text": "按仓库现有门禁完成 Rust 检查和测试，提供三种运行方式的文档及配置示例。",
+  "stage": "staging",
+  "target_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "contract_sha256": "9f6fdca575ede13e7989327f9bcdf29be47a69a3a74f19163fa2051f341f89dc",
+  "case_revision": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+  "case_tree_sha": "59705880c70e29d6ed876639a852a9341a0d78d1",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T06:19:43.600Z",
+  "finished_at": "2026-11-09T06:20:25.941Z",
+  "duration_ms": 42341,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Repository Rust checks/tests pass and the three hosting modes are documented with configuration examples",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "rustfmt --check and the rust-clippy Gate passed at f25aa433f2498202139f5b0d92429ea0a25a7d67"
+        },
+        {
+          "type": "runtime",
+          "value": "docs/architecture/mcp.md documents Standalone, Server embedded and Agent embedded with configuration examples"
+        }
+      ],
+      "duration_ms": 42313,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42571995446,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f25aa433f2498202139f5b0d92429ea0a25a7d67",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "record_path": "runs/2026-11-09/42571995446-1/565/SC-12.json",
+    "source_result_sha256": "caa4d932f1d40761f0deec4b8b56aac3a4acb35a41e91dd2fc491a6273b48363"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42571995446-1",
+    "sha256": "caa4d932f1d40761f0deec4b8b56aac3a4acb35a41e91dd2fc491a6273b48363",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42571995446",
+    "durability": "time-limited; object archival not configured"
+  }
+}
