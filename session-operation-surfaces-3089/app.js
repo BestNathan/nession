@@ -17,7 +17,7 @@
       {agent:'Test Agent',path:'/workspaces/nession-test',online:true}
     ],
     location: 0, env: new Set(['.env.development']), activeSession: 'dev-session',
-    status: '', error: '', copyStatus:'', selectedAddress:0, locationOpen:false
+    status: '', error: '', copyStatus:'', selectedAddress:0, locationOpen:false, envQuery:''
   };
   const paths = ['wss://agent.example.test:8443/ws/session', 'wss://relay.example.test/attach'];
   const longPath = '/srv/workspaces/nession/infrastructure/experiments/agent-workspaces/very-long-nested-source-root/feature-branches/session-runtime';
@@ -30,38 +30,76 @@
   const addr = idx => s.scenario === 'long' ? longAddress : paths[idx];
   const button = (label, action, variant = '', extra = '') => '<button type="button" class="btn '+variant+'" data-act="'+action+'" '+extra+'>'+label+'</button>';
   const region = (title, body) => '<div class="stack"><div class="section-label">'+title+'</div>'+body+'</div>';
-  function projectLocation(idx, selected = false) {
+  const envFiles = [
+    {name:'.env.development', source:'server', count:14},
+    {name:'.env.local', source:'agent:build-agent', count:7},
+    {name:'.env.test', source:'server', count:3}
+  ];
+  // Source anatomy: ProjectLocationDetails. Only the selected Web trigger and
+  // App location rows carry status; Web SelectItem options are Agent + path.
+  function projectLocation(idx, showStatus = true) {
     const loc = location(idx);
-    if (!loc) return '<span class="choice-body"><strong>No Existing Location</strong><span class="muted twelve">Add an Agent directory in Project settings.</span></span>';
+    if (!loc) return '<span class="location-details"><span class="location-agent">Select a location</span></span>';
     const offline = isOffline() && idx === 0;
-    return '<span class="choice-body"><strong>'+esc(loc.agent)+'</strong><span class="mono path">'+esc(visiblePath(loc.path))+'</span><span class="tiny '+(offline ? 'offline-chip' : 'muted')+'"><span class="dot '+(offline ? 'offline' : '')+'"></span>'+(offline?'Offline':'Online')+'</span></span>';
+    return '<span class="location-details"><span class="location-agent">'+esc(loc.agent)+'</span>'+
+      '<span class="location-path">'+esc(visiblePath(loc.path))+'</span>'+
+      (showStatus ? '<span class="location-status '+(offline?'offline-chip':'muted')+'">'+(offline?'Agent offline':'Agent online')+'</span>' : '')+
+      '</span>';
   }
   function locationSelector() {
-    return '<button class="app-select-row" data-act="choose-location">'+projectLocation(s.location)+'<span class="tiny muted">Change location →</span></button>';
+    return '<button type="button" class="app-select-row app-location-row" data-act="choose-location">'+
+      '<span class="app-location-value">'+projectLocation(s.location)+'</span>'+
+      '<span class="app-chevron" aria-hidden="true">›</span></button>';
   }
-  // An inline-anchored dropdown keeps the dialog body as the sole vertical
-  // scroll owner. Both the selected trigger and menu rows have intrinsic height:
-  // a long directory wraps instead of protruding from a 32px Select outline.
   function webLocationSelector() {
     if (!s.locations.length) return '<div class="form-empty">No Existing Location. Add an Agent directory in Project settings.</div>';
-    const trigger = '<button type="button" class="location-trigger" data-location-trigger data-act="toggle-location" aria-haspopup="listbox" aria-controls="project-location-options" aria-expanded="'+s.locationOpen+'"><span class="location-trigger-text">'+projectLocation(s.location)+'</span><span class="location-chevron" aria-hidden="true">'+(s.locationOpen?'⌃':'⌄')+'</span></button>';
+    const trigger = '<button type="button" class="location-trigger" data-location-trigger data-act="toggle-location" aria-haspopup="listbox" aria-controls="project-location-options" aria-expanded="'+s.locationOpen+'">'+
+      '<span class="location-trigger-text">'+projectLocation(s.location,true)+'</span>'+
+      '<span class="location-chevron" aria-hidden="true">'+(s.locationOpen?'⌃':'⌄')+'</span></button>';
     const options = s.locationOpen ? '<div class="location-options" id="project-location-options" role="listbox" aria-label="Existing Location">'+s.locations.map((loc,i)=>
-      '<button type="button" class="location-option '+(i===s.location?'current':'')+'" role="option" aria-selected="'+(i===s.location)+'" data-location-option data-act="select-location" data-idx="'+i+'">'+projectLocation(i)+'</button>'
+      '<button type="button" class="location-option '+(i===s.location?'current':'')+'" role="option" aria-selected="'+(i===s.location)+'" data-location-option data-act="select-location" data-idx="'+i+'">'+
+        projectLocation(i,false)+'<span class="location-item-check" aria-hidden="true">'+(i===s.location?'✓':'')+'</span></button>'
     ).join('')+'</div>' : '';
     return '<div class="location-combobox" data-location-combobox>'+trigger+options+'</div>';
   }
   function envSelector() {
-    return '<button class="app-select-row" data-act="choose-env"><strong>Environment files</strong><span class="twelve muted">'+(s.env.size ? esc([...s.env].join(', ')) : 'Optional · None selected')+'</span><span class="tiny muted">Manage selection →</span></button>';
+    const names=envFiles.filter(f=>s.env.has(f.name)).map(f=>f.name);
+    const summary=names.length ? names.join(', ') : 'Optional · None selected';
+    return '<button type="button" class="app-select-row app-env-row" data-act="choose-env">'+
+      '<span class="app-env-summary">'+esc(summary)+'</span><span class="app-chevron" aria-hidden="true">›</span></button>';
+  }
+  // Source anatomy: EnvFileMultiSelect — 32px search, independently scrolling
+  // 224px Web list, 16px selection marks, file icon, source badge and var count.
+  function envMultiSelect(scroll = true) {
+    const q=s.envQuery.trim().toLowerCase();
+    const filtered=envFiles.filter(f=>!q||f.name.toLowerCase().includes(q)||f.source.toLowerCase().includes(q));
+    const rows=filtered.map(f=> {
+      const selected=s.env.has(f.name);
+      return '<button type="button" class="env-file-row '+(selected?'is-selected':'')+'" data-act="toggle-env" data-env-name="'+esc(f.name)+'" aria-pressed="'+selected+'">'+
+        '<span class="env-check-box '+(selected?'is-checked':'')+'" aria-hidden="true">'+(selected?'✓':'')+'</span>'+
+        '<span class="env-file-icon" aria-hidden="true">▤</span>'+
+        '<span class="env-file-label">'+esc(f.name)+'</span>'+
+        '<span class="env-source-badge">'+esc(f.source)+'</span>'+
+        '<span class="env-var-count">'+f.count+' var'+(f.count===1?'':'s')+'</span></button>';
+    }).join('');
+    return '<div class="env-multi" data-env-multi>'+
+      '<label class="env-search"><span class="env-search-icon" aria-hidden="true">⌕</span>'+
+      '<input type="search" name="envQuery" placeholder="Search env files…" value="'+esc(s.envQuery)+'" autocomplete="off" aria-label="Search env files"></label>'+
+      '<div class="env-file-list '+(scroll?'env-scroll':'env-unscrolled')+'" role="group" aria-label="Environment files">'+
+      (rows||'<p class="env-no-files">'+(envFiles.length?'No files match your search':'No env files — create one in Env Files')+'</p>')+
+      '</div>'+
+      (s.env.size?'<p class="env-selected-count">'+s.env.size+' file'+(s.env.size===1?'':'s')+' selected</p>':'')+
+      '</div>';
   }
   function createFields(app) {
     const locations = s.projectContext
       ? '<div class="field"><span class="label">Existing Location</span>'+(app?locationSelector():webLocationSelector())+'</div>'
-      : '<div class="field"><span class="label">Agent</span>'+(app?locationSelector():'<button type="button" class="location-trigger" aria-label="Agent selection">'+projectLocation(s.location)+'</button>')+'</div>';
-    const name = '<label class="field"><span class="label">Session Name</span><input name="sessionName" maxlength="90" placeholder="my-session" value="'+esc(s.sessionName)+'" autocomplete="off"></label>';
+      : '<div class="field"><span class="label">Agent</span>'+(app?locationSelector():'<button type="button" class="location-trigger" aria-label="Agent selection">'+projectLocation(s.location,false)+'</button>')+'</div>';
+    const name = '<label class="field"><span class="label">Session Name</span><input type="text" name="sessionName" maxlength="90" placeholder="my-session" value="'+esc(s.sessionName)+'" autocomplete="off"></label>';
     const env = app
-      ? '<div class="field"><span class="label">Env Files (optional)</span>'+envSelector()+'</div>'
-      : '<div class="field"><span class="label">Env Files (optional)</span><div class="env-editor">'+['.env.development','.env.local','.env.test'].map(x=>'<label class="checkline"><input type="checkbox" name="env" value="'+esc(x)+'" '+(s.env.has(x)?'checked':'')+'>'+esc(x)+'</label>').join('')+'</div></div>';
-    return '<div class="dialog-form" data-form="new-session">'+locations+name+env+(s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
+      ? '<div class="field"><span class="label">Environment files</span>'+envSelector()+'</div>'
+      : '<div class="field"><span class="label">Env Files (optional)</span>'+envMultiSelect(true)+'</div>';
+    return '<div class="dialog-form" data-form="new-session">'+(app?name+locations+env:locations+name+env)+(s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
   }
   function attachModes(app) {
     const modes = [
@@ -188,8 +226,7 @@
       return appFull('Existing location',body,button('Done','child-back','primary'),'child-back');
     }
     if(kind==='choose-env') {
-      const body='<div class="stack"><div class="muted twelve">Select optional environment files</div>'+['.env.development','.env.local','.env.test'].map(env=>'<label class="checkline"><input type="checkbox" name="env" value="'+env+'" '+(s.env.has(env)?'checked':'')+'>'+env+'</label>').join('')+'</div>';
-      return appFull('Environment files',body,button('Done','child-back','primary'),'child-back');
+      return appFull('Environment files',envMultiSelect(false),button('Done','child-back','primary'),'child-back');
     }
     if(kind==='project-create' || kind==='project-settings'){
       const creating=kind==='project-create';
@@ -264,7 +301,12 @@
         product.querySelector('[data-location-trigger]')?.focus();
         break;
       case 'choose-location':showOperation('choose-location');break;
-      case 'choose-env':showOperation('choose-env');break;
+      case 'choose-env':s.envQuery='';showOperation('choose-env');break;
+      case 'toggle-env':{
+        const name=el.dataset.envName||'';
+        if(s.env.has(name))s.env.delete(name);else s.env.add(name);
+        render();break;
+      }
       case 'select-child-location':s.location=idx;render();break;
       case 'child-back':s.depth='create-session';render();break;
       case 'create-submit':submitCreate();break;
@@ -309,6 +351,11 @@
     const el=ev.target;
     if(!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement))return;
     if(el.name==='sessionName')s.sessionName=el.value;
+    else if(el.name==='envQuery'){
+      s.envQuery=el.value;const caret=el.selectionStart;
+      render();const search=product.querySelector('[name="envQuery"]');
+      if(search){search.focus();try{search.setSelectionRange(caret,caret);}catch{}}
+    }
     else if(el.name==='projectName')s.editedProjectName=el.value;
     else if(el.name==='projectDescription')s.draftDescription=el.value;
     else if(el.name==='repositoryUrl'){
@@ -320,7 +367,7 @@
     else if(el.name==='imageDigest')s.draftImageDigest=el.value;
     else if(el.name.startsWith('agent-')){const idx=Number(el.name.split('-')[1]);if(s.projectDraftLocations[idx])s.projectDraftLocations[idx].agent=el.value;}
     else if(el.name.startsWith('directory-')){const idx=Number(el.name.split('-')[1]);if(s.projectDraftLocations[idx])s.projectDraftLocations[idx].path=el.value;}
-    else if(el.name==='env')el.checked?s.env.add(el.value):s.env.delete(el.value);
+
   });
   document.addEventListener('keydown',ev=>{
     if(s.locationOpen && ev.key==='Escape'){
