@@ -143,21 +143,6 @@ async fn start_agent(
     (addr, handle)
 }
 
-fn reserve_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
-    listener.local_addr().expect("address").port()
-}
-
-async fn wait_for_port(port: u16) {
-    for _ in 0..100 {
-        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("the standalone MCP listener did not start");
-}
-
 fn spawn_standalone(config_path: &Path) -> ChildGuard {
     // not-tmux: this starts the standalone MCP host, which owns no tmux
     // server or Session and spawns no tmux process.
@@ -165,9 +150,48 @@ fn spawn_standalone(config_path: &Path) -> ChildGuard {
         .arg("--config")
         .arg(config_path)
         .env("RUST_LOG", "warn")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .expect("spawn nession-mcp");
     ChildGuard(child)
+}
+
+/// Read the bound address the standalone binary prints after it binds.
+///
+/// The config asks for port 0, so the port is only known after the bind; the
+/// binary prints it on stdout for exactly this reason. A fixed free-port guess
+/// was racy when two Cases (or two tests) ran at once.
+async fn await_listen_addr(child: &mut Child) -> SocketAddr {
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if let Some(addr) = line.strip_prefix("nession-mcp listening on ") {
+                        let _ = sender.send(Some(addr.trim().to_string()));
+                        return;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = sender.send(None);
+    });
+    let read = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || receiver.recv()),
+    )
+    .await
+    .expect("the standalone listener did not announce itself")
+    .expect("the stdout reader panicked");
+    read.expect("the stdout reader ended without a result")
+        .expect("the standalone listener printed no address")
+        .parse()
+        .expect("the announced address is a SocketAddr")
 }
 
 async fn send(
@@ -324,14 +348,13 @@ fn write_standalone_config(
     dir: &Path,
     server_addr: SocketAddr,
     agent_addr: SocketAddr,
-    mcp_port: u16,
 ) -> std::path::PathBuf {
     let config_path = dir.join("mcp.toml");
     std::fs::write(
         &config_path,
         format!(
             "[mcp]\n\
-             listen_address = \"127.0.0.1:{mcp_port}\"\n\
+             listen_address = \"127.0.0.1:0\"\n\
              auth_token = \"{MCP_TOKEN}\"\n\
              \n\
              [backend.server]\n\
@@ -374,12 +397,10 @@ async fn standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint() {
     let mock_agent = register_and_answer(server_addr).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, false).await;
 
-    let mcp_port = reserve_port();
     let dir = tempfile::tempdir().expect("tempdir");
-    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr, mcp_port);
+    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr);
     let mut child = spawn_standalone(&config_path);
-    wait_for_port(mcp_port).await;
-    let mcp_addr: SocketAddr = format!("127.0.0.1:{mcp_port}").parse().expect("addr");
+    let mcp_addr = await_listen_addr(&mut child.0).await;
 
     let anonymous = send(
         mcp_addr,
@@ -483,12 +504,10 @@ async fn standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint() {
 async fn all_three_hosts_share_one_tool_catalog() {
     let (server_addr, server_task) = start_server_with_mcp(true).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, true).await;
-    let mcp_port = reserve_port();
     let dir = tempfile::tempdir().expect("tempdir");
-    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr, mcp_port);
-    let _standalone = spawn_standalone(&config_path);
-    wait_for_port(mcp_port).await;
-    let standalone_addr: SocketAddr = format!("127.0.0.1:{mcp_port}").parse().expect("addr");
+    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr);
+    let mut _standalone = spawn_standalone(&config_path);
+    let standalone_addr = await_listen_addr(&mut _standalone.0).await;
 
     async fn tools(addr: SocketAddr, token: &str) -> Value {
         let session = initialize_with(addr, token).await;

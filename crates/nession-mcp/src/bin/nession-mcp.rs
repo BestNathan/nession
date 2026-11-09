@@ -58,6 +58,14 @@ async fn main() -> anyhow::Result<()> {
         tls = tls.is_some(),
         "nession-mcp listening"
     );
+    // A machine-readable line on stdout, because a `listen_address` of port 0
+    // makes the bound port the one fact a supervisor (or a test) cannot know
+    // before the bind. Logs stay on stderr.
+    {
+        use std::io::Write;
+        println!("nession-mcp listening on {local}");
+        let _ = std::io::stdout().flush();
+    }
 
     run(listener, tls, service).await
 }

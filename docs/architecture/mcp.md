@@ -92,6 +92,9 @@ agent_id = "agent-…"
   tools, and each call reports that no Agent backend is configured.
 - The inbound token and the backend tokens are separate. The inbound token is
   never forwarded to a backend.
+- After binding, the program prints `nession-mcp listening on <addr>` on
+  stdout (logs go to stderr). This is what makes `listen_address =
+  "127.0.0.1:0"` usable by a supervisor or test.
 - `[mcp] tls_cert_path` / `tls_key_path` optionally serve the MCP listener over
   TLS; public deployments should use TLS or a TLS-terminating proxy.
 - `SIGINT`/`SIGTERM` stops accepting and drops in-flight connection tasks.
