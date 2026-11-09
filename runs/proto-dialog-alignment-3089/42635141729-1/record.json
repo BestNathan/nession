@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "proto-dialog-alignment-3089",
+  "source_sha": "c80e0a86a3d9622957a1982b4581e965728e0a00",
+  "source_digest": "316af10e71885dbd2d132478c28acea562ebceb91a806a78416cc5d13dd1de21",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42635141729,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42635141729",
+    "event": "push",
+    "branch": "task/proto-dialog-alignment-3089",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-09T14:29:26.540Z",
+    "finished_at": "2026-11-09T14:29:41.582Z",
+    "result": {
+      "ok": true,
+      "issue": 3089,
+      "prototype_sha": "cd93e3e84bc141b8efb614c3b864bba5d1569847",
+      "cases": 6,
+      "results": [
+        {
+          "name": "Web 1440",
+          "nav": {
+            "session": 195,
+            "project": 195
+          },
+          "row": {
+            "agentTop": 970.75,
+            "directoryTop": 970.75
+          },
+          "session": {
+            "lefts": [
+              572,
+              572,
+              572
+            ],
+            "rights": [
+              1166,
+              1166,
+              1166
+            ],
+            "triggerHeight": 82.78125
+          },
+          "dropdown": {
+            "triggerWidth": 594,
+            "menuWidth": 594,
+            "options": [
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              },
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              }
+            ],
+            "overflow": 0
+          }
+        },
+        {
+          "name": "Web 1180",
+          "nav": {
+            "session": 256,
+            "project": 256
+          },
+          "row": {
+            "agentTop": 970.75,
+            "directoryTop": 970.75
+          },
+          "session": {
+            "lefts": [
+              503,
+              503,
+              503
+            ],
+            "rights": [
+              1097,
+              1097,
+              1097
+            ],
+            "triggerHeight": 82.78125
+          },
+          "dropdown": {
+            "triggerWidth": 594,
+            "menuWidth": 594,
+            "options": [
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              },
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              }
+            ],
+            "overflow": 0
+          }
+        },
+        {
+          "name": "Web 1024",
+          "nav": {
+            "session": 334,
+            "project": 334
+          },
+          "row": {
+            "agentTop": 970.75,
+            "directoryTop": 970.75
+          },
+          "session": {
+            "lefts": [
+              503,
+              503,
+              503
+            ],
+            "rights": [
+              1097,
+              1097,
+              1097
+            ],
+            "triggerHeight": 82.78125
+          },
+          "dropdown": {
+            "triggerWidth": 594,
+            "menuWidth": 594,
+            "options": [
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              },
+              {
+                "scroll": 584,
+                "client": 584,
+                "height": 96.78125
+              }
+            ],
+            "overflow": 0
+          }
+        },
+        {
+          "name": "App 390x844",
+          "app": {
+            "width": 390,
+            "height": 844,
+            "agentBottom": 1012.296875,
+            "directoryTop": 1048.296875,
+            "footerBottom": 1275.296875,
+            "rootBottom": 1275.296875,
+            "headers": 1,
+            "overflow": 0
+          }
+        },
+        {
+          "name": "App 375x812",
+          "app": {
+            "width": 375,
+            "height": 812,
+            "agentBottom": 1012.296875,
+            "directoryTop": 1048.296875,
+            "footerBottom": 1243.296875,
+            "rootBottom": 1243.296875,
+            "headers": 1,
+            "overflow": 0
+          }
+        },
+        {
+          "name": "App 844x390",
+          "app": {
+            "width": 844,
+            "height": 390,
+            "agentBottom": 1012.296875,
+            "directoryTop": 1048.296875,
+            "footerBottom": 821.296875,
+            "rootBottom": 821.296875,
+            "headers": 1,
+            "overflow": 0
+          }
+        }
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/c80e0a86a3d9622957a1982b4581e965728e0a00/proto-dialog-alignment-3089.json"
+}
