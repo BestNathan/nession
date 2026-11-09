@@ -17,6 +17,19 @@ import {
   parseEnvironmentOverlay,
 } from './deployment-identity-policy.mjs';
 
+// The live runner may observe an ordinary rolling Deployment before the new
+// pod is ready. The canonical observer still requires all three immutable
+// identities to match; only known readiness/mid-rollout states are retryable.
+// Never retry malformed provenance, wrong environment, cross-lane pods,
+// mismatched registry digests, ambiguous authority or hostile inputs.
+export function deploymentReadinessRetryable(error) {
+  const message = String(error instanceof Error ? error.message : error ?? '');
+  return /^(agent|server|ui) (deployment observed generation is stale|deployment is not Available|deployment has no available replica|deployment image does not match the trusted overlay tag|pod is not Running|pod container is not ready|pods disagree on the running imageID)$/.test(message) ||
+    /^missing running pod for (agent|server|ui) deployment$/.test(message) ||
+    /^no ready pod reports the (agent|server|ui) deployment image$/.test(message) ||
+    /^missing (agent|server|ui) deployment nession-(agent|server|ui)-(staging|staging-01)$/.test(message);
+}
+
 // A bounded, single-line log receipt for the trusted Acceptance collector.
 // The Acceptance harness never reads artifacts or step summaries; the job log
 // is the channel it can attest. The receipt carries only identity that is
@@ -551,6 +564,26 @@ function selfTest() {
   assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
     JSON.stringify({ ...receipt, source_sha: 'main' })), /source SHA/);
 
+  // Only finite-lived readiness conditions qualify for a bounded rerun.
+  for (const transient of [
+    'agent pod is not Running',
+    'server pod container is not ready',
+    'ui deployment is not Available',
+    'agent deployment observed generation is stale',
+    'server pods disagree on the running imageID',
+    'missing running pod for agent deployment',
+    'no ready pod reports the ui deployment image',
+    'missing server deployment nession-server-staging',
+  ]) assert.equal(deploymentReadinessRetryable(Error(transient)), true, transient);
+  for (const critical of [
+    'agent pod env label does not match the trusted overlay',
+    'agent workload imageID does not match the immutable provenance digest',
+    'server deployment namespace does not match the trusted overlay',
+    'build provenance source_sha must be a 40-character hex SHA',
+    'duplicate agent deployment nession-agent-staging',
+    'unexpected parameter',
+  ]) assert.equal(deploymentReadinessRetryable(Error(critical)), false, critical);
+
   console.log('deployment-identity-collect: Kubernetes observation mapping scenarios passed');
 }
 
@@ -559,6 +592,9 @@ if (process.argv[1]?.endsWith('deployment-identity-collect.mjs')) {
     main(process.argv.slice(2));
   } catch (error) {
     console.error('deployment-identity-collect: ' + error.message);
-    process.exitCode = 2;
+    // EX_TEMPFAIL is handled only by the trusted workflow's bounded retry
+    // loop. No retryable attempt writes an attestation or an Acceptance Pass.
+    process.exitCode = process.argv[2] === 'attest' &&
+      deploymentReadinessRetryable(error) ? 75 : 2;
   }
 }
