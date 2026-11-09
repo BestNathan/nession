@@ -2,7 +2,7 @@
 // #565 SC-02: the standalone host runs with no local Agent/Server process,
 // connects the configured remote Server, and completes discovery plus
 // Session create/kill through its own MCP endpoint.
-const { run, targetSha, checked, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, checked, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -11,6 +11,7 @@ run(({ evidence }) => {
     'nession-mcp',
     ['--test', 'integration', 'standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint'],
     900000,
+    isolatedTmuxEnv('nession-565-sc02'),
   );
   assertRan(out, ['standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint']);
   evidence.push(
