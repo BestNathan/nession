@@ -209,10 +209,13 @@ self_test() {
 case "${1:-}" in
   start)
     # This process owns only startup; the workflow's always() cleanup owns
-    # shutdown across subsequent Actions steps. A failed start self-cleans.
+    # shutdown across subsequent Actions steps. Failed/signal-interrupted
+    # startup must also self-clean, even before later Actions steps can run.
     trap 'cleanup' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM HUP
     start
-    trap - EXIT
+    trap - EXIT INT TERM HUP
     ;;
   cleanup) cleanup ;;
   self-test) self_test ;;
