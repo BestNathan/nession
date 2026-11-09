@@ -42,9 +42,9 @@
 
 - **Mock:** Project/Agent/Session state, attachment, probe/latency, Session terminal, environment selection, saving and errors. These are deterministic local browser variables.
 - **No network or secrets:** no Server API, tmux, provider, WebSocket, Project backend mutation, private data, real addresses or user files. Examples use .example.test and fictional paths.
-- **Static checks:** files and relative paths reviewed. Exact JavaScript parser and real browser click-through must still be verified.
+- **Static / synthetic checks (2026-11-09):** standalone JS parsed successfully in V8; source references and structured frame anchors verified. A minimal in-memory DOM/event stub exercised Web create, explicit configure/Save, App quick Attach → advanced mode → quick sheet → explicit Attach, App Project Create Session → Location/ENV child → Back → Create, and Project Create entry. This is a **synthetic source check**, not Chromium or a real rendered-page assertion.
 - **Browser verification:** **Pending** actual Chromium+Playwright testing on this source for Web/App width, composition, focus, Back, keyboard, horizontal scroll/overflow and console errors.
-- **Pages publication:** **Pending** until the trusted Pages publisher exposes exact source SHA in public prototypes/manifest.json and direct HTML readback. Prototype branch push alone is NOT live proof.
+- **Pages publication:** the public Pages publisher is the authority for exact source SHA and artifact bytes. See the owning Issue for the latest verified Run/SHA; do not infer latest live content solely from a prototype branch push. A verified gallery/manifest does not alone establish that this page was clicked through in Chromium.
 - **Production Acceptance:** all #3089 SCs remain Pending; prototype is not an authenticated production Case.
 - **Evidence authority:** independent published Pages readback + immutable commit identifies mock revision; mock success does not demonstrate actual Session creation.
 
@@ -53,7 +53,7 @@
 - Preview (not yet deployment-verified): https://bestnathan.github.io/nession/prototypes/session-operation-surfaces-3089/index.html
 - Pages gallery: https://bestnathan.github.io/nession/#/prototypes
 - Mutable source: https://github.com/BestNathan/nession/tree/prototype/session-operation-surfaces-3089
-- Immutable source: pin exact final prototype branch HEAD SHA after the final commit.
+- Immutable source: use the source SHA recorded in the owning Issue and the trusted public Pages manifest.
 
 ## Non-goals
 
