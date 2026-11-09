@@ -215,6 +215,7 @@
   {id:'s4',name:'Review CI workflows',meta:'zsh · devbox-01 · yesterday',tmux:'review-ci'}
  ];
  let sessions = original.map(s => ({...s}));
+ let dialogOrigin = null;
  const state={collapsed:false,width:1280,mode:'web',narrow:false,drawer:false,selected:'s1',surface:'terminal',beforeProject:'terminal',project:null,search:'',hasProjects:true,serverOffline:false,empty:false,appView:'terminal',menu:null,dialog:null,log:[]};
  const escape = s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
  const svg = name=>name==='folder'?'<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/></svg>':'';
@@ -252,6 +253,7 @@
   $('#app-body').innerHTML=content;
  }
  function dialog(kind,id){
+   dialogOrigin = document.activeElement;
    state.dialog={kind,id};const target=sessions.find(s=>s.id===id);
    const titles={new:'New Session',details:'Session details',edit:'Edit details',attach:'Attach settings',kill:'Kill session'};
    let body='';
@@ -274,7 +276,7 @@
    else log('Saved local attach preference preview; no reconnect');
    closeDialog();list();surfaceRender();appRender();
  }
- function closeDialog(){state.dialog=null;$('#dialog-overlay').hidden=true;$('#dialog-content').innerHTML='';if(state.mode==='web'&&state.collapsed&&!state.narrow)$('#rail [data-action="expand"]').focus()}
+ function closeDialog(){state.dialog=null;$('#dialog-overlay').hidden=true;$('#dialog-content').innerHTML='';if(dialogOrigin&&dialogOrigin.isConnected&&!dialogOrigin.closest('[inert]')&&dialogOrigin.getClientRects().length)dialogOrigin.focus();else if(state.mode==='web'&&state.collapsed&&!state.narrow)$('#rail [data-action="expand"]').focus();else if(state.narrow)$('#work-main [data-action="open-drawer"]').focus();dialogOrigin=null}
  function surfaceRender(){$('#surface-output').innerHTML=workHTML()}
  function measure(){
   if(state.mode==='app'){$('#geometry').textContent='App 390: no Web navigation rail; separate spatial surface.';return}
@@ -287,7 +289,7 @@
  function sync(){
    const isApp=state.mode==='app';state.narrow=!isApp&&state.width<1024;
    product.dataset.mode=state.mode;product.dataset.narrow=String(state.narrow);product.dataset.collapsed=String(state.collapsed);product.dataset.drawer=String(state.drawer);product.dataset.server=state.serverOffline?'offline':'connected';
-   const inactive=state.collapsed&&!state.narrow;$('#full-sidebar').inert=inactive;$('#full-sidebar').setAttribute('aria-hidden',String(inactive));$('#rail').inert=state.narrow||!state.collapsed;$('#rail').setAttribute('aria-hidden',String(state.narrow||!state.collapsed));
+   const inactive=(state.collapsed&&!state.narrow)||(state.narrow&&!state.drawer)||isApp;$('#full-sidebar').inert=inactive;$('#full-sidebar').setAttribute('aria-hidden',String(inactive));$('#rail').inert=state.narrow||!state.collapsed;$('#rail').setAttribute('aria-hidden',String(state.narrow||!state.collapsed));
    $('#projects-entry').hidden=!state.hasProjects;$('#rail-projects').hidden=!state.hasProjects;
    document.querySelectorAll('.mock-server-label').forEach(el=>el.textContent=state.serverOffline?'Server disconnected':'Server connected');
    $('#rail-server').title=state.serverOffline?'Server disconnected':'Server connected';$('#rail-server').setAttribute('aria-label',$('#rail-server').title);
