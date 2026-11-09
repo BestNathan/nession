@@ -149,6 +149,10 @@ function selfTest(){
   bad({source:{...source,head_branch:'feature'}});
   bad({source:{...source,head_sha:'b'.repeat(40)}});
   bad({source:{...source,path:'.github/workflows/evil.yml'}});
+  bad({source:{...source,workflow_id:workflowId+1}});
+  assert.throws(()=>attestReplay({...valid,workflow:{...workflow,id:workflowId+1}}),
+    /untrusted dispatch source, branch or workflow/,
+    'a same-name workflow with a different GitHub workflow ID must be refused');
   bad({source:{...source,actor:{login:'attacker'}}});
   bad({source:{...source,triggering_actor:{login:'attacker'}}});
   bad({source:{...source,conclusion:'failure'}});

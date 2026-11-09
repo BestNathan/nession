@@ -13,6 +13,7 @@ const positive=Object.freeze({
   source:38946994222,consumer:38947016290,
   sha:'da27edb59b2ac480ffe56bdbb2c08631b9a68bc2',
   source_workflow_id:385795701,
+  source_attempt:1,consumer_attempt:1,
 });
 const negatives=Object.freeze([
   // Live GET /actions/runs/41612523346/attempts/1 is completed/skipped:
@@ -37,6 +38,30 @@ const negatives=Object.freeze([
     case:'off_main_owner_manual_dispatch_foreign_source_sha',
     event:'workflow_dispatch',conclusion:'skipped',reason:'untrusted_source'}),
 ]);
+// #2741: the distinct live boundary is a workflow_dispatch-only workflow that
+// shares the canonical display name but exists only on an off-main branch with
+// a different Workflow ID/path. Its successful owner-triggered source run
+// completed without waking the main consumer; the deterministic guard fixture
+// covers the identity rejection that a dispatchable consumer would have used.
+const spoof=Object.freeze({
+  source:42558506660,source_attempt:1,
+  workflow_id:411676818,
+  workflow_path:'.github/workflows/2741-spoof-replay-request.yml',
+  branch:'test/2741-spoof-replay-request',
+  sha:'8f19beac83acde22d779d84f88154380319d2483',
+  main_sha:'453e94913625a69778d02e089ba6f33eb69633f2',
+});
+// The single new owner/main replay after the exact-Attempt fix (#2738), and
+// the bounded interval in which a spoof-triggered consumer would have appeared.
+const admissionReplay=Object.freeze({
+  source:42558657133,source_attempt:1,
+  consumer:42558670579,consumer_attempt:1,
+  sha:'29eb0217765ee860fa1675582b45ac98c484420d',
+  source_workflow_id:385795701,
+  suppression_window:Object.freeze({
+    start:'2026-11-09T03:50:03Z',end:'2026-11-09T03:51:41Z',
+  }),
+});
 const allowedNames=['authorize-replay','rust-health','web-health','e2e-health','publish'];
 const fail=x=>{throw Error('authenticated Metrics replay: '+x);};
 const normalized=r=>String(r?.path??'').replace(/@refs\/heads\/main$/,'');
@@ -66,14 +91,15 @@ function originalJob(jobs,run,name){
   if(found.length!==1||!Number.isSafeInteger(found[0].id))fail('missing/ambiguous consumer Job');
   return found[0];
 }
-export function attestPositiveReplay(source,recipient,jobs,authLog,ancestor){
-  if(!validRun(source,positive.source)||!validRun(recipient,positive.consumer)||
-    source.head_sha!==positive.sha||recipient.head_sha!==positive.sha||
-    source.run_attempt!==1||recipient.run_attempt!==1||
+export function attestPositiveReplay(source,recipient,jobs,authLog,ancestor,pin=positive){
+  if(!validRun(source,pin.source)||!validRun(recipient,pin.consumer)||
+    source.head_sha!==pin.sha||recipient.head_sha!==pin.sha||
+    source.run_attempt!==pin.source_attempt||
+    recipient.run_attempt!==pin.consumer_attempt||
     source.head_branch!=='main'||source.event!=='workflow_dispatch'||
     source.name!=='Metrics / Replay Request'||
     normalized(source)!==SOURCE_WORKFLOW||
-    source.workflow_id!==positive.source_workflow_id||
+    source.workflow_id!==pin.source_workflow_id||
     source.actor?.login!=='BestNathan'||
     source.triggering_actor?.login!=='BestNathan'||
     source.conclusion!=='success'||
@@ -128,6 +154,86 @@ export function attestPositiveReplay(source,recipient,jobs,authLog,ancestor){
     app_token_step:'completed_success',publisher_step:'completed_success',
     receipt_step:'completed_success',trusted_main_ancestry:true,
     proof_scope:'historical owner/main trusted replay and App-publisher steps, NOT production Ruleset denial matrix',
+  });
+}
+// #2741 SC-02: GitHub did not dispatch a workflow_run consumer for a
+// workflow_dispatch-only workflow that shares the canonical display name but
+// exists only on an off-main branch with a different Workflow ID/path. The
+// source identity is authenticated; the suppression is bounded to the window
+// between its completion and the next owner/main replay request.
+export function attestSpoofedSourceSuppression({source,workflow,consumerRuns,window}){
+  if(!validRun(source,spoof.source)||source.run_attempt!==spoof.source_attempt||
+     source.head_sha!==spoof.sha||source.head_branch!==spoof.branch||
+     source.event!=='workflow_dispatch'||source.name!=='Metrics / Replay Request'||
+     normalized(source)!==spoof.workflow_path||
+     source.workflow_id!==spoof.workflow_id||
+     source.actor?.login!=='BestNathan'||
+     source.triggering_actor?.login!=='BestNathan'||
+     source.conclusion!=='success'||
+     workflow?.id!==spoof.workflow_id||
+     normalized(workflow)!==spoof.workflow_path)
+    fail('untrusted same-display-name wrong-workflow source');
+  if(!window||!Number.isFinite(Date.parse(window.start))||
+     !Number.isFinite(Date.parse(window.end))||
+     Date.parse(window.start)>=Date.parse(window.end))
+    fail('invalid suppression observation window');
+  if(!Array.isArray(consumerRuns)||consumerRuns.length>100)
+    fail('untrusted consumer run inventory');
+  const start=Date.parse(window.start),end=Date.parse(window.end);
+  for(const run of consumerRuns){
+    const created=Date.parse(run?.created_at??'');
+    if(run?.event!=='workflow_run'||!Number.isFinite(created))continue;
+    if(created>=start&&created<=end)
+      fail('main consumer was dispatched for the suppressed spoof source');
+  }
+  return Object.freeze({
+    kind:'verified_suppressed_spoof_replay_source',repository:REPO,
+    source_run_id:source.id,source_attempt:source.run_attempt,
+    source_sha:source.head_sha,source_workflow_id:source.workflow_id,
+    source_workflow_path:spoof.workflow_path,source_event:source.event,
+    source_branch:source.head_branch,source_actor:source.actor.login,
+    main_consumer_dispatched:false,
+    observation_window:window,
+    observed_consumer_runs:consumerRuns.length,
+    store_write_attempted:false,
+    deterministic_guard_fixture:'scripts/metrics-replay-source.mjs self-test: same-name different workflow ID/path refused',
+  });
+}
+export async function collectMetricsReplayAdmissionProof(repo,targetSha,workspace,get,getText){
+  if(repo!==REPO||!SHA.test(targetSha)||!path.isAbsolute(workspace)||
+     typeof get!=='function'||typeof getText!=='function')
+    fail('invalid replay admission query');
+  for(const sha of [spoof.main_sha,admissionReplay.sha]){
+    const git=execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',
+      sha,targetSha],{encoding:'utf8',timeout:30000,
+      stdio:['ignore','pipe','pipe']});
+    if(git!=='')fail('unexpected Git ancestry stdout');
+  }
+  const prefix='/repos/'+REPO;
+  const [source,workflow,replaySource,recipient]=await Promise.all([
+    get(prefix+'/actions/runs/'+spoof.source+'/attempts/'+spoof.source_attempt),
+    get(prefix+'/actions/workflows/'+spoof.workflow_id),
+    get(prefix+'/actions/runs/'+admissionReplay.source+'/attempts/'+admissionReplay.source_attempt),
+    get(prefix+'/actions/runs/'+admissionReplay.consumer+'/attempts/'+admissionReplay.consumer_attempt),
+  ]);
+  const inventory=await get(prefix+
+    '/actions/workflows/metrics-repository.yml/runs?per_page=100&event=workflow_run');
+  const suppression=attestSpoofedSourceSuppression({
+    source,workflow,consumerRuns:inventory.workflow_runs,
+    window:admissionReplay.suppression_window});
+  const jobs=await get(prefix+'/actions/runs/'+recipient.id+
+    '/attempts/'+recipient.run_attempt+'/jobs?per_page=100');
+  const authorizer=originalJob(jobs,recipient,'authorize-replay');
+  const log=await getText(prefix+'/actions/jobs/'+authorizer.id+'/logs');
+  const replay=attestPositiveReplay(replaySource,recipient,jobs,log,true,admissionReplay);
+  return Object.freeze({
+    schema_version:1,kind:'authenticated_metrics_replay_admission_proof',
+    repository:REPO,authenticated_target_sha:targetSha,
+    verdict:'LiveAdmissionBoundaryVerified',
+    same_display_name_wrong_workflow_manual_source:suppression,
+    authorized_owner_main_replay:replay,
+    spoof_source_cover:1,positive_replay_cover:1,
+    prior_evidence_reused:'#1690 SC-09 historical replay and off-main cases retained; not repeated',
   });
 }
 export async function collectMetricsReplayLineage(repo,targetSha,workspace,get,getText){
@@ -257,5 +363,75 @@ export function selfTestMetricsReplayLineage(){
     x.name==='publish'?{...x,steps:x.steps.map(step=>
       step.name==='Publish durable metrics branch'?{...step,conclusion:'skipped'}:step)}:x)}));
   assert.throws(()=>verify(source,recipient,jobs,authLog.replace(String(source.id),'999')));
+  return true;
+}
+
+export function selfTestMetricsReplayAdmissionProof(){
+  const identity={full_name:REPO};
+  const source={id:spoof.source,run_attempt:1,status:'completed',
+    conclusion:'success',head_branch:spoof.branch,head_sha:spoof.sha,
+    name:'Metrics / Replay Request',path:spoof.workflow_path,
+    workflow_id:spoof.workflow_id,event:'workflow_dispatch',
+    actor:{login:'BestNathan'},triggering_actor:{login:'BestNathan'},
+    repository:identity,head_repository:identity,
+    created_at:'2026-11-09T03:49:56Z',updated_at:'2026-11-09T03:50:03Z'};
+  const workflow={id:spoof.workflow_id,name:'Metrics / Replay Request',
+    path:spoof.workflow_path};
+  const laterConsumer={id:1,event:'workflow_run',created_at:'2026-11-09T03:51:51Z'};
+  const suppression=attestSpoofedSourceSuppression({source,workflow,
+    consumerRuns:[laterConsumer],window:admissionReplay.suppression_window});
+  assert.equal(suppression.main_consumer_dispatched,false);
+  assert.equal(suppression.source_workflow_id,spoof.workflow_id);
+  const noConsumer=()=>attestSpoofedSourceSuppression({source,workflow,
+    consumerRuns:[],window:admissionReplay.suppression_window});
+  assert.throws(()=>attestSpoofedSourceSuppression({source,
+    workflow:{...workflow,id:spoof.workflow_id+1},
+    consumerRuns:[],window:admissionReplay.suppression_window}));
+  assert.throws(()=>attestSpoofedSourceSuppression({source:{...source,
+    path:SOURCE_WORKFLOW},workflow,consumerRuns:[],
+    window:admissionReplay.suppression_window}));
+  assert.throws(()=>attestSpoofedSourceSuppression({source:{...source,
+    event:'push'},workflow,consumerRuns:[],
+    window:admissionReplay.suppression_window}));
+  assert.throws(()=>attestSpoofedSourceSuppression({source,workflow,
+    consumerRuns:[{id:2,event:'workflow_run',
+      created_at:'2026-11-09T03:50:30Z'}],
+    window:admissionReplay.suppression_window}));
+  assert.equal(noConsumer().main_consumer_dispatched,false);
+
+  const replaySha=admissionReplay.sha;
+  const replaySource={id:admissionReplay.source,run_attempt:1,
+    status:'completed',conclusion:'success',head_branch:'main',
+    head_sha:replaySha,name:'Metrics / Replay Request',path:SOURCE_WORKFLOW,
+    workflow_id:admissionReplay.source_workflow_id,event:'workflow_dispatch',
+    actor:{login:'BestNathan'},triggering_actor:{login:'BestNathan'},
+    repository:identity,head_repository:identity,
+    updated_at:'2026-11-09T03:51:49Z'};
+  const recipient={id:admissionReplay.consumer,run_attempt:1,status:'completed',
+    conclusion:'success',name:'Metrics / Repository Health',
+    path:CONSUMER_WORKFLOW,event:'workflow_run',head_branch:'main',
+    head_sha:replaySha,repository:identity,head_repository:identity,
+    created_at:'2026-11-09T03:51:51Z'};
+  const checked=['Mint scoped App token for orphan Run Store updates',
+    'Reject unrecognized writer mode or unavailable App token',
+    'Publish durable metrics branch',
+    'Verify immutable Git bytes before uploading Run Store receipts'];
+  const jobs={jobs:allowedNames.map((name,i)=>({id:500+i,name,
+    run_id:recipient.id,run_attempt:1,head_sha:replaySha,
+    status:'completed',conclusion:'success',steps:name==='publish'
+      ?checked.map(x=>({name:x,status:'completed',conclusion:'success'})):[]}))};
+  const authLog='2026-11-09T03:52:00Z '+JSON.stringify({status:'authorized',
+    mode:'owner_main_manual_replay',repository:REPO,
+    source_run_id:replaySource.id,source_attempt:1,source_sha:replaySha,
+    workflow_id:replaySource.workflow_id})+'\n';
+  const replay=attestPositiveReplay(replaySource,recipient,jobs,authLog,true,
+    admissionReplay);
+  assert.equal(replay.recipient_run_id,admissionReplay.consumer);
+  assert.throws(()=>attestPositiveReplay({...replaySource,run_attempt:2},
+    recipient,jobs,authLog,true,admissionReplay));
+  assert.throws(()=>attestPositiveReplay(replaySource,
+    {...recipient,conclusion:'failure'},jobs,authLog,true,admissionReplay));
+  assert.throws(()=>attestPositiveReplay(replaySource,recipient,jobs,
+    authLog.replace(String(replaySource.id),'999'),true,admissionReplay));
   return true;
 }

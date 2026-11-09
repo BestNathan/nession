@@ -54,7 +54,11 @@ uuid.workspace = true
 [dev-dependencies]
 nession-server = { path = "../nession-server" }
 nession-common = { path = "../nession-common" }
+# The Agent-management connection needs a real Agent to prove the typed
+# `agent.session.*` calls and the operator credential handshake.
+nession-agent = { path = "../nession-agent" }
 tempfile = "3"
+rand.workspace = true
 
 [lints]
 workspace = true

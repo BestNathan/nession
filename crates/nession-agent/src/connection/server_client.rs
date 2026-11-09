@@ -3918,6 +3918,44 @@ core_routes!(agent, msg, responses;
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }
+    "agent.session.list" => "agent.session.list" => 1 => Query => {
+                    // The Server's MCP node tools route through here (#565):
+                    // `nession_agent_list_sessions` is Agent truth, not the
+                    // Server registry, so the Server asks this Agent and
+                    // relays the answer. The reply carries the same
+                    // `SessionListResponse` shape a direct agent connection
+                    // receives.
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let response = match agent.tmux.list_sessions().await {
+                        Ok(sessions) => serde_json::json!({
+                            "msg_type": "server.agent.command-response",
+                            "id": uuid::Uuid::new_v4().to_string(),
+                            "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                            "payload": {
+                                "request_id": request_id,
+                                "command": "session.list",
+                                "success": true,
+                                "sessions": sessions,
+                                "stale_agents": [],
+                                "error": null,
+                            }
+                        }),
+                        Err(e) => serde_json::json!({
+                            "msg_type": "server.agent.command-response",
+                            "id": uuid::Uuid::new_v4().to_string(),
+                            "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                            "payload": {
+                                "request_id": request_id,
+                                "command": "session.list",
+                                "success": false,
+                                "sessions": [],
+                                "stale_agents": [],
+                                "error": e.to_string(),
+                            }
+                        }),
+                    };
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
     "agent.session.create" => "agent.session.create" => 1 => Key(session_by_name(&msg.payload)) => {
                     let payload: ServerSessionCreatePayload =
                         match serde_json::from_value(msg.payload.clone()) {

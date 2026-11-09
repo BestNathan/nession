@@ -60,6 +60,18 @@ pub const SERVER_SESSION_CREATE: &str = "server.session.create";
 /// `server.session.kill` — kill one session.
 pub const SERVER_SESSION_KILL: &str = "server.session.kill";
 
+/// `server.info` — Server version, uptime and protocol manifest.
+pub const SERVER_INFO: &str = "server.info";
+
+/// `server.session.capture-preview` — read-only scrollback capture.
+pub const SERVER_SESSION_CAPTURE_PREVIEW: &str = "server.session.capture-preview";
+
+/// `server.agent.rename` — set or clear an Agent display name.
+pub const SERVER_AGENT_RENAME: &str = "server.agent.rename";
+
+/// `server.agent.delete` — remove an offline Agent.
+pub const SERVER_AGENT_DELETE: &str = "server.agent.delete";
+
 // ── The agent-facing wires ──────────────────────────────────────────────────
 //
 // These are sent on a socket to an **agent**, not to the Server, and they are
@@ -87,3 +99,21 @@ pub const AGENT_TERMINAL_RESIZE: &str = "agent.terminal.resize";
 /// answers. It is declared in the file that sends it rather than carried by the
 /// catalog, which is why it has no sibling entry here for a reply.
 pub const AGENT_TERMINAL_OUTPUT: &str = "agent.terminal.output";
+
+// ── The Agent management wires (`#565`) ─────────────────────────────────────
+//
+// These are not terminal traffic. They answer for one Agent node's own Session
+// state and are reached only through [`crate::AgentConnection`], which carries
+// the operator credential an Agent configured for direct management honours.
+// The Server is still the normal management path; this exists because a
+// standalone MCP host and Server-embedded MCP both need Agent truth when the
+// tool names the Agent explicitly.
+
+/// `agent.session.list` — the Agent's real tmux Sessions.
+pub const AGENT_SESSION_LIST: &str = "agent.session.list";
+
+/// `agent.session.create` — create a tmux Session on the Agent.
+pub const AGENT_SESSION_CREATE: &str = "agent.session.create";
+
+/// `agent.session.kill` — kill a tmux Session on the Agent.
+pub const AGENT_SESSION_KILL: &str = "agent.session.kill";

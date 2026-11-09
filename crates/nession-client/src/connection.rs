@@ -130,98 +130,15 @@ impl ClientConnection {
     /// this socket they mean something is wrong.
     pub async fn request_within<P: UnitRequest>(
         &mut self,
-        mut request: Message<P>,
+        request: Message<P>,
         timeout: Duration,
     ) -> Result<P::Reply, ClientError> {
         let wire_name = request.msg_type.clone();
-        let id = self.next_id();
-        request.id = id.clone();
-
-        let encoded = serde_json::to_string(&request).map_err(|source| ClientError::Frame {
-            wire: wire_name.clone(),
+        let (_, payload) = request_envelope(&mut self.ws, &mut self.seq, request, timeout).await?;
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire_name,
             source,
-        })?;
-        self.ws
-            .send(WsMessage::Text(encoded))
-            .await
-            .map_err(|source| ClientError::Send {
-                wire: wire_name.clone(),
-                source,
-            })?;
-
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(ClientError::Timeout {
-                    wire: wire_name,
-                    timeout,
-                });
-            }
-
-            let frame = match tokio::time::timeout(remaining, self.ws.next()).await {
-                Err(_elapsed) => {
-                    return Err(ClientError::Timeout {
-                        wire: wire_name,
-                        timeout,
-                    })
-                }
-                Ok(None) => return Err(ClientError::Closed { wire: wire_name }),
-                Ok(Some(Err(source))) => {
-                    return Err(ClientError::Transport {
-                        wire: wire_name,
-                        source,
-                    })
-                }
-                Ok(Some(Ok(frame))) => frame,
-            };
-
-            match frame {
-                WsMessage::Text(text) => {
-                    let envelope: Message<serde_json::Value> = serde_json::from_str(&text)
-                        .map_err(|source| ClientError::Frame {
-                            wire: wire_name.clone(),
-                            source,
-                        })?;
-                    if envelope.id != id {
-                        debug!(
-                            expected = %id,
-                            got = %envelope.id,
-                            msg_type = %envelope.msg_type,
-                            "skipping a frame that is not this request's reply"
-                        );
-                        continue;
-                    }
-                    return serde_json::from_value(envelope.payload).map_err(|source| {
-                        ClientError::Reply {
-                            wire: wire_name,
-                            source,
-                        }
-                    });
-                }
-                WsMessage::Close(_) => return Err(ClientError::Closed { wire: wire_name }),
-                // Keepalives and non-text frames are transport chatter, not
-                // answers. The consumer this replaces had a single-read design,
-                // so a `Ping` arriving first failed the call outright.
-                WsMessage::Ping(_)
-                | WsMessage::Pong(_)
-                | WsMessage::Binary(_)
-                | WsMessage::Frame(_) => continue,
-            }
-        }
-    }
-
-    /// The next request id.
-    ///
-    /// A per-connection counter, **not** a clock. The consumer this replaces
-    /// built ids as `{prefix}_{millis}`, so two requests sent within the same
-    /// millisecond on one connection carried the same id and the second reply
-    /// was correlated against the first request. A counter cannot collide, and
-    /// the `id` field is a free string — `ProtocolId`'s grammar governs wire
-    /// names, not this.
-    fn next_id(&mut self) -> String {
-        self.seq += 1;
-        format!("client-{}", self.seq)
+        })
     }
 
     /// Hand the socket to a caller that will take it over — relay-mode terminal
@@ -244,6 +161,104 @@ impl ClientConnection {
                 wire: "close".to_string(),
                 source,
             })
+    }
+}
+
+/// The per-connection request id counter.
+pub(crate) fn next_id(seq: &mut u64) -> String {
+    *seq += 1;
+    format!("client-{seq}")
+}
+
+/// Send one envelope and return the reply's wire type and payload value.
+///
+/// This is the correlation half of [`ClientConnection::request_within`], split
+/// out because the Agent management connection needs the same
+/// send-until-our-id loop but must inspect the reply's `msg_type` first: an
+/// Agent answers success with `ok` and a refusal with `error`, rather than
+/// echoing the request wire.
+///
+/// Correlation is by `id` alone. An envelope whose `id` is not ours is
+/// **skipped**, not an error: a peer may push at any time (`server.agents.changed`
+/// among others), and the consumer this replaces treated the first such push
+/// as a hard failure of the call in flight. Frames that are not protocol
+/// envelopes at all are reported — there is no `id` to skip them by, and on
+/// these sockets they mean something is wrong.
+pub(crate) async fn request_envelope<P: serde::Serialize>(
+    ws: &mut WsStream,
+    seq: &mut u64,
+    mut request: Message<P>,
+    timeout: Duration,
+) -> Result<(String, serde_json::Value), ClientError> {
+    let wire_name = request.msg_type.clone();
+    let id = next_id(seq);
+    request.id = id.clone();
+
+    let encoded = serde_json::to_string(&request).map_err(|source| ClientError::Frame {
+        wire: wire_name.clone(),
+        source,
+    })?;
+    ws.send(WsMessage::Text(encoded))
+        .await
+        .map_err(|source| ClientError::Send {
+            wire: wire_name.clone(),
+            source,
+        })?;
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(ClientError::Timeout {
+                wire: wire_name,
+                timeout,
+            });
+        }
+
+        let frame = match tokio::time::timeout(remaining, ws.next()).await {
+            Err(_elapsed) => {
+                return Err(ClientError::Timeout {
+                    wire: wire_name,
+                    timeout,
+                })
+            }
+            Ok(None) => return Err(ClientError::Closed { wire: wire_name }),
+            Ok(Some(Err(source))) => {
+                return Err(ClientError::Transport {
+                    wire: wire_name,
+                    source,
+                })
+            }
+            Ok(Some(Ok(frame))) => frame,
+        };
+
+        match frame {
+            WsMessage::Text(text) => {
+                let envelope: Message<serde_json::Value> =
+                    serde_json::from_str(&text).map_err(|source| ClientError::Frame {
+                        wire: wire_name.clone(),
+                        source,
+                    })?;
+                if envelope.id != id {
+                    debug!(
+                        expected = %id,
+                        got = %envelope.id,
+                        msg_type = %envelope.msg_type,
+                        "skipping a frame that is not this request's reply"
+                    );
+                    continue;
+                }
+                return Ok((envelope.msg_type, envelope.payload));
+            }
+            WsMessage::Close(_) => return Err(ClientError::Closed { wire: wire_name }),
+            // Keepalives and non-text frames are transport chatter, not
+            // answers. The consumer this replaces had a single-read design,
+            // so a `Ping` arriving first failed the call outright.
+            WsMessage::Ping(_)
+            | WsMessage::Pong(_)
+            | WsMessage::Binary(_)
+            | WsMessage::Frame(_) => continue,
+        }
     }
 }
 
