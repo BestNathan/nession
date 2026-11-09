@@ -42,7 +42,7 @@ test('SC-05: outside draft is empty-first, row validation is field-level, and En
   await page.getByTestId('sandbox-resource-key-1').fill('cpu.max');
   await page.getByTestId('sandbox-resource-value-1').fill('400000 100000');
   await page.getByTestId('sandbox-preflight').click();
-  await expect(page.getByTestId('sandbox-preflight-error-1')).toContainText('already configured');
+  await expect(page.getByTestId('sandbox-preflight-errors')).toContainText('already configured');
 
   await page.getByTestId('sandbox-resource-remove-1').click();
   await expect(page.getByTestId('sandbox-resource-row-1')).toHaveCount(0);

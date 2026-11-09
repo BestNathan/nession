@@ -47,6 +47,26 @@ Execution isolation belongs to `nession-sandbox`, not to this Agent:
 - Do not add a second isolation, cgroup or proxy owner beside
   `crates/nession-sandbox/AGENTS.md`.
 
+## Sandbox context capability (#3124)
+
+- The subject is the Session's **active Pane**, resolved on this Agent's
+  private tmux server (`window_active` + `pane_active`). Track executions by
+  tmux `pane_id` (with the recorded root PID as the legacy fallback), and
+  require the Session's `@nession_instance_id` to match; a same-named
+  recreation must never inherit an older execution.
+- `tmux/sandbox_context.rs` owns the context/preflight/Enter/Return/Focus
+  transitions. Preflight is a hint: Enter re-probes through
+  `nession-sandbox::prepare` and fails closed.
+- Enter uses a detached `new-window` in the same logical Session, never
+  `send-keys` into an existing shell. Focus moves only after the launch
+  barrier verifies; a failure removes exactly the Window this attempt created.
+  A repeated client `enter_id` replays its outcome instead of launching again.
+- Return to Native and Focus are focus switches. They never release the
+  execution; the Pane-keyed reaper does that when the Pane disappears.
+- The durable execution record carries the normalized effective policy, the
+  verified mechanisms and the Pane/Window/instance identity, so the inside
+  view survives an Agent restart.
+
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 
 ```bash
