@@ -103,16 +103,26 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 function DialogFooter({
   className,
   showCloseButton = false,
+  sticky = false,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
+  /**
+   * Pins the footer to the bottom of a scrolling dialog. A sticky footer is
+   * opaque so form fields can never show through it, and it reaches the
+   * dialog's padding edge so the band is flush with the surface instead of
+   * floating above it.
+   */
+  sticky?: boolean
 }) {
   return (
     <div
       data-slot="dialog-footer"
+      data-sticky={sticky ? "true" : undefined}
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t p-4 sm:flex-row sm:justify-end",
+        sticky ? "sticky -bottom-4 z-10 bg-muted" : "bg-muted/50",
         className
       )}
       {...props}

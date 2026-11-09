@@ -82,7 +82,7 @@ export function CreateProjectDialog({
             idPrefix="project-create"
           />
           <ErrorText error={form.error} />
-          <DialogFooter className="sticky bottom-0 z-10">
+          <DialogFooter sticky>
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
@@ -224,7 +224,7 @@ export function ProjectSettingsDialog({
             idPrefix="project-settings"
           />
           <ErrorText error={form.error} />
-          <DialogFooter className="sticky bottom-0 z-10">
+          <DialogFooter sticky>
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>

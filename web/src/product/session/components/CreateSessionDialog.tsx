@@ -260,7 +260,7 @@ export function CreateSessionDialog({
               {form.error}
             </p>
           )}
-          <DialogFooter className="sticky bottom-0 z-10">
+          <DialogFooter sticky>
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.loading}>
               Cancel
             </Button>
