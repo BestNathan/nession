@@ -15,7 +15,7 @@
 <span class="np-eyebrow">WEB / APP · RESPONSIVE INTERACTION STUDY</span>
 <div class="np-header-main"><div>
 <h1 class="np-title">Attach &amp; create Session · Web / App</h1>
-<p class="np-subtitle">Web uses roomy, content-aware dialogs; App uses a quick Attach sheet and full-depth configuration / creation pages. Switch devices and walk through the same task with long paths, an offline Agent, child selectors, and Back.</p>
+<p class="np-subtitle">Web uses roomy, content-aware dialogs; App uses a quick Attach sheet and full-depth configuration / creation pages. Switch devices and open the Project → New Session Existing Location dropdown: the selected Agent/path/status and each option grow to fit long directories without escaping the control border. Also try offline, child selectors, and Back.</p>
 </div><div class="np-links">
 <a href="https://github.com/BestNathan/nession/issues/3089" target="_blank" rel="noopener noreferrer">Issue #3089</a>
 <a href="https://github.com/BestNathan/nession/issues/3025" target="_blank" rel="noopener noreferrer">Project baseline #3025</a>
@@ -52,11 +52,11 @@
 <li>App: Sessions → Attach opens a compact sheet; Connection settings pushes a full view; Back restores the sheet and its draft; Attach is explicit.</li>
 <li>Session → Attach settings enters the full configuration directly on App. Save changes preference only; it must never attach.</li></ol></article>
 <article class="np-detail"><h3>Project → new Session</h3><ol class="np-steps">
-<li>Web: Project detail → New Session opens a 640px responsive dialog. Location shows Agent, path and status separately.</li>
+<li>Web: Project detail → New Session opens a 640px responsive dialog. Open the Existing Location dropdown, choose an Agent, and check that the selected Agent, wrapping path and status all fit inside an auto-height control. Menu options match the trigger width.</li>
 <li>App: Project detail → New Session pushes one full-height operation page. Location and ENV each open child selectors. Back preserves the draft.</li>
-<li>Submit a non-empty name. Offline fixture blocks confirmation without erasing the draft. Cancel preserves the previous Terminal.</li></ol></article>
+<li>Try “Very long path / address” with the selector both closed and open at Web 1440, 1180 and 1024. The same menu remains usable on narrow forced Web; offline blocks submission without erasing the draft. Cancel preserves the previous Terminal.</li></ol></article>
 <article class="np-detail"><h3>Project maintenance</h3><p>Project Create and Settings remain desktop dialogs on Web. On App they become full operation depths, with stacked Agent / Directory rows and bottom action. Existing location means real Project configuration semantics, not a new Project subtype.</p></article>
-<article class="np-detail"><h3>Fidelity &amp; boundary</h3><p>Presentation is a candidate based on the current WebLayout, AppLayers, AttachDialog, CreateSessionDialog and ProjectDialogs ownership. Product palette is a localized token snapshot. An actual side-by-side React screenshot comparison and production Chromium Case evidence remain pending.</p><details class="np-inspector"><summary>Live mock state</summary><pre id="state-inspector">Initialization pending</pre></details></article>
+<article class="np-detail"><h3>Fidelity &amp; boundary</h3><p>Presentation is a candidate based on the current WebLayout, AppLayers, AttachDialog, CreateSessionDialog and ProjectDialogs ownership. Product palette is a localized token snapshot. The Web location selector is a deterministic content-height/wrapping candidate, not the shipped Base UI Select primitive. Real React select computed-style geometry, authenticated Chromium Cases and new Pages revision verification remain pending.</p><details class="np-inspector"><summary>Live mock state</summary><pre id="state-inspector">Initialization pending</pre></details></article>
 </div>
 </section>
 </main>
