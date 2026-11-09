@@ -232,7 +232,55 @@ jobs:
 
       - name: Install runtime dependencies
         if: steps.select.outputs.count != '0'
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y tmux bubblewrap
+          # Native Sandbox Cases need unprivileged user namespaces and a
+          # writable delegated cgroup v2 subtree. This is an ephemeral hosted
+          # runner used only for this target-SHA Case batch; target Case code
+          # never receives a credential or a persistent host.
+          if [ -e /proc/sys/kernel/unprivileged_userns_clone ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --version
+          sandbox_root=/sys/fs/cgroup/nession-accept
+          if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+            # Enable the controllers at the root cgroup so the delegated
+            # directory inherits them. A root that still hosts processes
+            # refuses this; the Case then reports Pending instead of passing.
+            for controller in cpu memory pids; do
+              if grep -qw "${controller}" /sys/fs/cgroup/cgroup.controllers &&
+                 ! grep -qw "${controller}" /sys/fs/cgroup/cgroup.subtree_control; then
+                echo "+${controller}" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null || \
+                  echo "::warning::could not enable ${controller} on the root cgroup"
+              fi
+            done
+            if sudo mkdir -p "${sandbox_root}" &&
+               sudo chown -R "$(id -u):$(id -g)" "${sandbox_root}"; then
+              echo "SANDBOX_CGROUP_ROOT=/nession-accept" >> "${GITHUB_ENV}"
+              echo "delegated controllers: $(cat "${sandbox_root}/cgroup.controllers" 2>/dev/null || echo none)"
+              echo "job cgroup: $(cat /proc/self/cgroup); namespace $(readlink /proc/self/ns/cgroup)"
+              # A hosted runner may give the job a private cgroup namespace.
+              # The visible root is then the job's own cgroup and is the
+              # common ancestor for moving the launcher into an execution
+              # group; hand that ancestor's procs file to the Case user too.
+              sudo chown "$(id -u):$(id -g)" /sys/fs/cgroup/cgroup.procs 2>/dev/null || \
+                echo "::warning::could not hand the job cgroup procs file to the Case user"
+              if [ ! -w "${sandbox_root}/cgroup.subtree_control" ]; then
+                echo "::warning::the delegated cgroup root is not writable by the Case user"
+              fi
+            else
+              echo "::warning::could not delegate ${sandbox_root}; Sandbox cgroup Cases will report Pending"
+            fi
+          else
+            echo "::warning::this runner has no cgroup v2 mount; Sandbox cgroup Cases will report Pending"
+          fi
+          echo "sandbox prerequisites: $(bwrap --version)"
 
       - name: Install Web preview dependencies
         if: steps.select.outputs.count != '0'
