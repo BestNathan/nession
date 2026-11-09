@@ -183,11 +183,12 @@
     if(!d.workingDir.startsWith('/')||d.workingDir.indexOf('..')>=0)return '工作目录需要是规范化的绝对路径';
     if(s.macos){
       if(d.network==='restricted')return 'macOS Seatbelt 不支持 restricted egress 代理';
+      if(d.resourceRows.length||d.syscallRows.length)return 'macOS 不支持 Linux cgroup v2 或 seccomp 条目';
     }else{
       var paths=(d.readOnly+','+d.write).split(',').filter(Boolean);
       if(paths.some(function(p){return !p.trim().startsWith('/')||p.includes('..')}))return 'Filesystem 路径必须是绝对、规范化路径';
-      if(!/^[0-9]+$/.test(d.mem)||Number(d.mem)<1048576)return 'memory.max 需要至少 1048576 bytes';
-      if(!/^[0-9]+$/.test(d.pids)||Number(d.pids)<1)return 'pids.max 必须为正整数';
+      var resourceError=validateRows(d.resourceRows,'resource');if(resourceError)return resourceError;
+      var syscallError=validateRows(d.syscallRows,'syscall');if(syscallError)return syscallError;
     }
     if(d.network==='restricted'&&!d.egress.trim())return 'restricted 模式必须提供至少一个允许目标';
     if(s.preflightFail)return '当前 Agent cgroup v2 controllers 未委派；拒绝创建 Sandbox';
@@ -201,8 +202,8 @@
       '<div class="info-section"><h3>配置 Sandbox</h3><p class="subline">填写 Policy 草稿，预检后明确 Enter；启动新的隔离 Pane，原 Native Pane 不变。</p>'+
       '<div style="max-width:530px;margin-top:12px">'+configInput('workingDir','Start working directory',state.draft.workingDir,'input')+'</div>'+
       editor()+'</div>';
-    if(state.preflight==='passed')c+='<div class="notice success validated"><strong>预检通过</strong> · Policy 语法与当前 Agent 能力匹配（仅模拟）。进入时还需重新校验实际主机并验证执行机制。</div>';
-    if(state.preflight==='failed')c+='<div class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
+    if(state.preflight==='passed')c+='<div data-preflight-status class="notice success validated"><strong>预检通过</strong> · Policy 语法与当前 Agent 能力匹配（仅模拟）。进入时还需重新校验实际主机并验证执行机制。</div>';
+    if(state.preflight==='failed')c+='<div data-preflight-status class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
     if(state.error)c+='<div class="notice danger validated" role="alert"><strong>Enter 失败</strong> · '+escapeHtml(state.error)+'。仍位于原 Native Pane，草稿已保留。</div>';
     c+='<div class="actionline"><button class="action" data-action="validate" '+(!s.supported?'disabled title="Agent unavailable"':'')+'>校验配置</button>'+
       '<button class="action primary" data-action="enter" '+(state.preflight!=='passed'||!s.supported?'disabled title="先完成预检"':'')+'>Enter Sandbox →</button>'+
@@ -258,7 +259,7 @@
     var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
     mock.setAttribute("data-mode",state.mode);
     mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
-    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
+    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
     var target=mock.querySelector('.cap-item[aria-current="page"]');
     if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
@@ -270,31 +271,46 @@
     state.preflight="none";
     state.preflightError="";
     state.error="";
-    state.draft=Object.assign({},defaultDraft);
+    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;
     state.entered=false;
     state.pane=value==="active"?"sandbox":"native";
-    state.effective=value==="active"?Object.assign({},defaultDraft):null;
-    if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.mem="";state.draft.pids="";state.draft.seccomp=false;}
+    state.effective=value==="active"?cloneDraft(activeEffective):null;
+    if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.resourceRows=[];state.draft.syscallRows=[];}
     document.querySelectorAll("[data-fixture]").forEach(function(button){button.setAttribute("aria-pressed",String(button.getAttribute("data-fixture")===value));});
     render();
   }
   mock.addEventListener("input",function(e){
     var t=e.target;
-    if(!t||!t.hasAttribute||!t.hasAttribute("data-draft"))return;
-    var field=t.getAttribute("data-draft");
-    if(!Object.prototype.hasOwnProperty.call(state.draft,field))return;
-    state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
+    if(!t||!t.hasAttribute||!(t.hasAttribute("data-draft")||t.hasAttribute("data-kv-kind")))return;
+    var kind=t.getAttribute("data-kv-kind");
+    if(kind==="resource"||kind==="syscall"){
+      var entry=state.draft[kind+"Rows"].find(function(row){return String(row.id)===t.getAttribute("data-kv-id")});
+      var prop=t.getAttribute("data-kv-field");
+      if(!entry||(prop!=="key"&&prop!=="value"))return;
+      entry[prop]=t.value;
+    }else{
+      var field=t.getAttribute("data-draft");
+      if(!Object.prototype.hasOwnProperty.call(state.draft,field))return;
+      state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
+    }
     state.preflight="none";state.preflightError="";state.error="";
+    var proof=mock.querySelector('[data-preflight-status]');if(proof)proof.hidden=true;
+    var enter=mock.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
   });
   mock.addEventListener("change",function(e){
     var t=e.target;
-    if(t&&t.hasAttribute&&t.hasAttribute("data-draft")){
-      var field=t.getAttribute("data-draft");
-      if(Object.prototype.hasOwnProperty.call(state.draft,field)){
-        state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
-        state.preflight="none";state.preflightError="";state.error="";
-        render();
+    if(t&&t.hasAttribute&&(t.hasAttribute("data-draft")||t.hasAttribute("data-kv-kind"))){
+      var kind=t.getAttribute("data-kv-kind");
+      if(kind==="resource"||kind==="syscall"){
+        var row=state.draft[kind+"Rows"].find(function(r){return String(r.id)===t.getAttribute("data-kv-id")});
+        var prop=t.getAttribute("data-kv-field");
+        if(row&&(prop==="key"||prop==="value"))row[prop]=t.value;
+      }else{
+        var field=t.getAttribute("data-draft");
+        if(Object.prototype.hasOwnProperty.call(state.draft,field))state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
       }
+      state.preflight="none";state.preflightError="";state.error="";
+      render();
     }
   });
   mock.addEventListener("click",function(e){
@@ -307,6 +323,20 @@
     else if(action==="toggle-peek"){state.peek=!state.peek;}
     else if(action==="detail"){state.depth="detail";}
     else if(action==="detail-back"){state.depth="root";}
+    else if(action.indexOf("add-kv:")===0){
+      var kind=action.slice(7);
+      if((kind==="resource"||kind==="syscall")&&!settings().macos){
+        state.draft[kind+"Rows"].push({id:state.nextRowId++,key:"",value:""});
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
+    else if(action.indexOf("remove-kv:")===0){
+      var args=action.split(":");var kind=args[1];
+      if((kind==="resource"||kind==="syscall")&&!settings().macos){
+        state.draft[kind+"Rows"]=state.draft[kind+"Rows"].filter(function(row){return String(row.id)!==args[2]});
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
     else if(action==="validate"){
       var err=preflight();state.preflight=err?"failed":"passed";state.preflightError=err;state.error="";
     }
@@ -318,7 +348,7 @@
       var validationError=preflight();
       if(state.preflight!=="passed"||validationError){state.preflight="failed";state.preflightError=validationError||"预检状态已过期";state.depth="root";}
       else if(settings().enterFail){state.error="Agent 启动屏障验证失败（模拟）。未切换 Pane";state.depth="root";}
-      else{state.effective=Object.assign({},state.draft);state.entered=true;state.pane="sandbox";state.depth="root";state.preflight="none";state.error="";}
+      else{state.effective=cloneDraft(state.draft);state.entered=true;state.pane="sandbox";state.depth="root";state.preflight="none";state.error="";}
     }
     else if(action==="return-native"){state.pane="native";state.fixture="native";state.depth="root";state.preflight="none";state.error="";}
     else if(action==="switch-sandbox"){if(state.entered){state.pane="sandbox";state.depth="root";}}
