@@ -74,6 +74,9 @@ pub struct ProjectLocation {
 pub struct ProjectSessionDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
+    /// Server env file names applied at create time when the request selects
+    /// no env files. An explicit request selection takes precedence, and the
+    /// resulting binding belongs to the Session, not the Project.
     #[serde(default)]
     pub env_profile_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

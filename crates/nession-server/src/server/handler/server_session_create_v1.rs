@@ -3,8 +3,8 @@
 
 use super::{
     info, json, session_create_reply, AgentStatus, ClientSessionCreatePayload,
-    ClientSessionCreateResponsePayload, ConnectionHandler, Duration, HandlerAction,
-    ProtocolMessage,
+    ClientSessionCreateResponsePayload, ConnectionHandler, Duration, EnvFileRef, EnvSource,
+    HandlerAction, ProtocolMessage,
 };
 
 impl ConnectionHandler {
@@ -60,7 +60,7 @@ impl ConnectionHandler {
         // Location the Project actually declares, so a client cannot attach an
         // arbitrary Agent/path pair by asserting a Project id. The Project may
         // be edited or deleted later without mutating this Session.
-        if let Some(project_id) = project_id.as_deref() {
+        let project = if let Some(project_id) = project_id.as_deref() {
             let project = match self.db.get_project(project_id).await {
                 Ok(Some(project)) => project,
                 Ok(None) => {
@@ -95,7 +95,10 @@ impl ConnectionHandler {
                     )),
                 ));
             }
-        }
+            Some(project)
+        } else {
+            None
+        };
 
         // Check agent exists and is online
         let agent = self.agent_registry.get(agent_id).await;
@@ -115,12 +118,37 @@ impl ConnectionHandler {
             }
         }
 
+        // Precedence (#3025 SC-03): an explicit request selection wins; only
+        // when the request selects none do the Project's declared ENV profile
+        // ids apply, resolved as Server env files by name. The resolved set
+        // becomes the Session's own binding below, so a later Project edit
+        // cannot mutate an existing Session's environment.
+        let env_refs: Vec<EnvFileRef> = if env_refs.is_empty() {
+            project
+                .as_ref()
+                .and_then(|project| project.session_defaults.as_ref())
+                .map(|defaults| {
+                    defaults
+                        .env_profile_ids
+                        .iter()
+                        .map(|id| EnvFileRef {
+                            name: id.clone(),
+                            source: EnvSource::Server,
+                            agent_id: None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            env_refs
+        };
+
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        // `env_refs` came out of the parsed payload above — the create-time
-        // binding selection. The same resolution produces both the Agent's
-        // snapshots and the desired binding the Server persists, so the two
-        // cannot describe different content.
+        // `env_refs` is the effective create-time binding selection — the
+        // explicit request or the Project defaults above. The same resolution
+        // produces both the Agent's snapshots and the desired binding the
+        // Server persists, so the two cannot describe different content.
         let snapshots = if env_refs.is_empty() {
             Vec::new()
         } else {
