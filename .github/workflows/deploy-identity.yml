@@ -90,9 +90,9 @@ jobs:
         run: |
           set -euo pipefail
           # Pinned to the server-side gost major.minor (relay+wss protocol).
-          curl -sSL --retry 3 -o /tmp/gost.tgz https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
-          tar -xzf /tmp/gost.tgz -C /tmp gost
-          chmod +x /tmp/gost
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod +x "$RUNNER_TEMP/gost"
           command -v kubectl >/dev/null || { echo "::error::kubectl not installed on runner"; exit 1; }
 
       - name: Establish owned gost tunnel via existing HK relay
