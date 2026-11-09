@@ -39,6 +39,7 @@ concurrency:
 
 jobs:
   converge:
+    # The no-approval recheck wakes the same fail-closed controller.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
@@ -64,7 +65,6 @@ jobs:
           )
         )
       )
-        # Safe recheck is not an approval; source-bound owner/audit evidence is still required.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
