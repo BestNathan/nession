@@ -1,12 +1,12 @@
 ---
 title: "Session and Project operation surface presentation by Experience"
-description: "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner"
+description: "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records"
 topic: web
 categories: ["web", "app", "interaction", "session", "project", "presentation", "responsive"]
 status: verified
 created_at: 2026-11-09T11:34:00Z
-updated_at: 2026-11-09T14:27:17Z
-sources: ["https://github.com/BestNathan/nession/issues/3089", "https://github.com/BestNathan/nession/pull/3109", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppOperationPage.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppAttachSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppCreateSessionSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppProjectFormSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useAttachConfiguration.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useCreateSessionForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/project/hooks/useProjectDraftForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/tests/browser/app-attach-presentation.spec.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/acceptance/cases/3089/SC-06/verify.cjs", "https://github.com/BestNathan/nession/blob/8a9b670b4b82d93cec48bad81d24c8d677119659/session-operation-surfaces-3089/index.html"]
+updated_at: 2026-11-09T15:56:17Z
+sources: ["https://github.com/BestNathan/nession/issues/3089", "https://github.com/BestNathan/nession/pull/3109", "https://github.com/BestNathan/nession/pull/3126", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/product/session/components/CreateSessionDialog.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/app/fixture/fixtureProjects.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/tests/browser/project-session-create.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-07/verify.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-08/verify.cjs", "https://github.com/BestNathan/nession/blob/f3c0e8dd0f85f93c6dd3174ba6134c3af138c228/session-operation-surfaces-3089/README.md", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppOperationPage.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppAttachSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppCreateSessionSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppProjectFormSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useAttachConfiguration.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useCreateSessionForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/project/hooks/useProjectDraftForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/tests/browser/app-attach-presentation.spec.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/acceptance/cases/3089/SC-06/verify.cjs", "https://github.com/BestNathan/nession/blob/8a9b670b4b82d93cec48bad81d24c8d677119659/session-operation-surfaces-3089/index.html"]
 ---
 
 # Session and Project operation surface presentation by Experience
@@ -56,6 +56,23 @@ primitive exposes `centered`, `fullscreen` and `sheet` arrangements rather than
 a second overlay implementation. No protocol, Server, Project-domain or attach
 transport behavior changed.
 
+## Content-sized Select boundary
+
+Project → New Session names an Existing Location as Agent + directory + status.
+The generic Select primitive originally fixed every trigger at 32px and kept
+option text on one line (`shrink-0 whitespace-nowrap`) while the popup used the
+anchor width and hid horizontal overflow, so a three-line selected record could
+overflow the control and a long directory clipped in the menu.
+
+The primitive now exposes two opt-in variants: `SelectTrigger size="content"`
+(no fixed height, wrapping, no line clamp) and `SelectItem multiline` (wrapping
+option text with a shrinkable flex child). Single-line Selects keep the original
+contract. The Project location uses both; the popup stays at the anchor width
+and overlays the form, and the dialog remains the only vertical scroll owner.
+The fixture's `?projects=long` scenario supplies two online multi-segment
+locations for the geometry proof; normal, offline and no-location states stay
+separately covered.
+
 ## Context and evidence
 
 Issue [#3089](https://github.com/BestNathan/nession/issues/3089) owns the
@@ -75,6 +92,17 @@ Smoke run `42606207082` passed SC-01…SC-06 at the PR head; the selected E2E ru
 a runtime readback of the pinned source, the public Pages manifest entry and the
 live gallery, not by a production Chromium result for the mock.
 
+The post-acceptance Select correction is PR
+[#3126](https://github.com/BestNathan/nession/pull/3126), merged to staging at
+`8dfb163bb4e998198dd23ca5fde7cde3b06021c9`. Pre-merge Case Smoke run
+`42648295776` passed all eight criteria at the PR head: SC-07 (213 assertions)
+measured the content-sized trigger and wrapped options at 1440/1180/1024 and
+390 narrow forced Web with pointer/keyboard selection and one scroll owner;
+SC-08 (94 assertions) verified the revised prototype `f3c0e8dd` is published
+unchanged by the live Pages manifest (`8c6e943d`) and performed its Chromium
+click-through. Selected E2E run `42648295781` passed `project-session-create`
+(7/7) plus the declared regressions.
+
 ## Limits and when to revisit
 
 - Dialog widths (720/640) are initial design targets, not constants; a change to
@@ -88,6 +116,10 @@ live gallery, not by a production Chromium result for the mock.
 - The prototype is a deterministic mock. SC-06 verifies its public, versioned
   preview and its no-network source; it does not establish a Chromium
   interactive Acceptance result for the production surfaces.
+- The content-sized Select is a variant, not a global restyle: single-line
+  triggers keep their 32px height and one-line value. Revisit if another
+  multi-line Select consumer appears; it should opt in rather than widen the
+  default contract.
 - Keyboard, safe-area and visual-viewport behavior are asserted through
   Chromium and app-owned fixture inputs. Native iOS/Safari behavior is not
   claimed.

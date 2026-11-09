@@ -478,3 +478,10 @@
 - Categories: web, app, interaction, session, project, presentation, responsive
 - Reason: Point the related-knowledge link at the renamed Web Session-first article
 - Source: https://github.com/BestNathan/nession/issues/3075
+
+## 2026-11-09T15:56:17Z | update | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Record the post-acceptance Existing Location Select correction: the generic content-size trigger and multiline item variants, the single-line default preserved, the anchor-width overlay popup and one scroll owner, the long-path fixture, and the SC-07/SC-08 Case receipts at merged PR #3126
+- Source: https://github.com/BestNathan/nession/issues/3089
