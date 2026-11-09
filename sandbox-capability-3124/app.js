@@ -6,8 +6,10 @@
   var mock=document.getElementById("sandbox-product");
   var output=document.getElementById("sandbox-inspector");
   if(!root||!device||!mock)return;
-  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,mem:"2147483648",pids:"256",seccomp:true};
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:Object.assign({},defaultDraft),preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,resourceRows:[],syscallRows:[]};
+  function cloneDraft(d){return Object.assign({},d,{resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)})});}
+  var activeEffective=cloneDraft(Object.assign({},defaultDraft,{resourceRows:[{id:101,key:"memory.max",value:"2147483648"}],syscallRows:[{id:102,key:"seccomp.profile",value:"nession-interactive-v1"}]}));
+  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:cloneDraft(defaultDraft),nextRowId:1,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
   var execution="sbx-70df40f4";
@@ -19,7 +21,7 @@
     return {scenario:s,online:!offline,supported:!unsupported&&!offline&&!stale,verified:inside,inside:inside,native:!inside&&!offline&&!unsupported&&!stale,offline:offline,unsupported:unsupported,recreated:stale,macos:s==="macos",preflightFail:s==="preflight-fail",enterFail:s==="enter-fail"};
   }
   function escapeHtml(x){return String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
-  function actualPolicy(){return state.entered&&state.effective?state.effective:defaultDraft;}
+  function actualPolicy(){return state.effective||activeEffective;}
   function line(title,value,sub){
     return '<div class="fact"><small>'+title+'</small><b>'+value+'</b>'+(sub?'<div class="subtxt">'+sub+'</div>':'')+'</div>';
   }
@@ -73,6 +75,59 @@
       (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"><option value="allow"'+(value==="allow"?' selected':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+'>restricted · 白名单</option></select>':
       '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
   }
+
+  var nativeResourceKeys=["memory.max","cpu.max","pids.max","memory.oom.group"];
+  var nativeSyscallKeys=["seccomp.profile"];
+  var supportedSeccompProfiles=["nession-interactive-v1"];
+  function kvRows(kind,unavailable){
+    var rows=state.draft[kind+"Rows"],resource=kind==="resource";
+    var suggestionId=resource?"resource-key-suggestions":"syscall-key-suggestions";
+    var suggestions=resource?nativeResourceKeys:nativeSyscallKeys;
+    var note=resource?"KV 对应 cgroup v2 原生控制文件。不预设资源限制。":"当前仅支持 seccomp.profile → nession-interactive-v1；不接受任意 syscall 列表/BPF。";
+    var out='<div class="kv-editor" data-kv-editor="'+kind+'"><p class="hint2">'+note+'</p>'+
+      '<datalist id="'+suggestionId+'">'+suggestions.map(function(key){return '<option value="'+key+'"></option>';}).join('')+'</datalist>';
+    if(!rows.length)out+='<p class="kv-empty">'+(resource?"未添加额外的 Resource 限制。":"未添加额外的 Syscall profile；后端基础防护仍生效。")+'</p>';
+    rows.forEach(function(row){
+      var label=resource?"cgroup v2":"seccomp";
+      out+='<div class="kv-row" data-kv-row="'+kind+':'+row.id+'">'+
+        '<div class="field"><label for="kv-'+kind+'-'+row.id+'-key">Key</label><input id="kv-'+kind+'-'+row.id+'-key" list="'+suggestionId+'" aria-label="'+label+' Key" data-kv-kind="'+kind+'" data-kv-id="'+row.id+'" data-kv-field="key" value="'+escapeHtml(row.key)+'" placeholder="'+(resource?"e.g. cpu.max":"seccomp.profile")+'"'+(unavailable?' disabled':'')+'></div>'+
+        '<div class="field"><label for="kv-'+kind+'-'+row.id+'-value">Value</label><input id="kv-'+kind+'-'+row.id+'-value" aria-label="'+label+' Value" data-kv-kind="'+kind+'" data-kv-id="'+row.id+'" data-kv-field="value" value="'+escapeHtml(row.value)+'" placeholder="'+(resource?"native value":"nession-interactive-v1")+'"'+(unavailable?' disabled':'')+'></div>'+
+        '<button type="button" class="action kv-remove" aria-label="Remove '+label+' entry" data-action="remove-kv:'+kind+':'+row.id+'"'+(unavailable?' disabled':'')+'>移除</button></div>';
+    });
+    out+='<div class="actionline"><button type="button" class="action" data-action="add-kv:'+kind+'"'+(unavailable?' disabled title="Backend does not support this dimension"':'')+'>＋ 添加条目</button></div></div>';
+    return out;
+  }
+  function validateRows(rows,kind){
+    var seen=new Set();
+    var keys=kind==="resource"?nativeResourceKeys:nativeSyscallKeys;
+    for(var i=0;i<rows.length;i++){
+      var key=rows[i].key.trim(),value=rows[i].value.trim();
+      if(!key||!value)return (kind==="resource"?"Resource":"Syscall")+" 第 "+(i+1)+" 行的 Key 和 Value 都不能为空";
+      if(!keys.includes(key))return "不支持的 "+(kind==="resource"?"cgroup v2":"Syscall")+" Key: "+key;
+      if(seen.has(key))return "重复的 "+(kind==="resource"?"Resource":"Syscall")+" Key: "+key;
+      seen.add(key);
+      if(kind==="syscall"){
+        if(key!=="seccomp.profile"||!supportedSeccompProfiles.includes(value))return "seccomp.profile 只支持 nession-interactive-v1";
+        continue;
+      }
+      function u64(s){return /^[0-9]+$/.test(s)&&BigInt(s)<=18446744073709551615n;}
+      if(key==="memory.max"||key==="pids.max"){
+        if(value!=="max"&&!u64(value))return key+" 需要无符号整数或 max";
+      }else if(key==="cpu.max"){
+        var parts=value.split(/\s+/);
+        if(parts.length!==2||(parts[0]!=="max"&&!u64(parts[0]))||!u64(parts[1]))return "cpu.max 需要 quota period 原生格式";
+        var period=BigInt(parts[1]);if(period<1000n||period>1000000n)return "cpu.max period 必须在 1000..1000000 微秒";
+      }else if(key==="memory.oom.group"&&value!=="0"&&value!=="1")return "memory.oom.group 只能为 0 或 1";
+    }
+    return "";
+  }
+  function policyProjection(d){
+    var policy={version:1,enabled:true,enforcement:"required",filesystem:{access:{read:d.readOnly.split(",").map(function(x){return x.trim()}).filter(Boolean),write:d.write.split(",").map(function(x){return x.trim()}).filter(Boolean)}},network:{mode:d.network,ingress:"deny"},process:{linux_namespaces:{pid:!!d.pid,ipc:!!d.ipc,user:!!d.user}}};
+    if(d.network==="restricted")policy.network.egress={allow:d.egress.split(",").map(function(x){return x.trim()}).filter(Boolean),deny:[],private_network:"deny"};
+    if(d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value.trim()]}))};
+    if(d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
+    return policy;
+  }
   function toggler(id,label,checked,disabled){
     return '<label><input type="checkbox" data-draft="'+id+'" '+(checked?'checked':'')+' '+(disabled?'disabled':'')+'>'+label+'</label>';
   }
@@ -91,13 +146,8 @@
       '<div class="policy-group"><div><h3>Process</h3><div class="hint2">Linux namespaces</div></div><div class="checkrow">'+
       toggler('pid','PID',d.pid,m)+toggler('ipc','IPC',d.ipc,m)+toggler('user','USER',d.user,m)+
       (m?'<span class="subtxt">macOS 不提供 Linux namespaces</span>':'')+'</div></div>'+
-      '<div class="policy-group"><div><h3>Resource</h3><div class="hint2">'+(m?'macOS 不提供 cgroup v2':'cgroup v2 · 原生控制文件值')+'</div></div><div class="policy-fields">'+
-      configInput('mem','memory.max (bytes)',m?'':d.mem,'input',m?'unavailable':'')+
-      configInput('pids','pids.max',m?'':d.pids,'input',m?'unavailable':'')+
-      '</div></div>'+
-      '<div class="policy-group"><div><h3>Syscall</h3><div class="hint2">Linux seccomp</div></div><div class="checkrow">'+
-      toggler('seccomp','nession-interactive-v1',d.seccomp,m)+
-      (m?'<span class="subtxt">仅 Linux 支持这个 profile</span>':'')+'</div></div>'+
+      '<div class="policy-group"><div><h3>Resource</h3><div class="hint2">Linux cgroup v2 · KV</div></div>'+kvRows("resource",m)+'</div>'+
+      '<div class="policy-group"><div><h3>Syscall</h3><div class="hint2">Linux seccomp · KV</div></div>'+kvRows("syscall",m)+'</div>'+
       '<div class="extra-dim">Enforcement: <strong>required</strong> · Draft Policy v1 · 目标：同一 Session 的新隔离 Pane。不会对已有 Native PID 追加限制。</div></section>';
   }
   function policyDescription(d){
@@ -105,8 +155,8 @@
       '<div class="dimension"><div class="dimlabel">Filesystem</div><div class="dimval">'+escapeHtml(d.readOnly||'no explicit read')+' · read-only<span class="dimmer">'+escapeHtml(d.write||'none')+' · writable</span></div></div>'+
       '<div class="dimension"><div class="dimlabel">Network</div><div class="dimval">'+escapeHtml(d.network)+'<span class="dimmer">'+(d.network==='restricted'?'Allowed: '+escapeHtml(d.egress):'Ingress denied by V1 policy')+'</span></div></div>'+
       '<div class="dimension"><div class="dimlabel">Process</div><div class="dimval">'+(['pid','ipc','user'].filter(function(k){return d[k]}).join(' / ')||'no explicitly requested Linux namespaces')+'<span class="dimmer">当前执行上下文的实际机制，不是整个 Session</span></div></div>'+
-      '<div class="dimension"><div class="dimlabel">Resource</div><div class="dimval mono">memory.max '+escapeHtml(d.mem||'(not requested)')+' · pids.max '+escapeHtml(d.pids||'(not requested)')+'</div></div>'+
-      '<div class="dimension"><div class="dimlabel">Syscall</div><div class="dimval">'+(d.seccomp?'seccomp · nession-interactive-v1':'no additional profile requested')+'</div></div></div>';
+      '<div class="dimension"><div class="dimlabel">Resource</div><div class="dimval">'+(d.resourceRows.length?d.resourceRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 cgroup v2 限制')+'</div></div>'+
+      '<div class="dimension"><div class="dimlabel">Syscall</div><div class="dimval">'+(d.syscallRows.length?d.syscallRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 seccomp profile；后端基础安全机制仍生效')+'</div></div></div>';
   }
   function diagnostics(){
     return '<section class="info-section"><h3>执行时验证</h3><div class="info-grid">'+
