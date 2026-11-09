@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Info, MoreHorizontal, Pencil, Settings, Trash2 } from 'lucide-react';
+import { FolderKanban, Info, MoreHorizontal, Pencil, Settings, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -59,11 +59,14 @@ function SessionRowActionsMenu({
   onEditDetails,
   onConfigure,
   onKill,
+  onAssociateProject,
 }: {
   session: Session;
   selected: boolean;
   onViewDetails?: (session: Session) => void;
   onEditDetails?: (session: Session) => void;
+  /** Explicit Session→Project membership action (#3082). */
+  onAssociateProject?: (session: Session) => void;
   onConfigure?: (session: Session) => void;
   onKill?: (session: Session) => void;
 }) {
@@ -133,6 +136,15 @@ function SessionRowActionsMenu({
             Attach settings
           </DropdownMenuItem>
         ) : null}
+        {onAssociateProject ? (
+          <DropdownMenuItem
+            data-testid={`session-actions-project-${session.session_id}`}
+            onClick={() => onAssociateProject(session)}
+          >
+            <FolderKanban />
+            Project…
+          </DropdownMenuItem>
+        ) : null}
         {onKill ? (
           <>
             <DropdownMenuSeparator />
@@ -186,6 +198,8 @@ export interface SessionItemProps {
   onViewDetails?: (session: Session) => void;
   /** Open the same details surface directly in its metadata editor. */
   onEditDetails?: (session: Session) => void;
+  /** Explicit Session→Project membership action (#3082). */
+  onAssociateProject?: (session: Session) => void;
   /**
    * The Session's user-facing display identity (#2789): its metadata title when
    * set, otherwise the tmux name. The row keeps rendering `session_name` as
@@ -278,6 +292,7 @@ export function SessionItem({
   onKill,
   onViewDetails,
   onEditDetails,
+  onAssociateProject,
   showRecency = true,
   displayTitle,
 }: SessionItemProps) {
@@ -342,7 +357,7 @@ export function SessionItem({
           </span>
         )}
       </button>
-      {onViewDetails || onEditDetails || onConfigure || onKill ? (
+      {onViewDetails || onEditDetails || onConfigure || onKill || onAssociateProject ? (
         <SessionRowActionsMenu
           session={session}
           selected={selected}
@@ -350,6 +365,7 @@ export function SessionItem({
           onEditDetails={onEditDetails}
           onConfigure={onConfigure}
           onKill={onKill}
+          onAssociateProject={onAssociateProject}
         />
       ) : null}
     </div>

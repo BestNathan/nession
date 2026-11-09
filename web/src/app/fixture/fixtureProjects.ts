@@ -7,8 +7,8 @@ import { useProjectDialogs } from '@/product/project/hooks/useProjectDialogs';
 import type { Project, ProjectShellProps } from '@/product/project/types';
 import { FIXTURE_AGENTS } from './fixtureData';
 
-const PROJECT_ONE = 'project-00000000-0000-4000-8000-000000000001';
-const PROJECT_TWO = 'project-00000000-0000-4000-8000-000000000002';
+export const PROJECT_ONE = 'project-00000000-0000-4000-8000-000000000001';
+export const PROJECT_TWO = 'project-00000000-0000-4000-8000-000000000002';
 const CREATED_AT = 1_762_300_000;
 const UPDATED_AT = 1_762_303_600;
 

@@ -52,6 +52,8 @@ export interface Session {
   foreground_command?: string | null;
   /** Live cwd when the agent last reported the session (force refresh). */
   working_dir?: string | null;
+  /** Server-owned explicit Project membership (#3082); absent when unbound. */
+  project_id?: string | null;
   last_activity: string; // ISO 8601 timestamp
 }
 
@@ -142,7 +144,19 @@ export interface SessionsListResponse {
 export interface CreateSessionResponse {
   success: boolean;
   session_id?: string;
+  /** The Project membership committed with this create, when one was named. */
+  project_id?: string | null;
   error?: string;
+}
+
+/** `server.session.project.set` (#3082): associate, change or remove. */
+export interface SessionProjectBindingResponse {
+  success: boolean;
+  project_id?: string | null;
+  revision?: number;
+  error?: string;
+  /** `invalid`, `unauthorized`, `conflict`, `not_found` or `unavailable`. */
+  error_kind?: string;
 }
 
 export interface KillSessionResponse {

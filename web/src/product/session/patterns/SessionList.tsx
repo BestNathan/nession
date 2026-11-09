@@ -56,6 +56,7 @@ export interface SessionListProps {
   onKill?: (session: Session) => void;
   onViewDetails?: (session: Session) => void;
   onEditDetails?: (session: Session) => void;
+  onAssociateProject?: (session: Session) => void;
   /**
    * Rows split into labelled stretches. Absent renders `sessions` as one flat
    * list — today's behaviour, and Web's.
@@ -104,6 +105,7 @@ export function SessionList({
   onKill,
   onViewDetails,
   onEditDetails,
+  onAssociateProject,
   groups,
   showRowRecency = true,
   footer,
@@ -189,6 +191,7 @@ export function SessionList({
                   onKill={onKill}
                   onViewDetails={onViewDetails}
                   onEditDetails={onEditDetails}
+                  onAssociateProject={onAssociateProject}
                   showRecency={showRowRecency}
                 />
               );

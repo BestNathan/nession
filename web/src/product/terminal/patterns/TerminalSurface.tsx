@@ -97,6 +97,8 @@ export interface TerminalSurfaceProps {
    * the capsule's dock region, which owns the geometry.
    */
   surfaceAction?: ReactNode;
+  /** Contextual Session identity/action inside the composer (#3082). */
+  sessionContextAction?: ReactNode;
   /** Work-awareness context (#1347): whether any capability is working. */
   workContext?: ResolvedWorkContext;
 }
@@ -423,6 +425,7 @@ export function TerminalSurface({
   clipboardNotice = null,
   onDismissClipboardNotice,
   surfaceAction,
+  sessionContextAction,
   workContext,
 }: TerminalSurfaceProps) {
   const { hasNotices, dialogOpen: noticesDialogOpen, setOpen: setNoticesOpen, notices } =
@@ -473,6 +476,7 @@ export function TerminalSurface({
             capabilityDisclosure={capsuleCapabilities?.disclosure}
             capabilityProjection={capsuleProjection}
             adjacentAction={surfaceAction}
+            sessionContextAction={sessionContextAction}
             workContext={workContext}
             statusAction={hasNotices ? (
               <DialogTrigger

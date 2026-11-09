@@ -1,5 +1,59 @@
 import { FIXTURE_SESSIONS } from './fixtureData';
+import { PROJECT_ONE, PROJECT_TWO } from './fixtureProjects';
 import type { Session } from '@/types';
+
+export type FixtureSessionProjectScenario = 'unbound' | 'bound' | 'bound-ab' | 'deleted';
+
+/** The focused-Session Project input a fixture route advertises (#3082). */
+export function fixtureSessionProjectScenario(
+  search: string,
+): FixtureSessionProjectScenario {
+  const value = new URLSearchParams(search).get('sessionProject');
+  if (value === 'bound' || value === 'bound-ab' || value === 'deleted') {
+    return value;
+  }
+  return 'unbound';
+}
+
+/**
+ * Initial Session→Project bindings for a fixture route.
+ *
+ * Canonical routes are unbound so existing goldens and capability entries do
+ * not move. `deleted` deliberately names a Project the fixture list does not
+ * contain, so the capability can be tested for a safe unavailable state.
+ */
+export function fixtureSessionBindings(
+  search: string,
+): Record<string, string | null> {
+  switch (fixtureSessionProjectScenario(search)) {
+    case 'bound':
+      return {
+        'devbox-01:fix-terminal-reconnect': PROJECT_ONE,
+        'devbox-01:staging-deploy': PROJECT_ONE,
+      };
+    case 'bound-ab':
+      return {
+        'devbox-01:fix-terminal-reconnect': PROJECT_ONE,
+        'devbox-01:design-system': PROJECT_TWO,
+      };
+    case 'deleted':
+      return { 'devbox-01:fix-terminal-reconnect': 'project-00000000-0000-4000-8000-000000000099' };
+    case 'unbound':
+      return {};
+  }
+}
+
+/** Overlay the fixture's current membership map on its Session set. */
+export function applySessionProjectBindings(
+  sessions: Session[],
+  bindings: Record<string, string | null>,
+): Session[] {
+  return sessions.map((session) =>
+    Object.prototype.hasOwnProperty.call(bindings, session.session_id)
+      ? { ...session, project_id: bindings[session.session_id] }
+      : session,
+  );
+}
 
 /**
  * The Session set a canonical fixture route advertises (#1083 §9).

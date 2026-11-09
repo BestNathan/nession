@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
 import { sessionsApi } from '@/product/session';
 import type { PluginSurface } from '@/platform/socket/types';
@@ -191,6 +191,13 @@ export interface FixtureSessionMetadataControls {
 
 export interface FixtureSessionMetadataWindow {
   fixtureSessionMetadata?: FixtureSessionMetadataControls;
+  fixtureSessionProject?: FixtureSessionProjectControls;
+}
+
+/** Browser-window controls for the explicit Session→Project wire (#3082). */
+export interface FixtureSessionProjectControls {
+  bindings(): Record<string, string | null>;
+  setRequests(): { session_id: string; project_id: string | null }[];
 }
 
 interface FixtureSessionMetadataTransport {
@@ -203,6 +210,9 @@ interface FixtureSessionMetadataTransport {
   holdRead: boolean;
   releaseHeldRead: (() => void) | null;
   readHeld: boolean;
+  bindings: Map<string, string | null>;
+  projectSetRequests: { session_id: string; project_id: string | null }[];
+  onProjectSet?: (sessionId: string, projectId: string | null) => void;
 }
 
 function currentMetadata(
@@ -337,6 +347,19 @@ function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSu
       if (type === 'server.session.metadata.update') {
         return Promise.resolve(updateMetadata(state, payload)) as Promise<T>;
       }
+      if (type === 'server.session.project.set') {
+        const sessionId = String(payload.session_id ?? '');
+        const projectId =
+          typeof payload.project_id === 'string' ? payload.project_id : null;
+        state.bindings.set(sessionId, projectId);
+        state.projectSetRequests.push({ session_id: sessionId, project_id: projectId });
+        state.onProjectSet?.(sessionId, projectId);
+        return Promise.resolve({
+          success: true,
+          project_id: projectId,
+          revision: projectId === null ? 0 : 1,
+        }) as Promise<T>;
+      }
       return Promise.reject(
         new Error(`fixture session metadata surface does not answer ${type}`),
       );
@@ -382,9 +405,16 @@ function createMetadataControls(
   };
 }
 
-export function createFixtureSessionMetadataHarness(search: string): {
+export function createFixtureSessionMetadataHarness(
+  search: string,
+  options: {
+    initialBindings?: Record<string, string | null>;
+    onProjectSet?: (sessionId: string, projectId: string | null) => void;
+  } = {},
+): {
   surface: PluginSurface;
   controls: FixtureSessionMetadataControls | null;
+  projectControls: FixtureSessionProjectControls;
 } {
   const scenario = fixtureSessionMetadataScenario(search);
   const state: FixtureSessionMetadataTransport = {
@@ -400,10 +430,17 @@ export function createFixtureSessionMetadataHarness(search: string): {
     holdRead: false,
     releaseHeldRead: null,
     readHeld: false,
+    bindings: new Map(Object.entries(options.initialBindings ?? {})),
+    projectSetRequests: [],
+    onProjectSet: options.onProjectSet,
   };
   return {
     surface: createMetadataSurface(state),
     controls: createMetadataControls(state),
+    projectControls: {
+      bindings: () => Object.fromEntries(state.bindings),
+      setRequests: () => state.projectSetRequests.map((request) => ({ ...request })),
+    },
   };
 }
 
@@ -415,23 +452,52 @@ export function fixtureSessionMetadataSurface(search: string): PluginSurface {
   return createFixtureSessionMetadataHarness(search).surface;
 }
 
-/** Bind the stub for a fixture route's lifetime, one surface per scenario. */
-export function useFixtureSessionMetadata(search: string): void {
-  const harness = useMemo(() => createFixtureSessionMetadataHarness(search), [search]);
+/**
+ * Bind the stub for a fixture route's lifetime, one surface per scenario.
+ *
+ * The Project wire lives on this surface too (#3082): a second
+ * `sessionsApi.install` would replace this one, and each surface would reject
+ * the other's wires.
+ */
+export function useFixtureSessionMetadata(
+  search: string,
+  options: {
+    initialBindings?: Record<string, string | null>;
+    onProjectSet?: (sessionId: string, projectId: string | null) => void;
+  } = {},
+): void {
+  const onProjectSet = options.onProjectSet;
+  const onProjectSetRef = useRef(onProjectSet);
+  onProjectSetRef.current = onProjectSet;
+  const initialBindings = JSON.stringify(options.initialBindings ?? {});
+  const harness = useMemo(
+    () =>
+      createFixtureSessionMetadataHarness(search, {
+        initialBindings: JSON.parse(initialBindings) as Record<string, string | null>,
+        onProjectSet: (sessionId, projectId) =>
+          onProjectSetRef.current?.(sessionId, projectId),
+      }),
+    [search, initialBindings],
+  );
   useEffect(() => {
     if (harness.controls) {
       resetFixtureOwnershipSession();
       (window as FixtureSessionMetadataWindow).fixtureSessionMetadata = harness.controls;
     }
+    (window as FixtureSessionMetadataWindow).fixtureSessionProject =
+      harness.projectControls;
     const release = sessionsApi.install(harness.surface);
     return () => {
       release();
+      const windowWithControls = window as FixtureSessionMetadataWindow;
       if (harness.controls) {
-        const windowWithControls = window as FixtureSessionMetadataWindow;
         if (windowWithControls.fixtureSessionMetadata === harness.controls) {
           delete windowWithControls.fixtureSessionMetadata;
         }
         resetFixtureOwnershipSession();
+      }
+      if (windowWithControls.fixtureSessionProject === harness.projectControls) {
+        delete windowWithControls.fixtureSessionProject;
       }
     };
   }, [harness]);

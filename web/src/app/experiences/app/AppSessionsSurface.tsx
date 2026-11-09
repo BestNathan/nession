@@ -364,6 +364,7 @@ function SessionsListRegion({
   onKill,
   onViewDetails,
   onEditDetails,
+  onAssociateProject,
   createDisabled,
   onCreate,
   searchQuery,
@@ -382,6 +383,7 @@ function SessionsListRegion({
   onConfigure: AppSessionsSurfaceProps['onConfigure'];
   onKill: AppSessionsSurfaceProps['onKill'];
   onViewDetails: AppSessionsSurfaceProps['onViewDetails'];
+  onAssociateProject?: AppSessionsSurfaceProps['onAssociateProject'];
   onEditDetails: AppSessionsSurfaceProps['onEditDetails'];
   createDisabled: boolean;
   onCreate: () => void;
@@ -408,6 +410,7 @@ function SessionsListRegion({
         onConfigure={onConfigure}
         onKill={onKill}
         onViewDetails={onViewDetails}
+        onAssociateProject={onAssociateProject}
         onEditDetails={onEditDetails}
         groups={
           grouped
@@ -752,6 +755,7 @@ export function AppSessionsSurface({
   onKill,
   onViewDetails,
   onEditDetails,
+  onAssociateProject,
   projectShell = emptyProjectShell(),
 }: AppSessionsSurfaceProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
@@ -807,6 +811,7 @@ export function AppSessionsSurface({
         onConfigure={onConfigure}
         onKill={onKill}
         onViewDetails={onViewDetails}
+        onAssociateProject={onAssociateProject}
         onEditDetails={onEditDetails}
         createDisabled={createDisabled}
         onCreate={onCreate}

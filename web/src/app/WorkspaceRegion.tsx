@@ -9,14 +9,23 @@ import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
-import { emptyProjectShell, type ProjectShellProps } from '@/product/project/types';
+import {
+  emptyProjectShell,
+  type ProjectShellProps,
+  type SessionProjectContext,
+} from '@/product/project/types';
 import { ProjectDetail } from '@/product/project/components/ProjectDetail';
+import { SessionProjectDialog } from '@/product/project/components/SessionProjectDialog';
+import { resolveFocusedProject, relatedSessionsFor } from '@/product/project/model/focusedProject';
 import { AppProjectDetail } from '@/app/patterns/AppProjectDetail';
+import { useSessionProjectBinding } from '@/app/useSessionProjectBinding';
 
 export interface WorkspaceRegionProps {
   connectionStatus: ConnectionState;
   agents: Agent[];
   filteredSessions: Session[];
+  /** Every Session, for the focused Project's related-Session list. */
+  sessions?: Session[];
   /**
    * Total Sessions before search/filter. The collapsed rail quotes this so a
    * hidden filter never redefines what the number means (#1196 §3).
@@ -74,7 +83,7 @@ export interface WorkspaceRegionProps {
 
 export function WorkspaceRegion(props: WorkspaceRegionProps) {
   const {
-    connectionStatus, agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId,
+    connectionStatus, agents, filteredSessions, sessions = filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
     selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
@@ -90,6 +99,34 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   // which composition renders; `isWide` still decides its geometry, so a
   // narrow Web remains a drawer rather than a squeezed column.
   const isApp = experienceOverride === undefined ? !isWide : experienceOverride === 'app';
+  const projectBinding = useSessionProjectBinding();
+  const focusedProject = resolveFocusedProject(
+    selectedSession,
+    projectShell.projects,
+    projectShell.loading,
+  );
+  const sessionProject: SessionProjectContext | undefined = selectedSession
+    ? {
+        focusedProject,
+        relatedSessions: relatedSessionsFor(selectedSession, sessions),
+        onAssociate: () => projectBinding.open(selectedSession),
+        onOpenSession: onSelect,
+        onProjectSettings: projectShell.onSettings,
+        onCreateProjectSession: projectShell.onCreateSession,
+      }
+    : undefined;
+  const sessionProjectDialog = (
+    <SessionProjectDialog
+      session={projectBinding.target}
+      projects={projectShell.projects}
+      busy={projectBinding.busy}
+      error={projectBinding.error}
+      onSave={(projectId) => {
+        void projectBinding.save(projectId);
+      }}
+      onClose={projectBinding.close}
+    />
+  );
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
     surface,
@@ -103,6 +140,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onConfigure, onKill, onViewDetails: onViewSessionDetails, onEditDetails: onEditSessionDetails,
+    onAssociateProject: (session: Session) => projectBinding.open(session),
     projectShell,
   };
 
@@ -139,6 +177,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     // (#1082). Web ignores it — its empty state is a caption beside a sidebar.
     onCreate,
     onOpenWorktreeSession,
+    sessionProject,
   };
 
   // The two experiences, named. Which one renders is the whole of this
@@ -146,31 +185,37 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   // below it is a composition that lives in its own directory.
   if (isApp) {
     return (
-      <AppLayout
-        layer={layer}
-        onLayerChange={onLayerChange}
-        sidebarProps={sidebarProps}
-        onLayerSelect={onLayerSelect}
-        mainShared={mainShared}
-        workspaceAvailable={workspaceAvailable}
-        projectDetail={appProjectDetail}
-      />
+      <>
+        <AppLayout
+          layer={layer}
+          onLayerChange={onLayerChange}
+          sidebarProps={sidebarProps}
+          onLayerSelect={onLayerSelect}
+          mainShared={mainShared}
+          workspaceAvailable={workspaceAvailable}
+          projectDetail={appProjectDetail}
+        />
+        {sessionProjectDialog}
+      </>
     );
   }
 
   return (
-    <WebLayout
-      isWide={isWide}
-      showList={showList}
-      onCloseDrawer={onCloseDrawer}
-      onBackToSessions={onBackToSessions}
-      sidebarProps={sidebarProps}
-      onSelect={onSelect}
-      onConfigure={onConfigure}
-      mainShared={mainShared}
-      surface={surface}
-      terminal={terminal}
-      projectDetail={projectDetail}
-    />
+    <>
+      <WebLayout
+        isWide={isWide}
+        showList={showList}
+        onCloseDrawer={onCloseDrawer}
+        onBackToSessions={onBackToSessions}
+        sidebarProps={sidebarProps}
+        onSelect={onSelect}
+        onConfigure={onConfigure}
+        mainShared={mainShared}
+        surface={surface}
+        terminal={terminal}
+        projectDetail={projectDetail}
+      />
+      {sessionProjectDialog}
+    </>
   );
 }

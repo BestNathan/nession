@@ -42,8 +42,37 @@ describe('workspace capability providers', () => {
       'claude-code',
       'git',
       'terminal-keys',
+      'project',
       'quick-commands',
     ]);
+  });
+
+  it('resolves Project from the focused Session membership only (#3082)', () => {
+    const ready = workspaceContext({
+      focusedProject: {
+        status: 'ready',
+        projectId: 'project-1',
+        project: { project_id: 'project-1', name: 'Nession', locations: [] } as never,
+      },
+    });
+    expect(snapshotFor('project', ready)?.state).toBe('relevant');
+    expect(
+      snapshotFor(
+        'project',
+        { ...ready, activeCapabilityId: 'project' },
+      )?.state,
+    ).toBe('active');
+    expect(
+      snapshotFor('project', workspaceContext({
+        focusedProject: { status: 'loading', projectId: 'project-1' },
+      }))?.state,
+    ).toBe('relevant');
+    expect(
+      snapshotFor('project', workspaceContext({
+        focusedProject: { status: 'unavailable', projectId: 'project-1' },
+      }))?.state,
+    ).toBe('unavailable');
+    expect(snapshotFor('project', workspaceContext())?.state).toBe('unavailable');
   });
 
   it('reports Git as available for a Session and unavailable without one', () => {
