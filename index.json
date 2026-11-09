@@ -61,7 +61,7 @@
       },
       {
         "title": "Project declaration and Workspace location ownership",
-        "description": "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, plus the Project maintenance UI and Project-aware Existing Session creation with Session-owned ENV bindings",
+        "description": "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, plus the Project maintenance UI, Project-aware Existing Session creation with Session-owned ENV bindings, durable Session→Project membership and the context-sensed Project capability",
         "path": "topics/engineering/project-declaration-and-workspace-location-ownership.md",
         "status": "verified",
         "categories": [
@@ -73,7 +73,7 @@
           "server",
           "protocol"
         ],
-        "updated_at": "2026-11-09T05:02:01Z"
+        "updated_at": "2026-11-09T08:06:00Z"
       },
       {
         "title": "Session metadata and display identity ownership",

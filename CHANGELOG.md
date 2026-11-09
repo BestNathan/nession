@@ -408,3 +408,10 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the staging deployment patch (host cgroup mounted writable, privileged Agent, /nession-staging root) and the deployed Session that verified network deny, PID/IPC/User namespaces, cgroup membership and seccomp; keep SC-06 macOS and a trusted when:deployed Case lane explicitly pending
 - Source: https://github.com/BestNathan/nession/pull/3099
+
+## 2026-11-09T08:06:00Z | update | Project declaration and Workspace location ownership
+- Path: topics/engineering/project-declaration-and-workspace-location-ownership.md
+- Topic: engineering
+- Categories: architecture, project, workspace, session, ownership, server, protocol
+- Reason: Record #3082's delivered durable zero-or-one Session→Project membership (m006_session_project_bindings, server.session.project.set, create/list projection, tmux instance fence, destruction and Project-deletion semantics) and the context-sensed Project capability (capsule chip/Peek, Workspace view, focused A/B recompute, offline/unauthorized states), plus the SC-07 public prototype readback Case; Managed EROFS creation remains #3062 and the general orphan-source staging mechanism remains #3068
+- Source: https://github.com/BestNathan/nession/pull/3102
