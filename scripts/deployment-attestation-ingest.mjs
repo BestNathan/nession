@@ -136,6 +136,9 @@ export function executionIdentity(item, source) {
     })),
     source_run_id: source.run_id,
     source_run_attempt: source.run_attempt,
+    // Keep legacy execution IDs byte-identical; only new observation-bearing
+    // attestation runs extend the trusted immutable identity.
+    ...(item.remote_observation ? { remote_observation: item.remote_observation } : {}),
   }));
 }
 
@@ -208,6 +211,7 @@ export function indexRecord(record) {
     target_sha: item.source_sha,
     environment_id: item.environment_id,
     gitops_revision: item.gitops_revision,
+    ...(item.remote_observation ? { remote_profile: 'remote-staging' } : {}),
     record: path,
     execution_id: execution,
   };
