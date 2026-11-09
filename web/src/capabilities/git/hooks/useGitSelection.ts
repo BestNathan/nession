@@ -44,6 +44,26 @@ function isDiffRow(row: GitRow): row is Extract<GitRow, { kind: 'staged' | 'unst
   return row.kind === 'staged' || row.kind === 'unstaged';
 }
 
+/** Create the preview URL away from the Session hook's request/state owner. */
+function materializeMedia(
+  response: GitPreviewResponse,
+  isCurrent: () => boolean,
+): GitMediaView | null {
+  const payload =
+    response.state === 'ok' && response.preview.state === 'ready'
+      ? response.preview.media
+      : null;
+  if (!payload) {
+    return null;
+  }
+  const url = base64ToBlobUrl(payload.content_base64, payload.mime_type);
+  if (!isCurrent()) {
+    URL.revokeObjectURL(url);
+    return null;
+  }
+  return { url, mimeType: payload.mime_type };
+}
+
 /**
  * One request per opened Git row, with the row kind choosing the operation.
  *
@@ -133,19 +153,9 @@ export function useGitSelection({
         if (!isCurrent()) {
           return;
         }
-        let media: GitMediaView | null = null;
-        const payload =
-          response.state === 'ok' && response.preview.state === 'ready'
-            ? response.preview.media
-            : null;
-        if (payload) {
-          const url = base64ToBlobUrl(payload.content_base64, payload.mime_type);
-          if (!isCurrent()) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-          mediaUrlRef.current = url;
-          media = { url, mimeType: payload.mime_type };
+        const media = materializeMedia(response, isCurrent);
+        if (media) {
+          mediaUrlRef.current = media.url;
         }
         setState((previous) =>
           previous.selectedKey === row.key && previous.mode === 'preview'
