@@ -123,6 +123,10 @@ start() {
   for i in {1..15}; do
     if curl -ksS --max-time 2 --output /dev/null \
       "https://${API_ALIAS}:${API_PORT}/healthz" 2>/dev/null; then
+      # A pre-existing server or a detached child must not satisfy a healthy
+      # local socket after the specific process we own has exited.
+      owned_process "$pid" "$born" "$GOST_BIN" "$LISTENER" ||
+        { fail 'tunnel readiness does not belong to the tracked GOST process'; return 1; }
       # This probes only loopback, never an unauthorized private LAN target.
       if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6443' \
           >/dev/null 2>&1; then
