@@ -54,9 +54,11 @@ export function assessChangedPaths(paths) {
     // The canonical instruction files include `.github/AGENTS.md` (with its
     // CLAUDE.md compatibility link); leaving them unclassified made every
     // merged PR that touched scope guidance fail the merge-selection audit
-    // even though it could not affect E2E (#2478). Root ignore rules are the
-    // same kind of repository metadata and cannot affect a browser runtime.
-    if (/^(docs\/|\.claude\/|\.gitignore$|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
+    // even though it could not affect E2E (#2478). The root `AGENTS.md` is the
+    // same kind of instruction metadata and was the remaining omission. Root
+    // ignore rules are the same kind of repository metadata and cannot affect
+    // a browser runtime.
+    if (/^(docs\/|\.claude\/|\.gitignore$|AGENTS\.md$|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
     if (/^crates\/nession-(agent|server|protocol|common)\//.test(p)) {
       components.add('agent-server-protocol');
     } else if (/^web\//.test(p)) {
@@ -186,6 +188,14 @@ function selfTest() {
   assert.deepEqual(assessChangedPaths(['.github/AGENTS.md']).components, []);
   assert.equal(assessChangedPaths(['.github/AGENTS.md', '.github/CLAUDE.md']).floor,
     VERIFICATION_TIERS[0]);
+  // The root instruction surface is the same kind of documentation. A merged
+  // PR that registers a scoped owner there must not require an E2E audit.
+  assert.equal(assessChangedPaths(['AGENTS.md']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['AGENTS.md']).components, []);
+  assert.equal(assessChangedPaths(['AGENTS.md']).floor, VERIFICATION_TIERS[0]);
+  // Only the root file is instruction metadata; the rule must not turn every
+  // same-named file in an unmapped directory into a known-safe path.
+  assert.equal(assessChangedPaths(['unmapped/AGENTS.md']).needsAudit, true);
   assert.equal(assessChangedPaths(['.githooks/pre-commit','.githooks/pre-push']).needsAudit,false);
   assert.equal(assessChangedPaths(['.githooks/pre-commit','.github/workflows/ci-quality.yml']).floor,
     VERIFICATION_TIERS[1]);

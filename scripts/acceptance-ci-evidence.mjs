@@ -15,7 +15,7 @@ import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
-import {collectMetricsReplayLineage,selfTestMetricsReplayLineage} from './acceptance-metrics-replay-proof.mjs';
+import {collectMetricsReplayLineage,selfTestMetricsReplayLineage,collectMetricsReplayAdmissionProof,selfTestMetricsReplayAdmissionProof} from './acceptance-metrics-replay-proof.mjs';
 import {parseDeferredReplayLog,attestDeferredReplayReceipt,makeDeferredReplayReceipt,
   DEFERRED_REPLAY_WORKFLOW,DEFERRED_REPLAY_WORKFLOW_NAME,DEFERRED_REPLAY_JOB,
   DEFERRED_REPLAY_JOBS,DEFERRED_REPLAY_EVENTS,
@@ -50,6 +50,7 @@ import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './accep
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
 import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
+import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance-qwen-3001-pr-evidence.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicPagesLineage,selfTestPublicPagesLineage,shouldCollectPublicPagesLineage} from './acceptance-pages-lineage-readback.mjs';
@@ -185,7 +186,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], authenticatedQwenChainFixture = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], authenticatedQwenChainFixture = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -239,6 +240,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_public_pages_lineage_observations: publicPagesLineageObservations,
     verified_metrics_replay_denials: replayDenials,
     authenticated_metrics_replay_lineage: authenticatedMetricsReplayLineage,
+    ...(authenticatedMetricsReplayAdmission
+      ? {authenticated_metrics_replay_admission:authenticatedMetricsReplayAdmission} : {}),
     verified_deferred_acceptance_replays: deferredAcceptanceReplays,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
@@ -1702,6 +1705,13 @@ async function collectCommand(workspace, outFile) {
     String(process.env.ISSUE_NUMBER??'')==='1690'
       ?await collectMetricsReplayLineage(repo,sha,workspace,githubGet,githubJobLog)
       :null;
+  // #2741: one real same-display-name wrong-Workflow-ID/path manual source
+  // (GitHub-suppressed consumer) and one new owner/main replay after #2738.
+  const authenticatedMetricsReplayAdmission =
+    process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    String(process.env.ISSUE_NUMBER??'')==='2741'
+      ?await collectMetricsReplayAdmissionProof(repo,sha,workspace,githubGet,githubJobLog)
+      :null;
   // General, not issue-gated: any post-merge criterion about the governed refs
   // needs to be able to tell "unobservable here" from "absent".
   const storePolicyObservability=process.env.ACCEPTANCE_STAGE==='post-merge'
@@ -1957,7 +1967,7 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
-    authenticatedMetricsReplayLineage, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
+    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
     authenticatedQwenChainFixture,
     authenticatedRunStoreCasMatrix,
@@ -3262,6 +3272,7 @@ async function selfTest() {
       {jobs:[{...fnrScope,steps:[fnrScope.steps[0]]},fnrFullSkipped]},
     async()=>fnrLog),[],'missing scope steps are not a trusted decision');
   selfTestMetricsReplayLineage();
+  selfTestMetricsReplayAdmissionProof();
   assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
     authenticatedMetricsReplayLineage:{kind:'authenticated_metrics_replay_provenance_matrix',
       positive_coverage:1,negative_coverage:2}})
@@ -3292,6 +3303,7 @@ async function selfTest() {
     [{verdict:'fixture_pass'}]);
   selfTestCiCostStudy();
   selfTestPrQualityCost();
+  selfTestOriginalQwenReview();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
@@ -3323,6 +3335,25 @@ async function main() {
       verified_pr_quality_cost_study:measured,
     },null,2)+'\n');
     console.log('PR Quality CI cost source attested for issue #2917');
+    return;
+  }
+  if (command === 'collect-pr-fixture') {
+    const workspace=process.argv[3],outFile=process.argv[4];
+    if(!workspace||!outFile)throw Error('usage: collect-pr-fixture WORKSPACE OUT');
+    const repo=requireText(process.env.GITHUB_REPOSITORY,'GITHUB_REPOSITORY');
+    const targetSha=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],
+      {encoding:'utf8'}).trim();
+    // The original implementing PR #3017 is the SC source; never treat a
+    // future unrelated PR mentioning #3001 as the implementation.
+    const observed=await collectOriginalQwenReview({
+      repo,issue:Number(process.env.ISSUE_NUMBER??0),
+      stage:process.env.ACCEPTANCE_STAGE,targetSha,get:githubGet,
+    });
+    fs.writeFileSync(outFile,JSON.stringify({
+      schema_version:1,kind:'acceptance_ci_evidence',target_sha:targetSha,
+      verified_qwen_3001_original_review:observed,
+    },null,2)+'\n');
+    console.log('Original #3001 PR #3017 and Reviewer verified independently');
     return;
   }
   if (command === 'collect') {

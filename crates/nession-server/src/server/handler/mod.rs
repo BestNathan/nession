@@ -238,6 +238,23 @@ impl ConnectionHandler {
         }
     }
 
+    /// A detached handler whose client has already been authenticated by the
+    /// host (`#565`).
+    ///
+    /// The Server-hosted MCP endpoint verifies its bearer token at the HTTP
+    /// boundary and then dispatches through this handler, so the business
+    /// units see the same `authenticated_client` precondition a Web client
+    /// meets. It is **not** a bypass of any handler's own checks: those still
+    /// run, and they still decide.
+    pub(crate) fn new_authenticated(
+        deps: ConnectionHandlerDeps,
+        config: ConnectionHandlerConfig,
+    ) -> Self {
+        let mut handler = Self::new(deps, config);
+        handler.authenticated_client = true;
+        handler
+    }
+
     pub fn registered_agent_id(&self) -> Option<&String> {
         self.registered_agent_id.as_ref()
     }
@@ -596,7 +613,7 @@ impl ConnectionHandler {
             .to_string())
     }
 
-    async fn agent_command_with_timeout(
+    pub(crate) async fn agent_command_with_timeout(
         &self,
         agent_id: &str,
         msg_type: &str,

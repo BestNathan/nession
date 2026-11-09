@@ -762,7 +762,9 @@ async function selfTest() {
   const e='e'.repeat(40);
   const formerMap=new Map(mergedMap);
   formerMap.set('/repos/'+REPO+'/pulls/1720/commits?per_page=100',
-    [{sha:a},{sha:b},{sha:'c'.repeat(40)},{sha:e}]);
+    // Keep containingPr's exact head last: the former-head fixture must not
+    // violate pagination's independent exact-head ordering invariant.
+    [{sha:a},{sha:b},{sha:e},{sha:'c'.repeat(40)}]);
   formerMap.set('/repos/'+REPO+'/actions/runs?head_sha='+e+'&per_page=100',
     {workflow_runs:[run(30,e,'success')]});
   formerMap.set('/repos/'+REPO+'/actions/runs?head_sha='+'c'.repeat(40)+'&per_page=100',

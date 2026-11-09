@@ -5,7 +5,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
-use super::handler::{ConnectionHandler, HandlerAction};
+use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
 use crate::registry::{AgentRegistry, SessionRegistry};
@@ -19,9 +19,11 @@ use crate::server::outbound::WsMessageSender;
 use crate::server::web_client_registry::WebClientRegistry;
 use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
+use nession_mcp::http::Sniffed;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
 use nession_runtime::lane::KeyedLane;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -42,6 +44,9 @@ pub struct WebSocketServer {
     /// because the process that checks it is an *Agent* rather than this one —
     /// so this side is only the issuer's record, kept for expiry.
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
+    /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
+    /// listener and the Server's business services.
+    mcp: Option<Arc<nession_mcp::McpService>>,
     listener: Option<TcpListener>,
 }
 
@@ -87,6 +92,27 @@ impl WebSocketServer {
             config.p2p_token_expiry_secs,
         ));
 
+        // Mount MCP on this listener when configured. Building it here (rather
+        // than on first request) means a fail-closed configuration error stops
+        // the start, before `ready` is announced. It shares the runtime's
+        // mutation lane, so an MCP mutation of a Session is ordered against a
+        // Web client's mutation of the same Session (#565).
+        let mutations = mutation_scheduler();
+        let mcp = crate::server::mcp::build(
+            &config,
+            ConnectionHandlerDeps {
+                agent_registry: Arc::clone(&agent_registry),
+                session_registry: Arc::clone(&session_registry),
+                command_broker: Arc::clone(&command_broker),
+                client_registry: Arc::clone(&client_registry),
+                web_client_registry: Arc::clone(&web_client_registry),
+                env_service: Arc::clone(&env_service),
+                db: Arc::clone(&db),
+                p2p_broker: Arc::clone(&p2p_broker),
+            },
+            Arc::clone(&mutations),
+        )?;
+
         Ok(Self {
             config,
             p2p_broker,
@@ -97,7 +123,8 @@ impl WebSocketServer {
             web_client_registry,
             env_service,
             db,
-            mutations: mutation_scheduler(),
+            mutations,
+            mcp,
             listener: Some(listener),
         })
     }
@@ -246,6 +273,7 @@ impl WebSocketServer {
                 db: Arc::clone(&self.db),
                 mutations: Arc::clone(&self.mutations),
                 p2p_broker: Arc::clone(&self.p2p_broker),
+                mcp: self.mcp.clone(),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
@@ -314,6 +342,8 @@ struct ServerContext {
     /// `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
+    /// The MCP endpoint mounted on this listener, when enabled.
+    mcp: Option<Arc<nession_mcp::McpService>>,
     auth_token: String,
     heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
@@ -334,9 +364,39 @@ async fn handle_connection(
 ) -> anyhow::Result<()> {
     if let Some(acceptor) = tls_acceptor {
         let tls_stream = acceptor.accept(tcp_stream).await?;
-        handle_ws_stream(tls_stream, ctx).await
+        route_connection(tls_stream, ctx).await
     } else {
-        handle_ws_stream(tcp_stream, ctx).await
+        route_connection(tcp_stream, ctx).await
+    }
+}
+
+/// Dispatch one accepted connection to MCP or the WebSocket handler.
+///
+/// Without MCP this is exactly the old path. With MCP the request head is read
+/// once: a WebSocket upgrade replays those bytes into tungstenite, and an HTTP
+/// request is answered by the MCP service on the same listener. There is no
+/// second port, and `/ws` keeps its existing handshake and authentication.
+async fn route_connection<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let Some(mcp) = ctx.mcp.clone() else {
+        return handle_ws_stream(stream, ctx).await;
+    };
+
+    match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
+        Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
+        Ok(Sniffed::Http { head, body }) => mcp
+            .serve(head, body)
+            .await
+            .map_err(|error| anyhow::anyhow!("MCP response failed: {error}")),
+        Err(error) => {
+            // A non-WebSocket, non-HTTP peer (a scanner or a health check that
+            // sent garbage). The stream is gone with the parser, so this is a
+            // log and a close rather than a status code.
+            warn!(%error, "refusing a connection that is neither WebSocket nor HTTP");
+            Ok(())
+        }
     }
 }
 
@@ -363,6 +423,7 @@ where
         terminal_stall_grace,
         query_concurrency,
         p2p_broker,
+        mcp: _,
     } = ctx;
 
     let ws_stream = accept_async(stream).await?;

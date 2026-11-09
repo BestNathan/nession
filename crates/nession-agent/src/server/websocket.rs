@@ -52,6 +52,8 @@ use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
+use nession_mcp::http::{PrefixedStream, RequestHead, Sniffed};
+use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
@@ -1038,6 +1040,8 @@ pub struct AgentServer {
     /// loop and [`Self::complete_handshake`]; the same policy is never
     /// re-derived per connection.
     handshake_policy: P2pHandshakePolicy,
+    /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
+    mcp: Option<Arc<McpService>>,
 }
 
 /// Translate a legacy attach-time `env_snapshots` list into the binding model.
@@ -3044,6 +3048,19 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 }
 
+/// What a completed pre-authentication phase produced.
+///
+/// Either an authenticated WebSocket peer — the pre-`#565` outcome — or an MCP
+/// request that was answered on the same listener. MCP never owns the P2P
+/// credential store: its bearer check runs inside the service.
+enum Handshake {
+    WebSocket(
+        Box<WebSocketStream<PrefixedStream<TcpOrTls>>>,
+        ConnectionAuthority,
+    ),
+    Mcp(Arc<McpService>, RequestHead, Box<PrefixedStream<TcpOrTls>>),
+}
+
 impl AgentServer {
     /// Create a new agent server.
     ///
@@ -3108,7 +3125,28 @@ impl AgentServer {
             resize: context.resize,
             credentials: context.credentials,
             handshake_policy: context.handshake_policy,
+            mcp: None,
         })
+    }
+
+    /// Mount the MCP endpoint on this listener (`#565`).
+    ///
+    /// Built here, where the Agent's one `SessionManager` and `SessionRegistry`
+    /// are in scope, so the node tools reuse those services rather than opening
+    /// a second path to tmux. The cluster backend reuses the Server this Agent
+    /// reports to, or reports a structured "no Server" error in standalone
+    /// mode.
+    pub fn mount_mcp(&mut self, config: &crate::config::AgentConfig) -> Result<()> {
+        self.mcp = crate::server::mcp::build(
+            config,
+            &self.agent_id,
+            Arc::clone(&self.tmux_manager),
+            Arc::clone(&self.sessions),
+            &self.default_working_dir,
+            self.terminal_cols,
+            Arc::clone(&self.mutations),
+        )?;
+        Ok(())
     }
 
     /// Start accepting connections. Returns a [`ServerHandle`] that can be
@@ -3161,6 +3199,7 @@ impl AgentServer {
         let attach_mode = self.attach_mode.clone();
         let resize = self.resize.clone();
         let credentials = Arc::clone(&self.credentials);
+        let mcp = self.mcp.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = Mutex::new(shutdown_rx);
@@ -3218,24 +3257,37 @@ impl AgentServer {
                                 let am = attach_mode.clone();
                                 let rtx = resize.clone();
                                 let creds = Arc::clone(&credentials);
+                                let endpoint_mcp = mcp.clone();
                                 let deadline = handshake_policy.timeout;
                                 handshakes.spawn(async move {
                                     match Self::complete_handshake(
-                                        stream, addr, tls, creds, deadline,
+                                        stream, addr, tls, creds, deadline, endpoint_mcp,
                                     )
                                     .await
                                     {
-                                        Ok((ws, authority)) => {
+                                        Ok(Handshake::WebSocket(ws, authority)) => {
                                             // The peer is authenticated: this
                                             // connection no longer occupies the
                                             // pre-auth budget, however long its
                                             // Session lives.
                                             drop(slot);
                                             tokio::spawn(Self::serve_connection(
-                                                ws, authority, addr, tmux, svc,
+                                                *ws, authority, addr, tmux, svc,
                                                 shared_sessions, fops, meta, lanes, wd,
                                                 terminal_cols, la, aid, am, rtx,
                                             ));
+                                        }
+                                        Ok(Handshake::Mcp(service, head, body)) => {
+                                            // MCP is not a P2P peer: it had its
+                                            // own bearer check, and it must not
+                                            // hold the pre-authentication budget
+                                            // for a tool call. `serve` owns its
+                                            // own request timeout and failure
+                                            // handling.
+                                            drop(slot);
+                                            if let Err(e) = service.serve(head, *body).await {
+                                                info!("MCP connection from {} ended: {e:#}", addr);
+                                            }
                                         }
                                         Err(e) => {
                                             // Downgraded from warn: random non-WebSocket clients
@@ -3302,19 +3354,20 @@ impl AgentServer {
 
     /// Complete the pre-authentication phase of one accepted P2P socket.
     ///
-    /// Performs the optional TLS handshake and the WebSocket upgrade — the
-    /// latter including the #1013 credential check — under one deadline, and
-    /// returns only once a credential has been authorized. Everything after
-    /// this point is therefore unreachable for a peer that never completed an
-    /// upgrade, which is what bounds the work an unauthenticated connection can
-    /// cause (#2653).
+    /// Performs the optional TLS handshake and then reads one HTTP request
+    /// head. Without MCP this is byte-for-byte the old WebSocket upgrade.
+    /// With MCP, a non-upgrade request is handed back as
+    /// [`Handshake::Mcp`] and served by the host after this function returns,
+    /// so a tool call is not constrained by the WebSocket handshake deadline.
+    /// Everything else — including the #1013 credential check — is unchanged.
     async fn complete_handshake(
         stream: tokio::net::TcpStream,
         addr: SocketAddr,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         credentials: Arc<P2pCredentials>,
         deadline: Duration,
-    ) -> Result<(WebSocketStream<TcpOrTls>, ConnectionAuthority)> {
+        mcp: Option<Arc<McpService>>,
+    ) -> Result<Handshake> {
         let authority: Arc<OnceLock<ConnectionAuthority>> = Arc::new(OnceLock::new());
         let captured = Arc::clone(&authority);
         let store = Arc::clone(&credentials);
@@ -3333,6 +3386,26 @@ impl AgentServer {
                 TcpOrTls::Plain(stream)
             };
 
+            let io = match mcp {
+                Some(service) => {
+                    match nession_mcp::http::sniff(io, nession_mcp::http::DEFAULT_IO_TIMEOUT)
+                        .await
+                        .context("HTTP request head read failed")?
+                    {
+                        // Replay the consumed bytes: tungstenite parses the exact
+                        // upgrade request it expects, and the credential callback
+                        // below is untouched.
+                        Sniffed::WebSocket { stream } => stream,
+                        Sniffed::Http { head, body } => {
+                            return Ok(Handshake::Mcp(service, head, Box::new(body)))
+                        }
+                    }
+                }
+                // No MCP configured: keep the pre-existing path with an empty
+                // replay prefix, so the stream type is one type either way.
+                None => PrefixedStream::new(Vec::new(), io),
+            };
+
             // The half of #1013 that asks *is there a credential, and is it this
             // agent's*, decided at the upgrade rather than after it.
             //
@@ -3348,7 +3421,7 @@ impl AgentServer {
             // authority has to come back out through a cell the closure wrote to.
             // `OnceLock` rather than a `Mutex`: it is written once, on the path that
             // returns `Ok`, and read once below.
-            tokio_tungstenite::accept_hdr_async(
+            let ws = tokio_tungstenite::accept_hdr_async(
                 io,
                 move |request: &UpgradeRequest, response: UpgradeResponse| {
                     let presented = request
@@ -3379,36 +3452,35 @@ impl AgentServer {
                 },
             )
             .await
-            .context("WebSocket upgrade failed")
+            .context("WebSocket upgrade failed")?;
+
+            // The callback sets this on every path that returns `Ok`. A `None` here
+            // would mean a connection that passed the upgrade with no record of what
+            // it may do, so it ends rather than running on an assumed scope — there
+            // is no safe default, and "assume it is allowed" is exactly the
+            // anonymous fallback this design forbids.
+            let Some(authority) = authority.get().cloned() else {
+                anyhow::bail!("upgrade completed without a credential authority");
+            };
+
+            info!(
+                "WebSocket connection from {} (credential {}, session {})",
+                addr, authority.credential_id, authority.session_id
+            );
+            Ok::<Handshake, anyhow::Error>(Handshake::WebSocket(Box::new(ws), authority))
         };
 
         // One deadline for both phases, because they are one unauthenticated
         // window: a peer that sends nothing, a partial TLS record, or half of a
         // request line is exactly the peer this bound exists for. It starts
         // after `accept` (the admission slot is acquired before this future
-        // runs) and ends when the upgrade callback has authorized a credential.
-        let ws = tokio::time::timeout(deadline, upgrade)
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "P2P handshake did not complete within {deadline:?}; closing the connection"
-                )
-            })??;
-
-        // The callback sets this on every path that returns `Ok`. A `None` here
-        // would mean a connection that passed the upgrade with no record of what
-        // it may do, so it ends rather than running on an assumed scope — there
-        // is no safe default, and "assume it is allowed" is exactly the
-        // anonymous fallback this design forbids.
-        let Some(authority) = authority.get().cloned() else {
-            anyhow::bail!("upgrade completed without a credential authority");
-        };
-
-        info!(
-            "WebSocket connection from {} (credential {}, session {})",
-            addr, authority.credential_id, authority.session_id
-        );
-        Ok((ws, authority))
+        // runs) and ends when the upgrade callback has authorized a credential
+        // — or when an MCP head has been read.
+        tokio::time::timeout(deadline, upgrade).await.map_err(|_| {
+            anyhow::anyhow!(
+                "P2P handshake did not complete within {deadline:?}; closing the connection"
+            )
+        })?
     }
 
     /// Run one authenticated P2P connection's message loop.
@@ -3418,7 +3490,7 @@ impl AgentServer {
     /// here: that budget is for becoming a peer, not for being one.
     #[allow(clippy::too_many_arguments)]
     async fn serve_connection(
-        ws: WebSocketStream<TcpOrTls>,
+        ws: WebSocketStream<PrefixedStream<TcpOrTls>>,
         authority: ConnectionAuthority,
         addr: SocketAddr,
         tmux_manager: Arc<SessionManager>,
@@ -3529,7 +3601,7 @@ impl AgentServer {
     ///   transition ahead of the operations that depend on it;
     /// * WebSocket's own ping, which belongs to the transport.
     async fn run_message_loop(
-        mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<TcpOrTls>>,
+        mut ws_stream: futures_util::stream::SplitStream<WebSocketStream<PrefixedStream<TcpOrTls>>>,
         connection: Arc<Connection>,
         mutations: Arc<KeyedLane<ResourceKey>>,
     ) -> Result<()> {

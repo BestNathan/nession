@@ -1,6 +1,8 @@
 //! Agent configuration.
 
-use nession_common::config::{validate_terminal_cols, DEFAULT_TERMINAL_COLS, TERMINAL_COLS_ENV};
+use nession_common::config::{
+    validate_terminal_cols, McpConfig, DEFAULT_TERMINAL_COLS, TERMINAL_COLS_ENV,
+};
 use nession_common::logging::LoggingConfig;
 use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
@@ -303,6 +305,15 @@ pub struct AgentConfig {
     /// Host-local Sandbox backend configuration (#2681).
     #[serde(default)]
     pub sandbox: SandboxConfig,
+    /// MCP access layer (`#565`). Disabled unless `[mcp] enabled = true`.
+    ///
+    /// The inbound token is `agent_token`: the Agent presents it to clients of
+    /// its own P2P socket in standalone mode, and MCP reuses the same
+    /// configured token source rather than inventing a second user system. It
+    /// is **not** added to the P2P credential store for a Server-connected
+    /// Agent — the MCP bearer check is independent of P2P authorization.
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 impl Default for AgentConfig {
@@ -337,6 +348,7 @@ impl Default for AgentConfig {
             memory_threshold_percent: default_memory_threshold_percent(),
             terminal_cols: default_terminal_cols(),
             sandbox: SandboxConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -372,6 +384,8 @@ impl AgentConfig {
     /// Validate the effective configuration before the runtime starts.
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
+        self.mcp
+            .validate_for_host(&self.agent_token, "agent_token")?;
         Ok(())
     }
 }
@@ -383,6 +397,24 @@ mod tests {
     #[test]
     fn test_default_listen_address() {
         assert_eq!(default_listen_address(), "0.0.0.0:8080");
+    }
+
+    /// Agent-hosted MCP reuses `agent_token`; enabling it without one is a
+    /// startup error, including on an Agent connected to a Server where the
+    /// token would otherwise be unused.
+    #[test]
+    fn mcp_enabled_requires_the_agent_token() {
+        let mut config = AgentConfig::default();
+        config.mcp.enabled = true;
+        let error = config
+            .validate()
+            .expect_err("an empty agent_token must refuse to start MCP");
+        assert!(error.to_string().contains("agent_token"), "{error}");
+
+        config.agent_token = "agent-secret".to_string();
+        config
+            .validate()
+            .expect("a configured token makes MCP startable");
     }
 
     #[test]

@@ -1261,7 +1261,7 @@ connections.
 - `#678` — the requirement this document implements.
 - `#1013` — the P2P credential this section describes.
 - `#565` — shared `nession-mcp`, which consumes the same contracts rather than
-  copying Nession DTOs.
+  copying Nession DTOs; see [`docs/architecture/mcp.md`](mcp.md).
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
   client side.
 
