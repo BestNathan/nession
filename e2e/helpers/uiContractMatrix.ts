@@ -495,8 +495,20 @@ export async function assertProductionCapabilityCountOnlyChangesScrollExtent(
   );
   const full = await captureProductionWorkspaceCapabilityRow(page, '/#/fixture/workspace');
 
-  expect(reduced.ids).toEqual(['session', 'agent', 'env', 'claude-code', 'git']);
-  expect(full.ids).toEqual(['files', 'session', 'agent', 'env', 'claude-code', 'git']);
+  // The Sandbox capability is Session-context and view-bound (#3124), so it
+  // adds one entry to the production set after Env. The invariant under test
+  // is unchanged: one more eligible entry extends only the row's horizontal
+  // content/scroll axis.
+  expect(reduced.ids).toEqual(['session', 'agent', 'env', 'sandbox', 'claude-code', 'git']);
+  expect(full.ids).toEqual([
+    'files',
+    'session',
+    'agent',
+    'env',
+    'sandbox',
+    'claude-code',
+    'git',
+  ]);
   expect(full.ids.length).toBeGreaterThan(2);
   expect(full.ids.length).toBe(reduced.ids.length + 1);
   expect(full.states.every((state) => state !== 'unavailable')).toBe(true);
