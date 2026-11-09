@@ -459,7 +459,7 @@ fn compile_cgroup(cgroup: &SandboxCgroupV2Policy) -> Result<CgroupLimits> {
     Ok(limits)
 }
 
-fn validate_memory_max(value: &str) -> Result<String> {
+pub(crate) fn validate_memory_max(value: &str) -> Result<String> {
     if value == "max" {
         return Ok(value.to_string());
     }
@@ -467,7 +467,7 @@ fn validate_memory_max(value: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn validate_pids_max(value: &str) -> Result<String> {
+pub(crate) fn validate_pids_max(value: &str) -> Result<String> {
     if value == "max" {
         return Ok(value.to_string());
     }
@@ -475,7 +475,7 @@ fn validate_pids_max(value: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn validate_cpu_max(value: &str) -> Result<String> {
+pub(crate) fn validate_cpu_max(value: &str) -> Result<String> {
     let mut parts = value.split_whitespace();
     let quota = parts.next().ok_or_else(|| {
         SandboxError::InvalidPolicy("cpu.max needs `quota period` in native format".to_string())
@@ -501,7 +501,7 @@ fn validate_cpu_max(value: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-fn validate_oom_group(value: &str) -> Result<String> {
+pub(crate) fn validate_oom_group(value: &str) -> Result<String> {
     if value == "0" || value == "1" {
         Ok(value.to_string())
     } else {

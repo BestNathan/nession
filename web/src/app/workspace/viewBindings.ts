@@ -1,4 +1,4 @@
-import { FileCog, FileText, FolderKanban, Settings2, UserRound, type LucideIcon } from 'lucide-react';
+import { FileCog, FileText, FolderKanban, Settings2, Shield, UserRound, type LucideIcon } from 'lucide-react';
 import { claudeCodeView } from '@/capabilities/claude-code';
 import { gitView } from '@/capabilities/git';
 import { PROJECT_CAPABILITY_ID } from '@/capabilities/project';
@@ -27,6 +27,7 @@ const WORKSPACE_VIEWS: readonly { id: WorkspaceViewId; icon: LucideIcon }[] = [
   { id: 'session', icon: Settings2 },
   { id: 'agent', icon: UserRound },
   { id: 'env', icon: FileCog },
+  { id: 'sandbox', icon: Shield },
 ];
 
 /**

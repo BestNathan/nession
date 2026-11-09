@@ -1,0 +1,564 @@
+import { manifestsOf, ProtocolDirectory } from '@/platform/protocol';
+import type { PluginSurface } from '@/platform/socket/types';
+import {
+  WIRE as CONTEXT_WIRE,
+  type SandboxActionResult,
+  type SandboxCapabilityCatalog,
+  type SandboxContextResponse,
+  type SandboxCurrentContext,
+  type SandboxFieldError,
+  type SandboxKvEntry,
+  type SandboxPolicyDraft,
+  type SandboxPreflightResult,
+} from '@/generated/protocol/core/server-session-sandbox-context/v1';
+import { WIRE as ENTER_WIRE } from '@/generated/protocol/core/server-session-sandbox-enter/v1';
+import { WIRE as FOCUS_WIRE } from '@/generated/protocol/core/server-session-sandbox-focus/v1';
+import { WIRE as PREFLIGHT_WIRE } from '@/generated/protocol/core/server-session-sandbox-preflight/v1';
+import { WIRE as RETURN_WIRE } from '@/generated/protocol/core/server-session-sandbox-return-to-native/v1';
+import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
+
+/**
+ * A canned Sandbox Agent for the fixture routes (#3124).
+ *
+ * The route names what the Agent answered, never a rendered state: the
+ * capability view decides what "outside", "inside", "unknown" or an
+ * uninstallable `cpu.max` looks like.
+ *
+ *   /#/fixture/workspace?capability=sandbox                  → outside, full catalog
+ *   /#/fixture/workspace?capability=sandbox&sandbox=inside   → verified effective policy
+ *   …&sandbox=limited     → memory/pids delegated; no cpu.max
+ *   …&sandbox=macos       → Seatbelt; no Linux-native Resource/Syscall keys
+ *   …&sandbox=unsupported → backend unavailable, no Enter
+ *   …&sandbox=unknown     → stale instance; no protection claim
+ *   …&sandbox=offline     → the context read fails (Agent unreachable)
+ *   …&sandbox=preflight-fail → validation blocked by host capability
+ *   …&sandbox=enter-fail  → validated, then the launch barrier refuses
+ *
+ * The row validation below is a **fixture mirror** of the Agent's rules, so a
+ * browser Case can drive the UI's field-error rendering. It is not a second
+ * policy authority: the Rust materializer and compiler remain canonical.
+ */
+
+const SESSION = FIXTURE_SELECTED_ID;
+const INSTANCE = 'fixture-instance-1';
+
+type Scenario =
+  | 'outside'
+  | 'inside'
+  | 'limited'
+  | 'macos'
+  | 'unsupported'
+  | 'unknown'
+  | 'offline'
+  | 'preflight-fail'
+  | 'enter-fail';
+
+function scenarioOf(search: string): Scenario {
+  const requested = new URLSearchParams(search).get('sandbox');
+  switch (requested) {
+    case 'inside':
+    case 'limited':
+    case 'macos':
+    case 'unsupported':
+    case 'unknown':
+    case 'offline':
+    case 'preflight-fail':
+    case 'enter-fail':
+      return requested;
+    default:
+      return 'outside';
+  }
+}
+
+function fieldEntry(entry: {
+  key: string;
+  valueFormat: string;
+  example: string;
+  available?: boolean;
+  reason?: string;
+}) {
+  const available = entry.available ?? true;
+  return {
+    key: entry.key,
+    value_format: entry.valueFormat,
+    example: entry.example,
+    available,
+    reason: available ? undefined : (entry.reason ?? 'not measured'),
+  };
+}
+
+function catalogFor(scenario: Scenario): SandboxCapabilityCatalog {
+  if (scenario === 'unsupported') {
+    return {
+      status: 'unavailable',
+      platform: 'linux',
+      backend: undefined,
+      probe_generation: 'fixture-probe-unsupported',
+      source: 'agent-host-probe',
+      detail: ['bubblewrap is not executable on this host'],
+      reason: 'bubblewrap is not executable on this host',
+      resource_fields: [],
+      syscall_fields: [],
+    };
+  }
+  if (scenario === 'macos') {
+    return {
+      status: 'available',
+      platform: 'macos',
+      backend: 'macos-seatbelt',
+      probe_generation: 'fixture-probe-macos',
+      source: 'agent-host-probe',
+      detail: [
+        'Seatbelt network denial verified',
+        'filesystem path allow-lists are not verified on macOS',
+      ],
+      resource_fields: [],
+      syscall_fields: [],
+    };
+  }
+  if (scenario === 'offline') {
+    return {
+      status: 'unknown',
+      platform: 'unknown',
+      backend: undefined,
+      probe_generation: '',
+      source: 'unavailable',
+      detail: [],
+      reason: 'the Agent did not answer',
+      resource_fields: [],
+      syscall_fields: [],
+    };
+  }
+  const limited = scenario === 'limited';
+  return {
+    status: 'available',
+    platform: 'linux',
+    backend: 'linux-bwrap',
+    probe_generation: limited ? 'fixture-probe-limited' : 'fixture-probe-full',
+    source: 'agent-host-probe',
+    detail: limited
+      ? ['delegated controllers: memory, pids']
+      : ['delegated controllers: memory, cpu, pids'],
+    resource_fields: [
+      fieldEntry({
+        key: 'memory.max',
+        valueFormat: 'uint64 bytes or `max`',
+        example: '2147483648',
+      }),
+      fieldEntry({
+        key: 'cpu.max',
+        valueFormat: '`quota period` (quota microseconds or `max`; period 1000..=1000000)',
+        example: '200000 100000',
+        available: !limited,
+        reason: 'the cpu controller is not delegated to this Agent’s execution root',
+      }),
+      fieldEntry({ key: 'pids.max', valueFormat: 'uint64 tasks or `max`', example: '256' }),
+      fieldEntry({ key: 'memory.oom.group', valueFormat: '`0` or `1`', example: '0' }),
+    ],
+    syscall_fields: [
+      fieldEntry({
+        key: 'seccomp.profile',
+        valueFormat: 'registered Agent seccomp profile',
+        example: 'nession-interactive-v1',
+      }),
+    ],
+  };
+}
+
+function effectivePolicy(): SandboxPolicyDraft {
+  return {
+    version: 1,
+    enabled: true,
+    filesystem: { access: { read: ['/usr', '/bin'], write: ['/workspace'] } },
+    network: { mode: 'deny', ingress: 'deny' },
+    process: {
+      linux_namespaces: { pid: true, ipc: true, user: true, uts: true, cgroup: false },
+    },
+    resource: [
+      { key: 'memory.max', value: '2147483648' },
+      { key: 'cpu.max', value: '200000 100000' },
+    ],
+    syscall: [{ key: 'seccomp.profile', value: 'nession-interactive-v1' }],
+    enforcement: 'required',
+  };
+}
+
+function outsideContext(scenario: Scenario, revision: number): SandboxCurrentContext {
+  const catalog = catalogFor(scenario);
+  const unknown = scenario === 'unknown';
+  const unsupported = scenario === 'unsupported';
+  return {
+    status: unknown ? 'unknown' : 'outside',
+    reason: unknown
+      ? 'the Session’s instance identity changed; a previous execution’s report is not this Pane’s proof'
+      : unsupported
+        ? catalog.reason
+        : undefined,
+    scope: {
+      session_name: SESSION,
+      session_instance_id: unknown ? undefined : INSTANCE,
+      pane_id: '%1',
+      window_id: '@1',
+      pane_pid: 4242,
+      working_dir: '/workspace',
+    },
+    generation: `fixture-${scenario}-${revision}`,
+    execution: undefined,
+    effective_policy: undefined,
+    native_pane: undefined,
+    enterable: !unknown && !unsupported,
+    sandbox_panes: [],
+    catalog,
+  };
+}
+
+function insideContext(scenario: Scenario, revision: number): SandboxCurrentContext {
+  const catalog = catalogFor(scenario);
+  return {
+    status: 'inside',
+    scope: {
+      session_name: SESSION,
+      session_instance_id: INSTANCE,
+      pane_id: '%2',
+      window_id: '@2',
+      pane_pid: 4343,
+      working_dir: '/workspace',
+    },
+    generation: `fixture-inside-${revision}`,
+    execution: {
+      execution_id: 'fixture-execution-1',
+      backend: 'linux-bwrap',
+      policy_digest: 'a'.repeat(64),
+      mechanisms: [
+        'filesystem.access',
+        'network.deny',
+        'process.linux_namespaces.pid,ipc,user,uts',
+        'resource.cgroup_v2',
+        'syscall.seccomp',
+        'backend.baseline_namespaces',
+      ],
+      cgroup_path: '/nession/fixture-execution-1',
+      warnings: ['backend baseline mounts added for executability'],
+      pane_pid: 4343,
+      created_at: 1_760_000_000,
+    },
+    effective_policy: effectivePolicy(),
+    native_pane: { window_id: '@1', pane_id: '%1' },
+    enterable: false,
+    sandbox_panes: [
+      {
+        execution_id: 'fixture-execution-1',
+        window_id: '@2',
+        pane_id: '%2',
+        backend: 'linux-bwrap',
+      },
+    ],
+    catalog,
+  };
+}
+
+const RESOURCE_KEYS = new Set([
+  'memory.max',
+  'cpu.max',
+  'pids.max',
+  'memory.oom.group',
+]);
+
+function valueValid(key: string, value: string): boolean {
+  if (key === 'memory.max' || key === 'pids.max') {
+    return value === 'max' || /^\d+$/.test(value);
+  }
+  if (key === 'memory.oom.group') {
+    return value === '0' || value === '1';
+  }
+  if (key === 'cpu.max') {
+    const parts = value.trim().split(/\s+/);
+    if (parts.length !== 2) {
+      return false;
+    }
+    const [quota, period] = parts;
+    if (quota !== 'max' && !/^\d+$/.test(quota)) {
+      return false;
+    }
+    const parsed = Number(period);
+    return /^\d+$/.test(period) && parsed >= 1_000 && parsed <= 1_000_000;
+  }
+  return false;
+}
+
+function validateRows(rows: SandboxKvEntry[], group: 'resource' | 'syscall'): SandboxFieldError[] {
+  const errors: SandboxFieldError[] = [];
+  const seen = new Set<string>();
+  rows.forEach((row, index) => {
+    const key = row.key.trim();
+    const value = row.value.trim();
+    if (!key) {
+      errors.push({
+        field: `${group}[${index}].key`,
+        code: 'blank-key',
+        message: 'a key is required',
+      });
+      return;
+    }
+    if (group === 'resource' && !RESOURCE_KEYS.has(key)) {
+      errors.push({
+        field: `${group}[${index}].key`,
+        code: 'unknown-key',
+        message: `\`${key}\` is not a V1 cgroup v2 control file`,
+      });
+      return;
+    }
+    if (group === 'syscall' && key !== 'seccomp.profile') {
+      errors.push({
+        field: `${group}[${index}].key`,
+        code: 'unknown-key',
+        message: `\`${key}\` is not supported; the only V1 key is \`seccomp.profile\``,
+      });
+      return;
+    }
+    if (seen.has(key)) {
+      errors.push({
+        field: `${group}[${index}].key`,
+        code: 'duplicate-key',
+        message: `\`${key}\` is already configured`,
+      });
+      return;
+    }
+    seen.add(key);
+    if (!value) {
+      errors.push({
+        field: `${group}[${index}].value`,
+        code: 'blank-value',
+        message: 'a native value is required',
+      });
+      return;
+    }
+    if (group === 'syscall' && value !== 'nession-interactive-v1') {
+      errors.push({
+        field: `${group}[${index}].value`,
+        code: 'invalid-value',
+        message: 'this build pins `nession-interactive-v1`',
+      });
+      return;
+    }
+    if (group === 'resource' && !valueValid(key, value)) {
+      errors.push({
+        field: `${group}[${index}].value`,
+        code: 'invalid-value',
+        message: `\`${value}\` is not a valid native value for ${key}`,
+      });
+    }
+  });
+  return errors;
+}
+
+function preflight(
+  scenario: Scenario,
+  payload: Record<string, unknown>,
+): SandboxPreflightResult {
+  const policy = payload.policy as SandboxPolicyDraft;
+  const generation = String(payload.generation ?? '');
+  const catalog = catalogFor(scenario);
+  const errors = [
+    ...validateRows(policy.resource ?? [], 'resource'),
+    ...validateRows(policy.syscall ?? [], 'syscall'),
+  ];
+  const filesystem = policy.filesystem?.access;
+  for (const path of [...(filesystem?.read ?? []), ...(filesystem?.write ?? [])]) {
+    if (!path.startsWith('/')) {
+      errors.push({
+        field: 'filesystem.access.read',
+        code: 'invalid-value',
+        message: `filesystem path \`${path}\` must be absolute`,
+      });
+      break;
+    }
+  }
+  if (scenario === 'limited') {
+    const cpu = (policy.resource ?? []).find((row) => row.key.trim() === 'cpu.max');
+    if (cpu) {
+      errors.push({
+        field: 'resource[0].value',
+        code: 'unsupported',
+        message: 'resource.cgroup_v2 cpu.max is not installable: the cpu controller is not delegated',
+      });
+    }
+  }
+  if (scenario === 'macos') {
+    if ((policy.resource ?? []).length > 0 || (policy.syscall ?? []).length > 0) {
+      errors.push({
+        field: 'policy',
+        code: 'unsupported',
+        message: 'resource.cgroup_v2 and syscall.seccomp are Linux-native and unsupported on macOS',
+      });
+    }
+  }
+  if (scenario === 'preflight-fail') {
+    errors.push({
+      field: 'policy',
+      code: 'unsupported',
+      message: 'resource.cgroup_v2 controllers are not delegated: memory',
+    });
+  }
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      generation,
+      mechanisms: [],
+      errors,
+      warnings: [],
+      catalog,
+    };
+  }
+  return {
+    ok: true,
+    generation,
+    policy_digest: 'b'.repeat(64),
+    backend: scenario === 'macos' ? 'macos-seatbelt' : 'linux-bwrap',
+    mechanisms: ['network.deny'],
+    errors: [],
+    warnings: [],
+    catalog,
+  };
+}
+
+interface FixtureSandboxState {
+  scenario: Scenario;
+  revision: number;
+  entered: boolean;
+}
+
+/** The one request switch; `state` is the Agent's mutable observed state. */
+function answerSandbox(
+  state: FixtureSandboxState,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const contextFor = (): SandboxCurrentContext =>
+    state.entered
+      ? insideContext(state.scenario, state.revision)
+      : outsideContext(state.scenario, state.revision);
+  if (type === CONTEXT_WIRE) {
+    if (state.scenario === 'offline') {
+      return Promise.reject(new Error('Agent did not answer'));
+    }
+    const response: SandboxContextResponse = { success: true, context: contextFor() };
+    return Promise.resolve(response);
+  }
+  if (type === PREFLIGHT_WIRE) {
+    const context = contextFor();
+    if (String(payload.generation ?? '') !== context.generation) {
+      return Promise.resolve({
+        ok: false,
+        error: 'the Sandbox context changed since the draft was composed; re-read it',
+        generation: context.generation,
+        mechanisms: [],
+        errors: [
+          {
+            field: 'context',
+            code: 'stale-generation',
+            message: 'the Sandbox context changed since the draft was composed',
+          },
+        ],
+        warnings: [],
+        catalog: context.catalog,
+      } satisfies SandboxPreflightResult);
+    }
+    return Promise.resolve(preflight(state.scenario, payload));
+  }
+  if (type === ENTER_WIRE) {
+    const context = contextFor();
+    if (String(payload.generation ?? '') !== context.generation) {
+      return Promise.resolve({
+        success: false,
+        error_kind: 'conflict',
+        error: 'the Sandbox context changed since preflight; re-run it',
+        context,
+      } satisfies SandboxActionResult);
+    }
+    if (state.entered) {
+      return Promise.resolve({
+        success: false,
+        error_kind: 'conflict',
+        error: 'the active Pane is already inside a managed Sandbox',
+        context,
+      } satisfies SandboxActionResult);
+    }
+    if (state.scenario === 'enter-fail') {
+      return Promise.resolve({
+        success: false,
+        error_kind: 'failed',
+        error:
+          'sandbox launch verification failed: the barrier did not observe the requested controls',
+        context,
+      } satisfies SandboxActionResult);
+    }
+    state.revision += 1;
+    state.entered = true;
+    return Promise.resolve({
+      success: true,
+      context: insideContext(state.scenario, state.revision),
+    } satisfies SandboxActionResult);
+  }
+  if (type === RETURN_WIRE) {
+    if (!state.entered) {
+      return Promise.resolve({
+        success: false,
+        error_kind: 'conflict',
+        error: 'the active Pane is not inside a managed Sandbox',
+        context: contextFor(),
+      } satisfies SandboxActionResult);
+    }
+    state.revision += 1;
+    state.entered = false;
+    const context = outsideContext(state.scenario, state.revision);
+    context.sandbox_panes = [
+      {
+        execution_id: 'fixture-execution-1',
+        window_id: '@2',
+        pane_id: '%2',
+        backend: 'linux-bwrap',
+      },
+    ];
+    return Promise.resolve({ success: true, context } satisfies SandboxActionResult);
+  }
+  if (type === FOCUS_WIRE) {
+    state.revision += 1;
+    state.entered = true;
+    return Promise.resolve({
+      success: true,
+      context: insideContext(state.scenario, state.revision),
+    } satisfies SandboxActionResult);
+  }
+  return Promise.reject(new Error(`fixture sandbox surface does not answer ${type}`));
+}
+
+export function fixtureSandboxSurface(search: string): PluginSurface {
+  const state: FixtureSandboxState = {
+    scenario: scenarioOf(search),
+    revision: 0,
+    entered: scenarioOf(search) === 'inside',
+  };
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+  return {
+    connectionState: 'connected',
+    protocols,
+    request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
+      return answerSandbox(state, type, payload) as Promise<T>;
+    },
+    send(): void {},
+    subscribe(): () => void {
+      return () => {};
+    },
+    onBinary(): () => void {
+      return () => {};
+    },
+    waitForConnection(): Promise<void> {
+      return Promise.resolve();
+    },
+    onConnectionStateChange(): () => void {
+      return () => {};
+    },
+  };
+}

@@ -1749,3 +1749,4 @@ mod server_session_list_v1;
 mod server_session_metadata_v1;
 mod server_session_processes_v1;
 mod server_session_project_v1;
+mod server_session_sandbox_v1;

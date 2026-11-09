@@ -21,6 +21,8 @@ fn row(
         pane_pid,
         pane_tty: Some("/dev/pts/1".to_string()),
         window_linked: true,
+        window_active: false,
+        pane_active: true,
     }
 }
 

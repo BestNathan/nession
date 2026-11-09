@@ -1068,9 +1068,12 @@ mod tests {
         // Up by two for #2789: `session.metadata.get` / `session.metadata.update`
         // are served on both sockets, because the Agent is the owner whether a
         // browser reads through the Server or directly over P2P.
+        // Up by five for #3124: the Sandbox context capability adds context,
+        // preflight, enter and the two focus transitions. The Agent owns the
+        // active-Pane observation and the one Enter mutation.
         assert_eq!(
             manifest.protocols.len(),
-            34,
+            39,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

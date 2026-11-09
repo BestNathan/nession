@@ -19,7 +19,7 @@ export type Experience = CapsuleExperience;
  * absent: it draws the same view in both experiences, so its binding is
  * contributed whole by the capability instead.
  */
-export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env';
+export type WorkspaceViewId = 'files' | 'session' | 'agent' | 'env' | 'sandbox';
 
 /**
  * What caused the Workspace to open, when something did.

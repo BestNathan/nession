@@ -20,7 +20,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::capabilities::CgroupSupport;
+use crate::capabilities::{CgroupFieldSupport, CgroupSupport};
 use crate::error::{Result, SandboxError};
 use crate::policy::CgroupLimits;
 use crate::util::{read_trimmed, wait_until};
@@ -215,6 +215,39 @@ impl CgroupManager {
             // execution can still be limited by whatever the policy requests.
             writable = true;
         }
+        // Per-field installability (#3124): file presence is not writability,
+        // so write a harmless native value for every allowlisted control file
+        // into this Agent-owned child cgroup. The probe group has no
+        // processes, so these writes cannot affect any workload.
+        let mut fields = std::collections::BTreeMap::new();
+        for (key, probe_value) in [
+            ("memory.max", "max"),
+            ("cpu.max", "max 100000"),
+            ("pids.max", "max"),
+            ("memory.oom.group", "0"),
+        ] {
+            let path = probe_path.join(key);
+            let support = if !path.exists() {
+                CgroupFieldSupport {
+                    available: false,
+                    reason: Some(
+                        "the delegated child cgroup does not expose this control file".to_string(),
+                    ),
+                }
+            } else {
+                match std::fs::write(&path, probe_value) {
+                    Ok(()) => CgroupFieldSupport {
+                        available: true,
+                        reason: None,
+                    },
+                    Err(error) => CgroupFieldSupport {
+                        available: false,
+                        reason: Some(format!("the kernel refused a probe write: {error}")),
+                    },
+                }
+            };
+            fields.insert(key.to_string(), support);
+        }
         let created = probe_path.exists();
         // A cgroup directory is removed with rmdir. `remove_dir_all` walks the
         // virtual control files and can leave the fixture behind.
@@ -227,6 +260,7 @@ impl CgroupManager {
             root: root_mount,
             relative_root,
             controllers: delegated,
+            fields,
             detail: if notes.is_empty() {
                 "delegated writable cgroup v2 subtree".to_string()
             } else {

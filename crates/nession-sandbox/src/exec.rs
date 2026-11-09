@@ -42,6 +42,10 @@ pub struct LaunchRequest {
 }
 
 /// One live execution record, durable across Agent restarts.
+///
+/// `pane_id`/`window_id` bind the record to the tmux Pane it actually owns
+/// (#3124). A record without them predates per-Pane tracking; reconciliation
+/// falls back to Session liveness for those.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRecord {
     pub execution_id: String,
@@ -52,6 +56,31 @@ pub struct ExecutionRecord {
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+    /// The Pane's initial working directory, for the observed context.
+    #[serde(default)]
+    pub working_dir: String,
+    /// The Agent-observed normalized policy. A digest cannot reconstruct the
+    /// settings after an Agent restart; the snapshot can.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_policy: Option<SandboxPolicy>,
+    /// The verified-mechanism names the execution reported.
+    #[serde(default)]
+    pub mechanisms: Vec<String>,
+    /// Non-fatal backend notes, kept for the inside view after a restart.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_endpoint: Option<String>,
+    /// The Native Pane this execution was entered from, if any. Present only
+    /// for an existing-Session Enter; the create-time execution has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_pane_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_path: Option<String>,
     pub execution_dir: String,
@@ -72,7 +101,7 @@ impl ExecutionRecord {
 #[derive(Debug)]
 pub enum ReconcileOutcome {
     /// The tmux Session still exists; the Agent should re-arm its reaper.
-    Active(ExecutionRecord),
+    Active(Box<ExecutionRecord>),
     /// Its Session is gone; the owned resources were removed.
     Cleaned(String),
     /// Cleanup failed and the record was kept for a later attempt.
@@ -193,6 +222,21 @@ impl PreparedSandbox {
     /// The record, for diagnostics.
     pub fn record(&self) -> &ExecutionRecord {
         &self.record
+    }
+
+    /// Bind the execution to the tmux Pane that runs its launcher (#3124).
+    ///
+    /// Called between `new-window`/`new-session` and [`Self::verify`], so the
+    /// durable record written at verification names the Pane it owns.
+    pub fn set_pane_identity(&mut self, pane_id: Option<&str>, window_id: Option<&str>) {
+        self.record.pane_id = pane_id.map(str::to_string);
+        self.record.window_id = window_id.map(str::to_string);
+    }
+
+    /// Record the Native Pane this execution was entered from.
+    pub fn set_native_pane(&mut self, window_id: &str, pane_id: &str) {
+        self.record.native_window_id = Some(window_id.to_string());
+        self.record.native_pane_id = Some(pane_id.to_string());
     }
 
     /// What the launch barrier observed, once verification succeeded.
@@ -365,6 +409,47 @@ pub fn prepare(request: &LaunchRequest, settings: &SandboxSettings) -> Result<Pr
             "no Sandbox backend exists for this platform".to_string(),
         ))
     }
+}
+
+/// What a no-side-effect preflight measured.
+#[derive(Debug, Clone)]
+pub struct PreflightReport {
+    pub compiled: CompiledSandboxPolicy,
+    pub capabilities: capabilities::Capabilities,
+    pub warnings: Vec<String>,
+}
+
+/// Validate a would-be launch without creating any host resource (#3124).
+///
+/// This is `prepare`'s validation prefix — compile, working-directory and
+/// host-path checks, host capability validation — with every resource-creating
+/// step removed. Preflight is a hint to the caller, not a reservation: Enter
+/// re-runs the whole `prepare` path and fails closed on its own.
+pub fn preflight(request: &LaunchRequest, settings: &SandboxSettings) -> Result<PreflightReport> {
+    let compiled = compile(&request.policy)?;
+    if !request.policy.enabled {
+        return Err(SandboxError::InvalidPolicy(
+            "a disabled Sandbox policy must not be preflighted for an Enter".to_string(),
+        ));
+    }
+    if !settings.state_dir.is_absolute() {
+        return Err(SandboxError::Prepare(
+            "the sandbox state directory must be absolute".to_string(),
+        ));
+    }
+    let working_dir = validate_working_dir(&request.working_dir, compiled.filesystem.as_ref())?;
+    let capabilities = probe(settings);
+    crate::capabilities::validate(&compiled, &capabilities)?;
+    let mut warnings = capabilities.detail.clone();
+    if let Some(filesystem) = &compiled.filesystem {
+        warnings.extend(validate_host_paths(filesystem)?);
+    }
+    let _ = working_dir;
+    Ok(PreflightReport {
+        compiled,
+        capabilities,
+        warnings,
+    })
 }
 
 /// Resolve and validate the initial cwd. It must exist, be a directory and be
@@ -558,16 +643,25 @@ pub(crate) fn now_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-/// Read records and reconcile them against the live tmux Session set.
+/// One live Pane, as a successful tmux listing reported it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LivePane {
+    pub session_name: String,
+    pub pane_id: String,
+}
+
+/// Read records and reconcile them against the live tmux Pane set.
 ///
-/// The caller must pass a **successfully listed** Session set. Treating a
-/// failed tmux query as "no Sessions" would clean live executions, so the
-/// function itself refuses an empty set only when records exist? No: an empty
-/// set can be true. The caller owns that proof; this function never queries
-/// tmux.
+/// The caller must pass a **successfully listed** Pane set. Treating a failed
+/// tmux query as "no Panes" would clean live executions, so the caller owns
+/// that proof; this function never queries tmux.
+///
+/// A record with a Pane identity is alive only while *that Pane* exists: a
+/// removed Window with the same Session name is not a live execution (#3124).
+/// A legacy record (no Pane identity) falls back to Session liveness.
 pub fn reconcile(
     settings: &SandboxSettings,
-    live_sessions: &[String],
+    live_panes: &[LivePane],
 ) -> Result<Vec<ReconcileOutcome>> {
     let entries = match std::fs::read_dir(&settings.state_dir) {
         Ok(entries) => entries,
@@ -614,11 +708,16 @@ pub fn reconcile(
                 continue;
             }
         };
-        if live_sessions
-            .iter()
-            .any(|name| name == &record.session_name)
-        {
-            outcomes.push(ReconcileOutcome::Active(record));
+        let alive = match &record.pane_id {
+            Some(pane_id) => live_panes
+                .iter()
+                .any(|pane| pane.session_name == record.session_name && &pane.pane_id == pane_id),
+            None => live_panes
+                .iter()
+                .any(|pane| pane.session_name == record.session_name),
+        };
+        if alive {
+            outcomes.push(ReconcileOutcome::Active(Box::new(record)));
             continue;
         }
         let mut report = CleanupReport {
@@ -679,6 +778,15 @@ mod tests {
             policy_digest: "digest".to_string(),
             created_at: 0,
             pane_pid: None,
+            pane_id: None,
+            window_id: None,
+            working_dir: String::new(),
+            effective_policy: None,
+            mechanisms: Vec::new(),
+            warnings: Vec::new(),
+            proxy_endpoint: None,
+            native_window_id: None,
+            native_pane_id: None,
             cgroup_path: None,
             execution_dir: dir.join("state").join(id).display().to_string(),
             restricted_network: false,
@@ -696,7 +804,14 @@ mod tests {
             std::fs::create_dir_all(&record.execution_dir).expect("execution dir");
             write_record(&settings, record).expect("record");
         }
-        let outcomes = reconcile(&settings, &["session-live".to_string()]).expect("reconcile");
+        let outcomes = reconcile(
+            &settings,
+            &[LivePane {
+                session_name: "session-live".to_string(),
+                pane_id: "%1".to_string(),
+            }],
+        )
+        .expect("reconcile");
         assert!(outcomes.iter().any(|outcome| matches!(outcome, ReconcileOutcome::Active(record) if record.execution_id == "live")));
         assert!(outcomes
             .iter()
@@ -704,6 +819,31 @@ mod tests {
         assert!(std::path::Path::new(&live.execution_dir).exists());
         assert!(!std::path::Path::new(&dead.execution_dir).exists());
         assert!(!dead.record_path(&settings).exists());
+    }
+
+    #[test]
+    fn a_record_whose_pane_is_gone_is_cleaned_even_when_the_session_lives() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = settings(dir.path());
+        let mut record = record(dir.path(), "pane-gone", "session");
+        record.pane_id = Some("%9".to_string());
+        record.window_id = Some("@9".to_string());
+        std::fs::create_dir_all(&record.execution_dir).expect("execution dir");
+        write_record(&settings, &record).expect("record");
+        let outcomes = reconcile(
+            &settings,
+            &[LivePane {
+                session_name: "session".to_string(),
+                // Same Session name, different Pane: the removed Window's
+                // execution must not be claimed as live.
+                pane_id: "%1".to_string(),
+            }],
+        )
+        .expect("reconcile");
+        assert!(outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, ReconcileOutcome::Cleaned(id) if id == "pane-gone")));
+        assert!(!record.record_path(&settings).exists());
     }
 
     #[test]

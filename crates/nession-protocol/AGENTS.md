@@ -23,14 +23,20 @@ When adding/changing a Protocol Unit:
 
 Notification/control wires without generated operation contracts still have one declaring owner. Follow the protocol architecture and validator rather than inventing another registry.
 
-## Sandbox policy contract (#2681)
+## Sandbox policy contract (#2681, #3124)
 
-`contracts/sandbox/v1.rs` owns the versioned `SandboxPolicy` shape. The policy
-rides the session-create payloads; `nession-sandbox` owns validation and
-execution, and the Web projection deliberately omits the policy document (V1
-has no Web Sandbox surface; native cgroup keys such as `memory.max` cannot be
-generated under the Web naming rule). Do not add a second sandbox schema in a
-provider crate.
+`contracts/sandbox/v1.rs` owns the versioned `SandboxPolicy` shape and the
+context capability's Web-safe projection. The canonical policy still rides the
+session-create payloads and is omitted from generated bindings because its
+native cgroup keys (`memory.max`) cannot satisfy the Web naming rule.
+
+`SandboxPolicyDraft` is the Web-safe editor projection used by the
+context/preflight/Enter payloads: Resource/Syscall are typed `{key, value}`
+rows instead of dotted fields. `nession-sandbox` materializes the rows into the
+canonical policy and remains the only validator; do not add a second sandbox
+schema or a second row→policy interpreter in a provider crate. The context
+snapshot, catalog, preflight and action results are session-scoped contract
+types, generated for the Web.
 
 ## Verification
 

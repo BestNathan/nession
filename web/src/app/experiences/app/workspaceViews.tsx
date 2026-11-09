@@ -4,6 +4,7 @@ import { SessionDetails } from '@/product/session/components/SessionDetails';
 import { AppToolScroll } from './AppToolScroll';
 import { EnvAppLayout } from './EnvAppLayout';
 import { FilesAppLayout } from './FilesAppLayout';
+import { SandboxAppLayout } from './SandboxAppLayout';
 import type { WorkspaceAppViewProps, WorkspaceViewId } from '@/app/workspace/workspaceContext';
 
 /**
@@ -55,4 +56,5 @@ export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<Workspac
     ) : null,
   env: EnvAppLayout,
   files: FilesAppLayout,
+  sandbox: SandboxAppLayout,
 };

@@ -14,8 +14,10 @@ import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
+import { sandboxApi } from '@/capabilities/sandbox';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
+import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import {
@@ -63,6 +65,11 @@ export function FixtureWorkspace() {
     installConversationSurface,
   );
   const envReady = useFixtureSurface(capability === 'env', search, installEnvSurface);
+  const sandboxReady = useFixtureSurface(
+    capability === 'sandbox',
+    search,
+    installSandboxSurface,
+  );
   // #2803: the Agent capability's two-Agent same-name process scenario. The
   // route names the environment input, and the mounted capability observes the
   // Session change like a real Workspace move.
@@ -127,7 +134,7 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !conversationReady || !envReady || !agentProcessReady) {
+  if (!gitReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -183,6 +190,9 @@ function openedCapability(search: string): CapabilityId {
   if (requested === 'agent') {
     return 'agent';
   }
+  if (requested === 'sandbox') {
+    return 'sandbox';
+  }
   return requested === 'session' ? 'session' : 'files';
 }
 
@@ -198,6 +208,11 @@ function installGitSurface(search: string): () => void {
  */
 function installEnvSurface(search: string): () => void {
   return envApi.install(fixtureEnvSurface(search));
+}
+
+/** Bind the Sandbox Agent stub (#3124). Gated for the same mount-order reason. */
+function installSandboxSurface(search: string): () => void {
+  return sandboxApi.install(fixtureSandboxSurface(search));
 }
 
 /**

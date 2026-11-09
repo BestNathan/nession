@@ -3,6 +3,7 @@ import { AgentDetail } from '@/product/agent/patterns/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
 import { FilesWebLayout } from './FilesWebLayout';
 import { EnvWebLayout } from './EnvWebLayout';
+import { SandboxWebLayout } from '@/capabilities/sandbox';
 import type { WorkspaceContext, WorkspaceViewId } from '@/app/workspace/workspaceContext';
 
 /**
@@ -37,4 +38,5 @@ export const WEB_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<{ ctx: W
     ctx.session && ctx.domain ? <SessionDetails session={ctx.session} state={ctx.domain} /> : null,
   env: EnvWebLayout,
   files: FilesWebLayout,
+  sandbox: SandboxWebLayout,
 };

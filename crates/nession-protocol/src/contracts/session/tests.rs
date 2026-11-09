@@ -1,4 +1,7 @@
 use super::v1::*;
+use crate::contracts::sandbox::v1::{
+    SandboxActionResult, SandboxFieldError, SandboxPreflightResult,
+};
 
 #[test]
 fn a_process_snapshot_round_trips_with_its_honest_unknowns() {
@@ -566,4 +569,94 @@ fn metadata_validation_rejects_invalid_tags() {
             max: SESSION_METADATA_TAG_LIMIT
         }
     );
+}
+
+#[test]
+fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
+    // #3124: the client sends the Web-safe draft; empty Resource/Syscall rows
+    // survive the wire as an empty list, not as a fabricated option.
+    let enter: ClientSessionSandboxEnterPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent:work",
+        "generation": "gen-1",
+        "enter_id": "enter-1",
+        "policy": {
+            "enabled": true,
+            "filesystem": { "access": { "read": ["/usr"], "write": ["/workspace"] } },
+            "network": { "mode": "deny" },
+            "resource": [],
+            "syscall": []
+        },
+        "working_dir": "/workspace"
+    }))
+    .expect("the client draft must parse");
+    assert!(enter.policy.resource.is_empty());
+    let value = serde_json::to_value(&enter).unwrap();
+    assert_eq!(value["policy"]["resource"], serde_json::json!([]));
+    let parsed: ClientSessionSandboxEnterPayload = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.enter_id, "enter-1");
+
+    // The Agent side carries the broker request id *and* the client's enter
+    // id: correlation and idempotency are different identities.
+    let agent: ServerSessionSandboxEnterPayload = serde_json::from_value(serde_json::json!({
+        "request_id": "broker-1",
+        "session_name": "work",
+        "generation": "gen-1",
+        "enter_id": "enter-1",
+        "policy": { "enabled": true, "resource": [{ "key": "memory.max", "value": "max" }] }
+    }))
+    .expect("the agent draft must parse");
+    assert_eq!(agent.request_id, "broker-1");
+    assert_eq!(agent.enter_id, "enter-1");
+    assert_eq!(agent.policy.resource[0].key, "memory.max");
+}
+
+#[test]
+fn sandbox_context_and_action_replies_round_trip() {
+    let context = SandboxContextResponse {
+        success: false,
+        error: Some("Agent 'a' is offline".to_string()),
+        context: None,
+    };
+    let value = serde_json::to_value(&context).unwrap();
+    assert_eq!(value["success"], false);
+    assert!(value.get("context").is_none());
+
+    let action = SandboxActionResult {
+        success: false,
+        error_kind: Some(crate::contracts::sandbox::v1::SandboxActionErrorKind::Conflict),
+        error: Some("the Sandbox context changed; re-run preflight".to_string()),
+        field_errors: None,
+        context: None,
+    };
+    let value = serde_json::to_value(&action).unwrap();
+    assert_eq!(value["error_kind"], "conflict");
+
+    let preflight = SandboxPreflightResult {
+        ok: false,
+        error: None,
+        generation: "gen-1".to_string(),
+        policy_digest: None,
+        backend: None,
+        mechanisms: Vec::new(),
+        errors: vec![SandboxFieldError {
+            field: "resource[0].key".to_string(),
+            code: "unknown-key".to_string(),
+            message: "only the four V1 cgroup keys are accepted".to_string(),
+        }],
+        warnings: Vec::new(),
+        catalog: crate::contracts::sandbox::v1::SandboxCapabilityCatalog {
+            status: crate::contracts::sandbox::v1::SandboxCatalogStatus::Available,
+            platform: "linux".to_string(),
+            backend: Some("linux-bwrap".to_string()),
+            probe_generation: "probe-1".to_string(),
+            source: "agent-host-probe".to_string(),
+            detail: Vec::new(),
+            reason: None,
+            resource_fields: Vec::new(),
+            syscall_fields: Vec::new(),
+        },
+    };
+    let value = serde_json::to_value(&preflight).unwrap();
+    assert_eq!(value["errors"][0]["code"], "unknown-key");
+    assert!(value.get("error").is_none());
 }

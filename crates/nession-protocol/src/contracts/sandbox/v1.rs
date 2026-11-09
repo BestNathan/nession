@@ -295,6 +295,327 @@ pub struct SandboxExecutionReport {
     pub warnings: Vec<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Context capability (#3124)
+//
+// Sandbox is a Session-context capability: the selected *active Pane* is
+// either inside a verified Nession-managed execution, outside it, or unknown.
+// The types below are the authenticated read/preflight/Enter surface. The
+// canonical `SandboxPolicy` above remains the only policy schema; the draft
+// below is its **Web-safe projection** (the native cgroup keys are carried as
+// typed Key/Value rows instead of dotted field names, which the Web naming
+// rules cannot generate). `nession-sandbox` owns the draft→policy
+// materialization, so the projection is not a second validator.
+// ---------------------------------------------------------------------------
+
+/// The capability's context answers exactly one of three states.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxContextStatus {
+    /// The current Pane runs under a verified, Nession-managed execution.
+    Inside,
+    /// The current Pane is a Native execution with no managed Sandbox.
+    Outside,
+    /// The Agent could not prove either state (unreadable identity, stale
+    /// instance, probe failure). Never rendered as protected.
+    Unknown,
+}
+
+/// One typed Resource/Syscall editor row.
+///
+/// Rows are empty-first: the schema preselects nothing, and an empty list
+/// omits the whole optional group from the materialized policy.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxKvEntry {
+    pub key: String,
+    pub value: String,
+}
+
+/// The Web-safe policy editor model (#3124).
+///
+/// Faithful to the canonical `SandboxPolicy`: every field either reuses a
+/// generated policy dimension unchanged or carries a native Key/Value row that
+/// `nession-sandbox` maps into the canonical nested contract. It is a
+/// projection, not an alternative schema — the Agent materializes it and
+/// compiles the canonical policy before any host resource is created.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxPolicyDraft {
+    #[serde(default = "default_policy_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<SandboxFilesystemPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<SandboxNetworkPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<SandboxProcessPolicy>,
+    /// `resource.cgroup_v2` rows; empty means the group is omitted.
+    #[serde(default)]
+    pub resource: Vec<SandboxKvEntry>,
+    /// `syscall.seccomp` rows; empty means the group is omitted.
+    #[serde(default)]
+    pub syscall: Vec<SandboxKvEntry>,
+    #[serde(default)]
+    pub enforcement: SandboxEnforcement,
+}
+
+/// Field-level preflight/Enter error.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxFieldError {
+    /// Dot/row path such as `resource[0].key` or `filesystem.access.read`.
+    pub field: String,
+    /// A stable machine code such as `unknown-key`, `duplicate-key`,
+    /// `blank-key`, `invalid-value`, `unsupported`.
+    pub code: String,
+    pub message: String,
+}
+
+/// The identity of the Pane execution the capability is reporting on.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxPaneScope {
+    pub session_name: String,
+    /// The Session's durable tmux identity (`@nession_instance_id`). A
+    /// same-named recreation gets a different value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_instance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_pid: Option<u32>,
+    /// The Pane's current working directory, when the Agent could read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+}
+
+/// One verified Nession-managed execution, as the Agent observed it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxExecutionView {
+    pub execution_id: String,
+    pub backend: String,
+    pub policy_digest: String,
+    /// Requested guarantees the launch barrier verified in effect.
+    pub mechanisms: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_endpoint: Option<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_pid: Option<u32>,
+    /// Wall-clock creation time, epoch seconds.
+    pub created_at: u64,
+}
+
+/// The Native Pane a Sandbox Pane was entered from, preserved untouched.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxNativePane {
+    pub window_id: String,
+    pub pane_id: String,
+}
+
+/// Another verified Sandbox Pane that still runs in the Session.
+///
+/// Return to Native is a focus switch; the Sandbox Pane keeps running, so the
+/// capability must be able to name it again without fabricating `inside`.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxPaneRef {
+    pub execution_id: String,
+    pub window_id: String,
+    pub pane_id: String,
+    pub backend: String,
+}
+
+/// Whether the Agent's host probe can offer Enter at all.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxCatalogStatus {
+    Available,
+    Unavailable,
+    /// The host was not probed (offline/unknown); never read as "empty
+    /// kernel feature set".
+    Unknown,
+}
+
+/// One selectable Key/Value key, as the Agent's own probe measured it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxFieldEntry {
+    pub key: String,
+    /// Native value-format help, e.g. `quota period` or `uint64 or max`.
+    pub value_format: String,
+    pub example: String,
+    /// Whether this Agent could actually install the key in a child cgroup /
+    /// load the profile. Presence of a file is not installability.
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The Agent-authenticated capability catalog the UI consumes as hints.
+///
+/// `nession-sandbox` still owns final preflight/launch rejection; a stale
+/// probe generation is revalidated on preflight and Enter.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxCapabilityCatalog {
+    pub status: SandboxCatalogStatus,
+    /// `linux`, `macos` or `unsupported`.
+    pub platform: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    /// Changes when the measured host capability changes.
+    pub probe_generation: String,
+    /// `agent-host-probe`.
+    pub source: String,
+    #[serde(default)]
+    pub detail: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Linux cgroup v2 choices actually installable by this Agent.
+    #[serde(default)]
+    pub resource_fields: Vec<SandboxFieldEntry>,
+    /// Registered seccomp profile choices whose loading was probed.
+    #[serde(default)]
+    pub syscall_fields: Vec<SandboxFieldEntry>,
+}
+
+impl SandboxCapabilityCatalog {
+    /// The truthful "not measured" catalog for an unreachable Agent. It is
+    /// never an empty kernel feature set: discovery status is unknown.
+    pub fn unknown(reason: impl Into<String>) -> Self {
+        Self {
+            status: SandboxCatalogStatus::Unknown,
+            platform: "unknown".to_string(),
+            backend: None,
+            probe_generation: String::new(),
+            source: "unavailable".to_string(),
+            detail: Vec::new(),
+            reason: Some(reason.into()),
+            resource_fields: Vec::new(),
+            syscall_fields: Vec::new(),
+        }
+    }
+}
+
+/// The active Pane's Sandbox context.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxCurrentContext {
+    pub status: SandboxContextStatus,
+    /// A truthful reason code/message when the status is not provable or the
+    /// host cannot offer Enter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub scope: SandboxPaneScope,
+    /// Opaque context revision. Preflight and Enter are bound to it; it
+    /// changes when the active Pane, Session instance or execution changes.
+    pub generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<SandboxExecutionView>,
+    /// The Agent-observed normalized policy; never the last UI draft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_policy: Option<SandboxPolicyDraft>,
+    /// Present only while a Sandbox Pane entered from a Native Pane is
+    /// focused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_pane: Option<SandboxNativePane>,
+    /// Whether Enter is eligible from this exact context.
+    pub enterable: bool,
+    /// Other verified Sandbox Panes still running in this Session.
+    #[serde(default)]
+    pub sandbox_panes: Vec<SandboxPaneRef>,
+    pub catalog: SandboxCapabilityCatalog,
+}
+
+/// Typed outcome kind shared by the capability commands.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxActionErrorKind {
+    /// Stale generation, duplicate Enter, or the context changed between
+    /// preflight and Enter.
+    Conflict,
+    /// The draft is not a valid policy (field errors accompany it).
+    Invalid,
+    /// The host/Agent cannot perform the action now (offline, unsupported,
+    /// unreadable identity).
+    Unavailable,
+    /// The launch was attempted and failed; owned resources were released.
+    Failed,
+}
+
+/// Preflight result. `ok` is true only when the Agent's own compile + host
+/// capability validation passed.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxPreflightResult {
+    pub ok: bool,
+    /// A request-level refusal (unauthenticated, offline, stale generation).
+    /// Field-level policy problems are in `errors` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The context revision the preflight was evaluated against.
+    pub generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub mechanisms: Vec<String>,
+    #[serde(default)]
+    pub errors: Vec<SandboxFieldError>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    pub catalog: SandboxCapabilityCatalog,
+}
+
+/// Enter / Return / Focus outcome.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxActionResult {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<SandboxActionErrorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_errors: Option<Vec<SandboxFieldError>>,
+    /// The freshly observed context after the action (or after a refusal that
+    /// did not change it), so the UI never needs a second round trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SandboxCurrentContext>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +680,88 @@ mod tests {
         }))
         .expect_err("network modes are a closed set");
         assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn the_editor_draft_carries_native_kv_rows_and_omits_empty_groups() {
+        // The contract shape accepts an empty-first draft; whether the empty
+        // list omits the group is the materializer's rule (owned by
+        // `nession-sandbox`), so the wire must represent "no rows" without a
+        // dotted key anywhere.
+        let draft: SandboxPolicyDraft = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "filesystem": { "access": { "read": ["/usr"], "write": [] } },
+            "network": { "mode": "deny" },
+            "resource": [],
+            "syscall": []
+        }))
+        .expect("an empty-first draft is valid");
+        assert!(draft.resource.is_empty());
+        assert!(draft.syscall.is_empty());
+        let value = serde_json::to_value(&draft).unwrap();
+        assert_eq!(value["resource"], serde_json::json!([]));
+
+        let with_rows: SandboxPolicyDraft = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "resource": [{ "key": "cpu.max", "value": "200000 100000" }],
+            "syscall": [{ "key": "seccomp.profile", "value": "nession-interactive-v1" }]
+        }))
+        .expect("native rows are the Web-safe spelling");
+        assert_eq!(with_rows.resource[0].key, "cpu.max");
+        assert_eq!(with_rows.syscall[0].key, "seccomp.profile");
+    }
+
+    #[test]
+    fn a_draft_refuses_unknown_fields_like_the_policy_does() {
+        let error = serde_json::from_value::<SandboxPolicyDraft>(serde_json::json!({
+            "enabled": true,
+            "resource": [{ "key": "cpu.max", "value": "1 1000", "extra": true }]
+        }))
+        .expect_err("a row is exactly key+value");
+        assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn the_context_snapshot_round_trips_and_never_invents_inside() {
+        let context = SandboxCurrentContext {
+            status: SandboxContextStatus::Outside,
+            reason: Some("native".to_string()),
+            scope: SandboxPaneScope {
+                session_name: "s".to_string(),
+                session_instance_id: Some("i".to_string()),
+                pane_id: Some("%1".to_string()),
+                window_id: Some("@1".to_string()),
+                pane_pid: Some(42),
+                working_dir: Some("/workspace".to_string()),
+            },
+            generation: "g".to_string(),
+            execution: None,
+            effective_policy: None,
+            native_pane: None,
+            enterable: true,
+            sandbox_panes: Vec::new(),
+            catalog: SandboxCapabilityCatalog {
+                status: SandboxCatalogStatus::Available,
+                platform: "linux".to_string(),
+                backend: Some("linux-bwrap".to_string()),
+                probe_generation: "p".to_string(),
+                source: "agent-host-probe".to_string(),
+                detail: Vec::new(),
+                reason: None,
+                resource_fields: vec![SandboxFieldEntry {
+                    key: "memory.max".to_string(),
+                    value_format: "uint64 or max".to_string(),
+                    example: "2147483648".to_string(),
+                    available: true,
+                    reason: None,
+                }],
+                syscall_fields: Vec::new(),
+            },
+        };
+        let value = serde_json::to_value(&context).unwrap();
+        assert_eq!(value["status"], "outside");
+        assert!(value.get("execution").is_none(), "absent stays absent");
+        let parsed: SandboxCurrentContext = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, context);
     }
 }

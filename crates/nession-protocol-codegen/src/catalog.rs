@@ -155,6 +155,44 @@ fn decl_of<T: TS + schemars::JsonSchema + 'static>(cfg: &ts_rs::Config) -> Decl 
     }
 }
 
+/// Every type the Sandbox context-capability units share (#3124).
+///
+/// The context snapshot, the Web-safe policy draft and the action results are
+/// one family: the client context/preflight/Enter units and the Agent
+/// request-only units all describe the same capability, so one list keeps the
+/// generated files self-contained without hand-copying a dependency set five
+/// times.
+fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
+    use nession_protocol::contracts::sandbox::v1 as sandbox;
+    vec![
+        decl_of::<sandbox::SandboxContextStatus>(cfg),
+        decl_of::<sandbox::SandboxPaneScope>(cfg),
+        decl_of::<sandbox::SandboxExecutionView>(cfg),
+        decl_of::<sandbox::SandboxNativePane>(cfg),
+        decl_of::<sandbox::SandboxPaneRef>(cfg),
+        decl_of::<sandbox::SandboxCapabilityCatalog>(cfg),
+        decl_of::<sandbox::SandboxCatalogStatus>(cfg),
+        decl_of::<sandbox::SandboxFieldEntry>(cfg),
+        decl_of::<sandbox::SandboxCurrentContext>(cfg),
+        decl_of::<sandbox::SandboxPolicyDraft>(cfg),
+        decl_of::<sandbox::SandboxKvEntry>(cfg),
+        decl_of::<sandbox::SandboxEnforcement>(cfg),
+        decl_of::<sandbox::SandboxFilesystemPolicy>(cfg),
+        decl_of::<sandbox::SandboxFilesystemAccess>(cfg),
+        decl_of::<sandbox::SandboxNetworkPolicy>(cfg),
+        decl_of::<sandbox::SandboxNetworkMode>(cfg),
+        decl_of::<sandbox::SandboxEgressPolicy>(cfg),
+        decl_of::<sandbox::SandboxPrivateNetwork>(cfg),
+        decl_of::<sandbox::SandboxIngress>(cfg),
+        decl_of::<sandbox::SandboxProcessPolicy>(cfg),
+        decl_of::<sandbox::SandboxLinuxNamespaces>(cfg),
+        decl_of::<sandbox::SandboxFieldError>(cfg),
+        decl_of::<sandbox::SandboxPreflightResult>(cfg),
+        decl_of::<sandbox::SandboxActionResult>(cfg),
+        decl_of::<sandbox::SandboxActionErrorKind>(cfg),
+    ]
+}
+
 /// Every contract this workspace serves, and the types each one carries.
 pub fn units(cfg: &ts_rs::Config) -> Vec<Unit> {
     vec![
@@ -2702,6 +2740,223 @@ wires: &["agent.file.cwd"],
                 nession_protocol::contracts::file::v1::FileCwdResponse::inline,
                 schema_of::<nession_protocol::contracts::file::v1::FileCwdResponse>,
             )),
+        },
+        // ── Sandbox context capability (#3124) ──
+        //
+        // Client units carry the Web-safe draft and the typed observation; the
+        // Agent units are request-only because every answer travels on
+        // `server.agent.command-response` (the request shape is still owned
+        // here, so the two sides cannot disagree about it).
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.context",
+            version: 1,
+            wires: &["server.session.sandbox.context"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxContextPayload>(cfg),
+                    decl_of::<nession_protocol::contracts::session::v1::SandboxContextResponse>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxContextCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxContextPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxContextPayload>,
+            )),
+            response: Some((
+                "SessionSandboxContextReply",
+                nession_protocol::contracts::session::v1::SandboxContextResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SandboxContextResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.context",
+            version: 1,
+            wires: &["agent.session.sandbox.context"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxContextPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxContextCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxContextPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxContextPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.preflight",
+            version: 1,
+            wires: &["server.session.sandbox.preflight"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxPreflightPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxPreflightCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxPreflightPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxPreflightPayload>,
+            )),
+            response: Some((
+                "SessionSandboxPreflightReply",
+                nession_protocol::contracts::sandbox::v1::SandboxPreflightResult::inline,
+                schema_of::<nession_protocol::contracts::sandbox::v1::SandboxPreflightResult>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.preflight",
+            version: 1,
+            wires: &["agent.session.sandbox.preflight"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxPreflightPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxPreflightCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxPreflightPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxPreflightPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.enter",
+            version: 1,
+            wires: &["server.session.sandbox.enter"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxEnterPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxEnterCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxEnterPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxEnterPayload>,
+            )),
+            response: Some((
+                "SessionSandboxEnterReply",
+                nession_protocol::contracts::sandbox::v1::SandboxActionResult::inline,
+                schema_of::<nession_protocol::contracts::sandbox::v1::SandboxActionResult>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.enter",
+            version: 1,
+            wires: &["agent.session.sandbox.enter"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxEnterPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxEnterCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxEnterPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxEnterPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.return-to-native",
+            version: 1,
+            wires: &["server.session.sandbox.return-to-native"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxReturnPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxReturnCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxReturnPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxReturnPayload>,
+            )),
+            response: Some((
+                "SessionSandboxReturnReply",
+                nession_protocol::contracts::sandbox::v1::SandboxActionResult::inline,
+                schema_of::<nession_protocol::contracts::sandbox::v1::SandboxActionResult>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.return-to-native",
+            version: 1,
+            wires: &["agent.session.sandbox.return-to-native"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxReturnPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxReturnCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxReturnPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxReturnPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
+            id: "server.session.sandbox.focus",
+            version: 1,
+            wires: &["server.session.sandbox.focus"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxFocusPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "SessionSandboxFocusCall",
+                nession_protocol::contracts::session::v1::ClientSessionSandboxFocusPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ClientSessionSandboxFocusPayload>,
+            )),
+            response: Some((
+                "SessionSandboxFocusReply",
+                nession_protocol::contracts::sandbox::v1::SandboxActionResult::inline,
+                schema_of::<nession_protocol::contracts::sandbox::v1::SandboxActionResult>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "agent.session.sandbox.focus",
+            version: 1,
+            wires: &["agent.session.sandbox.focus"],
+            decls: {
+                let mut decls = vec![
+                    decl_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxFocusPayload>(cfg),
+                ];
+                decls.extend(sandbox_capability_decls(cfg));
+                decls
+            },
+            request: Some((
+                "ServerSessionSandboxFocusCall",
+                nession_protocol::contracts::session::v1::ServerSessionSandboxFocusPayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::ServerSessionSandboxFocusPayload>,
+            )),
+            response: None,
         },
         // `agent.keepalive.ping` used to be here — the one unit whose missing
         // half was a *classification* of a wire that already existed
