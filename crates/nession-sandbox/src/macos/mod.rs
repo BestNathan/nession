@@ -232,6 +232,7 @@ pub fn prepare(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: Some(compiled.normalized.clone()),
+        channel_dir: None,
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),
         proxy_endpoint: report.proxy_endpoint.clone(),

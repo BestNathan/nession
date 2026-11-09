@@ -44,8 +44,12 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
    alone is not an identity.
 6. **Cleanup removes owned resources only.** cgroup operations stay under the
    Nession cgroup root; filesystem removal stays under the Agent sandbox state
-   directory. Never kill or remove anything identified only by a caller-supplied
-   path.
+   directory and the Agent-owned short runtime root
+   (`/tmp/nession-sandbox/<execution_id>`) used when the state directory is too
+   deep for a `SUN_LEN`-bounded Unix socket. The runtime directory is removed
+   only when its parent is the configured root and its name is exactly the
+   execution id. Never kill or remove anything identified only by a
+   caller-supplied path.
 7. **A failed tmux listing is not "no Sessions".** Reconciliation and the
    reaper skip the pass; only a successful snapshot may release resources.
 

@@ -91,6 +91,15 @@ impl Channel {
             ))
         })?;
         let host_socket = directory.join("channel.sock");
+        // Linux names the socket by path, capped by `SUN_LEN` (~108 bytes).
+        // Fail with the cause rather than a bare `bind` error if a caller
+        // hands in a directory deep enough to overflow it.
+        if host_socket.as_os_str().len() > 100 {
+            return Err(SandboxError::Prepare(format!(
+                "channel socket path {} is too long for a Unix socket; use a shorter sandbox runtime root",
+                host_socket.display()
+            )));
+        }
         let _ = std::fs::remove_file(&host_socket);
         let listener = UnixListener::bind(&host_socket).map_err(|error| {
             SandboxError::Prepare(format!("bind {}: {error}", host_socket.display()))

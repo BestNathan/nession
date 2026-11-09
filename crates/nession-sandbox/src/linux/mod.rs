@@ -240,6 +240,15 @@ pub fn prepare(
 
     let execution_id = uuid::Uuid::new_v4().to_string();
     let execution_dir = create_execution_dir(settings, &execution_id)?;
+    // A Unix socket path must fit SUN_LEN. Keep the channel beside the record
+    // while that fits; a deep operator-configured state dir falls back to the
+    // Agent-owned short runtime root, recorded for exact cleanup.
+    let state_socket = execution_dir.join("channel.sock");
+    let runtime_dir = if state_socket.as_os_str().len() <= 100 {
+        None
+    } else {
+        Some(create_runtime_dir(settings, &execution_id)?)
+    };
     let result = prepare_inner(
         request,
         compiled,
@@ -248,14 +257,59 @@ pub fn prepare(
         &capabilities,
         &execution_id,
         &execution_dir,
+        runtime_dir.as_deref(),
     );
     match result {
         Ok(prepared) => Ok(prepared),
         Err(error) => {
             let _ = std::fs::remove_dir_all(&execution_dir);
+            if let Some(runtime_dir) = runtime_dir {
+                let _ = std::fs::remove_dir_all(runtime_dir);
+            }
             Err(error)
         }
     }
+}
+
+/// Create the short Agent-owned channel directory for one execution.
+fn create_runtime_dir(settings: &SandboxSettings, execution_id: &str) -> Result<PathBuf> {
+    let root = &settings.runtime_root;
+    std::fs::create_dir_all(root).map_err(|error| {
+        SandboxError::Prepare(format!(
+            "create sandbox runtime root {}: {error}",
+            root.display()
+        ))
+    })?;
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        SandboxError::Prepare(format!(
+            "inspect sandbox runtime root {}: {error}",
+            root.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(SandboxError::Prepare(format!(
+            "sandbox runtime root {} is not an Agent-owned directory",
+            root.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700));
+    }
+    let dir = root.join(execution_id);
+    std::fs::create_dir(&dir).map_err(|error| {
+        SandboxError::Prepare(format!(
+            "create channel directory {}: {error}",
+            dir.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(dir)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -267,6 +321,7 @@ fn prepare_inner(
     capabilities: &Capabilities,
     execution_id: &str,
     execution_dir: &Path,
+    runtime_dir: Option<&Path>,
 ) -> Result<PreparedSandbox> {
     let cgroup_support: Option<&CgroupSupport> = capabilities.cgroup_v2.as_ref();
     let mut cgroup_guard = CgroupGuard(match (&compiled.cgroup, cgroup_support) {
@@ -300,12 +355,14 @@ fn prepare_inner(
     } else {
         None
     };
-    let channel = channel::Channel::start(execution_id, execution_dir, proxy_rules)?;
+    let channel_dir = runtime_dir.unwrap_or(execution_dir);
+    let channel = channel::Channel::start(execution_id, channel_dir, proxy_rules)?;
 
     let mut forbidden = bwrap::ForbiddenPaths {
         files: request.tmux_socket.clone().into_iter().collect(),
         directories: vec![
             settings.state_dir.clone(),
+            settings.runtime_root.clone(),
             PathBuf::from("/sys/fs/cgroup"),
             // Ambient host control surfaces. A filesystem policy that lists
             // them is refused; without one, `/run` is masked wholesale.
@@ -435,6 +492,7 @@ fn prepare_inner(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: Some(compiled.normalized.clone()),
+        channel_dir: runtime_dir.map(|dir| dir.display().to_string()),
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),
         proxy_endpoint: report.proxy_endpoint.clone(),

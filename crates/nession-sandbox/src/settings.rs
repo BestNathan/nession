@@ -16,8 +16,15 @@ pub struct SandboxSettings {
     pub bubblewrap_path: PathBuf,
     /// The macOS `sandbox-exec` executable.
     pub sandbox_exec_path: PathBuf,
-    /// Agent-private directory for execution records, sockets and profiles.
+    /// Agent-private directory for execution records and profiles.
     pub state_dir: PathBuf,
+    /// Agent-owned short root for one execution's Unix channel directory.
+    ///
+    /// A Unix socket path must fit the kernel's `SUN_LEN` (~108 bytes), and
+    /// `state_dir` is operator-configurable and may be arbitrarily deep. The
+    /// channel therefore lives in a fixed short root keyed by the execution
+    /// id; the durable record names the exact directory for cleanup.
+    pub runtime_root: PathBuf,
     /// Optional cgroup root override. Defaults to a `nession` subtree under
     /// the Agent's own cgroup.
     pub cgroup_root: Option<PathBuf>,
@@ -49,6 +56,7 @@ impl SandboxSettings {
             bubblewrap_path,
             sandbox_exec_path,
             state_dir,
+            runtime_root: std::path::PathBuf::from("/tmp/nession-sandbox"),
             cgroup_root: None,
             launch_timeout: Duration::from_secs(10),
             bridge_executable,
