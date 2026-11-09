@@ -41,7 +41,11 @@ and live readback exist.
 
 Do not mistake negative `kubectl auth can-i` checks for firewall egress
 enforcement: they demonstrate Kubernetes API authorization, not denied
-connectivity to other LAN destinations. Demonstrate the network boundary with
+connectivity to other LAN destinations. The actual CI workflow now additionally
+probes a fixed harmless **local** destination (`127.0.0.1:6443`) at TCP level
+after the positive API-alias probe; that verifies the GOST listener is not
+wildcard-bound on the runner. This is *not* proof of a relay-side ACL or LAN
+egress deny-list, which still needs an independently approved live control. Demonstrate the network boundary with
 an explicitly allowlisted API endpoint **and** a separately approved,
 non-sensitive denied-destination probe from the actual workflow environment
 before asserting SC-01. A successful tunnel startup is not an authenticated
