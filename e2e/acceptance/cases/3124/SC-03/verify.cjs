@@ -110,7 +110,7 @@ function emit(result) {
     assert.equal(record.window_id, inside.scope.window_id);
     assert.equal(record.instance_id, inside.scope.session_instance_id);
     assert.equal(record.effective_policy.network.mode, 'deny');
-    assert.equal(record.working_dir, runtime.home);
+    assert.equal(record.working_dir, fs.realpathSync(runtime.home));
     assert.ok(Array.isArray(record.mechanisms) && record.mechanisms.includes('network.deny'));
 
     // Both Panes are alive: the original Native one was not converted or
