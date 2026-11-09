@@ -28,7 +28,7 @@ test.describe('App Project and Session operation pages (#3089)', () => {
     await page.getByTestId('project-create').click();
     const projectPage = page.getByTestId('app-project-create-page');
     await expect(projectPage).toBeVisible();
-    await expect(page.getByTestId('app-page-header')).toHaveCount(1);
+    await expect(projectPage.getByTestId('app-page-header')).toHaveCount(1);
     await projectPage.locator('#project-create-name').fill(projectName);
     await projectPage.getByTestId('project-location-add').click();
     await projectPage.locator('#project-create-location-path-0').fill('/tmp/nession-e2e');
@@ -38,7 +38,7 @@ test.describe('App Project and Session operation pages (#3089)', () => {
     await page.getByTestId('project-detail-create-session').click();
     const createPage = page.getByTestId('app-create-session-page');
     await expect(createPage).toBeVisible();
-    await expect(page.getByTestId('app-page-header')).toHaveCount(1);
+    await expect(createPage.getByTestId('app-page-header')).toHaveCount(1);
     const sessionName = `e2e-app-session-${Date.now()}`;
     await createPage.locator('#name').fill(sessionName);
 
