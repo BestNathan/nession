@@ -102,7 +102,7 @@ to the per-execution Unix channel. The host proxy speaks SOCKS5 and HTTP
 `ALL_PROXY`/`HTTPS_PROXY` are convenience hints. The network namespace and the
 host proxy are the enforcement boundary.
 
-### cgroup delegation
+## Resource: cgroup v2 delegation and cleanup
 
 The cgroup v2 default root is `<Agent cgroup>/nession`. Creating an execution
 group there requires the Agent's own cgroup to be a delegated root — a cgroup
