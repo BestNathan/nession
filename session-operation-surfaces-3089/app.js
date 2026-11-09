@@ -67,7 +67,7 @@
   function projectFields(app) {
     return '<div class="stack"><label class="field"><span class="label">Project name</span><input name="projectName" maxlength="72" value="'+esc(s.editedProjectName)+'" placeholder="Project name"></label>'+
       region('Existing Agent locations',
-        '<div class="stack">'+s.locations.map((loc,i)=>'<div class="card location-editor"><label class="field"><span class="label">Agent</span><input aria-label="Agent '+(i+1)+'" name="agent-'+i+'" value="'+esc(loc.agent)+'"></label><label class="field"><span class="label">Working directory</span><input aria-label="Directory '+(i+1)+'" name="directory-'+i+'" value="'+esc(visiblePath(loc.path))+'"></label>'+button('Remove','remove-location','ghost','data-idx="'+i+'"')+'</div>').join('')+button('＋ Add location','add-location','')+'</div>'
+        '<div class="stack">'+s.locations.map((loc,i)=>'<div class="card location-editor"><label class="field"><span class="label">Agent</span><input aria-label="Agent '+(i+1)+'" name="agent-'+i+'" value="'+esc(loc.agent)+'"></label><label class="field"><span class="label">Working directory</span><textarea aria-label="Directory '+(i+1)+'" name="directory-'+i+'" rows="2">'+esc(visiblePath(loc.path))+'</textarea></label>'+button('Remove','remove-location','ghost','data-idx="'+i+'"')+'</div>').join('')+button('＋ Add location','add-location','')+'</div>'
       )+
       (s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
   }
@@ -251,7 +251,7 @@
   });
   product.addEventListener('input',ev=>{
     const el=ev.target;
-    if(!(el instanceof HTMLInputElement))return;
+    if(!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement))return;
     if(el.name==='sessionName')s.sessionName=el.value;
     else if(el.name==='projectName')s.editedProjectName=el.value;
     else if(el.name.startsWith('agent-')){const idx=Number(el.name.split('-')[1]);if(s.locations[idx])s.locations[idx].agent=el.value;}
