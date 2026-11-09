@@ -37,7 +37,7 @@ const SYSTEMD_UNIT_NAME: &str = "nession-agent.service";
 const LAUNCHD_PLIST_NAME: &str = "com.nession.agent.plist";
 
 /// launchd `Label` of the installed job.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 const LAUNCHD_LABEL: &str = "com.nession.agent";
 
 /// Install the autostart service for the current user.
@@ -458,7 +458,7 @@ fn install_platform(
 }
 
 /// Whether launchd currently has the installed job, and whether it is running.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchdJobState {
     NotLoaded,
@@ -517,23 +517,104 @@ fn wait_for_launchd_running() -> Result<()> {
     )
 }
 
+/// One `launchctl` invocation produced by the uninstall plan.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchdCommand {
+    args: Vec<String>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl LaunchdCommand {
+    fn new(args: &[&str]) -> Self {
+        Self {
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+        }
+    }
+}
+
+/// Executes launchctl commands. Tests substitute a recorder so the
+/// no-termination contract is executable on every host, not only macOS.
+#[cfg(any(target_os = "macos", test))]
+trait LaunchctlRunner {
+    fn run_quiet(&self, args: &[String]);
+}
+
+#[cfg(target_os = "macos")]
+struct SystemLaunchctlRunner;
+
+#[cfg(target_os = "macos")]
+impl LaunchctlRunner for SystemLaunchctlRunner {
+    fn run_quiet(&self, args: &[String]) {
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_cmd_quiet("launchctl", &argv);
+    }
+}
+
+/// The `launchctl` commands that remove autostart registration.
+///
+/// `unload` terminates a loaded job, so a running Agent is only disabled:
+/// launchd stops loading it in future sessions while the current process keeps
+/// serving its Sessions. A job launchd reports as stopped or not loaded may be
+/// unloaded so a later reinstall starts from a clean registration.
+#[cfg(any(target_os = "macos", test))]
+fn launchd_uninstall_commands(
+    plist_path: &Path,
+    job_state: LaunchdJobState,
+    uid: u32,
+) -> Vec<LaunchdCommand> {
+    let mut commands = vec![
+        LaunchdCommand::new(&["disable", &launchd_target_for("gui", uid)]),
+        LaunchdCommand::new(&["disable", &launchd_target_for("user", uid)]),
+    ];
+    if job_state != LaunchdJobState::Running {
+        commands.push(LaunchdCommand::new(&[
+            "unload",
+            &plist_path.to_string_lossy(),
+        ]));
+    }
+    commands
+}
+
+/// Apply the unregistration plan through `runner`. Returns `false` when there
+/// is no plist to unregister, keeping the command idempotent.
+#[cfg(any(target_os = "macos", test))]
+fn uninstall_launchd_registration(
+    runner: &dyn LaunchctlRunner,
+    plist_path: &Path,
+    plist_exists: bool,
+    job_state: LaunchdJobState,
+    uid: u32,
+) -> bool {
+    if !plist_exists {
+        return false;
+    }
+    for command in launchd_uninstall_commands(plist_path, job_state, uid) {
+        runner.run_quiet(&command.args);
+    }
+    true
+}
+
 #[cfg(target_os = "macos")]
 fn uninstall_platform() -> Result<()> {
     let agents_dir = launchd_agents_dir()?;
     let plist_path = agents_dir.join(LAUNCHD_PLIST_NAME);
-    if !plist_path.exists() {
+    let plist_exists = plist_path.exists();
+
+    let unregistered = uninstall_launchd_registration(
+        &SystemLaunchctlRunner,
+        &plist_path,
+        plist_exists,
+        if plist_exists {
+            launchd_job_state()?
+        } else {
+            LaunchdJobState::NotLoaded
+        },
+        unsafe { libc::getuid() },
+    );
+    if !unregistered {
         println!("LaunchAgent plist not present — nothing to uninstall.");
         return Ok(());
-    }
-
-    // Disable future loads without terminating the agent that is running now.
-    run_cmd_quiet("launchctl", &["disable", &launchd_target("gui")]);
-    run_cmd_quiet("launchctl", &["disable", &launchd_target("user")]);
-
-    // `launchctl unload` stops a running job; `uninstall-service` must not stop
-    // the Agent, so only unload when launchd has no live process for it.
-    if launchd_job_state()? != LaunchdJobState::Running {
-        run_cmd_quiet("launchctl", &["unload", &plist_path.to_string_lossy()]);
     }
 
     fs::remove_file(&plist_path)
@@ -561,9 +642,16 @@ fn launchd_agents_dir() -> Result<PathBuf> {
 /// A LaunchAgent can be loaded in the GUI domain (the normal interactive
 /// case) or the per-user domain (an SSH session); both are inspected so the
 /// command never mistakes "not in my domain" for "not running".
+/// A `domain/<uid>/<label>` service target. Pure so the uninstall command
+/// plan can be asserted on any test host, without reading the real uid.
+#[cfg(any(target_os = "macos", test))]
+fn launchd_target_for(domain: &str, uid: u32) -> String {
+    format!("{domain}/{uid}/{LAUNCHD_LABEL}")
+}
+
 #[cfg(target_os = "macos")]
 fn launchd_target(domain: &str) -> String {
-    format!("{domain}/{}/{}", unsafe { libc::getuid() }, LAUNCHD_LABEL)
+    launchd_target_for(domain, unsafe { libc::getuid() })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -809,6 +897,122 @@ fn run_cmd_output(program: &str, args: &[&str]) -> Result<std::process::Output> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    /// Records the launchctl command stream instead of executing it, so the
+    /// uninstall contract is asserted without a macOS host.
+    struct RecordingLaunchctlRunner {
+        calls: RefCell<Vec<Vec<String>>>,
+    }
+
+    impl RecordingLaunchctlRunner {
+        fn new() -> Self {
+            Self {
+                calls: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    impl LaunchctlRunner for RecordingLaunchctlRunner {
+        fn run_quiet(&self, args: &[String]) {
+            self.calls.borrow_mut().push(args.to_vec());
+        }
+    }
+
+    fn launchd_plist_path() -> &'static Path {
+        Path::new("/Users/me/Library/LaunchAgents/com.nession.agent.plist")
+    }
+
+    /// #3045 SC-01: an already-running Agent must keep running. Uninstalling
+    /// autostart may disable future loads but must never send a launchd verb
+    /// that terminates the managed process.
+    #[test]
+    fn macos_uninstall_keeps_a_running_agent_alive() {
+        let runner = RecordingLaunchctlRunner::new();
+        let acted = uninstall_launchd_registration(
+            &runner,
+            launchd_plist_path(),
+            true,
+            LaunchdJobState::Running,
+            501,
+        );
+
+        assert!(acted);
+        let calls = runner.calls();
+        assert_eq!(
+            calls,
+            vec![
+                vec![
+                    "disable".to_string(),
+                    "gui/501/com.nession.agent".to_string()
+                ],
+                vec![
+                    "disable".to_string(),
+                    "user/501/com.nession.agent".to_string()
+                ],
+            ],
+            "a running job may only be disabled: {calls:?}"
+        );
+        for call in &calls {
+            for token in call {
+                assert!(
+                    ![
+                        "unload",
+                        "bootout",
+                        "stop",
+                        "kill",
+                        "killall",
+                        "restart",
+                        "kickstart",
+                        "terminate",
+                    ]
+                    .contains(&token.as_str()),
+                    "uninstall sent a process-terminating launchctl verb: {calls:?}"
+                );
+            }
+        }
+    }
+
+    /// #3045 SC-01: a loaded-but-stopped or not-loaded job has no live process
+    /// to protect, so unloading it keeps a later reinstall from inheriting
+    /// stale state.
+    #[test]
+    fn macos_uninstall_unloads_a_job_with_no_live_process() {
+        for state in [LaunchdJobState::NotRunning, LaunchdJobState::NotLoaded] {
+            let runner = RecordingLaunchctlRunner::new();
+            let acted =
+                uninstall_launchd_registration(&runner, launchd_plist_path(), true, state, 501);
+
+            assert!(acted);
+            let calls = runner.calls();
+            let expected = vec![
+                "unload".to_string(),
+                launchd_plist_path().to_string_lossy().into_owned(),
+            ];
+            assert_eq!(calls.last(), Some(&expected), "{state:?}: {calls:?}");
+        }
+    }
+
+    /// #3045 SC-01: no plist means nothing to unregister; the command stays
+    /// idempotent and sends no launchctl calls at all.
+    #[test]
+    fn macos_uninstall_without_a_plist_is_idempotent() {
+        let runner = RecordingLaunchctlRunner::new();
+        let acted = uninstall_launchd_registration(
+            &runner,
+            launchd_plist_path(),
+            false,
+            LaunchdJobState::Running,
+            501,
+        );
+
+        assert!(!acted);
+        assert!(runner.calls().is_empty());
+    }
 
     #[test]
     fn service_status_returns_known_value() {
