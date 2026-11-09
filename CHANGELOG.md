@@ -373,3 +373,10 @@
 - Categories: architecture, session, metadata, identity, ownership, web, app
 - Reason: Cross-link the #3021 Project declaration article and reconcile the previously unpersisted Workspace-location limit with explicit Project Existing Locations
 - Source: https://github.com/BestNathan/nession/issues/3021
+
+## 2026-11-09T02:48:51Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Reconcile #3042 post-merge historical Qwen producer visibility with independently authenticated Store/Worker/Publisher/Writer/PR provenance, exact public Pages SHA-256 proof, and successful source-aligned SC-03 acceptance without changing Open Work semantics
+- Source: https://github.com/BestNathan/nession/issues/3042

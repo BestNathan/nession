@@ -5,8 +5,8 @@ topic: workflows
 categories: ["delivery","knowledge","pages","security"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-03T10:27:55Z
-sources: ["https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/.github/workflows/deploy-pages.yml", "https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/scripts/knowledge-ledger-contract.mjs", "https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/scripts/workflow-conventions.mjs", "https://github.com/BestNathan/nession/issues/2519", "https://github.com/BestNathan/nession/issues/2664", "https://github.com/BestNathan/nession/issues/2683"]
+updated_at: 2026-11-09T02:48:51Z
+sources: ["https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/.github/workflows/deploy-pages.yml","https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/scripts/knowledge-ledger-contract.mjs","https://github.com/BestNathan/nession/blob/00ba70db36bf97d04bc9c3a6e149e7c6816e40e6/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/2519","https://github.com/BestNathan/nession/issues/2664","https://github.com/BestNathan/nession/issues/2683","https://github.com/BestNathan/nession/blob/860cd4b5355dcbc850abe42958d296466158e5ad/pages/scripts/qwen-lineage-reader.mjs","https://github.com/BestNathan/nession/blob/860cd4b5355dcbc850abe42958d296466158e5ad/pages/scripts/project.mjs","https://github.com/BestNathan/nession/blob/860cd4b5355dcbc850abe42958d296466158e5ad/pages/scripts/build.mjs","https://github.com/BestNathan/nession/blob/860cd4b5355dcbc850abe42958d296466158e5ad/scripts/acceptance-pages-lineage-readback.mjs","https://github.com/BestNathan/nession/issues/3042"]
 ---
 
 # Nession public Pages source publication and orphan-branch signals
@@ -40,6 +40,14 @@ The final recorded end-to-end chain is:
 4. Source-aligned [Acceptance / Cases run 41618761386](https://github.com/BestNathan/nession/actions/runs/41618761386) executed `2683/SC-01` and `2683/SC-03` as **Pass** on merged main `00ba70db36bf97d04bc9c3a6e149e7c6816e40e6`; authenticated [Case Ingest run 41619259587](https://github.com/BestNathan/nession/actions/runs/41619259587) successfully projected both outcomes. `SC-02` and `SC-04` were already projected Pass by trusted PR source/CI evaluation.
 
 These observations prove the concrete witnessed publication, not a guarantee that every future GitHub-hosted job will run on time. The last published source SHA must be compared with the current `knowledge` head when answering freshness questions; never infer freshness from a green signal alone.
+
+## Authenticated historical Work lineage after merged implementing PR — 2026-11-09
+
+An implementing PR leaving the live **Open** Issue/PR activity windows must not make its original, independently witnessed Agent producer disappear. Trusted main Pages reads **at most two** historical Producer candidates from the SHA-pinned `agent-store` tree; mutable Store records only locate candidates. The original Worker, Publisher, committed Writer receipt, historical PR HEAD, Run/Attempt, and pinned Store source are independently checked before a positive public causal edge is emitted. Unavailable, stale, conflicting, forged, or expired original evidence stays Unknown/Unlinked, never a current PR Review or SC Pass.
+
+This historical read-only view coexists with the unchanged Open Work lists. The overview and Issue/PR detail routes expose only authenticated source identities, GitHub source links, and truthful `Logical Slice: Unlinked` where no distinct Slice was established. A verified historical PR HEAD is **not** proof of current PR approval, current acceptance, or branch state.
+
+Concrete deployed proof: [#3042](https://github.com/BestNathan/nession/issues/3042) was implemented by merged [PR #3044](https://github.com/BestNathan/nession/pull/3044) and its source-aligned Acceptance readback by merged [PR #3048](https://github.com/BestNathan/nession/pull/3048). The trusted-main [Deploy / Public Pages run 42552366269](https://github.com/BestNathan/nession/actions/runs/42552366269) built and anonymously re-read the exact public JSON for main `860cd4b5355dcbc850abe42958d296466158e5ad`, with SHA-256 `191641ca2b887d902c3a2bcc021d176c9b5ced18962ecdb5730c5cd03172595d`. Its actual build output reports `lineage_status=verified`, connecting **Issue #3001 → PR #3017 → Qwen developer Run 42488022265, attempt 1**, bound to historical PR HEAD `2d6f729b94cf4b8a0db73d9c5a60fd1284dd79ed`. The read-only post-merge Pages attester requires matching exact public bytes and independent deployed Run/Attempt/Jobs provenance; [Post-Run Waker 42552444045](https://github.com/BestNathan/nession/actions/runs/42552444045) successfully updated SC-03 to **Pass** through the canonical deterministic Issue updater, without a model-created source or synthetic Slice.
 
 ## Related knowledge
 
