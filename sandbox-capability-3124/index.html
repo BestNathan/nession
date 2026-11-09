@@ -107,6 +107,34 @@
 .fixtures button{border:1px solid var(--np-line);background:#fff;border-radius:10px;padding:8px 11px;font-size:12px;cursor:pointer}
 .fixtures button[aria-pressed=true]{background:#202326;border-color:#202326;color:white}
 .fixtures button:focus-visible{outline:2px solid #5a6a78;outline-offset:2px}
+
+/* Sandbox capability-local form; source-informed, no product shell duplication. */
+.nession-ui .policy-editor{margin-top:14px;max-width:820px}
+.nession-ui .policy-group{border-top:1px solid var(--nession-border);padding:16px 0;display:grid;grid-template-columns:165px 1fr;column-gap:22px;align-items:start}
+.nession-ui .policy-group h3{margin:0 0 5px;font-size:13px}
+.nession-ui .policy-group .hint2{font-size:11px;color:var(--nession-muted-foreground)}
+.nession-ui .policy-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 13px}
+.nession-ui .field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.nession-ui label{font-size:11px;color:var(--nession-muted-foreground)}
+.nession-ui .field input,.nession-ui .field select{width:100%;min-height:38px;padding:8px 10px;border:1px solid var(--nession-border);border-radius:9px;background:var(--nession-background);color:var(--nession-foreground);font:12px/1.4 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:0}
+.nession-ui .field input:disabled,.nession-ui .field select:disabled{opacity:.5}
+.nession-ui .full{grid-column:1/-1}
+.nession-ui .checkrow{display:flex;flex-wrap:wrap;align-items:center;gap:11px;font-size:12px;padding:7px 0}
+.nession-ui .checkrow label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--nession-foreground)}
+.nession-ui .checkrow input{accent-color:var(--nession-foreground)}
+.nession-ui .validated{margin-top:15px;max-width:730px}
+.nession-ui .note-pair{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--nession-border);padding:11px 0;min-width:0}
+.nession-ui .note-pair span:last-child{overflow-wrap:anywhere;max-width:70%;text-align:right}
+.nession-ui .action:disabled{opacity:.45;cursor:not-allowed}
+.nession-ui .notice.success{background:var(--nession-surface)}
+.nession-ui .app .policy-group{grid-template-columns:1fr;row-gap:9px}
+.nession-ui .app .policy-fields{grid-template-columns:1fr;gap:10px}
+.nession-ui .app .workspace-inner{max-width:100%}
+.nession-ui .app .workspace{padding:0}
+.nession-ui .app .note-pair{font-size:12px}
+.nession-ui .app .action{min-height:44px}
+.nession-ui .app .actionline{gap:8px}
+.nession-ui .app .actionline .action{flex:1 1 120px}
 </style>
 </head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
@@ -114,26 +142,25 @@
 <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox Capability</span></nav>
 <span class="np-eyebrow">WORKSPACE · AGENT / LOCATION CAPABILITY · SESSION EXECUTION</span>
 <div class="np-header-main">
-<div><h1 class="np-title">Sandbox · Workspace 能力感知与展示</h1><p class="np-subtitle">区分 Agent 能力支持、当前 Session 的已验证隔离执行以及仅按需隔离的边界。复用 Workspace Capsule；Web 与 App 共享语义、采用各自的页面深度。</p></div>
+<div><h1 class="np-title">Sandbox · 感知当前环境 / 配置并进入</h1><p class="np-subtitle">Sandbox 是可操作的 Workspace 能力：当前在隔离 Pane 内则展示已生效策略；不在则编辑策略、预检并明确进入。Native Pane 不受影响，进入后可切换返回。</p></div>
 <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3124">Issue #3124</a><a href="https://github.com/BestNathan/nession/issues/2681">Sandbox V1 #2681</a><a href="https://github.com/BestNathan/nession/issues/3062">Managed #3062</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
 </div>
-<div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Mock, read-only</strong></span></div>
+<div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox → Enter</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Mock, read-only</strong></span></div>
 </header>
 <main>
-<section class="np-preview"><div class="np-section-heading"><div><h2>交互预览 · 真实 CSS 像素</h2><p>从 Terminal 打开 Workspace，选择 Sandbox，展开执行详情；切换运行时观测条件和 Web/App，验证不会误报整会话隔离。</p></div>
+<section class="np-preview"><div class="np-section-heading"><div><h2>交互预览 · 真实 CSS 像素</h2><p>先在 Native 上编辑策略 → 预检 → 确认 Enter → 查看当前 Pane 的生效配置 → Return to Native。外部场景可模拟运行时失败和不可用。</p></div>
 <div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button><button type="button" data-np-size="1024">Web 1024</button><button type="button" data-np-size="390">App 390</button><button type="button" data-np-size="375">App 375</button><button type="button" data-np-reset>Reset</button></div></div>
 <div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"><div id="sandbox-product" class="nession-ui" data-mode="web"></div></div></div>
 <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
-<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟 Agent / Session 观测：</b><button type="button" data-fixture="active" aria-pressed="true">已验证执行</button><button type="button" data-fixture="native">支持但 Native</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="recreated">同名 Session 重建</button><button type="button" data-fixture="partial">仅初始 Pane 隔离</button></div>
+<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟当前执行环境：</b><button type="button" data-fixture="native" aria-pressed="true">Native / 可进入</button><button type="button" data-fixture="active">已在 Sandbox</button><button type="button" data-fixture="preflight-fail">预检失败</button><button type="button" data-fixture="enter-fail">启动失败</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="macos">macOS Seatbelt</button><button type="button" data-fixture="recreated">旧实例记录</button></div>
 </section>
-<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">原型内的 Agent / Session / Policy / Execution ID 均为合成示例。模拟控制位于产品画布外；切换条件不触发真实进程、隔离、远程调用或持久化。</p>
+<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
 <div class="np-detail-grid">
-<article class="np-detail"><h3>交互路径</h3><ol class="np-steps"><li>Terminal → Workspace（Web 圆形目的地；App 显式 Workspace 入口）。</li><li>Capsule → Sandbox → 查看状态和五个 Policy 维度；展开详情查看 effective mechanisms、digest、execution id。</li><li>切换外部条件 Native / Offline / Unsupported / Recreated：不将 Agent 离线误报为 Native，也不将旧执行报告关联到新实例；Unavailable 不占胶囊槽。</li><li>App 在详情深度点击唯一 Back 返回 Sandbox，再返回 Terminal。Web 通过左侧目的地按钮返回 Terminal。</li><li>Web 1180 → App 390 → Web 1180；切换 Files/Agent/Sandbox 后当前 Capsule 仍可用且不改变高度。</li></ol></article>
-<article class="np-detail"><h3>语义边界</h3><p><strong>Agent probe</strong> 是宿主能支持什么；<strong>SandboxExecutionReport</strong> 是实际执行了什么；<strong>Workspace presence</strong> 是产品如何显示。每次点击不是新的 Sandbox 执行。隔离范围是 On-demand initial Pane，不承诺未来新开的 tmux Window/Pane 都被强制隔离。</p><p>ENV 属于独立 Session Binding；EROFS 属于 #3022–#3024，Managed 创建属于 #3062，本 Issue 不新增镜像、策略编辑和安全承诺。</p></article>
-<article class="np-detail"><h3>UI 所有权</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox view。Sidebar 只有扁平 Session 与 Agent，Sandbox 不再创建二级全局导航。</p><p>App：AppLayers（Sessions ← Terminal → Workspace）→ WorkspacePanel 的唯一 AppPageHeader/Back → WorkspaceShell → Sandbox root/detail。Workspace Capsule 在每个深度保留，内部横向滚动；无 Workspace “+” 菜单。</p></article>
-<article class="np-detail"><h3>验证范围与限制</h3><p>页面行为为确定性 mock；样式使用 staging 生成设计 token 的局部快照，未接入 React、WebSocket、Bubblewrap、Seatbelt、cgroup、tmux、真实安全策略。DOM/静态源码核对不等于浏览器验收；真浏览器 / Pages 发布 SHA 需要独立记录。</p><details class="np-inspector"><summary>设计状态记录</summary><pre id="sandbox-inspector">state=active; surface=terminal; depth=root; mode=web</pre></details></article>
-</div></section>
-</main><footer class="np-footer">Nession · Requirement #3124 · Prototype source is not proof of production security or Acceptance</footer>
+<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox，编辑 Filesystem / Network / Process / Resource / Syscall。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>测试预检失败、启动失败、macOS、不支持和 Agent 离线；失败保留 Native/草稿，绝不回退成 Native 却提示成功。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
+<article class="np-detail"><h3>核心对象和状态</h3><p>宿主能支持 Sandbox ≠ 当前 Pane 位于 Sandbox。状态由 Agent 对 <strong>active Pane + Session instance + execution id</strong> 的观测决定，外部启动的非托管 Sandbox 不能推测为 Nession 已验证。</p><p><strong>Policy Draft</strong> 在提交前可编辑；<strong>Effective Policy</strong> 是成功执行后、Agent 验证并持续可查询的只读配置。预检与 Enter 是两个不同动作。</p></article>
+<article class="np-detail"><h3>运行时设计约束</h3><p>现有 #2681 仅在创建 Session 时提供启动屏障。新的 Enter 需要 Agent 创建 <strong>同一个逻辑 Session 的隔离 Pane</strong>，验证 Linux Bubblewrap / macOS Seatbelt 后切换焦点。原 Native Pane 保留，失败时不影响原 shell，不向已有 Pane 注入文本。</p><p>Return to Native 只是切换焦点，不代表 Sandbox 的进程已经终止。完整的结束/清理与重连需在后端代码及独立 Case 中实现、验收。</p></article>
+<article class="np-detail"><h3>信息架构和证据边界</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox 能力本地视图。App：AppLayers → WorkspacePanel 唯一 AppPageHeader/Back → WorkspaceShell → Sandbox 配置/确认/详情。没有新的永久 Sandbox 页面。</p><p>字体、终端渲染和样式为 Nession token 快照基础上的近似，非真实 React / xterm 画面。静态校验与合成 DOM 测试不等于 Chromium 或真实原生隔离验证。</p><details class="np-inspector"><summary>当前模拟状态</summary><pre id="sandbox-inspector">fixture=native; surface=terminal</pre></details></article>
+</div></section></main><footer class="np-footer">Nession · Requirement #3124 · Prototype source is not proof of production security or Acceptance</footer>
 </div>
 <script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script>
 </body></html>
