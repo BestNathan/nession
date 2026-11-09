@@ -46,6 +46,9 @@
 .nession-product .field{display:flex;flex-direction:column;gap:7px;min-width:0}
 .nession-product .field input{border:1px solid var(--nession-border);border-radius:10px;background:var(--nession-background);height:40px;width:100%;min-width:0;padding:9px 12px}
 .nession-product .field input:focus{border-color:var(--nession-muted-foreground)}
+.nession-product .field textarea{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--nession-foreground);border:1px solid var(--nession-border);border-radius:10px;background:var(--nession-background);min-height:62px;max-height:156px;min-width:0;width:100%;padding:9px 12px;resize:vertical;overflow-wrap:anywhere;white-space:pre-wrap}
+.nession-product .field textarea:focus{border-color:var(--nession-muted-foreground)}
+
 .nession-product .error{font-size:12px;color:var(--nession-danger);overflow-wrap:anywhere}
 .nession-product .offline-chip{color:var(--nession-danger)}
 .nession-product .choice{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--nession-border);border-radius:10px;padding:12px;text-align:left;min-width:0;width:100%;background:var(--nession-background)}
