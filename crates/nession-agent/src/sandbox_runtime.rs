@@ -316,6 +316,7 @@ pub fn launch_and_verify(
 }
 
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use super::*;
     use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
@@ -347,7 +348,6 @@ mod tests {
 
     /// On macOS the verified mechanism is network denial. A policy that asks
     /// for it prepares a Seatbelt launch and reports exactly that.
-    #[cfg(target_os = "macos")]
     #[test]
     fn a_verified_network_deny_prepares_a_seatbelt_launch() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -377,7 +377,6 @@ mod tests {
 
     /// A filesystem allow-list is not verified on this platform; the backend
     /// refuses it instead of approximating it.
-    #[cfg(target_os = "macos")]
     #[test]
     fn an_unverified_filesystem_policy_fails_closed_on_macos() {
         let dir = tempfile::tempdir().expect("tempdir");
