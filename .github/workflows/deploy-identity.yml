@@ -95,37 +95,11 @@ jobs:
           chmod +x /tmp/gost
           command -v kubectl >/dev/null || { echo "::error::kubectl not installed on runner"; exit 1; }
 
-      - name: Establish gost tunnel via HK relay (do not expose configuration)
+      - name: Establish owned gost tunnel via existing HK relay
         env:
           GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
         shell: bash
-        run: |
-          set -euo pipefail
-          # The CI kubeconfig targets https://192.168.2.162:6443. Alias that
-          # address onto lo so the API-server TLS SAN check passes unchanged,
-          # then forward it through the authenticated relay+wss entry on HK.
-          sudo ip addr add 192.168.2.162/32 dev lo
-          sudo nohup /tmp/gost -L tcp://192.168.2.162:6443/192.168.2.162:6443 -F "$GOST_RELAY_URL" >"$RUNNER_TEMP/gost-ci.log" 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/gost-ci.pid"
-          for i in $(seq 1 15); do
-            if curl -sk -m 2 https://192.168.2.162:6443/healthz >/dev/null 2>&1; then
-              # The local GOST listener must be bound to the one approved
-              # API alias only. A wildcard/loopback listener would expose the
-              # tunnel outside the intended destination on this runner.
-              # Probe only loopback; never send requests to unapproved LAN IPs.
-              if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6443' \
-                  >/dev/null 2>&1; then
-                echo "::error::gost listener unexpectedly accepts a different local destination"
-                exit 1
-              fi
-              echo "gost tunnel to the k8s API is up; non-allowlisted local destination denied."
-              exit 0
-            fi
-            sleep 2
-          done
-          # Raw relay diagnostics may contain private URLs, parameters or
-          # credentials even after naive username/password redaction.
-          echo "::error::gost tunnel to the k8s API is not ready (relay log suppressed)"; exit 1
+        run: bash scripts/ci/deploy-identity-tunnel.sh start
 
       - name: Verify read-only Kubernetes identity
         env:
@@ -235,23 +209,7 @@ jobs:
           path: ${{ runner.temp }}/deployment-attestation.json
           retention-days: 90
 
-      - name: Remove temporary tunnel and kubeconfig
+      - name: Remove only job-owned tunnel, alias and temporary evidence
         if: always()
         shell: bash
-        run: |
-          # Only stop this attempt's tunnel; never match unrelated gost
-          # processes on a shared runner or rely on broad pkill patterns.
-          if [[ -f "$RUNNER_TEMP/gost-ci.pid" ]]; then
-            pid="$(cat "$RUNNER_TEMP/gost-ci.pid")"
-            if [[ "$pid" =~ ^[0-9]+$ ]] && [[ -r "/proc/$pid/cmdline" ]] \
-              && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -Fq '/tmp/gost -L tcp://192.168.2.162:6443'; then
-              sudo kill "$pid" >/dev/null 2>&1 || true
-            fi
-          fi
-          sudo ip addr del 192.168.2.162/32 dev lo >/dev/null 2>&1 || true
-          rm -f "$RUNNER_TEMP/nession-ci-kubeconfig" "$RUNNER_TEMP/gost-ci.pid" \
-            "$RUNNER_TEMP/gost-ci.log" "$RUNNER_TEMP/deployments.json" \
-            "$RUNNER_TEMP/pods.json" "$RUNNER_TEMP/overlay.yaml" \
-            "$RUNNER_TEMP/cluster-context"
-          rm -rf "$RUNNER_TEMP/provenance"
-          echo "Only this attempt's tunnel and temporary observation inputs cleared."
+        run: bash scripts/ci/deploy-identity-tunnel.sh cleanup
