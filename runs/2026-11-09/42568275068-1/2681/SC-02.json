@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "adc5233006363f61e99801e1a5f4b54b66153cf602ac1728da23e2f29e7d7b5e",
+  "run_id": 42568275068,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-02",
+  "criterion_text": "A Linux on-demand sandbox can launch an interactive tmux Pane via trusted initial command with real filesystem and PID/IPC/User isolation; regular Native Session behavior is unchanged.",
+  "stage": "staging",
+  "target_sha": "22d9681e00edd5391a23c5b378d333221d14d14a",
+  "contract_sha256": "b8d996fa5c87deb8cbb297967383abdec50e43abd74da73f058ef59aef0a0f7f",
+  "case_revision": "22d9681e00edd5391a23c5b378d333221d14d14a",
+  "case_tree_sha": "57a3300b78435a8f6c73f8f314441fe55c0f7ffa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T05:38:56.172Z",
+  "finished_at": "2026-11-09T05:39:07.016Z",
+  "duration_ms": 10844,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "No usable Linux Sandbox backend on this runner: bubblewrap is not executable on this host",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "platform=linux backend=unavailable: bubblewrap is not executable on this host namespaces={\"cgroup\":false,\"ipc\":false,\"net\":false,\"pid\":false,\"user\":false,\"uts\":false} seccomp=false filesystem=false network_deny=false network_restricted=false cgroup_v2=unavailable"
+        }
+      ],
+      "duration_ms": 4713,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42568275068,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "22d9681e00edd5391a23c5b378d333221d14d14a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42568275068",
+    "record_path": "runs/2026-11-09/42568275068-1/2681/SC-02.json",
+    "source_result_sha256": "441b63d07f631fd94ac1c552815eace364415b03145bd2dad2c72af9a455dfa5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42568275068-1",
+    "sha256": "441b63d07f631fd94ac1c552815eace364415b03145bd2dad2c72af9a455dfa5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42568275068",
+    "durability": "time-limited; object archival not configured"
+  }
+}
