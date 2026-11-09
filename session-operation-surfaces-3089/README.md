@@ -23,9 +23,10 @@
 
 - **Web Attach:** Sidebar Session menu → Attach → roomy responsive 720px dialog; Auto/P2P/Relay side by side, whole candidate addresses, Copy full address, simulated Re-test, Cancel / Attach. Session actions → Attach settings saves preferences without attaching.
 - **App Attach:** App Sessions → Session actions → Attach → compact bottom sheet. Connection settings opens full-height screen. Select mode, Use this mode returns to quick sheet without attaching, explicit Attach confirms. Direct Attach settings opens the configuration page and Save only changes preference.
-- **Web Create:** Project detail → New Session → responsive 640px dialog; **open a content-sized Existing Location dropdown**, select Agent+directory (distinct lines plus online/offline status), confirm the closed trigger retains all visible lines and the option list wraps long paths within the same anchored width; ENV summary/options and submit remain unchanged. Ordinary New Session stays unbound to Project.
-- **App Create:** Project detail → New Session → full-height operation page, child Location and ENV selectors, Back preserving draft, explicit Create opens new Session. Cancel preserves original Project context. Project Create/Settings uses full-height views and stacked Agent/Directory editor.
-- **Scenarios:** Very long paths and URLs, offline Agent, multiple locations, ENV options, cancellation and return to the same navigation context.
+- **Web New Session:** Project detail → New Session → responsive 640px dialog; field order is Existing Location, Session Name, Env Files (optional), all using identical label/control left edges and spacing. Open the content-sized dropdown, select Agent+directory and verify the closed trigger retains status and wrapping path. Ordinary New Session remains unbound to Project.
+- **Web New Project:** Sidebar → New Project → responsive 720px dialog. Align Name, Description, Git URL/ref, Existing Locations (optional), and Image digest field with one form geometry. New Project starts with no locations; Add Location creates Agent Select/Directory textarea row whose labels and input *top edges* line up; Remove is aligned with the input row. Settings rehydrates existing locations without editing persisted Project until Save.
+- **App Create:** Project detail → New Session → full-height operation page, child Location and ENV selectors, Back preserving draft, explicit Create opens new Session. Project Create/Settings uses the same full-height layout but stacks Agent/Directory controls in a single column with a bottom CTA. One App Project header owns the title.
+- **Scenarios:** New Project empty vs Settings populated locations, Add/Remove, long paths and URLs, offline Agent, multiple locations, ENV options, cancellation and return to the same navigation context.
 - **Devices:** Web 1440/1180/1024 and App 375/390/430/844×390. The product composition changes with review size; there is no zoom or CSS scale.
 
 ## Walkthrough
@@ -79,3 +80,24 @@ No production React code, no new backend endpoint, no changes to domain semantic
 - Publication: source branch SHA, trusted Pages manifest `session-operation-surfaces-3089` entry and live HTML/readback at the same source SHA (SC-08). **GitHub source push alone does not prove public Pages freshness.**
 
 **Knowledge Impact:** None — an existing design pattern's geometry/regression boundary, with no new product concept.
+
+
+## Dialog alignment correction — 2026-11-09 follow-up
+
+**Owner feedback:** Both **New Project** and **New Session** were visibly misaligned in the published mock. The earlier dropdown-only fix had not evaluated the entire form geometry.
+
+**Source audit:** Against `staging` `ProjectFormFields.tsx`, `ProjectLocationsEditor.tsx`, `ProjectDialogs.tsx` and `CreateSessionDialog.tsx`:
+- The prior New Project mock had omitted Description, Git URL/branch and image digest; it showed the live Project's locations at creation time, whereas the actual Create form may start with no locations. These are corrected in the mock.
+- The old `.location-editor {align-items:end}` paired a one-line Agent field with a taller Directory textarea and staggered their labels. The revised editor uses top-aligned labels and controls in a responsive `minmax(0,...)` grid. App stacks controls.
+- The prior New Session mock displayed Session Name before Existing Location, used an all-caps section heading for the latter and a separate ENV card title. The revised mock follows production field order with a shared `dialog-form`/field-label rhythm.
+- Sidebar **New Session** and **New Project** actions now use identical button/icon anatomy. App Project detail no longer duplicates the Project name beneath its host page header.
+
+**Review scenarios for Chromium:**
+1. Web 1440/1180/1024: open New Project, assert all form controls share the dialog's horizontal content edges; add Location, assert Agent/Directory labels and *control top edges* are aligned and all control widths stay within the form; remove, cancel, reopen to confirm draft resets; save a name-only Project.
+2. Web Project detail → New Session, check trigger/field horizontal edges, opening/closing and changing Location, long-path fixture with no horizontal overflow, keyboard focus and ESC.
+3. App 390/375 and landscape 844×390: New Project/Session are full-height and use stacked fields, one page header and anchored CTA; long Project forms scroll in the middle. Return/back leaves previous state intact.
+4. Switch Web→App→Web and repeat the same controls. Compare the actual dimensions of the two dialog contents, not only whether button labels are visible.
+
+**Fidelity & proof:** This mock uses the current design token snapshot but is not the React UI. The changed prototype is not considered browser-verified until a new exact-SHA Chromium/Playwright run checks these cases; a previous successful Pages deployment or the JavaScript source parser is not sufficient. Production issues SC-07/SC-08 remain independent Pending obligations.
+
+**Knowledge Impact:** None — correcting geometry and fidelity of existing Session/Project interactions, no new domain concepts.
