@@ -505,6 +505,24 @@ pub struct SandboxCapabilityCatalog {
     pub syscall_fields: Vec<SandboxFieldEntry>,
 }
 
+impl SandboxCapabilityCatalog {
+    /// The truthful "not measured" catalog for an unreachable Agent. It is
+    /// never an empty kernel feature set: discovery status is unknown.
+    pub fn unknown(reason: impl Into<String>) -> Self {
+        Self {
+            status: SandboxCatalogStatus::Unknown,
+            platform: "unknown".to_string(),
+            backend: None,
+            probe_generation: String::new(),
+            source: "unavailable".to_string(),
+            detail: Vec::new(),
+            reason: Some(reason.into()),
+            resource_fields: Vec::new(),
+            syscall_fields: Vec::new(),
+        }
+    }
+}
+
 /// The active Pane's Sandbox context.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]

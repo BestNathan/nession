@@ -67,6 +67,14 @@ pub struct ExecutionRecord {
     /// settings after an Agent restart; the snapshot can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_policy: Option<SandboxPolicy>,
+    /// The verified-mechanism names the execution reported.
+    #[serde(default)]
+    pub mechanisms: Vec<String>,
+    /// Non-fatal backend notes, kept for the inside view after a restart.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_endpoint: Option<String>,
     /// The Native Pane this execution was entered from, if any. Present only
     /// for an existing-Session Enter; the create-time execution has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,7 +101,7 @@ impl ExecutionRecord {
 #[derive(Debug)]
 pub enum ReconcileOutcome {
     /// The tmux Session still exists; the Agent should re-arm its reaper.
-    Active(ExecutionRecord),
+    Active(Box<ExecutionRecord>),
     /// Its Session is gone; the owned resources were removed.
     Cleaned(String),
     /// Cleanup failed and the record was kept for a later attempt.
@@ -709,7 +717,7 @@ pub fn reconcile(
                 .any(|pane| pane.session_name == record.session_name),
         };
         if alive {
-            outcomes.push(ReconcileOutcome::Active(record));
+            outcomes.push(ReconcileOutcome::Active(Box::new(record)));
             continue;
         }
         let mut report = CleanupReport {
@@ -774,6 +782,9 @@ mod tests {
             window_id: None,
             working_dir: String::new(),
             effective_policy: None,
+            mechanisms: Vec::new(),
+            warnings: Vec::new(),
+            proxy_endpoint: None,
             native_window_id: None,
             native_pane_id: None,
             cgroup_path: None,

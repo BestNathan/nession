@@ -435,6 +435,9 @@ fn prepare_inner(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: Some(compiled.normalized.clone()),
+        mechanisms: report.mechanisms.clone(),
+        warnings: report.warnings.clone(),
+        proxy_endpoint: report.proxy_endpoint.clone(),
         native_window_id: None,
         native_pane_id: None,
         cgroup_path: cgroup_guard

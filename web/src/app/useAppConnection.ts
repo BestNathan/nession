@@ -10,6 +10,7 @@ import { serverApi } from '@/platform/server';
 import { envApi } from '@/capabilities/env';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
+import { sandboxApi } from '@/capabilities/sandbox';
 import { gitApi } from '@/capabilities/git';
 import { imagesApi, projectsApi } from '@/product/project';
 import { terminalServerApi } from '@/product/terminal';
@@ -40,6 +41,7 @@ const SERVER_PLUGINS = [
   projectsApi,
   imagesApi,
   terminalServerApi,
+  sandboxApi,
 ];
 
 class AuthenticationRejectedError extends Error {

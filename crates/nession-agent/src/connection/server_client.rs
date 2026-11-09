@@ -48,7 +48,10 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::session::v1::{
     AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload, SessionMetadataUpdatePayload,
+    ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
+    ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
+    ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
+    SessionMetadataUpdatePayload,
 };
 use nession_protocol::{Message, ProtocolMessage};
 use serde::{Deserialize, Serialize};
@@ -3857,6 +3860,14 @@ fn session_by_name(payload: &serde_json::Value) -> ResourceKey {
 /// wrong about the resource — the two would share a queue, and a write to an
 /// env file would wait behind a mutation of a session that happened to have
 /// that name.
+/// The session a Sandbox capability payload names.
+///
+/// Its field is `session_name` (the same spelling process discovery uses), so
+/// it cannot share [`session_by_name`] — that reads `name`.
+fn sandbox_session_by_name(payload: &serde_json::Value) -> ResourceKey {
+    ResourceKey::Session(str_field(payload, "session_name"))
+}
+
 fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
     ResourceKey::Env(str_field(payload, "name"))
 }
@@ -4525,6 +4536,225 @@ core_routes!(agent, msg, responses;
                             "success": success,
                             "snapshot": snapshot,
                             "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    // ── Sandbox context capability (#3124) ──
+    //
+    // The capability observes one Session's *active Pane* on this Agent's
+    // private tmux server. The Server never names a Pane and never interprets
+    // a policy; every answer is this Agent's observation or refusal.
+    "agent.session.sandbox.context" => "agent.session.sandbox.context" => 1 => Query => {
+                    let payload: ServerSessionSandboxContextPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.context payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.context",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, context, error) =
+                        match agent.tmux.sandbox_context(&payload.session_name).await {
+                            Ok(context) => (true, Some(context), None),
+                            Err(e) => {
+                                warn!(
+                                    "Sandbox context failed for {}: {e:#}",
+                                    payload.session_name
+                                );
+                                (false, None, Some(format!("{e:#}")))
+                            }
+                        };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.context",
+                            "success": success,
+                            "context": context,
+                            "error": error,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.preflight" => "agent.session.sandbox.preflight" => 1 => Query => {
+                    let payload: ServerSessionSandboxPreflightPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.preflight payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.preflight",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_preflight(
+                            &payload.session_name,
+                            &payload.generation,
+                            &payload.policy,
+                            &payload.working_dir,
+                        )
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.preflight",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.enter" => "agent.session.sandbox.enter" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxEnterPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.enter payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.enter",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_enter(
+                            &payload.session_name,
+                            &payload.generation,
+                            &payload.enter_id,
+                            &payload.policy,
+                            &payload.working_dir,
+                        )
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.enter",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.return-to-native" => "agent.session.sandbox.return-to-native" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxReturnPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.return-to-native payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.return-to-native",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_return_to_native(&payload.session_name)
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.return-to-native",
+                            "success": true,
+                            "result": result,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.focus" => "agent.session.sandbox.focus" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxFocusPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.focus payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.focus",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let result = agent
+                        .tmux
+                        .sandbox_focus(&payload.session_name, &payload.pane_id)
+                        .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.focus",
+                            "success": true,
+                            "result": result,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

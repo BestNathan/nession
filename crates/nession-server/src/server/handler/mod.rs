@@ -28,6 +28,10 @@ use nession_protocol::contracts::env::v1::{
 };
 use nession_protocol::contracts::p2p::agent_url_with_credential;
 use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
+use nession_protocol::contracts::sandbox::v1::{
+    SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCurrentContext,
+    SandboxPreflightResult,
+};
 use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
@@ -35,10 +39,13 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
     ClientSessionEnvBindingSetPayload, ClientSessionEnvQueryPayload,
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
-    ClientSessionProcessesPayload, ProcessSnapshot, ServerSessionListPayload,
-    ServerSessionListReply, ServerSessionProcessesReply, SessionEnvActiveResponse,
-    SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
-    SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
+    ClientSessionProcessesPayload, ClientSessionSandboxContextPayload,
+    ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
+    ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
+    SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
+    ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvQueryResponse,
+    SessionMetadata, SessionMetadataResponse, SessionProcessesResponse, SessionRefusal,
+    WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
     WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
@@ -1421,6 +1428,11 @@ mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
 mod server_session_project_set_v1;
 mod server_session_relay_begin_v1;
+mod server_session_sandbox_context_v1;
+mod server_session_sandbox_enter_v1;
+mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_preflight_v1;
+mod server_session_sandbox_return_to_native_v1;
 #[cfg(test)]
 mod tests;
 
@@ -1433,6 +1445,37 @@ mod tests;
 impl ConnectionHandler {
     /// Authorize the client and split `agent:name`, then require a registered
     /// online Agent. The Agent remains the metadata owner.
+    /// The authenticated Session target for a Sandbox capability unit
+    /// (#3124).
+    ///
+    /// The registry id is split exactly as every other session unit splits
+    /// it; the Session must be registered and its Agent online. The Agent
+    /// remains the owner of the active Pane and the policy decision.
+    pub(super) async fn sandbox_session_target(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(String, String), String> {
+        if !self.authenticated_client {
+            return Err("Not authenticated".to_string());
+        }
+        let Some((agent_id, session_name)) = session_id.split_once(':') else {
+            return Err("Invalid session_id format. Expected 'agent_id:session_name'".to_string());
+        };
+        if agent_id.is_empty() || session_name.is_empty() {
+            return Err("Invalid session_id format. Expected 'agent_id:session_name'".to_string());
+        }
+        if self.session_registry.get(session_id).await.is_none() {
+            return Err(format!("Session '{session_id}' not found"));
+        }
+        match self.agent_registry.get(agent_id).await {
+            Some(agent) if agent.status == AgentStatus::Online => {
+                Ok((agent_id.to_string(), session_name.to_string()))
+            }
+            Some(_) => Err(format!("Agent '{agent_id}' is offline")),
+            None => Err(format!("Agent '{agent_id}' not found")),
+        }
+    }
+
     pub(super) async fn resolve_session_metadata_target(
         &mut self,
         session_id: &str,

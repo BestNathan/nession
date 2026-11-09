@@ -41,5 +41,5 @@ pub use exec::{
     LaunchRequest, LivePane, PreflightReport, PreparedSandbox, ReconcileOutcome,
     SandboxExecutionHandle,
 };
-pub use policy::{compile, CompiledSandboxPolicy};
+pub use policy::{compile, hex_sha256, requested_mechanisms, CompiledSandboxPolicy};
 pub use settings::SandboxSettings;

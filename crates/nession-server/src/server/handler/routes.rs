@@ -117,6 +117,15 @@ server_routes!(handler, msg, payload;
     // Read-only and Agent-scoped (#2514): it observes the Panes of one
     // Session on that Session's Agent and never enumerates the host.
     "server.session.processes" => "server.session.processes" => 1 => Query => handler.handle_client_session_processes(msg).await,
+    // Sandbox context capability (#3124). Reads observe the Agent's active
+    // Pane; Enter/Return/Focus are session-serialized mutations. Generation
+    // and Enter idempotency are owned by the Agent, which alone can prove the
+    // Pane and execution identity.
+    "server.session.sandbox.context" => "server.session.sandbox.context" => 1 => Query => handler.handle_client_session_sandbox_context(msg).await,
+    "server.session.sandbox.preflight" => "server.session.sandbox.preflight" => 1 => Query => handler.handle_client_session_sandbox_preflight(msg).await,
+    "server.session.sandbox.enter" => "server.session.sandbox.enter" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_enter(msg).await,
+    "server.session.sandbox.return-to-native" => "server.session.sandbox.return-to-native" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_return(msg).await,
+    "server.session.sandbox.focus" => "server.session.sandbox.focus" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_sandbox_focus(msg).await,
     "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function

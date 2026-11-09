@@ -22,6 +22,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
+import { sandboxApi } from '@/capabilities/sandbox';
 import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
@@ -29,6 +30,7 @@ import { fixtureCommandsSurface } from './fixtureCommands';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
+import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureInputDrop } from './fixtureInputDrop';
@@ -380,6 +382,10 @@ export function FixtureApp() {
   // `server.commands.list` owner the product does, so the fixture answers that
   // wire rather than injecting a list into the component.
   useEffect(() => commandsApi.install(fixtureCommandsSurface(search)), [search]);
+
+  // The Sandbox Agent stub (#3124): the App reaches the capability from the
+  // tool strip after mount, so the binding only has to be in place by then.
+  useEffect(() => sandboxApi.install(fixtureSandboxSurface(search)), [search]);
 
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');

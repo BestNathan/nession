@@ -50,7 +50,7 @@ fn claude_binding_env(session_name: &str, instance_id: &str) -> Vec<(String, Str
 /// resolves the passwd shell a moment later. Without this fallback the Session
 /// runs bash while the binding reports `unsupported_shell` and Layer C is
 /// skipped.
-fn resolve_session_shell(
+pub(super) fn resolve_session_shell(
     tmux_default: Option<String>,
     shell_env: Option<String>,
     passwd_shell: Option<String>,
@@ -67,7 +67,7 @@ fn resolve_session_shell(
 /// Used only as a shell-resolution fallback. `None` when the database has no
 /// entry or records a non-interactive shell.
 #[cfg(unix)]
-fn passwd_login_shell() -> Option<String> {
+pub(super) fn passwd_login_shell() -> Option<String> {
     // SAFETY: `pwd` and `buf` are valid for the whole call, and `getpwuid_r`
     // writes the record and its strings into them. On success `pw_shell`
     // points into `buf`, and the string is copied out before either is
@@ -1120,19 +1120,28 @@ impl SessionManager {
                     .list_panes()
                     .await
                     .context("locate the sandboxed Pane")?;
-                let pane_pid = panes
+                let pane = panes
                     .iter()
-                    .find(|pane| pane.session_name == name && pane.pane_index == 0)
-                    .and_then(|pane| pane.pane_pid)
+                    .find(|pane| {
+                        pane.session_name == name && pane.window_index == 0 && pane.pane_index == 0
+                    })
                     .ok_or_else(|| {
-                        anyhow::anyhow!("the sandboxed Session has no Pane process to verify")
+                        anyhow::anyhow!("the sandboxed Session has no Pane to verify")
                     })?;
+                let pane_pid = pane.pane_pid.ok_or_else(|| {
+                    anyhow::anyhow!("the sandboxed Session has no Pane process to verify")
+                })?;
+                let target = crate::sandbox_runtime::PaneLaunchTarget {
+                    pane_pid,
+                    pane_id: Some(pane.pane_id.clone()),
+                    window_id: Some(pane.window_id.clone()),
+                };
                 let session_name = name.to_string();
                 let report = tokio::task::spawn_blocking(move || {
                     crate::sandbox_runtime::launch_and_verify(
                         &runtime,
                         prepared,
-                        pane_pid,
+                        target,
                         &session_name,
                     )
                 })

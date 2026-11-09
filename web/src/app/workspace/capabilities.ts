@@ -26,6 +26,7 @@ import {
   resolveQuickCommandsState,
 } from '@/product/terminal/quickCommands/quickCommands';
 import { PROJECT_CAPABILITY_ID, PROJECT_CAPABILITY_TITLE, resolveProjectCapabilityState } from '@/capabilities/project';
+import { SANDBOX_CAPABILITY_ID, SANDBOX_TITLE } from '@/capabilities/sandbox';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -78,6 +79,15 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'session', title: 'Session', available: () => true },
   { id: 'agent', title: 'Agent', available: () => true },
   { id: 'env', title: 'Environment', shortTitle: 'Env', available: () => true },
+  // Sandbox exists where there is a Session and the Agent that owns it (#3124).
+  // `inside`/`outside`/`unknown` is the Agent's authenticated observation,
+  // read by the capability view on open; host support is Enter eligibility,
+  // never containment.
+  {
+    id: SANDBOX_CAPABILITY_ID,
+    title: SANDBOX_TITLE,
+    available: (ctx) => ctx.session !== null,
+  },
 ];
 
 function providerFor(

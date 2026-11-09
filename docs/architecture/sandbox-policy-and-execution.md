@@ -1,9 +1,11 @@
 # Sandbox policy and execution isolation
 
-Status: **V1 delivered in source for #2681** (on-demand execution; not
+Status: **V1 delivered in source for #2681**, with the context capability and
+existing-Session Enter added by #3124 (on-demand, Pane-scoped execution; not
 whole-Session enforcement). Real Linux/macOS proof is bound to the Acceptance
-Cases under `e2e/acceptance/cases/2681/`; nothing in this document is evidence
-that a particular runner installed a mechanism.
+Cases under `e2e/acceptance/cases/2681/` and `e2e/acceptance/cases/3124/`;
+nothing in this document is evidence that a particular runner installed a
+mechanism.
 
 This is the canonical current-architecture owner for Sandbox behaviour. The
 product decision (what V1 promises and explicitly does not) remains Requirement
@@ -136,21 +138,82 @@ own cgroup hosts processes, still fails closed at policy validation; it does not
 silently degrade to Native. The acceptance lane measures the same capabilities
 and reports Pending with the measured prerequisite when a runner lacks them.
 
+## Context capability and existing-Session Enter (#3124)
+
+Sandbox is a Session-context **capability**, not a host monitor. The subject is
+the selected Session's **active Pane**:
+
+```text
+active Pane -> inside  : verified Nession-managed execution for THIS Pane
+             -> outside : a Native Pane; Enter may be eligible
+             -> unknown : identity/instance/execution not provable
+```
+
+`server.session.sandbox.context` reads the Agent's observation; the Agent
+resolves the active Pane itself (`window_active` + `pane_active` on its private
+tmux server), matches a tracked execution by exact `pane_id` (or, for a
+pre-#3124 record, by the recorded root PID), and requires the Session's durable
+`instance_id` to match. A same-named recreation therefore never inherits an
+older execution, and an available backend never by itself produces `inside`.
+
+`server.session.sandbox.preflight` validates the Web-safe draft on the Agent
+without creating resources: compilation, working-directory/host-path checks and
+the measured host-capability validation. `server.session.sandbox.enter` is the
+single explicit mutation:
+
+1. it re-reads the context and requires the preflight's opaque `generation` to
+   still describe the same Pane/instance/execution;
+2. it re-probes the host through `prepare` (the preflight is a hint, never a
+   reservation);
+3. `new-window -d` starts the trusted launcher in the **same logical Session**;
+4. the launch barrier must verify before focus moves (`select-window`), so the
+   original Native Pane is never written to and stays focused on failure;
+5. a failed verification removes exactly the Window this attempt created and
+   releases its owned resources. A repeated client `enter_id` replays the
+   completed outcome instead of launching again.
+
+The original Native Pane and the new Sandbox Pane are siblings. Return to
+Native is a **focus switch**; the Sandbox execution keeps running. The Shell's
+exit closes its Window, and the Pane-keyed reaper releases the record/cgroup.
+Terminating a Sandbox execution is a separate lifecycle action, not a side
+effect of returning.
+
+### The Web-safe draft is a projection, not a second policy
+
+The editor model (`SandboxPolicyDraft`) cannot carry the canonical dotted
+cgroup keys under the generated-binding naming rules. Resource/Syscall are
+therefore typed `{key, value}` rows that start empty. `nession-sandbox`
+materializes them into `resource.cgroup_v2` / `syscall.seccomp`, validating
+unknown, duplicate, blank and malformed rows with field-level errors, and
+**omits an empty group** rather than sending `{}`. `compile` and the launch
+barrier remain the only policy authorities. The Agent's capability catalog
+(`resource_fields`, `syscall_fields`, `probe_generation`) is measured from its
+real delegated child cgroup and profile registry; it feeds UI suggestions, and
+stale probes are revalidated on preflight/Enter.
+
+The inside view shows the execution's **observed normalized policy**, verified
+mechanisms, warnings, execution/PID identity and its Pane-only scope. The
+normalized policy is persisted in the durable execution record, so an Agent
+restart can still answer it; a digest alone cannot reconstruct settings.
+
 ## Lifecycle and reconciliation
 
 Each execution has a durable record under the Agent sandbox state directory
-(execution id, Session name, instance id, backend, policy digest, cgroup path,
-restricted flag). Cleanup when the Session disappears releases the cgroup
-(`cgroup.kill` only inside that owned directory), closes the channel socket and
-removes the record/directory. A failed cleanup keeps the record for retry.
+(execution id, Session name and instance id, tmux `pane_id`/`window_id`, the
+observed normalized policy and verified mechanisms, backend, digest, cgroup
+path, restricted flag, and the preserved Native Pane for an Enter). Cleanup
+when the Pane disappears releases the cgroup (`cgroup.kill` only inside that
+owned directory), closes the channel socket and removes the record/directory. A
+failed cleanup keeps the record for retry.
 
-The Agent reaper polls tmux; a successful snapshot that lacks a tracked name
-triggers cleanup. At startup, records are reconciled against the live Session
-set, so a previous Agent process cannot silently orphan resources and cannot
-cross-kill unrelated processes. Restricted proxying does not survive the Agent
-process itself: the Pane and its cgroup do, but the host proxy listener is
-recreated only for new executions. This limitation is recorded, not claimed
-away.
+The Agent reaper polls tmux Panes; a successful snapshot that lacks a tracked
+`pane_id` triggers cleanup even while the Session name lives. A pre-#3124
+record without a Pane identity falls back to Session liveness. At startup,
+records are reconciled against the live Pane set, so a previous Agent process
+cannot silently orphan resources and cannot cross-kill unrelated processes.
+Restricted proxying does not survive the Agent process itself: the Pane and its
+cgroup do, but the host proxy listener is recreated only for new executions.
+This limitation is recorded, not claimed away.
 
 ## macOS: exactly what was verified
 
@@ -165,9 +228,10 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 
 ## Known limits (V1)
 
-- Not whole-Session enforcement: tmux server `run-shell`, new-window/split
+- Not whole-Session enforcement: tmux server `run-shell`, other new-window/split
   command overrides and the shared control plane remain outside a Pane's
-  execution domain.
+  execution domain. Enter isolates one new Pane; it does not convert the
+  existing Native Pane or cover future Panes.
 - No OCI image/rootfs, layer store, VM or ingress port publication.
 - No HTTPS MITM, URL-path/method filtering, payload inspection or DLP.
 - An allowed host/port can still exfiltrate data; the policy authorizes
@@ -186,13 +250,18 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Launcher argv, masking, seccomp baseline | `crates/nession-sandbox/src/linux/bwrap.rs`, `linux/seccomp.rs` |
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |
 | Launch barrier and proxy identity | `crates/nession-sandbox/src/linux/channel.rs`, `src/bridge.rs` |
-| Owned-resource reconciliation | `crates/nession-sandbox/src/exec.rs`, `crates/nession-agent/src/sandbox_runtime.rs` |
+| Context snapshot, generation and Enter idempotency | `crates/nession-agent/src/tmux/sandbox_context.rs`, `crates/nession-server/src/server/handler/server_session_sandbox_*_v1.rs` |
+| Draft rows → canonical policy, catalog | `crates/nession-sandbox/src/draft.rs`, `capabilities.rs` |
+| Owned-resource reconciliation (by Pane) | `crates/nession-sandbox/src/exec.rs`, `crates/nession-agent/src/sandbox_runtime.rs` |
 | Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs` and `e2e/acceptance/cases/2681/` |
+| Existing-Session Enter and active-Pane context | `e2e/acceptance/cases/3124/` (real Server + Agent), `e2e/tests/browser/sandbox-workspace-capability.spec.ts` |
 | macOS verified scope | `crates/nession-sandbox/src/macos/` (probe tests run on macOS) |
 
 ## References
 
-- #2681 — normative Requirement and Acceptance Plan.
+- #2681 — normative Requirement and Acceptance Plan (create-time V1).
+- [#3124](https://github.com/BestNathan/nession/issues/3124) — context
+  capability, policy editor and existing-Session Enter.
 - [#2469](session-tmux-sdk-ownership.md) — Session/tmux ownership.
 - [#2514](agent-process-discovery.md) — read-only process discovery.
 - [#170](session-env-binding.md) — independent Session Environment Binding.

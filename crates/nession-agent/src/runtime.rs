@@ -209,9 +209,15 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     // tmux Sessions that actually exist. A failed listing is not "no
     // Sessions"; the pass is skipped and the records stay for the next start.
     if let Some(sandbox) = tmux_for_client.sandbox_runtime() {
-        match tmux_for_client.list_sessions().await {
-            Ok(sessions) => {
-                let live: Vec<String> = sessions.into_iter().map(|session| session.name).collect();
+        match tmux_for_client.tmux_dep().ops().list_panes().await {
+            Ok(panes) => {
+                let live: Vec<nession_sandbox::LivePane> = panes
+                    .into_iter()
+                    .map(|pane| nession_sandbox::LivePane {
+                        session_name: pane.session_name,
+                        pane_id: pane.pane_id,
+                    })
+                    .collect();
                 if let Err(error) = sandbox.reconcile(&live) {
                     tracing::warn!("Sandbox reconciliation failed: {error:#}");
                 }

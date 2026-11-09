@@ -1,44 +1,78 @@
-//! Agent-owned Sandbox execution lifecycle (#2681).
+//! Agent-owned Sandbox execution lifecycle (#2681, #3124).
 //!
 //! `nession-sandbox` owns policy compilation, the native backends and the
 //! launch barrier. This module owns the Agent's side of the lifecycle: where
 //! the host configuration comes from, which executions are currently tracked,
 //! cleanup when a Pane disappears, and reconciliation after a restart.
 //!
-//! The tracker never treats a failed tmux listing as "no Sessions". A query
+//! Executions are keyed by the tmux **Pane** they own, not only by Session
+//! name: one Session may hold a Native Pane and one or more Sandbox Panes, and
+//! a removed Window must not be mistaken for a live execution just because its
+//! Session still exists.
+//!
+//! The tracker never treats a failed tmux listing as "no Panes". A query
 //! failure skips the pass; only a successful snapshot that lacks a tracked
-//! name releases that execution's owned resources.
+//! Pane releases that execution's owned resources.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use nession_protocol::contracts::sandbox::v1::{
+    SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog,
+};
 use nession_sandbox::{
-    cleanup_record, prepare, probe, reconcile, Capabilities, CleanupReport, ExecutionRecord,
-    LaunchRequest, PreparedSandbox, ReconcileOutcome, SandboxExecutionHandle, SandboxSettings,
+    catalog, cleanup_record, prepare, probe, reconcile, Capabilities, CleanupReport,
+    ExecutionRecord, LaunchRequest, LivePane, PreparedSandbox, ReconcileOutcome,
+    SandboxExecutionHandle, SandboxSettings,
 };
 
 use crate::tmux::ops::TmuxDep;
 
 const REAPER_INTERVAL: Duration = Duration::from_millis(500);
 const REAPER_IDLE_INTERVAL: Duration = Duration::from_secs(2);
+/// The host catalog is a measured fact; probing it on every context refresh
+/// would spawn Bubblewrap fixtures repeatedly. The capability changes rarely,
+/// and Enter re-probes through `prepare` regardless.
+const CATALOG_TTL: Duration = Duration::from_secs(15);
+/// How many completed Enter attempts are remembered for idempotent retries.
+const RECENT_ENTER_LIMIT: usize = 32;
 
 /// One tracked execution.
 enum TrackedExecution {
     /// A verified execution owned by this Agent process.
     Live(Box<SandboxExecutionHandle>),
-    /// A record recovered at startup whose Session still exists. Its owned
-    /// resources are released when the Session disappears.
-    Recovered(ExecutionRecord),
+    /// A record recovered at startup whose Pane still exists. Its owned
+    /// resources are released when the Pane disappears.
+    Recovered(Box<ExecutionRecord>),
+}
+
+impl TrackedExecution {
+    fn record(&self) -> &ExecutionRecord {
+        match self {
+            Self::Live(handle) => handle.record(),
+            Self::Recovered(record) => record,
+        }
+    }
+}
+
+/// The Pane a prepared execution was launched into, as tmux reported it.
+#[derive(Debug, Clone)]
+pub struct PaneLaunchTarget {
+    pub pane_pid: u32,
+    pub pane_id: Option<String>,
+    pub window_id: Option<String>,
 }
 
 /// The Agent's Sandbox runtime.
 pub struct SandboxRuntime {
     settings: SandboxSettings,
     executions: Mutex<HashMap<String, TrackedExecution>>,
+    recent_enters: Mutex<VecDeque<(String, SandboxActionResult)>>,
+    catalog_cache: Mutex<Option<(Instant, SandboxCapabilityCatalog)>>,
     reaper_started: AtomicBool,
     tmux: Mutex<Option<TmuxDep>>,
 }
@@ -49,6 +83,8 @@ impl SandboxRuntime {
         Arc::new(Self {
             settings,
             executions: Mutex::new(HashMap::new()),
+            recent_enters: Mutex::new(VecDeque::new()),
+            catalog_cache: Mutex::new(None),
             reaper_started: AtomicBool::new(false),
             tmux: Mutex::new(None),
         })
@@ -107,6 +143,30 @@ impl SandboxRuntime {
         probe(&self.settings)
     }
 
+    /// The measured host catalog, cached briefly (see [`CATALOG_TTL`]).
+    pub fn catalog(&self) -> SandboxCapabilityCatalog {
+        let now = Instant::now();
+        if let Ok(cache) = self.catalog_cache.lock() {
+            if let Some((measured_at, catalog)) = cache.as_ref() {
+                if now.duration_since(*measured_at) < CATALOG_TTL {
+                    return catalog.clone();
+                }
+            }
+        }
+        let catalog = catalog(&self.capabilities());
+        if let Ok(mut cache) = self.catalog_cache.lock() {
+            *cache = Some((now, catalog.clone()));
+        }
+        catalog
+    }
+
+    /// Discard the cached catalog (after a launch changed host resources).
+    pub fn forget_catalog(&self) {
+        if let Ok(mut cache) = self.catalog_cache.lock() {
+            *cache = None;
+        }
+    }
+
     /// Compile and prepare a launch. Blocking; callers use
     /// `spawn_blocking`.
     pub fn prepare(&self, request: &LaunchRequest) -> Result<PreparedSandbox> {
@@ -121,33 +181,126 @@ impl SandboxRuntime {
         self.spawn_reaper();
     }
 
-    /// Track a verified execution.
-    pub fn register(self: &Arc<Self>, session_name: &str, handle: SandboxExecutionHandle) {
+    /// Track a verified execution under the Pane it owns.
+    pub fn register(self: &Arc<Self>, handle: SandboxExecutionHandle) {
+        let key = execution_key(handle.record());
         if let Ok(mut executions) = self.executions.lock() {
-            executions.insert(
-                session_name.to_string(),
-                TrackedExecution::Live(Box::new(handle)),
-            );
+            executions.insert(key, TrackedExecution::Live(Box::new(handle)));
         }
         self.spawn_reaper();
     }
 
-    /// Whether this Session has a tracked execution.
+    /// Whether any execution of this Session is tracked.
     pub fn is_tracked(&self, session_name: &str) -> bool {
         self.executions
             .lock()
-            .map(|executions| executions.contains_key(session_name))
+            .map(|executions| {
+                executions
+                    .values()
+                    .any(|entry| entry.record().session_name == session_name)
+            })
             .unwrap_or(false)
     }
 
-    /// Release one Session's owned resources. Returns `None` when the Session
-    /// was not tracked.
-    pub fn cleanup_session(&self, session_name: &str) -> Result<Option<CleanupReport>> {
+    /// The execution that owns one exact Pane, if this Agent tracks it.
+    pub fn execution_for_pane(&self, session_name: &str, pane_id: &str) -> Option<ExecutionRecord> {
+        self.executions.lock().ok().and_then(|executions| {
+            executions
+                .values()
+                .map(TrackedExecution::record)
+                .find(|record| {
+                    record.session_name == session_name
+                        && record.pane_id.as_deref() == Some(pane_id)
+                })
+                .cloned()
+        })
+    }
+
+    /// The legacy (pre-per-Pane) execution whose Pane is the one with this
+    /// root PID. A record created before #3124 named no Pane id.
+    pub fn legacy_execution_for_pane(
+        &self,
+        session_name: &str,
+        pane_pid: Option<u32>,
+    ) -> Option<ExecutionRecord> {
+        let pane_pid = pane_pid?;
+        self.executions.lock().ok().and_then(|executions| {
+            executions
+                .values()
+                .map(TrackedExecution::record)
+                .find(|record| {
+                    record.session_name == session_name
+                        && record.pane_id.is_none()
+                        && record.pane_pid == Some(pane_pid)
+                })
+                .cloned()
+        })
+    }
+
+    /// Every tracked execution with a Pane identity in this Session.
+    pub fn sandbox_panes(&self, session_name: &str) -> Vec<ExecutionRecord> {
+        self.executions
+            .lock()
+            .map(|executions| {
+                executions
+                    .values()
+                    .map(TrackedExecution::record)
+                    .filter(|record| {
+                        record.session_name == session_name && record.pane_id.is_some()
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Release every execution owned by one Session (a Session kill).
+    pub fn cleanup_session(&self, session_name: &str) -> Result<usize> {
+        let keys: Vec<String> = self
+            .executions
+            .lock()
+            .map(|executions| {
+                executions
+                    .iter()
+                    .filter(|(_, entry)| entry.record().session_name == session_name)
+                    .map(|(key, _)| key.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut cleaned = 0;
+        for key in keys {
+            if self.cleanup_entry(&key)?.is_some() {
+                cleaned += 1;
+            }
+        }
+        Ok(cleaned)
+    }
+
+    /// Release one exact Pane's execution, if tracked.
+    pub fn cleanup_pane(&self, session_name: &str, pane_id: &str) -> Result<Option<CleanupReport>> {
+        let key = self.executions.lock().ok().and_then(|executions| {
+            executions
+                .iter()
+                .find(|(_, entry)| {
+                    let record = entry.record();
+                    record.session_name == session_name
+                        && record.pane_id.as_deref() == Some(pane_id)
+                })
+                .map(|(key, _)| key.clone())
+        });
+        match key {
+            Some(key) => self.cleanup_entry(&key),
+            None => Ok(None),
+        }
+    }
+
+    /// Release one tracked key. Returns `None` when it was not tracked.
+    pub fn cleanup_entry(&self, key: &str) -> Result<Option<CleanupReport>> {
         let Some(entry) = self
             .executions
             .lock()
             .ok()
-            .and_then(|mut executions| executions.remove(session_name))
+            .and_then(|mut executions| executions.remove(key))
         else {
             return Ok(None);
         };
@@ -161,8 +314,8 @@ impl SandboxRuntime {
                         // reaper must not forget resources they still own.
                         if let Ok(mut executions) = self.executions.lock() {
                             executions.insert(
-                                session_name.to_string(),
-                                TrackedExecution::Recovered(record),
+                                key.to_string(),
+                                TrackedExecution::Recovered(Box::new(record)),
                             );
                         }
                         Err(error.into())
@@ -181,22 +334,42 @@ impl SandboxRuntime {
         }
     }
 
-    /// Reconcile records left by a previous Agent process.
-    pub fn reconcile(self: &Arc<Self>, live_sessions: &[String]) -> Result<()> {
-        let outcomes = reconcile(&self.settings, live_sessions).map_err(anyhow::Error::from)?;
+    /// Remember one completed Enter attempt for an idempotent retry.
+    pub fn remember_enter(&self, enter_id: &str, result: SandboxActionResult) {
+        if let Ok(mut recent) = self.recent_enters.lock() {
+            recent.push_back((enter_id.to_string(), result));
+            while recent.len() > RECENT_ENTER_LIMIT {
+                recent.pop_front();
+            }
+        }
+    }
+
+    /// The outcome of an Enter attempt with this client id, if still recent.
+    pub fn recent_enter(&self, enter_id: &str) -> Option<SandboxActionResult> {
+        self.recent_enters.lock().ok().and_then(|recent| {
+            recent
+                .iter()
+                .find(|(id, _)| id == enter_id)
+                .map(|(_, result)| result.clone())
+        })
+    }
+
+    /// Reconcile records left by a previous Agent process against the live
+    /// tmux Pane set.
+    pub fn reconcile(self: &Arc<Self>, live_panes: &[LivePane]) -> Result<()> {
+        let outcomes = reconcile(&self.settings, live_panes).map_err(anyhow::Error::from)?;
         if let Ok(mut executions) = self.executions.lock() {
             for outcome in outcomes {
                 match outcome {
                     ReconcileOutcome::Active(record) => {
                         tracing::info!(
                             session = %record.session_name,
+                            pane = %record.pane_id.as_deref().unwrap_or("<legacy>"),
                             execution = %record.execution_id,
-                            "recovered Sandbox execution for a live Session"
+                            "recovered Sandbox execution for a live Pane"
                         );
-                        executions.insert(
-                            record.session_name.clone(),
-                            TrackedExecution::Recovered(record),
-                        );
+                        let key = execution_key(&record);
+                        executions.insert(key, TrackedExecution::Recovered(Box::new(*record)));
                     }
                     ReconcileOutcome::Cleaned(execution_id) => {
                         tracing::info!(%execution_id, "removed leftover Sandbox resources");
@@ -240,30 +413,41 @@ impl SandboxRuntime {
                     tokio::time::sleep(REAPER_IDLE_INTERVAL).await;
                     continue;
                 }
-                match ops.list_sessions().await {
-                    Ok(sessions) => {
-                        let live: HashSet<String> =
-                            sessions.into_iter().map(|session| session.name).collect();
+                match ops.list_panes().await {
+                    Ok(panes) => {
+                        let live_panes: HashSet<String> =
+                            panes.iter().map(|pane| pane.pane_id.clone()).collect();
+                        let live_sessions: HashSet<String> =
+                            panes.iter().map(|pane| pane.session_name.clone()).collect();
                         let vanished: Vec<String> = runtime
                             .executions
                             .lock()
                             .map(|executions| {
                                 executions
-                                    .keys()
-                                    .filter(|name| !live.contains(*name))
-                                    .cloned()
+                                    .iter()
+                                    .filter(|(_, entry)| {
+                                        let record = entry.record();
+                                        match &record.pane_id {
+                                            Some(pane_id) => !live_panes.contains(pane_id),
+                                            // A pre-#3124 record has no Pane id;
+                                            // its Session is the only evidence
+                                            // the record can be checked against.
+                                            None => !live_sessions.contains(&record.session_name),
+                                        }
+                                    })
+                                    .map(|(key, _)| key.clone())
                                     .collect()
                             })
                             .unwrap_or_default();
-                        for name in vanished {
+                        for key in vanished {
                             let runtime = Arc::clone(&runtime);
                             let cleanup =
-                                tokio::task::spawn_blocking(move || runtime.cleanup_session(&name))
+                                tokio::task::spawn_blocking(move || runtime.cleanup_entry(&key))
                                     .await;
                             match cleanup {
                                 Ok(Ok(Some(report))) => tracing::info!(
                                     execution = %report.execution_id,
-                                    "released Sandbox resources after its Session ended"
+                                    "released Sandbox resources after its Pane ended"
                                 ),
                                 Ok(Ok(None)) => {}
                                 Ok(Err(error)) => tracing::warn!(
@@ -275,10 +459,10 @@ impl SandboxRuntime {
                             }
                         }
                     }
-                    // A failed query is not "no Sessions". Skipping the pass
-                    // is the only safe reading.
+                    // A failed query is not "no Panes". Skipping the pass is
+                    // the only safe reading.
                     Err(error) => tracing::warn!(
-                        "Sandbox reaper could not list Sessions; skipping this pass: {error:#}"
+                        "Sandbox reaper could not list Panes; skipping this pass: {error:#}"
                     ),
                 }
                 tokio::time::sleep(REAPER_INTERVAL).await;
@@ -287,19 +471,44 @@ impl SandboxRuntime {
     }
 }
 
-/// Prepare, verify and register one sandboxed Session.
+/// The tracker key for one execution: its owned Pane, or the Session for a
+/// record created before per-Pane tracking.
+pub fn execution_key(record: &ExecutionRecord) -> String {
+    match &record.pane_id {
+        Some(pane_id) => format!("pane:{pane_id}"),
+        None => format!("session:{}", record.session_name),
+    }
+}
+
+/// The actionable outcome for an error kind, with no context attached. The
+/// caller adds the observed context when it has one.
+pub fn action_failure(
+    kind: SandboxActionErrorKind,
+    error: impl Into<String>,
+) -> SandboxActionResult {
+    SandboxActionResult {
+        success: false,
+        error_kind: Some(kind),
+        error: Some(error.into()),
+        field_errors: None,
+        context: None,
+    }
+}
+
+/// Prepare, verify and register one sandboxed Pane.
 ///
 /// Runs on a blocking task: probes spawn bounded processes and the barrier
-/// waits for the in-sandbox init. The tmux Session has already been created;
-/// on any failure the caller kills it.
+/// waits for the in-sandbox init. `launch_and_verify` deliberately refuses to
+/// kill the Pane itself — the caller owns the tmux resource it created and
+/// knows whether removal is safe.
 pub fn launch_and_verify(
     runtime: &Arc<SandboxRuntime>,
-    prepared: PreparedSandbox,
-    pane_pid: u32,
+    mut prepared: PreparedSandbox,
+    pane: PaneLaunchTarget,
     session_name: &str,
 ) -> Result<nession_protocol::contracts::sandbox::v1::SandboxExecutionReport> {
-    let mut prepared = prepared;
-    if let Err(error) = prepared.verify(pane_pid) {
+    prepared.set_pane_identity(pane.pane_id.as_deref(), pane.window_id.as_deref());
+    if let Err(error) = prepared.verify(pane.pane_pid) {
         let abort = prepared.abort();
         return Err(anyhow::anyhow!(
             "sandbox launch verification failed: {error}{}",
@@ -311,7 +520,9 @@ pub fn launch_and_verify(
     }
     let report = prepared.report().clone();
     let handle = prepared.into_handle();
-    runtime.register(session_name, handle);
+    runtime.register(handle);
+    runtime.forget_catalog();
+    let _ = session_name;
     Ok(report)
 }
 
