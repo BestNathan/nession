@@ -11,6 +11,13 @@ if [ "${NESSION_PRE_COMMIT_STAGED:-}" = 1 ]; then
   exec bash "${GATES_DIR}/run-staged-index" "$@"
 fi
 
+# Git hooks export the pushing repository's view (GIT_DIR, GIT_WORK_TREE, …)
+# to their children. A Gate inspects the checked-out worktree, never that
+# inherited view: a test which invokes `git` must not operate on the caller's
+# repository (and a `git init`/`git branch -M` fixture must not rename its
+# branch). Pre-commit's staged-index runner unsets these itself above.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
 usage() {
   cat <<'USAGE'
 usage:

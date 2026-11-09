@@ -11,7 +11,7 @@ import { envApi } from '@/capabilities/env';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
 import { gitApi } from '@/capabilities/git';
-import { projectsApi } from '@/product/project';
+import { imagesApi, projectsApi } from '@/product/project';
 import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
@@ -38,6 +38,7 @@ const SERVER_PLUGINS = [
   gitApi,
   commandsApi,
   projectsApi,
+  imagesApi,
   terminalServerApi,
 ];
 

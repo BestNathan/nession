@@ -18,6 +18,10 @@ async fn make_handler() -> anyhow::Result<ConnectionHandler> {
     let client_registry = Arc::new(ClientRegistry::new());
     let web_client_registry = Arc::new(WebClientRegistry::new());
     let env_service = EnvService::new(Arc::clone(&db));
+    let image_manager = Arc::new(nession_server::image::ImageManager::unavailable(
+        Arc::clone(&db),
+        std::env::temp_dir().join(format!("nession-image-test-{}", uuid::Uuid::new_v4())),
+    )?);
     Ok(ConnectionHandler::new(
         ConnectionHandlerDeps {
             agent_registry,
@@ -26,6 +30,7 @@ async fn make_handler() -> anyhow::Result<ConnectionHandler> {
             client_registry,
             web_client_registry,
             env_service,
+            image_manager,
             db,
 
             p2p_broker: std::sync::Arc::new(nession_server::broker::ConnectionBroker::new(300)),

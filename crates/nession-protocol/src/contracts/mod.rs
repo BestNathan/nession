@@ -39,6 +39,7 @@ pub mod env;
 pub mod file;
 #[cfg(test)]
 mod fixtures;
+pub mod image;
 pub mod p2p;
 pub mod project;
 pub mod sandbox;

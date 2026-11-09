@@ -2,6 +2,7 @@
 members = [
     "crates/nession-claude-code",
     "crates/nession-common",
+    "crates/nession-erofs",
     "crates/nession-git",
     "crates/nession-mcp",
     "crates/nession-protocol",

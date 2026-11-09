@@ -11,6 +11,7 @@
 //! to/from the `u16`/`u32` shapes the domain types use.
 
 pub mod entities;
+mod images;
 pub mod migration;
 pub mod schema;
 
@@ -19,6 +20,7 @@ use entities::{
     agents, env_files, projects, quick_commands, session_env_bindings, session_project_bindings,
     sessions,
 };
+pub use images::{ImageGrantRow, ImageLeaseRow, ImageRow};
 use migration::Migrator;
 use nession_protocol::contracts::project::v1::{
     ProjectLocation, ProjectSessionDefaults, ProjectSource,
