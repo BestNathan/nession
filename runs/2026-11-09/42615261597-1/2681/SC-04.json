@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6fe1a3a1c930a2b0d428a3d3891c4bd7e8c11dd4994b287970546df914636e5e",
+  "run_id": 42615261597,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-04",
+  "criterion_text": "Linux cgroup v2 resource constraints are applied to the entire execution domain before user code, do not include shared tmux/Agent, and expose actual resource-limit/OOM evidence; unavailable delegated controllers fail closed.",
+  "stage": "staging",
+  "target_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "contract_sha256": "1796f24738f9883855bf1cd45f5950ff3c2be4d89b5bcb81c37ef09e99a5c8ce",
+  "case_revision": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "case_tree_sha": "f036bebdca83e2de43b7dae41595b34c5a6b0752",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T12:16:14.686Z",
+  "finished_at": "2026-11-09T12:16:22.160Z",
+  "duration_ms": 7474,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Delegated cgroup v2 limits were in effect for the execution domain and released with it",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "execution 88ac9c0c-b4ee-4e54-9376-4b1bd4325155 was enrolled in /nession-accept/88ac9c0c-b4ee-4e54-9376-4b1bd4325155"
+        },
+        {
+          "type": "runtime",
+          "value": "effective limits read back: {\"cpu.max\":\"max 100000\",\"memory.max\":\"max\",\"memory.oom.group\":\"0\",\"pids.max\":\"64\"}"
+        },
+        {
+          "type": "runtime",
+          "value": "the shared Agent/tmux were outside the execution domain; the cgroup was removed on exit"
+        }
+      ],
+      "duration_ms": 1617,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42615261597,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "record_path": "runs/2026-11-09/42615261597-1/2681/SC-04.json",
+    "source_result_sha256": "b865eec90f8a3469defcccad20fbc1cea1ef494759360556db1ac8135fb2dbc0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42615261597-1",
+    "sha256": "b865eec90f8a3469defcccad20fbc1cea1ef494759360556db1ac8135fb2dbc0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "durability": "time-limited; object archival not configured"
+  }
+}

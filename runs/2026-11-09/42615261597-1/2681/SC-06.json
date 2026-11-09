@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "22e2221d983bfcb3cbc3c7a924149d259b40a67863a592e946c6031f8affa096",
+  "run_id": 42615261597,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-06",
+  "criterion_text": "macOS implementation reports actual Seatbelt support and reliably rejects incompatible `linux_namespaces`, `cgroup_v2`, `seccomp` requests; it never reports them as equivalent protections.",
+  "stage": "staging",
+  "target_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "contract_sha256": "1796f24738f9883855bf1cd45f5950ff3c2be4d89b5bcb81c37ef09e99a5c8ce",
+  "case_revision": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "case_tree_sha": "a9bd3d16d24ea09f27e7fc3a167683a95a913fb7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T12:23:56.238Z",
+  "finished_at": "2026-11-09T12:24:39.001Z",
+  "duration_ms": 42763,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "macOS reports only its verified Seatbelt capability and rejects every Linux-native guarantee without claiming equivalence",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the macOS probe observed a real Seatbelt network deny against a control connection"
+        },
+        {
+          "type": "runtime",
+          "value": "filesystem.access was rejected because the path allow-list was not verified"
+        },
+        {
+          "type": "runtime",
+          "value": "process.linux_namespaces, resource.cgroup_v2 and syscall.seccomp were rejected as Linux-native"
+        }
+      ],
+      "duration_ms": 35875,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42615261597,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "record_path": "runs/2026-11-09/42615261597-1/2681/SC-06.json",
+    "source_result_sha256": "30810cb05ddb293788be33e26b4aec5ac7cfbde75d801edd15b289c48b1dc791"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42615261597-1",
+    "sha256": "30810cb05ddb293788be33e26b4aec5ac7cfbde75d801edd15b289c48b1dc791",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "durability": "time-limited; object archival not configured"
+  }
+}

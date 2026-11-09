@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b673082d162cb4acb8a1eb80dd49d862460240bd1e44e629621864530db21ccf",
+  "run_id": 42615261597,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-02",
+  "criterion_text": "A Linux on-demand sandbox can launch an interactive tmux Pane via trusted initial command with real filesystem and PID/IPC/User isolation; regular Native Session behavior is unchanged.",
+  "stage": "staging",
+  "target_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "contract_sha256": "1796f24738f9883855bf1cd45f5950ff3c2be4d89b5bcb81c37ef09e99a5c8ce",
+  "case_revision": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "case_tree_sha": "57a3300b78435a8f6c73f8f314441fe55c0f7ffa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T12:15:57.104Z",
+  "finished_at": "2026-11-09T12:16:08.045Z",
+  "duration_ms": 10940,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A Linux on-demand Pane launched through the trusted launcher with real filesystem and PID/IPC/User isolation",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "execution 3b68e57b-28a0-47ef-ad92-4738cdff1c12 on linux-bwrap ran /bin/sh inside real mount/PID/IPC/User isolation"
+        },
+        {
+          "type": "runtime",
+          "value": "the launch barrier verified 6 filesystem probes before releasing the shell"
+        },
+        {
+          "type": "runtime",
+          "value": "sandbox namespaces: {\"cgroup\":\"cgroup:[4026531835]\",\"ipc\":\"ipc:[4026532318]\",\"mnt\":\"mnt:[4026532313]\",\"net\":\"net:[4026531833]\",\"pid\":\"pid:[4026532319]\",\"user\":\"user:[4026532320]\",\"uts\":\"uts:[4026532316]\"}"
+        },
+        {
+          "type": "runtime",
+          "value": "the Pane ran through the trusted initial command and printed: sandbox-alive unshare=1 fork=0"
+        },
+        {
+          "type": "runtime",
+          "value": "a policy without a filesystem dimension still masked and verified the Agent control paths (3 probes)"
+        }
+      ],
+      "duration_ms": 5051,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42615261597,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "record_path": "runs/2026-11-09/42615261597-1/2681/SC-02.json",
+    "source_result_sha256": "dd3ab4980f6c7a8db30b187b3d6e60b471f7430a8469be7ebc17330c5af23c98"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42615261597-1",
+    "sha256": "dd3ab4980f6c7a8db30b187b3d6e60b471f7430a8469be7ebc17330c5af23c98",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "516f823ea6fbe551d6471b7ee34be71ff1f38ea4778968501c66cdf6dc407ccd",
+  "run_id": 42615261597,
+  "run_attempt": 1,
+  "issue": 2681,
+  "criterion": "SC-05",
+  "criterion_text": "Linux seccomp baseline and backend safety prerequisites block prohibited operations and dangerous TTY/FD/socket escape paths without breaking verified interactive TUI, fork, signals, resize and job control.",
+  "stage": "staging",
+  "target_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "contract_sha256": "1796f24738f9883855bf1cd45f5950ff3c2be4d89b5bcb81c37ef09e99a5c8ce",
+  "case_revision": "0173f403c6d791e9d8152e196dad288fce113e66",
+  "case_tree_sha": "0c9fd49e20ab8a0fd71a101e47599e963f061316",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T12:16:22.161Z",
+  "finished_at": "2026-11-09T12:16:29.583Z",
+  "duration_ms": 7422,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The pinned seccomp baseline blocked a prohibited syscall without breaking shell execution",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "execution 1ebbba61-aacf-4049-af64-13f7be33c566 reported Seccomp=2 and NoNewPrivs=1"
+        },
+        {
+          "type": "runtime",
+          "value": "a blocked unshare syscall returned EPERM while a shell fork succeeded"
+        },
+        {
+          "type": "runtime",
+          "value": "TIOCSTI filtering is part of the same installed profile"
+        }
+      ],
+      "duration_ms": 1572,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42615261597,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0173f403c6d791e9d8152e196dad288fce113e66",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "record_path": "runs/2026-11-09/42615261597-1/2681/SC-05.json",
+    "source_result_sha256": "433744f3af9976cc34a76e90bf12e8d812639433e329690005d39716343af2ae"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42615261597-1",
+    "sha256": "433744f3af9976cc34a76e90bf12e8d812639433e329690005d39716343af2ae",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42615261597",
+    "durability": "time-limited; object archival not configured"
+  }
+}
