@@ -394,3 +394,10 @@
 - Categories: architecture, project, workspace, session, ownership, server, protocol
 - Reason: Record #3025's delivered Project maintenance UI, standalone detail, project-aware Existing Session creation, create-time ENV precedence with a Session-owned binding, and the fail-closed Managed entry; keep Managed EROFS/Sandbox creation owned by #3062 and record the SC-06 Case readback versus the read-only Agent's orphan-branch limit (#3068)
 - Source: https://github.com/BestNathan/nession/pull/3064
+
+## 2026-11-09T07:00:13Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the merged-staging Linux acceptance receipts (SC-02/03/04/05/07 Pass in Acceptance / Cases run 42575857638 at 1987709a), the packaged Bubblewrap Agent images and entrypoint [sandbox] projection, and keep SC-06 macOS plus a deployed-environment proof explicitly pending
+- Source: https://github.com/BestNathan/nession/pull/3096
