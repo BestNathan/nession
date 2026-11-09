@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "ddc9c518023bb5b8df433826419e339dfc5abcad",
+  "run_id": 42582458220,
+  "run_attempt": 1,
+  "plan_digest": "a23a3dce8e9f6120758b9bb996926dbee3353c36e4535d2d4d9dbbdc720cc000",
+  "artifact_digest": "sha256:61184f44300ed2bdead440d2608cd137be85283728f7b0f2327edc8c6444d227",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 13,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 154
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 60
+    },
+    {
+      "id": "project-session-binding",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 32
+    },
+    {
+      "id": "project-session-create",
+      "result": "Pass",
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 12
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 151
+    }
+  ]
+}
