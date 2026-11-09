@@ -328,6 +328,54 @@ function selfTest() {
     provenance: { ...enriched.provenance, source_record_sha256: 'e'.repeat(64) },
   }), /source digest disagrees/);
 
+  // The remote observation is part of the SAME authenticated, immutable
+  // deployment record. Older records retain their historical execution IDs;
+  // a copied/tampered sample cannot silently gain independent authority.
+  const observed = validateAttestation(RECEIPT_FIXTURE);
+  const samples = [100, 1100].map((offset_ms, index) => ({
+    at: '2026-10-25T01:00:0' + (index + 1) + '.000Z',
+    offset_ms,
+    workloads: observed.workloads.map((w) => ({
+      role: w.role, uid: w.uid, generation: w.generation,
+      observed_generation: w.observed_generation, digest: w.digest, ready: true,
+    })),
+  }));
+  const remote_observation = {
+    schema_version: 1, kind: 'nession_remote_staging_observation',
+    profile: 'remote-staging', status: 'Observed', evaluation: null,
+    environment_id: observed.environment_id, source_sha: observed.source_sha,
+    gitops_revision: observed.gitops_revision,
+    attestation_observed_at: observed.observed_at, samples,
+  };
+  const remoteEnriched = enrichReceipt({ ...RECEIPT_FIXTURE, remote_observation }, {
+    source,
+    workflowUrl: 'https://github.com/' + REPOSITORY + '/actions/runs/40118354470',
+    recordPath: path,
+  });
+  assert.equal(validateStoredRecord(remoteEnriched).item.remote_observation.samples.length, 2);
+  assert.notEqual(remoteEnriched.execution_id, enriched.execution_id);
+  const remoteIndex = indexRecord(remoteEnriched);
+  assert.equal(validateRunIndex(remoteIndex).mode, 'deployment');
+  assert.equal(remoteIndex.remote_profile, 'remote-staging');
+  assert.equal(remoteIndex.target_sha, observed.source_sha);
+  assert.throws(() => validateStoredRecord({ ...remoteEnriched, remote_observation: {
+    ...remoteEnriched.remote_observation, samples: [
+      remoteEnriched.remote_observation.samples[0],
+      { ...remoteEnriched.remote_observation.samples[1], offset_ms: 1099 },
+    ],
+  } }), /execution_id does not match|source digest disagrees/);
+  assert.throws(() => enrichReceipt({ ...RECEIPT_FIXTURE,
+    remote_observation: { ...remote_observation, evaluation: 'Pass' },
+  }, { source, workflowUrl: 'https://github.com/' + REPOSITORY +
+    '/actions/runs/40118354470', recordPath: path }), /observation-only/);
+  assert.throws(() => validateStoredRecord({ ...remoteEnriched, provenance: {
+    ...remoteEnriched.provenance, verified_source: { ...source, run_attempt: 2 },
+  } }), /canonical path|execution_id does not match/);
+  assert.ok(!JSON.stringify(remoteEnriched.remote_observation).includes('ghcr.io'),
+    'remote-staging samples must contain no registry/private URLs');
+  assert.equal(validateStoredRecord(enriched).item.remote_observation, undefined,
+    'old deployment receipts remain valid');
+
   console.log('deployment attestation ingest: source, artifact and store bindings passed');
 }
 
