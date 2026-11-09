@@ -15,8 +15,11 @@ ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 # missing, so every `git.*` unit failed at the point of running git. Kept in step
 # with `Dockerfile.agent`, which carries the longer note (including why there is
 # deliberately no `openssh-client`).
+#
+# `bubblewrap` is the Linux Sandbox backend's launcher. Namespace creation and
+# delegated cgroup v2 remain host/runtime prerequisites; see `Dockerfile.agent`.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base git && \
+    apt-get install -y --no-install-recommends nginx ca-certificates curl gettext-base git bubblewrap && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /etc/nginx/sites-enabled/default
 
