@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverCases } from '../e2e/acceptance/contract/cases.mjs';
+import { discoverCases, CASE_PLATFORMS } from '../e2e/acceptance/contract/cases.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
 import { acceptancePlan, acceptancePlanSection } from './acceptance-plan.mjs';
 import { validateCaseSelection } from './acceptance-case-selection-contract.mjs';
@@ -14,18 +14,23 @@ const SELF = fileURLToPath(import.meta.url);
 
 export function selectTrustedCases({
   issueNumbers, issues, stage, targetSha, runId, requested = '',
-  runtime = '', sourceCaseRoot, deploymentBinding = null,
+  runtime = '', platform = '', sourceCaseRoot, deploymentBinding = null,
 }) {
   if (!Array.isArray(issueNumbers) || !Array.isArray(issues)) throw new Error('Issue inputs must be arrays');
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) throw new Error('target must be an exact 40-byte hexadecimal SHA');
-  const selected = discoverCases(sourceCaseRoot)
-    .map(({ manifest }) => manifest)
+  if (platform && !CASE_PLATFORMS.has(platform)) throw new Error('unsupported Acceptance platform: ' + platform);
+  const manifests = discoverCases(sourceCaseRoot).map(({ manifest }) => manifest);
+  const manifestByKey = new Map(
+    manifests.map((item) => [item.issue + '/' + item.criterion, item]),
+  );
+  const selected = manifests
     .filter((item) => issueNumbers.includes(Number(item.issue)))
     .filter((item) => item.stage === stage)
     .filter((item) => !requested || item.criterion === requested)
     .filter((item) => !runtime || item.runtime === runtime)
-    .map(({ issue, criterion, runtime: runtimeName, verifiers }) => ({
-      issue, criterion, runtime: runtimeName,
+    .filter((item) => !platform || item.platform === platform)
+    .map(({ issue, criterion, platform: platformName, runtime: runtimeName, verifiers }) => ({
+      issue, criterion, platform: platformName, runtime: runtimeName,
       needs_browser: verifiers.some((item) => item.type === 'browser'),
     }));
   // A `when: deployed` criterion carries a `post-merge` compatibility Case,
@@ -51,6 +56,11 @@ export function selectTrustedCases({
     const explicit = acceptancePlanSection(issue.body) !== null;
     for (const criterion of context.criteria) {
       const key = issueNumber + '/' + criterion.criterion;
+      // A Case declared for another OS belongs to that platform's job; every
+      // platform covers only its own Cases. A genuinely missing Case is still
+      // expected on both platforms and fails closed there.
+      const manifest = manifestByKey.get(key);
+      if (platform && manifest && manifest.platform !== platform) continue;
       // Explicit Case-method obligations must be present. Historical issues
       // without a declared Method retain only their existing source Cases:
       // forcing a Case for all legacy Agent-validated SCs would break them.
@@ -120,6 +130,26 @@ function selfTest() {
     assert.equal(selectTrustedCases({ ...base, issues: [legacy] }).coverage.status, 'not-applicable');
     assert.throws(() => selectTrustedCases({ ...base, issues: [issue], targetSha: 'main' }), /exact/);
 
+    // A macOS-only Case belongs to the macOS job; the Linux job must not
+    // require it and the macOS job must select exactly it. An unknown platform
+    // fails closed instead of silently running on either OS.
+    const macDir = path.join(root, '44', 'SC-01'); fs.mkdirSync(macDir, { recursive: true });
+    fs.writeFileSync(path.join(macDir, 'case.yaml'),
+      'schema_version: 1\nissue: 44\ncriterion: SC-01\nstage: staging\nplatform: macos\nruntime: full-stack-local\nverifiers:\n  - type: runtime\n    entry: verify.js\nresult_policy: all-pass\n');
+    fs.writeFileSync(path.join(macDir, 'verify.js'), '// macOS fixture verifier');
+    const macIssue = { number: 44, title: 'macOS fixture', body: issueBody('staging', true) };
+    const macBase = { ...base, issueNumbers: [44], issues: [macIssue] };
+    const linuxJob = selectTrustedCases({ ...macBase, platform: 'linux' });
+    assert.equal(linuxJob.selected.length, 0);
+    assert.equal(linuxJob.coverage.status, 'not-applicable');
+    const macJob = selectTrustedCases({ ...macBase, platform: 'macos' });
+    assert.deepEqual(macJob.coverage.expected, ['44/SC-01']);
+    assert.equal(macJob.selected.length, 1);
+    assert.equal(macJob.selected[0].platform, 'macos');
+    assert.equal(selectTrustedCases(macBase).selected.length, 1);
+    assert.throws(() => selectTrustedCases({ ...macBase, platform: 'windows' }),
+      /unsupported Acceptance platform/);
+
     // A `when: deployed` criterion's post-merge compatibility Case exists in
     // the tree, but without an authenticated binding the executor makes the
     // criterion ineligible — the selector must not count the Case as
@@ -141,8 +171,8 @@ function selfTest() {
     assert.throws(() => selectTrustedCases({ ...postBase, issues: [deployedIssue],
       deploymentBinding: { environment_id: 'production', attested: true } }),
     /wrong-stage\/unknown|no source-aligned Cases/);
-    console.log('trusted Acceptance Case selection: method separation, missing coverage, '
-      + 'and deployed-binding negatives passed');
+    console.log('trusted Acceptance Case selection: method separation, platform routing, '
+      + 'missing coverage, and deployed-binding negatives passed');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -168,6 +198,7 @@ function main() {
     runId: Number(process.env.GITHUB_RUN_ID),
     requested: process.env.MANUAL_CRITERION ?? '',
     runtime: process.env.RUNTIME_PROFILE ?? '',
+    platform: process.env.ACCEPTANCE_PLATFORM ?? '',
     sourceCaseRoot: caseRoot,
     deploymentBinding,
   });
