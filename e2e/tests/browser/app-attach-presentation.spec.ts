@@ -24,7 +24,7 @@ test.describe('App Attach presentation (#3089)', () => {
 
     await page.getByTestId('app-home-browse-sessions').click();
     await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
-    await page.locator('[data-testid^="session-item-"]').first().click();
+    await page.locator('button[data-testid^="session-item-"]').first().click();
 
     const sheet = page.getByTestId('app-attach-sheet');
     await expect(sheet).toBeVisible();
