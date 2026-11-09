@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "a2661b9c598b9195a4c8505ca1b2defdbdafe544",
+  "run_id": 42603216474,
+  "run_attempt": 1,
+  "plan_digest": "f638e587377b1806514c4cb28792019c425b609bfdadba78e513c3a67bdc662d",
+  "artifact_digest": "sha256:07b3e6e8892025cf23b3d009c1652a0661aa285b0f121c0fdeb3a56437b05f4e",
+  "results": [
+    {
+      "id": "app-attach-presentation",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "app-session-operations",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "project-management",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "project-sidebar-detail",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
