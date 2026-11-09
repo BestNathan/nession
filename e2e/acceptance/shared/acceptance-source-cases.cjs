@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, checked, targetSha } = require('../../../shared/control-mode-cases.cjs');
+const { run, checked, targetSha } = require('./control-mode-cases.cjs');
 const root = path.resolve(__dirname, '../../..');
 function inspect(file) { return fs.readFileSync(path.join(root, file), 'utf8'); }
 function test(command, timeout = 90000) { return checked('node', command, timeout).trim(); }
