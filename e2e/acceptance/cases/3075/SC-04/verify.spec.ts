@@ -64,7 +64,10 @@ test('SC-04: narrow Web and App own no rail; switches and degraded states stay u
   // The offline Server keeps a truthful passive status and never becomes a
   // control; the rail's shortcuts stay usable.
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // A query-only change is a same-document navigation, so reload to mount the
+  // fixture with the offline Server input.
   await page.goto('/#/fixture?connection=disconnected');
+  await page.reload();
   await page.getByTestId('shell').waitFor();
   await waitForFixtureTerminal(page);
   await page.getByTestId('sidebar-collapse').click();

@@ -130,8 +130,10 @@ test('SC-02: rail shortcuts delegate to the existing owners and are never dead',
     .toBe(246);
   await expect(page.getByTestId('sidebar-collapse')).toBeFocused();
 
-  // No dead shortcut when Projects are not navigable.
+  // No dead shortcut when Projects are not navigable. A query-only change is a
+  // same-document navigation, so reload to mount the fixture with the input.
   await page.goto('/#/fixture?projects=empty');
+  await page.reload();
   await page.getByTestId('shell').waitFor();
   await waitForFixtureTerminal(page);
   await page.getByTestId('sidebar-collapse').click();
