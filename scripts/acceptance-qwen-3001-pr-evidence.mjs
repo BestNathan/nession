@@ -195,5 +195,10 @@ export function selfTestOriginalQwenReview(){
   bad(x=>{x.storeResult.implementing_pr.head_sha_at_attestation='1'.repeat(40);});
   bad(x=>{x.artifacts.artifacts[0].digest='sha256:'+'2'.repeat(64);});
   bad(x=>{x.artifacts.artifacts[0].expired=true;});
+  bad(x=>{x.artifacts.artifacts[0].id+=1;}); // historical Result ID must agree
+  bad(x=>{x.storeResult.artifact.source_run_attempt=2;}); // no guessed replay
+  bad(x=>{x.reviewRun.head_repository.full_name='foreign/repository';});
+  bad(x=>{x.files[0].additions=2;}); // even the same source file cannot contain extra changes
+  bad(x=>{x.comparison.status='behind';}); // source must precede target
   return true;
 }
