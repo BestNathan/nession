@@ -1,12 +1,12 @@
 ---
 title: "Project declaration and Workspace location ownership"
-description: "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, with the canonical Project/Workspace/Location/Session/Image ownership boundary"
+description: "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, plus the Project maintenance UI and Project-aware Existing Session creation with Session-owned ENV bindings"
 topic: engineering
 categories: ["architecture", "project", "workspace", "session", "ownership", "server", "protocol"]
 status: verified
 created_at: 2026-11-09T01:09:24Z
-updated_at: 2026-11-09T01:09:24Z
-sources: ["https://github.com/BestNathan/nession/issues/3021", "https://github.com/BestNathan/nession/pull/3046", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/docs/design/project.md", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-protocol/src/contracts/project/v1.rs", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-server/src/db/migration/m005_projects.rs"]
+updated_at: 2026-11-09T05:02:01Z
+sources: ["https://github.com/BestNathan/nession/issues/3021", "https://github.com/BestNathan/nession/pull/3046", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/docs/design/project.md", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-protocol/src/contracts/project/v1.rs", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-server/src/db/migration/m005_projects.rs", "https://github.com/BestNathan/nession/issues/3025", "https://github.com/BestNathan/nession/pull/3064", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-server/src/server/handler/server_session_create_v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/app/patterns/ProjectsSection.tsx", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/product/project/components/ProjectDetail.tsx"]
 ---
 
 # Project declaration and Workspace location ownership
@@ -43,6 +43,25 @@ image, a Workspace, or a persistent `ProjectEnvironment`.
 - **Reads are independent of Sessions and Agents.** List and detail reads work
   with an empty Session registry and no selected Agent; a legacy Session with no
   Project association remains valid.
+- **A sibling destination, not a Session parent.** Web Sidebar and the App
+  Sessions layer expose a flat, selectable Projects section; opening one shows a
+  standalone detail without requiring, selecting, replacing or re-parenting a
+  Session. App pushes the detail with exactly one host-owned header and returns
+  through Back; Web keeps the list and the selected Session intact.
+- **Project-aware creation is additive.** `server.session.create` accepts an
+  optional `project_id`. When present, `agent_id` and `working_dir` must match a
+  declared Existing Location, and the Project never reaches the Agent. Missing
+  or offline Agents are explicit refusals that preserve the declaration; legacy
+  and no-Project creates are unchanged.
+- **Defaults are create-time suggestions; the binding is Session-owned.**
+  Precedence is explicit request ENV selection over the Project's ordered
+  `env_profile_ids`. The resolved ENV binding belongs to the Session, so a later
+  Project edit never changes an existing Session's environment, source version
+  or mounts.
+- **Managed EROFS/Sandbox creation is a separate requirement.** It is owned by
+  #3062 and remains blocked on #3022, #3023, #3024 and #2681. The Project detail
+  exposes a Managed entry that fails closed: it creates nothing, preserves the
+  declaration and never falls back to a Native Session.
 
 ## Context and evidence
 
@@ -64,16 +83,34 @@ Session / EROFS image / Agent ownership map and records that no persistent
 The contract landed with #3021 (PR #3046, merged to staging at
 `54e3044acd9641eb9990af8a6d638869654e4425`). Source-aligned Cases SC-01–SC-04
 and SC-06 ran exact-SHA Rust protocol/DB/handler tests; SC-05 evaluated this
-canonical document. Web Sidebar/App presentation, Standalone Project detail and
-Existing/Managed Session creation are owned by #3025.
+canonical document.
+
+#3025 (PR #3064, merged to staging at
+`0929326e13c4349a5798064e931789b27d84597a`) delivered the Project maintenance
+surface and the Existing-location create path: Web/App Projects navigation and
+standalone detail, name-only create, rename/settings/delete with explicit
+confirmation, optional `project_id` on Session create, Project ENV defaults with
+explicit-request precedence, and the fail-closed Managed entry. Its SC-01,
+SC-03, SC-04, SC-06, SC-07 and SC-08 passed source-aligned Cases at PR head
+`49f811938b05ab30493f57ff9379c332588ca97d`; the selected E2E IDs
+(`project-management`, `project-sidebar-detail`, `project-session-create` and
+the `fixture-*`/`session-lifecycle` regressions) passed in run 42563353256. The
+Managed EROFS/Sandbox criteria moved to #3062 and stay Pending until its native
+staging lane exists. Because the read-only Acceptance Agent cannot see the
+orphan `prototype` branch, SC-06 is proven by a Case that reads back the pinned
+public Pages manifest/HTML and the archived Chromium record; a general
+orphan-source staging proposal is #3068.
 
 ## Limits and when to revisit
 
 - This article does not describe EROFS build/registry or image storage; a
   Project only references an immutable digest owned by the global Image Manager.
 - A Project has no mandatory Agent binding, and it is not a navigation parent.
-  Any future grouping of Sessions by Project (#3025) must preserve legacy
-  Sessions with no Project.
+  The delivered Projects section is a sibling destination over a flat Session
+  list; it must keep legacy Sessions with no Project valid.
+- Managed EROFS/Sandbox Session creation is not implemented. #3062 owns that
+  behavior; until its dependencies land, the detail's Managed action refuses
+  explicitly rather than creating a Native Session.
 - The JSON-encoded declaration columns are a Server-owned storage detail. If a
   second writer appears, it must consume the canonical validation rather than
   write those columns directly.

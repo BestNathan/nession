@@ -387,3 +387,10 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record PR #3066's delivered V1 source slice (nession-sandbox, Linux launch barrier, delegated cgroup, seccomp, restricted proxy, macOS verified scope, Agent lifecycle) while keeping approved design, implemented source and pending merged-staging Acceptance evidence explicitly distinct
 - Source: https://github.com/BestNathan/nession/pull/3066
+
+## 2026-11-09T05:02:01Z | update | Project declaration and Workspace location ownership
+- Path: topics/engineering/project-declaration-and-workspace-location-ownership.md
+- Topic: engineering
+- Categories: architecture, project, workspace, session, ownership, server, protocol
+- Reason: Record #3025's delivered Project maintenance UI, standalone detail, project-aware Existing Session creation, create-time ENV precedence with a Session-owned binding, and the fail-closed Managed entry; keep Managed EROFS/Sandbox creation owned by #3062 and record the SC-06 Case readback versus the read-only Agent's orphan-branch limit (#3068)
+- Source: https://github.com/BestNathan/nession/pull/3064
