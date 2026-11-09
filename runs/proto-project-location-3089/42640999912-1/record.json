@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "proto-project-location-3089",
+  "source_sha": "cdff51ddfa1d889402e3197880822af0a530909b",
+  "source_digest": "df8bc2b135ad8edbba21d7abe5405511e4c078cc7e1fd862aab3e92140eb5848",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42640999912,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42640999912",
+    "event": "push",
+    "branch": "task/proto-project-location-3089",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-09T15:05:10.874Z",
+    "finished_at": "2026-11-09T15:05:24.641Z",
+    "result": {
+      "ok": true,
+      "prototype_sha": "d7b3fce854dc763124c1d0a6649ba0f3661a7858",
+      "cases": 3,
+      "rows": [
+        {
+          "width": 1440,
+          "start": {
+            "agent": {
+              "x": 557,
+              "y": 1004.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 771.65625,
+              "y": 1004.84375,
+              "w": 405.34375,
+              "h": 42
+            },
+            "row": {
+              "x": 557,
+              "y": 979.84375,
+              "w": 674,
+              "h": 67
+            },
+            "overflow": 0
+          },
+          "filled": {
+            "agent": {
+              "x": 557,
+              "y": 794.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 771.65625,
+              "y": 794.84375,
+              "w": 405.34375,
+              "h": 76
+            },
+            "row": {
+              "x": 557,
+              "y": 769.84375,
+              "w": 674,
+              "h": 101
+            },
+            "overflow": 0
+          }
+        },
+        {
+          "width": 1180,
+          "start": {
+            "agent": {
+              "x": 488,
+              "y": 1004.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 702.65625,
+              "y": 1004.84375,
+              "w": 405.34375,
+              "h": 42
+            },
+            "row": {
+              "x": 488,
+              "y": 979.84375,
+              "w": 674,
+              "h": 67
+            },
+            "overflow": 0
+          },
+          "filled": {
+            "agent": {
+              "x": 488,
+              "y": 986.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 702.65625,
+              "y": 986.84375,
+              "w": 405.34375,
+              "h": 76
+            },
+            "row": {
+              "x": 488,
+              "y": 961.84375,
+              "w": 674,
+              "h": 101
+            },
+            "overflow": 0
+          }
+        },
+        {
+          "width": 1024,
+          "start": {
+            "agent": {
+              "x": 488,
+              "y": 1004.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 702.65625,
+              "y": 1004.84375,
+              "w": 405.34375,
+              "h": 42
+            },
+            "row": {
+              "x": 488,
+              "y": 979.84375,
+              "w": 674,
+              "h": 67
+            },
+            "overflow": 0
+          },
+          "filled": {
+            "agent": {
+              "x": 488,
+              "y": 986.84375,
+              "w": 202.65625,
+              "h": 42
+            },
+            "path": {
+              "x": 702.65625,
+              "y": 986.84375,
+              "w": 405.34375,
+              "h": 76
+            },
+            "row": {
+              "x": 488,
+              "y": 961.84375,
+              "w": 674,
+              "h": 101
+            },
+            "overflow": 0
+          }
+        }
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/cdff51ddfa1d889402e3197880822af0a530909b/proto-project-location-3089.json"
+}
