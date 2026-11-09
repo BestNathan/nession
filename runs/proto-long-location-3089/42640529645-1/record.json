@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "proto-long-location-3089",
+  "source_sha": "f43dcf959c47221598a43088d943d3b619b5b4b0",
+  "source_digest": "24b53eedfd42a1fa314ed14806ee5d74d2c0a9da24eb6596df1346f55c7da544",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 42640529645,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42640529645",
+    "event": "push",
+    "branch": "task/proto-long-location-3089",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-09T15:02:19.128Z",
+    "finished_at": "2026-11-09T15:02:31.114Z",
+    "result": {
+      "ok": true,
+      "prototype_sha": "2b02775166cb2e846417751de951383d8aff1702",
+      "tests": [
+        {
+          "width": 1440,
+          "closed": {
+            "control": {
+              "w": 594,
+              "h": 83
+            },
+            "content": {
+              "w": 548,
+              "h": 65
+            },
+            "overflow": 0,
+            "dialogOverflow": 0,
+            "contentInBox": true
+          },
+          "pop": {
+            "trigger": 594,
+            "menu": 594,
+            "overflow": 0,
+            "items": [
+              {
+                "height": 65,
+                "overflow": 0
+              },
+              {
+                "height": 65,
+                "overflow": 0
+              }
+            ]
+          },
+          "row": {
+            "row": 674,
+            "agent": {
+              "x": 557,
+              "w": 202.65625,
+              "h": 42
+            },
+            "directory": {
+              "x": 771.65625,
+              "w": 405.34375,
+              "h": 64
+            },
+            "agentTop": 786.84375,
+            "directoryTop": 786.84375,
+            "overflow": 0
+          }
+        },
+        {
+          "width": 1180,
+          "closed": {
+            "control": {
+              "w": 594,
+              "h": 83
+            },
+            "content": {
+              "w": 548,
+              "h": 65
+            },
+            "overflow": 0,
+            "dialogOverflow": 0,
+            "contentInBox": true
+          },
+          "pop": {
+            "trigger": 594,
+            "menu": 594,
+            "overflow": 0,
+            "items": [
+              {
+                "height": 65,
+                "overflow": 0
+              },
+              {
+                "height": 65,
+                "overflow": 0
+              }
+            ]
+          },
+          "row": {
+            "row": 674,
+            "agent": {
+              "x": 488,
+              "w": 202.65625,
+              "h": 42
+            },
+            "directory": {
+              "x": 702.65625,
+              "w": 405.34375,
+              "h": 64
+            },
+            "agentTop": 801.84375,
+            "directoryTop": 801.84375,
+            "overflow": 0
+          }
+        },
+        {
+          "width": 1024,
+          "closed": {
+            "control": {
+              "w": 594,
+              "h": 83
+            },
+            "content": {
+              "w": 548,
+              "h": 65
+            },
+            "overflow": 0,
+            "dialogOverflow": 0,
+            "contentInBox": true
+          },
+          "pop": {
+            "trigger": 594,
+            "menu": 594,
+            "overflow": 0,
+            "items": [
+              {
+                "height": 65,
+                "overflow": 0
+              },
+              {
+                "height": 65,
+                "overflow": 0
+              }
+            ]
+          },
+          "row": {
+            "row": 674,
+            "agent": {
+              "x": 488,
+              "w": 202.65625,
+              "h": 42
+            },
+            "directory": {
+              "x": 702.65625,
+              "w": 405.34375,
+              "h": 64
+            },
+            "agentTop": 801.84375,
+            "directoryTop": 801.84375,
+            "overflow": 0
+          }
+        }
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/f43dcf959c47221598a43088d943d3b619b5b4b0/proto-long-location-3089.json"
+}
