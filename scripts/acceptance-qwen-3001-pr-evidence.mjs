@@ -195,5 +195,6 @@ export function selfTestOriginalQwenReview(){
   bad(x=>{x.storeResult.implementing_pr.head_sha_at_attestation='1'.repeat(40);});
   bad(x=>{x.artifacts.artifacts[0].digest='sha256:'+'2'.repeat(64);});
   bad(x=>{x.artifacts.artifacts[0].expired=true;});
+  bad(x=>{x.artifacts.total_count+=1;}); // truncated inventory is not authenticated
   return true;
 }
