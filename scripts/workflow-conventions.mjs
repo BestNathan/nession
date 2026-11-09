@@ -26,6 +26,7 @@ export const CATALOG = [
   ['store-agent-review-result-ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store-agent-review-result-ingest.yml', 'Store / Agent Review Result Ingest', 'store'],
   ['store-controlled-publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store'],
   ['store-knowledge-publisher', 'store-knowledge-publisher.yml', 'Store / Knowledge Publisher', 'store-knowledge-publisher.yml', 'Store / Knowledge Publisher', 'store'],
+  ['store-knowledge-canary-probe', 'store-knowledge-canary-probe.yml', 'Store / Knowledge Canary Probe', 'store-knowledge-canary-probe.yml', 'Store / Knowledge Canary Probe', 'store'],
   ['store-qwen-publisher', 'store-qwen-publisher.yml', 'Store / Qwen Publisher', 'store-qwen-publisher.yml', 'Store / Qwen Publisher', 'store'],
   ['store-publisher-review-ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store'],
   ['agent-sc-acceptance', 'acceptance.yml', 'Acceptance', 'agent-sc-acceptance.yml', 'Agent / SC Acceptance', 'agent'],
