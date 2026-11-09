@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "61e53da97815c97e61f6bbfc2b317b014bd53670aaa057c554029bb517199968",
+  "run_id": 42611784526,
+  "run_attempt": 1,
+  "issue": 3104,
+  "criterion": "SC-01",
+  "criterion_text": "Each trusted Acceptance Case executes only on its declared platform: a `platform: macos` Case is selected exclusively by the macOS job, existing Linux Cases remain on the Ubuntu job, a genuinely missing Case still fails coverage on every platform, and both jobs' source-bound records are ingested from one run.",
+  "stage": "post-merge",
+  "target_sha": "0ab18932b98154a9e6a9ecead4ef2d150a144b3d",
+  "contract_sha256": "711800714e45f42a4ea34be90c2fa4c1af03ca96ba48be7f4692782ebe7dd437",
+  "case_revision": "0ab18932b98154a9e6a9ecead4ef2d150a144b3d",
+  "case_tree_sha": "09324416175cd01c58fae7ea6cac284aed9ebe93",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T11:49:42.165Z",
+  "finished_at": "2026-11-09T11:49:48.224Z",
+  "duration_ms": 6059,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Acceptance Cases are routed only to their declared platform and both platform artifacts are ingested from one source run",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 0ab18932b98154a9e6a9ecead4ef2d150a144b3d: the trusted selector self-test proves Linux/macOS platform routing and fail-closed unknown-platform handling"
+        },
+        {
+          "type": "runtime",
+          "value": "the macOS job pins macos-15-intel, sets ACCEPTANCE_PLATFORM=macos, and the ingest downloads both platform artifacts from one run"
+        }
+      ],
+      "duration_ms": 155,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42611784526,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0ab18932b98154a9e6a9ecead4ef2d150a144b3d",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42611784526",
+    "record_path": "runs/2026-11-09/42611784526-1/3104/SC-01.json",
+    "source_result_sha256": "4af78a55f0f9c72837303ba00b77276738cbc2ee2fb006427d5417531d8623f9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42611784526-1",
+    "sha256": "4af78a55f0f9c72837303ba00b77276738cbc2ee2fb006427d5417531d8623f9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42611784526",
+    "durability": "time-limited; object archival not configured"
+  }
+}
