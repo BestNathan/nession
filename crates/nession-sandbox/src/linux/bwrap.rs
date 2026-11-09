@@ -298,20 +298,13 @@ fn mask_host_control_paths(
     warnings: &mut Vec<String>,
 ) -> bool {
     let mut masked = false;
+    let mut masked_directories: Vec<PathBuf> = Vec::new();
     for path in &forbidden.directories {
         if path.exists() {
             args.push("--tmpfs".to_string());
             args.push(path.to_string_lossy().into_owned());
             warnings.push(format!("backend baseline: masked {}", path.display()));
-            masked = true;
-        }
-    }
-    for path in &forbidden.files {
-        if path.exists() {
-            args.push("--ro-bind".to_string());
-            args.push("/dev/null".to_string());
-            args.push(path.to_string_lossy().into_owned());
-            warnings.push(format!("backend baseline: masked {}", path.display()));
+            masked_directories.push(path.clone());
             masked = true;
         }
     }
@@ -323,18 +316,35 @@ fn mask_host_control_paths(
         args.push("--tmpfs".to_string());
         args.push("/run".to_string());
         warnings.push("backend baseline: masked /run host runtime state".to_string());
+        masked_directories.push(run.to_path_buf());
         masked = true;
     }
-    // `/var/run` is usually a symlink to `/run`; on hosts where it is a real
-    // directory, mask the known control sockets directly.
-    for socket in ["/var/run/docker.sock", "/var/run/dbus/system_bus_socket"] {
-        let path = Path::new(socket);
-        if path.exists() && !run.exists() {
-            args.push("--ro-bind".to_string());
-            args.push("/dev/null".to_string());
-            args.push(socket.to_string());
-            masked = true;
+    // Do not ask bwrap to create a mount point for a file that a masked
+    // directory already hides: `/var/run` is a symlink to `/run` on most
+    // hosts, and creating `/var/run/docker.sock` through that symlink after
+    // `/run` became a tmpfs fails the whole launch. Canonicalize so the
+    // symlinked spelling is recognized as living under the masked directory.
+    let canonical_masked: Vec<PathBuf> = masked_directories
+        .iter()
+        .filter_map(|directory| std::fs::canonicalize(directory).ok())
+        .collect();
+    for path in &forbidden.files {
+        if !path.exists() {
+            continue;
         }
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            if canonical_masked
+                .iter()
+                .any(|directory| canonical.starts_with(directory))
+            {
+                continue;
+            }
+        }
+        args.push("--ro-bind".to_string());
+        args.push("/dev/null".to_string());
+        args.push(path.to_string_lossy().into_owned());
+        warnings.push(format!("backend baseline: masked {}", path.display()));
+        masked = true;
     }
     masked
 }
@@ -528,5 +538,32 @@ mod tests {
         ] {
             assert!(args.contains(&name.to_string()));
         }
+    }
+
+    #[test]
+    fn a_file_hidden_by_a_masked_directory_is_not_bound_through_its_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let masked = dir.path().join("run");
+        std::fs::create_dir(&masked).expect("masked directory");
+        let file = masked.join("docker.sock");
+        std::fs::write(&file, b"").expect("socket stand-in");
+        let link = dir.path().join("var-run");
+        std::os::unix::fs::symlink(&masked, &link).expect("symlink");
+        let linked_file = link.join("docker.sock");
+        let forbidden = ForbiddenPaths {
+            files: vec![linked_file.clone()],
+            directories: vec![masked],
+        };
+        let mut args = Vec::new();
+        let mut warnings = Vec::new();
+        assert!(mask_host_control_paths(
+            &mut args,
+            &forbidden,
+            &mut warnings
+        ));
+        assert!(
+            !args.iter().any(|argument| argument == &linked_file.to_string_lossy()),
+            "a file already hidden by the masked directory must not be bound through its symlink: {args:?}"
+        );
     }
 }
