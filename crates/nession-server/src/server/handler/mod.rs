@@ -482,8 +482,9 @@ impl ConnectionHandler {
     /// Called after any mutation so browsers don't have to poll or wait for a
     /// manual refresh to notice changes.
     async fn broadcast_sessions(&self) {
+        let project_ids = self.session_registry.project_ids().await;
         self.web_client_registry
-            .broadcast_sessions_changed(Arc::clone(&self.session_registry))
+            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_ids)
             .await;
     }
 
@@ -535,6 +536,18 @@ impl ConnectionHandler {
         let mut stale = Vec::new();
         for (agent_id, observed_generation, outcome) in results {
             match outcome {
+                Ok(resp)
+                    if resp.get("success").and_then(serde_json::Value::as_bool) == Some(false) =>
+                {
+                    warn!(
+                        "sessions.list refresh from agent {} reported failure: {}",
+                        agent_id,
+                        resp.get("error")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown error")
+                    );
+                    stale.push(agent_id);
+                }
                 Ok(resp) => {
                     let incoming = parse_agent_sessions(&agent_id, &resp);
                     let removed = self
@@ -1242,7 +1255,10 @@ fn current_timestamp() -> u64 {
 /// Serialise a session for the wire. Shared by `server.session.list` and the
 /// `server.sessions.changed` broadcast so both always agree on the field set — the
 /// web client feeds either straight into the same state setter.
-pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInfo {
+pub(crate) fn session_to_info(
+    s: &crate::registry::SessionInfo,
+    project_id: Option<&str>,
+) -> WebSessionInfo {
     WebSessionInfo {
         session_id: s.session_id.clone(),
         agent_id: s.agent_id.clone(),
@@ -1259,12 +1275,16 @@ pub(crate) fn session_to_info(s: &crate::registry::SessionInfo) -> WebSessionInf
         attached_clients: s.attached_clients,
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
+        project_id: project_id.map(std::string::ToString::to_string),
         last_activity: s.last_activity.to_rfc3339(),
     }
 }
 
-pub(crate) fn session_to_json(s: &crate::registry::SessionInfo) -> serde_json::Value {
-    serde_json::to_value(session_to_info(s)).unwrap_or(json!({}))
+pub(crate) fn session_to_json(
+    s: &crate::registry::SessionInfo,
+    project_id: Option<&str>,
+) -> serde_json::Value {
+    serde_json::to_value(session_to_info(s, project_id)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.
@@ -1328,6 +1348,11 @@ fn parse_agent_sessions(
                             .map(std::string::ToString::to_string),
                         created_at,
                         last_activity: now,
+                        instance_id: s
+                            .get("instance_id")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|id| !id.is_empty())
+                            .map(std::string::ToString::to_string),
                     })
                 })
                 .collect()
@@ -1383,6 +1408,7 @@ mod server_session_list_v1;
 mod server_session_metadata_get_v1;
 mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
+mod server_session_project_set_v1;
 mod server_session_relay_begin_v1;
 #[cfg(test)]
 mod tests;

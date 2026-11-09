@@ -152,6 +152,7 @@ impl WebClientRegistry {
     pub async fn broadcast_sessions_changed(
         &self,
         session_registry: Arc<crate::registry::SessionRegistry>,
+        project_ids: &std::collections::HashMap<String, String>,
     ) {
         let sessions = session_registry.list().await;
         let payload = serde_json::json!({
@@ -164,7 +165,10 @@ impl WebClientRegistry {
             "payload": {
                 "sessions": sessions
                     .iter()
-                    .map(crate::server::handler::session_to_json)
+                    .map(|session| crate::server::handler::session_to_json(
+                        session,
+                        project_ids.get(&session.session_id).map(String::as_str),
+                    ))
                     .collect::<Vec<_>>(),
             }
         });
@@ -247,6 +251,7 @@ mod tests {
             attached_clients: attached,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         }
@@ -265,7 +270,7 @@ mod tests {
         sessions.update_session(make_session("a1", "s1", 1)).await;
 
         registry
-            .broadcast_sessions_changed(Arc::clone(&sessions))
+            .broadcast_sessions_changed(Arc::clone(&sessions), &std::collections::HashMap::new())
             .await;
 
         let msg = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
@@ -296,7 +301,10 @@ mod tests {
         registry.subscribe(sender);
 
         registry
-            .broadcast_sessions_changed(new_session_registry().await)
+            .broadcast_sessions_changed(
+                new_session_registry().await,
+                &std::collections::HashMap::new(),
+            )
             .await;
 
         let msg = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
@@ -316,7 +324,10 @@ mod tests {
     async fn broadcast_with_no_subscribers_is_harmless() {
         let registry = WebClientRegistry::new();
         registry
-            .broadcast_sessions_changed(new_session_registry().await)
+            .broadcast_sessions_changed(
+                new_session_registry().await,
+                &std::collections::HashMap::new(),
+            )
             .await;
     }
 }

@@ -91,6 +91,7 @@ async fn session_create_success_preserves_agent_report_that_arrived_first() {
                 attached_clients: 0,
                 foreground_command: Some("bash".to_string()),
                 working_dir: Some("/srv".to_string()),
+                instance_id: None,
                 created_at: now,
                 last_activity: now,
             })
@@ -603,6 +604,20 @@ async fn project_session_create_uses_the_declared_existing_location() {
     let reply = parse_reply(action.unwrap());
     assert_eq!(reply["payload"]["success"], true);
     assert_eq!(reply["payload"]["session_id"], "a1:from-project");
+    assert_eq!(
+        reply["payload"]["project_id"], PROJECT_ID,
+        "the create reply carries the committed Project membership"
+    );
+    let binding =
+        h.db.get_session_project_binding("a1:from-project")
+            .await
+            .unwrap()
+            .expect("the membership commits with the Session");
+    assert_eq!(binding.project_id, PROJECT_ID);
+    assert_eq!(
+        binding.agent_created_at, 0,
+        "the first Agent report adopts the tmux creation time"
+    );
 }
 
 #[tokio::test]

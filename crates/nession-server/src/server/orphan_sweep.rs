@@ -114,6 +114,7 @@ mod tests {
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: chrono::Utc::now() - chrono::Duration::hours(48),
             last_activity: chrono::Utc::now(),
         }

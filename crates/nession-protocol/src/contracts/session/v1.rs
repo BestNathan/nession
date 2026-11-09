@@ -155,6 +155,12 @@ pub struct ClientSessionCreateResponsePayload {
     /// Binding (reserved-key collisions, parse warnings). Empty on refusal.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The Project membership committed with this Session create (#3082).
+    ///
+    /// Present only when the create named a Project whose Existing Location was
+    /// validated. The Agent never sees this field; the Server owns the link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     /// The sandbox mechanisms verified in effect, for a sandboxed create.
     #[cfg_attr(feature = "codegen", ts(skip))]
     #[cfg_attr(feature = "codegen", schemars(skip))]
@@ -561,6 +567,9 @@ pub struct AgentSessionUpdatePayload {
     /// to discover it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_command: Option<String>,
+    /// Durable tmux Session instance identity. See `SessionInfo::instance_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
 }
 
 // ============================================================================
@@ -713,6 +722,15 @@ pub struct SessionInfo {
     /// Live cwd of the session's active pane when the agent last reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Durable tmux Session instance identity (`@nession_instance_id`).
+    ///
+    /// A recyclable `agent_id:session_name` is not an incarnation: this id is
+    /// created with the tmux Session, survives Agent restarts and is replaced
+    /// when the name is killed and recreated. Project membership (#3082) and
+    /// Session metadata (#2789) key on it. Absent only for a legacy Session
+    /// that has not been asked yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -914,6 +932,13 @@ pub struct WebSessionInfo {
     pub foreground_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// The focused Session's Server-owned Project membership (#3082).
+    ///
+    /// Absent for a Session with no Project. This is durable membership, not an
+    /// inference from cwd, Git or the Agent; a newer Session incarnation that
+    /// reuses the same `agent_id:session_name` does not inherit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub last_activity: String,
 }
 
@@ -1548,6 +1573,42 @@ pub struct WebSessionMetadataUpdatePayload {
     #[serde(default)]
     pub tags: Vec<String>,
     pub expected_revision: u64,
+}
+
+/// `server.session.project.set`'s request (#3082).
+///
+/// A whole replacement of one Session's Project membership: `project_id: Some`
+/// associates or changes it, `None` removes it. `expected_revision` guards a
+/// concurrent change; its absence is a last-writer-wins first association.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionProjectBindingUpdatePayload {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
+}
+
+/// `server.session.project.set`'s reply.
+///
+/// `error_kind` is the actionable classification the Web renders: `invalid`,
+/// `unauthorized`, `conflict`, `not_found` or `unavailable`. `revision` is the
+/// new membership revision on success (0 means unassociated).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionProjectBindingResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
 }
 
 /// The shared answer for both metadata operations, at both ends.

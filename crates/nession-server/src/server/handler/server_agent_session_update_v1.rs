@@ -95,6 +95,11 @@ impl ConnectionHandler {
             working_dir,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
+            instance_id: payload
+                .get("instance_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(std::string::ToString::to_string),
         };
 
         info!(

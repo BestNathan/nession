@@ -22,6 +22,7 @@ impl ConnectionHandler {
             session_id: None,
             error: Some(error.to_string()),
             warnings: Vec::new(),
+            project_id: None,
             sandbox: None,
         };
 
@@ -198,6 +199,13 @@ impl ConnectionHandler {
             env_refs.len()
         );
 
+        // An ambiguous create reply (disconnect/timeout) must not overwrite
+        // the membership of a Session that already existed under this name.
+        let session_pre_existed = self
+            .session_registry
+            .get(&session_id_for_binding)
+            .await
+            .is_some();
         let rx = self
             .command_broker
             .send_command(
@@ -242,7 +250,7 @@ impl ConnectionHandler {
                     .get("success")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
-                let (session_id, binding_warning) = if success {
+                let (session_id, binding_warning, project_id) = if success {
                     let sid = format!("{agent_id}:{name}");
                     // The SessionWatcher may have reported the real pane
                     // command *before* this create ACK was delivered (#2021).
@@ -263,27 +271,49 @@ impl ConnectionHandler {
                         working_dir: None,
                         created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
+                        instance_id: None,
                     };
                     self.session_registry
                         .insert_session_if_absent(session_info)
                         .await;
-                    // Apply the staged binding before the broadcast: the
-                    // create reply is the frame this client expects next, and
-                    // awaiting the binding after the broadcast let the queued
-                    // sessions-changed frame arrive first.
+                    // Apply the staged Environment Binding before the broadcast:
+                    // the create reply is the frame this client expects next,
+                    // and awaiting the binding after the broadcast let the
+                    // queued sessions-changed frame arrive first.
                     let binding_warning = self
                         .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
                         .await;
+                    // Commit the Project membership with the same create. The
+                    // Agent never sees it; the Server owns the link. The first
+                    // Agent report adopts the binding with the tmux creation
+                    // time, which is what makes a later name reuse a different
+                    // incarnation (#3082 SC-01/SC-02).
+                    let project_id = if let Some(pid) = project_id.as_deref() {
+                        match self
+                            .apply_create_project_binding(&session_id_for_binding, pid)
+                            .await
+                        {
+                            Ok(()) => Some(pid.to_string()),
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to persist Project membership for {session_id_for_binding}: {e:#}"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     // Broadcast the current registry snapshot, which might
                     // contain a newer Agent report than this create reply.
                     self.broadcast_sessions().await;
-                    (Some(sid), binding_warning)
+                    (Some(sid), binding_warning, project_id)
                 } else {
                     // The Agent refused the create (a duplicate name or another
                     // refusal). This attempt does not own the Session, so its
                     // staged candidate is discarded without touching the
                     // existing binding.
-                    (None, None)
+                    (None, None, None)
                 };
                 let error = response
                     .get("error")
@@ -316,6 +346,7 @@ impl ConnectionHandler {
                         session_id,
                         error,
                         warnings,
+                        project_id,
                         sandbox: sandbox_report,
                     },
                 ))
@@ -329,18 +360,60 @@ impl ConnectionHandler {
                 let _ = self
                     .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
                     .await;
+                if !session_pre_existed {
+                    if let Some(pid) = project_id.as_deref() {
+                        let _ = self
+                            .apply_create_project_binding(&session_id_for_binding, pid)
+                            .await;
+                    }
+                }
                 Ok(session_create_reply(&msg.id, refusal("Agent disconnected")))
             }
             Err(_) => {
                 let _ = self
                     .apply_create_binding(&session_id_for_binding, candidate_binding.as_ref())
                     .await;
+                if !session_pre_existed {
+                    if let Some(pid) = project_id.as_deref() {
+                        let _ = self
+                            .apply_create_project_binding(&session_id_for_binding, pid)
+                            .await;
+                    }
+                }
                 Ok(session_create_reply(
                     &msg.id,
                     refusal("Timeout waiting for agent response"),
                 ))
             }
         }
+    }
+
+    /// Record the Project membership a create committed.
+    ///
+    /// The binding is deliberately written with `agent_created_at = 0`
+    /// (pending): the Agent ACK does not carry the tmux creation time, and the
+    /// first authoritative report adopts it. Until then, the list projection
+    /// only exposes the membership for a session row that belongs to this
+    /// create's short window.
+    async fn apply_create_project_binding(
+        &self,
+        session_id: &str,
+        project_id: &str,
+    ) -> anyhow::Result<()> {
+        let agent_id = session_id
+            .split_once(':')
+            .map(|(agent_id, _)| agent_id)
+            .unwrap_or_default();
+        let row = crate::db::SessionProjectBindingRow {
+            session_id: session_id.to_string(),
+            agent_id: agent_id.to_string(),
+            project_id: project_id.to_string(),
+            incarnation_id: String::new(),
+            agent_created_at: 0,
+            revision: 1,
+            updated_at: chrono::Utc::now().timestamp(),
+        };
+        self.db.upsert_session_project_binding(&row).await
     }
 
     /// Apply a create's staged Environment Binding once the Agent has answered.

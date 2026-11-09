@@ -19,6 +19,9 @@ pub struct SessionInfo {
     pub working_dir: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,
+    /// Durable tmux Session instance identity. `None` for a legacy Session or
+    /// before the Agent's first report.
+    pub instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,6 +176,46 @@ impl SessionRegistry {
         }
     }
 
+    /// The live Session→Project membership map for a Web projection (#3082).
+    ///
+    /// A binding belongs to one Session incarnation: the tmux `created_at` the
+    /// Agent reports. A pending binding written by create matches the
+    /// create-placeholder window; a binding whose timestamp does not match the
+    /// current row is omitted (and is invalidated by the report/refresh path),
+    /// so a reused `agent_id:session_name` never inherits an old Project.
+    pub async fn project_ids_for(&self, sessions: &[SessionInfo]) -> HashMap<String, String> {
+        match self.db.list_session_project_bindings().await {
+            Ok(bindings) => bindings
+                .into_iter()
+                .filter_map(|binding| {
+                    let session = sessions
+                        .iter()
+                        .find(|session| session.session_id == binding.session_id)?;
+                    let matches_incarnation = if !binding.incarnation_id.is_empty() {
+                        session.instance_id.as_deref() == Some(binding.incarnation_id.as_str())
+                    } else if session.instance_id.is_some() {
+                        // A pending create-time membership applies to the first
+                        // incarnation reported inside its short window.
+                        session.created_at.timestamp() >= binding.updated_at.saturating_sub(300)
+                    } else {
+                        session.created_at.timestamp() >= binding.updated_at.saturating_sub(300)
+                    };
+                    matches_incarnation.then_some((binding.session_id, binding.project_id))
+                })
+                .collect(),
+            Err(e) => {
+                tracing::error!("Failed to read session project bindings: {e:#}");
+                HashMap::new()
+            }
+        }
+    }
+
+    /// All live Sessions with their Project membership.
+    pub async fn project_ids(&self) -> HashMap<String, String> {
+        let sessions = self.list().await;
+        self.project_ids_for(&sessions).await
+    }
+
     pub async fn update_session(&self, session: SessionInfo) {
         // Ordered before the per-Session guard: a force-refresh holds this
         // Agent guard for its whole projection, so a live report either
@@ -198,6 +241,22 @@ impl SessionRegistry {
         // is the source of truth and will re-report on reconnect).
         if let Err(e) = self.db.insert_session(&session, status).await {
             tracing::error!("Failed to persist session {}: {:#}", session.session_id, e);
+        }
+        // Adopt a pending create-time membership with the Agent's first report,
+        // or invalidate it when this is a new incarnation of the same name.
+        if let Err(e) = self
+            .db
+            .adopt_or_invalidate_session_project_binding(
+                &session.session_id,
+                session.instance_id.as_deref(),
+                Some(session.created_at.timestamp()),
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to reconcile project membership for {}: {e:#}",
+                session.session_id
+            );
         }
     }
 
@@ -512,6 +571,7 @@ fn session_info_from_row(row: crate::db::SessionRow) -> SessionInfo {
         // reconnect.
         foreground_command: None,
         working_dir: None,
+        instance_id: row.instance_id,
         created_at,
         last_activity,
     }
@@ -549,6 +609,7 @@ mod tests {
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }

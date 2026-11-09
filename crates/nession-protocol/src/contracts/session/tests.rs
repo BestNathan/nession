@@ -343,6 +343,79 @@ fn test_client_session_create_env_files_are_part_of_the_contract() {
 }
 
 #[test]
+fn test_client_session_create_response_carries_project_membership() {
+    let json = serde_json::json!({
+        "success": true,
+        "session_id": "a1:s1",
+        "warnings": [],
+        "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+    });
+    let decoded: ClientSessionCreateResponsePayload = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        decoded.project_id.as_deref(),
+        Some("project-123e4567-e89b-42d3-a456-426614174000")
+    );
+    let legacy: ClientSessionCreateResponsePayload =
+        serde_json::from_value(serde_json::json!({ "success": true, "session_id": "a1:s1" }))
+            .unwrap();
+    assert!(legacy.project_id.is_none());
+}
+
+#[test]
+fn test_session_project_binding_payload_removes_with_null_and_carries_expected_revision() {
+    let json = serde_json::json!({
+        "session_id": "a1:s1",
+        "project_id": null,
+        "expected_revision": 2,
+    });
+    let decoded: SessionProjectBindingUpdatePayload = serde_json::from_value(json).unwrap();
+    assert!(decoded.project_id.is_none());
+    assert_eq!(decoded.expected_revision, Some(2));
+
+    let absent: SessionProjectBindingUpdatePayload =
+        serde_json::from_value(serde_json::json!({ "session_id": "a1:s1" })).unwrap();
+    assert!(absent.project_id.is_none());
+    assert!(absent.expected_revision.is_none());
+}
+
+#[test]
+fn test_session_instance_identity_is_optional_on_updates_and_reports() {
+    let update: AgentSessionUpdatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "active",
+        "window_count": 1,
+        "attached_clients": 0,
+        "instance_id": "instance-1",
+    }))
+    .unwrap();
+    assert_eq!(update.instance_id.as_deref(), Some("instance-1"));
+
+    let legacy_update: AgentSessionUpdatePayload = serde_json::from_value(serde_json::json!({
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "active",
+        "window_count": 1,
+        "attached_clients": 0,
+    }))
+    .unwrap();
+    assert!(legacy_update.instance_id.is_none());
+
+    let report: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "s1",
+        "created_at": 1,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null,
+        "instance_id": "instance-1",
+    }))
+    .unwrap();
+    assert_eq!(report.instance_id.as_deref(), Some("instance-1"));
+}
+
+#[test]
 fn test_client_session_kill_payload() {
     let payload = ClientSessionKillPayload {
         session_id: "agent-1:doomed".to_string(),
@@ -359,6 +432,7 @@ fn test_client_session_create_response_payload() {
         session_id: Some("agent-1:new-sess".to_string()),
         error: None,
         warnings: Vec::new(),
+        project_id: None,
         sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();

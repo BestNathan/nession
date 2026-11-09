@@ -137,6 +137,9 @@ server_routes!(handler, msg, payload;
     // `session_id` the rest of the Session family uses, so they share its key.
     "server.session.metadata.get" => "server.session.metadata.get" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_get(msg).await,
     "server.session.metadata.update" => "server.session.metadata.update" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_metadata_update(msg).await,
+    // The Server-owned Session→Project membership (#3082). One unit replaces
+    // the whole membership: `project_id: null` removes it.
+    "server.session.project.set" => "server.session.project.set" => 1 => Key(session_by_id(payload)) => handler.handle_client_session_project_set(msg).await,
     "server.session.capture-preview" => "server.session.capture-preview" => 1 => Query => handler.handle_client_session_capture_preview(msg).await,
     "server.env.list" => "server.env.list" => 1 => Query => handler.handle_client_env_list(msg).await,
     "server.env.get" => "server.env.get" => 1 => Query => handler.handle_client_env_get(msg).await,

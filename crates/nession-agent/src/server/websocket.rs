@@ -2730,6 +2730,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // fills it in from a later query.
                                 foreground_command: None,
                                 working_dir: None,
+                                // Project membership is Server-owned (#3082);
+                                // a direct Agent view has no authority for it.
+                                project_id: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })

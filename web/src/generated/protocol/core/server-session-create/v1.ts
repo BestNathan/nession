@@ -51,7 +51,14 @@ export type ClientSessionCreateResponsePayload = { success: boolean, session_id?
  * Non-fatal warnings from resolving/materializing the initial Environment
  * Binding (reserved-key collisions, parse warnings). Empty on refusal.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The Project membership committed with this Session create (#3082).
+ *
+ * Present only when the create named a Project whose Existing Location was
+ * validated. The Agent never sees this field; the Server owns the link.
+ */
+project_id?: string | null, };
 export type EnvFileRef = { name: string, source: EnvSource, agent_id?: string | null, };
 export type EnvSource = "server" | "agent";
 
@@ -90,5 +97,12 @@ export type SessionCreateReply = { success: boolean, session_id?: string | null,
  * Non-fatal warnings from resolving/materializing the initial Environment
  * Binding (reserved-key collisions, parse warnings). Empty on refusal.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The Project membership committed with this Session create (#3082).
+ *
+ * Present only when the create named a Project whose Existing Location was
+ * validated. The Agent never sees this field; the Server owns the link.
+ */
+project_id?: string | null, };
 

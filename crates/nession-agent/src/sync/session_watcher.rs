@@ -52,6 +52,7 @@ pub async fn publish_session_snapshot(
             session.window_count,
             session.attached_clients,
             session.foreground_command.as_deref(),
+            session.instance_id.as_deref(),
         )?;
 
         if has_command {
@@ -298,7 +299,8 @@ impl SessionWatcher {
             if !current_map.contains_key(name) {
                 debug!("Session removed: {}", name);
                 // Send a "removed" update with status "gone".
-                self.handle.send_session_update(name, "gone", 0, 0, None)?;
+                self.handle
+                    .send_session_update(name, "gone", 0, 0, None, None)?;
             }
         }
 
@@ -316,6 +318,7 @@ impl SessionWatcher {
             session.window_count,
             session.attached_clients,
             session.foreground_command.as_deref(),
+            session.instance_id.as_deref(),
         )?;
 
         Ok(())
@@ -323,7 +326,8 @@ impl SessionWatcher {
 
     /// Report a Session that no longer exists in tmux as gone.
     fn send_gone(&self, name: &str) -> Result<()> {
-        self.handle.send_session_update(name, "gone", 0, 0, None)
+        self.handle
+            .send_session_update(name, "gone", 0, 0, None, None)
     }
 
     /// Get a snapshot of the currently tracked sessions (for testing).
@@ -359,6 +363,7 @@ mod tests {
             height: 24,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
         }
     }
 

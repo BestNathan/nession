@@ -1686,6 +1686,7 @@ pub(super) async fn bind_for_test(
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: now,
             last_activity: now,
         })
@@ -1737,3 +1738,4 @@ mod server_session_kill_v1;
 mod server_session_list_v1;
 mod server_session_metadata_v1;
 mod server_session_processes_v1;
+mod server_session_project_v1;

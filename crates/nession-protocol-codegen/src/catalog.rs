@@ -1364,6 +1364,26 @@ wires: &["agent.session.kill"],
         },
         Unit {
             owner: "core",
+            id: "server.session.project.set",
+            version: 1,
+            wires: &["server.session.project.set"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::session::v1::SessionProjectBindingUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::session::v1::SessionProjectBindingResponse>(cfg),
+            ],
+            request: Some((
+                "SessionProjectBindingUpdateCall",
+                nession_protocol::contracts::session::v1::SessionProjectBindingUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionProjectBindingUpdatePayload>,
+            )),
+            response: Some((
+                "SessionProjectBindingReply",
+                nession_protocol::contracts::session::v1::SessionProjectBindingResponse::inline,
+                schema_of::<nession_protocol::contracts::session::v1::SessionProjectBindingResponse>,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "agent.session.metadata.get",
             version: 1,
             wires: &["agent.session.metadata.get"],

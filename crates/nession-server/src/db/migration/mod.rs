@@ -11,6 +11,7 @@ mod m002_env_files;
 mod m003_quick_commands;
 mod m004_session_env_bindings;
 mod m005_projects;
+mod m006_session_project_bindings;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m003_quick_commands::Migration),
             Box::new(m004_session_env_bindings::Migration),
             Box::new(m005_projects::Migration),
+            Box::new(m006_session_project_bindings::Migration),
         ]
     }
 }
