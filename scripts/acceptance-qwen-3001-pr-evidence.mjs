@@ -196,5 +196,6 @@ export function selfTestOriginalQwenReview(){
   bad(x=>{x.artifacts.artifacts[0].digest='sha256:'+'2'.repeat(64);});
   bad(x=>{x.artifacts.artifacts[0].expired=true;});
   bad(x=>{x.artifacts.total_count+=1;}); // truncated inventory is not authenticated
+  bad(x=>{x.storeResult.source.task_id='0'.repeat(64);}); // action ID cannot be substituted
   return true;
 }
