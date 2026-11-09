@@ -165,22 +165,59 @@ jobs:
           gh run download "$RUN_ID" -R "$REPO" -n nession-build-provenance -D "$RUNNER_TEMP/provenance"
           echo "Downloaded provenance from trusted run $RUN_ID (attempt identity is in the run URL)."
 
-      - name: Attest deployment identity
+      - name: Wait boundedly for reconciled Staging workload identity
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/deployment-identity-collect.mjs attest \
-            --overlay-path "$OVERLAY_PATH" \
-            --overlay "$RUNNER_TEMP/overlay.yaml" \
-            --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
-            --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
-            --environment "${{ github.event.inputs.environment }}" \
-            --cluster-context "$CLUSTER_CONTEXT" \
-            --observed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --deployments "$RUNNER_TEMP/deployments.json" \
-            --pods "$RUNNER_TEMP/pods.json" \
-            --out "$RUNNER_TEMP/deployment-attestation.json"
-          cat "$RUNNER_TEMP/deployment-attestation.json" >> "$GITHUB_STEP_SUMMARY"
+          export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
+          # The trusted collector alone classifies retryable rolling readiness
+          # (exit 75). Identity/provenance/namespace/digest mismatches fail
+          # immediately. Neither retries nor timeout produce a Run Record.
+          attempts=18
+          attested=false
+          rm -f "$RUNNER_TEMP/deployment-attestation.json"
+          for attempt in $(seq 1 "$attempts"); do
+            if (( attempt > 1 )); then
+              kubectl --request-timeout=20s -n "$NAMESPACE" get deployments -o json \
+                > "$RUNNER_TEMP/deployments.json"
+              kubectl --request-timeout=20s -n "$NAMESPACE" get pods -o json \
+                > "$RUNNER_TEMP/pods.json"
+            fi
+            status=0
+            node scripts/deployment-identity-collect.mjs attest \
+              --overlay-path "$OVERLAY_PATH" \
+              --overlay "$RUNNER_TEMP/overlay.yaml" \
+              --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
+              --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
+              --environment "${{ github.event.inputs.environment }}" \
+              --cluster-context "$CLUSTER_CONTEXT" \
+              --observed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --deployments "$RUNNER_TEMP/deployments.json" \
+              --pods "$RUNNER_TEMP/pods.json" \
+              --out "$RUNNER_TEMP/deployment-attestation.json" \
+              > "$RUNNER_TEMP/deployment-attempt.stdout" \
+              2> "$RUNNER_TEMP/deployment-attempt.stderr" || status=$?
+            if (( status == 0 )); then
+              # Emit exactly one source-bound log receipt for trusted ingest.
+              grep '^DEPLOYMENT_ATTESTATION_V1 ' \
+                "$RUNNER_TEMP/deployment-attempt.stdout"
+              echo "Ready Staging identity attested after ${attempt} attempt(s)." >> "$GITHUB_STEP_SUMMARY"
+              attested=true
+              break
+            fi
+            if (( status != 75 )); then
+              echo "::error::Staging identity rejected non-retryable source, namespace or digest evidence"
+              exit 1
+            fi
+            if (( attempt == attempts )); then
+              echo "::error::Staging rollout did not reconcile within bounded read-only observation window"
+              exit 1
+            fi
+            echo "Staging not ready (${attempt}/${attempts}); retrying fresh read-only metadata."
+            sleep 10
+          done
+          [[ "$attested" == true && -s "$RUNNER_TEMP/deployment-attestation.json" ]] \
+            || { echo "::error::missing canonical Staging attestation"; exit 1; }
 
       # Runs only on trusted main with the existing read-only tunnel and
       # kubeconfig. Never execute source-SHA Cases/Playwright or arbitrary
@@ -202,6 +239,14 @@ jobs:
           # A remote observation is a zero-verdict identity/readiness fact, not
           # an Acceptance Case Pass. Trust/source provenance is bound on ingest.
           echo "Two real read-only Staging snapshots observed; Acceptance evaluation remains null." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify pinned GitOps revision remained unchanged during read-only observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin gitops
+          [[ "$(git rev-parse FETCH_HEAD)" == "$(cat "$RUNNER_TEMP/gitops-revision")" ]] \
+            || { echo "::error::GitOps revision changed while observing Staging; refusing stale attestation"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
