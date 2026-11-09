@@ -182,9 +182,12 @@ self_test() {
   cleanup_alias
   [[ "$deletes" == 1 && ! -e "$temp/gost-ci-alias-owned" ]]
   : > "$temp/nession-ci-kubeconfig"
+  : > "$temp/gost"
+  : > "$temp/gost.tgz"
   : > "$temp/foreign-owned-file"
   cleanup
-  [[ ! -e "$temp/nession-ci-kubeconfig" && -e "$temp/foreign-owned-file" ]]
+  [[ ! -e "$temp/nession-ci-kubeconfig" && ! -e "$temp/gost" &&
+     ! -e "$temp/gost.tgz" && -e "$temp/foreign-owned-file" ]]
   kill -0 "$unrelated"
   # Failure to inspect the current alias must not lead to borrowing/removing it.
   GOST_BIN="$exe"
