@@ -55,3 +55,11 @@
 .project-product .project-dialog h2{font-size:18px;margin:0 0 10px}.project-product .project-dialog p{font-size:12px;line-height:1.7;color:var(--nession-text-secondary);margin:0 0 24px}
 .project-product .project-dialog .negative{background:#a23b34;color:white;border-color:#a23b34}
 .project-product .side-projects{max-height:240px;overflow:visible}
+
+/* #3082: context-sensed Project Peek from the focused Session capsule. */
+.project-product .session-context-chip{border-radius:16px;background:var(--nession-surface);padding:6px 10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600}
+.project-product .session-context-chip:hover{background:var(--nession-muted)}
+.project-product .project-peek{position:absolute;right:18px;bottom:69px;z-index:46;width:min(375px,calc(100% - 32px));padding:17px;display:flex;flex-direction:column;gap:12px;background:#fff;border:1px solid var(--nession-border);border-radius:13px;box-shadow:0 14px 37px #13233824}
+.project-product .project-peek strong{font-size:14px}.project-product .project-peek p{overflow-wrap:anywhere}.project-product .project-peek .row{flex-wrap:wrap}
+.project-product .peek-close{font-size:18px;border-radius:8px;width:28px;height:28px}.project-product .peek-close:hover{background:var(--nession-muted)}
+.project-product[data-mode=app] .project-peek{right:10px;bottom:74px;width:calc(100% - 20px)}
