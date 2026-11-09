@@ -5,7 +5,7 @@ topic: web
 categories: ["web", "navigation", "sidebar", "interaction", "ownership", "responsive"]
 status: verified
 created_at: 2026-11-06T14:33:00Z
-updated_at: 2026-11-06T15:00:56Z
+updated_at: 2026-11-09T11:34:00Z
 sources: ["https://github.com/BestNathan/nession/issues/2851", "https://github.com/BestNathan/nession/pull/2866", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/docs/design/interaction/web.md", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/docs/design/design-system/patterns/session-list.md", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/experiences/web/WebLayout.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/Sidebar.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/patterns/SidebarTopActions.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/app/patterns/SidebarAgentsEntry.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/product/session/patterns/SessionItem.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/web/src/product/session/components/SessionMetadataSection.tsx", "https://github.com/BestNathan/nession/blob/cba6fd3665a6dcefc05759164654761fb5dde97c/e2e/tests/browser/sidebar-session-first.spec.ts"]
 ---
 
@@ -98,6 +98,11 @@ selection, its Close action, Escape or the scrim, and leaves a visible floating
 control to reopen it. `experience=app` is the symmetric override for a wide
 viewport. The App keeps its independent `Sessions ← Terminal → Workspace`
 model and never inherits Web collapse state.
+
+The same Experience decision also selects the operation-surface composition for
+Attach and Session/Project creation — Web's content-capable dialogs versus the
+App quick sheet and full-height operation depths. That contract is owned by
+[Session and Project operation surface presentation by Experience](session-and-project-operation-surface-presentation-by-experience.md).
 
 ## Evidence
 

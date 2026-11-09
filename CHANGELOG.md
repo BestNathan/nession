@@ -415,3 +415,24 @@
 - Categories: architecture, project, workspace, session, ownership, server, protocol
 - Reason: Record #3082's delivered durable zero-or-one Session→Project membership (m006_session_project_bindings, server.session.project.set, create/list projection, tmux instance fence, destruction and Project-deletion semantics) and the context-sensed Project capability (capsule chip/Peek, Workspace view, focused A/B recompute, offline/unauthorized states), plus the SC-07 public prototype readback Case; Managed EROFS creation remains #3062 and the general orphan-source staging mechanism remains #3068
 - Source: https://github.com/BestNathan/nession/pull/3102
+
+## 2026-11-09T11:34:00Z | create | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Record #3089's delivered cross-Experience presentation contract: Web content-capable Attach/Session/Project dialogs with wrapped full addresses and distinct Agent/path lines versus App quick Attach sheet plus full-height configuration and creation depths with draft-preserving child selectors, one Back and safe-area CTA; one shared Attach/create/Project-form owner each, no protocol or domain change
+- Source: https://github.com/BestNathan/nession/pull/3109
+
+## 2026-11-09T11:34:00Z | update | Web Session-first navigation, full tuck-away and explicit experience mode
+- Path: topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md
+- Topic: web
+- Categories: web, navigation, sidebar, interaction, ownership, responsive
+- Reason: Link the Experience decision to the Session/Project operation-surface composition it now selects, so the two Experience-owned presentation contracts resolve from one navigation owner
+- Source: https://github.com/BestNathan/nession/pull/3109
+
+## 2026-11-09T11:34:00Z | update | Project declaration and Workspace location ownership
+- Path: topics/engineering/project-declaration-and-workspace-location-ownership.md
+- Topic: engineering
+- Categories: architecture, project, workspace, session, ownership, server, protocol
+- Reason: Point the Project declaration article at the Experience-specific composition of Project create/settings and Project-aware Session creation delivered by #3089, keeping the domain authority in this article
+- Source: https://github.com/BestNathan/nession/pull/3109

@@ -5,7 +5,7 @@ topic: engineering
 categories: ["architecture", "project", "workspace", "session", "ownership", "server", "protocol"]
 status: verified
 created_at: 2026-11-09T01:09:24Z
-updated_at: 2026-11-09T08:06:00Z
+updated_at: 2026-11-09T11:34:00Z
 sources: ["https://github.com/BestNathan/nession/issues/3021", "https://github.com/BestNathan/nession/pull/3046", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/docs/design/project.md", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-protocol/src/contracts/project/v1.rs", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-server/src/db/migration/m005_projects.rs", "https://github.com/BestNathan/nession/issues/3025", "https://github.com/BestNathan/nession/pull/3064", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-server/src/server/handler/server_session_create_v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/app/patterns/ProjectsSection.tsx", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/product/project/components/ProjectDetail.tsx", "https://github.com/BestNathan/nession/issues/3082", "https://github.com/BestNathan/nession/pull/3102", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/db/migration/m006_session_project_bindings.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/server/handler/server_session_project_set_v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/registry/session.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/capabilities/project/model.ts", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/app/workspace/ProjectWorkspaceView.tsx", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/e2e/acceptance/cases/3082/SC-07/verify.cjs"]
 ---
 
@@ -188,6 +188,9 @@ the archived 32/32 Chromium record. #3062 still owns Managed EROFS creation.
 
 Related knowledge:
 
+- [Session and Project operation surface presentation by Experience](../web/session-and-project-operation-surface-presentation-by-experience.md)
+  owns how Web and App compose the Project create/settings and Project-aware
+  Session create operations over this declaration.
 - [Session metadata and display identity ownership](session-metadata-and-display-identity-ownership.md)
   owns the Session-scoped metadata store and the tmux `@nession_instance_id`
   fence that Project membership also uses; a Project's Session defaults do not
