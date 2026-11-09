@@ -264,6 +264,13 @@ jobs:
                sudo chown -R "$(id -u):$(id -g)" "${sandbox_root}"; then
               echo "SANDBOX_CGROUP_ROOT=/nession-accept" >> "${GITHUB_ENV}"
               echo "delegated controllers: $(cat "${sandbox_root}/cgroup.controllers" 2>/dev/null || echo none)"
+              echo "job cgroup: $(cat /proc/self/cgroup); namespace $(readlink /proc/self/ns/cgroup)"
+              # A hosted runner may give the job a private cgroup namespace.
+              # The visible root is then the job's own cgroup and is the
+              # common ancestor for moving the launcher into an execution
+              # group; hand that ancestor's procs file to the Case user too.
+              sudo chown "$(id -u):$(id -g)" /sys/fs/cgroup/cgroup.procs 2>/dev/null || \
+                echo "::warning::could not hand the job cgroup procs file to the Case user"
               if [ ! -w "${sandbox_root}/cgroup.subtree_control" ]; then
                 echo "::warning::the delegated cgroup root is not writable by the Case user"
               fi
