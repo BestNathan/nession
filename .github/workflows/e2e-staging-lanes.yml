@@ -174,13 +174,17 @@ jobs:
             || { echo "::error::identity refresh requires exact source and destination SHAs"; exit 1; }
           git cat-file -e "${PUSH_BEFORE}^{commit}" \
             || { echo "::error::missing trusted main parent for identity refresh"; exit 1; }
-          if git diff --quiet "$PUSH_BEFORE" "$MAIN_SHA" -- \
+          # Capture the exact source delta and fail on Git errors rather than
+          # mistaking a failed diff command for a changed verifier.
+          git diff --name-only "$PUSH_BEFORE" "$MAIN_SHA" -- \
             .github/workflows/e2e-staging-lanes.yml \
             .github/workflows/deploy-identity.yml \
             scripts/ci/deploy-identity-tunnel.sh \
             scripts/remote-staging-observe.mjs \
             scripts/deployment-identity-policy.mjs \
-            scripts/deployment-identity-collect.mjs; then
+            scripts/deployment-identity-collect.mjs \
+            > "$RUNNER_TEMP/identity-verifier-changes"
+          if [[ ! -s "$RUNNER_TEMP/identity-verifier-changes" ]]; then
             echo "Trusted deployment identity execution sources unchanged; no refresh."
             exit 0
           fi
