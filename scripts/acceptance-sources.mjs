@@ -95,10 +95,6 @@ export function parseAcceptanceSources(body, criteria, plan) {
   return normalized;
 }
 
-export function sourceDigestExtension(sources) {
-  return sources ? { acceptance_sources: sources } : null;
-}
-
 function git(workspace, ...args) {
   return execFileSync('git', ['-C', workspace, ...args], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 2 * 1024 * 1024,
@@ -209,6 +205,10 @@ export function materializeSources(context, workspace) {
     return manifest;
   } catch (error) {
     fs.chmodSync(root, 0o700);
+    for (const dir of new Set(entries.filter((e) => e.staged_path)
+      .map((e) => path.dirname(path.join(root, e.staged_path.slice(SOURCE_ROOT.length + 1)))))) {
+      if (fs.existsSync(dir)) fs.chmodSync(dir, 0o700);
+    }
     fs.rmSync(root, { recursive: true, force: true });
     throw error;
   }
