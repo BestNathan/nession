@@ -887,43 +887,50 @@ impl SessionManager {
         // explicit policy without a configured runtime is refused rather than
         // silently executed as a Native Session.
         let mut sandbox_prepared = match sandbox {
-            Some(policy) if policy.enabled => {
-                let Some(runtime) = self.sandbox.clone() else {
-                    anyhow::bail!(
+            Some(policy) => {
+                // Validate even an explicitly disabled policy: a payload that
+                // says `enabled: false` while carrying constraints is
+                // contradictory and must not be silently ignored.
+                nession_sandbox::compile(policy).map_err(|error| anyhow::anyhow!("{error}"))?;
+                if !policy.enabled {
+                    None
+                } else {
+                    let Some(runtime) = self.sandbox.clone() else {
+                        anyhow::bail!(
                         "this Agent has no Sandbox backend configured; refusing the Session's Sandbox policy"
                     );
-                };
-                let inner_command = if adapter.command.is_empty() {
-                    let tmux_default = self.sdk_ops().default_shell().await.ok().flatten();
-                    let shell = resolve_session_shell(
-                        tmux_default,
-                        std::env::var("SHELL").ok(),
-                        passwd_login_shell(),
-                    )
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "could not resolve a shell to run inside the sandboxed Session"
+                    };
+                    let inner_command = if adapter.command.is_empty() {
+                        let tmux_default = self.sdk_ops().default_shell().await.ok().flatten();
+                        let shell = resolve_session_shell(
+                            tmux_default,
+                            std::env::var("SHELL").ok(),
+                            passwd_login_shell(),
                         )
-                    })?;
-                    vec![shell, "-l".to_string()]
-                } else {
-                    adapter.command.clone()
-                };
-                let request = nession_sandbox::LaunchRequest {
-                    policy: policy.clone(),
-                    session_name: name.to_string(),
-                    instance_id: instance_id.clone(),
-                    working_dir: working_dir.to_string(),
-                    inner_command,
-                    tmux_socket: Some(self.socket_path().to_path_buf()),
-                };
-                let prepared = tokio::task::spawn_blocking(move || runtime.prepare(&request))
-                    .await
-                    .context("sandbox preparation task")?
-                    .map_err(|error| anyhow::anyhow!("{error}"))?;
-                Some(prepared)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "could not resolve a shell to run inside the sandboxed Session"
+                            )
+                        })?;
+                        vec![shell, "-l".to_string()]
+                    } else {
+                        adapter.command.clone()
+                    };
+                    let request = nession_sandbox::LaunchRequest {
+                        policy: policy.clone(),
+                        session_name: name.to_string(),
+                        instance_id: instance_id.clone(),
+                        working_dir: working_dir.to_string(),
+                        inner_command,
+                        tmux_socket: Some(self.socket_path().to_path_buf()),
+                    };
+                    let prepared = tokio::task::spawn_blocking(move || runtime.prepare(&request))
+                        .await
+                        .context("sandbox preparation task")?
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    Some(prepared)
+                }
             }
-            Some(_) => None,
             None => None,
         };
         if let Some(prepared) = &sandbox_prepared {
@@ -1720,6 +1727,45 @@ mod history_limit_tests {
 #[cfg(test)]
 mod sandbox_refusal_tests {
     use super::*;
+
+    /// A payload that says `enabled: false` while carrying constraints is
+    /// contradictory and must be refused, not silently run as Native.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_disabled_policy_with_constraints_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
+        let mgr = crate::test_support::manager_with_fake(&fake);
+        let session = crate::test_support::TestSession::new("sandbox-disabled");
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "enabled": false,
+            "network": { "mode": "deny" }
+        }))
+        .expect("policy fixture");
+
+        let error = mgr
+            .create_session_with_options(
+                session.name(),
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                Some(&policy),
+            )
+            .await
+            .expect_err("a disabled policy with constraints must fail closed");
+        assert!(
+            format!("{error:#}").contains("disabled sandbox policy"),
+            "the refusal must name the contradiction: {error:#}"
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|args| args.first().map(String::as_str) == Some("new-session")),
+            "no Session may be created for a contradictory policy"
+        );
+    }
 
     /// A policy without a composed Sandbox runtime is refused before tmux
     /// creates anything. Falling through to a Native Session would silently

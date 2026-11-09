@@ -121,6 +121,7 @@ pub struct PreparedSandbox {
     settings: SandboxSettings,
     record: ExecutionRecord,
     verified: Option<VerifiedControls>,
+    armed: bool,
     #[cfg(target_os = "linux")]
     linux: Option<crate::linux::PreparedLinux>,
     #[cfg(target_os = "macos")]
@@ -146,6 +147,7 @@ impl PreparedSandbox {
             settings,
             record,
             verified: None,
+            armed: true,
             linux,
         }
     }
@@ -168,6 +170,7 @@ impl PreparedSandbox {
             settings,
             record,
             verified: None,
+            armed: true,
             macos,
         }
     }
@@ -225,39 +228,57 @@ impl PreparedSandbox {
     }
 
     /// Remove every resource prepared for a launch that will not verify.
-    pub fn abort(self) -> Result<CleanupReport> {
-        self.cleanup_prepared()
+    pub fn abort(mut self) -> Result<CleanupReport> {
+        self.armed = false;
+        self.cleanup_in_place()
     }
 
     /// Convert a verified launch into its lifecycle handle.
-    pub fn into_handle(self) -> SandboxExecutionHandle {
+    pub fn into_handle(mut self) -> SandboxExecutionHandle {
+        self.armed = false;
         SandboxExecutionHandle {
-            settings: self.settings,
-            record: self.record,
+            settings: self.settings.clone(),
+            record: self.record.clone(),
             #[cfg(target_os = "linux")]
-            linux: self.linux,
+            linux: self.linux.take(),
             #[cfg(target_os = "macos")]
-            macos: self.macos,
+            macos: self.macos.take(),
         }
     }
 
-    fn cleanup_prepared(self) -> Result<CleanupReport> {
+    fn cleanup_in_place(&mut self) -> Result<CleanupReport> {
         let mut report = CleanupReport {
             execution_id: self.record.execution_id.clone(),
             ..CleanupReport::default()
         };
         #[cfg(target_os = "linux")]
-        if let Some(linux) = self.linux {
+        if let Some(linux) = self.linux.take() {
             crate::linux::cleanup_prepared(linux, &self.settings, &self.record, &mut report)?;
             return Ok(report);
         }
         #[cfg(target_os = "macos")]
-        if let Some(macos) = self.macos {
+        if let Some(macos) = self.macos.take() {
             crate::macos::cleanup_prepared(macos, &self.settings, &self.record, &mut report)?;
             return Ok(report);
         }
         remove_owned_paths(&self.settings, &self.record, &mut report)?;
         Ok(report)
+    }
+}
+
+impl Drop for PreparedSandbox {
+    /// A prepared launch that was dropped before it became a verified handle
+    /// never got user code past the barrier. Releasing its owned resources here
+    /// closes the create-deadline window in which the async future can be
+    /// dropped after preparation succeeded.
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.armed = false;
+        if let Err(error) = self.cleanup_in_place() {
+            tracing::warn!("could not release a prepared Sandbox that was never verified: {error}");
+        }
     }
 }
 
@@ -433,7 +454,11 @@ pub(crate) fn build_report(
     warnings: Vec<String>,
 ) -> SandboxExecutionReport {
     let mut mechanisms = requested_mechanisms(compiled);
-    mechanisms.push("backend.baseline_namespaces".to_string());
+    if backend == "linux-bwrap" {
+        // The Linux backend always creates the baseline namespaces; macOS
+        // Seatbelt does not, so the report must not claim them there.
+        mechanisms.push("backend.baseline_namespaces".to_string());
+    }
     SandboxExecutionReport {
         execution_id: execution_id.to_string(),
         backend: backend.to_string(),

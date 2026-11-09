@@ -31,6 +31,7 @@ pub struct PreparedLinux {
     execution_id: String,
     visible_probes: Vec<PathBuf>,
     hidden_probes: Vec<PathBuf>,
+    not_socket_probes: Vec<PathBuf>,
     require_network_isolation: bool,
     require_cgroup_namespace: bool,
 }
@@ -209,6 +210,10 @@ impl CgroupGuard {
     fn take(&mut self) -> Option<cgroup::ExecutionCgroup> {
         self.0.take()
     }
+
+    fn as_ref(&self) -> Option<&cgroup::ExecutionCgroup> {
+        self.0.as_ref()
+    }
 }
 
 impl Drop for CgroupGuard {
@@ -299,8 +304,25 @@ fn prepare_inner(
 
     let mut forbidden = bwrap::ForbiddenPaths {
         files: request.tmux_socket.clone().into_iter().collect(),
-        directories: vec![settings.state_dir.clone(), PathBuf::from("/sys/fs/cgroup")],
+        directories: vec![
+            settings.state_dir.clone(),
+            PathBuf::from("/sys/fs/cgroup"),
+            // Ambient host control surfaces. A filesystem policy that lists
+            // them is refused; without one, `/run` is masked wholesale.
+            PathBuf::from("/run/user"),
+            PathBuf::from("/run/dbus"),
+        ],
     };
+    forbidden.files.extend(
+        [
+            "/run/docker.sock",
+            "/var/run/docker.sock",
+            "/run/dbus/system_bus_socket",
+            "/var/run/dbus/system_bus_socket",
+        ]
+        .into_iter()
+        .map(PathBuf::from),
+    );
     forbidden
         .directories
         .extend(settings.private_directories.iter().cloned());
@@ -317,9 +339,10 @@ fn prepare_inner(
         bridge_subcommand: settings.bridge_subcommand.clone(),
     };
 
-    // Filesystem probes: the cwd must be visible, and the Agent state (or the
-    // policy-hidden control paths) must not be. A probe path that does not
-    // exist on the host cannot prove anything and is not used.
+    // Filesystem probes. An explicit policy hides every unlisted host path, so
+    // the forbidden directories themselves must be absent. With no filesystem
+    // policy the backend *masks* them with a tmpfs/devnull; the masked
+    // directory then exists, so the probe names a known child the mask removed.
     let mut visible_probes = vec![working_dir.to_path_buf()];
     if let Some(filesystem) = &compiled.filesystem {
         if let Some(path) = filesystem.visible().find(|path| path.is_dir()) {
@@ -329,17 +352,37 @@ fn prepare_inner(
     visible_probes.retain(|path| path.exists());
     visible_probes.sort();
     visible_probes.dedup();
-    let mut hidden_probes: Vec<PathBuf> = forbidden
-        .files
-        .iter()
-        .chain(forbidden.directories.iter())
-        .filter(|path| path.exists())
-        .cloned()
-        .collect();
+
+    let mut hidden_probes = Vec::new();
+    let mut not_socket_probes = Vec::new();
+    if compiled.filesystem.is_some() {
+        hidden_probes.extend(
+            forbidden
+                .directories
+                .iter()
+                .filter(|path| path.exists())
+                .cloned(),
+        );
+    } else {
+        // The record is written before the launcher starts; after masking its
+        // directory this child must be gone.
+        hidden_probes.push(settings.state_dir.join(format!("{execution_id}.json")));
+        if let Some(root) = settings.resolved_cgroup_root() {
+            let relative = root.strip_prefix("/").unwrap_or(root.as_path());
+            let controllers = Path::new(cgroup::CGROUP_MOUNT)
+                .join(relative)
+                .join("cgroup.controllers");
+            if controllers.exists() {
+                hidden_probes.push(controllers);
+            }
+        }
+    }
+    not_socket_probes.extend(forbidden.files.iter().filter(|path| path.exists()).cloned());
     hidden_probes.sort();
     hidden_probes.dedup();
+    not_socket_probes.sort();
+    not_socket_probes.dedup();
 
-    let cgroup = cgroup_guard.take();
     let plan = bwrap::build(
         compiled,
         working_dir,
@@ -347,8 +390,9 @@ fn prepare_inner(
         &bridge,
         &visible_probes,
         &hidden_probes,
+        &not_socket_probes,
         &seccomp_profile,
-        cgroup
+        cgroup_guard
             .as_ref()
             .map(cgroup::ExecutionCgroup::procs_file)
             .as_deref(),
@@ -373,7 +417,9 @@ fn prepare_inner(
         compiled,
         execution_id,
         "linux-bwrap",
-        cgroup.as_ref().map(cgroup::ExecutionCgroup::path),
+        cgroup_guard
+            .as_ref()
+            .map(cgroup::ExecutionCgroup::relative_path),
         restricted.then(|| format!("socks5h://127.0.0.1:{}", bwrap::SANDBOX_PROXY_PORT)),
         warnings,
     );
@@ -385,14 +431,17 @@ fn prepare_inner(
         policy_digest: compiled.digest.clone(),
         created_at: now_seconds(),
         pane_pid: None,
-        cgroup_path: cgroup
+        cgroup_path: cgroup_guard
             .as_ref()
-            .map(|group| group.path().display().to_string()),
+            .map(|group| group.relative_path().display().to_string()),
         execution_dir: execution_dir.display().to_string(),
         restricted_network: restricted,
         agent_pid: std::process::id(),
     };
     write_record(settings, &record)?;
+    // Only now disarm the guard: every fallible preparation step above either
+    // succeeded or unwound through `CgroupGuard::drop`.
+    let cgroup = cgroup_guard.take();
 
     let extra_env = sandbox_environment(&record, "linux-bwrap", &compiled.digest);
     Ok(PreparedSandbox::new(
@@ -409,6 +458,7 @@ fn prepare_inner(
             execution_id: execution_id.to_string(),
             visible_probes,
             hidden_probes,
+            not_socket_probes,
             require_network_isolation,
             require_cgroup_namespace: compiled.namespaces.cgroup,
         }),
@@ -416,7 +466,18 @@ fn prepare_inner(
 }
 
 fn pane_alive(pid: u32) -> bool {
-    Path::new(&format!("/proc/{pid}")).exists()
+    // `/proc/<pid>` exists for a zombie too. The launcher may exit while its
+    // parent has not reaped it yet, and that is not a live Pane.
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    let Some(close) = stat.rfind(')') else {
+        return false;
+    };
+    let state = stat
+        .get(close + 1..)
+        .and_then(|rest| rest.split_whitespace().next());
+    !matches!(state, Some("Z" | "X") | None)
 }
 
 /// Wait for the bridge, verify the installed controls, then release the
@@ -456,11 +517,15 @@ pub fn verify_launch(
         peer: &peer,
         pane_pid,
         expected_execution_id: &prepared.execution_id,
-        expected_cgroup: prepared.cgroup.as_ref().map(cgroup::ExecutionCgroup::path),
+        expected_cgroup: prepared
+            .cgroup
+            .as_ref()
+            .map(cgroup::ExecutionCgroup::relative_path),
         require_network_isolation: prepared.require_network_isolation,
         require_cgroup_namespace: prepared.require_cgroup_namespace,
         visible_probes: &prepared.visible_probes,
         hidden_probes: &prepared.hidden_probes,
+        not_socket_probes: &prepared.not_socket_probes,
     };
     let facts = match verify::verify(&request) {
         Ok(facts) => facts,
@@ -478,17 +543,10 @@ pub fn verify_launch(
     };
     channel.release(peer)?;
 
-    // The bridge now execs the user's shell. A shell that cannot start must
-    // fail the create rather than leave an empty Session.
-    let grace = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < grace {
-        if !pane_alive(pane_pid) {
-            return Err(SandboxError::Verify(format!(
-                "the Pane process {pane_pid} exited immediately after the launch barrier"
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // The bridge now execs the user's shell. A command that exits immediately
+    // is a legitimate Session state (for example `sh -c true`), so the create
+    // does not insist the Pane outlive verification; a spawn failure is caught
+    // by the barrier itself because no init ever connects.
     Ok(crate::exec::VerifiedControls {
         namespaces: facts.namespaces,
         cgroup: facts.cgroup,

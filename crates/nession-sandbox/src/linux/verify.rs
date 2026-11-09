@@ -25,6 +25,7 @@ pub struct VerifyRequest<'a> {
     pub require_cgroup_namespace: bool,
     pub visible_probes: &'a [PathBuf],
     pub hidden_probes: &'a [PathBuf],
+    pub not_socket_probes: &'a [PathBuf],
 }
 
 /// Observed facts, retained as evidence.
@@ -58,12 +59,10 @@ pub fn verify(request: &VerifyRequest<'_>) -> Result<VerifiedFacts> {
             request.pane_pid
         )));
     }
-    if facts.ns_pid != 1 {
-        return Err(SandboxError::Verify(format!(
-            "the sandbox init has in-namespace PID {}, not 1",
-            facts.ns_pid
-        )));
-    }
+    // Bubblewrap's own init may hold in-namespace PID 1 (measured with
+    // bubblewrap 0.8: the command starts as PID 3). The requirement is a real
+    // PID namespace, not that the bridge is its init; the namespace identity
+    // check below is the authority.
 
     let mut required = vec!["mnt", "pid", "user", "ipc", "uts"];
     if request.require_network_isolation {
@@ -101,7 +100,10 @@ pub fn verify(request: &VerifyRequest<'_>) -> Result<VerifiedFacts> {
 
     if let Some(expected) = request.expected_cgroup {
         let expected_entry = format!("0::{}", expected.display());
-        if facts.cgroup != expected_entry {
+        // A cgroup namespace maps the execution's path to `/` inside the
+        // sandbox, so the in-sandbox string cannot equal the host-relative
+        // one. The host's `/proc` remains the authority for membership.
+        if !request.require_cgroup_namespace && facts.cgroup != expected_entry {
             return Err(SandboxError::Verify(format!(
                 "the sandbox init reports cgroup `{}`, expected `{expected_entry}`",
                 facts.cgroup
@@ -128,6 +130,14 @@ pub fn verify(request: &VerifyRequest<'_>) -> Result<VerifiedFacts> {
         if !facts.hidden.contains(&probe) {
             return Err(SandboxError::Verify(format!(
                 "hidden path `{probe}` was not confirmed absent inside the sandbox"
+            )));
+        }
+    }
+    for probe in request.not_socket_probes {
+        let probe = probe.to_string_lossy().into_owned();
+        if !facts.hidden_not_socket.contains(&probe) {
+            return Err(SandboxError::Verify(format!(
+                "masked path `{probe}` is still reachable inside the sandbox"
             )));
         }
     }

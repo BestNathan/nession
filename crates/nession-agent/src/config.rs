@@ -126,8 +126,9 @@ pub struct SandboxConfig {
     /// macOS `sandbox-exec` executable.
     #[serde(default)]
     pub sandbox_exec_path: Option<std::path::PathBuf>,
-    /// Optional cgroup v2 execution root. Defaults to a `nession` subtree under
-    /// the Agent's own delegated cgroup.
+    /// Optional cgroup v2 execution root, as a **kernel-relative** path
+    /// (`/proc/<pid>/cgroup` form), not a `/sys/fs/cgroup` mount path.
+    /// Defaults to a `nession` subtree under the Agent's own delegated cgroup.
     #[serde(default)]
     pub cgroup_root: Option<std::path::PathBuf>,
     /// Execution records, profiles and channel sockets. Defaults to

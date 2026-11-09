@@ -15,10 +15,10 @@ run(({ evidence }) => {
     300000,
   );
   assertRan(contract, [
-    'contracts::sandbox::tests::the_illustrative_policy_round_trips_with_native_cgroup_keys',
-    'contracts::sandbox::tests::unknown_fields_are_refused_at_the_schema_boundary',
-    'contracts::sandbox::tests::unknown_cgroup_keys_are_refused_rather_than_written',
-    'contracts::sandbox::tests::unknown_enum_values_are_refused',
+    'contracts::sandbox::v1::tests::the_illustrative_policy_round_trips_with_native_cgroup_keys',
+    'contracts::sandbox::v1::tests::unknown_fields_are_refused_at_the_schema_boundary',
+    'contracts::sandbox::v1::tests::unknown_cgroup_keys_are_refused_rather_than_written',
+    'contracts::sandbox::v1::tests::unknown_enum_values_are_refused',
   ]);
 
   const policy = checked(

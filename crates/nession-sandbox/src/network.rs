@@ -133,7 +133,32 @@ impl EgressRules {
         }
     }
 
-    /// Decide whether one *effective address* may be connected to.
+    /// Decide whether one effective address of an **allowed name** may be
+    /// connected to.
+    ///
+    /// The name allow rule already authorized the name; this checks only the
+    /// address-class safety and IP deny rules. Requiring an IP-literal allow
+    /// rule here would make every domain allow rule unusable.
+    pub fn authorize_resolved_ip(
+        &self,
+        ip: IpAddr,
+        port: u16,
+    ) -> std::result::Result<(), EgressDenial> {
+        if is_forbidden_address(ip) {
+            return Err(EgressDenial::PrivateAddress);
+        }
+        if self
+            .deny
+            .iter()
+            .any(|rule| rule.matches_ip(ip) && rule.matches_port(port))
+        {
+            return Err(EgressDenial::DeniedByRule);
+        }
+        Ok(())
+    }
+
+    /// Decide whether one *effective address* may be connected to as an IP
+    /// literal.
     ///
     /// Deny rules win, the address must be explicitly allowed as an IP
     /// literal, and private/host-local addresses are refused unconditionally.
@@ -384,6 +409,24 @@ mod tests {
             Err(EgressDenial::DeniedByRule)
         );
         assert_eq!(rules.authorize_host("public.example.com", 443), Ok(()));
+    }
+
+    #[test]
+    fn a_domain_allow_rule_authorizes_its_public_resolutions() {
+        let rules = rules(&["api.example.com:443"], &["8.8.8.8"]);
+        assert_eq!(rules.authorize_host("api.example.com", 443), Ok(()));
+        assert_eq!(
+            rules.authorize_resolved_ip("93.184.216.34".parse().unwrap(), 443),
+            Ok(())
+        );
+        assert_eq!(
+            rules.authorize_resolved_ip("10.0.0.7".parse().unwrap(), 443),
+            Err(EgressDenial::PrivateAddress)
+        );
+        assert_eq!(
+            rules.authorize_resolved_ip("8.8.8.8".parse().unwrap(), 443),
+            Err(EgressDenial::DeniedByRule)
+        );
     }
 
     #[test]

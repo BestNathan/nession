@@ -16,7 +16,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
-use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_sandbox::{
     cleanup_record, prepare, probe, reconcile, Capabilities, CleanupReport, ExecutionRecord,
     LaunchRequest, PreparedSandbox, ReconcileOutcome, SandboxExecutionHandle, SandboxSettings,
@@ -286,11 +285,6 @@ impl SandboxRuntime {
             }
         });
     }
-}
-
-/// Whether a policy is an explicit request to sandbox this create.
-pub fn policy_requests_sandbox(policy: &SandboxPolicy) -> bool {
-    policy.enabled
 }
 
 /// Prepare, verify and register one sandboxed Session.

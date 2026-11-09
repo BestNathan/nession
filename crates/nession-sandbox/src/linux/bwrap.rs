@@ -88,6 +88,7 @@ pub fn build(
     bridge: &BridgePlacement,
     visible_probes: &[PathBuf],
     hidden_probes: &[PathBuf],
+    not_socket_probes: &[PathBuf],
     seccomp_profile: &Path,
     cgroup_procs: Option<&Path>,
     inner_command: &[String],
@@ -146,11 +147,14 @@ pub fn build(
                         .to_string(),
                 );
             }
-            for path in &filesystem.read {
-                push_bind(&mut args, "--ro-bind", path, path);
-            }
+            // Writable mounts first, read-only mounts after: a later mount
+            // wins on an overlapping path. Compilation refuses overlaps, so
+            // this ordering is belt-and-braces rather than the primary guard.
             for path in &filesystem.write {
                 push_bind(&mut args, "--bind", path, path);
+            }
+            for path in &filesystem.read {
+                push_bind(&mut args, "--ro-bind", path, path);
             }
             for (target, link) in merged_usr_symlinks(filesystem) {
                 args.push("--symlink".to_string());
@@ -234,6 +238,10 @@ pub fn build(
         args.push("--probe-hidden".to_string());
         args.push(path_string(probe)?);
     }
+    for probe in not_socket_probes {
+        args.push("--probe-not-socket".to_string());
+        args.push(path_string(probe)?);
+    }
     args.push("--".to_string());
     args.extend(inner_command.iter().cloned());
 
@@ -307,25 +315,21 @@ fn mask_host_control_paths(
             masked = true;
         }
     }
-    // Common ambient host control sockets. They are masked only when this
-    // execution did not ask for a filesystem view (a filesystem policy that
-    // lists them is refused by `ForbiddenPaths`).
-    for directory in ["/run/user", "/run/dbus", "/var/run/dbus", "/run/systemd"] {
-        let path = Path::new(directory);
-        if path.exists() {
-            args.push("--tmpfs".to_string());
-            args.push(directory.to_string());
-            masked = true;
-        }
+    // Host runtime state lives under `/run` (Docker/D-Bus/user sockets, pid
+    // files). A fresh tmpfs removes all of it without enumerating individual
+    // sockets, and makes `/run/nession` mountable on the read-only root.
+    let run = Path::new("/run");
+    if run.exists() {
+        args.push("--tmpfs".to_string());
+        args.push("/run".to_string());
+        warnings.push("backend baseline: masked /run host runtime state".to_string());
+        masked = true;
     }
-    for socket in [
-        "/run/docker.sock",
-        "/var/run/docker.sock",
-        "/run/dbus/system_bus_socket",
-        "/var/run/dbus/system_bus_socket",
-    ] {
+    // `/var/run` is usually a symlink to `/run`; on hosts where it is a real
+    // directory, mask the known control sockets directly.
+    for socket in ["/var/run/docker.sock", "/var/run/dbus/system_bus_socket"] {
         let path = Path::new(socket);
-        if path.exists() {
+        if path.exists() && !run.exists() {
             args.push("--ro-bind".to_string());
             args.push("/dev/null".to_string());
             args.push(socket.to_string());
@@ -438,6 +442,7 @@ mod tests {
             &bridge(),
             &[],
             &[],
+            &[],
             Path::new("/tmp/seccomp"),
             None,
             &["/bin/sh".to_string(), "-l".to_string()],
@@ -464,6 +469,7 @@ mod tests {
             &bridge(),
             &[],
             &[],
+            &[],
             Path::new("/tmp/seccomp"),
             None,
             &["/bin/sh".to_string(), "-l".to_string()],
@@ -488,6 +494,7 @@ mod tests {
             Path::new("/tmp"),
             &forbidden,
             &bridge(),
+            &[],
             &[],
             &[],
             Path::new("/tmp/seccomp"),

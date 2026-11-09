@@ -7,5 +7,11 @@
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    std::process::exit(nession_sandbox::bridge::run(&arguments));
+    // The Agent's hidden subcommand and this binary receive the same argv:
+    // the subcommand token is followed by the bridge arguments. Accept both
+    // shapes so one protocol serves both entrypoints.
+    let bridge_arguments = arguments
+        .strip_prefix(&[nession_sandbox::bridge::SUBCOMMAND.to_string()])
+        .unwrap_or(arguments.as_slice());
+    std::process::exit(nession_sandbox::bridge::run(bridge_arguments));
 }

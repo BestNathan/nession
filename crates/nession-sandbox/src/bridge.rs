@@ -1,6 +1,7 @@
 //! The in-sandbox init and bridge.
 //!
-//! It runs as PID 1 in the sandbox's PID namespace, before any user code:
+//! It runs inside the sandbox's PID namespace, before any user code (Bubblewrap's
+//! own init may hold in-namespace PID 1; this process reaps its descendants):
 //!
 //! 1. binds the sandbox-local proxy endpoint (restricted mode);
 //! 2. connects to the trusted host channel and reports the facts it can see
@@ -48,6 +49,7 @@ struct BridgeArgs {
     proxy_listen: Option<SocketAddr>,
     visible_probes: Vec<String>,
     hidden_probes: Vec<String>,
+    not_socket_probes: Vec<String>,
     command: Vec<String>,
 }
 
@@ -57,6 +59,7 @@ fn parse(arguments: &[String]) -> Result<BridgeArgs, String> {
     let mut proxy_listen = None;
     let mut visible_probes = Vec::new();
     let mut hidden_probes = Vec::new();
+    let mut not_socket_probes = Vec::new();
     let mut command = Vec::new();
     let mut index = 0;
     while index < arguments.len() {
@@ -101,6 +104,15 @@ fn parse(arguments: &[String]) -> Result<BridgeArgs, String> {
                         .clone(),
                 );
             }
+            "--probe-not-socket" => {
+                index += 1;
+                not_socket_probes.push(
+                    arguments
+                        .get(index)
+                        .ok_or_else(|| "--probe-not-socket needs a path".to_string())?
+                        .clone(),
+                );
+            }
             "--" => {
                 command = arguments.get(index + 1..).unwrap_or_default().to_vec();
                 break;
@@ -120,6 +132,7 @@ fn parse(arguments: &[String]) -> Result<BridgeArgs, String> {
         proxy_listen,
         visible_probes,
         hidden_probes,
+        not_socket_probes,
         command,
     })
 }
@@ -161,7 +174,11 @@ pub fn run(arguments: &[String]) -> i32 {
     let _ = channel.set_read_timeout(Some(RELEASE_TIMEOUT));
     let _ = channel.set_write_timeout(Some(RELEASE_TIMEOUT));
 
-    let facts = collect_facts(&args.visible_probes, &args.hidden_probes);
+    let facts = collect_facts(
+        &args.visible_probes,
+        &args.hidden_probes,
+        &args.not_socket_probes,
+    );
     let facts_json = match serde_json::to_string(&facts) {
         Ok(json) => json,
         Err(error) => {
@@ -224,7 +241,7 @@ pub fn run(arguments: &[String]) -> i32 {
 }
 
 /// The bridge's own PID as seen from inside the namespace.
-fn collect_facts(visible: &[String], hidden: &[String]) -> BridgeFacts {
+fn collect_facts(visible: &[String], hidden: &[String], not_socket: &[String]) -> BridgeFacts {
     let mut facts = BridgeFacts {
         ns_pid: std::process::id(),
         ..BridgeFacts::default()
@@ -276,6 +293,26 @@ fn collect_facts(visible: &[String], hidden: &[String]) -> BridgeFacts {
                 .push(format!("hidden probe {path}: {error}")),
         }
     }
+    for path in not_socket {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                use std::os::unix::fs::FileTypeExt as _;
+                if metadata.file_type().is_socket() {
+                    facts
+                        .probe_errors
+                        .push(format!("masked probe {path} is still a socket"));
+                } else {
+                    facts.hidden_not_socket.push(path.clone());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                facts.hidden_not_socket.push(path.clone());
+            }
+            Err(error) => facts
+                .probe_errors
+                .push(format!("masked probe {path}: {error}")),
+        }
+    }
     facts
 }
 
@@ -319,8 +356,9 @@ fn reap_until(child_pid: i32) -> i32 {
         if pid == child_pid {
             return decode_status(status);
         }
-        // Any other child is an orphan reparented to this init; reaping it is
-        // the reason this process exists as PID 1.
+        // Any other child is an orphan reparented to this process when it is
+        // the namespace init, or to Bubblewrap's init otherwise. Reaping what
+        // arrives here keeps the namespace free of zombies either way.
     }
 }
 

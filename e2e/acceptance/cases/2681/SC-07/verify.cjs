@@ -10,9 +10,12 @@ const {
 } = require('../../../shared/sandbox-cases.cjs');
 
 const capabilities = probeCapabilities();
-if (!capabilities.backend) {
-  pending('No usable Sandbox backend on this runner: ' + capabilities.unavailable,
-    [{ type: 'blocked', value: capabilityLine(capabilities) }]);
+if (capabilities.platform !== 'linux' || !capabilities.backend) {
+  pending(
+    'No usable Linux Sandbox backend on this runner: ' +
+      (capabilities.unavailable || 'platform=' + capabilities.platform),
+    [{ type: 'blocked', value: capabilityLine(capabilities) }],
+  );
 } else {
   run(({ evidence }) => {
     const normal = runtimeEvidence(
@@ -33,20 +36,26 @@ if (!capabilities.backend) {
     );
     assert.equal(survival.survived_client_loss, true);
 
+    const restart = runtimeEvidence(
+      runLinuxRuntimeTest('a_recorded_cgroup_is_recoverable_after_restart'),
+    );
+    assert.ok(restart.recorded_cgroup, 'the record stored a cgroup path');
+
     const reconciliation = checked(
       'cargo',
-      ['test', '-p', 'nession-agent', '--lib', 'sandbox_runtime::tests', '--', '--nocapture'],
+      ['test', '-p', 'nession-sandbox', '--lib', 'exec::tests', '--', '--nocapture'],
       600000,
     );
     assertRan(reconciliation, [
-      'sandbox_runtime::tests::reconciliation_keeps_live_sessions_and_cleans_dead_ones',
-      'sandbox_runtime::tests::a_record_outside_the_state_directory_is_not_followed',
+      'exec::tests::reconciliation_keeps_live_sessions_and_cleans_dead_ones',
+      'exec::tests::a_record_outside_the_state_directory_is_not_followed',
     ]);
 
     evidence.push(
       { type: 'runtime', value: 'execution ' + normal.execution_id + ' released its record, directory and cgroup on normal exit' },
       { type: 'runtime', value: 'a prepared-but-aborted launch removed exactly its owned record and directory' },
       { type: 'runtime', value: 'the sandboxed Pane remained alive after its client stream disappeared' },
+      { type: 'runtime', value: 'a durable record with a cgroup path was recovered and cleaned without the in-memory handle (' + restart.recorded_cgroup + ')' },
       { type: 'runtime', value: 'restart reconciliation kept live Sessions and removed vanished ones without following unowned paths' },
     );
     return 'Sandboxed executions survive client loss, and normal exit, partial startup and restart reconciliation release only owned resources';

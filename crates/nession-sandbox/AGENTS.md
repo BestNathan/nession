@@ -35,7 +35,8 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
 3. **No user string is interpreted by the launcher shell.** The launcher is a
    fixed `/bin/sh` program with positional arguments; the only variable it
    evaluates is `$$` for cgroup enrollment.
-4. **The launch barrier is real.** The bridge reports facts and waits for
+4. **The launch barrier is real.** The bridge runs inside the PID namespace,
+   reports facts and waits for
    `GO`; user code starts only after the host verifies namespaces, cgroup,
    seccomp and its filesystem probes. Never move GO before verification.
 5. **Proxy identity is kernel peer identity.** A proxy connection is accepted
@@ -58,6 +59,13 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
 - Backend baseline namespaces (user, pid, ipc, uts, mount) and the pinned
   seccomp profile are created for every execution. They are safety
   prerequisites, not additional user-requested constraints.
+
+## cgroup delegation
+
+The execution root needs a cgroup with delegated controllers and no processes
+of its own. Probe, never assume: a host that cannot delegate reports
+`UnsupportedPolicy(resource.cgroup_v2)`. Cleanup uses the record's
+kernel-relative path and only removes a direct child of the Nession root.
 
 ## Verification
 

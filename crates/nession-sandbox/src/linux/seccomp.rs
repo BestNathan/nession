@@ -25,6 +25,17 @@ const EPERM_ERRNO: u32 = 1;
 
 const SECCOMP_DATA_NR: u32 = 0;
 const SECCOMP_DATA_ARCH: u32 = 4;
+/// Low 32 bits of `args[1]` (`ioctl`'s request argument).
+const SECCOMP_DATA_ARG1_LOW: u32 = 24;
+
+/// The `TIOCSTI` ioctl request, the terminal-injection primitive this profile
+/// denies even though `ioctl` itself must stay available for TUIs and resize.
+const TIOCSTI_REQUEST: u32 = 0x5412;
+
+#[cfg(target_arch = "x86_64")]
+const IOCTL_SYSCALL: u32 = 16;
+#[cfg(target_arch = "aarch64")]
+const IOCTL_SYSCALL: u32 = 29;
 
 #[cfg(target_arch = "x86_64")]
 const AUDIT_ARCH: u32 = 0xC000_003E;
@@ -164,6 +175,19 @@ pub fn interactive_profile_v1() -> Result<Vec<u8>> {
     program.push(SockFilter::new(BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS));
     program.push(SockFilter::new(BPF_LD_W_ABS, 0, 0, SECCOMP_DATA_NR));
 
+    // `ioctl` stays allowed (TUIs, resize, job control), but its TIOCSTI
+    // request is denied by argument. A denied ioctl returns EPERM just like
+    // the blocked syscalls below.
+    program.push(SockFilter::new(BPF_JEQ_K, 0, 3, IOCTL_SYSCALL));
+    program.push(SockFilter::new(BPF_LD_W_ABS, 0, 0, SECCOMP_DATA_ARG1_LOW));
+    program.push(SockFilter::new(BPF_JEQ_K, 0, 1, TIOCSTI_REQUEST));
+    program.push(SockFilter::new(
+        BPF_RET_K,
+        0,
+        0,
+        SECCOMP_RET_ERRNO | EPERM_ERRNO,
+    ));
+
     for (_name, number) in BLOCKED_SYSCALLS {
         let number = u32::try_from(*number).map_err(|_| {
             SandboxError::Prepare("a blocked syscall number is not representable".to_string())
@@ -254,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn clone_and_ioctl_are_not_blocked() {
+    fn clone_and_ioctl_are_not_globally_blocked() {
         // The profile must not break fork/threads, TUIs or job control. These
         // names are absent by construction; the test makes the compatibility
         // promise executable rather than a comment.
@@ -262,5 +286,27 @@ mod tests {
         for allowed in ["clone", "clone3", "ioctl", "execve", "wait4", "tty"] {
             assert!(!names.contains(&allowed), "{allowed} must stay allowed");
         }
+    }
+
+    #[test]
+    fn the_tiocsti_ioctl_request_is_denied_by_argument() {
+        let bytes = interactive_profile_v1().expect("profile builds");
+        let program = instructions(&bytes);
+        let index = program
+            .iter()
+            .position(|instruction| *instruction == (BPF_JEQ_K, 0, 3, IOCTL_SYSCALL))
+            .expect("the ioctl argument guard is present");
+        assert_eq!(
+            program.get(index + 1),
+            Some(&(BPF_LD_W_ABS, 0, 0, SECCOMP_DATA_ARG1_LOW))
+        );
+        assert_eq!(
+            program.get(index + 2),
+            Some(&(BPF_JEQ_K, 0, 1, TIOCSTI_REQUEST))
+        );
+        assert_eq!(
+            program.get(index + 3),
+            Some(&(BPF_RET_K, 0, 0, SECCOMP_RET_ERRNO | EPERM_ERRNO))
+        );
     }
 }

@@ -72,7 +72,10 @@ These are safety/executability prerequisites, not additional policy:
    opens the profile as FD 3 and `exec`s Bubblewrap. It evaluates only `$$`;
    no policy string is interpolated into shell code.
 3. Bubblewrap applies namespaces, mounts and the seccomp filter, then runs the
-   bridge (a hidden subcommand of the Agent binary) as PID 1.
+   bridge (a hidden subcommand of the Agent binary) inside the new PID
+   namespace. Bubblewrap's own init may hold in-namespace PID 1 (measured with
+   bubblewrap 0.8); the bridge reaps its descendants and the host verifies the
+   namespace identity, not a PID number.
 4. The bridge reports `/proc/self/ns/*`, `/proc/self/cgroup`, `Seccomp` and
    `NoNewPrivs`, plus the result of the filesystem probes, and **waits**.
 5. The Agent authenticates the channel peer (`SO_PEERCRED` + descendant of the
@@ -98,6 +101,18 @@ to the per-execution Unix channel. The host proxy speaks SOCKS5 and HTTP
 
 `ALL_PROXY`/`HTTPS_PROXY` are convenience hints. The network namespace and the
 host proxy are the enforcement boundary.
+
+### cgroup delegation
+
+The cgroup v2 default root is `<Agent cgroup>/nession`. Creating an execution
+group there requires the Agent's own cgroup to be a delegated root — a cgroup
+with controllers available and **no processes of its own**, because the kernel
+forbids a cgroup from both hosting processes and enabling domain controllers in
+its `subtree_control`. A systemd `Delegate=yes` service or a Pod that places
+the Agent in a leaf satisfies this; a plain container whose root cgroup hosts
+PID 1 does not. Operators can point `[sandbox] cgroup_root` at a delegated
+sibling. The backend probes rather than assumes: an unavailable delegation
+reports `UnsupportedPolicy(resource.cgroup_v2)` and the create is refused.
 
 ## Lifecycle and reconciliation
 

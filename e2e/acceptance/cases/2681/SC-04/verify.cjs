@@ -19,8 +19,9 @@ if (!cgroup || !cgroup.controllers.includes('pids')) {
     );
     const facts = runtimeEvidence(output);
     assert.ok(facts.cgroup_path, 'the execution cgroup path was reported');
-    assert.equal(facts.cgroup_membership_verified, true);
+    assert.equal(facts.cgroup_membership_verified, true, 'the Pane must be a member of the recorded cgroup');
     assert.equal(facts.cgroup_limits_verified, true);
+    assert.equal(facts.cgroup_effective_limits['pids.max'], '64');
     assert.equal(facts.cgroup_removed, true);
     evidence.push(
       { type: 'runtime', value: 'execution ' + facts.execution_id + ' was enrolled in ' + facts.cgroup_path },

@@ -352,6 +352,20 @@ fn compile_filesystem(read: &[String], write: &[String]) -> Result<CompiledFiles
     // A writable path is visible; keeping it only in `write` avoids a
     // contradictory read-only and read-write mount of the same path.
     read_paths.retain(|path| !write_paths.contains(path));
+    // A nested read-only path under a writable parent (or vice versa) cannot
+    // be honoured by both dimensions: one mount hides the other. Refusing is
+    // the only truthful answer.
+    for read in &read_paths {
+        for write in &write_paths {
+            if read.starts_with(write) || write.starts_with(read) {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem paths overlap: {} and {} request different access to the same tree",
+                    read.display(),
+                    write.display()
+                )));
+            }
+        }
+    }
     Ok(CompiledFilesystem {
         read: read_paths,
         write: write_paths,
@@ -620,6 +634,21 @@ mod tests {
                 "filesystem": { "access": { "read": [bad] } }
             })))
             .expect_err("path must be absolute and normalized");
+            assert!(matches!(error, SandboxError::InvalidPolicy(_)));
+        }
+    }
+
+    #[test]
+    fn overlapping_read_and_write_paths_are_refused() {
+        for (read, write) in [
+            ("/workspace/vendor", "/workspace"),
+            ("/workspace", "/workspace/tmp"),
+        ] {
+            let error = compile(&policy(serde_json::json!({
+                "enabled": true,
+                "filesystem": { "access": { "read": [read], "write": [write] } }
+            })))
+            .expect_err("two access modes for one tree is contradictory");
             assert!(matches!(error, SandboxError::InvalidPolicy(_)));
         }
     }

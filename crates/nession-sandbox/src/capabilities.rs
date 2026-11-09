@@ -59,7 +59,10 @@ impl NamespaceSupport {
 /// Delegated cgroup v2 support under one writable execution root.
 #[derive(Debug, Clone)]
 pub struct CgroupSupport {
+    /// The execution root under the cgroup mount (control-file access).
     pub root: PathBuf,
+    /// The same root as `/proc/<pid>/cgroup` reports it (kernel-relative).
+    pub relative_root: PathBuf,
     pub controllers: BTreeSet<String>,
     pub detail: String,
 }
@@ -351,6 +354,7 @@ mod tests {
             },
             cgroup_v2: Some(CgroupSupport {
                 root: PathBuf::from("/sys/fs/cgroup/nession"),
+                relative_root: PathBuf::from("/nession"),
                 controllers: ["memory", "cpu", "pids"]
                     .into_iter()
                     .map(str::to_string)
@@ -441,6 +445,7 @@ mod tests {
         let mut capabilities = linux_capabilities();
         capabilities.cgroup_v2 = Some(CgroupSupport {
             root: PathBuf::from("/sys/fs/cgroup/nession"),
+            relative_root: PathBuf::from("/nession"),
             controllers: ["cpu"].into_iter().map(str::to_string).collect(),
             detail: "cpu only".to_string(),
         });

@@ -68,6 +68,10 @@ pub struct Channel {
     bridge_pid: Arc<AtomicU32>,
     proxy_rules: Option<Arc<EgressRules>>,
     accepted: Arc<AtomicBool>,
+    /// Set once the barrier is released or refused. After that, no control
+    /// connection is legitimate: sandboxed user code must not be able to grow
+    /// an unbounded queue of retained streams in the Agent.
+    released: Arc<AtomicBool>,
 }
 
 impl Channel {
@@ -108,10 +112,12 @@ impl Channel {
         let shutdown = Arc::new(AtomicBool::new(false));
         let bridge_pid = Arc::new(AtomicU32::new(0));
         let accepted = Arc::new(AtomicBool::new(false));
+        let released = Arc::new(AtomicBool::new(false));
         let execution_id = execution_id.to_string();
         let thread_shutdown = Arc::clone(&shutdown);
         let thread_bridge_pid = Arc::clone(&bridge_pid);
         let thread_accepted = Arc::clone(&accepted);
+        let thread_released = Arc::clone(&released);
         let thread_rules = proxy_rules.clone();
         let thread = std::thread::Builder::new()
             .name("nession-sandbox-channel".to_string())
@@ -123,6 +129,7 @@ impl Channel {
                     &thread_shutdown,
                     &thread_bridge_pid,
                     &thread_accepted,
+                    &thread_released,
                     thread_rules,
                 );
             })
@@ -136,6 +143,7 @@ impl Channel {
             bridge_pid,
             proxy_rules,
             accepted,
+            released,
         })
     }
 
@@ -172,6 +180,11 @@ impl Channel {
                 "the sandbox init named a different execution".to_string(),
             ));
         }
+        // No legitimate control connection follows this one. Drop the receiver
+        // so a sandbox process that finds the socket cannot retain streams in
+        // the Agent's queue.
+        self.released.store(true, Ordering::SeqCst);
+        self.control_rx = None;
         self.bridge_pid.store(peer.pid, Ordering::SeqCst);
         peer.stream
             .write_all(b"GO\n")
@@ -185,6 +198,7 @@ impl Channel {
 
     /// Refuse the launch barrier. The caller still kills the Session.
     pub fn deny(&self, mut peer: ControlPeer) {
+        self.released.store(true, Ordering::SeqCst);
         let _ = peer.stream.write_all(b"DENY\n");
         let _ = peer.stream.flush();
     }
@@ -216,6 +230,7 @@ fn accept_loop(
     shutdown: &AtomicBool,
     bridge_pid: &AtomicU32,
     accepted: &AtomicBool,
+    released: &AtomicBool,
     proxy_rules: Option<Arc<EgressRules>>,
 ) {
     while !shutdown.load(Ordering::SeqCst) {
@@ -227,6 +242,7 @@ fn accept_loop(
                     execution_id,
                     control_tx,
                     bridge_pid,
+                    released,
                     proxy_rules.as_ref(),
                 ) {
                     tracing::debug!("sandbox channel connection refused: {error}");
@@ -249,6 +265,7 @@ fn classify(
     execution_id: &str,
     control_tx: &mpsc::Sender<ControlPeer>,
     bridge_pid: &AtomicU32,
+    released: &AtomicBool,
     proxy_rules: Option<&Arc<EgressRules>>,
 ) -> io::Result<()> {
     let pid = peer_pid(&stream)?;
@@ -259,6 +276,10 @@ fn classify(
     stream.read_exact(&mut first)?;
     let [first] = first;
     if first == b'N' {
+        if released.load(Ordering::SeqCst) {
+            // The barrier is over; this cannot be the trusted init.
+            return Ok(());
+        }
         let chain = std::io::Cursor::new(vec![first]).chain(stream);
         let mut reader = BufReader::new(chain);
         let mut hello = String::new();
@@ -567,7 +588,7 @@ fn connect_target(
                 .map_err(|_| EgressDenial::Unresolvable)?;
             let mut last = EgressDenial::Unresolvable;
             for address in addresses {
-                match rules.authorize_ip(address.ip(), port) {
+                match rules.authorize_resolved_ip(address.ip(), port) {
                     Ok(()) => match connect_validated(address) {
                         Ok(stream) => return Ok(stream),
                         Err(denial) => last = denial,
