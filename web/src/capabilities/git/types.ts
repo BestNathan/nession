@@ -21,15 +21,30 @@
 import {
   type ChangeKind,
   type ChangedFile,
+  type GitSnapshotV1,
   type RepoStatus,
   type SessionTargetV1,
   type StatusResponse,
-} from '@/generated/protocol/git/status/v1';
+} from '@/generated/protocol/git/status/v2';
 import {
   type DiffRequest,
   type DiffResponse,
+  type DiffSourceV2,
   type FileDiff,
-} from '@/generated/protocol/git/diff/v1';
+} from '@/generated/protocol/git/diff/v2';
+import {
+  type StageRequest,
+  type StageResponse,
+} from '@/generated/protocol/git/stage/v1';
+import {
+  type UnstageRequest,
+  type UnstageResponse,
+} from '@/generated/protocol/git/unstage/v1';
+import {
+  type CommitCreatedV1,
+  type CreateCommitRequest,
+  type CreateCommitResponse,
+} from '@/generated/protocol/git/create-commit/v1';
 import {
   type CommitRequest,
   type CommitResponse,
@@ -74,6 +89,9 @@ export type GitCommitRequest = CommitRequest & { agent_id: string };
 export type GitBranchesRequest = BranchesRequest & { agent_id: string };
 export type GitWorktreesRequest = WorktreesRequest & { agent_id: string };
 export type GitPreviewRequest = PreviewRequest & { agent_id: string };
+export type GitStageRequest = StageRequest & { agent_id: string };
+export type GitUnstageRequest = UnstageRequest & { agent_id: string };
+export type GitCreateCommitRequest = CreateCommitRequest & { agent_id: string };
 
 /** The capability's names for the responses. */
 export type GitStatusResponse = StatusResponse;
@@ -84,16 +102,22 @@ export type GitBranchesResponse = BranchesResponse;
 export type GitRootResponse = RootResponse;
 export type GitWorktreesResponse = WorktreesResponse;
 export type GitPreviewResponse = PreviewResponse;
+export type GitStageResponse = StageResponse;
+export type GitUnstageResponse = UnstageResponse;
+export type GitCreateCommitResponse = CreateCommitResponse;
 
 /** The capability's names for the payload shapes. */
 export type GitChangeKind = ChangeKind;
 export type GitChangedFile = ChangedFile;
 export type GitStatus = RepoStatus;
 export type GitFileDiff = FileDiff;
+export type GitDiffSource = DiffSourceV2;
+export type GitSnapshot = GitSnapshotV1;
 export type GitCommit = Commit;
 export type GitHistory = History;
 export type GitCommitDetail = CommitDetail;
 export type GitCommitChangedFile = ChangedFileEntry;
+export type GitCommitCreated = CommitCreatedV1;
 export type GitBranch = Branch;
 export type GitBranches = Branches;
 export type GitWorktree = Worktree;
@@ -115,11 +139,23 @@ export type GitWorktrees = Worktrees;
 export type GitUnavailable = Exclude<GitStatusResponse, { state: 'ok' }>;
 export type GitUnavailableState = GitUnavailable['state'];
 
+/**
+ * The answer a mutation gives.
+ *
+ * Stage and unstage answer with the same state shape; create-commit adds the
+ * created commit. The failure half is richer than a read's because a hook can
+ * fail after changing the index (#845).
+ */
+export type GitMutationResponse = GitStageResponse | GitUnstageResponse;
+export type GitMutationOk = Extract<GitMutationResponse, { state: 'ok' }>;
+export type GitMutationFailure = Exclude<GitMutationResponse, { state: 'ok' }>;
+
 /** The ok member of each response, for a view that has already narrowed. */
 export type GitStatusOk = Extract<GitStatusResponse, { state: 'ok' }>;
 export type GitDiffOk = Extract<GitDiffResponse, { state: 'ok' }>;
 export type GitLogOk = Extract<GitLogResponse, { state: 'ok' }>;
 export type GitCommitOk = Extract<GitCommitResponse, { state: 'ok' }>;
+export type GitCreateCommitOk = Extract<GitCreateCommitResponse, { state: 'ok' }>;
 export type GitBranchesOk = Extract<GitBranchesResponse, { state: 'ok' }>;
 export type GitRootOk = Extract<GitRootResponse, { state: 'ok' }>;
 export type GitWorktreesOk = Extract<GitWorktreesResponse, { state: 'ok' }>;

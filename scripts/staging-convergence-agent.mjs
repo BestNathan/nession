@@ -41,6 +41,15 @@ function validateDiagnosis(raw,r){
     authoritative:false,
   };
 }
+export function conflictTelemetryTask(r) {
+  verifyRequest(r);
+  // Canonical execution traces require a positive owner Issue and keep a
+  // separately pinned PR identity. This is the convergence requirement's
+  // read-only conflict analysis, not the generated batch's own acceptance.
+  return {id:'conflict-'+r.pr_number,type:'staging-convergence-conflict-review',
+    issue:2953,pr:r.pr_number,target_ref:r.lane_sha,
+    fingerprint:r.main_sha+':'+r.lane_sha};
+}
 function telemetry(r,prompt,envelope,status,file){
   const now=new Date();
   const model=process.env.ANALYSIS_CLAUDE_MODEL||'qwen-gateway';
@@ -51,8 +60,7 @@ function telemetry(r,prompt,envelope,status,file){
       runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,
       taskId:'conflict-'+r.pr_number,provider:'claude-code'}),
     job:'review',
-    task:{id:'conflict-'+r.pr_number,type:'staging-convergence-conflict-review',
-      issue:null,target_ref:r.lane_sha,fingerprint:r.main_sha+':'+r.lane_sha},
+    task:conflictTelemetryTask(r),
     agent:{provider:'claude-code',id:'staging-convergence-reviewer',
       role:'analyst',prompt:promptTelemetry({template_id:'staging-convergence-conflict',template_version:'v1',
         template_sha256:createHash('sha256').update('staging-convergence-conflict-v1').digest('hex')}),
@@ -115,6 +123,11 @@ function selfTest(){
   const good=validateDiagnosis(JSON.stringify({schema_version:1,pr_number:4,
     summary:'Conflict',conflict_paths:['a.txt'],repair_steps:['Edit a.txt and test']}),r);
   assert.equal(good.authoritative,false);
+  const telemetryTask=conflictTelemetryTask(r);
+  assert.equal(telemetryTask.issue,2953);
+  assert.equal(telemetryTask.pr,4);
+  assert.equal(telemetryTask.target_ref,r.lane_sha);
+  assert.throws(()=>conflictTelemetryTask({...r,pr_number:0}),/invalid/);
   assert.throws(()=>validateDiagnosis(JSON.stringify({schema_version:1,pr_number:5,
     summary:'Wrong',conflict_paths:[],repair_steps:[]}),r),/invalid/);
   console.log('staging convergence Agent review self-test: PASS');

@@ -2,6 +2,24 @@ use async_trait::async_trait;
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde_json::Value;
 
+/// How a provider asks the runtime to schedule one of its Protocol Units
+/// (#974).
+///
+/// This is deliberately **not** part of [`ProtocolDescriptor`]: a descriptor is
+/// the consumer-visible contract, and scheduling is provider/runtime
+/// implementation. Declaring it beside `descriptors()` keeps the contract
+/// unchanged while making a mutation's lane a provider statement rather than a
+/// host-side guess about a wire's spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionUnitPolicy {
+    /// Read-only: admitted to the runtime's bounded query lane.
+    Query,
+    /// A mutation of the Session named by the request's `session` field:
+    /// serialized behind that Session's key, never interleaved with another
+    /// mutation of it.
+    SessionMutation,
+}
+
 /// Agent-side extension: provides one or more Protocol Units, and serves them
 /// when the server relays a call.
 ///
@@ -32,6 +50,16 @@ pub trait AgentExtension: Send + Sync {
 
     /// The Protocol Units this extension provides.
     fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError>;
+
+    /// Units whose scheduling differs from the read-only default (#974).
+    ///
+    /// Each entry must name a wire this extension declares; the registry
+    /// refuses a policy for a unit the provider does not serve. An omitted unit
+    /// keeps the runtime's read-only default, which is what every existing
+    /// provider relies on.
+    fn execution_policies(&self) -> Vec<(&'static str, ExtensionUnitPolicy)> {
+        Vec::new()
+    }
 
     /// Serve one call. `command` is the wire message type **verbatim** — the
     /// wire *is* the protocol id, so there is no namespace left to strip and

@@ -71,3 +71,21 @@ test('attested logical Slice is retained but absent lineage stays unlinked',()=>
  assert.equal(available.edges[0].slice_id,'slice-runtime-2961');
  assert.equal(projection({...source,records:[e]}).edges[0].slice_id,null);
 });
+
+test('historical authenticated Work detail outlives Open Issue/PR windows',()=>{
+ const attested={status:'verified',source_ref_sha:ref,records:[e]};
+ const p=validateProjection(makeProjection({
+   issues:[],pulls:[],lineageEvidence:attested,
+ }));
+ assert.deepEqual(p.work.issues,[]);
+ assert.deepEqual(p.work.pulls,[]);
+ assert.equal(p.work.lineage.status,'verified');
+ assert.equal(p.work.lineage.edges.length,1);
+ assert.match(app,/SOURCE-AUTHENTICATED HISTORY/);
+ assert.match(app,/Verified historical Agent lineage/);
+ assert.match(app,/historical\.edges\?\.some/);
+ assert.match(app,/renderLineageDetail\(kind,number\);/);
+ assert.match(app,/current Review: Unknown · Acceptance SC: Unknown/);
+ assert.match(app,/Logical Slice:/);
+ assert.match(app,/source_url/);
+});

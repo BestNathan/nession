@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
-  CONTROLLED_REPAIR_RETRY_COMMENT}
+  CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -86,6 +86,39 @@ const commentValid={...valid,environment:commentEnvironment,event:commentEvent,
   issue:1997,actionId:'95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
   run:{...run,event:'issue_comment'}};
 assert.equal(assertDispatchAuthority(commentValid).issue,1997);
+// Exact owner/main GitHub issue_comment route for the fresh #1974
+// producer fixture. The requested Action is still checked against Store
+// Outbox by the same canonical dispatch preflight; no free-form dispatch.
+const canaryAction='d'.repeat(64);
+const canaryComment='/nession qwen-v2-dispatch issue=3001 action='+canaryAction;
+assert.equal(QWEN_V2_DISPATCH_RE.exec(canaryComment)?.[1],canaryAction);
+const canaryEvent={
+  action:'created',repository:{full_name:'BestNathan/nession'},
+  issue:{number:3001,state:'open'},
+  comment:{id:888001,body:canaryComment,user:{login:'BestNathan'}},
+};
+const canaryValid={...valid,environment:commentEnvironment,
+  event:canaryEvent,issue:3001,actionId:canaryAction,
+  run:{...run,event:'issue_comment'}};
+assert.equal(assertDispatchAuthority(canaryValid).issue,3001);
+for(const change of [
+  {event:{...canaryEvent,issue:{number:3002,state:'open'}}},
+  {event:{...canaryEvent,issue:{number:3001,state:'closed'}}},
+  {event:{...canaryEvent,comment:{...canaryEvent.comment,id:0}}},
+  {event:{...canaryEvent,comment:{...canaryEvent.comment,
+    user:{login:'external'}}}},
+  {event:{...canaryEvent,comment:{...canaryEvent.comment,
+    body:canaryComment+' '}}},
+  {event:{...canaryEvent,action:'edited'}},
+  {event:{...canaryEvent,repository:{full_name:'foreign/repo'}}},
+  {issue:1997},
+  {actionId:'e'.repeat(64)},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+])
+  assert.throws(()=>assertDispatchAuthority({...canaryValid,...change}),
+    /authenticated owner\/main/);
+
 const actualAction=await import('./outbox.mjs').then(m=>
   m.failedDeveloperRetryActionId(1997,
   '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',

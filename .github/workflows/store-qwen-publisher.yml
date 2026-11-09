@@ -210,6 +210,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Authenticate original Qwen and publish/reconcile one real PR
+        id: publisher_proof
         env:
           ACTIONS_READ_TOKEN: ${{ github.token }}
           STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
@@ -244,3 +245,27 @@ jobs:
             echo "- Reviewer Action: $(jq -r .reviewer_action_id "$RUNNER_TEMP/qwen-publisher-result.json")"
             echo "- No model code or native plaintext was executed by this job."
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # This proof is minted only by the previously trusted main-only
+          # Publisher. A repair or replay must not forge a fresh Store writer
+          # receipt. The original immutable artifact remains the authority.
+          if jq -e '
+            (.producer_result_path // "" |
+              test("^workflows/issues/[1-9][0-9]*/producer-results-v2/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\\.json$")) and
+            (.producer_result_sha256 // "" | test("^[a-f0-9]{64}$")) and
+            (.store_commit_sha // "" | test("^[a-f0-9]{40}$")) and
+            .publisher_run_id == (env.GITHUB_RUN_ID | tonumber)
+          ' "$RUNNER_TEMP/qwen-publisher-result.json" >/dev/null; then
+            echo "source_v2=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "source_v2=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish bounded Developer v2 producer and Store writer receipt
+        if: steps.publisher_proof.outputs.source_v2 == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-developer-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/qwen-publisher-result.json
+          retention-days: 90
+          if-no-files-found: error

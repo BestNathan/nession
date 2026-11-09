@@ -36,7 +36,11 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
       if (!selected || !selectedFile) {
         throw new Error('no selection');
       }
-      return gitApi.gitDiff({ ...target, path: selectedFile, commit: selected });
+      return gitApi.gitDiff({
+        ...target,
+        path: selectedFile,
+        source: { kind: 'commit', oid: selected },
+      });
     },
     [selected, selectedFile],
   );

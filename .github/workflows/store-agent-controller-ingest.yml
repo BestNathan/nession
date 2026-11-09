@@ -1,6 +1,7 @@
 name: Store / Agent Controller Ingest
 
-# MAIN-OWNED ONLY. The request is unprivileged workflow_dispatch; this distinct
+# MAIN-OWNED ONLY. Source is owner/main workflow_dispatch or exact #3001
+# owner-authenticated issue_comment; this distinct
 # workflow_run authenticates the producer Run and immutable ZIP before minting
 # the existing Store writer App credential. Never checkout source branch code.
 on:
@@ -23,7 +24,13 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
+      (
+        github.event.workflow_run.event == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.event == 'issue_comment' &&
+          github.event.workflow_run.actor.login == 'BestNathan'
+        )
+      ) &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.actor.login == 'BestNathan' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&

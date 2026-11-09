@@ -17,6 +17,9 @@ vi.mock('../../../GitPlugin', () => ({
     gitStatus: vi.fn(),
     gitDiff: vi.fn(),
     gitPreview: vi.fn(),
+    gitStage: vi.fn(),
+    gitUnstage: vi.fn(),
+    gitCreateCommit: vi.fn(),
     gitRoot: vi.fn(),
     onInvalidated: vi.fn(() => () => {}),
   },
@@ -25,6 +28,9 @@ vi.mock('../../../GitPlugin', () => ({
 const mockedStatus = vi.mocked(gitApi.gitStatus);
 const mockedDiff = vi.mocked(gitApi.gitDiff);
 const mockedPreview = vi.mocked(gitApi.gitPreview);
+const mockedStage = vi.mocked(gitApi.gitStage);
+const mockedUnstage = vi.mocked(gitApi.gitUnstage);
+const mockedCreateCommit = vi.mocked(gitApi.gitCreateCommit);
 
 const agent: Agent = {
   agent_id: 'agent-1',
@@ -69,7 +75,9 @@ function statusResponse(overrides: Partial<GitStatusResponse & { state: 'ok' }> 
   return {
     state: 'ok',
     truncated: false,
-    truncated_bytes: 0,
+    truncatedBytes: 0,
+    root: '/repo',
+    snapshot: { token: 'token-1', head: 'head-1', root: '/repo' },
     status: {
       branch: 'main',
       detached: false,
@@ -166,12 +174,12 @@ describe('GitWorkspace', () => {
 
     render(<GitWorkspace ctx={context()} />);
 
-    expect(await screen.findByTestId('git-group-modified')).toHaveTextContent('Modified (1)');
+    expect(await screen.findByTestId('git-group-changes')).toHaveTextContent('Changes (1)');
     expect(screen.getByTestId('git-group-untracked')).toHaveTextContent('Untracked (1)');
 
     // Both rows are controls now, but they open different resources: the
     // tracked row has a diff, the untracked row's kind selects a file preview.
-    expect(screen.getByTestId('git-row-tracked')).toBeInstanceOf(HTMLButtonElement);
+    expect(screen.getByTestId('git-row-unstaged')).toBeInstanceOf(HTMLButtonElement);
     expect(screen.getByTestId('git-row-untracked')).toBeInstanceOf(HTMLButtonElement);
     expect(screen.getByRole('button', { name: 'notes.txt' })).toBeInTheDocument();
   });
@@ -203,13 +211,14 @@ describe('GitWorkspace', () => {
     render(<GitWorkspace ctx={context()} />);
     await screen.findByTestId('git-change-list');
 
-    const rows = screen.getAllByTestId('git-row-tracked');
-    // "Modified (2)" already says both are modified; saying it twice more is
+    const unstaged = screen.getByTestId('git-row-unstaged');
+    const staged = screen.getByTestId('git-row-staged');
+    // The group heading already says what these rows are; repeating it is
     // decoration. `renamed` is not in the heading, so it stays.
-    expect(rows[0]).not.toHaveTextContent('modified');
-    expect(rows[1]).toHaveTextContent('renamed');
+    expect(unstaged).not.toHaveTextContent('modified');
+    expect(staged).toHaveTextContent('renamed');
     // The old path cannot fit inline without squeezing the name being read.
-    expect(rows[1]).toHaveAttribute('title', 'src/b.ts → src/c.ts');
+    expect(staged).toHaveAttribute('title', 'src/b.ts → src/c.ts');
 
     // The heading already says untracked, so the row repeats nothing.
     expect(screen.getByTestId('git-row-untracked')).not.toHaveTextContent('untracked');
@@ -248,8 +257,11 @@ describe('GitWorkspace', () => {
       'Untracked · File preview (no Git baseline)',
     );
     expect(screen.getByTestId('git-file-preview-text')).toHaveTextContent('hello');
-    // The row is a reader, not a staging affordance.
-    expect(screen.queryByRole('button', { name: /stage|commit|push/i })).toBeNull();
+    // The row still offers no remote or destructive operation; its write is
+    // staging this untracked file, which the contract defines.
+    expect(
+      screen.queryByRole('button', { name: /push|pull|fetch|checkout|discard|reset/i }),
+    ).toBeNull();
   });
 
   it('opens an unmerged row with its actual worktree bytes (#2838 SC-02)', async () => {
@@ -510,13 +522,14 @@ describe('GitWorkspace', () => {
     );
 
     render(<GitWorkspace ctx={context()} />);
-    await userEvent.click(await screen.findByTestId('git-row-tracked'));
+    await userEvent.click(await screen.findByTestId('git-row-unstaged'));
 
     await waitFor(() => expect(mockedDiff).toHaveBeenCalledTimes(1));
     expect(mockedDiff).toHaveBeenCalledWith({
       agent_id: 'agent-1',
       session: 'agent-1:work',
       path: 'src/a.ts',
+      source: { kind: 'unstaged' },
     });
 
     const host = await screen.findByTestId('git-diff-patch');
@@ -568,7 +581,7 @@ describe('GitWorkspace', () => {
     );
 
     render(<GitWorkspace ctx={context()} />);
-    await userEvent.click(await screen.findByTestId('git-row-tracked'));
+    await userEvent.click(await screen.findByTestId('git-row-unstaged'));
 
     expect(await screen.findByTestId('git-diff-binary')).toHaveTextContent('Binary file');
     expect(screen.queryByTestId('git-diff-patch')).toBeNull();
@@ -633,7 +646,7 @@ describe('GitWorkspace', () => {
     expect(screen.getByTestId('git-refresh')).toBeInTheDocument();
   });
 
-  it('offers no control that could write to the repository (SC5)', async () => {
+  it('offers exactly the local writes the contract defines, and no others (#845)', async () => {
     mockedStatus.mockResolvedValue(
       statusResponse({
         status: {
@@ -654,19 +667,232 @@ describe('GitWorkspace', () => {
     render(<GitWorkspace ctx={context()} />);
     await screen.findByTestId('git-change-list');
 
-    // Two reads (the two tracked rows) and one refresh. Nothing else is
-    // pressable, so there is no affordance for stage/commit/checkout/push.
-    const labels = screen.getAllByRole('button').map(
-      (button) => button.getAttribute('aria-label') ?? button.textContent ?? '',
+    // Each actionable row carries the write for its own group. The conflicted
+    // row is inert: resolving a merge is not a staging action.
+    expect(screen.getByRole('button', { name: 'Unstage src/a.ts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage src/b.ts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage notes.txt' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /stage both\.ts|unstage both\.ts/i }),
+    ).toBeNull();
+
+    // The commit control needs a message before it can even open its
+    // confirmation; the confirmation itself is what the Case drives.
+    expect(screen.getByTestId('git-commit')).toBeDisabled();
+
+    // No remote or history-rewriting operation is expressible anywhere.
+    expect(
+      screen.queryByRole('button', {
+        name: /push|pull|fetch|checkout|switch|discard|reset|rebase|merge/i,
+      }),
+    ).toBeNull();
+  });
+
+  it('stages a reviewed row with the snapshot it was shown, and adopts the answer (#845)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [
+            { path: 'src/a.ts', kind: 'modified', staged: false, unstaged: true },
+          ],
+          untracked: [],
+          unmerged: [],
+        },
+      }),
     );
-    expect(labels.sort()).toEqual([
-      'Refresh repository state',
-      'both.ts',
-      'notes.txt',
-      'src/a.ts',
-      'src/b.ts',
-    ]);
-    expect(screen.queryByRole('button', { name: /commit|stage|push|pull|checkout|discard/i })).toBeNull();
+    mockedStage.mockResolvedValue({
+      state: 'ok',
+      snapshot: { token: 'token-2', head: 'head-1', root: '/repo' },
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [{ path: 'src/a.ts', kind: 'modified', staged: true, unstaged: false }],
+        untracked: [],
+        unmerged: [],
+      },
+      truncated: false,
+      truncatedBytes: 0,
+    });
+
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-change-list');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stage src/a.ts' }));
+
+    await waitFor(() =>
+      expect(mockedStage).toHaveBeenCalledWith({
+        agent_id: 'agent-1',
+        session: 'agent-1:work',
+        path: 'src/a.ts',
+        expectedSnapshot: 'token-1',
+      }),
+    );
+    // The mutation's answer is adopted as the authoritative listing rather
+    // than re-read, so the row moves without a second status request.
+    await waitFor(() =>
+      expect(screen.getByTestId('git-group-staged')).toHaveTextContent('src/a.ts'),
+    );
+    expect(mockedStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('adopts the current state and explains a stale review instead of applying it (#845)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [
+            { path: 'src/a.ts', kind: 'modified', staged: false, unstaged: true },
+          ],
+          untracked: [],
+          unmerged: [],
+        },
+      }),
+    );
+    mockedStage.mockResolvedValue({
+      state: 'repository_changed',
+      message: 'The repository changed after it was reviewed.',
+      snapshot: { token: 'token-9', head: 'head-1', root: '/repo' },
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [
+          { path: 'src/b.ts', kind: 'modified', staged: false, unstaged: true },
+        ],
+        untracked: [],
+        unmerged: [],
+      },
+      truncated: false,
+      truncatedBytes: 0,
+    });
+
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-change-list');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stage src/a.ts' }));
+
+    expect(await screen.findByTestId('git-mutation-notice')).toHaveTextContent(
+      /repository changed/i,
+    );
+    // The refusal carries the current state, and the view shows it rather than
+    // the stale row the user clicked.
+    expect(screen.getByTestId('git-group-changes')).toHaveTextContent('src/b.ts');
+    expect(screen.queryByText('src/a.ts')).toBeNull();
+  });
+
+  it('commits only after confirmation, with the reviewed snapshot and one request id (#845)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [{ path: 'src/a.ts', kind: 'modified', staged: true, unstaged: false }],
+          untracked: [],
+          unmerged: [],
+        },
+      }),
+    );
+    mockedCreateCommit.mockResolvedValue({
+      state: 'ok',
+      commit: { oid: 'head-2', author: 'Test <test@example.com>' },
+      snapshot: { token: 'token-2', head: 'head-2', root: '/repo' },
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [],
+        untracked: [],
+        unmerged: [],
+      },
+      truncated: false,
+      truncatedBytes: 0,
+    });
+
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-change-list');
+
+    expect(screen.getByTestId('git-commit')).toBeDisabled();
+    await userEvent.type(screen.getByTestId('git-commit-message'), 'feat: change a');
+    await userEvent.click(screen.getByTestId('git-commit'));
+
+    // The confirmation is the heavier step a commit is supposed to cost.
+    expect(await screen.findByTestId('git-commit-dialog')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-commit-confirm'));
+
+    await waitFor(() => expect(mockedCreateCommit).toHaveBeenCalledTimes(1));
+    const request = mockedCreateCommit.mock.calls[0][0];
+    expect(request).toMatchObject({
+      agent_id: 'agent-1',
+      session: 'agent-1:work',
+      expectedSnapshot: 'token-1',
+      message: 'feat: change a',
+    });
+    expect(typeof request.requestId).toBe('string');
+    expect(request.requestId.length).toBeGreaterThan(0);
+
+    expect(await screen.findByTestId('git-clean')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-commit-form')).toBeNull();
+  });
+
+  it('unstages with the reviewed snapshot and never asks for a worktree restore (#845)', async () => {
+    mockedStatus.mockResolvedValue(
+      statusResponse({
+        status: {
+          branch: 'main',
+          detached: false,
+          ahead: 0,
+          behind: 0,
+          modified: [{ path: 'src/a.ts', kind: 'modified', staged: true, unstaged: false }],
+          untracked: [],
+          unmerged: [],
+        },
+      }),
+    );
+    mockedUnstage.mockResolvedValue({
+      state: 'ok',
+      snapshot: { token: 'token-2', head: 'head-1', root: '/repo' },
+      status: {
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        modified: [{ path: 'src/a.ts', kind: 'modified', staged: false, unstaged: true }],
+        untracked: [],
+        unmerged: [],
+      },
+      truncated: false,
+      truncatedBytes: 0,
+    });
+
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-change-list');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Unstage src/a.ts' }));
+
+    await waitFor(() =>
+      expect(mockedUnstage).toHaveBeenCalledWith({
+        agent_id: 'agent-1',
+        session: 'agent-1:work',
+        path: 'src/a.ts',
+        expectedSnapshot: 'token-1',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('git-group-changes')).toHaveTextContent('src/a.ts'),
+    );
   });
 
   it('offers the refresh control to ask again', async () => {

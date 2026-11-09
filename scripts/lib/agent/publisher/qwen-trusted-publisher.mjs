@@ -13,6 +13,8 @@ import {authenticateWorkerClaimRun,inspectWorkerClaimZip}
   from '../orchestration/worker-reconcile.mjs';
 import {readWorkerZipMember}
   from '../orchestration/worker-zip.mjs';
+import {composeQwenDeveloperResult}
+  from '../orchestration/result-artifact.mjs';
 import {deriveDispatchKey}
   from '../orchestration/controller-dispatch.mjs';
 import {preflightTrustedQwenPublisher,preflightTrustedQwenRepairPublisher}
@@ -215,15 +217,25 @@ export async function runTrustedQwenPublication({
     if(published&&(published.head_sha!==readback.head_sha||
       published.pull_request!==readback.pull_request))
       fail('fresh Publisher response differs from independent PR readback');
+    const developerResult=composeQwenDeveloperResult({
+      receipt,worker,claim,originalResult,
+      resultJsonBytes:readWorkerZipMember(resultZip,'result.json'),
+      readback,publisherRunId:Number(env.GITHUB_RUN_ID),
+    });
     const handoff=applyQwenPublicationToRemote({
-      remote,readback,intent,registry});
+      remote,readback,intent,registry,developerResult});
+    if(!handoff.producer_result_path||
+       !/^[a-f0-9]{64}$/.test(handoff.producer_result_sha256??''))
+      fail('trusted Qwen Publisher missing committed Developer v2 proof');
     return {schema_version:1,kind:'trusted_qwen_publisher_handoff',
       issue:receipt.issue,action_id:receipt.action_id,
       developer_run_id:worker.id,publisher_run_id:Number(env.GITHUB_RUN_ID),
       pull_request:readback.pull_request,pr_head_sha:readback.head_sha,
       reviewer_action_id:handoff.reviewer_action_id??null,
       status:handoff.changed?'reviewer_pending':'replayed',
-      store_commit_sha:handoff.commit_sha??null};
+      store_commit_sha:handoff.commit_sha??null,
+      producer_result_path:handoff.producer_result_path,
+      producer_result_sha256:handoff.producer_result_sha256};
   }finally{key.fill(0);}
 }
 async function main(){

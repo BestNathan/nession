@@ -1,9 +1,10 @@
 // e2e/tests/browser/fixture-git.spec.ts
 //
-// #750 SC5, asserted against real DOM rather than a jsdom mock: the view carries
-// no control that could ask git to write. #2838 extends the same listing to
-// preview untracked and conflicted worktree bytes; #826's History section is
-// asserted here too — it reads the log through the same fixture surface.
+// #750 SC5, asserted against real DOM rather than a jsdom mock. #2838 extends
+// the same listing to preview untracked and conflicted worktree bytes; #826's
+// History section is asserted here too — it reads the log through the same
+// fixture surface. #845 adds the three local write units, and the last tests
+// assert that the surface offers those and nothing beyond them.
 //
 // The assertions are shape-based, not copy-based. A test that looked for the
 // word "Commit" would pass the moment someone labelled the button "Stage all",
@@ -48,18 +49,22 @@ test('changes are grouped, and every row is an opener (#2838 supersedes #750 SC2
 }) => {
   await gotoGit(page);
 
-  const modified = page.getByTestId('git-group-modified');
+  const staged = page.getByTestId('git-group-staged');
+  const changes = page.getByTestId('git-group-changes');
   const untracked = page.getByTestId('git-group-untracked');
-  await expect(modified).toBeVisible();
+  await expect(staged).toBeVisible();
+  await expect(changes).toBeVisible();
   await expect(untracked).toBeVisible();
 
-  // Both groups are controls. The tracked row opens a diff; the untracked row
-  // opens a worktree preview. It is still not pretending an untracked file has
-  // a Git baseline.
-  await expect(modified.getByTestId('git-row-tracked').first()).toBeVisible();
+  // Each group is a control. A staged row opens HEAD→INDEX, an unstaged row
+  // opens INDEX→WORKTREE, and an untracked row opens a worktree preview. It is
+  // still not pretending an untracked file has a Git baseline.
+  await expect(staged.getByTestId('git-row-staged')).toBeVisible();
+  await expect(changes.getByTestId('git-row-unstaged').first()).toBeVisible();
   await expect(untracked.getByTestId('git-row-untracked').first()).toBeVisible();
-  await expect(untracked.locator('button')).toHaveCount(2);
-  await expect(untracked.getByTestId('git-row-tracked')).toHaveCount(0);
+  // Each untracked row is one opener plus its Stage action.
+  await expect(untracked.locator('button')).toHaveCount(4);
+  await expect(untracked.getByTestId('git-row-staged')).toHaveCount(0);
 });
 
 test('untracked and conflicted rows open their worktree bytes (#2838 SC-01/02)', async ({
@@ -127,7 +132,7 @@ test('preview failures and limits are visible and never fake content (#2838 SC-0
 
   // A tracked path that vanished between listing and selection reports an
   // explicit error instead of a blank or stale diff.
-  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/deleted.ts' }).click();
+  await page.getByTestId('git-row-unstaged').filter({ hasText: 'src/deleted.ts' }).click();
   await expect(page.getByTestId('git-diff-unavailable')).toContainText('no longer available');
   await expect(page.getByTestId('git-diff-patch')).toHaveCount(0);
 });
@@ -181,7 +186,7 @@ test('opening a changed file renders its patch with line semantics (SC3, #2791 S
 }) => {
   await gotoGit(page);
 
-  const row = page.getByTestId('git-row-tracked').first();
+  const row = page.getByTestId('git-row-unstaged').first();
   const path = await row.getAttribute('data-path');
   await row.click();
 
@@ -232,7 +237,11 @@ test('binary, empty, mode-only, truncated and malformed answers stay honest (#27
   await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
   await page.getByTestId('git-change-list').waitFor();
 
-  const row = (path: string) => page.getByTestId('git-row-tracked').filter({ hasText: path });
+  const row = (path: string) =>
+    page
+      .getByTestId('git-row-staged')
+      .or(page.getByTestId('git-row-unstaged'))
+      .filter({ hasText: path });
   const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
 
   await row('assets/logo.png').click();
@@ -272,7 +281,7 @@ test('the diff remains usable at desktop and App-like phone width (#2791 SC-03)'
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoGit(page);
 
-  await page.getByTestId('git-row-tracked').first().click();
+  await page.getByTestId('git-row-unstaged').first().click();
   await expect(page.getByTestId('git-diff')).toBeVisible();
   const patch = page.getByTestId('git-diff-patch').locator('diffs-container');
   await expect(patch.locator('[data-line]').first()).toBeVisible();
@@ -326,7 +335,7 @@ test('the diff remains usable at desktop and App-like phone width (#2791 SC-03)'
   await page.goto('/#/fixture/workspace?capability=git&git=diff-states');
   await page.reload();
   await page.getByTestId('git-change-list').waitFor();
-  await page.getByTestId('git-row-tracked').filter({ hasText: 'src/long.ts' }).click();
+  await page.getByTestId('git-row-unstaged').filter({ hasText: 'src/long.ts' }).click();
   await expect(patch.locator('[data-line]')).toHaveCount(101);
   const longBody = page.getByTestId('git-diff-body');
   await expect(longBody).toHaveCSS('overflow-y', 'auto');
@@ -342,45 +351,75 @@ test('the diff remains usable at desktop and App-like phone width (#2791 SC-03)'
   expect(longScroll.scrollTop).toBeGreaterThan(0);
 
   expect(
-    await page.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }).count(),
+    await page
+      .getByTestId('git-workspace')
+      .getByRole('button', { name: /push|pull|fetch|checkout|switch|discard|reset/i })
+      .count(),
   ).toBe(0);
 });
 
-test('the view offers no control that could write to the repository (SC5)', async ({ page }) => {
+test('offers the three local writes and nothing beyond them (#845)', async ({ page }) => {
   await gotoGit(page);
 
   const view = page.getByTestId('git-workspace');
-  const openers = view.locator('button[data-path]');
-  const controls = view.locator('button');
 
-  // Counted whole rather than grepped for keywords. A test that looked for the
-  // word "Commit" would pass the moment someone labelled the button "Stage
-  // all"; counting cannot be worded around. The archetype is fixed by the
-  // fixture: three tracked changes and two untracked rows, each an opener, plus
-  // the header's controls — the four section tabs and Refresh.
-  await expect(openers).toHaveCount(5);
-  await expect(controls).toHaveCount(10);
+  // Counted by the units they invoke. The default fixture has two unstaged
+  // tracked rows and two untracked rows (four Stage actions) and one staged row
+  // (one Unstage action).
+  await expect(view.getByTestId('git-stage')).toHaveCount(4);
+  await expect(view.getByTestId('git-unstage')).toHaveCount(1);
+  await expect(view.getByTestId('git-commit-form')).toBeVisible();
+  await expect(view.getByTestId('git-commit')).toBeDisabled();
 
-  // Naming the five that are not file openers is what keeps the count honest.
-  // A write affordance cannot hide by being counted as one of them, because
-  // these two assertions say exactly which controls the extras are.
-  await expect(view.getByTestId('git-refresh')).toHaveCount(1);
-  await expect(view.getByRole('tab')).toHaveCount(4);
-
-  // Opening the diff adds only the two presentation controls. They choose how
-  // the same patch is drawn; neither can ask Git for anything, and the fixed
-  // count is what would notice a third control appearing beside them.
-  await view.getByTestId('git-row-tracked').first().click();
-  await expect(view.getByTestId('git-diff-layout')).toBeVisible();
-  await expect(controls).toHaveCount(12);
-  await expect(view.getByRole('button', { name: 'Unified' })).toHaveCount(1);
-  await expect(view.getByRole('button', { name: 'Split' })).toHaveCount(1);
+  // A conflicted row is displayed but inert: resolving a merge is not one of
+  // the three units. The fixture's default scenario has no conflicts, so open
+  // the preview scenario to prove the absence on a conflict that exists.
+  await page.goto('/#/fixture/workspace?capability=git&git=preview-states');
+  await page.getByTestId('git-change-list').waitFor();
   await expect(
-    view.getByRole('button', { name: /commit|stage|push|pull|checkout|discard/i }),
+    page.getByRole('button', { name: /stage src\/conflict\.ts|unstage src\/conflict\.ts/i }),
   ).toHaveCount(0);
 
-  await view.getByTestId('git-refresh').click();
-  await expect(controls).toHaveCount(12);
+  // No remote or history-rewriting operation is expressible in the Git
+  // surface. Scoped to the view: the shell's own controls are not Git
+  // operations, and counting them made this assertion about the page.
+  await expect(
+    view.getByRole('button', {
+      // Word boundaries: `merge` must not match the path
+      // `src/unmerged-missing.ts`, which is a row opener, not a control.
+      name: /\b(?:push|pull|fetch|checkout|switch|discard|reset|rebase|merge)\b/i,
+    }),
+  ).toHaveCount(0);
+});
+
+test('stage, confirm, and commit from the Changes surface (#845)', async ({ page }) => {
+  await gotoGit(page);
+
+  const target = page.getByTestId('git-row-unstaged').filter({
+    hasText: 'web/src/capabilities/git/GitPlugin.ts',
+  });
+  await target.click();
+  await page.getByRole('button', { name: 'Stage web/src/capabilities/git/GitPlugin.ts' }).click();
+
+  // The row moved from Changes to Staged; the post-state came from the agent
+  // answer, not from an optimistic guess.
+  await expect(
+    page.getByTestId('git-group-staged').getByText('web/src/capabilities/git/GitPlugin.ts'),
+  ).toBeVisible();
+
+  await page.getByTestId('git-commit-message').fill('feat(git): stage from the workspace');
+  await expect(page.getByTestId('git-commit')).toBeEnabled();
+
+  // Commit is heavier than stage: it opens a confirmation naming what will run.
+  await page.getByTestId('git-commit').click();
+  await expect(page.getByTestId('git-commit-dialog')).toBeVisible();
+  await expect(page.getByTestId('git-commit-dialog')).toContainText('hooks');
+  await page.getByTestId('git-commit-confirm').click();
+
+  // The fixture's commit clears the staged rows and reports a new state; the
+  // commit form disappears with the last staged file.
+  await expect(page.getByTestId('git-group-staged')).toHaveCount(0);
+  await expect(page.getByTestId('git-commit-form')).toHaveCount(0);
 });
 
 test('History bounds what it offers, and unmounts the section it replaced (#826)', async ({

@@ -3,10 +3,15 @@ import type { PluginSurface } from '@/platform/socket/types';
 import type {
   GitBranchesResponse,
   GitCommitResponse,
+  GitCreateCommitResponse,
   GitDiffResponse,
+  GitFileDiff,
   GitFilePreview,
   GitLogResponse,
+  GitMutationResponse,
   GitPreviewResponse,
+  GitSnapshot,
+  GitStatus,
   GitStatusResponse,
   GitWorktreesResponse,
 } from '@/capabilities/git';
@@ -80,13 +85,148 @@ function fixtureGitPluginSurface(
   };
 }
 
+interface FixtureRepoState {
+  scenario: string;
+  status: GitStatusResponse;
+  snapshot: GitSnapshot;
+  snapshotEpoch: number;
+  headEpoch: number;
+}
+
+function createFixtureRepoState(
+  scenario: string,
+  status: GitStatusResponse,
+): FixtureRepoState {
+  return {
+    scenario,
+    status,
+    snapshot:
+      status.state === 'ok'
+        ? status.snapshot
+        : fixtureSnapshot('fixture-unavailable-0', null),
+    snapshotEpoch: 0,
+    headEpoch: 0,
+  };
+}
+
+/**
+ * Apply one write unit to the canned repository.
+ *
+ * Mirrors the agent's contract: the reviewed token is checked first, and a
+ * success answers with the authoritative new status and snapshot. This is a
+ * real state machine because the browser Case must be able to see a stale
+ * review and an authoritative post-state, not a stub that always says ok.
+ */
+function mutateFixtureRepository(
+  repo: FixtureRepoState,
+  type: string,
+  payload: Record<string, unknown>,
+): GitMutationResponse | GitCreateCommitResponse {
+  if (repo.status.state !== 'ok') {
+    return {
+      state: 'not_a_repository',
+      message: 'This Session is not in a git repository.',
+    };
+  }
+  if (String(payload.expectedSnapshot ?? '') !== repo.snapshot.token) {
+    return {
+      state: 'repository_changed',
+      message: 'The repository changed after it was reviewed.',
+      snapshot: repo.snapshot,
+      status: repo.status.status,
+      truncated: false,
+      truncatedBytes: 0,
+    };
+  }
+
+  const path = String(payload.path ?? '');
+  const status = repo.status.status;
+
+  const accept = (next: GitStatus, head: string | null = repo.snapshot.head ?? null) => {
+    repo.snapshotEpoch += 1;
+    repo.snapshot = fixtureSnapshot(
+      `fixture-${repo.scenario}-${repo.snapshotEpoch}`,
+      head,
+    );
+    repo.status = {
+      state: 'ok',
+      status: next,
+      root: FIXTURE_ROOT,
+      snapshot: repo.snapshot,
+      truncated: false,
+      truncatedBytes: 0,
+    };
+    return {
+      state: 'ok' as const,
+      snapshot: repo.snapshot,
+      status: next,
+      truncated: false,
+      truncatedBytes: 0,
+    };
+  };
+
+  if (type === 'git.stage') {
+    const isUntracked = status.untracked.includes(path);
+    const tracked = status.modified.some((file) => file.path === path);
+    if (!isUntracked && !tracked) {
+      return { state: 'refused', message: `\`${path}\` has no unstaged change to stage.` };
+    }
+    const modified = status.modified.map((file) =>
+      file.path === path ? { ...file, staged: true, unstaged: false } : file,
+    );
+    return accept({
+      ...status,
+      modified: isUntracked
+        ? [...modified, { path, kind: 'added', staged: true, unstaged: false }]
+        : modified,
+      untracked: status.untracked.filter((candidate) => candidate !== path),
+    });
+  }
+
+  if (type === 'git.unstage') {
+    const file = status.modified.find(
+      (candidate) => candidate.path === path && candidate.staged,
+    );
+    if (!file) {
+      return { state: 'refused', message: `\`${path}\` has no staged change to unstage.` };
+    }
+    return accept({
+      ...status,
+      modified:
+        file.kind === 'added'
+          ? status.modified.filter((candidate) => candidate.path !== path)
+          : status.modified.map((candidate) =>
+              candidate.path === path
+                ? { ...candidate, staged: false, unstaged: true }
+                : candidate,
+            ),
+      untracked: file.kind === 'added' ? [...status.untracked, path] : status.untracked,
+    });
+  }
+
+  // git.create-commit
+  if (!status.modified.some((file) => file.staged)) {
+    return { state: 'refused', message: 'There are no staged changes to commit.' };
+  }
+  repo.headEpoch += 1;
+  const head = `fixture-head-commit-${repo.headEpoch}`;
+  const accepted = accept(
+    { ...status, modified: status.modified.filter((file) => !file.staged) },
+    head,
+  );
+  return {
+    ...accepted,
+    commit: { oid: head, author: 'Fixture Dev <dev@example.com>' },
+  };
+}
+
 /**
  * A canned git backend for the fixture route.
  *
  * The fixture is offline, so the git capability has nothing to talk to. This
  * stands in for the agent's `git.*` answers with deterministic data,
  * which is what lets the canonical route render the view at all — and therefore
- * what lets e2e assert the Git Changes read-only surface against real DOM rather
+ * what lets e2e assert the Git Changes surface against real DOM rather
  * than against a jsdom mock.
  *
  * What it varies is the *repository*, never the component's state: a route
@@ -109,15 +249,10 @@ function fixtureGitPluginSurface(
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
  *     held until the Case releases it, so a manual Refresh can answer first
  *     with the newer repository state (#2787)
- *   /#/fixture/workspace?capability=git&git=selection-overlap → the first
- *     diff/preview read is held; a same-row or different-row reselection
- *     answers first with newer data (#2972)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
-  if (scenario === 'selection-overlap') {
-    return selectionOverlapGitSurface();
-  }
+  if (scenario === 'selection-overlap') return selectionOverlapGitSurface();
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
@@ -126,6 +261,11 @@ export function fixtureGitSurface(search: string): PluginSurface {
         : scenario === 'preview-states'
           ? PREVIEW_STATE_STATUS
           : CHANGED_STATUS;
+  // The write path is a small state machine: the fixture must be able to show
+  // a stale review and an authoritative post-state, not a stub that always
+  // answers ok. The state lives in one object so the request handler stays a
+  // router rather than a second implementation.
+  const repo = createFixtureRepoState(scenario, status);
   /** Every `git.status` read this surface has been asked for. */
   let statusRequests = 0;
   /** Every `git.diff` path this surface has been asked for, in order. */
@@ -159,8 +299,17 @@ export function fixtureGitSurface(search: string): PluginSurface {
     };
   };
 
-  return fixtureGitPluginSurface(
-    <T>(type: string, payload: Record<string, unknown>): Promise<T> => {
+  // The real directory is filled by `AgentsPlugin` from the agent list; the
+  // fixture has no agent list request, so it fills the same directory from the
+  // same `FIXTURE_AGENTS` the rest of the fixture renders. Built with the same
+  // `manifestsOf`, so the fixture cannot present a directory the app would not.
+  const protocols = new ProtocolDirectory();
+  protocols.publish(manifestsOf(FIXTURE_AGENTS));
+
+  return {
+    connectionState: 'connected',
+    protocols,
+    request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       if (type === 'git.status') {
         statusRequests += 1;
         if (scenario === 'overlap') {
@@ -176,23 +325,23 @@ export function fixtureGitSurface(search: string): PluginSurface {
           // The manual Refresh: the newer repository state, answered first.
           return Promise.resolve(CHANGED_STATUS as T);
         }
-        return Promise.resolve(status as T);
+        return Promise.resolve(repo.status as T);
+      }
+      if (type === 'git.stage' || type === 'git.unstage' || type === 'git.create-commit') {
+        return Promise.resolve(mutateFixtureRepository(repo, type, payload) as T);
       }
       if (type === 'git.diff') {
-        const path = String(payload.path);
-        diffRequests.push(path);
+        diffRequests.push(String(payload.path));
         if (typeof window !== 'undefined') {
           (window as FixtureGitOverlapWindow).fixtureGitDiffRequests = diffRequests;
         }
-        return Promise.resolve(diffFor(path, scenario) as T);
+        return Promise.resolve(
+          diffFor(String(payload.path), scenario, repo.snapshot) as T,
+        );
       }
       if (type === 'git.preview') {
         return Promise.resolve(
-          previewFor(
-            String(payload.path),
-            scenario,
-            payload.want === 'media' ? 'media' : 'text',
-          ) as T,
+          previewFor(String(payload.path), String(payload.expected), scenario, payload.want === 'media' ? 'media' : 'text') as T,
         );
       }
       if (type === 'git.log') {
@@ -209,7 +358,20 @@ export function fixtureGitSurface(search: string): PluginSurface {
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
-  );
+    send(): void {},
+    subscribe(): () => void {
+      return () => {};
+    },
+    onBinary(): () => void {
+      return () => {};
+    },
+    waitForConnection(): Promise<void> {
+      return Promise.resolve();
+    },
+    onConnectionStateChange(): () => void {
+      return () => {};
+    },
+  };
 }
 
 /**
@@ -337,9 +499,15 @@ function selectionOverlapGitSurface(): PluginSurface {
 /** The work tree the fixture pretends to be in — a Peek names its basename. */
 const FIXTURE_ROOT = '/Users/dev/code/nession-capsule';
 
+/** A snapshot identity for a canned state; only equality is meaningful. */
+function fixtureSnapshot(token: string, head: string | null): GitSnapshot {
+  return { token, head, root: FIXTURE_ROOT };
+}
+
 const CLEAN_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-clean-0', 'fixture-head-clean'),
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -362,6 +530,7 @@ const CLEAN_STATUS: GitStatusResponse = {
 const CHANGED_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-changed-0', 'fixture-head-changed'),
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -417,6 +586,7 @@ function changedDiff(path: string): string {
 const SELECTION_OVERLAP_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-selection-overlap-0', 'fixture-head-selection'),
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -464,6 +634,7 @@ function selectionOverlapDiff(path: string, marker: 'OLD' | 'NEW'): GitDiffRespo
       truncated: marker === 'OLD',
       truncated_bytes: marker === 'OLD' ? 4096 : 0,
     },
+    snapshot: fixtureSnapshot('fixture-selection-overlap-0', 'fixture-head-selection'),
   };
 }
 
@@ -487,6 +658,7 @@ function selectionOverlapPreview(path: string, marker: 'OLD' | 'NEW'): GitPrevie
 const DIFF_STATE_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-diff-states-0', 'fixture-head-diff'),
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -521,21 +693,10 @@ const DIFF_STATE_STATUS: GitStatusResponse = {
  * reports a conflicted path once, in `unmerged` only. The missing/changed
  * answers are races the reader can actually hit after selecting a row.
  */
-/**
- * Real, decodable media bytes (#2876 SC-03).
- *
- * The fixture stands in for the Agent's bounded media answer, not for a mocked
- * viewer: the browser decodes these exact bytes, so the Case exercises the
- * same image/video/audio/PDF elements the product uses.
- */
-const FIXTURE_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGP4z8BAEiJN9aiGUQ1DSgMAkPn/Afnh+ngAAAAASUVORK5CYII=';
-const FIXTURE_WAV_BASE64 = 'UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
-const FIXTURE_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDEyMF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTIgVGYgMjAgNjAgVGQgKE5lc3Npb24gbWVkaWEgc2FtcGxlKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCnRyYWlsZXI8PC9TaXplIDYvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgowCiUlRU9GCg==';
-const FIXTURE_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAK3EU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEnTbuMU6uEHFO7a1OsggKh7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuMS4xMDBXQYxMYXZmNjEuMS4xMDBEiYhAj0AAAAAAABZUrmvMrgEAAAAAAABD14EBc8WIoFP3VVktqNucgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4QF9eEA4JSwgRC6gRCagQJVsIhVt4ECVbiBAhJUw2f6c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2MS4xLjEwMHNz1WPAi2PFiKBT91VZLajbZ8igRaOHRU5DT0RFUkSHk0xhdmM2MS4zLjEwMCBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAxLjAwMDAwMDAwMAAfQ7Z1QPXngQCjoYEAAIAQAgCdASoQABAAAEcIhYWIhYSIAgIADA5gAP5oAKOVgQBkALEBAAEQEAAYABhYL/QACAAAo5WBAMgAsQEAARAQABgAGFgv9AAIAACjlYEBLACxAQABEBAAGAAYWC/0AAgAAKOVgQGQALEBAAEQEAAYABhYL/QACAAAo5WBAfQAsQEAARAQABgAGFgv9AAIAACjlYECWACxAQABEBAAGAAYWC/0AAgAAKOVgQK8ALEBAAEQEBRgAGFgv9AAIAAAo5WBAyAAsQEAARAQABgAGFgv9AAIAACjlYEDhACxAQABEBAAGAAYWC/0AAgAABxTu2uRu4+zgQC3iveBAfGCAabwgQM=';
-
 const PREVIEW_STATE_STATUS: GitStatusResponse = {
   state: 'ok',
   root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-preview-states-0', 'fixture-head-preview'),
   truncated: false,
   truncatedBytes: 0,
   status: {
@@ -549,18 +710,6 @@ const PREVIEW_STATE_STATUS: GitStatusResponse = {
     ],
     untracked: [
       'notes/new.ts',
-      'notes/example.ts',
-      'notes/data.json',
-      'notes/events.jsonl',
-      'notes/README.md',
-      'notes/broken.json',
-      'notes/truncated.json',
-      'assets/photo.png',
-      'assets/sample.webm',
-      'assets/sample.wav',
-      'assets/spec.pdf',
-      'assets/fake.png',
-      'assets/oversized.png',
       'assets/logo.bin',
       'src/large.txt',
       'src/missing.txt',
@@ -568,7 +717,7 @@ const PREVIEW_STATE_STATUS: GitStatusResponse = {
       'src/long-preview.txt',
       'src/link',
     ],
-    unmerged: ['src/conflict.ts', 'src/conflict.rs', 'src/unmerged-missing.ts'],
+    unmerged: ['src/conflict.ts', 'src/unmerged-missing.ts'],
   },
 };
 
@@ -591,6 +740,11 @@ function readyPreview(
     },
   };
 }
+
+const FIXTURE_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGP4z8BAEiJN9aiGUQ1DSgMAkPn/Afnh+ngAAAAASUVORK5CYII=';
+const FIXTURE_WAV_BASE64 = 'UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+const FIXTURE_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMjAwIDEyMF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTIgVGYgMjAgNjAgVGQgKE5lc3Npb24gbWVkaWEgc2FtcGxlKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCnRyYWlsZXI8PC9TaXplIDYvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgowCiUlRU9GCg==';
+const FIXTURE_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAK3EU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEnTbuMU6uEHFO7a1OsggKh7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuMS4xMDBXQYxMYXZmNjEuMS4xMDBEiYhAj0AAAAAAABZUrmvMrgEAAAAAAABD14EBc8WIoFP3VVktqNucgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4QF9eEA4JSwgRC6gRCagQJVsIhVt4ECVbiBAhJUw2f6c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2MS4xLjEwMHNz1WPAi2PFiKBT91VZLajbZ8igRaOHRU5DT0RFUkSHk0xhdmM2MS4zLjEwMCBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAxLjAwMDAwMDAwMAAfQ7Z1QPXngQCjoYEAAIAQAgCdASoQABAAAEcIhYWIhYSIAgIADA5gAP5oAKOVgQBkALEBAAEQEAAYABhYL/QACAAAo5WBAMgAsQEAARAQABgAGFgv9AAIAACjlYEBLACxAQABEBAAGAAYWC/0AAgAAKOVgQGQALEBAAEQEAAYABhYL/QACAAAo5WBAfQAsQEAARAQABgAGFgv9AAIAACjlYECWACxAQABEBAAGAAYWC/0AAgAAKOVgQK8ALEBAAEQEBRgAGFgv9AAIAAAo5WBAyAAsQEAARAQABgAGFgv9AAIAACjlYEDhACxAQABEBAAGAAYWC/0AAgAABxTu2uRu4+zgQC3iveBAfGCAabwgQM=';
 
 function readyMedia(
   path: string,
@@ -745,22 +899,71 @@ function previewStateFor(path: string): GitPreviewResponse | null {
   return null;
 }
 
-function previewFor(
-  path: string,
-  scenario: string,
-  want: 'text' | 'media',
-): GitPreviewResponse {
+function previewFor(path: string, expected: string, scenario: string, want: 'text' | 'media'): GitPreviewResponse {
   if (want === 'media') {
     const media = mediaFixture(path);
-    if (media) {
-      return media;
-    }
+    if (media) return media;
   }
-
   if (scenario === 'preview-states') {
-    const state = previewStateFor(path);
-    if (state) {
-      return state;
+    const extra = previewStateFor(path);
+    if (extra) return extra;
+  }
+  if (scenario === 'preview-states') {
+    if (path === 'notes/new.ts') {
+      return readyPreview(path, 'export const note = "untracked";\n');
+    }
+    if (path === 'src/conflict.ts') {
+      return readyPreview(
+        path,
+        '<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n',
+      );
+    }
+    if (path === 'assets/logo.bin') {
+      return readyPreview(path, '', { binary: true, size: 4096 });
+    }
+    if (path === 'src/large.txt') {
+      return readyPreview(path, 'first line\n', {
+        size: 4103,
+        truncated: true,
+        truncated_bytes: 4096,
+      });
+    }
+    if (path === 'src/missing.txt' || path === 'src/unmerged-missing.ts') {
+      return { state: 'ok', preview: { path, state: 'missing', text: '', binary: false, size: 0, truncated: false, truncated_bytes: 0 } };
+    }
+    if (path === 'src/long-preview.txt') {
+      const lines = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`);
+      return readyPreview(path, lines.join('\n'));
+    }
+    if (path === 'src/link') {
+      return {
+        state: 'ok',
+        preview: {
+          path,
+          state: 'unsupported',
+          text: '',
+          binary: false,
+          size: 0,
+          truncated: false,
+          truncated_bytes: 0,
+          message: 'This path is a symbolic link; previews do not follow links.',
+        },
+      };
+    }
+    if (path === 'src/moved.txt') {
+      return {
+        state: 'ok',
+        preview: {
+          path,
+          state: 'changed',
+          text: '',
+          binary: false,
+          size: 0,
+          truncated: false,
+          truncated_bytes: 0,
+          message: 'The file changed while it was being read. Refresh Git Changes.',
+        },
+      };
     }
   }
 
@@ -775,7 +978,7 @@ function previewFor(
     state: 'ok',
     preview: {
       path,
-      state: 'changed',
+      state: expected === 'unmerged' ? 'changed' : 'changed',
       text: '',
       binary: false,
       size: 0,
@@ -1049,12 +1252,21 @@ const WORKTREES: GitWorktreesResponse = {
   },
 };
 
-function diffFor(path: string, scenario: string): GitDiffResponse {
+function okDiff(
+  path: string,
+  diff: GitFileDiff,
+  snapshot: GitSnapshot,
+): GitDiffResponse {
+  return { state: 'ok', diff: { ...diff, path }, snapshot };
+}
+
+function diffFor(path: string, scenario: string, snapshot: GitSnapshot): GitDiffResponse {
   if (path.endsWith('.png')) {
-    return {
-      state: 'ok',
-      diff: { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
-    };
+    return okDiff(
+      path,
+      { path, text: '', binary: true, truncated_bytes: 0, truncated: false },
+      snapshot,
+    );
   }
 
   if (scenario === 'preview-states' && path === 'src/deleted.ts') {
@@ -1066,49 +1278,62 @@ function diffFor(path: string, scenario: string): GitDiffResponse {
 
   if (scenario === 'diff-states') {
     if (path === 'mode/run.sh') {
-      return {
-        state: 'ok',
-        diff: { path, text: modeDiff(path), binary: false, truncated_bytes: 0, truncated: false },
-      };
+      return okDiff(
+        path,
+        { path, text: modeDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+        snapshot,
+      );
     }
     if (path === 'src/empty.txt') {
-      return {
-        state: 'ok',
-        diff: { path, text: '', binary: false, truncated_bytes: 0, truncated: false },
-      };
+      return okDiff(
+        path,
+        { path, text: '', binary: false, truncated_bytes: 0, truncated: false },
+        snapshot,
+      );
     }
     if (path === 'src/large.ts') {
-      return {
-        state: 'ok',
-        diff: {
+      return okDiff(
+        path,
+        {
           path,
           text: changedDiff(path),
           binary: false,
           truncated_bytes: 4096,
           truncated: true,
         },
-      };
+        snapshot,
+      );
     }
     if (path === 'src/long.ts') {
-      return {
-        state: 'ok',
-        diff: { path, text: longDiff(path), binary: false, truncated_bytes: 0, truncated: false },
-      };
+      return okDiff(
+        path,
+        { path, text: longDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+        snapshot,
+      );
     }
     if (path === 'src/malformed.ts') {
-      return {
-        state: 'ok',
-        diff: { path, text: malformedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
-      };
+      return okDiff(
+        path,
+        {
+          path,
+          text: malformedDiff(path),
+          binary: false,
+          truncated_bytes: 0,
+          truncated: false,
+        },
+        snapshot,
+      );
     }
-    return {
-      state: 'ok',
-      diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
-    };
+    return okDiff(
+      path,
+      { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+      snapshot,
+    );
   }
 
-  return {
-    state: 'ok',
-    diff: { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
-  };
+  return okDiff(
+    path,
+    { path, text: changedDiff(path), binary: false, truncated_bytes: 0, truncated: false },
+    snapshot,
+  );
 }

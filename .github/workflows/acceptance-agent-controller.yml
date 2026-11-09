@@ -1,8 +1,11 @@
 name: Acceptance / Agent Controller
 
-# Unprivileged MANUAL REQUEST ONLY. This workflow cannot write agent-store,
-# issue comments or PRs; the separate verified workflow_run receiver owns App.
+# Unprivileged owner/main request. A single native owner-authenticated #3001
+# comment may use the same trust-separated ingress when manual workflow
+# dispatch is unavailable. This workflow cannot write Store or use App keys.
 on:
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -38,7 +41,20 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan'
+      github.actor == 'BestNathan' &&
+      github.run_attempt == 1 &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.action == 'created' &&
+          github.event.issue.number == 3001 &&
+          github.event.issue.state == 'open' &&
+          !github.event.issue.pull_request &&
+          github.event.comment.user.login == 'BestNathan' &&
+          github.event.comment.body == '/nession qwen-v2-start issue=3001'
+        )
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -59,8 +75,8 @@ jobs:
       - name: Confirm exact SHA and open native Issue
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
-          INPUT_SHA: ${{ inputs.input_sha }}
+          ISSUE_NUMBER: ${{ github.event_name == 'issue_comment' && '3001' || inputs.issue_number }}
+          INPUT_SHA: ${{ github.event_name == 'issue_comment' && github.sha || inputs.input_sha }}
         shell: bash
         run: |
           set -euo pipefail

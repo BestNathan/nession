@@ -19,6 +19,9 @@ import { validateQwenRepairPublisherIntent, qwenRepairPublisherIntentPath }
   from './qwen-repair-intent.mjs';
 import { githubFetcher } from '../github-read.mjs';
 import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
+import {createHash} from 'node:crypto';
+import {appendAuthenticatedResult,validateAuthenticatedAgentReceipt}
+  from '../orchestration/result-artifact.mjs';
 import { publish } from '../../../run-store-cas-push.mjs';
 
 const REPO = 'BestNathan/nession';
@@ -300,7 +303,27 @@ export function applyQwenPublisherReviewHandoff({
     reviewer_agent_id:reviewer[0].task.agent_id};
 }
 export function applyQwenPublicationToRemote({remote,readback,intent,registry,
-  publishStore=publish,onCandidate=null}){
+  developerResult=null,publishStore=publish,onCandidate=null}){
+  // Only the main-owned authenticated Publisher may compose this receipt;
+  // immutable Intent records or model output do not authorize a result.
+  if(developerResult!==null){
+    validateAuthenticatedAgentReceipt(developerResult);
+    const origin=intent?.record;
+    if(developerResult.schema_version!==2||
+      developerResult.result.kind!=='developer'||
+      developerResult.issue!==origin?.issue||
+      developerResult.action_id!==origin.action_id||
+      developerResult.source.agent_id!=='dev-qwen-01'||
+      developerResult.result.run_id!==origin.worker_run_id||
+      developerResult.result.run_attempt!==origin.worker_run_attempt||
+      developerResult.source.input_sha!==origin.worker_source_sha||
+      developerResult.result.target_sha!==readback?.head_sha||
+      developerResult.implementing_pr.number!==readback.pull_request||
+      origin.publisher_run_id!==readback.publisher_run_id)
+      fail('Qwen v2 is not bound to authenticated original Worker and PR');
+  }else if(process.env.NODE_ENV!=='test'){
+    fail('Qwen Publisher requires authenticated Developer v2 receipt');
+  }
   if(typeof remote!=='string'||!remote||
       (process.env.NODE_ENV!=='test'&&
        !remote.startsWith('https://x-access-token:')))
@@ -309,10 +332,20 @@ export function applyQwenPublicationToRemote({remote,readback,intent,registry,
   try{
     const applied=applyQwenPublisherReviewHandoff({
       storeRoot:work,readback,intent,registry});
-    if(!applied.changed)return {...applied,replayed:true,commit_sha:null};
+    const written=developerResult===null?null:appendAuthenticatedResult(
+      work,developerResult,{namespace:'producer-results-v2'});
+    if(!applied.changed){
+      if(written?.changed)
+        fail('Qwen replay lacks committed Developer proof');
+      return {...applied,replayed:true,commit_sha:null,
+        producer_result_path:written?.path??null,
+        producer_result_sha256:written?
+          createHash('sha256').update(fs.readFileSync(path.join(work,written.path)))
+            .digest('hex'):null};
+    }
     git(work,['add','-A']);
-    if(auditStagedRunStore(work,STORE_REF).checked_changes!==2)
-      fail('Qwen Publisher must CAS only workflow state and head');
+    if(auditStagedRunStore(work,STORE_REF).checked_changes!==(written?.changed?3:2))
+      fail('Qwen Publisher must CAS only state, head and versioned Developer v2');
     git(work,['-c','user.name=nession-agent-controller',
       '-c','user.email=nession-agent-controller@users.noreply.github.com',
       'commit','-m','agent-store: Qwen Publisher Review handoff Issue '+
@@ -323,7 +356,11 @@ export function applyQwenPublicationToRemote({remote,readback,intent,registry,
     }
     const committed=publishStore(STORE_REF,work,4);
     return {...applied,replayed:committed.replayed,
-      commit_sha:committed.commit_sha};
+      commit_sha:committed.commit_sha,
+      producer_result_path:written?.path??null,
+      producer_result_sha256:written?
+        createHash('sha256').update(fs.readFileSync(path.join(work,written.path)))
+          .digest('hex'):null};
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
 

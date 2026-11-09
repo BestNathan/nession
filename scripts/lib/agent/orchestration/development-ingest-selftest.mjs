@@ -165,4 +165,25 @@ assert.throws(()=>resolveTrustedIngestSource({environment:{...env,GITHUB_ACTOR:'
   /exact owner\/main/);
 assert.throws(()=>resolveTrustedIngestSource({environment:{...env,GITHUB_REF:'refs/pull/1/merge'},event}),
   /main-owned/);
+// #1974: an authenticated owner/main comment may *locate* the successful
+// Worker for a suppressed workflow_run. The writer independently verifies
+// the actual Worker Run, claim Issue and original Artifact digests.
+const qwenRun=42488022265;
+const qwenCommand='/nession ingest-qwen issue=3001 worker_run='+qwenRun;
+const qwenEvent={...event,issue:{number:3001,state:'open'},
+  comment:{id:192837,user:{login:'BestNathan'},body:qwenCommand}};
+assert.deepEqual(resolveTrustedIngestSource({environment:env,event:qwenEvent}),
+  {run_id:qwenRun,source:null,qwen_recovery:true,issue:3001,attempt:1});
+for(const altered of [
+  {...qwenEvent,issue:{number:3002,state:'open'}},
+  {...qwenEvent,issue:{number:3001,state:'open',pull_request:{url:'fake'}}},
+  {...qwenEvent,comment:{...qwenEvent.comment,user:{login:'evil'}}},
+  {...qwenEvent,comment:{...qwenEvent.comment,body:qwenCommand+' '}},
+  {...qwenEvent,comment:{...qwenEvent.comment,id:0}},
+  {...qwenEvent,action:'edited'},
+])assert.throws(()=>resolveTrustedIngestSource({environment:env,event:altered}),
+  /exact owner\/main/);
+assert.throws(()=>resolveTrustedIngestSource({environment:{
+  ...env,GITHUB_ACTOR:'evil'},event:qwenEvent}),/exact owner\/main/);
+
 console.log('Development Ingest v2: signed parent, exact Worker/Action owner fallback and forgery negatives passed');

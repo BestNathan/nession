@@ -11,6 +11,11 @@ import {decodeResultZip} from './result-artifact.mjs';
 const REPO='BestNathan/nession',ISSUE=/^[1-9][0-9]*$/,SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
 const WORKFLOW='Acceptance / Agent Controller';
 const PATH='.github/workflows/acceptance-agent-controller.yml';
+// One owner/main-signed, GitHub-authenticated Issue comment can bootstrap
+// the fresh Qwen v2 provenance fixture. Never select issue, provider or SHA
+// from mutable Issue prose or arbitrary comments.
+export const QWEN_V2_BOOTSTRAP_ISSUE=3001;
+export const QWEN_V2_BOOTSTRAP_COMMENT='/nession qwen-v2-start issue=3001';
 function fail(message){throw Error('Agent Controller request: '+message);}
 const positive=x=>Number.isSafeInteger(x)&&x>0;
 function fields(obj,keys){
@@ -55,10 +60,16 @@ export function buildControllerRequest(input,run,registry,defaults={}) {
   });
   const valid=request({...input,developer:developer.agent_id,
     reviewer:reviewer.agent_id,acceptor:acceptor.agent_id});
+  const canary=run?.event==='issue_comment'&&
+    Number(input.issue_number)===QWEN_V2_BOOTSTRAP_ISSUE&&
+    input.input_sha===run.head_sha&&
+    input.developer==='dev-qwen-01'&&
+    input.reviewer==='review-qwen-01'&&
+    input.acceptor==='accept-qwen-01';
   if(!fields(run,['repository','workflow','workflow_path','event','ref','head_sha',
     'run_id','attempt','actor'])||run.repository!==REPO||
     run.workflow!==WORKFLOW||run.workflow_path!==PATH||
-    run.event!=='workflow_dispatch'||run.ref!=='refs/heads/main'||
+    (run.event!=='workflow_dispatch'&&!canary)||run.ref!=='refs/heads/main'||
     !SHA.test(run.head_sha??'')||!positive(run.run_id)||!positive(run.attempt)||
     run.actor!=='BestNathan')fail('untrusted Controller request context');
   // Fail before artifact publication if the assigned roles are not registered.
@@ -73,7 +84,8 @@ export function verifyControllerRequestSource(run,artifacts,expected){
       run.run_attempt!==expected.attempt||run.head_sha!==expected.head_sha||
       run.name!==WORKFLOW||run.path!==PATH||
       run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
-      run.actor?.login!=='BestNathan'||run.event!=='workflow_dispatch'||
+      run.actor?.login!=='BestNathan'||
+      !['workflow_dispatch','issue_comment'].includes(run.event)||
       run.head_branch!=='main'||run.status!=='completed'||run.conclusion!=='success')
     fail('source Run is not trusted owner main workflow_dispatch');
   const matches=artifacts?.artifacts?.filter(a=>
@@ -120,8 +132,33 @@ function read(p,max=256*1024){
     fail('unsafe Controller input file');
   return fs.readFileSync(p);
 }
+export function qwenV2OwnerCommentInput(event,env){
+  if(event?.action!=='created'||
+      event?.repository?.full_name!==REPO||
+      event?.issue?.number!==QWEN_V2_BOOTSTRAP_ISSUE||
+      event?.issue?.state!=='open'||event.issue.pull_request||
+      event?.comment?.body!==QWEN_V2_BOOTSTRAP_COMMENT||
+      event?.comment?.user?.login!=='BestNathan'||
+      !positive(event.comment.id)||
+      env?.GITHUB_ACTIONS!=='true'||
+      env?.GITHUB_REPOSITORY!==REPO||
+      env?.GITHUB_WORKFLOW!==WORKFLOW||
+      env?.GITHUB_ACTOR!=='BestNathan'||
+      env?.GITHUB_EVENT_NAME!=='issue_comment'||
+      env?.GITHUB_REF!=='refs/heads/main'||
+      !SHA.test(env?.GITHUB_SHA??'')||
+      Number(env.GITHUB_RUN_ATTEMPT)!==1)
+    fail('noncanonical owner-only Qwen v2 bootstrap Issue comment');
+  return {
+    issue_number:String(QWEN_V2_BOOTSTRAP_ISSUE),
+    input_sha:env.GITHUB_SHA,developer:'dev-qwen-01',
+    reviewer:'review-qwen-01',acceptor:'accept-qwen-01',
+  };
+}
 function sourceContext(){
-  const input=JSON.parse(read(process.env.GITHUB_EVENT_PATH,64*1024).toString('utf8')).inputs;
+  const raw=JSON.parse(read(process.env.GITHUB_EVENT_PATH,64*1024).toString('utf8'));
+  const input=process.env.GITHUB_EVENT_NAME==='issue_comment'?
+    qwenV2OwnerCommentInput(raw,process.env):raw.inputs;
   return {input,run:{repository:process.env.GITHUB_REPOSITORY,
     workflow:process.env.GITHUB_WORKFLOW,workflow_path:PATH,
     event:process.env.GITHUB_EVENT_NAME,ref:process.env.GITHUB_REF,

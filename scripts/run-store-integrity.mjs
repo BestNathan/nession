@@ -33,6 +33,7 @@ const rules = Object.freeze({
     {path: new RegExp('^roles/' + ROLES + '/' + UUID + '/issues/' + ISSUE + '/head\\.json$'), kind:'cas-pointer'},
     {path: new RegExp('^workflows/issues/' + ISSUE + '/states/' + VER + '\\.json$'), kind:'immutable'},
     {path: new RegExp('^workflows/issues/' + ISSUE + '/results/' + ISSUE + '-' + ISSUE + '-[a-f0-9]{64}\\.json$'), kind:'immutable'},
+    {path: new RegExp('^workflows/issues/' + ISSUE + '/producer-results-v2/' + ISSUE + '-' + ISSUE + '-[a-f0-9]{64}\\.json$'), kind:'immutable'},
     {path: new RegExp('^workflows/issues/' + ISSUE + '/head\\.json$'), kind:'cas-pointer'},
     {path: /^e2e-failures\/[a-f0-9]{64}\/states\/[0-9]{8}\.json$/, kind:'immutable'},
     {path: /^e2e-failures\/[a-f0-9]{64}\/head\.json$/, kind:'cas-pointer'},

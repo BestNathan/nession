@@ -105,11 +105,24 @@ const topology={
  ],
  edges:[{from:'ci-quality',to:'acceptance-orchestrator',kind:'workflow_run'}],
 };
-export async function startPagesFixture(){
+export async function startPagesFixture(options:{historicalLineage?:boolean}={}){
+ // Closed historical Issue/PR are NOT in the active OPEN lists; only
+ // independently source-attested public lineage edges may make them reachable.
+ const selected=options.historicalLineage?{...fixture,work:{...fixture.work,
+   agent_store_readiness:{status:'present_unverified',sha:'d'.repeat(40),
+     url:'https://github.com/BestNathan/nession/tree/agent-store'},
+   lineage:{schema_version:1,status:'verified',source_ref_sha:'d'.repeat(40),
+     truncated:false,edges:[{issue:3001,pr_number:3017,pr_head_sha:'e'.repeat(40),
+       role:'developer',agent_id:'dev-qwen-01',run_id:42488022265,attempt:1,
+       action_id:'f'.repeat(64),slice_id:null,
+       verification:'authenticated_at_attestation',
+       source_ref_sha:'d'.repeat(40),
+       source_url:'https://github.com/BestNathan/nession/actions/runs/42488022265'}]}}
+ }:fixture;
  const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
-  if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(fixture));return;}
+  if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(selected));return;}
   if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
   if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}

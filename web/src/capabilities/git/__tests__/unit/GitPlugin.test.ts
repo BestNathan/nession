@@ -4,7 +4,12 @@ import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPlug
 import type { ProtocolManifest } from '@/platform/protocol';
 
 const statusReq = { agent_id: 'a1', session: 'a1:work' } as const;
-const diffReq = { agent_id: 'a1', session: 'a1:work', path: 'src/a.ts' } as const;
+const diffReq = {
+  agent_id: 'a1',
+  session: 'a1:work',
+  path: 'src/a.ts',
+  source: { kind: 'worktree' },
+} as const;
 
 /**
  * What `a1` advertises.
@@ -18,14 +23,17 @@ const diffReq = { agent_id: 'a1', session: 'a1:work', path: 'src/a.ts' } as cons
 const AGENT_MANIFEST: ProtocolManifest = {
   provider: 'test',
   protocols: {
-    'git.status': { versions: [1] },
-    'git.diff': { versions: [1] },
+    'git.status': { versions: [2] },
+    'git.diff': { versions: [2] },
     'git.preview': { versions: [1] },
     'git.root': { versions: [1] },
     'git.log': { versions: [1] },
     'git.commit': { versions: [1] },
     'git.branches': { versions: [1] },
     'git.worktrees': { versions: [1] },
+    'git.stage': { versions: [1] },
+    'git.unstage': { versions: [1] },
+    'git.create-commit': { versions: [1] },
   },
 };
 
@@ -47,6 +55,8 @@ const statusResponse = {
     untracked: [],
     unmerged: [],
   },
+  root: '/repo',
+  snapshot: { token: 'token-1', head: 'head-1', root: '/repo' },
   truncated: false,
   truncatedBytes: 0,
 } as const;
@@ -124,6 +134,41 @@ describe('GitPlugin', () => {
       await expect(pending).resolves.toMatchObject({ state: 'ok' });
     });
 
+    it('gitStage carries the reviewed snapshot the agent checks', async () => {
+      const request = {
+        agent_id: 'a1',
+        session: 'a1:work',
+        path: 'src/a.ts',
+        expectedSnapshot: 'token-1',
+      } as const;
+      const pending = plugin.gitStage(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'git.stage',
+        payload: request,
+      });
+
+      surface.resolveNext('git.stage', { state: 'refused', message: 'stale' });
+      await expect(pending).resolves.toMatchObject({ state: 'refused' });
+    });
+
+    it('gitCreateCommit forwards the idempotency identity', async () => {
+      const request = {
+        agent_id: 'a1',
+        session: 'a1:work',
+        expectedSnapshot: 'token-1',
+        message: 'feat: change',
+        requestId: 'commit-1',
+      } as const;
+      const pending = plugin.gitCreateCommit(request);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'git.create-commit',
+        payload: request,
+      });
+
+      surface.resolveNext('git.create-commit', { state: 'refused', message: 'not yet' });
+      await expect(pending).resolves.toMatchObject({ state: 'refused' });
+    });
+
     it('gitPreview forwards the selected row kind with the path', async () => {
       const req = {
         agent_id: 'a1',
@@ -189,7 +234,7 @@ describe('GitPlugin', () => {
       expect(surface.requests[0].payload).toMatchObject({
         agent_id: 'a1',
         session: 'a1:work',
-        contract_version: 1,
+        contract_version: 2,
       });
 
       surface.resolveNext('git.status', statusResponse);
@@ -217,10 +262,12 @@ describe('GitPlugin', () => {
     });
 
     it('refuses locally when the target serves only versions we cannot read', async () => {
-      surface.protocols.publish(new Map([['a1', v([2])]]));
+      // The client now speaks `git.status` v2; a v1-only agent is exactly the
+      // no-common-version case the resolver refuses rather than downgrading.
+      surface.protocols.publish(new Map([['a1', v([1])]]));
 
       await expect(plugin.gitStatus(statusReq)).rejects.toThrow(
-        '`a1` offers `git.status` at [v2], which this client cannot read',
+        '`a1` offers `git.status` at [v1], which this client cannot read',
       );
       expect(surface.requests, 'nothing may reach the wire').toHaveLength(0);
     });
@@ -248,12 +295,14 @@ describe('GitPlugin', () => {
         ]),
       );
 
-      await expect(plugin.gitStatus(statusReq)).rejects.toThrow('`a1` offers');
-
-      const pending = plugin.gitStatus({ agent_id: 'a2', session: 'a2:work' });
-      expect(surface.requests[0].payload).toMatchObject({ contract_version: 1 });
+      const pending = plugin.gitStatus(statusReq);
+      expect(surface.requests[0].payload).toMatchObject({ contract_version: 2 });
       surface.resolveNext('git.status', statusResponse);
       await expect(pending).resolves.toEqual(statusResponse);
+
+      await expect(
+        plugin.gitStatus({ agent_id: 'a2', session: 'a2:work' }),
+      ).rejects.toThrow('`a2` offers');
     });
   });
 

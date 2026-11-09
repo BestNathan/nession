@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 import {
   aggregateVerifierResults,
@@ -386,6 +387,45 @@ ok(() => {
     }
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+// #1974: a future genuine Qwen Developer Result v2 must be discoverable
+// without hardcoding the immutable historical #2961 / PR #2963 fixture.
+// Pure selection and syntax preflight require neither GitHub nor model tokens.
+const qwenRequire=createRequire(import.meta.url);
+const {selectNewestQwenProducer}=qwenRequire(
+  '../e2e/acceptance/shared/qwen-live-source.cjs');
+const qwenRecord=(issue,run,mode='100644')=>({
+  path:'workflows/issues/'+issue+'/producer-results-v2/'+run+'-1-'+
+    'a'.repeat(64)+'.json',sha:'b'.repeat(40),type:'blob',mode,size:512
+});
+ok(()=>{
+  const records=selectNewestQwenProducer({truncated:false,tree:[
+    qwenRecord(2961,42401513247),qwenRecord(4001,53000000000)
+  ]});
+  assert.equal(records[0].issue,4001);
+  assert.equal(records[0].runId,53000000000);
+  assert.equal(records[1].issue,2961);
+});
+rejects(()=>selectNewestQwenProducer({truncated:true,tree:[
+  qwenRecord(4001,53000000000)]}),/false/);
+rejects(()=>selectNewestQwenProducer({truncated:false,tree:[
+  qwenRecord(4001,53000000000,'120000')]}),/100644/);
+rejects(()=>selectNewestQwenProducer({truncated:false,tree:[
+  qwenRecord(4001,53000000000),qwenRecord(4002,53000000001)]},
+  {maxEntries:1}),/truncated/);
+ok(()=>{
+  for(const file of [
+    'e2e/acceptance/shared/qwen-live-source.cjs',
+    'e2e/acceptance/cases/1974/SC-01/verify.js',
+    'e2e/acceptance/cases/1974/SC-03/verify.js',
+    'e2e/acceptance/cases/1974/SC-04/verify.js',
+  ]){
+    const result=spawnSync(process.execPath,['--check',path.join(repoRoot,file)],{
+      cwd:repoRoot,encoding:'utf8',timeout:5000
+    });
+    assert.equal(result.status,0,file+': '+(result.stderr||result.error));
   }
 });
 
