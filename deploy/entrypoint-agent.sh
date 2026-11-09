@@ -21,6 +21,11 @@ AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 # point it at the PVC mount: /data is NFS in this deployment and binding a unix
 # socket there is not reliable.
 AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
+# Durable EROFS image cache (#3023). The Kubernetes manifest points this at the
+# existing PVC mounted at /data; leaving it unset uses the Agent's documented
+# default. The Agent validates the path and fails closed when an explicitly
+# declared cache is not durable.
+AGENT_EROFS_STORAGE_DIR="${AGENT_EROFS_STORAGE_DIR:-}"
 # The fixed column count this Agent creates Sessions at (#2487). The release
 # pipeline sets NESSION_TERMINAL_COLS from the same parameter that built the
 # Web bundle; AGENT_TERMINAL_COLS lets a standalone operator override it
@@ -80,6 +85,20 @@ fi
 # documented default.
 if [ -n "${AGENT_TMUX_SOCKET}" ]; then
     echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> /etc/nession/agent-config.toml
+fi
+
+# Only add the EROFS cache section if explicitly set. This table must follow
+# every top-level key above; otherwise a later top-level assignment would be
+# parsed as a member of `[erofs]`.
+if [ -n "${AGENT_EROFS_STORAGE_DIR}" ]; then
+    case "${AGENT_EROFS_STORAGE_DIR}" in
+        /*) ;;
+        *) echo "AGENT_EROFS_STORAGE_DIR must be absolute" >&2; exit 1 ;;
+    esac
+    if printf '%s' "${AGENT_EROFS_STORAGE_DIR}" | grep -q '[[:cntrl:]"]'; then
+        echo "AGENT_EROFS_STORAGE_DIR contains invalid characters" >&2; exit 1
+    fi
+    printf '\n[erofs]\nstorage_dir = "%s"\n' "${AGENT_EROFS_STORAGE_DIR}" >> "${NESSON_CONFIG_DIR}/agent-config.toml"
 fi
 
 # Sandbox configuration is an operator statement about this host. The table

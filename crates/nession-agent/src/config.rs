@@ -6,6 +6,58 @@ use nession_common::config::{
 use nession_common::logging::LoggingConfig;
 use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+/// Environment override for the Agent's durable EROFS cache directory.
+///
+/// The entrypoint and an operator may set this; an explicit
+/// `[erofs] storage_dir` in the TOML always wins (see
+/// [`AgentConfig::apply_env_overrides_from`]).
+pub const EROFS_STORAGE_DIR_ENV: &str = "NESSION_EROFS_STORAGE_DIR";
+
+/// The resolved cache location plus whether it was explicitly declared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedErofsStorage {
+    pub path: PathBuf,
+    /// An explicit `[erofs] storage_dir` is a durable-location declaration;
+    /// an implicit default is not.
+    pub explicit: bool,
+}
+
+/// Agent-local cache for downloaded EROFS images (#3023).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErofsConfig {
+    /// Absolute durable cache directory. When omitted, the Agent uses
+    /// `$NESSION_HOME/erofs` or the documented native default.
+    #[serde(default)]
+    pub storage_dir: Option<String>,
+}
+
+impl ErofsConfig {
+    /// Validate the declared path without touching the filesystem.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(raw) = &self.storage_dir {
+            let value = raw.trim();
+            if value.is_empty() {
+                anyhow::bail!("erofs.storage_dir must not be empty");
+            }
+            if value.chars().any(|c| c.is_ascii_control()) {
+                anyhow::bail!("erofs.storage_dir contains control characters");
+            }
+            let path = Path::new(value);
+            if !path.is_absolute() {
+                anyhow::bail!("erofs.storage_dir must be absolute");
+            }
+            if path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                anyhow::bail!("erofs.storage_dir must not contain '..'");
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Default listen address for the agent WebSocket server.
 fn default_listen_address() -> String {
@@ -272,6 +324,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub tmux_socket_path: Option<String>,
 
+    /// Durable local EROFS image cache (#3023).
+    #[serde(default)]
+    pub erofs: ErofsConfig,
+
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
@@ -344,6 +400,7 @@ impl Default for AgentConfig {
             default_working_dir: default_working_dir(),
             file_root: None,
             tmux_socket_path: None,
+            erofs: ErofsConfig::default(),
             logging: LoggingConfig::default(),
             memory_threshold_percent: default_memory_threshold_percent(),
             terminal_cols: default_terminal_cols(),
@@ -378,15 +435,83 @@ impl AgentConfig {
             self.terminal_cols =
                 nession_common::config::parse_terminal_cols(&raw).map_err(anyhow::Error::msg)?;
         }
+        // An explicit TOML value wins over the environment. The environment is
+        // only a default for deployments that do not write the section.
+        if self.erofs.storage_dir.is_none() {
+            if let Some(raw) = get(EROFS_STORAGE_DIR_ENV) {
+                let value = raw.trim();
+                if !value.is_empty() {
+                    self.erofs.storage_dir = Some(value.to_string());
+                }
+            }
+        }
         Ok(())
     }
 
     /// Validate the effective configuration before the runtime starts.
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
+        self.erofs.validate()?;
         self.mcp
             .validate_for_host(&self.agent_token, "agent_token")?;
         Ok(())
+    }
+    /// Resolve the effective durable cache directory.
+    ///
+    /// Precedence: explicit `[erofs] storage_dir`, then `$NESSION_HOME/erofs`,
+    /// then the documented native default (`/var/lib/nession/erofs` on Linux,
+    /// `$HOME/.nession/erofs` elsewhere). There is no `/tmp` or container-layer
+    /// fallback.
+    pub fn effective_erofs_storage_dir(&self) -> anyhow::Result<ResolvedErofsStorage> {
+        self.effective_erofs_storage_dir_from(
+            std::env::var(nession_common::paths::NESSION_HOME_ENV)
+                .ok()
+                .as_deref(),
+        )
+    }
+
+    /// The testable half of [`Self::effective_erofs_storage_dir`].
+    pub fn effective_erofs_storage_dir_from(
+        &self,
+        nession_home: Option<&str>,
+    ) -> anyhow::Result<ResolvedErofsStorage> {
+        self.erofs.validate()?;
+        if let Some(raw) = &self.erofs.storage_dir {
+            return Ok(ResolvedErofsStorage {
+                path: PathBuf::from(raw.trim()),
+                explicit: true,
+            });
+        }
+        if let Some(home) = nession_home.map(str::trim).filter(|home| !home.is_empty()) {
+            let home = PathBuf::from(home);
+            if !home.is_absolute() {
+                anyhow::bail!("NESSION_HOME must be absolute to resolve the EROFS cache");
+            }
+            return Ok(ResolvedErofsStorage {
+                path: home.join("erofs"),
+                explicit: false,
+            });
+        }
+        Ok(ResolvedErofsStorage {
+            path: default_erofs_storage_dir()?,
+            explicit: false,
+        })
+    }
+}
+
+fn default_erofs_storage_dir() -> anyhow::Result<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(PathBuf::from("/var/lib/nession/erofs"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let home = std::env::var("HOME").map_err(|_| {
+            anyhow::anyhow!(
+                "HOME is not set; configure erofs.storage_dir or NESSION_HOME for the EROFS cache"
+            )
+        })?;
+        Ok(PathBuf::from(home).join(".nession").join("erofs"))
     }
 }
 
@@ -757,5 +882,68 @@ terminal_cols = 80
             .is_err());
         invalid.terminal_cols = 0;
         assert!(invalid.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod erofs_tests {
+    use super::*;
+
+    #[test]
+    fn an_explicit_toml_cache_path_wins_over_the_environment() {
+        let mut config = AgentConfig::default();
+        config.erofs.storage_dir = Some("/srv/nession/erofs".to_string());
+        config
+            .apply_env_overrides_from(|name| {
+                (name == EROFS_STORAGE_DIR_ENV).then(|| "/env/erofs".to_string())
+            })
+            .unwrap();
+        assert_eq!(
+            config.erofs.storage_dir.as_deref(),
+            Some("/srv/nession/erofs")
+        );
+        let resolved = config
+            .effective_erofs_storage_dir_from(Some("/data"))
+            .unwrap();
+        assert_eq!(resolved.path, PathBuf::from("/srv/nession/erofs"));
+        assert!(resolved.explicit);
+    }
+
+    #[test]
+    fn the_environment_fills_an_absent_toml_path_and_home_wins_when_both_are_absent() {
+        let mut config = AgentConfig::default();
+        config
+            .apply_env_overrides_from(|name| {
+                (name == EROFS_STORAGE_DIR_ENV).then(|| "/env/erofs".to_string())
+            })
+            .unwrap();
+        assert_eq!(config.erofs.storage_dir.as_deref(), Some("/env/erofs"));
+
+        let config = AgentConfig::default();
+        let resolved = config
+            .effective_erofs_storage_dir_from(Some("/data"))
+            .unwrap();
+        assert_eq!(resolved.path, PathBuf::from("/data/erofs"));
+        assert!(!resolved.explicit);
+    }
+
+    #[test]
+    fn relative_empty_and_parent_cache_paths_are_refused() {
+        for value in ["", "relative/erofs", "/data/../etc"] {
+            let mut config = AgentConfig::default();
+            config.erofs.storage_dir = Some(value.to_string());
+            assert!(config.validate().is_err(), "path {value:?} must be refused");
+        }
+        let mut config = AgentConfig::default();
+        config.erofs.storage_dir = Some("/".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_relative_home_is_refused_rather_than_resolved_against_the_cwd() {
+        let config = AgentConfig::default();
+        assert!(config
+            .effective_erofs_storage_dir_from(Some("relative-home"))
+            .is_err());
     }
 }

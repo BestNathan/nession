@@ -47,6 +47,9 @@ futures-util.workspace = true
 tokio-rustls.workspace = true
 base64.workspace = true
 mime_guess.workspace = true
+# Durable EROFS cache download (#3023): bounded authenticated streaming.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+sha2.workspace = true
 portable-pty.workspace = true
 if-addrs.workspace = true
 
@@ -64,6 +67,7 @@ nession-server = { path = "../nession-server" }
 base64.workspace = true
 rand.workspace = true
 tempfile = "3"
+httptest = "0.16"
 # A self-signed identity for the TLS half of the P2P handshake-deadline tests
 # (#2653). Generated per test rather than committed as PEM material.
 rcgen = "0.13"
