@@ -84,6 +84,8 @@ cleanup() {
     "$RUNNER_TEMP/cluster-context" "$RUNNER_TEMP/gitops-revision" \
     "$RUNNER_TEMP/deployment-attestation.json" \
     "$RUNNER_TEMP/deployment-attestation.json.remote.tmp" \
+    "$RUNNER_TEMP/deployment-attempt.stdout" \
+    "$RUNNER_TEMP/deployment-attempt.stderr" \
     "$RUNNER_TEMP/gost" "$RUNNER_TEMP/gost.tgz"
   rm -rf -- "$RUNNER_TEMP/provenance"
   ((state == 0)) || return 1
@@ -195,10 +197,13 @@ self_test() {
   : > "$temp/nession-ci-kubeconfig"
   : > "$temp/gost"
   : > "$temp/gost.tgz"
+  : > "$temp/deployment-attempt.stdout"
+  : > "$temp/deployment-attempt.stderr"
   : > "$temp/foreign-owned-file"
   cleanup
   [[ ! -e "$temp/nession-ci-kubeconfig" && ! -e "$temp/gost" &&
-     ! -e "$temp/gost.tgz" && -e "$temp/foreign-owned-file" ]]
+     ! -e "$temp/gost.tgz" && ! -e "$temp/deployment-attempt.stdout" &&
+     ! -e "$temp/deployment-attempt.stderr" && -e "$temp/foreign-owned-file" ]]
   kill -0 "$unrelated"
   # Failure to inspect the current alias must not lead to borrowing/removing it.
   GOST_BIN="$exe"

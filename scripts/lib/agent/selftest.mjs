@@ -90,7 +90,7 @@ const acceptance = renderAcceptancePrompt({
 });
 assert.match(acceptance.text, /Do not add, remove, rename, rewrite, weaken/);
 assert.match(acceptance.text, /"target_ref": "sha"/);
-assert.equal(acceptance.template_version, 'v3');
+assert.equal(acceptance.template_version, 'v4');
 // The evaluation unit is the repository at target_ref, never the PR diff.
 assert.match(acceptance.text, /The pull request's diff is NOT the unit of evaluation/);
 const staleContext={issue:{number:17},stage:'staging',target_ref:'a'.repeat(40),
