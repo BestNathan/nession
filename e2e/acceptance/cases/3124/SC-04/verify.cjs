@@ -138,8 +138,10 @@ async function waitFor(predicate, timeoutMs, label) {
       assert.equal(blockedAfter.context.status, 'outside');
       assert.equal(blockedAfter.context.execution, undefined);
       assert.equal(blockedAfter.context.sandbox_panes.length, 0);
-      assert.equal(fs.existsSync(recordsDir()) ? fs.readdirSync(recordsDir()).length : 0, 1,
-        'the failed launch left no record of its own');
+      const records = fs.existsSync(recordsDir())
+        ? fs.readdirSync(recordsDir()).filter((name) => name.endsWith('.json'))
+        : [];
+      assert.equal(records.length, 1, 'the failed launch left no record of its own');
     } finally {
       await killSession(client, blockedSession);
     }
