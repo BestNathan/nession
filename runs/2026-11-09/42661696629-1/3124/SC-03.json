@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "411c1c632fa8f04a50d32e11c9477cd2c9c4d6ee89843c17a7ad03ae177b8beb",
+  "run_id": 42661696629,
+  "run_attempt": 1,
+  "issue": 3124,
+  "criterion": "SC-03",
+  "criterion_text": "From an eligible native Pane, a **single explicit and authorized Enter** launches a new sandboxed interactive Pane under verified OS isolation (including requested filesystem/network/process/resource/syscall mechanisms where supported), switches focus only after success and returns a verified execution identity; the original Native Pane/process remains alive and outside.",
+  "stage": "staging",
+  "target_sha": "cbd20ff8ea2e5d45850aef5c17287083eee9922a",
+  "contract_sha256": "2547e3e1d154b6315c0d5f30919914122bf81360755ef338b317887dfe5bae7a",
+  "case_revision": "cbd20ff8ea2e5d45850aef5c17287083eee9922a",
+  "case_tree_sha": "ed7862c264ec87ae65d38409070230b295e0efa1",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T17:11:43.456Z",
+  "finished_at": "2026-11-09T17:11:58.760Z",
+  "duration_ms": 15304,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "The launch barrier refused the requested isolation on this runner",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "error_kind=failed error=sandbox preparation failed: bind /tmp/nession-acceptance-42661696629-1-3124-sc-03/agent/sandbox/4e5154a3-2fe6-4ce2-bb3d-48f88da820e6/channel.sock: path must be shorter than SUN_LEN"
+        }
+      ],
+      "duration_ms": 9425,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42661696629,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cbd20ff8ea2e5d45850aef5c17287083eee9922a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42661696629",
+    "record_path": "runs/2026-11-09/42661696629-1/3124/SC-03.json",
+    "source_result_sha256": "5c66c07d6ef301e65443aa763fb6d2d1b367db20c8976a8f3ec4798641d5f85f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42661696629-1",
+    "sha256": "5c66c07d6ef301e65443aa763fb6d2d1b367db20c8976a8f3ec4798641d5f85f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42661696629",
+    "durability": "time-limited; object archival not configured"
+  }
+}
