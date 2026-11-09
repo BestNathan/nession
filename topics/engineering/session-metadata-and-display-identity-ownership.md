@@ -5,7 +5,7 @@ topic: engineering
 categories: ["architecture", "session", "metadata", "identity", "ownership", "web", "app"]
 status: verified
 created_at: 2026-11-05T18:11:33Z
-updated_at: 2026-11-05T18:11:33Z
+updated_at: 2026-11-09T01:09:24Z
 sources: ["https://github.com/BestNathan/nession/issues/2789", "https://github.com/BestNathan/nession/pull/2795", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/docs/architecture/session-tmux-sdk-ownership.md", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/crates/nession-agent/src/session/metadata.rs", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/web/src/product/session/components/SessionMetadataSection.tsx", "https://github.com/BestNathan/nession/blob/615da2bf5a40791f91754712fc9cd1ece8b6cb4c/docs/design/design-system/patterns/session-item.md"]
 ---
 
@@ -69,11 +69,18 @@ recorded in the product repository at
   orchestration; those remain a separate model (#2789 explicitly defers them).
 - The Server has no mutable metadata cache today. If one is introduced, it must
   be marked last-known and must not become a second authority.
-- Workspace identity linkage (a logical Workspace spanning physical locations)
-  is still unpersisted; the metadata is Session-scoped.
+- Workspace identity linkage is still contextual rather than a first-class
+  persisted entity. The explicit, persisted projection of work resources and
+  Session presets is a Project (#3021); Session metadata remains Session-scoped
+  and a Session with no Project association stays valid.
 - Retaining a killed instance's metadata directory is deliberate. A future
   cleanup policy must be explicit and must not delete metadata behind the
   user's back.
 
-Related knowledge: [[app-mobile-spatial-navigation-and-terminal-touch-ownership]]
-covers the App Workspace depth and Back that the narrow editor relies on.
+Related knowledge:
+
+- [App mobile spatial navigation and Terminal touch ownership](../app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md)
+  covers the App Workspace depth and Back that the narrow editor relies on.
+- [Project declaration and Workspace location ownership](project-declaration-and-workspace-location-ownership.md)
+  owns the persisted Project declaration and the explicit mapping of previously
+  inferred Workspace Locations.

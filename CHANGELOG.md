@@ -359,3 +359,17 @@
 - Categories: architecture, ci, security, workflows
 - Reason: Record #2953's authenticated source-bound Staging integration batch, historical E2E selection, exact Issue approval/wake-up, protected merge and live-ref conflict review, distinguishing manually initiated staging merge from controller evidence
 - Source: https://github.com/BestNathan/nession/issues/2953
+
+## 2026-11-09T01:09:24Z | create | Project declaration and Workspace location ownership
+- Path: topics/engineering/project-declaration-and-workspace-location-ownership.md
+- Topic: engineering
+- Categories: architecture, project, workspace, session, ownership, server, protocol
+- Reason: Record #3021's first-class server-owned Project declaration, canonical deterministic validation, explicit Existing Locations that never clone/mutate user directories, restart-stable identity, and the Project/Workspace/Location/Session/Image boundary with no persistent ProjectEnvironment
+- Source: https://github.com/BestNathan/nession/issues/3021
+
+## 2026-11-09T01:09:24Z | update | Session metadata and display identity ownership
+- Path: topics/engineering/session-metadata-and-display-identity-ownership.md
+- Topic: engineering
+- Categories: architecture, session, metadata, identity, ownership, web, app
+- Reason: Cross-link the #3021 Project declaration article and reconcile the previously unpersisted Workspace-location limit with explicit Project Existing Locations
+- Source: https://github.com/BestNathan/nession/issues/3021

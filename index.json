@@ -60,6 +60,22 @@
         "updated_at": "2026-11-05T10:32:06Z"
       },
       {
+        "title": "Project declaration and Workspace location ownership",
+        "description": "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, with the canonical Project/Workspace/Location/Session/Image ownership boundary",
+        "path": "topics/engineering/project-declaration-and-workspace-location-ownership.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "project",
+          "workspace",
+          "session",
+          "ownership",
+          "server",
+          "protocol"
+        ],
+        "updated_at": "2026-11-09T01:09:24Z"
+      },
+      {
         "title": "Session metadata and display identity ownership",
         "description": "Session-owned title, description and tags with an Agent store fenced by tmux instance identity; the display title aliases navigation without renaming tmux",
         "path": "topics/engineering/session-metadata-and-display-identity-ownership.md",
@@ -73,7 +89,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-05T18:11:33Z"
+        "updated_at": "2026-11-09T01:09:24Z"
       }
     ],
     "terminal": [
@@ -248,6 +264,7 @@
     ],
     "architecture": [
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
@@ -307,6 +324,7 @@
     ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
@@ -322,7 +340,11 @@
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
+    "project": [
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md"
+    ],
     "protocol": [
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
@@ -357,7 +379,11 @@
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "server": [
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md"
+    ],
     "session": [
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
     ],
     "sidebar": [
@@ -387,6 +413,9 @@
     ],
     "workflows": [
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+    ],
+    "workspace": [
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md"
     ]
   }
 }
