@@ -1,0 +1,136 @@
+/* Nession #3089 product-only candidate, local snapshot from design/generated/web.css (staging 2026-11-09). */
+.nession-product {
+  --nession-background:oklch(1 0 0);
+  --nession-foreground:oklch(.2636 .0063 258.359);
+  --nession-popover:oklch(1 0 0);
+  --nession-surface:oklch(.9782 .0034 247.858);
+  --nession-secondary:oklch(.9519 .0013 106.424);
+  --nession-muted-foreground:oklch(.553 .0118 261.773);
+  --nession-border:oklch(.9274 .0027 106.451);
+  --nession-primary:oklch(.2636 .0063 258.359);
+  --nession-primary-foreground:oklch(1 0 0);
+  --nession-action:oklch(.538 .1284 157.694);
+  --nession-danger:oklch(.572 .189 25);
+  --nession-radius-control:10px;--nession-radius-surface:16px;
+  background:var(--nession-background);color:var(--nession-foreground);
+  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  height:100%;width:100%;position:relative;overflow:hidden;display:flex;
+}
+.nession-product *, .nession-product *::before,.nession-product *::after{box-sizing:border-box}
+.nession-product button,.nession-product input{font:inherit;color:inherit}
+.nession-product button{cursor:pointer}
+.nession-product button:disabled{cursor:not-allowed;opacity:.45}
+.nession-product button:focus-visible,.nession-product input:focus-visible{outline:2px solid var(--nession-muted-foreground);outline-offset:-2px}
+.nession-product .muted{color:var(--nession-muted-foreground)}
+.nession-product .label{font-size:12px;font-weight:650;letter-spacing:.01em}
+.nession-product .mono{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere;word-break:break-word}
+.nession-product .tiny{font-size:11px}
+.nession-product .twelve{font-size:12px}
+.nession-product .title{font-size:17px;letter-spacing:-.02em;font-weight:650}
+.nession-product .line{height:1px;background:var(--nession-border);width:100%;flex-shrink:0}
+.nession-product .pill{border:1px solid var(--nession-border);background:var(--nession-surface);padding:3px 8px;border-radius:20px;font-size:11px}
+.nession-product .dot{width:6px;height:6px;background:var(--nession-action);display:inline-block;border-radius:50%;margin-right:6px}
+.nession-product .dot.offline{background:var(--nession-danger)}
+.nession-product .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--nession-background);border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);padding:9px 14px;min-height:36px;font-weight:580;font-size:13px;white-space:nowrap;text-align:center}
+.nession-product .btn:hover:not(:disabled){background:var(--nession-secondary)}
+.nession-product .btn.primary{color:var(--nession-primary-foreground);background:var(--nession-primary);border-color:var(--nession-primary)}
+.nession-product .btn.primary:hover:not(:disabled){opacity:.88}
+.nession-product .btn.ghost{border-color:transparent;background:transparent}
+.nession-product .btn.ghost:hover{background:var(--nession-secondary)}
+.nession-product .btn.danger{color:var(--nession-danger)}
+.nession-product .grow{flex:1;min-width:0}
+.nession-product .row{display:flex;align-items:center;gap:10px;min-width:0}
+.nession-product .between{justify-content:space-between}
+.nession-product .stack{display:flex;flex-direction:column;gap:12px;min-width:0}
+.nession-product .card{border:1px solid var(--nession-border);background:var(--nession-background);border-radius:var(--nession-radius-control);padding:13px;min-width:0}
+.nession-product .field{display:flex;flex-direction:column;gap:7px;min-width:0}
+.nession-product .field input{border:1px solid var(--nession-border);border-radius:10px;background:var(--nession-background);height:40px;width:100%;min-width:0;padding:9px 12px}
+.nession-product .field input:focus{border-color:var(--nession-muted-foreground)}
+.nession-product .error{font-size:12px;color:var(--nession-danger);overflow-wrap:anywhere}
+.nession-product .offline-chip{color:var(--nession-danger)}
+.nession-product .choice{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--nession-border);border-radius:10px;padding:12px;text-align:left;min-width:0;width:100%;background:var(--nession-background)}
+.nession-product .choice.selected{border-color:var(--nession-primary);background:var(--nession-surface)}
+.nession-product .choice-body{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.nession-product .choice-body strong{font-size:13px}
+.nession-product .radio{border-radius:50%;border:1px solid var(--nession-muted-foreground);width:15px;height:15px;flex:0 0 15px;margin-top:2px}
+.nession-product .selected .radio{border:5px solid var(--nession-primary)}
+.nession-product .path{overflow-wrap:anywhere;word-break:break-word;white-space:normal;color:var(--nession-muted-foreground)}
+.nession-product .inline-link{border:0;background:none;color:var(--nession-foreground);text-decoration:underline;padding:0;white-space:normal;text-underline-offset:3px}
+.nession-product .scroll-region{overflow-y:auto;overflow-x:hidden;min-height:0;overscroll-behavior:contain}
+.nession-product .notice{padding:10px 12px;border:1px solid var(--nession-border);border-radius:10px;background:var(--nession-surface);font-size:12px}
+.nession-product .success{color:var(--nession-action)}
+.nession-product .width-safe{min-width:0;overflow-wrap:anywhere}
+.nession-product .web-sidebar{width:245px;flex:0 0 245px;background:var(--nession-surface);border-right:1px solid var(--nession-border);display:flex;flex-direction:column;padding:18px 10px;gap:16px;min-height:0}
+.nession-product .brand{display:flex;align-items:center;gap:10px;padding:0 10px;font-weight:660;letter-spacing:-.03em;font-size:19px}
+.nession-product .brand-symbol{display:inline-grid;place-items:center;width:26px;height:26px;color:#fff;background:var(--nession-primary);border-radius:8px;font-size:13px}
+.nession-product .navgroup{display:flex;flex-direction:column;gap:4px}
+.nession-product .navtitle{font-size:10px;font-weight:650;color:var(--nession-muted-foreground);letter-spacing:.12em;text-transform:uppercase;margin:8px 10px}
+.nession-product .navrow{display:flex;align-items:center;justify-content:space-between;gap:9px;width:100%;min-width:0;padding:11px 10px;border:none;background:transparent;text-align:left;border-radius:8px}
+.nession-product .navrow:hover,.nession-product .navrow.current{background:var(--nession-secondary)}
+.nession-product .navrow .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nession-product .web-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.nession-product .web-top{padding:18px 26px;border-bottom:1px solid var(--nession-border);font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.nession-product .work-zone{flex:1;min-height:0;padding:30px clamp(24px,5vw,70px);overflow-y:auto;display:flex;flex-direction:column;gap:22px}
+.nession-product .project-banner{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.nession-product .section-label{font-size:11px;color:var(--nession-muted-foreground);text-transform:uppercase;letter-spacing:.12em;font-weight:650}
+.nession-product .project-detail{max-width:850px;width:100%;display:flex;flex-direction:column;gap:19px}
+.nession-product .project-detail h1{font-size:24px;letter-spacing:-.045em;margin:4px 0;font-weight:630}
+.nession-product .project-detail .two-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.nession-product .terminal{flex:1;min-height:0;background:var(--nession-background);padding:24px 26px;font:13px/1.75 ui-monospace,Menlo,monospace}
+.nession-product .terminal .prompt{font-weight:600}
+.nession-product .terminal .cursor{display:inline-block;width:7px;height:13px;vertical-align:middle;background:var(--nession-foreground);margin-left:3px}
+.nession-product .terminal-capsule{margin-top:auto;border:1px solid var(--nession-border);border-radius:20px;padding:12px 16px;max-width:540px;font:13px/1.4 system-ui;box-shadow:0 4px 16px #1111;color:var(--nession-muted-foreground)}
+.nession-product .app-shell{width:100%;min-width:0;display:flex;flex-direction:column;min-height:0}
+.nession-product .app-header{display:flex;align-items:center;gap:8px;min-height:57px;padding:8px 14px;border-bottom:1px solid var(--nession-border);flex-shrink:0}
+.nession-product .app-header h1{font-weight:650;font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;flex:1}
+.nession-product .app-contents{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding:18px 16px 26px}
+.nession-product .app-list-title{color:var(--nession-muted-foreground);font-size:11px;letter-spacing:.1em;font-weight:650;text-transform:uppercase;padding:12px 3px 6px}
+.nession-product .app-list-item{width:100%;min-height:52px;padding:10px 8px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:transparent;border:0;border-bottom:1px solid var(--nession-border);text-align:left}
+.nession-product .app-list-item strong{font-size:13px}
+.nession-product .app-list-item small{display:block;color:var(--nession-muted-foreground);margin-top:3px}
+.nession-product .app-bottom{border-top:1px solid var(--nession-border);min-height:54px;display:flex;align-items:center;justify-content:center;gap:30px;background:var(--nession-surface);font-size:12px;flex-shrink:0}
+.nession-product .app-bottom button{border:0;background:none;padding:12px}
+.nession-product .app-bottom .selected-tab{font-weight:700}
+.nession-product .veil{position:absolute;inset:0;z-index:10;background:#0003;display:flex;align-items:center;justify-content:center;padding:16px}
+.nession-product .web-dialog{width:min(var(--dialog-max,640px),100%);max-height:calc(100% - 12px);display:flex;flex-direction:column;min-height:0;border-radius:16px;background:var(--nession-popover);border:1px solid var(--nession-border);box-shadow:var(--nession-elevation-floating,0 16px 45px #2222)}
+.nession-product .dialog-head{padding:19px 22px 14px;border-bottom:1px solid var(--nession-border);display:flex;justify-content:space-between;align-items:center;gap:14px;flex-shrink:0}
+.nession-product .dialog-head h2{font-size:17px;font-weight:650;margin:0;letter-spacing:-.02em}
+.nession-product .dialog-body{padding:20px 22px;overflow-y:auto;overflow-x:hidden;min-height:0;display:flex;flex-direction:column;gap:18px}
+.nession-product .dialog-footer{padding:14px 22px;border-top:1px solid var(--nession-border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
+.nession-product .mode-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.nession-product .mode-grid .choice{height:100%}
+.nession-product .app-overlay{z-index:20;position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;background:var(--nession-background)}
+.nession-product .app-overlay .app-header{padding-top:max(10px,env(safe-area-inset-top));}
+.nession-product .app-overlay .app-contents{padding:18px 16px}
+.nession-product .app-cta{padding:12px 16px max(14px,env(safe-area-inset-bottom));border-top:1px solid var(--nession-border);display:flex;flex-direction:column;gap:8px;flex-shrink:0;background:var(--nession-background)}
+.nession-product .app-cta .btn{min-height:46px;width:100%}
+.nession-product .app-cta small{font-size:11px;color:var(--nession-muted-foreground)}
+.nession-product .app-overlay .btn{min-height:44px}
+.nession-product .app-sheet-veil{position:absolute;inset:0;z-index:20;background:#0003;display:flex;align-items:flex-end}
+.nession-product .app-sheet{width:100%;max-height:80%;border-radius:18px 18px 0 0;background:var(--nession-background);box-shadow:0 -3px 28px #2222;display:flex;flex-direction:column;overflow:hidden}
+.nession-product .sheet-grip{width:36px;height:4px;border-radius:10px;background:var(--nession-border);margin:9px auto 0;flex-shrink:0}
+.nession-product .sheet-top{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.nession-product .sheet-content{display:flex;flex-direction:column;gap:15px;padding:3px 18px 16px;overflow-y:auto;min-height:0}
+.nession-product .sheet-footer{padding:12px 18px max(16px,env(safe-area-inset-bottom));border-top:1px solid var(--nession-border)}
+.nession-product .sheet-footer .btn{width:100%;min-height:46px}
+.nession-product .app-operation .app-contents{padding:18px 16px 25px}
+.nession-product .app-operation .field input{height:46px}
+.nession-product .app-operation .choice{min-height:48px}
+.nession-product .app-select-row{border:1px solid var(--nession-border);border-radius:11px;padding:14px;width:100%;background:var(--nession-background);text-align:left;display:flex;flex-direction:column;gap:4px;min-width:0}
+.nession-product .app-select-row:hover{background:var(--nession-surface)}
+.nession-product .app-select-row strong{font-size:14px}
+.nession-product .path-detail{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;min-width:0}
+.nession-product .checkline{display:flex;align-items:center;gap:10px;min-height:46px;border-bottom:1px solid var(--nession-border);font-size:13px}
+.nession-product .checkline input{accent-color:var(--nession-primary);width:18px;height:18px}
+.nession-product .location-editor{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end}
+.nession-product .location-editor .field{min-width:0}
+.nession-product .location-editor .btn{height:40px}
+.nession-product .app-operation .location-editor{display:flex;flex-direction:column;align-items:stretch}
+.nession-product .app-operation .location-editor .btn{width:100%}
+.nession-product .toast{position:absolute;z-index:50;bottom:20px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);background:var(--nession-primary);color:var(--nession-primary-foreground);padding:12px 18px;border-radius:11px;font-size:12px;text-align:center;box-shadow:0 5px 26px #2222}
+.nession-product[data-experience="app"] .btn,.nession-product[data-experience="app"] .navrow{min-height:44px}
+.nession-product[data-experience="app"] .project-detail .two-cols{grid-template-columns:1fr}
+.fixture-bar{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;color:var(--np-dim);font-size:12px}
+.fixture-bar button{padding:7px 12px;border:1px solid var(--np-line);background:#fff;border-radius:8px;cursor:pointer}
+.fixture-bar button[aria-pressed="true"]{background:#222629;color:white}
+.fixture-bar span{font-size:11px}
