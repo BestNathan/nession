@@ -456,3 +456,25 @@
 - Categories: architecture, project, workspace, session, ownership, server, protocol
 - Reason: Link the Project image-digest reference to the now-delivered global EROFS Image Manager (#3022), name the delivered build/store dependency and keep managed EROFS creation/mount with #3062/#3024
 - Source: https://github.com/BestNathan/nession/pull/3120
+
+## 2026-11-09T14:27:17Z | rename | Web Session-first navigation, reserved rail and explicit experience mode
+- Previous path: topics/web/web-session-first-navigation-full-tuck-away-and-explicit-experience-mode.md
+- Path: topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md
+- Topic: web
+- Categories: web, navigation, sidebar, interaction, ownership, responsive
+- Reason: #3075 supersedes the #2851 0px tuck-away with a reserved 56px in-flow rail whose shortcuts delegate to the existing New/Search/Project owners; record the mounted inert Sidebar, focus round trip, conditional Projects shortcut, passive Server status, Project-over-mounted-Terminal continuity, and the added Project membership row action
+- Source: https://github.com/BestNathan/nession/issues/3075
+
+## 2026-11-09T14:27:17Z | update | App mobile spatial navigation and Terminal touch ownership
+- Path: topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md
+- Topic: app
+- Categories: app, interaction, navigation, ownership, terminal, touch
+- Reason: Point the related-knowledge link at the renamed Web Session-first article and state that the App narrow shell is neither the Web collapse state nor its reserved rail
+- Source: https://github.com/BestNathan/nession/issues/3075
+
+## 2026-11-09T14:27:17Z | update | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Point the related-knowledge link at the renamed Web Session-first article
+- Source: https://github.com/BestNathan/nession/issues/3075
