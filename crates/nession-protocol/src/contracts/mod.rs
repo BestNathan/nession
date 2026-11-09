@@ -6,6 +6,7 @@
 //! contracts/
 //! ├── agent/v1.rs      agent.register, agent.heartbeat, agent.address.update
 //! ├── session/v1.rs    session.create, session.attach, session.env.binding.*
+//! ├── sandbox/v1.rs    the versioned SandboxPolicy schema (#2681)
 //! ├── env/v1.rs        env.{list,get,write,delete} at both ends
 //! ├── client/v1.rs     server.auth — the peer-to-peer door
 //! ├── commands/v1.rs   commands.{list,add,remove,update}
@@ -40,6 +41,7 @@ pub mod file;
 mod fixtures;
 pub mod p2p;
 pub mod project;
+pub mod sandbox;
 pub mod server;
 pub mod session;
 pub mod terminal;

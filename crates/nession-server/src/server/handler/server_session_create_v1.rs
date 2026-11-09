@@ -22,6 +22,7 @@ impl ConnectionHandler {
             session_id: None,
             error: Some(error.to_string()),
             warnings: Vec::new(),
+            sandbox: None,
         };
 
         if !self.authenticated_client {
@@ -36,6 +37,7 @@ impl ConnectionHandler {
             name,
             working_dir,
             env_files: env_refs,
+            sandbox,
         }) = serde_json::from_value::<ClientSessionCreatePayload>(msg.payload)
         else {
             return Ok(session_create_reply(
@@ -155,6 +157,7 @@ impl ConnectionHandler {
                     } else {
                         Some(binding_revision)
                     },
+                    "sandbox": sandbox,
                 }),
             )
             .await;
@@ -228,6 +231,12 @@ impl ConnectionHandler {
                 if let Some(warning) = binding_warning {
                     warnings.push(warning);
                 }
+                let sandbox_report = response.get("sandbox").and_then(|value| {
+                    serde_json::from_value::<
+                        nession_protocol::contracts::sandbox::v1::SandboxExecutionReport,
+                    >(value.clone())
+                    .ok()
+                });
 
                 Ok(session_create_reply(
                     &msg.id,
@@ -236,6 +245,7 @@ impl ConnectionHandler {
                         session_id,
                         error,
                         warnings,
+                        sandbox: sandbox_report,
                     },
                 ))
             }

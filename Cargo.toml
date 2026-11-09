@@ -9,6 +9,7 @@ members = [
     "crates/nession-server",
     "crates/nession-agent",
     "crates/nession-tmux",
+    "crates/nession-sandbox",
     "crates/nession-cli",
     "crates/nession-client",
 ]

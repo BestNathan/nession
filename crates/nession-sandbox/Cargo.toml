@@ -1,0 +1,25 @@
+[package]
+name = "nession-sandbox"
+version.workspace = true
+edition.workspace = true
+description = "Policy validation, capability probing and native execution isolation for Nession Sandbox (#2681)"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+nession-protocol = { path = "../nession-protocol" }
+# The macOS capability probe needs a real allow/deny fixture directory.
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+
+[lints]
+workspace = true

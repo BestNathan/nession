@@ -222,6 +222,7 @@ fn test_server_session_create_payload() {
         binding_profiles: Vec::new(),
         binding_revision: None,
         terminal_cols: None,
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -259,6 +260,7 @@ fn test_agent_command_response_payload() {
         success: true,
         error: None,
         session_name: Some("new-session".to_string()),
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -274,6 +276,7 @@ fn test_agent_command_response_payload_failure() {
         success: false,
         error: Some("session already exists".to_string()),
         session_name: None,
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -289,6 +292,7 @@ fn test_client_session_create_payload() {
         name: "new-session".to_string(),
         working_dir: None,
         env_files: Vec::new(),
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -330,6 +334,7 @@ fn test_client_session_create_response_payload() {
         session_id: Some("agent-1:new-sess".to_string()),
         error: None,
         warnings: Vec::new(),
+        sandbox: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();

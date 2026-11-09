@@ -349,6 +349,7 @@ impl ClientConnection {
                     name: name.to_string(),
                     working_dir: None,
                     env_files: Vec::new(),
+                    sandbox: None,
                 },
             ),
             SESSION_CREATE_TIMEOUT,

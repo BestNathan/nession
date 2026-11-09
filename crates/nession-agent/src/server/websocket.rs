@@ -1801,6 +1801,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let resp = SessionCreateResponse {
                             name: payload.name,
                             warnings,
+                            sandbox: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -2762,6 +2763,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             success: false,
                             session_id: None,
                             error: Some(e.to_string()),
+                            sandbox: None,
                         };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
@@ -2775,6 +2777,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 success: false,
                                 session_id: None,
                                 error: Some(e.to_string()),
+                                sandbox: None,
                             };
                             return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default();
@@ -2804,6 +2807,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             success: true,
                             session_id: Some(session_id),
                             error: None,
+                            sandbox: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -2813,6 +2817,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             success: false,
                             session_id: None,
                             error: Some(e.to_string()),
+                            sandbox: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -5683,6 +5688,7 @@ mod tests {
             binding_profiles: Vec::new(),
             binding_revision: None,
             terminal_cols: None,
+            sandbox: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
@@ -6761,6 +6767,7 @@ mod tests {
             height: 30,
             working_dir: None,
             terminal_cols: None,
+            sandbox: None,
         };
         let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
         let create_resp: Message<WebSessionCreateResponse> =

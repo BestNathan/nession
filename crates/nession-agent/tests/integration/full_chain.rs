@@ -619,6 +619,7 @@ async fn test_session_lifecycle() {
         binding_profiles: Vec::new(),
         binding_revision: None,
         terminal_cols: None,
+        sandbox: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();
