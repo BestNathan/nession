@@ -171,3 +171,98 @@
 .nession-product .location-option:hover,
 .nession-product .location-option:focus-visible,
 .nession-product .location-option.current{background:var(--nession-surface)}
+
+
+/* #3089 alignment audit: New Project and New Session share the same
+   content grid/label rhythm, independent of their dialog maximum widths. */
+.nession-product .navrow.nav-create{justify-content:flex-start;gap:9px}
+.nession-product .navrow.nav-create .nav-icon{
+  display:inline-flex;width:17px;min-width:17px;align-items:center;justify-content:center;
+  font-size:15px;line-height:1;
+}
+.nession-product .dialog-form{
+  display:flex;flex-direction:column;gap:17px;width:100%;min-width:0;
+}
+.nession-product .dialog-form > .field,
+.nession-product .dialog-form > .source-fields{
+  min-width:0;width:100%;
+}
+.nession-product .dialog-form .label{
+  display:block;font-size:12px;line-height:18px;min-height:18px;font-weight:650;
+  letter-spacing:.01em;text-transform:none;color:var(--nession-foreground);
+}
+.nession-product .dialog-form .field{gap:7px;min-width:0}
+.nession-product .dialog-form .field input,
+.nession-product .dialog-form .field select{
+  display:block;box-sizing:border-box;width:100%;height:42px;min-width:0;
+  background:var(--nession-background);border:1px solid var(--nession-border);
+  border-radius:var(--nession-radius-control);padding:9px 12px;
+  text-overflow:ellipsis;
+}
+.nession-product .dialog-form .field select:focus-visible,
+.nession-product .dialog-form .field textarea:focus-visible{
+  outline:2px solid var(--nession-muted-foreground);outline-offset:0;
+}
+.nession-product .dialog-form .field textarea{
+  display:block;box-sizing:border-box;min-height:64px;max-width:100%;width:100%;
+  padding:10px 12px;resize:vertical;line-height:1.5;
+}
+.nession-product .dialog-form .field input:disabled{
+  opacity:.55;background:var(--nession-surface);cursor:not-allowed;
+}
+.nession-product .source-fields{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start;
+}
+.nession-product .source-fields .field{min-width:0;width:100%}
+.nession-product .section-heading{
+  display:flex;align-items:center;justify-content:space-between;min-width:0;gap:12px;
+}
+.nession-product .section-heading .btn{min-height:36px;flex-shrink:0}
+.nession-product .form-help{
+  display:block;color:var(--nession-muted-foreground);font-size:11px;
+  overflow-wrap:anywhere;
+}
+.nession-product .form-empty{
+  padding:12px;border:1px dashed var(--nession-border);border-radius:10px;
+  color:var(--nession-muted-foreground);font-size:12px;line-height:1.5;
+  overflow-wrap:anywhere;
+}
+.nession-product .locations-stack{display:flex;flex-direction:column;gap:11px;min-width:0}
+.nession-product .location-editor{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;
+  align-items:start;gap:12px;min-width:0;padding:12px;
+  border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);
+  background:var(--nession-background);
+}
+.nession-product .location-editor > .field{min-width:0;align-self:start}
+.nession-product .location-editor > .field select,
+.nession-product .location-editor > .field textarea{margin:0}
+.nession-product .location-editor .remove-location{
+  align-self:start;margin-top:25px;height:42px;min-height:42px;max-height:42px;
+}
+.nession-product .env-editor{
+  border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);
+  padding:4px 12px;display:flex;flex-direction:column;gap:0;min-width:0;
+}
+.nession-product .env-editor .checkline:last-child{border-bottom:0}
+.nession-product .dialog-form .location-trigger{width:100%;min-width:0}
+.nession-product .app-operation .dialog-form .field input,
+.nession-product .app-operation .dialog-form .field select{height:46px}
+.nession-product .app-operation .dialog-form .source-fields{grid-template-columns:minmax(0,1fr)}
+.nession-product .app-operation .dialog-form .location-editor{
+  display:flex;flex-direction:column;align-items:stretch;gap:11px;
+}
+.nession-product .app-operation .dialog-form .location-editor .remove-location{
+  align-self:stretch;margin-top:0;height:auto;min-height:44px;max-height:none;
+}
+.nession-product[data-experience="app"] .section-heading{align-items:center}
+.nession-product[data-experience="app"] .section-heading .btn{min-height:44px}
+@container (max-width: 570px){
+  .nession-product[data-experience="web"] .source-fields{grid-template-columns:minmax(0,1fr)}
+  .nession-product[data-experience="web"] .location-editor{grid-template-columns:minmax(0,1fr)}
+  .nession-product[data-experience="web"] .location-editor .remove-location{
+    align-self:stretch;margin-top:0;height:auto;min-height:40px;max-height:none;
+  }
+}
+/* The selected product CSS pixel viewport is the container query boundary. */
+.nession-product{container-type:inline-size}
