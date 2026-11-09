@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -243,7 +244,61 @@ function selfTest() {
   assert.throws(() => validateSourceEvidence(context, { ...pass, evidence: [] }), /source citation/);
   assert.throws(() => validateSourceEvidence(context, { ...pass,
     evidence: [{ type: 'source', value: 'forged' }] }), /forged/);
-  console.log('acceptance-sources: parser and citation fixtures passed');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-source-selftest-'));
+  try {
+    git(dir, 'init', '-q');
+    git(dir, 'config', 'user.name', 'Acceptance fixture');
+    git(dir, 'config', 'user.email', 'fixture@example.invalid');
+    fs.mkdirSync(path.join(dir, 'demo-123'));
+    fs.writeFileSync(path.join(dir, 'demo-123/index.html'), '<html>pinned</html>\n');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-qm', 'pinned fixture');
+    const originalSha = git(dir, 'rev-parse', 'HEAD');
+    git(dir, 'update-ref', 'refs/remotes/origin/prototype', originalSha);
+    const plan = new Map([['SC-01', { method: 'agent' }]]);
+    const localDeclaration = parseAcceptanceSources(
+      body.replace('a'.repeat(40), originalSha), ['SC-01'], plan);
+    const localContext = {
+      issue: { number: 1 }, target_ref: originalSha,
+      contract_sha256: 'd'.repeat(64),
+      criteria: [{ criterion: 'SC-01' }], acceptance_sources: localDeclaration,
+    };
+    const published = materializeSources(localContext, dir);
+    assert.equal(published.entries.length, 1);
+    assert.equal(published.entries[0].sha, originalSha);
+    assert.equal(fs.readFileSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype/demo-123/index.html'), 'utf8'),
+      '<html>pinned</html>\n');
+    assert.throws(() => materializeSources(localContext, dir), /reserved staging root already exists/);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype/demo-123'), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype'), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01'), 0o700);
+    fs.rmSync(path.join(dir, SOURCE_ROOT), { recursive: true, force: true });
+    // New tip does not retarget a pinned source.
+    fs.writeFileSync(path.join(dir, 'demo-123/index.html'), '<html>moved</html>\n');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-qm', 'new tip');
+    git(dir, 'update-ref', 'refs/remotes/origin/prototype', git(dir, 'rev-parse', 'HEAD'));
+    const pinned = materializeSources(localContext, dir);
+    assert.equal(pinned.entries[0].sha256, published.entries[0].sha256);
+    // An unrelated force-pushed tip cannot be mistaken for the approved source lineage.
+    fs.chmodSync(path.join(dir, SOURCE_ROOT), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype/demo-123'), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype'), 0o700);
+    fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01'), 0o700);
+    fs.rmSync(path.join(dir, SOURCE_ROOT), { recursive: true, force: true });
+    git(dir, 'checkout', '--orphan', 'unrelated');
+    git(dir, 'rm', '-qr', '.');
+    fs.mkdirSync(path.join(dir, 'demo-123'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'demo-123/index.html'), '<html>different</html>\n');
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-qm', 'unrelated tip');
+    git(dir, 'update-ref', 'refs/remotes/origin/prototype', git(dir, 'rev-parse', 'HEAD'));
+    assert.throws(() => materializeSources(localContext, dir), /not reachable/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  console.log('acceptance-sources: parser, source materialization, drift and citation fixtures passed');
 }
 
 function main() {
