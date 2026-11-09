@@ -27,13 +27,13 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: agent-d931bb0
+  newTag: agent-e1a4b89
 - name: ghcr.io/bestnathan/nession-server
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: server-d931bb0
+  newTag: server-e1a4b89
 - name: ghcr.io/bestnathan/nession-ui
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: ui-d931bb0
+  newTag: ui-e1a4b89
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
