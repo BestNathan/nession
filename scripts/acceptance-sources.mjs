@@ -302,7 +302,7 @@ function selfTest() {
     fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01'), 0o700);
     fs.rmSync(path.join(dir, SOURCE_ROOT), { recursive: true, force: true });
     git(dir, 'checkout', '--orphan', 'unrelated');
-    git(dir, 'rm', '-qr', '.');
+    git(dir, 'rm', '-qrf', '.');
     fs.mkdirSync(path.join(dir, 'demo-123'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'demo-123/index.html'), '<html>different</html>\n');
     git(dir, 'add', '.');
