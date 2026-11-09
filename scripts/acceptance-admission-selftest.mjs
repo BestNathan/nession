@@ -52,12 +52,23 @@ for(const fragment of [
 assert.match(background,/\n  acceptance-close-guard:/);
 assert.match(background,/\n  merged-agent-acceptance:/);
 assert.match(background,/\n  post-merge-provider-evidence-acceptance:/);
-assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && inputs.issue_number == '2917')"),
-  'only #2917 may collect pre-merge historical CI evidence');
+assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001'))"),
+  'only #2917 and #3001 may collect pre-merge historical CI evidence');
+const admissionLiteral="if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001'))";
+assert.ok(!acceptor.replace(
+  "(inputs.issue_number == '2917' || inputs.issue_number == '3001')",
+  "(inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '9999')")
+  .includes(admissionLiteral),
+  'a widened pre-merge collector allowlist must fail the exact admission contract');
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
 assert.match(acceptor,/ci_evidence_file="-"/);
-assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 ]]; then'),
-  'all other pre-merge contexts must still omit CI evidence');
+assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 ]]; then'),
+  'only #2917 and #3001 may pass pre-merge CI evidence to the executor; all other contexts omit it');
+assert.ok(!acceptor.replace(
+  '"${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001',
+  '"${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 9999')
+  .includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 ]]; then'),
+  'a widened executor evidence allowlist must fail the exact admission contract');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
 console.log('Acceptance PR route: immediate SC selection, no Quality/E2E barrier, no PR blocking Gate, merged/close routes and evidence separation verified');
