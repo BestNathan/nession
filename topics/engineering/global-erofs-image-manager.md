@@ -5,7 +5,7 @@ topic: engineering
 categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent"]
 status: verified
 created_at: 2026-11-09T12:54:48Z
-updated_at: 2026-11-09T16:16:00Z
+updated_at: 2026-11-09T17:07:00Z
 sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/db/migration/m007_erofs_images.rs", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/docs/architecture/agent-erofs-cache.md", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/crates/nession-agent/src/erofs_cache.rs", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/crates/nession-agent/src/config.rs", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/f05e138c4ef36dac920ca9aefa1111de0552315a/base/nession/deployment-agent.yaml"]
 ---
 
@@ -138,8 +138,22 @@ The Agent cache merged to staging at
 passed Case Smoke run `42637855144` at PR head
 `bc91a75ecd1454183ed3bc19b8600c90d634d3a4` (SC-01, SC-03, SC-04) and the
 trusted agent run `42637858414` (SC-02). The merged staging Acceptance / Cases
-run `42638717201` recorded SC-05 as Pending at the merged SHA with the blocked
-K8s-runner reason; no live Pod/PVC survival is claimed.
+run `42638717201` initially recorded SC-05 as Pending with the blocked
+K8s-runner reason.
+
+SC-05 was then observed by a one-time controlled trusted CI Task (run
+`42660858103`, source `8bf780722d338e3b654f738cea0167d8da578374`) on Ubuntu
+24.04: a kind v0.25.0 / Kubernetes v1.31.2 cluster bound PVC `sc05-pvc`
+(PV `sc05-pv`) and served a real EROFS image with the fixed `-T 0 -U … -b 4096`
+packaging (`sha256=f83590c0…`, 266240 bytes). Pod `sc05-agent-1` downloaded it
+once and published it under `sha256/<digest>` on the PVC; the Pod was deleted;
+recreated Pod `sc05-agent-2` — a different Pod UID — reused the identical
+digest and bytes, and the HTTP server recorded exactly one blob GET. The
+receipt is archived in `task-results` at
+`runs/3023-sc05-k8s/42660858103-1/record.json` as an **untrusted Task
+observation** (the Task skill does not grant Acceptance authority); the owner
+recorded it for SC-05 because no committed K8s Case lane exists, and the Issue
+closed with every criterion Pass.
 
 The staging release for `a0a970d` succeeded, and the server, Agent and UI
 deployments were observed Running at their `a0a970d` images. GitOps deploy
@@ -162,6 +176,8 @@ keeps `AGENT_EROFS_STORAGE_DIR=/data/erofs` on the existing
   `server.image.access` refuses until the image is ready.
 - The Agent cache is a delivered component with its own configuration and
   storage contract; no Session/Sandbox image consumer invokes it yet, and
-  provisioning/mounting remains with #3024/#3062. SC-05's controlled Kubernetes
-  Pod-delete/recreate proof is **Pending**: no trusted K8s Case lane exists, and
-  the staging Case records that blocked reason rather than claiming live proof.
+  provisioning/mounting remains with #3024/#3062.
+- SC-05's controlled Kubernetes Pod-delete/recreate proof is a **one-time Task
+  observation**, not a reusable committed K8s Case lane. The existing staging
+  Case still reports Pending when executed; a future trusted K8s Case runner
+  should codify the fixture and replace the one-time receipt.

@@ -492,3 +492,10 @@
 - Categories: architecture, erofs, images, server, storage, security, agent
 - Reason: Add the Agent-side durable cache contract from #3023/PR #3125: [erofs] config precedence, fail-closed PVC/ownership/ephemeral validation, digest-addressed atomic and resume-safe cache lifecycle, zero-transfer warm hits, the container/GitOps /data contract, the Pending Kubernetes Pod/PVC criterion, and the a0a970d staging rollout evidence
 - Source: https://github.com/BestNathan/nession/pull/3125
+
+## 2026-11-09T17:07:00Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent
+- Reason: Record the completed SC-05 one-time controlled Kubernetes Task observation (run 42660858103: kind/Kubernetes, bound PVC, real EROFS digest survival across Pod delete/recreate, exactly one blob GET), label it an untrusted Task receipt rather than a committed Case lane, and note that the Issue closed with every criterion Pass after SC-01/03/04 were projected from Case Smoke run 42637855144
+- Source: https://github.com/BestNathan/nession/issues/3023
