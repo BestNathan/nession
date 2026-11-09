@@ -5,8 +5,8 @@ topic: engineering
 categories: ["agent","architecture","sandbox","security"]
 status: candidate
 created_at: 2026-11-03T08:52:21.743Z
-updated_at: 2026-11-05T10:32:06Z
-sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/session-tmux-sdk-ownership.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md"]
+updated_at: 2026-11-09T04:20:04Z
+sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/pull/3066","https://github.com/BestNathan/nession/blob/59e0bbbe380e678a88e331c8b0fe131cfbe2fd48/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/session-tmux-sdk-ownership.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md"]
 ---
 
 # Nession Sandbox policy and execution isolation architecture
@@ -15,7 +15,7 @@ sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.co
 
 **Owner decision, approved 2026-11-03:** Nession Sandbox is one **optional SandboxPolicy** with replaceable, capability-probed backends. Five policy groups are filesystem, network, process, resource, syscall. **Resource is a group inside SandboxPolicy**, not another product service, API, or independent runtime. Session Environment Binding is separate and remains owned by the Session. Sandbox is disabled by default.
 
-**Implementation status: design approved, not shipped or verified.** This article is a detailed architecture proposal anchored to [Requirement #2681](https://github.com/BestNathan/nession/issues/2681). It MUST NOT be interpreted as evidence that the Sandbox backends, isolation guarantees, proxies, integration Cases, or resource controls are currently deployed. Current authoritative Session/tmux and process-discovery contracts remain in the linked repository architecture documents. Article status is **candidate** until implementation and source-aligned evidence justify promotion.
+**Implementation status (2026-11-09): V1 delivered in source on [PR #3066](https://github.com/BestNathan/nession/pull/3066) at `59e0bbbe`; merged-staging Acceptance is still pending.** The approved design below is unchanged. The first implementation slice is the `nession-sandbox` crate plus Agent/Server/CLI integration, documented as current architecture in [Sandbox policy and execution isolation](https://github.com/BestNathan/nession/blob/59e0bbbe380e678a88e331c8b0fe131cfbe2fd48/docs/architecture/sandbox-policy-and-execution.md). This article MUST NOT be read as evidence that any Success Criterion passed, that a deployment runs a sandbox, or that the missing native lanes exist. Article status stays **candidate** until merged staging Cases and a native macOS/cgroup-capable runner provide exact receipts.
 
 ### Core execution boundary
 
@@ -27,6 +27,18 @@ sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.co
            -> one private shared tmux server -> Pane -> sandbox launcher -> shell/children
 
 The shared tmux server does not enter a sandbox or its resource domain. No additional tmux server per Session is required. Browser attach/detach is not sandbox ownership; a running Pane and its execution may outlive WebSocket disconnection and Agent connection replacement. Nession's existing terminal transport, control lease, resize, replay and recovery semantics remain the controlling owners.
+
+### What the V1 implementation actually does
+
+Source-aligned facts from the first implementation (design claims above remain the contract):
+
+- `nession-sandbox` compiles/validates the versioned schema without host side effects, probes the actual host, and fails closed when a requested guarantee cannot be installed. It is the sole isolation owner; `nession-tmux` receives only an explicit argv, and the Agent's SessionService owns Session lifecycle.
+- Linux uses Bubblewrap with a trusted `/bin/sh` launcher that enrolls the Pane PID in an execution cgroup and opens the pinned seccomp profile. Mount, user, PID, IPC and UTS namespaces and the seccomp profile are baseline safety prerequisites; the policy's native groups are a subset of what is verified.
+- The in-sandbox bridge reports `/proc/self/ns/*`, cgroup, `Seccomp`/`NoNewPrivs` and filesystem probes, then waits. The Agent authenticates the channel peer, compares the facts with its own observation and only then releases the shell. Bubblewrap may hold in-namespace PID 1 (measured with bubblewrap 0.8); the bridge reaps what is reparented to it.
+- Restricted mode uses a host-side SOCKS5/HTTP-CONNECT proxy whose peer identity is the kernel's `SO_PEERCRED` bridge PID. Deny wins, a name allow rule authorizes its validated public resolutions, and direct/private/host-local/metadata egress is refused.
+- cgroup cleanup uses the record's kernel-relative path and only a direct child of the Nession root. Delegation requires a cgroup with controllers and **no processes of its own**; a plain container whose root cgroup hosts PID 1 fails closed. Restart reconciliation compares records against a successfully listed tmux Session set.
+- macOS verified scope is exactly network denial under Seatbelt. Path allow-lists could not be expressed with the measured Seatbelt compiler, so `filesystem.access` is rejected rather than approximated; Linux namespaces, cgroup v2 and seccomp are rejected as Linux-native, and `setrlimit` is not treated as cgroup v2.
+- Known V1 limit discovered in implementation: restricted proxying does not survive the Agent process itself (the Pane and its cgroup do); a restarted Agent services new executions only.
 
 ## Policy schema philosophy
 
@@ -156,8 +168,8 @@ Bubblewrap Namespace and private mounts normally end when their final references
 
 | Contract | Linux backend | macOS backend |
 |---|---|---|
-| filesystem.access | Bubblewrap mount view | Seatbelt path restrictions if verified |
-| network allow/deny/restricted | Network Namespace plus trusted host proxy | Seatbelt restrictions plus trusted proxy if verified |
+| filesystem.access | Bubblewrap mount view | **Rejected in V1**: the measured Seatbelt compiler cannot express a verified path allow-list |
+| network allow/deny/restricted | Network Namespace plus trusted host proxy | Deny verified; **restricted rejected in V1** |
 | process.linux_namespaces | PID/IPC/User/UTS/Cgroup Namespace (per request) | Unsupported |
 | resource.cgroup_v2 | Kernel cgroup v2 with real delegation | Unsupported |
 | syscall.seccomp | seccomp-BPF verified builtin profile | Unsupported |
@@ -166,7 +178,7 @@ macOS sandbox-exec is deprecated and should be treated as a version-probed, risk
 
 ## Evidence, validation and known limitations
 
-- **Normative design owner:** [Requirement #2681](https://github.com/BestNathan/nession/issues/2681); implementation and exact Acceptance receipts are pending.
+- **Normative design owner:** [Requirement #2681](https://github.com/BestNathan/nession/issues/2681). Implementation: [PR #3066](https://github.com/BestNathan/nession/pull/3066) at `59e0bbbe`; current architecture: [Sandbox policy and execution isolation](https://github.com/BestNathan/nession/blob/59e0bbbe380e678a88e331c8b0fe131cfbe2fd48/docs/architecture/sandbox-policy-and-execution.md). Exact merged-staging Acceptance receipts are still pending.
 - **Current tmux ownership:** [Session/tmux SDK ownership](https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/session-tmux-sdk-ownership.md), where generic nession-tmux constructs tmux processes with an explicit private socket and Agent SessionService owns session policy.
 - **Existing process discovery:** [Agent process discovery](https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md) is read-only and intentionally does not create cgroups or grant resource control.
 - **Historical OOM:** [#1286](https://github.com/BestNathan/nession/issues/1286) records an Agent-Pod OOM affecting multiple Sessions; the proposed on-demand Sandbox is **not** a complete fix for all Native Sessions or parent Pod limits.

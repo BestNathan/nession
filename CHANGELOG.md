@@ -380,3 +380,10 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Reconcile #3042 post-merge historical Qwen producer visibility with independently authenticated Store/Worker/Publisher/Writer/PR provenance, exact public Pages SHA-256 proof, and successful source-aligned SC-03 acceptance without changing Open Work semantics
 - Source: https://github.com/BestNathan/nession/issues/3042
+
+## 2026-11-09T04:20:04Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record PR #3066's delivered V1 source slice (nession-sandbox, Linux launch barrier, delegated cgroup, seccomp, restricted proxy, macOS verified scope, Agent lifecycle) while keeping approved design, implemented source and pending merged-staging Acceptance evidence explicitly distinct
+- Source: https://github.com/BestNathan/nession/pull/3066
