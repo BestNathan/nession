@@ -15,7 +15,7 @@ on:
     # release-qualification SCs Pending with no later re-evaluation. A second
     # trigger cannot authorize Pass by itself; the evaluator re-reads the
     # completed Full evidence under the same trusted rules.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "CI / Run Store Signed Checkpoint", "CI / Run Store Integrity Audit", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "CI / Run Store Signed Checkpoint", "CI / Run Store Integrity Audit", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages", "Deploy / Identity Ingest"]
     # Only successful main-push sources can authorize post-merge verification.
     # Filtering the event here prevents thousands of PR completion no-op runs,
     # rather than creating a downstream run solely to skip its select job.
@@ -37,7 +37,8 @@ jobs:
     if: >-
       ${{ github.event.workflow_run.event == 'push' &&
           github.event.workflow_run.head_branch == 'main' &&
-          github.event.workflow_run.conclusion == 'success' }}
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.name != 'Deploy / Identity Ingest' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -178,5 +179,89 @@ jobs:
       stage: post-merge
       provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.select.outputs.target_sha }}
+      deployment: ''
+    secrets: inherit
+
+  # The deployment ingester may finish after merged-Staging Acceptance. It
+  # exposes an exact-source SHA only after appending authenticated K8s identity
+  # into acceptance-results; latest-lane SHA alone is NOT historical proof.
+  select-staging:
+    if: >-
+      ${{ github.event.workflow_run.name == 'Deploy / Identity Ingest' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      target_sha: ${{ steps.proof.outputs.target_sha }}
+      agent_issues: ${{ steps.select.outputs.agent_issues }}
+      has_agents: ${{ steps.select.outputs.has_agents }}
+    steps:
+      - name: Checkout trusted Acceptance planner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate completed Staging attestation ingestion
+        id: proof
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-staging-deployment-wake.mjs verify \
+            "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/staging-proof.json"
+          if jq -e 'type == "object" and (.target_sha | test("^[a-f0-9]{40}$"))' \
+            "$RUNNER_TEMP/staging-proof.json" >/dev/null; then
+            echo "target_sha=$(jq -r .target_sha "$RUNNER_TEMP/staging-proof.json")" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Select pending exact-SHA merged-Staging Agent criteria
+        id: select
+        if: steps.proof.outputs.target_sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.proof.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$TARGET_SHA")"
+          mkdir -p "$RUNNER_TEMP/staging-postrun-contracts"
+          jq -r '.[]' <<< "$issue_numbers" | while IFS= read -r number; do
+            [[ "$number" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" \
+              > "$RUNNER_TEMP/staging-postrun-contracts/$number.json"
+          done
+          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=staging \
+            TARGET_SHA="$TARGET_SHA" node scripts/select-merged-agents.mjs select \
+            "$RUNNER_TEMP/staging-postrun-contracts")"
+          echo "agent_issues=$agent_issues" >> "$GITHUB_OUTPUT"
+          if [[ "$(jq length <<< "$agent_issues")" -gt 0 ]]; then
+            echo 'has_agents=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_agents=false' >> "$GITHUB_OUTPUT"
+          fi
+          echo "Reconcile attested Staging source $TARGET_SHA: $agent_issues" >> "$GITHUB_STEP_SUMMARY"
+
+  evaluate-staging:
+    needs: select-staging
+    if: needs.select-staging.outputs.has_agents == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.select-staging.outputs.agent_issues) }}
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: staging
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      target_ref: ${{ needs.select-staging.outputs.target_sha }}
       deployment: ''
     secrets: inherit
