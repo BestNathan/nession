@@ -50,6 +50,12 @@ spec:
               value: "xterm-256color"
             - name: NESSION_HOME
               value: "/data"
+            # Durable EROFS image cache (#3023). /data is the existing
+            # nession-server-data PVC below; do not create a second PVC for
+            # this cache. The Agent treats an explicit path as a durable
+            # declaration and fails closed if the mount is ephemeral.
+            - name: AGENT_EROFS_STORAGE_DIR
+              value: "/data/erofs"
           volumeMounts:
             - name: claude-home
               mountPath: /root/.claude
