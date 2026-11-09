@@ -271,12 +271,14 @@ export function selfTestPrQualityCost(){
     {...mixedJobs.jobs[0],steps:[{name:'Run E2E tests',conclusion:'success'}]}]}));
   const workflow=readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
     import.meta.url),'utf8');
-  assert.ok(workflow.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && inputs.issue_number == '2917')"),
-    'only #2917 can request pre-merge CI evidence');
-  assert.ok(workflow.includes('scripts/acceptance-ci-evidence.mjs collect-pr-quality'),
-    'trusted pre-merge CI evidence command is not routed');
-  assert.ok(workflow.includes('[[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 ]]'),
-    'prepare stage must pass #2917 only its collected CI evidence');
+  assert.ok(workflow.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001'))"),
+    'only #2917 and separately attested #3001 can request pre-merge CI evidence');
+  assert.ok(workflow.includes('2917) node scripts/acceptance-ci-evidence.mjs collect-pr-quality'),
+    'trusted #2917 pre-merge CI timing command is not independently routed');
+  assert.ok(workflow.includes('3001) node scripts/acceptance-ci-evidence.mjs collect-pr-fixture'),
+    'the distinct original Qwen PR source reader must not replace the cost study');
+  assert.ok(workflow.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 ]]; then'),
+    'prepare stage must supply only the two explicitly admitted PR evidence contexts');
 
   console.log('PR Quality timing: exact Run/Attempt/SHA, required job steps, skip, source change and negative fixture contracts passed');
 }
