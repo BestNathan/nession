@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Reserved navigation rail · #3075</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<style>
+/* Product-only, pinned Nession generated semantic snapshot. Candidate railWidth differs. */
+.mock{--nession-background:oklch(1 0 0);--nession-foreground:oklch(0.2636 0.0063 258.359);--nession-text-secondary:oklch(0.4571 0.01 271.194);--nession-muted-foreground:oklch(0.553 0.0118 261.773);--nession-sidebar:oklch(0.9782 0.0034 247.858);--nession-sidebar-accent:oklch(0.9519 0.0013 106.424);--nession-border:oklch(0.9274 0.0027 106.451);--nession-ring:oklch(0.553 0.0118 261.773);--nession-danger:oklch(0.572 0.189 25);--nession-action:oklch(0.538 0.1284 157.694);--nession-radius-control:10px;--nession-shell-sidebar-width:246px;--nession-shell-rail-width:56px;--nession-shell-icon-button-size:36px;--nession-shell-status-dot-size:5px;--nession-typography-primary-size:14px;--nession-typography-metadata-size:11.5px;--nession-typography-body-size:13px;--nession-motion-shell-duration:180ms;--nession-motion-shell-ease:cubic-bezier(.2,0,0,1);font:13px/1.4 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--nession-foreground);background:var(--nession-background);width:100%;height:100%;overflow:hidden;position:relative}
+.mock,.mock *{box-sizing:border-box}
+.mock button,.mock input,.mock select{font:inherit}
+.mock button{cursor:pointer}
+.mock button:focus-visible,.mock input:focus-visible,.mock select:focus-visible{outline:2px solid var(--nession-ring);outline-offset:-2px}
+.mock [hidden]{display:none!important}
+.mock svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none}
+.mock-web{width:100%;height:100%;display:flex;position:relative;overflow:hidden}
+.mock-nav-col{height:100%;width:var(--nession-shell-sidebar-width);flex:0 0 var(--nession-shell-sidebar-width);background:var(--nession-sidebar);position:relative;overflow:hidden;z-index:2;transition:width var(--nession-motion-shell-duration) var(--nession-motion-shell-ease),flex-basis var(--nession-motion-shell-duration) var(--nession-motion-shell-ease)}
+.mock[data-collapsed="true"][data-mode="web"][data-narrow="false"] .mock-nav-col{width:var(--nession-shell-rail-width);flex-basis:var(--nession-shell-rail-width)}
+.mock-sidebar{width:var(--nession-shell-sidebar-width);height:100%;display:flex;flex-direction:column;position:absolute;inset:0 auto 0 0;overflow:hidden;background:var(--nession-sidebar);visibility:visible}
+.mock[data-collapsed="true"][data-narrow="false"] .mock-sidebar{visibility:hidden;pointer-events:none}
+.mock-rail{width:var(--nession-shell-rail-width);height:100%;position:absolute;inset:0 auto 0 0;display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 0 16px;visibility:hidden;pointer-events:none}
+.mock[data-collapsed="true"][data-narrow="false"] .mock-rail{visibility:visible;pointer-events:auto}
+.mock-rail-sep{width:22px;height:1px;background:var(--nession-border);margin:4px 0}
+.mock-icon{width:36px;height:36px;display:grid;place-items:center;border:0;border-radius:var(--nession-radius-control);background:transparent;color:var(--nession-text-secondary)}
+.mock-icon:hover,.mock-row:hover,.mock-project-row:hover{background:var(--nession-sidebar-accent)}
+.mock-icon[aria-current="page"]{background:var(--nession-sidebar-accent);color:var(--nession-foreground)}
+.mock-rail-bottom{margin-top:auto;display:grid;place-items:center;min-height:34px;width:36px;color:var(--nession-muted-foreground)}
+.mock-status-dot{width:var(--nession-shell-status-dot-size);height:var(--nession-shell-status-dot-size);border-radius:50%;background:var(--nession-action);display:inline-block;flex:none}
+.mock[data-server="offline"] .mock-status-dot{background:var(--nession-danger)}
+.mock-toolbar{display:flex;align-items:center;gap:8px;padding:8px;min-height:52px;flex:none}
+.mock-primary{border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);background:#fff;padding:0 13px;height:36px;display:inline-flex;align-items:center;gap:8px;justify-content:center}
+.mock-primary:hover{background:var(--nession-sidebar-accent)}
+.mock-toolbar .mock-primary{margin-left:auto}
+.mock-search{margin:4px 8px 11px;height:36px;border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);background:#fff;display:flex;gap:8px;align-items:center;padding:0 10px;color:var(--nession-muted-foreground)}
+.mock-search:focus-within{border-color:var(--nession-ring)}
+.mock-search input{width:100%;min-width:0;border:0;background:transparent;outline:0!important;font-size:13px}
+.mock-sidebar-head{padding:8px 13px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:560;color:var(--nession-text-secondary)}
+.mock-nav-scroller{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 18px}
+.mock-time{font-size:11px;color:var(--nession-muted-foreground);padding:14px 12px 5px}
+.mock-row{width:100%;border:0;border-radius:7px;background:transparent;text-align:left;display:flex;align-items:center;gap:10px;padding:10px 8px;margin:2px 0;color:var(--nession-foreground)}
+.mock-row[data-selected="true"]{background:var(--nession-sidebar-accent)}
+.mock-row-copy{min-width:0;flex:1}
+.mock-row-title{font-size:var(--nession-typography-primary-size);font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.mock-row-meta{font-size:var(--nession-typography-metadata-size);color:var(--nession-muted-foreground);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.mock-more{flex:none;border:0;background:transparent;border-radius:7px;font-size:20px;color:var(--nession-muted-foreground);width:29px;height:29px}
+.mock-more:hover{background:var(--nession-sidebar-accent)}
+.mock-row-wrap{position:relative}
+.mock-inline-menu{position:absolute;right:5px;top:44px;z-index:8;padding:5px;min-width:175px;background:#fff;border:1px solid var(--nession-border);box-shadow:0 6px 18px #17191c20;border-radius:10px}
+.mock-inline-menu button{display:block;border:0;border-radius:6px;background:transparent;width:100%;text-align:left;padding:8px 9px;font-size:12px}
+.mock-inline-menu button:hover{background:var(--nession-sidebar-accent)}
+.mock-side-bottom{padding:8px 10px 15px;border-top:1px solid var(--nession-border);flex:none}
+.mock-side-link{display:flex;width:100%;border:0;border-radius:9px;align-items:center;gap:9px;background:transparent;text-align:left;padding:9px 8px;color:var(--nession-text-secondary)}
+.mock-side-link:hover{background:var(--nession-sidebar-accent)}
+.mock-side-count{margin-left:auto;color:var(--nession-muted-foreground);font-size:11px}
+.mock-side-connection{display:flex;align-items:center;gap:9px;padding:8px;color:var(--nession-muted-foreground);font-size:11px}
+.mock-empty{color:var(--nession-muted-foreground);font-size:12px;padding:20px 10px;text-align:center}
+.mock-work{position:relative;min-width:0;flex:1;height:100%;overflow:hidden;background:var(--nession-background)}
+.mock-work-surface{height:100%;overflow-y:auto;position:relative}
+.mock-terminal{height:100%;padding:35px 24px 112px;background:var(--nession-background);overflow:auto}
+.mock-terminal pre{font:12px/1.75 Menlo,Monaco,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;max-width:100%}
+.mock-prompt{color:var(--nession-action)}
+.mock-terminal-footer{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);height:56px;width:min(520px,calc(100% - 48px));border:1px solid var(--nession-border);background:#fff;box-shadow:0 3px 16px #10141910;border-radius:19px;display:flex;align-items:center;gap:12px;padding:8px 12px}
+.mock-terminal-footer span{color:var(--nession-muted-foreground);flex:1}
+.mock-terminal-footer button{border:0;background:var(--nession-foreground);border-radius:10px;color:#fff;width:34px;height:34px}
+.mock-ws{padding:46px max(32px,7%);height:100%;overflow:auto}
+.mock-eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--nession-muted-foreground);font-weight:600}
+.mock-ws h2{font-size:26px;line-height:1.2;letter-spacing:-.04em;margin:12px 0}
+.mock-ws p{font-size:13px;color:var(--nession-text-secondary);max-width:600px;line-height:1.6}
+.mock-ws-card{padding:18px;border:1px solid var(--nession-border);border-radius:14px;max-width:580px;background:#fff;margin:20px 0}
+.mock-project-row{display:flex;width:100%;padding:14px 12px;border:1px solid var(--nession-border);border-radius:10px;margin:10px 0;background:#fff;align-items:center;gap:8px;text-align:left}
+.mock-project-row span{margin-left:auto;color:var(--nession-muted-foreground)}
+.mock-work-corner{position:absolute;right:18px;top:14px;z-index:1;display:flex;gap:5px}
+.mock-work-corner button{border:1px solid var(--nession-border);border-radius:9px;padding:7px 10px;background:#fff;color:var(--nession-text-secondary);font-size:12px}
+.mock-drawer-open,.mock-drawer-close,.mock-scrim{display:none}
+.mock[data-narrow="true"] .mock-nav-col{position:absolute;left:0;top:0;bottom:0;width:min(320px,90%);flex:0 0 0;z-index:8;transform:translateX(-105%);transition:transform 180ms ease;overflow:visible}
+.mock[data-narrow="true"][data-drawer="true"] .mock-nav-col{transform:translateX(0)}
+.mock[data-narrow="true"] .mock-sidebar{width:100%;position:relative;visibility:visible}
+.mock[data-narrow="true"] .mock-rail{display:none}
+.mock[data-narrow="true"] .mock-drawer-close{display:grid}
+.mock[data-narrow="true"] .mock-collapse-btn{display:none}
+.mock[data-narrow="true"] .mock-drawer-open{display:grid;position:absolute;left:12px;top:12px;z-index:3;background:#fff;border:1px solid var(--nession-border)}
+.mock[data-narrow="true"][data-drawer="true"] .mock-drawer-open{display:none}
+.mock[data-narrow="true"][data-drawer="true"] .mock-scrim{display:block;position:absolute;inset:0;background:#151b2233;border:0;z-index:7}
+.mock[data-narrow="true"] .mock-terminal{padding:66px 12px 110px}
+.mock[data-narrow="true"] .mock-terminal pre{font-size:10px}
+.mock[data-narrow="true"] .mock-terminal-footer{width:calc(100% - 20px);bottom:16px}
+.mock-app{display:none;height:100%;background:var(--nession-background);position:relative}
+.mock[data-mode="app"] .mock-app{display:flex;flex-direction:column}
+.mock[data-mode="app"] .mock-web{display:none}
+.mock-app-top{padding:16px 16px 10px;display:flex;align-items:center;justify-content:space-between;min-height:65px;border-bottom:1px solid var(--nession-border)}
+.mock-app-top strong{font-size:16px}
+.mock-app-body{flex:1;min-height:0;overflow:auto;padding:20px 15px}
+.mock-app-tabs{display:flex;gap:7px;padding:10px;border-top:1px solid var(--nession-border);background:var(--nession-sidebar)}
+.mock-app-tabs button{flex:1;border:0;background:transparent;border-radius:8px;padding:12px 3px;color:var(--nession-text-secondary);font-size:12px}
+.mock-app-tabs button[aria-selected="true"]{background:var(--nession-sidebar-accent);color:var(--nession-foreground)}
+.mock-app-entry{width:100%;border:0;background:var(--nession-sidebar);border-radius:10px;text-align:left;padding:14px;margin:6px 0}
+.mock-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#15181e55;z-index:20;padding:18px}
+.mock-dialog{background:#fff;width:min(400px,100%);border-radius:15px;padding:22px;box-shadow:0 16px 45px #0b10183b}
+.mock-dialog h3{font-size:18px;margin:0 0 10px}
+.mock-dialog p{color:var(--nession-text-secondary);font-size:12px}
+.mock-dialog label{display:block;font-size:12px;font-weight:600;margin-top:13px}
+.mock-dialog input,.mock-dialog select{height:40px;border:1px solid var(--nession-border);border-radius:9px;padding:8px 10px;width:100%;background:#fff;margin-top:6px}
+.mock-dialog-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+.mock-dialog-actions button{border:1px solid var(--nession-border);border-radius:9px;padding:9px 13px;background:#fff}
+.mock-dialog-actions button:last-child{background:var(--nession-foreground);color:#fff}
+.mock-dialog-error{color:var(--nession-danger)!important;min-height:17px;margin-bottom:0}
+.mock[data-mode="app"] .mock-app-panel pre{white-space:pre-wrap;font:10px/1.6 Menlo,monospace}
+@media(prefers-reduced-motion:reduce){.mock-nav-col{transition:none!important}}
+</style>
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root id="review-root">
+<header class="np-overview">
+ <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a><span>·</span><span>Issue #3075</span></nav>
+ <span class="np-eyebrow">Nession / Web shell · Proposed interaction</span>
+ <div class="np-header-main">
+  <div><h1 class="np-title">Persistent Sidebar Rail</h1><p class="np-subtitle">折叠时依然占位，不再用悬浮按钮覆盖工作区；窄栏容纳少量真实快捷操作。保留 #2851 Session-first Sidebar 的工作优先结构。</p></div>
+  <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3075">Requirement #3075</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
+ </div>
+ <div class="np-meta"><span>Target: <strong>Web 1024–1440 / narrow Web / App</strong></span><span>Fidelity: <strong>interactive fixture · 1:1 CSS px</strong></span><span>Baseline: <strong>#2851 / PR #2866</strong></span></div>
+</header>
+<main>
+ <section class="np-preview" aria-label="Interactive product preview">
+  <div class="np-section-heading"><div><h2>Interactive preview</h2><p>点击折叠、创建、搜索、Project；下方状态控件仅用于设计验证，不属于产品界面。</p></div>
+   <div class="np-preview-toolbar">
+    <button data-np-size="1280" data-demo-experience="web" aria-pressed="true">Web 1280</button>
+    <button data-np-size="1440" data-demo-experience="web">Web 1440</button>
+    <button data-np-size="1180" data-demo-experience="web">Web 1180</button>
+    <button data-np-size="1024" data-demo-experience="web">Web 1024</button>
+    <button data-np-size="390" data-demo-experience="web">Narrow Web 390</button>
+    <button data-np-size="375" data-demo-experience="web">Narrow Web 375</button>
+    <button data-np-size="390" data-demo-experience="app">App 390</button>
+    <button data-np-reset>Reset</button>
+   </div>
+  </div>
+  <div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1280px;--np-device-height:800px">
+   <div class="mock" id="product" data-mode="web" data-collapsed="false" data-narrow="false" data-drawer="false" data-server="connected">
+    <div class="mock-web" id="web-shell">
+     <div class="mock-nav-col" id="nav-column">
+      <aside class="mock-sidebar" id="full-sidebar" aria-label="Session navigation">
+       <div class="mock-toolbar">
+        <button class="mock-icon mock-collapse-btn" data-action="collapse" title="Collapse sidebar" aria-label="Collapse sidebar"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <button class="mock-icon mock-drawer-close" data-action="close-drawer" title="Close sessions" aria-label="Close sessions"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        <button class="mock-primary" data-action="new-session"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New session</button>
+       </div>
+       <label class="mock-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="session-search" type="search" placeholder="Search sessions…" aria-label="Search sessions"></label>
+       <div class="mock-sidebar-head"><span>Sessions</span><span id="session-count" style="font-weight:400"></span></div>
+       <div class="mock-nav-scroller" id="session-scroller"><div id="session-rows"></div></div>
+       <div class="mock-side-bottom">
+        <button class="mock-side-link" id="projects-entry" data-action="projects"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/></svg>Projects<span class="mock-side-count">2</span></button>
+        <button class="mock-side-link" data-action="agents"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 14h7"/></svg>Agents / locations<span class="mock-side-count">3</span></button>
+        <div class="mock-side-connection"><span class="mock-status-dot"></span><span class="mock-server-label">Server connected</span></div>
+       </div>
+      </aside>
+      <nav class="mock-rail" id="rail" aria-label="Quick navigation">
+       <button class="mock-icon" data-action="expand" title="Expand sidebar" aria-label="Expand sidebar"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+       <div class="mock-rail-sep"></div>
+       <button class="mock-icon" data-action="new-session" title="New session" aria-label="New session"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+       <button class="mock-icon" data-action="search" title="Search sessions" aria-label="Search sessions"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg></button>
+       <button class="mock-icon" id="rail-projects" data-action="projects" title="Projects" aria-label="Projects"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/></svg></button>
+       <div class="mock-rail-bottom" title="Server connected" id="rail-server" role="img" aria-label="Server connected"><span class="mock-status-dot"></span></div>
+      </nav>
+     </div>
+     <button class="mock-scrim" data-action="close-drawer" aria-label="Close session drawer"></button>
+     <main class="mock-work" id="work-main">
+      <button class="mock-icon mock-drawer-open" data-action="open-drawer" title="Open sessions" aria-label="Open sessions"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <div class="mock-work-corner"><button data-action="terminal">Terminal</button><button data-action="workspace">Workspace</button></div>
+      <div class="mock-work-surface" id="surface-output"></div>
+     </main>
+    </div>
+    <section class="mock-app" id="app-shell" aria-label="App spatial experience">
+      <div class="mock-app-top"><strong id="app-heading">Terminal</strong><button class="mock-icon" data-action="app-sessions" title="Sessions" aria-label="Open App Sessions"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></div>
+      <div class="mock-app-body" id="app-body"></div>
+      <div class="mock-app-tabs" role="tablist" aria-label="App navigation">
+       <button data-action="app-sessions" role="tab" id="app-tab-sessions">Sessions</button>
+       <button data-action="app-terminal" role="tab" id="app-tab-terminal">Terminal</button>
+       <button data-action="app-workspace" role="tab" id="app-tab-workspace">Workspace</button>
+      </div>
+    </section>
+    <div class="mock-overlay" id="dialog-overlay" hidden><div class="mock-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-heading" id="dialog-content"></div></div>
+   </div>
+  </div></div>
+  <p class="np-stage-label">Preview is exactly the selected CSS-pixel width; Terminal is a sanitized text approximation, not xterm.</p>
+ </section>
+ <section class="np-details">
+  <h2>Functional design &amp; verification</h2>
+  <p class="np-details-lede">本设计改变的是展开/收起时的空间与快捷导航，不重做 #2851 的 Session 列表。项目详情沿用 #3025 独立主区域语义；App 保持原本空间层。</p>
+  <div class="np-detail-grid">
+   <article class="np-detail"><h3>01 · 交互场景</h3><ol class="np-steps"><li>先在展开 Sidebar 搜索并选择 Session，然后折叠，验证保留搜索/选中态。</li><li>在窄栏直接点击 New、Search、Projects；New 需要填写并显式提交。</li><li>返回 Terminal，切换 Workspace；缩放 1024↔390，确认没有永久 Rail 进入 App/Drawer。</li><li>关闭 Projects 可用性并尝试零 Session，验证快捷入口的条件显示。</li></ol></article>
+   <article class="np-detail"><h3>02 · 状态与故障模拟</h3>
+    <label><input type="checkbox" id="fixture-projects" checked> Projects 能力可用</label>
+    <label style="display:block;margin-top:12px"><input type="checkbox" id="fixture-empty"> 零 Sessions</label>
+    <label style="display:block;margin-top:12px"><input type="checkbox" id="fixture-server"> Server disconnected</label>
+    <p style="margin-top:14px">连接状态不代表所有 Agent、Session 和 Attachment 的聚合健康。无 Projects 时不展示失效图标。</p>
+   </article>
+   <article class="np-detail"><h3>03 · 当前测量（浏览器计算值）</h3><p id="geometry" aria-live="polite">Select a viewport to measure layout.</p><p id="event-feedback" aria-live="polite">Ready · Expanded / Session work</p><p>Geometry pass: rail.right ≤ main.left; main.right ≤ viewport.right. Reviewer controls live outside product viewport.</p></article>
+   <article class="np-detail"><h3>04 · Fidelity / Scope</h3><p>Source-aligned candidate based on #2851's 246px Web sidebar, current generated Nession typography/color tokens and the shell ownership model. New <code>56px</code> rail is intentional. Plain HTML mocks create/search/project content and text-based Terminal; no live Server, React mount proof, xterm PTY, real Project CRUD or production Acceptance. 1:1 means CSS-pixel geometry only, not pixel parity.</p><p><a href="https://github.com/BestNathan/nession/issues/2851">#2851</a> is the historical 0px/floating-button proposal; <a href="https://github.com/BestNathan/nession/issues/3025">#3025</a> owns independent ProjectDetail.</p></article>
+  </div>
+  <details class="np-inspector"><summary>Interaction log (mock / local state only)</summary><pre id="interaction-log">Ready.</pre></details>
+ </section>
+</main>
+<footer class="np-footer">Prototype #3075 · deterministic local fixture · no backend mutation</footer>
+</div>
+<script src="../prototype-frame-2758/frame.js"></script>
+<script>
+(() => {
+ 'use strict';
+ const $ = (s) => document.querySelector(s);
+ const product = $('#product');
+ const original = [
+  {id:'s1',name:'Fix terminal reconnect',meta:'Claude Code · devbox-01 · just now',tmux:'fix-terminal-reconnect'},
+  {id:'s2',name:'Design sidebar rail',meta:'shell · macbook · 12m',tmux:'design-sidebar-rail'},
+  {id:'s3',name:'Sandbox lifecycle',meta:'Codex · runner-02 · 2h',tmux:'sandbox-lifecycle'},
+  {id:'s4',name:'Review CI workflows',meta:'zsh · devbox-01 · yesterday',tmux:'review-ci'}
+ ];
+ let sessions = original.map(s => ({...s}));
+ const state={collapsed:false,width:1280,mode:'web',narrow:false,drawer:false,selected:'s1',surface:'terminal',beforeProject:'terminal',project:null,search:'',hasProjects:true,serverOffline:false,empty:false,appView:'terminal',menu:null,dialog:null,log:[]};
+ const escape = s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
+ const svg = name=>name==='folder'?'<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z"/></svg>':'';
+ const log = s=>{state.log.unshift(s);state.log.length=Math.min(state.log.length,16);$('#event-feedback').textContent=s;$('#interaction-log').textContent=state.log.join('\n')};
+ function list(){
+   const rows=$('#session-rows'), q=state.search.toLowerCase();
+   const visible=(state.empty?[]:sessions).filter(s=>s.name.toLowerCase().includes(q)||s.meta.toLowerCase().includes(q));
+   $('#session-count').textContent=String(visible.length);
+   const prev=$('#session-scroller').scrollTop;
+   rows.innerHTML=visible.length?'<div class="mock-time">Recent work</div>'+visible.map(s=>'<div class="mock-row-wrap"><div class="mock-row" data-selected="'+(s.id===state.selected)+'"><button class="mock-row" style="padding:0;flex:1;min-width:0" data-action="select" data-id="'+escape(s.id)+'"><span class="mock-row-copy"><span class="mock-row-title">'+escape(s.name)+'</span><span class="mock-row-meta">'+escape(s.meta)+'</span></span></button><button class="mock-more" data-action="menu" data-id="'+escape(s.id)+'" aria-label="Actions for '+escape(s.name)+'" title="Session actions">···</button></div>'+(state.menu===s.id?'<div class="mock-inline-menu"><button data-action="menu-details" data-id="'+escape(s.id)+'">Session details</button><button data-action="menu-edit" data-id="'+escape(s.id)+'">Edit details</button><button data-action="menu-attach" data-id="'+escape(s.id)+'">Attach settings</button><button data-action="menu-kill" data-id="'+escape(s.id)+'">Kill session</button></div>':'')+'</div>').join(''):'<p class="mock-empty">'+(q?'No matching sessions.':'No sessions yet. Use New session to start.')+'</p>';
+   $('#session-scroller').scrollTop=prev;
+ }
+ function terminalHTML(){
+  const current=sessions.find(s=>s.id===state.selected);
+  if(!current||state.empty)return '<div class="mock-ws"><span class="mock-eyebrow">Sessions</span><h2>No active Session</h2><p>Create a Session to start working. Projects stay available independently.</p><button class="mock-primary" data-action="new-session">New session</button></div>';
+  return '<section class="mock-terminal"><pre><span class="mock-prompt">➜</span>  ~  ssh devbox-01\n<span class="mock-prompt">➜</span>  /workspace/nession  git status\nOn branch feature/rail-navigation\nChanges not staged for commit:\n  modified: web/src/app/experiences/web/WebLayout.tsx\n\n<span class="mock-prompt">➜</span>  /workspace/nession  cargo test -p nession-tmux\nrunning 18 tests\n..................\ntest result: ok. 18 passed\n\n<span class="mock-prompt">➜</span>  /workspace/nession  echo "'+escape(current.name)+'"\n'+escape(current.name)+'\n\n<span class="mock-prompt">➜</span>  /workspace/nession  ▌</pre></section><div class="mock-terminal-footer"><span>Message or run a command…</span><button data-action="workspace" title="Open Workspace" aria-label="Open Workspace">↗</button></div>';
+ }
+ function workHTML(){
+  if(state.surface==='project-list')return '<section class="mock-ws"><span class="mock-eyebrow">Projects · Standalone destination</span><h2>Projects</h2><p>Projects are independent of the selected Session. Opening this view does not detach the Terminal.</p><button class="mock-project-row" data-action="project-detail" data-id="nession">'+svg('folder')+' Nession <span>Open →</span></button><button class="mock-project-row" data-action="project-detail" data-id="ntarlink">'+svg('folder')+' ntarlink <span>Open →</span></button><button class="mock-primary" data-action="project-back">Return to current work</button></section>';
+  if(state.surface==='project-detail')return '<section class="mock-ws"><button class="mock-primary" data-action="project-list">← Projects</button><span class="mock-eyebrow" style="display:block;margin-top:20px">ProjectDetail · Independent from Session</span><h2>'+escape(state.project||'Nession')+'</h2><p>Source · Git repository / Existing Locations · Agent + directory / Shared EROFS references</p><div class="mock-ws-card"><strong>Existing location</strong><p>devbox-01 · /workspace/'+escape(state.project||'nession')+'</p><button class="mock-primary" data-action="new-session">Create Session here</button></div><button class="mock-primary" data-action="project-back">Return to current work</button></section>';
+  if(state.surface==='agents')return '<section class="mock-ws"><span class="mock-eyebrow">Infrastructure · Secondary</span><h2>Agents / locations</h2><p>devbox-01 · Online<br>macbook · Online<br>runner-02 · Offline</p><button class="mock-primary" data-action="terminal">Return to work</button></section>';
+  if(state.surface==='workspace')return '<section class="mock-ws"><span class="mock-eyebrow">Contextual depth</span><h2>Workspace</h2><p>Resources and capabilities around the currently selected Session. This is not a universal feature launcher.</p><div class="mock-ws-card"><strong>Working directory</strong><p>/workspace/nession · Files · Git · ENV</p></div><button class="mock-primary" data-action="terminal">Return to Terminal</button></section>';
+  return terminalHTML();
+ }
+ function appRender(){
+  const view=state.appView;
+  $('#app-heading').textContent=view==='sessions'?'Sessions':view==='workspace'?'Workspace':'Terminal';
+  ['sessions','terminal','workspace'].forEach(n=>$('#app-tab-'+n).setAttribute('aria-selected',String(view===n)));
+  let content='';
+  if(view==='sessions')content='<h2 style="margin-top:4px">Sessions</h2>'+(state.empty?'<p>No sessions yet.</p>':sessions.map(s=>'<button class="mock-app-entry" data-action="app-select" data-id="'+escape(s.id)+'">'+escape(s.name)+'<br><small>'+escape(s.meta)+'</small></button>').join(''))+(state.hasProjects?'<button class="mock-app-entry" data-action="app-projects">Projects →</button>':'')+'<button class="mock-app-entry" data-action="new-session">+ New Session</button>';
+  else if(view==='workspace')content='<h2>Workspace</h2><p>Contextual resources, not a desktop rail.</p><button class="mock-primary" data-action="app-terminal">Back to Terminal</button>';
+  else if(view==='projects')content='<h2>Projects</h2><button class="mock-app-entry" data-action="app-project-detail">Nession →</button><button class="mock-primary" data-action="app-sessions">← Sessions</button>';
+  else if(view==='project-detail')content='<h2>Project · Nession</h2><p>One App host-owned Back. No duplicated global header and no rail.</p><button class="mock-primary" data-action="app-projects">← Projects</button>';
+  else content='<div class="mock-app-panel"><pre>$ pwd\n/workspace/nession\n$ git status\nOn branch feature/rail-navigation\n$ ▌</pre></div>';
+  $('#app-body').innerHTML=content;
+ }
+ function dialog(kind,id){
+   state.dialog={kind,id};const target=sessions.find(s=>s.id===id);
+   const titles={new:'New Session',details:'Session details',edit:'Edit details',attach:'Attach settings',kill:'Kill session'};
+   let body='';
+   if(kind==='new')body='<p>Mock only. A Session is created only after explicit Submit.</p><label>Session name<input id="new-name" placeholder="e.g. dev-session" autofocus maxlength="72"></label><label>Agent<select id="new-agent"><option value="devbox-01">devbox-01 · online</option><option value="runner-02">runner-02 · offline</option></select></label><p class="mock-dialog-error" id="dialog-error"></p>';
+   else if(kind==='details')body='<p>Name: '+escape(target?.name)+'<br>tmux identity: '+escape(target?.tmux)+'<br>Attachment: attached (mock)<br>Context preserved when rail toggles.</p>';
+   else if(kind==='edit')body='<p>Display title only. tmux identity is unchanged.</p><label>Title<input id="edit-name" value="'+escape(target?.name)+'"></label><p class="mock-dialog-error" id="dialog-error"></p>';
+   else if(kind==='attach')body='<p>Preview only: local attach configuration. No reconnect.</p><label>Transport<select id="attach-mode"><option>Auto</option><option>P2P</option><option>Relay</option></select></label>';
+   else if(kind==='kill')body='<p>Type exact tmux name to remove this fixture Session.</p><label>tmux name: '+escape(target?.tmux)+'<input id="kill-name" placeholder="Type exact tmux name"></label><p class="mock-dialog-error" id="dialog-error"></p>';
+   $('#dialog-content').innerHTML='<h3 id="dialog-heading">'+titles[kind]+'</h3>'+body+'<div class="mock-dialog-actions"><button data-action="dialog-cancel">Cancel</button>'+(kind==='details'?'':'<button data-action="dialog-submit">Confirm</button>')+'</div>';
+   $('#dialog-overlay').hidden=false;
+   const first=$('#dialog-content input')||$('#dialog-content select')||$('#dialog-content button');if(first)first.focus();
+   log(titles[kind]+' opened; no backend operation');
+ }
+ function submitDialog(){
+   if(!state.dialog)return;
+   const {kind,id}=state.dialog, target=sessions.find(s=>s.id===id), err=$('#dialog-error');
+   if(kind==='new'){const name=($('#new-name').value||'').trim();if(!name){err.textContent='Session name is required';return}if($('#new-agent').value==='runner-02'){err.textContent='Selected Agent is offline';return}const now={id:'mock-'+(sessions.length+1),name,tmux:name.toLowerCase().replace(/\s+/g,'-'),meta:'shell · devbox-01 · now'};sessions.unshift(now);state.empty=false;$('#fixture-empty').checked=false;state.search='';$('#session-search').value='';state.selected=now.id;state.surface='terminal';log('Created local fixture Session: '+name)}
+   else if(kind==='edit'){const name=($('#edit-name').value||'').trim();if(!name){err.textContent='Title cannot be empty';return}if(target)target.name=name;log('Updated display title in local fixture')}
+   else if(kind==='kill'){if($('#kill-name').value!==target?.tmux){err.textContent='Exact tmux name required';return}sessions=sessions.filter(s=>s.id!==id);if(state.selected===id)state.selected=sessions[0]?.id??null;log('Removed local fixture Session')}
+   else log('Saved local attach preference preview; no reconnect');
+   closeDialog();list();surfaceRender();appRender();
+ }
+ function closeDialog(){state.dialog=null;$('#dialog-overlay').hidden=true;$('#dialog-content').innerHTML='';if(state.mode==='web'&&state.collapsed&&!state.narrow)$('#rail [data-action="expand"]').focus()}
+ function surfaceRender(){$('#surface-output').innerHTML=workHTML()}
+ function measure(){
+  if(state.mode==='app'){$('#geometry').textContent='App 390: no Web navigation rail; separate spatial surface.';return}
+  const nav=$('#nav-column').getBoundingClientRect(),work=$('#work-main').getBoundingClientRect(),root=product.getBoundingClientRect();
+  const occupied=state.narrow?0:Math.round(nav.width);
+  const overlap=!state.narrow&&nav.right>work.left+1;
+  const overflow=work.right>root.right+1;
+  $('#geometry').textContent='Web '+state.width+' · nav '+occupied+'px · work '+Math.round(work.width)+'px · gap '+Math.round(work.left-nav.right)+'px · '+(overlap||overflow?'CHECK GEOMETRY':'No overlap/overflow');
+ }
+ function sync(){
+   const isApp=state.mode==='app';state.narrow=!isApp&&state.width<1024;
+   product.dataset.mode=state.mode;product.dataset.narrow=String(state.narrow);product.dataset.collapsed=String(state.collapsed);product.dataset.drawer=String(state.drawer);product.dataset.server=state.serverOffline?'offline':'connected';
+   const inactive=state.collapsed&&!state.narrow;$('#full-sidebar').inert=inactive;$('#full-sidebar').setAttribute('aria-hidden',String(inactive));$('#rail').inert=state.narrow||!state.collapsed;$('#rail').setAttribute('aria-hidden',String(state.narrow||!state.collapsed));
+   $('#projects-entry').hidden=!state.hasProjects;$('#rail-projects').hidden=!state.hasProjects;
+   document.querySelectorAll('.mock-server-label').forEach(el=>el.textContent=state.serverOffline?'Server disconnected':'Server connected');
+   $('#rail-server').title=state.serverOffline?'Server disconnected':'Server connected';$('#rail-server').setAttribute('aria-label',$('#rail-server').title);
+   $('#session-search').value=state.search;
+   list();surfaceRender();appRender();
+   requestAnimationFrame(()=>requestAnimationFrame(measure));
+   setTimeout(measure,220);
+ }
+ function toProject(){if(!state.hasProjects)return; if(!['project-list','project-detail'].includes(state.surface))state.beforeProject=state.surface;state.surface='project-list';state.project=null;state.drawer=false;surfaceRender();log('Opened Projects independent main view; Session preserved')}
+ function resize(event){
+   const chosen=document.querySelector('[data-np-size][aria-pressed="true"]');
+   state.width=Number(event.detail.width);state.mode=chosen?.dataset.demoExperience==='app'?'app':'web';
+   state.drawer=false;state.menu=null;
+   if(state.mode==='app'){state.appView='terminal'} else if(state.width<1024){state.collapsed=false}
+   sync();log('Viewport '+state.width+' CSS px · '+(state.mode==='app'?'App spatial':state.width<1024?'Web drawer':'Web two-column'));
+ }
+ document.addEventListener('np:resize',resize);
+ $('#session-search').addEventListener('input',e=>{state.search=e.target.value;list()});
+ document.addEventListener('click',e=>{
+   const btn=e.target.closest('[data-action]');if(!btn||!product.contains(btn))return;
+   const action=btn.dataset.action,id=btn.dataset.id;
+   if(action==='collapse'){state.collapsed=true;state.menu=null;sync();$('#rail [data-action="expand"]').focus();log('Collapsed to in-flow 56px rail; work surface uncovered')}
+   else if(action==='expand'){state.collapsed=false;sync();$('#full-sidebar [data-action="collapse"]').focus();log('Expanded 246px Session-first Sidebar')}
+   else if(action==='search'){state.collapsed=false;sync();$('#session-search').focus();log('Expanded and focused existing Session search')}
+   else if(action==='new-session'){dialog('new')}
+   else if(action==='dialog-cancel'){closeDialog();log('Dialog canceled; no resource created')}
+   else if(action==='dialog-submit'){submitDialog()}
+   else if(action==='projects'){toProject()}
+   else if(action==='project-detail'){state.surface='project-detail';state.project=id;surfaceRender();log('Opened standalone ProjectDetail '+id)}
+   else if(action==='project-list'){state.surface='project-list';surfaceRender()}
+   else if(action==='project-back'){state.surface=state.beforeProject;state.project=null;surfaceRender();log('Returned to previous current work; selected Session unchanged')}
+   else if(action==='terminal'||action==='workspace'){state.surface=action;state.project=null;surfaceRender();log('Switched to '+action+' without Session remount (mock)')}
+   else if(action==='agents'){state.surface='agents';state.drawer=false;surfaceRender();log('Opened secondary Agent context')}
+   else if(action==='select'){state.selected=id;state.surface='terminal';state.drawer=false;state.menu=null;sync();log('Selected Session '+id)}
+   else if(action==='menu'){state.menu=state.menu===id?null:id;list()}
+   else if(action.startsWith('menu-')){state.menu=null;list();dialog(action.slice(5),id)}
+   else if(action==='open-drawer'){state.drawer=true;sync();log('Opened narrow Web drawer; no permanent rail')}
+   else if(action==='close-drawer'){state.drawer=false;sync();log('Closed narrow Web drawer')}
+   else if(action.startsWith('app-')){if(action==='app-select'){state.selected=id;state.appView='terminal'}else if(action==='app-projects')state.appView='projects';else if(action==='app-project-detail')state.appView='project-detail';else state.appView=action.slice(4);appRender();log('App spatial navigation: '+state.appView+' (no Web rail)')}
+ });
+ document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  if(state.dialog){closeDialog();log('Closed dialog with Escape')}
+  else if(state.menu){state.menu=null;list();log('Closed Session action menu')}
+  else if(state.narrow&&state.drawer){state.drawer=false;sync();$('#work-main [data-action="open-drawer"]').focus();log('Closed Web drawer with Escape')}
+ });
+ $('#fixture-projects').addEventListener('change',e=>{state.hasProjects=e.target.checked;if(!state.hasProjects&&['project-list','project-detail'].includes(state.surface))state.surface=state.beforeProject;sync();log('Projects capability '+(state.hasProjects?'available':'unavailable; shortcut hidden'))});
+ $('#fixture-empty').addEventListener('change',e=>{state.empty=e.target.checked;if(state.empty)state.selected=null;else if(!state.selected)state.selected=sessions[0]?.id??null;sync();log(state.empty?'No Sessions; Project still available':'Restored Session fixtures')});
+ $('#fixture-server').addEventListener('change',e=>{state.serverOffline=e.target.checked;sync();log('Server '+(state.serverOffline?'disconnected':'connected')+'; Agent status remains separate')});
+ sync();
+})();
+</script>
+</body>
+</html>
