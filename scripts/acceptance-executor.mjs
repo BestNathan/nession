@@ -104,7 +104,8 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     });
   return {
     schema_version: 1,
-    issue: { number: Number(issue.number), title: issue.title ?? '', url: issue.url ?? '' },
+    issue: { number: Number(issue.number), title: issue.title ?? '', url: issue.url ?? '',
+      created_at: issue.createdAt ?? issue.created_at ?? null },
     stage: normalizedStage,
     contract_sha256: contractDigest(contract),
     run_id: runId,
@@ -352,7 +353,7 @@ function fetchIssue(issueNumber) {
   if (!repo) throw new Error('GITHUB_REPOSITORY is required');
   const raw = execFileSync(
     'gh',
-    ['issue', 'view', String(issueNumber), '--repo', repo, '--json', 'number,title,body,state,url,labels'],
+    ['issue', 'view', String(issueNumber), '--repo', repo, '--json', 'number,title,body,state,url,labels,createdAt'],
     { encoding: 'utf8', env: process.env }
   );
   return JSON.parse(raw);
