@@ -200,7 +200,7 @@ impl CgroupManager {
         // name is unique per call so concurrent creates cannot delete each
         // other's fixture.
         let probe_path = root_mount.join(format!(".probe-{}", uuid::Uuid::new_v4()));
-        let _ = std::fs::remove_dir_all(&probe_path);
+        let _ = std::fs::remove_dir(&probe_path);
         if std::fs::create_dir(&probe_path).is_err() {
             let _ = std::fs::remove_dir(&probe_path);
             return None;
@@ -216,7 +216,9 @@ impl CgroupManager {
             writable = true;
         }
         let created = probe_path.exists();
-        let _ = std::fs::remove_dir_all(&probe_path);
+        // A cgroup directory is removed with rmdir. `remove_dir_all` walks the
+        // virtual control files and can leave the fixture behind.
+        let _ = std::fs::remove_dir(&probe_path);
         if !created || !writable {
             return None;
         }
