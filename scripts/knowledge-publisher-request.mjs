@@ -64,7 +64,7 @@ function prepare(eventPath, destination) {
   );
   const root = process.cwd();
   if (git(root, 'rev-parse', 'HEAD') !== process.env.GITHUB_SHA ||
-      !new RegExp('^https://github\\.com/' + REPO + '(?:\\.git)?)
+      !/^https:\/\/github\.com\/BestNathan\/nession(?:\.git)?$/.test(git(root, 'remote', 'get-url', 'origin')))
     fail('checkout is not the exact trusted main-owned source');
   if (!destination.startsWith(process.env.RUNNER_TEMP + path.sep) ||
       fs.existsSync(destination)) fail('destination must be fresh under RUNNER_TEMP');
