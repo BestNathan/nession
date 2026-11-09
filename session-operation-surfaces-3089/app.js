@@ -193,9 +193,12 @@
   function confirmAttach(){
     if(isOffline()){s.error='Build Agent is offline.';render();return;}
     const save=s.configureFrom==='direct';
-    s.depth=null;s.modal=null;s.error='';s.page=save?s.page:'terminal';
-    s.status=save?'Connection preference saved · Session not attached':'Attached · '+s.activeSession+' · '+s.mode;
-    s.configureFrom=null;render();
+    const toQuick=isApp() && s.configureFrom==='quick' && s.depth==='attach-config';
+    s.depth=toQuick?'attach-quick':null;s.modal=null;s.error='';
+    s.page=save||toQuick?s.page:'terminal';
+    s.status=save?'Connection preference saved · Session not attached':toQuick?'Connection mode selected · confirm Attach':'Attached · '+s.activeSession+' · '+s.mode;
+    if(!toQuick)s.configureFrom=null;
+    render();
   }
   function action(kind,el){
     s.status='';s.copyStatus='';
