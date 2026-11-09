@@ -137,3 +137,37 @@
 .fixture-bar button{padding:7px 12px;border:1px solid var(--np-line);background:#fff;border-radius:8px;cursor:pointer}
 .fixture-bar button[aria-pressed="true"]{background:#222629;color:white}
 .fixture-bar span{font-size:11px}
+
+
+/* #3089 reopened: Project → New Session multi-line Existing Location dropdown.
+   Intrinsic control height; anchor-width menu, no nowrap/shrink-0 content.
+   The menu stays in the dialog's vertical flow, avoiding a competing scroll pane. */
+.nession-product .location-combobox{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0;max-width:100%}
+.nession-product .location-trigger,
+.nession-product .location-option{
+  display:flex;align-items:center;gap:12px;width:100%;max-width:100%;min-width:0;
+  height:auto;white-space:normal;text-align:left;overflow-wrap:anywhere;
+  background:var(--nession-background);color:var(--nession-foreground);
+}
+.nession-product .location-trigger{
+  min-height:48px;padding:10px 12px;border:1px solid var(--nession-border);
+  border-radius:var(--nession-radius-control);
+}
+.nession-product .location-trigger:hover{background:var(--nession-surface)}
+.nession-product .location-trigger-text{display:flex;flex:1 1 0%;min-width:0}
+.nession-product .location-trigger .choice-body,
+.nession-product .location-option .choice-body{min-width:0;flex:1 1 0%;white-space:normal}
+.nession-product .location-trigger .choice-body strong,
+.nession-product .location-option .choice-body strong{white-space:normal;overflow-wrap:anywhere}
+.nession-product .location-chevron{flex:0 0 16px;display:grid;place-items:center;color:var(--nession-muted-foreground);font-size:17px}
+.nession-product .location-options{
+  display:flex;flex-direction:column;gap:2px;width:100%;min-width:0;max-width:100%;
+  padding:4px;border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);
+  background:var(--nession-popover);box-shadow:0 3px 12px #1111;
+}
+.nession-product .location-option{
+  min-height:44px;padding:9px 10px;border:0;border-radius:7px;
+}
+.nession-product .location-option:hover,
+.nession-product .location-option:focus-visible,
+.nession-product .location-option.current{background:var(--nession-surface)}
