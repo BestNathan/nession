@@ -41,6 +41,7 @@ patchesStrategicMerge:
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
+- path: patch-agent-sandbox.yaml
 - patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
@@ -59,6 +60,18 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
       value: nession/claude-home
+  target:
+    kind: Deployment
+    name: nession-agent
+# Appended after the two index-based subPath patches so their indices stay
+# stable; the Sandbox Agent needs the host cgroup tree writable at its
+# canonical mount path (#2681).
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/-
+      value:
+        name: cgroup
+        mountPath: /sys/fs/cgroup
   target:
     kind: Deployment
     name: nession-agent
