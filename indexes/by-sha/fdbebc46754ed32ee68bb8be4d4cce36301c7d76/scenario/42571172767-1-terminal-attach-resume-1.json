@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42571172767,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/565-case-isolation",
+    "target_sha": "fdbebc46754ed32ee68bb8be4d4cce36301c7d76",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42571172767",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "f89afb0618c65f9f314339edc5e8ce3b209eced9ae089a5b4e3757dcefd2ae5f"
+  },
+  "record": "runs/2026-11-09/42571172767-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "506387681b4f8ae183e33cecbca338f6c64c4dd7e058ab3cd0f3b250c163764d"
+}
