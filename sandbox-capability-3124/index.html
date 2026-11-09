@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
+<title>Nession · Sandbox capability · #3124</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<style>
+/* Isolated product-surface approximation. Values below are a scoped snapshot of staging design/generated/web.css (2026-11-09). */
+.nession-ui{--nession-background:oklch(1 0 0);--nession-foreground:oklch(.2636 .0063 258.359);--nession-surface:oklch(.9782 .0034 247.858);--nession-muted:oklch(.9519 .0013 106.424);--nession-muted-foreground:oklch(.553 .0118 261.773);--nession-border:oklch(.9274 .0027 106.451);--nession-destructive:oklch(.572 .189 25);--nession-workspace-background:var(--nession-background);--nession-radius-control:10px;--nession-radius-capsule:22px;--nession-elevation-floating:0 0 0 1px #0000000f,0 1px 2px #0000000f,0 8px 24px #00000014;color:var(--nession-foreground);background:var(--nession-background);font:13px/1.48 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;width:100%;height:100%;position:relative;overflow:hidden}
+.nession-ui *{box-sizing:border-box}
+.nession-ui button{font:inherit;color:inherit;cursor:pointer}
+.nession-ui button:focus-visible{outline:2px solid #607381;outline-offset:3px}
+.nession-ui .shell{display:flex;width:100%;height:100%}
+.nession-ui .sidebar{width:246px;flex:0 0 246px;background:var(--nession-surface);border-right:1px solid var(--nession-border);padding:17px 12px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto}
+.nession-ui .sidebar-head{display:flex;justify-content:space-between;align-items:center;padding:4px 8px 15px}
+.nession-ui .wordmark{font-weight:750;font-size:19px;letter-spacing:-.055em}
+.nession-ui .minor{font-size:11px;color:var(--nession-muted-foreground)}
+.nession-ui .side-label{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--nession-muted-foreground);font-weight:700;padding:13px 10px 4px}
+.nession-ui .navrow{border:0;background:transparent;width:100%;text-align:left;padding:10px;border-radius:9px;display:flex;align-items:center;gap:9px;min-width:0}
+.nession-ui .navrow.selected,.nession-ui .navrow:hover{background:var(--nession-muted)}
+.nession-ui .navrow .navtext{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nession-ui .subtxt{font-size:11px;color:var(--nession-muted-foreground)}
+.nession-ui .main{position:relative;min-width:0;flex:1;overflow:hidden;background:var(--nession-workspace-background)}
+.nession-ui .main-content{height:100%;min-height:0;overflow:auto}
+.nession-ui .terminal{padding:23px 31px 120px;display:flex;flex-direction:column;height:100%;min-height:0}
+.nession-ui .terminal-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--nession-border);padding-bottom:13px;margin-bottom:21px}
+.nession-ui .term-output{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.9 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-y:auto;flex:1}
+.nession-ui .prompt{color:#526759}
+.nession-ui .workspace{height:100%;min-height:0;padding:30px clamp(20px,3vw,48px) 112px;overflow-y:auto}
+.nession-ui .workspace-inner{max-width:850px;margin:0 auto}
+.nession-ui .crumb{font-size:11px;color:var(--nession-muted-foreground);margin-bottom:25px}
+.nession-ui .titlebar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:26px}
+.nession-ui h2{font-size:26px;letter-spacing:-.035em;font-weight:660;line-height:1.18;margin:0}
+.nession-ui h3{font-size:14px;font-weight:650;letter-spacing:-.01em;margin:0 0 13px}
+.nession-ui p{margin:0}
+.nession-ui .subline{color:var(--nession-muted-foreground);margin-top:9px;max-width:640px;line-height:1.6}
+.nession-ui .pill{font-size:11px;font-weight:550;border:1px solid var(--nession-border);background:var(--nession-surface);padding:5px 9px;border-radius:50px;white-space:nowrap}
+.nession-ui .pill.strong{background:var(--nession-muted);color:var(--nession-foreground)}
+.nession-ui .pill.error{color:var(--nession-destructive);background:transparent}
+.nession-ui .statusline{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0 0 20px}
+.nession-ui .notice{border:1px solid var(--nession-border);border-radius:11px;padding:16px 17px;background:var(--nession-surface);line-height:1.65;color:var(--nession-foreground);margin-bottom:22px;max-width:780px}
+.nession-ui .notice.warning{border-color:#d6b596;background:#fffaf2}
+.nession-ui .notice.danger{border-color:#dfc4c2;background:#fffafa}
+.nession-ui .notice strong{font-weight:650}
+.nession-ui .info-section{border-top:1px solid var(--nession-border);padding-top:19px;margin-top:16px}
+.nession-ui .info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 20px}
+.nession-ui .fact{border-bottom:1px solid var(--nession-border);padding:8px 0;min-width:0}
+.nession-ui .fact small{display:block;color:var(--nession-muted-foreground);font-size:11px;margin-bottom:5px}
+.nession-ui .fact b{font-weight:590;overflow-wrap:anywhere}
+.nession-ui .actionline{display:flex;flex-wrap:wrap;gap:9px;margin-top:23px}
+.nession-ui .action{border:1px solid var(--nession-border);border-radius:10px;padding:10px 13px;background:var(--nession-background);min-height:38px;font-weight:580}
+.nession-ui .action:hover{background:var(--nession-muted)}
+.nession-ui .action.primary{background:var(--nession-foreground);color:var(--nession-background)}
+.nession-ui .mono{font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.nession-ui .dimlist{display:flex;flex-direction:column;gap:0}
+.nession-ui .dimension{border-bottom:1px solid var(--nession-border);display:grid;grid-template-columns:155px 1fr;gap:20px;padding:13px 0}
+.nession-ui .dimension .dimlabel{font-weight:580}
+.nession-ui .dimension .dimval{min-width:0;overflow-wrap:anywhere}
+.nession-ui .dimension .dimmer{display:block;font-size:11px;color:var(--nession-muted-foreground);margin-top:4px}
+.nession-ui .bottom-zone{position:absolute;bottom:20px;left:20px;right:20px;display:flex;align-items:center;justify-content:center;gap:10px;pointer-events:none}
+.nession-ui .round{width:45px;height:45px;min-width:45px;border-radius:50%;background:white;border:1px solid var(--nession-border);box-shadow:var(--nession-elevation-floating);font-size:19px;pointer-events:auto}
+.nession-ui .round:hover{background:var(--nession-muted)}
+.nession-ui .capsule{border-radius:var(--nession-radius-capsule);background:#fffffff5;border:1px solid var(--nession-border);box-shadow:var(--nession-elevation-floating);display:flex;align-items:center;gap:3px;padding:6px 8px;min-width:0;max-width:100%;pointer-events:auto;height:48px}
+.nession-ui .capsule.workspace-cap{max-width:min(590px,calc(100% - 60px))}
+.nession-ui .capsule-row{display:flex;align-items:center;gap:3px;overflow-x:auto;scrollbar-width:thin;min-width:0;width:100%;overscroll-behavior-x:contain}
+.nession-ui .cap-item{border:0;flex:none;border-radius:9px;min-width:80px;height:33px;padding:0 9px;display:flex;align-items:center;justify-content:center;gap:6px;background:transparent;font-size:12px;color:var(--nession-muted-foreground)}
+.nession-ui .cap-item[aria-current="page"]{background:var(--nession-muted);color:var(--nession-foreground)}
+.nession-ui .cap-item:hover{background:var(--nession-muted)}
+.nession-ui .cap-item span:last-child{white-space:nowrap}
+.nession-ui .compose{width:min(520px,calc(100% - 60px));justify-content:space-between}
+.nession-ui .compose .plus{width:34px;height:34px;border:0;background:transparent;border-radius:11px;font-size:20px}
+.nession-ui .compose .hint{color:var(--nession-muted-foreground);flex:1;padding:0 13px;font-size:12px}
+.nession-ui .compose .send{border:0;border-radius:50%;width:33px;height:33px;background:var(--nession-foreground);color:white}
+.nession-ui .peek{position:absolute;bottom:79px;left:50%;transform:translateX(-50%);width:min(425px,calc(100% - 46px));background:white;box-shadow:var(--nession-elevation-floating);border:1px solid var(--nession-border);border-radius:15px;padding:16px;z-index:2}
+.nession-ui .peekhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.nession-ui .peek p{font-size:12px;color:var(--nession-muted-foreground);margin-bottom:10px}
+.nession-ui .peek button.close{border:0;background:transparent}
+.nession-ui .app{height:100%;display:flex;flex-direction:column;position:relative;background:var(--nession-background)}
+.nession-ui .app-header{height:55px;flex:0 0 55px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--nession-border);padding:0 16px;gap:10px}
+.nession-ui .app-header .app-title{font-size:15px;max-width:215px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:620}
+.nession-ui .app-header .arrow{width:40px;height:40px;border:0;background:transparent;font-size:20px;border-radius:8px}
+.nession-ui .app-header .action-small{border:0;background:transparent;font-size:12px;padding:10px 8px}
+.nession-ui .app-body{flex:1;overflow-y:auto;min-height:0;padding:22px 18px 118px}
+.nession-ui .app .workspace{height:auto;overflow:visible;padding:0}
+.nession-ui .app .workspace-inner{max-width:none}
+.nession-ui .app h2{font-size:22px}
+.nession-ui .app .info-grid{grid-template-columns:1fr}
+.nession-ui .app .dimension{grid-template-columns:1fr;gap:3px;padding:10px 0}
+.nession-ui .app .titlebar{margin-bottom:18px}
+.nession-ui .app .crumb{margin-bottom:14px}
+.nession-ui .app .bottom-zone{bottom:18px;left:14px;right:14px}
+.nession-ui .app .capsule{height:56px}
+.nession-ui .app .capsule.workspace-cap{width:100%;max-width:100%;justify-content:stretch;padding:5px 7px}
+.nession-ui .app .cap-item{height:44px;min-width:72px;display:flex;flex-direction:column;gap:1px;padding:3px 5px;font-size:10px;line-height:1.2}
+.nession-ui .app .cap-item span:first-child{font-size:15px}
+.nession-ui .app .compose{width:100%;max-width:none}
+.nession-ui .app .term-output{font-size:7px;line-height:1.8;word-break:normal;white-space:pre-wrap;letter-spacing:-.015em}
+.nession-ui .app .terminal{padding:14px 16px 90px}
+.nession-ui .app .terminal-head{margin-bottom:13px}
+.nession-ui .app .peek{bottom:87px}
+.nession-ui .app .terminal .term-output{font-size:8px}
+.nession-ui .empty-cap{border:1px dashed var(--nession-border);padding:30px 20px;border-radius:12px;text-align:center;margin-top:25px;color:var(--nession-muted-foreground)}
+.nession-ui .extra-dim{font-size:11px;color:var(--nession-muted-foreground);margin-top:14px}
+.nession-ui .sr-only{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden;white-space:nowrap}
+.fixtures{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:15px}
+.fixtures b{font-size:12px;color:var(--np-dim);font-weight:600;margin-right:6px}
+.fixtures button{border:1px solid var(--np-line);background:#fff;border-radius:10px;padding:8px 11px;font-size:12px;cursor:pointer}
+.fixtures button[aria-pressed=true]{background:#202326;border-color:#202326;color:white}
+.fixtures button:focus-visible{outline:2px solid #5a6a78;outline-offset:2px}
+</style>
+</head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox Capability</span></nav>
+<span class="np-eyebrow">WORKSPACE · AGENT / LOCATION CAPABILITY · SESSION EXECUTION</span>
+<div class="np-header-main">
+<div><h1 class="np-title">Sandbox · Workspace 能力感知与展示</h1><p class="np-subtitle">区分 Agent 能力支持、当前 Session 的已验证隔离执行以及仅按需隔离的边界。复用 Workspace Capsule；Web 与 App 共享语义、采用各自的页面深度。</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3124">Issue #3124</a><a href="https://github.com/BestNathan/nession/issues/2681">Sandbox V1 #2681</a><a href="https://github.com/BestNathan/nession/issues/3062">Managed #3062</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
+</div>
+<div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Mock, read-only</strong></span></div>
+</header>
+<main>
+<section class="np-preview"><div class="np-section-heading"><div><h2>交互预览 · 真实 CSS 像素</h2><p>从 Terminal 打开 Workspace，选择 Sandbox，展开执行详情；切换运行时观测条件和 Web/App，验证不会误报整会话隔离。</p></div>
+<div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button><button type="button" data-np-size="1024">Web 1024</button><button type="button" data-np-size="390">App 390</button><button type="button" data-np-size="375">App 375</button><button type="button" data-np-reset>Reset</button></div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"><div id="sandbox-product" class="nession-ui" data-mode="web"></div></div></div>
+<p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟 Agent / Session 观测：</b><button type="button" data-fixture="active" aria-pressed="true">已验证执行</button><button type="button" data-fixture="native">支持但 Native</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="recreated">同名 Session 重建</button><button type="button" data-fixture="partial">仅初始 Pane 隔离</button></div>
+</section>
+<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">原型内的 Agent / Session / Policy / Execution ID 均为合成示例。模拟控制位于产品画布外；切换条件不触发真实进程、隔离、远程调用或持久化。</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>交互路径</h3><ol class="np-steps"><li>Terminal → Workspace（Web 圆形目的地；App 显式 Workspace 入口）。</li><li>Capsule → Sandbox → 查看状态和五个 Policy 维度；展开详情查看 effective mechanisms、digest、execution id。</li><li>切换外部条件 Native / Offline / Unsupported / Recreated：不将 Agent 离线误报为 Native，也不将旧执行报告关联到新实例；Unavailable 不占胶囊槽。</li><li>App 在详情深度点击唯一 Back 返回 Sandbox，再返回 Terminal。Web 通过左侧目的地按钮返回 Terminal。</li><li>Web 1180 → App 390 → Web 1180；切换 Files/Agent/Sandbox 后当前 Capsule 仍可用且不改变高度。</li></ol></article>
+<article class="np-detail"><h3>语义边界</h3><p><strong>Agent probe</strong> 是宿主能支持什么；<strong>SandboxExecutionReport</strong> 是实际执行了什么；<strong>Workspace presence</strong> 是产品如何显示。每次点击不是新的 Sandbox 执行。隔离范围是 On-demand initial Pane，不承诺未来新开的 tmux Window/Pane 都被强制隔离。</p><p>ENV 属于独立 Session Binding；EROFS 属于 #3022–#3024，Managed 创建属于 #3062，本 Issue 不新增镜像、策略编辑和安全承诺。</p></article>
+<article class="np-detail"><h3>UI 所有权</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox view。Sidebar 只有扁平 Session 与 Agent，Sandbox 不再创建二级全局导航。</p><p>App：AppLayers（Sessions ← Terminal → Workspace）→ WorkspacePanel 的唯一 AppPageHeader/Back → WorkspaceShell → Sandbox root/detail。Workspace Capsule 在每个深度保留，内部横向滚动；无 Workspace “+” 菜单。</p></article>
+<article class="np-detail"><h3>验证范围与限制</h3><p>页面行为为确定性 mock；样式使用 staging 生成设计 token 的局部快照，未接入 React、WebSocket、Bubblewrap、Seatbelt、cgroup、tmux、真实安全策略。DOM/静态源码核对不等于浏览器验收；真浏览器 / Pages 发布 SHA 需要独立记录。</p><details class="np-inspector"><summary>设计状态记录</summary><pre id="sandbox-inspector">state=active; surface=terminal; depth=root; mode=web</pre></details></article>
+</div></section>
+</main><footer class="np-footer">Nession · Requirement #3124 · Prototype source is not proof of production security or Acceptance</footer>
+</div>
+<script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script>
+</body></html>
