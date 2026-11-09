@@ -107,6 +107,12 @@ export function useSandboxTransitions(options: {
             setConfirming(false);
           } else {
             setActionError(actionErrorOf(result));
+            // A refusal that reports the Pane already inside (for example a
+            // second confirmation racing the first) must not leave the App's
+            // Enter-Sandbox depth stacked over an inside projection.
+            if (result.context?.status === 'inside') {
+              setConfirming(false);
+            }
           }
         })
         .catch((failure: unknown) => {

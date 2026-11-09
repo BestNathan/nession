@@ -253,6 +253,37 @@ describe('SandboxWorkspace (#3124)', () => {
     expect(screen.getByTestId('sandbox-existing-panes')).toHaveTextContent('%2');
   });
 
+  it('drops the confirmation when a racing Enter reports the Pane already inside', async () => {
+    const user = userEvent.setup();
+    api.preflight.mockResolvedValue({
+      ok: true,
+      generation: 'gen-outside',
+      policy_digest: 'b'.repeat(64),
+      backend: 'linux-bwrap',
+      mechanisms: ['network.deny'],
+      errors: [],
+      warnings: [],
+      catalog: catalog(),
+    } satisfies SandboxPreflightResult);
+    api.enter.mockResolvedValue({
+      success: false,
+      error_kind: 'conflict',
+      error: 'the active Pane is already inside a managed Sandbox',
+      context: insideContext(),
+    } satisfies SandboxActionResult);
+    render(<SandboxWorkspace ctx={workspaceContext()} />);
+
+    await screen.findByTestId('sandbox-composer');
+    await user.click(screen.getByTestId('sandbox-preflight'));
+    await screen.findByTestId('sandbox-preflight-ok');
+    await user.click(screen.getByTestId('sandbox-enter'));
+    await screen.findByTestId('sandbox-confirm');
+    await user.click(screen.getByTestId('sandbox-confirm-enter'));
+
+    expect(await screen.findByTestId('sandbox-inside')).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-confirm')).toBeNull();
+  });
+
   it('shows a verified inside context from the Agent without a draft', async () => {
     api.context.mockResolvedValue({ success: true, context: insideContext() });
     render(<SandboxWorkspace ctx={workspaceContext()} />);
