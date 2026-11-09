@@ -12,6 +12,7 @@ import {
   type SessionMetadataResponse,
 } from '@/generated/protocol/core/server-session-metadata-get/v1';
 import { WIRE as SESSION_METADATA_UPDATE_WIRE } from '@/generated/protocol/core/server-session-metadata-update/v1';
+import { WIRE as SESSION_PROJECT_SET_WIRE } from '@/generated/protocol/core/server-session-project-set/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 import type {
   AttachInfo,
@@ -20,6 +21,7 @@ import type {
   KillSessionResponse,
   Session,
   SessionMetadataInput,
+  SessionProjectBindingResponse,
   SessionsListResponse,
 } from './types';
 
@@ -232,6 +234,28 @@ export class SessionsPlugin implements TransportPlugin {
       ...(options.workingDir ? { working_dir: options.workingDir } : {}),
       ...(options.projectId ? { project_id: options.projectId } : {}),
     });
+  }
+
+  /**
+   * Associate, change or remove one Session's Project membership (#3082).
+   *
+   * Membership is metadata only: the server never changes cwd, ENV, mounts or
+   * the running process. `expectedRevision` is the last revision the caller
+   * observed; omit it for a last-writer-wins first association.
+   */
+  async setProjectBinding(
+    sessionId: string,
+    projectId: string | null,
+    expectedRevision?: number,
+  ): Promise<SessionProjectBindingResponse> {
+    return this.requireConnection().request<SessionProjectBindingResponse>(
+      SESSION_PROJECT_SET_WIRE,
+      {
+        session_id: sessionId,
+        project_id: projectId,
+        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+      },
+    );
   }
 
   /** Kill a tmux session (`"agentId:sessionName"`). */

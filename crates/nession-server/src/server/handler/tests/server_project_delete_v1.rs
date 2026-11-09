@@ -155,6 +155,7 @@ async fn project_delete_does_not_cascade_to_sessions() {
             attached_clients: 0,
             foreground_command: None,
             working_dir: None,
+            instance_id: None,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
         })

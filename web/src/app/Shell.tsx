@@ -141,6 +141,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             connectionStatus={connectionStatus}
             agents={data.agents}
             filteredSessions={data.filteredSessions}
+            sessions={data.sessions}
             totalSessionCount={data.sessions.length}
             staleAgents={data.staleAgents}
             selectedId={state.selectedId}

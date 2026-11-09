@@ -15,7 +15,10 @@ pub mod migration;
 pub mod schema;
 
 use anyhow::{Context, Result};
-use entities::{agents, env_files, projects, quick_commands, session_env_bindings, sessions};
+use entities::{
+    agents, env_files, projects, quick_commands, session_env_bindings, session_project_bindings,
+    sessions,
+};
 use migration::Migrator;
 use nession_protocol::contracts::project::v1::{
     ProjectLocation, ProjectSessionDefaults, ProjectSource,
@@ -80,6 +83,7 @@ pub struct SessionRow {
     pub window_count: u32,
     pub attached_clients: u32,
     pub metadata: String,
+    pub instance_id: Option<String>,
 }
 
 /// A server-managed env file row (issue #95, part 2).
@@ -110,6 +114,24 @@ pub struct SessionEnvBindingRow {
     pub desired_revision: u64,
     /// JSON-encoded ordered materialized profiles.
     pub profiles_json: String,
+    pub updated_at: i64,
+}
+
+/// One Session's explicit Project membership (#3082).
+///
+/// The row is keyed by the recyclable `agent_id:session_name`; the
+/// `agent_created_at` tmux creation time is what distinguishes incarnations.
+/// `0` means the create ACK has not yet been reconciled with the Agent report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionProjectBindingRow {
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_id: String,
+    /// Durable tmux instance identity; empty until the first Agent report.
+    pub incarnation_id: String,
+    /// Fallback tmux creation time; `0` until the first Agent report.
+    pub agent_created_at: i64,
+    pub revision: u64,
     pub updated_at: i64,
 }
 
@@ -301,6 +323,21 @@ impl Database {
         txn.commit()
             .await
             .context("failed to commit session replacement")?;
+        // The projection is this Agent's complete live set: removed Sessions
+        // lose their membership and present ones adopt/invalidate by
+        // incarnation (#3082 SC-02).
+        let live: Vec<(String, Option<String>, Option<i64>)> = replacement
+            .iter()
+            .map(|session| {
+                (
+                    session.session_id.clone(),
+                    session.instance_id.clone(),
+                    Some(session.created_at.timestamp()),
+                )
+            })
+            .collect();
+        self.reconcile_session_project_bindings(agent_id, &live)
+            .await?;
         Ok(())
     }
 
@@ -317,20 +354,66 @@ impl Database {
     }
 
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        let txn = self
+            .conn
+            .begin()
+            .await
+            .context("failed to begin session deletion")?;
+        session_project_bindings::Entity::delete_by_id(session_id.to_owned())
+            .exec(&txn)
+            .await
+            .context("failed to delete session project binding")?;
         sessions::Entity::delete_many()
             .filter(sessions::Column::SessionId.eq(session_id))
-            .exec(&self.conn)
+            .exec(&txn)
             .await
             .context("failed to delete session")?;
+        txn.commit()
+            .await
+            .context("failed to commit session deletion")?;
         Ok(())
     }
 
+    /// Remove one Agent's Session recovery rows without touching durable
+    /// Project memberships.
+    ///
+    /// Reconnect, re-registration and offline grace call this path while the
+    /// tmux Sessions may still exist; clearing memberships here would violate
+    /// #3082 SC-02. Confirmed destruction (single `remove`, force-refresh
+    /// absence, stale sweep) owns membership deletion instead.
     pub async fn delete_sessions_by_agent(&self, agent_id: &str) -> Result<()> {
         sessions::Entity::delete_many()
             .filter(sessions::Column::AgentId.eq(agent_id))
             .exec(&self.conn)
             .await
             .context("failed to delete sessions by agent")?;
+        Ok(())
+    }
+
+    /// Remove one Agent's Sessions **and** durable memberships. Only an
+    /// explicit Agent deletion may use this.
+    pub async fn delete_sessions_and_project_bindings_by_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<()> {
+        let txn = self
+            .conn
+            .begin()
+            .await
+            .context("failed to begin agent deletion")?;
+        session_project_bindings::Entity::delete_many()
+            .filter(session_project_bindings::Column::AgentId.eq(agent_id))
+            .exec(&txn)
+            .await
+            .context("failed to delete agent session project bindings")?;
+        sessions::Entity::delete_many()
+            .filter(sessions::Column::AgentId.eq(agent_id))
+            .exec(&txn)
+            .await
+            .context("failed to delete sessions by agent")?;
+        txn.commit()
+            .await
+            .context("failed to commit agent deletion")?;
         Ok(())
     }
 
@@ -626,6 +709,208 @@ impl Database {
         Ok(res.rows_affected > 0)
     }
 
+    // ── Session Project Bindings (#3082) ─────────────────────────────
+
+    /// Read one Session's Project membership.
+    pub async fn get_session_project_binding(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionProjectBindingRow>> {
+        let row = session_project_bindings::Entity::find_by_id(session_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read session project binding")?;
+        Ok(row.map(session_project_binding_row_from_model))
+    }
+
+    /// Every persisted membership. The caller filters by live Session
+    /// incarnation; this is one read per list/broadcast projection.
+    pub async fn list_session_project_bindings(&self) -> Result<Vec<SessionProjectBindingRow>> {
+        let rows = session_project_bindings::Entity::find()
+            .order_by_asc(session_project_bindings::Column::SessionId)
+            .all(&self.conn)
+            .await
+            .context("failed to list session project bindings")?;
+        Ok(rows
+            .into_iter()
+            .map(session_project_binding_row_from_model)
+            .collect())
+    }
+
+    /// Insert or replace one Session's Project membership.
+    pub async fn upsert_session_project_binding(
+        &self,
+        row: &SessionProjectBindingRow,
+    ) -> Result<()> {
+        let model = session_project_bindings::ActiveModel {
+            session_id: Set(row.session_id.clone()),
+            agent_id: Set(row.agent_id.clone()),
+            project_id: Set(row.project_id.clone()),
+            incarnation_id: Set(row.incarnation_id.clone()),
+            agent_created_at: Set(row.agent_created_at),
+            revision: Set(i64::try_from(row.revision).unwrap_or(i64::MAX)),
+            updated_at: Set(row.updated_at),
+        };
+        session_project_bindings::Entity::insert(model)
+            .on_conflict(
+                OnConflict::column(session_project_bindings::Column::SessionId)
+                    .update_columns([
+                        session_project_bindings::Column::AgentId,
+                        session_project_bindings::Column::ProjectId,
+                        session_project_bindings::Column::IncarnationId,
+                        session_project_bindings::Column::AgentCreatedAt,
+                        session_project_bindings::Column::Revision,
+                        session_project_bindings::Column::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.conn)
+            .await
+            .context("failed to upsert session project binding")?;
+        Ok(())
+    }
+
+    /// Delete one Session's Project membership (idempotent).
+    pub async fn delete_session_project_binding(&self, session_id: &str) -> Result<()> {
+        session_project_bindings::Entity::delete_by_id(session_id.to_owned())
+            .exec(&self.conn)
+            .await
+            .context("failed to delete session project binding")?;
+        Ok(())
+    }
+
+    /// Delete every membership owned by one Agent.
+    pub async fn delete_session_project_bindings_by_agent(&self, agent_id: &str) -> Result<()> {
+        session_project_bindings::Entity::delete_many()
+            .filter(session_project_bindings::Column::AgentId.eq(agent_id))
+            .exec(&self.conn)
+            .await
+            .context("failed to delete agent session project bindings")?;
+        Ok(())
+    }
+
+    /// Adopt a pending create-time membership with the Agent's first report, or
+    /// invalidate it when the report is a different Session incarnation.
+    ///
+    /// The tmux `created_at` is the incarnation identity. A binding recorded at
+    /// create time carries `agent_created_at = 0` until the Agent reports; a
+    /// different reported timestamp means the original Session is gone and a
+    /// new one reused its name, so the membership must not be resurrected.
+    pub async fn adopt_or_invalidate_session_project_binding(
+        &self,
+        session_id: &str,
+        incarnation_id: Option<&str>,
+        agent_created_at: Option<i64>,
+    ) -> Result<Option<SessionProjectBindingRow>> {
+        let Some(model) = session_project_bindings::Entity::find_by_id(session_id.to_owned())
+            .one(&self.conn)
+            .await
+            .context("failed to read session project binding for reconciliation")?
+        else {
+            return Ok(None);
+        };
+        let observed = incarnation_id.filter(|id| !id.is_empty());
+        if let Some(observed) = observed {
+            if model.incarnation_id.is_empty() {
+                // A pending create-time membership adopts this incarnation.
+                // A stale pending row (an ambiguous create that never produced
+                // a Session) must not resurrect a Project for a later
+                // same-name incarnation.
+                if chrono::Utc::now()
+                    .timestamp()
+                    .saturating_sub(model.updated_at)
+                    > 600
+                {
+                    session_project_bindings::Entity::delete_by_id(model.session_id)
+                        .exec(&self.conn)
+                        .await
+                        .context("failed to expire a stale pending project binding")?;
+                    return Ok(None);
+                }
+                let mut active: session_project_bindings::ActiveModel = model.into();
+                active.incarnation_id = Set(observed.to_string());
+                if let Some(created_at) = agent_created_at {
+                    active.agent_created_at = Set(created_at);
+                }
+                active.updated_at = Set(chrono::Utc::now().timestamp());
+                let updated = active
+                    .update(&self.conn)
+                    .await
+                    .context("failed to adopt session project binding")?;
+                return Ok(Some(session_project_binding_row_from_model(updated)));
+            }
+            if model.incarnation_id != observed {
+                session_project_bindings::Entity::delete_by_id(model.session_id)
+                    .exec(&self.conn)
+                    .await
+                    .context("failed to invalidate stale session project binding")?;
+                return Ok(None);
+            }
+            return Ok(Some(session_project_binding_row_from_model(model)));
+        }
+        // No durable incarnation on this report (legacy Agent): fall back to
+        // the tmux creation time only while the binding itself is fallback-
+        // keyed. A durable binding is never guessed away from a missing id.
+        if model.incarnation_id.is_empty() {
+            if let Some(created_at) = agent_created_at {
+                if model.agent_created_at == 0 {
+                    let mut active: session_project_bindings::ActiveModel = model.into();
+                    active.agent_created_at = Set(created_at);
+                    active.updated_at = Set(chrono::Utc::now().timestamp());
+                    let updated = active
+                        .update(&self.conn)
+                        .await
+                        .context("failed to adopt a fallback project binding")?;
+                    return Ok(Some(session_project_binding_row_from_model(updated)));
+                }
+                if model.agent_created_at != created_at {
+                    session_project_bindings::Entity::delete_by_id(model.session_id)
+                        .exec(&self.conn)
+                        .await
+                        .context("failed to invalidate a fallback session project binding")?;
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(session_project_binding_row_from_model(model)))
+    }
+
+    /// Reconcile one Agent's memberships against its authoritative live set.
+    ///
+    /// Removed Sessions lose their membership, present Sessions adopt/invalidate
+    /// by incarnation. Called after a force-refresh projection, which is the
+    /// Agent's complete live set for that Agent.
+    pub async fn reconcile_session_project_bindings(
+        &self,
+        agent_id: &str,
+        live: &[(String, Option<String>, Option<i64>)],
+    ) -> Result<()> {
+        let live_ids: std::collections::HashSet<&str> =
+            live.iter().map(|(id, _, _)| id.as_str()).collect();
+        let existing = session_project_bindings::Entity::find()
+            .filter(session_project_bindings::Column::AgentId.eq(agent_id))
+            .all(&self.conn)
+            .await
+            .context("failed to list agent session project bindings")?;
+        for row in existing {
+            if !live_ids.contains(row.session_id.as_str()) {
+                session_project_bindings::Entity::delete_by_id(row.session_id)
+                    .exec(&self.conn)
+                    .await
+                    .context("failed to remove binding for a removed Session")?;
+            }
+        }
+        for (session_id, incarnation_id, created_at) in live {
+            self.adopt_or_invalidate_session_project_binding(
+                session_id,
+                incarnation_id.as_deref(),
+                *created_at,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     // ── Projects (#3021) ──────────────────────────────────────────────
 
     /// Insert one Project.
@@ -721,11 +1006,38 @@ impl Database {
     /// directories and EROFS digests are references to globally shared
     /// artifacts; neither is touched here.
     pub async fn delete_project(&self, project_id: &str) -> Result<bool> {
+        let txn = self
+            .conn
+            .begin()
+            .await
+            .context("failed to begin project deletion")?;
+        session_project_bindings::Entity::delete_many()
+            .filter(session_project_bindings::Column::ProjectId.eq(project_id))
+            .exec(&txn)
+            .await
+            .context("failed to clear project session bindings")?;
         let res = projects::Entity::delete_by_id(project_id.to_owned())
-            .exec(&self.conn)
+            .exec(&txn)
             .await
             .context("failed to delete project")?;
+        txn.commit()
+            .await
+            .context("failed to commit project deletion")?;
         Ok(res.rows_affected > 0)
+    }
+}
+
+fn session_project_binding_row_from_model(
+    model: session_project_bindings::Model,
+) -> SessionProjectBindingRow {
+    SessionProjectBindingRow {
+        session_id: model.session_id,
+        agent_id: model.agent_id,
+        project_id: model.project_id,
+        incarnation_id: model.incarnation_id,
+        agent_created_at: model.agent_created_at,
+        revision: u64::try_from(model.revision).unwrap_or(0),
+        updated_at: model.updated_at,
     }
 }
 
@@ -820,6 +1132,7 @@ fn session_active_model(
         window_count: Set(i32::try_from(session.window_count).unwrap_or(0)),
         attached_clients: Set(i32::try_from(session.attached_clients).unwrap_or(0)),
         metadata: Set(Some(String::new())),
+        instance_id: Set(session.instance_id.clone()),
     }
 }
 
@@ -835,6 +1148,7 @@ fn session_upsert_columns() -> OnConflict {
             sessions::Column::WindowCount,
             sessions::Column::AttachedClients,
             sessions::Column::Metadata,
+            sessions::Column::InstanceId,
         ])
         .to_owned()
 }
@@ -850,6 +1164,7 @@ fn session_row_from_model(m: sessions::Model) -> SessionRow {
         window_count: u32::try_from(m.window_count).unwrap_or(0),
         attached_clients: u32::try_from(m.attached_clients).unwrap_or(0),
         metadata: m.metadata.unwrap_or_default(),
+        instance_id: m.instance_id,
     }
 }
 
@@ -1001,6 +1316,7 @@ mod tests {
             working_dir: None,
             created_at: chrono::Utc::now(),
             last_activity: chrono::Utc::now(),
+            instance_id: None,
         }
     }
 
@@ -1425,5 +1741,214 @@ mod tests {
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(format!("{path}-wal")).ok();
         std::fs::remove_file(format!("{path}-shm")).ok();
+    }
+
+    // ── Session Project Bindings (#3082) ─────────────────────────────
+
+    fn binding_row(
+        session_id: &str,
+        project_id: &str,
+        agent_created_at: i64,
+    ) -> SessionProjectBindingRow {
+        SessionProjectBindingRow {
+            session_id: session_id.to_owned(),
+            agent_id: "a1".to_owned(),
+            project_id: project_id.to_owned(),
+            incarnation_id: String::new(),
+            agent_created_at,
+            revision: 1,
+            updated_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_project_binding_round_trips_across_restart() {
+        let path = format!("/tmp/nession_test_binding_{}.db", uuid::Uuid::new_v4());
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        let binding = binding_row("a1:sess1", project_id, 1_700_000_000);
+
+        {
+            let db = Database::new(&path).await.unwrap();
+            db.insert_project(&project_row(project_id)).await.unwrap();
+            db.insert_session(&sess_info("a1:sess1", SessionStatus::Active), "active")
+                .await
+                .unwrap();
+            db.upsert_session_project_binding(&binding).await.unwrap();
+        }
+        {
+            let db = Database::new(&path).await.unwrap();
+            let read = db
+                .get_session_project_binding("a1:sess1")
+                .await
+                .unwrap()
+                .expect("the membership survives restart");
+            assert_eq!(read, binding);
+            assert_eq!(
+                db.list_session_project_bindings().await.unwrap(),
+                vec![binding]
+            );
+        }
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(format!("{path}-wal")).ok();
+        std::fs::remove_file(format!("{path}-shm")).ok();
+    }
+
+    #[tokio::test]
+    async fn pending_binding_adopts_the_first_report_and_invalidates_a_reused_name() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        db.insert_session(&sess_info("a1:sess1", SessionStatus::Active), "active")
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:sess1", project_id, 0))
+            .await
+            .unwrap();
+
+        let adopted = db
+            .adopt_or_invalidate_session_project_binding(
+                "a1:sess1",
+                Some("instance-1"),
+                Some(1_700_000_001),
+            )
+            .await
+            .unwrap()
+            .expect("pending membership is adopted");
+        assert_eq!(adopted.incarnation_id, "instance-1");
+        assert_eq!(adopted.agent_created_at, 1_700_000_001);
+
+        let same = db
+            .adopt_or_invalidate_session_project_binding(
+                "a1:sess1",
+                Some("instance-1"),
+                Some(1_700_000_001),
+            )
+            .await
+            .unwrap()
+            .expect("the same incarnation keeps membership");
+        assert_eq!(same.project_id, project_id);
+
+        assert!(db
+            .adopt_or_invalidate_session_project_binding(
+                "a1:sess1",
+                Some("instance-2"),
+                Some(1_700_000_999),
+            )
+            .await
+            .unwrap()
+            .is_none());
+        assert!(
+            db.get_session_project_binding("a1:sess1")
+                .await
+                .unwrap()
+                .is_none(),
+            "a reused name must not resurrect the previous Project"
+        );
+    }
+
+    #[tokio::test]
+    async fn project_delete_clears_bindings_but_preserves_sessions() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        db.insert_session(&sess_info("a1:sess1", SessionStatus::Active), "active")
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:sess1", project_id, 10))
+            .await
+            .unwrap();
+
+        assert!(db.delete_project(project_id).await.unwrap());
+        assert!(db
+            .get_session_project_binding("a1:sess1")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(
+            db.get_session("a1:sess1").await.unwrap().is_some(),
+            "Project deletion never cascades to a Session"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_delete_clears_its_binding() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        db.insert_session(&sess_info("a1:sess1", SessionStatus::Active), "active")
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:sess1", project_id, 10))
+            .await
+            .unwrap();
+
+        db.delete_session("a1:sess1").await.unwrap();
+        assert!(db
+            .get_session_project_binding("a1:sess1")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn explicit_agent_deletion_clears_memberships() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        db.insert_session(&sess_info("a1:s1", SessionStatus::Active), "active")
+            .await
+            .unwrap();
+        db.upsert_session_project_binding(&binding_row("a1:s1", project_id, 10))
+            .await
+            .unwrap();
+
+        db.delete_sessions_and_project_bindings_by_agent("a1")
+            .await
+            .unwrap();
+        assert!(db
+            .get_session_project_binding("a1:s1")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db.get_session("a1:s1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn force_refresh_reconciliation_drops_removed_sessions_only() {
+        let db = new_db().await;
+        let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
+        db.insert_project(&project_row(project_id)).await.unwrap();
+        for id in ["a1:live", "a1:gone"] {
+            db.insert_session(&sess_info(id, SessionStatus::Active), "active")
+                .await
+                .unwrap();
+            db.upsert_session_project_binding(&binding_row(id, project_id, 0))
+                .await
+                .unwrap();
+        }
+
+        db.reconcile_session_project_bindings(
+            "a1",
+            &[(
+                "a1:live".to_owned(),
+                Some("instance-live".to_owned()),
+                Some(1_700_000_001),
+            )],
+        )
+        .await
+        .unwrap();
+        let live = db
+            .get_session_project_binding("a1:live")
+            .await
+            .unwrap()
+            .expect("present incarnation keeps its membership");
+        assert_eq!(live.incarnation_id, "instance-live");
+        assert_eq!(live.agent_created_at, 1_700_000_001);
+        assert!(db
+            .get_session_project_binding("a1:gone")
+            .await
+            .unwrap()
+            .is_none());
     }
 }

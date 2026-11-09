@@ -15,6 +15,7 @@ import type { Agent, Session } from '@/types';
 import { CAPSULE_PROJECTION_IDS, projectionIconFor } from '@/app/capsuleProjections';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import type { Experience } from '@/app/workspace/workspaceContext';
+import type { FocusedProject, SessionProjectContext } from '@/product/project/types';
 
 /** The capsule's partition of capability presence — one rule, capsule's own limit.
  *
@@ -52,6 +53,12 @@ export interface CapsuleCapabilityInput {
    * not on a capability landing page.
    */
   onOpenWorkspace: (id: CapabilityId, resourceId?: string) => void;
+  /** Focused Session's Project resolution (#3082). */
+  focusedProject?: FocusedProject;
+  /** The capability currently open, for the active state. */
+  activeCapabilityId?: CapabilityId;
+  /** Project-owned content/actions for the Project Peek. */
+  projectContext?: SessionProjectContext;
 }
 
 /**
@@ -95,6 +102,9 @@ export function resolveCapsuleCapabilities(
     experience: input.experience,
     facts: input.facts,
     onToolChange: input.onToolChange,
+    focusedProject: input.focusedProject,
+    activeCapabilityId: input.activeCapabilityId,
+    sessionProject: input.projectContext,
   });
 
   const disclosure = capsuleDisclosure(snapshots);

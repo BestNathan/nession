@@ -19,6 +19,7 @@ fn make_session(id: &str, agent: &str, name: &str, status: SessionStatus) -> Ses
         attached_clients: 0,
         foreground_command: None,
         working_dir: None,
+        instance_id: None,
         created_at: Utc::now(),
         last_activity: Utc::now(),
     }

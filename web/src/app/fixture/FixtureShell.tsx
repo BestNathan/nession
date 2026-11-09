@@ -19,9 +19,10 @@ import type { Agent, Session } from '@/types';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
+import type { Surface } from '@/app/patterns/SessionHeader';
+import type { CapabilityId } from '@/product/capability';
 import { fixturePaneCommand } from './fixturePaneCommand';
-import { fixtureSessions } from './fixtureSessions';
-import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import { useFixtureSessions } from './useFixtureSessions';
 import { useFixtureProjectShell } from './fixtureProjects';
 import { FixtureProjectDialogs } from './FixtureProjectDialogs';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
@@ -64,7 +65,7 @@ export function FixtureShell() {
   // The Session metadata stub (#2789), installed for the route's lifetime so
   // the sidebar's Session rows resolve their display titles through the same
   // product path the shipped app uses. Absent `?sessionMetadata=` is legacy.
-  useFixtureSessionMetadata(search);
+
   const projectLayer = useFixtureProjectShell(search);
 
   // The same stub `FixtureApp` installs, for the same reason (#838): a
@@ -75,7 +76,7 @@ export function FixtureShell() {
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
   const agents = useMemo(() => fixtureAgents(search), [search]);
-  const sessions = useMemo(() => fixtureSessions(search), [search]);
+  const sessions = useFixtureSessions(search);
   const staleAgents = useMemo(() => fixtureStaleAgents(search), [search]);
   const connectionStatus = fixtureConnection(search);
   const experienceOverride = experienceFromSearch(search);
@@ -86,6 +87,8 @@ export function FixtureShell() {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [listOpen, setListOpen] = useState(true);
+  const [surface, setSurface] = useState<Surface>('terminal');
+  const [tool, setTool] = useState<CapabilityId>('files');
 
   const mediaWide = useMediaQuery('(min-width: 1024px)');
   // jsdom has no matchMedia. Component tests mount this fixture as the wide
@@ -153,8 +156,8 @@ export function FixtureShell() {
           selectedSession={selectedSessionWithCommand}
           selectedAgent={selectedAgent}
           domain={domain}
-          surface="terminal"
-          tool="files"
+          surface={surface}
+          tool={tool}
           fileOps={null}
           onCreate={() => {}}
           onRefresh={() => {}}
@@ -166,8 +169,8 @@ export function FixtureShell() {
           onKill={() => {}}
           onViewSessionDetails={(session) => sessionDetails.show(session, false)}
           onEditSessionDetails={(session) => sessionDetails.show(session, true)}
-          onSurfaceChange={() => {}}
-          onToolChange={() => {}}
+          onSurfaceChange={setSurface}
+          onToolChange={setTool}
           onCloseDrawer={() => setListOpen(false)}
           isWide={isWide}
           experienceOverride={experienceOverride}

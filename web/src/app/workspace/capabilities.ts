@@ -25,6 +25,7 @@ import {
   QUICK_COMMANDS_TITLE,
   resolveQuickCommandsState,
 } from '@/product/terminal/quickCommands/quickCommands';
+import { PROJECT_CAPABILITY_ID, PROJECT_CAPABILITY_TITLE, resolveProjectCapabilityState } from '@/capabilities/project';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -134,6 +135,25 @@ function gitProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
 }
 
 /**
+ * Project is context-sensed from the **focused Session's persisted membership**
+ * (#3082 SC-04), never from cwd, Git, Agent health or a globally selected
+ * Project. Registration lives here; the state is Project-owned.
+ */
+function projectProvider(workspaceContext: WorkspaceContext): CapabilityDefinition {
+  return {
+    id: PROJECT_CAPABILITY_ID,
+    title: PROJECT_CAPABILITY_TITLE,
+    resolve: (context) => ({
+      scope: resolveScope(context, workspaceContext),
+      state: resolveProjectCapabilityState(
+        workspaceContext.focusedProject,
+        workspaceContext.activeCapabilityId,
+      ),
+    }),
+  };
+}
+
+/**
  * Terminal Keys is a capability of the Terminal and nothing else (`#826` §7).
  *
  * It is registered here because this is the app's one capability registry —
@@ -191,6 +211,7 @@ export function createWorkspaceCapabilityRegistry(
   registry.register(claudeCodeProvider(workspaceContext));
   registry.register(gitProvider(workspaceContext));
   registry.register(terminalKeysProvider(workspaceContext));
+  registry.register(projectProvider(workspaceContext));
   registry.register(quickCommandsProvider(workspaceContext));
 
   return registry;

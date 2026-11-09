@@ -93,8 +93,14 @@ impl ConnectionHandler {
 
         info!("Deleting offline agent {} and its sessions", agent_id);
 
-        // Delete sessions from DB, then agent from DB.
-        if let Err(e) = self.db.delete_sessions_by_agent(agent_id).await {
+        // Delete sessions and their durable Project memberships from the DB,
+        // then the agent. This is an explicit Agent deletion, unlike a
+        // reconnect/offline cache clear which must preserve memberships.
+        if let Err(e) = self
+            .db
+            .delete_sessions_and_project_bindings_by_agent(agent_id)
+            .await
+        {
             tracing::error!("Failed to delete sessions for agent {}: {:?}", agent_id, e);
             return Ok(HandlerAction::Reply(Some(Message::Text(
                 json!({

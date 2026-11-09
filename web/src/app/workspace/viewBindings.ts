@@ -1,6 +1,8 @@
-import { FileCog, FileText, Settings2, UserRound, type LucideIcon } from 'lucide-react';
+import { FileCog, FileText, FolderKanban, Settings2, UserRound, type LucideIcon } from 'lucide-react';
 import { claudeCodeView } from '@/capabilities/claude-code';
 import { gitView } from '@/capabilities/git';
+import { PROJECT_CAPABILITY_ID } from '@/capabilities/project';
+import { ProjectWorkspace } from './ProjectWorkspaceView';
 import { APP_WORKSPACE_VIEWS } from '../experiences/app/workspaceViews';
 import { WEB_WORKSPACE_VIEWS } from '../experiences/web/workspaceViews';
 import type { WorkspaceViewBinding, WorkspaceViewId } from './workspaceContext';
@@ -44,4 +46,9 @@ export const WORKSPACE_VIEW_BINDINGS: readonly WorkspaceViewBinding[] = [
   })),
   claudeCodeView,
   gitView,
+  {
+    id: PROJECT_CAPABILITY_ID,
+    icon: FolderKanban,
+    layout: { web: ProjectWorkspace, app: ProjectWorkspace },
+  },
 ];

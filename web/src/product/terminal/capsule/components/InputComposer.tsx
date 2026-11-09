@@ -26,6 +26,8 @@ interface InputComposerProps {
    */
   onFieldFocus?: () => void;
   fieldRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Contextual Session identity/action (#3082); present only when meaningful. */
+  sessionContextAction?: ReactNode;
   /** Contextual notices entry (#2658); present only while notices exist. */
   statusAction?: ReactNode;
 }
@@ -39,7 +41,10 @@ interface InputComposerProps {
  * and the tools sit beneath it, `+` still leftmost and send still rightmost.
  */
 export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
-  function InputComposer({ capabilityDisclosure, onFieldFocus, fieldRef, statusAction }, ref) {
+  function InputComposer(
+    { capabilityDisclosure, onFieldFocus, fieldRef, sessionContextAction, statusAction },
+    ref,
+  ) {
     const ctx = useCapsuleContext();
     const {
       inputValue,
@@ -76,8 +81,10 @@ export const InputComposer = forwardRef<HTMLDivElement, InputComposerProps>(
     // Terminal has something to disclose (#2658). It stays outside the
     // `capsule-input-actions` contract, which counts the composer's own
     // history/send actions.
-    const actions = statusAction ? (
+    const hasContextualActions = Boolean(sessionContextAction || statusAction);
+    const actions = hasContextualActions ? (
       <div className="flex items-center gap-[length:var(--nession-terminal-capsule-control-gap)]">
+        {sessionContextAction}
         {statusAction}
         {trailingActions}
       </div>

@@ -9,10 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { agentDisplayName } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import type { Agent } from '@/types';
+import { agentDisplayName } from '@/shared/lib/format';
+import type { Agent, Session } from '@/types';
 import type { Project, ProjectLocation } from '@/product/project/types';
 
 export interface ProjectDetailProps {
@@ -20,6 +20,9 @@ export interface ProjectDetailProps {
   agents: Agent[];
   onCreateSession: (project: Project) => void;
   onSettings: (project: Project) => void;
+  /** Related Sessions are a Workspace-content projection, not navigation (#3082). */
+  sessions?: Session[];
+  onOpenSession?: (session: Session) => void;
 }
 
 const boxClass = 'rounded-[var(--nession-radius-surface)] border border-border px-3 py-2';
@@ -225,6 +228,46 @@ function DefaultsSection({ project }: { project: Project }) {
   );
 }
 
+function RelatedSessionsSection({
+  sessions,
+  onOpenSession,
+}: {
+  sessions: Session[];
+  onOpenSession?: (session: Session) => void;
+}) {
+  return (
+    <Section title="Related Sessions">
+      {sessions.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          {sessions.map((session) => (
+            <button
+              key={session.session_id}
+              type="button"
+              data-testid="project-related-session"
+              className={cn(boxClass, 'flex min-w-0 items-center justify-between gap-2 text-left')}
+              onClick={() => onOpenSession?.(session)}
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className={cn('truncate', chromeSansRole('primary'))}>
+                  {session.session_name}
+                </span>
+                <span className={cn('truncate text-muted-foreground', chromeSansRole('caption'))}>
+                  {session.agent_id}
+                </span>
+              </span>
+              <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+                Open
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyRow>No other Sessions are associated with this Project.</EmptyRow>
+      )}
+    </Section>
+  );
+}
+
 function ImageSection({ project }: { project: Project }) {
   return (
     <Section title="Image">
@@ -274,6 +317,8 @@ export function ProjectDetailContent({
   agents,
   onCreateSession,
   onSettings,
+  sessions,
+  onOpenSession,
 }: ProjectDetailProps) {
   const [managedOpen, setManagedOpen] = useState(false);
   return (
@@ -292,6 +337,9 @@ export function ProjectDetailContent({
       <SourceSection project={project} />
       <LocationsSection project={project} agents={agents} />
       <DefaultsSection project={project} />
+      {sessions === undefined ? null : (
+        <RelatedSessionsSection sessions={sessions} onOpenSession={onOpenSession} />
+      )}
       <ImageSection project={project} />
       <ManagedUnavailableDialog open={managedOpen} onClose={() => setManagedOpen(false)} />
     </div>

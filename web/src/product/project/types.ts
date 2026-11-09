@@ -16,6 +16,30 @@ export interface ProjectDraft {
   image_digest?: string;
 }
 
+/**
+ * The focused Session's Project resolution (#3082).
+ *
+ * `unbound` is a Session with no membership. `loading` and `unavailable` keep
+ * the membership id but do not disclose a partial/unauthorized Project;
+ * `ready` carries the authorized Project summary. Capability presence is
+ * derived from this, never from cwd/Git/Agent heuristics.
+ */
+export type FocusedProject =
+  | { status: 'unbound' }
+  | { status: 'loading'; projectId: string }
+  | { status: 'unavailable'; projectId: string }
+  | { status: 'ready'; projectId: string; project: Project };
+
+/** What the Project Peek/Workspace needs from app composition (#3082). */
+export interface SessionProjectContext {
+  focusedProject: FocusedProject;
+  relatedSessions: import('@/types').Session[];
+  onAssociate: () => void;
+  onOpenSession: (session: import('@/types').Session) => void;
+  onProjectSettings: (project: Project) => void;
+  onCreateProjectSession: (project: Project) => void;
+}
+
 /** Everything the shell needs to render and maintain Projects (#3025). */
 export interface ProjectShellProps {
   projects: Project[];

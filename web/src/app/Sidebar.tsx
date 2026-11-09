@@ -59,6 +59,7 @@ export interface SidebarProps {
   onKill: (session: Session) => void;
   onViewDetails?: (session: Session) => void;
   onEditDetails?: (session: Session) => void;
+  onAssociateProject?: (session: Session) => void;
   /** Projects are a first-class sibling destination, not a Session parent (#3025). */
   projectShell?: ProjectShellProps;
 }
@@ -157,6 +158,7 @@ export function Sidebar({
   onKill,
   onViewDetails,
   onEditDetails,
+  onAssociateProject,
   projectShell = emptyProjectShell(),
 }: SidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
@@ -225,6 +227,7 @@ export function Sidebar({
           onKill={onKill}
           onViewDetails={onViewDetails}
           onEditDetails={onEditDetails}
+          onAssociateProject={onAssociateProject}
           groups={groups}
           showRowRecency={!grouped}
           searchMissState={

@@ -54,8 +54,25 @@ impl ConnectionHandler {
             self.session_registry.list().await
         };
 
-        let sessions_json: Vec<serde_json::Value> = sessions.iter().map(session_to_json).collect();
-        let sessions: Vec<WebSessionInfo> = sessions.iter().map(session_to_info).collect();
+        let project_ids = self.session_registry.project_ids_for(&sessions).await;
+        let sessions_json: Vec<serde_json::Value> = sessions
+            .iter()
+            .map(|session| {
+                session_to_json(
+                    session,
+                    project_ids.get(&session.session_id).map(String::as_str),
+                )
+            })
+            .collect();
+        let sessions: Vec<WebSessionInfo> = sessions
+            .iter()
+            .map(|session| {
+                session_to_info(
+                    session,
+                    project_ids.get(&session.session_id).map(String::as_str),
+                )
+            })
+            .collect();
 
         info!(
             "Client requested sessions list (force: {}), returning {} sessions, {} stale agent(s)",

@@ -368,7 +368,14 @@ async fn integration_session_update_message_format() {
 
     // Send session update. Not `async` any more, and for the heartbeat's reason.
     handle
-        .send_session_update("my-session", "active", 5, 2, Some("claude"))
+        .send_session_update(
+            "my-session",
+            "active",
+            5,
+            2,
+            Some("claude"),
+            Some("instance-1"),
+        )
         .expect("session update failed");
 
     // Wait for session update message.

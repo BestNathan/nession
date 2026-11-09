@@ -324,6 +324,7 @@ impl ServerClientHandle {
         window_count: u32,
         attached_clients: u32,
         foreground_command: Option<&str>,
+        instance_id: Option<&str>,
     ) -> Result<()> {
         let payload = AgentSessionUpdatePayload {
             agent_id: self.agent_id.clone(),
@@ -332,6 +333,7 @@ impl ServerClientHandle {
             window_count,
             attached_clients,
             foreground_command: foreground_command.map(std::string::ToString::to_string),
+            instance_id: instance_id.map(std::string::ToString::to_string),
         };
         let msg = new_message(msg_types::AGENT_SESSION_UPDATE, payload);
         #[cfg(test)]
@@ -1500,7 +1502,14 @@ mod tests {
 
         // Send session update.
         handle
-            .send_session_update("test-session", "active", 3, 1, Some("claude"))
+            .send_session_update(
+                "test-session",
+                "active",
+                3,
+                1,
+                Some("claude"),
+                Some("instance-1"),
+            )
             .expect("session update failed");
 
         let msg = tokio::time::timeout(Duration::from_secs(5), msg_rx.recv())
@@ -2938,6 +2947,7 @@ mod tests {
             window_count: 3,
             attached_clients: 1,
             foreground_command: Some("claude".to_string()),
+            instance_id: Some("instance-1".to_string()),
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["agent_id"], "a1");
@@ -4527,11 +4537,14 @@ core_routes!(agent, msg, responses;
                     // "no server running" to an empty Vec. Only report the raw
                     // fields; the server derives status from `attached_clients`
                     // so the rule lives in exactly one place.
-                    let sessions = match agent.tmux.list_sessions().await {
-                        Ok(s) => s,
+                    let (sessions, list_error) = match agent.tmux.list_sessions().await {
+                        Ok(sessions) => (sessions, None),
                         Err(e) => {
                             warn!("tmux list-sessions failed: {:#}", e);
-                            vec![]
+                            // A listing failure is not "no sessions": reporting
+                            // an empty successful set would let the Server
+                            // delete live recovery rows and Project bindings.
+                            (Vec::new(), Some(e.to_string()))
                         }
                     };
 
@@ -4550,6 +4563,7 @@ core_routes!(agent, msg, responses;
                                 "attached_clients": s.attached_clients,
                                 "foreground_command": s.foreground_command,
                                 "working_dir": s.working_dir,
+                                "instance_id": s.instance_id,
                             })
                         })
                         .collect();
@@ -4561,7 +4575,8 @@ core_routes!(agent, msg, responses;
                         "payload": {
                             "request_id": request_id,
                             "command": "sessions.list",
-                            "success": true,
+                            "success": list_error.is_none(),
+                            "error": list_error,
                             "sessions": sessions_json,
                         }
                     });

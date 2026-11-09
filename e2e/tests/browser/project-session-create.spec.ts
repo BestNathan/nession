@@ -8,6 +8,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test.describe('Project Existing-location Session creation', () => {
   test('creates a Session from the declared Existing Location', async ({ page }) => {
     test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    test.setTimeout(90_000);
     await page.goto(
       '/?token=e2e-test-token&server_url=' +
         encodeURIComponent('ws://localhost:19090/ws'),
@@ -43,11 +44,20 @@ test.describe('Project Existing-location Session creation', () => {
     ).toBeVisible({ timeout: 15_000 });
 
     // Creating enters the work (the ordinary selection path); a freshly made
-    // Session has no stored attach profile, so dismiss its attach prompt.
+    // Session has no stored attach profile, so confirm its attach prompt. The
+    // Project chip is terminal-capsule chrome — it exists once the Terminal
+    // surface is attached — and it carries the membership the create
+    // committed, projected through create/list.
     const attachDialog = page.getByRole('dialog').filter({ hasText: 'Attach' });
-    if (await attachDialog.isVisible().catch(() => false)) {
-      await attachDialog.getByRole('button', { name: 'Cancel' }).click();
-    }
+    await expect(attachDialog).toBeVisible({ timeout: 10_000 });
+    const attachButton = attachDialog.getByRole('button', { name: 'Attach' });
+    await expect(attachButton).toBeEnabled({ timeout: 10_000 });
+    await attachButton.click();
+    await expect(attachDialog).not.toBeVisible({ timeout: 5_000 });
+
+    await expect(page.getByTestId('session-project-chip')).toHaveText(projectName, {
+      timeout: 30_000,
+    });
   });
 
   test('an offline Existing Location is explicit and cannot create', async ({ page }) => {

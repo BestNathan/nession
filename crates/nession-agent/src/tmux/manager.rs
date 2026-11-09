@@ -490,6 +490,7 @@ impl SessionManager {
                 height: session.height,
                 foreground_command: session.foreground_command,
                 working_dir: session.working_dir,
+                instance_id: session.instance_id,
             })
             .collect())
     }
