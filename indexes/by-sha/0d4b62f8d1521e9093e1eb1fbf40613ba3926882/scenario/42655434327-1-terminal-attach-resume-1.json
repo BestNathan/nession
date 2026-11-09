@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42655434327,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3124-sandbox-context-capability",
+    "target_sha": "0d4b62f8d1521e9093e1eb1fbf40613ba3926882",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42655434327",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "a831c4c355d3c39bc00a05d0e7568f65a37bff5869c5a80ec9201d9b348593d0"
+  },
+  "record": "runs/2026-11-09/42655434327-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "10c4237f347877ee6194a267edc2e702275a98cf7de342ab08cdd54ebc7dd8e5"
+}
