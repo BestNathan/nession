@@ -21,7 +21,7 @@ owned_process() {
   [[ "$(readlink -f "/proc/$pid/exe")" == "$(readlink -f "$expected_exe")" ]] || return 1
   current="$(ticks "$pid")" || return 1
   [[ "$born" == "$current" ]] || return 1
-  tr '\\0' ' ' < "/proc/$pid/cmdline" | grep -Fq -- "$argument"
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -Fq -- "$argument"
 }
 stop_owned_pid() {
   local file="$1" exe="$2" argument="$3" pid born extra i
@@ -51,16 +51,24 @@ stop_owned_pid() {
   rm -f -- "$file"
 }
 alias_present() {
-  sudo ip -o -4 addr show dev lo |
-    grep -Eq 'inet[[:space:]]+192[.]168[.]2[.]162/32([[:space:]]|$)'
+  local observed
+  observed="$(sudo ip -o -4 addr show dev lo)" || return 2
+  grep -Eq 'inet[[:space:]]+192[.]168[.]2[.]162/32([[:space:]]|$)' <<< "$observed"
 }
 cleanup_alias() {
   local marker="$RUNNER_TEMP/gost-ci-alias-owned"
   # An alias that predated this job must never be removed.
   [[ -f "$marker" ]] || return 0
+  local inspect_status=0
   if alias_present; then
     sudo ip addr del "$API_ALIAS/32" dev lo ||
       { fail 'could not remove job-owned loopback alias'; return 1; }
+  else
+    inspect_status=$?
+    if (( inspect_status != 1 )); then
+      fail 'could not inspect job-owned loopback alias; preserving marker'
+      return 1
+    fi
   fi
   rm -f -- "$marker"
 }
@@ -103,7 +111,7 @@ start() {
   done
   [[ "$born" =~ ^[1-9][0-9]*$ ]] ||
     { fail 'could not pin the owned GOST process identity'; return 1; }
-  printf '%s %s\\n' "$pid" "$born" > "$RUNNER_TEMP/gost-ci.pid"
+  printf '%s %s\n' "$pid" "$born" > "$RUNNER_TEMP/gost-ci.pid"
   for i in {1..15}; do
     if curl -ksS --max-time 2 --output /dev/null \
       "https://${API_ALIAS}:${API_PORT}/healthz" 2>/dev/null; then
@@ -130,10 +138,10 @@ self_test() {
   sleep 20 & owned=$!
   sleep 20 & unrelated=$!
   born="$(ticks "$owned")"
-  printf '%s %s\\n' "$owned" "$born" > "$temp/gost-ci.pid"
+  printf '%s %s\n' "$owned" "$born" > "$temp/gost-ci.pid"
   owned_process "$owned" "$born" "$exe" 'sleep 20'
   # A copied marker with the wrong process birth time must not kill anything.
-  printf '%s %s\\n' "$unrelated" "$(( $(ticks "$unrelated") + 1 ))" > "$temp/forged.pid"
+  printf '%s %s\n' "$unrelated" "$(( $(ticks "$unrelated") + 1 ))" > "$temp/forged.pid"
   stop_owned_pid "$temp/forged.pid" "$exe" 'sleep 20'
   kill -0 "$unrelated"
   stop_owned_pid "$temp/gost-ci.pid" "$exe" 'sleep 20'
