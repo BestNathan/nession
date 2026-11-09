@@ -485,3 +485,10 @@
 - Categories: web, app, interaction, session, project, presentation, responsive
 - Reason: Record the post-acceptance Existing Location Select correction: the generic content-size trigger and multiline item variants, the single-line default preserved, the anchor-width overlay popup and one scroll owner, the long-path fixture, and the SC-07/SC-08 Case receipts at merged PR #3126
 - Source: https://github.com/BestNathan/nession/issues/3089
+
+## 2026-11-09T16:16:00Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent
+- Reason: Add the Agent-side durable cache contract from #3023/PR #3125: [erofs] config precedence, fail-closed PVC/ownership/ephemeral validation, digest-addressed atomic and resume-safe cache lifecycle, zero-transfer warm hits, the container/GitOps /data contract, the Pending Kubernetes Pod/PVC criterion, and the a0a970d staging rollout evidence
+- Source: https://github.com/BestNathan/nession/pull/3125

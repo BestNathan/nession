@@ -1,12 +1,12 @@
 ---
 title: "Global EROFS Image Manager"
-description: "Server-owned immutable EROFS artifacts: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, Project-scoped access grants, Range HTTP and reference-safe GC"
+description: "Server-owned immutable EROFS artifacts with a durable Agent cache: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, Project-scoped access grants, Range HTTP, reference-safe GC and fail-closed PVC-backed Agent storage"
 topic: engineering
-categories: ["architecture", "erofs", "images", "server", "storage", "security"]
+categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent"]
 status: verified
 created_at: 2026-11-09T12:54:48Z
-updated_at: 2026-11-09T12:54:48Z
-sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/db/migration/m007_erofs_images.rs"]
+updated_at: 2026-11-09T16:16:00Z
+sources: ["https://github.com/BestNathan/nession/issues/3022", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-erofs/src/build.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/image/mod.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-protocol/src/contracts/image/v1.rs", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/crates/nession-server/src/db/migration/m007_erofs_images.rs", "https://github.com/BestNathan/nession/issues/3023", "https://github.com/BestNathan/nession/pull/3125", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/docs/architecture/agent-erofs-cache.md", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/crates/nession-agent/src/erofs_cache.rs", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/crates/nession-agent/src/config.rs", "https://github.com/BestNathan/nession/blob/a0a970da27ba97da76e5dd7c619d9c9dc0c44b88/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/f05e138c4ef36dac920ca9aefa1111de0552315a/base/nession/deployment-agent.yaml"]
 ---
 
 # Global EROFS Image Manager
@@ -20,7 +20,9 @@ owns the build, the blob and the access boundary. Sandbox never clones Git or
 manages a registry.
 
 Delivered by #3022 (PR #3120, merged to staging at
-`5e9a2d82118a8ea4da2b2418af6b161d86bf3841`).
+`5e9a2d82118a8ea4da2b2418af6b161d86bf3841`). The Agent-side durable cache
+was delivered by #3023 (PR #3125, merged to staging at
+`a0a970da27ba97da76e5dd7c619d9c9dc0c44b88`).
 
 ## Ownership
 
@@ -87,6 +89,39 @@ one physical blob; a different revision can never overwrite a referenced digest.
   at it, no unexpired lease exists, and no in-process transfer is active.
   Restart preserves metadata, aliases and Project references in SQLite.
 
+## Agent cache and durable storage (#3023)
+
+The Agent consumes a digest, never a logical image: the Server resolves the
+image and mints a scoped grant, and `nession-agent` keeps only a local copy of
+bytes it was authorized to read. The cache is the Agent-side mirror of the
+Server's blob store; it does not build, tag or resolve images.
+
+- **Configuration.** `[erofs] storage_dir` in the Agent TOML. Precedence is
+  explicit TOML, `NESION_EROFS_STORAGE_DIR`, `$NESION_HOME/erofs`, then the
+  native default (`/var/lib/nession/erofs` on Linux, `$HOME/.nession/erofs`
+  elsewhere). Relative, empty, control-character and `..` paths are rejected;
+  the resolution owner is `AgentConfig::effective_erofs_storage_dir`.
+- **Fail closed.** An explicit path is a **durable-location declaration**: the
+  Agent requires a real directory (not a symlink), matching ownership when not
+  root, a real write+fsync probe, and on Linux a `/proc/mounts` filesystem that
+  is not tmpfs/ramfs/overlay/aufs/etc. It never falls back to the container
+  writable layer or tmpfs. An implicit default is a development convenience and
+  does not claim a PVC.
+- **Cache contract.** Verified blobs live at `sha256/<hex>`; downloads stage in
+  `tmp/<hex>.part`, verify SHA-256, fsync and rename atomically. One in-process
+  fetch per digest serves concurrent callers; an interrupted `.part` resumes
+  with `Range`, a `200` restarts, and stale partials are reconciled after 24h.
+  A warm hit re-hashes the blob, transfers zero body bytes, and a corrupted file
+  is removed and refetched. Pins prevent eviction; the cache never deletes a
+  mounted resource and never buffers a whole image in memory.
+- **Container/GitOps.** Both Agent Dockerfiles create `/data` and `/data/erofs`
+  and document that an OCI `VOLUME` is not a PVC. The GitOps Agent Deployment
+  keeps `NESION_HOME=/data` on the existing `nession-server-data` PVC and sets
+  `AGENT_EROFS_STORAGE_DIR=/data/erofs`; it creates no second PVC and moves no
+  Server, Claude-home or Session data. `deploy/entrypoint-agent.sh` validates
+  the override and writes the optional `[erofs]` table after every top-level
+  key.
+
 ## Evidence
 
 All five runtime criteria passed source-aligned Cases in Case Smoke run
@@ -97,6 +132,20 @@ magic at byte 1024), prove shallow/tagless/committable snapshots, deterministic
 digest reuse, HTTP Range/ETag/403/404/416 and Project-isolated grants, GC
 protection and restart persistence. Staging deployed server/agent/ui image
 `5e9a2d8`; the server pod started with the m007 migration applied.
+
+The Agent cache merged to staging at
+`a0a970da27ba97da76e5dd7c619d9c9dc0c44b88` (PR #3125). Its pre-merge criteria
+passed Case Smoke run `42637855144` at PR head
+`bc91a75ecd1454183ed3bc19b8600c90d634d3a4` (SC-01, SC-03, SC-04) and the
+trusted agent run `42637858414` (SC-02). The merged staging Acceptance / Cases
+run `42638717201` recorded SC-05 as Pending at the merged SHA with the blocked
+K8s-runner reason; no live Pod/PVC survival is claimed.
+
+The staging release for `a0a970d` succeeded, and the server, Agent and UI
+deployments were observed Running at their `a0a970d` images. GitOps deploy
+commit `f05e138c4ef36dac920ca9aefa1111de0552315a` carries that image set and
+keeps `AGENT_EROFS_STORAGE_DIR=/data/erofs` on the existing
+`nession-server-data` PVC.
 
 ## Limits and when to revisit
 
@@ -111,3 +160,8 @@ protection and restart persistence. Staging deployed server/agent/ui image
 - Digest dedupe is physical only; every Project authorization is checked
   independently. A Project referencing a missing digest remains a declaration;
   `server.image.access` refuses until the image is ready.
+- The Agent cache is a delivered component with its own configuration and
+  storage contract; no Session/Sandbox image consumer invokes it yet, and
+  provisioning/mounting remains with #3024/#3062. SC-05's controlled Kubernetes
+  Pod-delete/recreate proof is **Pending**: no trusted K8s Case lane exists, and
+  the staging Case records that blocked reason rather than claiming live proof.

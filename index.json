@@ -21,7 +21,7 @@
     "engineering": [
       {
         "title": "Global EROFS Image Manager",
-        "description": "Server-owned immutable EROFS artifacts: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, Project-scoped access grants, Range HTTP and reference-safe GC",
+        "description": "Server-owned immutable EROFS artifacts with a durable Agent cache: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, Project-scoped access grants, Range HTTP, reference-safe GC and fail-closed PVC-backed Agent storage",
         "path": "topics/engineering/global-erofs-image-manager.md",
         "status": "verified",
         "categories": [
@@ -30,9 +30,10 @@
           "images",
           "server",
           "storage",
-          "security"
+          "security",
+          "agent"
         ],
-        "updated_at": "2026-11-09T12:54:48Z"
+        "updated_at": "2026-11-09T16:16:00Z"
       },
       {
         "title": "Karpathy LLM Wiki principles for Nession project knowledge",
@@ -282,6 +283,7 @@
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
     "agent": [
+      "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
     "agents": [
