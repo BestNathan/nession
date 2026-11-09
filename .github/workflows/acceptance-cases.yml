@@ -413,10 +413,11 @@ jobs:
     # runner. The trusted selector routes only `platform: macos` Cases here;
     # an ordinary push runs both platform jobs. A manual dispatch targets one.
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'macos'
-    # The hosted arm64 macOS configuration (macos-14/15) is not available to
-    # this repository; macos-13 is the supported x86_64 image. The Case only
-    # needs cargo and /usr/bin/sandbox-exec, both present on either image.
-    runs-on: macos-13
+    # Current hosted Intel macOS labels are macos-15-intel / macos-26-intel;
+    # macos-13 is retired (its jobs queue forever) and the arm64 configuration
+    # is unavailable to this repository. The Case only needs cargo and
+    # /usr/bin/sandbox-exec, both present on the Intel image.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: ""
