@@ -15,7 +15,7 @@
 
 ## Catalog
 
-| Web/App Attach and Session operation surfaces — responsive Web Dialog, App quick sheet/full-depth Create and settings | [#3089](https://github.com/BestNathan/nession/issues/3089) | [Interactive HTML](session-operation-surfaces-3089/index.html) · [Scenario & fidelity](session-operation-surfaces-3089/README.md) |
+| Web/App Attach and Session operations — responsive Web Dialog, App operation depths; Project Location Select now content-height and wrap-safe (#3089 reopened) | [#3089](https://github.com/BestNathan/nession/issues/3089) | [Interactive HTML](session-operation-surfaces-3089/index.html) · [Scenario & fidelity](session-operation-surfaces-3089/README.md) |
 
 | Project in Sidebar / App Sessions → standalone detail → Existing + Managed Session creation | [#3025](https://github.com/BestNathan/nession/issues/3025), [#3021](https://github.com/BestNathan/nession/issues/3021), [#3022](https://github.com/BestNathan/nession/issues/3022) | [Interactive HTML](project-session-3025/index.html) · [Scenario & fidelity](project-session-3025/README.md) |
 
