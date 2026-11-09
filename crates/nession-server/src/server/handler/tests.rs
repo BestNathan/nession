@@ -25,6 +25,7 @@ struct TestDeps {
     client_registry: Arc<ClientRegistry>,
     web_client_registry: Arc<WebClientRegistry>,
     env_service: Arc<EnvService>,
+    image_manager: Arc<crate::image::ImageManager>,
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
 
@@ -40,6 +41,13 @@ impl TestDeps {
     /// read failure is reported rather than swallowed — needs the handler
     /// reading from the same `Database` the test broke.
     fn with_db(db: Arc<Database>) -> Self {
+        let image_manager = Arc::new(
+            crate::image::ImageManager::unavailable(
+                Arc::clone(&db),
+                std::env::temp_dir().join(format!("nession-image-test-{}", uuid::Uuid::new_v4())),
+            )
+            .expect("test image manager"),
+        );
         Self {
             agent_registry: Arc::new(AgentRegistry::new(60, Arc::clone(&db))),
             session_registry: Arc::new(SessionRegistry::new(Arc::clone(&db))),
@@ -48,6 +56,7 @@ impl TestDeps {
             web_client_registry: Arc::new(WebClientRegistry::new()),
             env_service: EnvService::new(Arc::clone(&db)),
             p2p_broker: Arc::new(crate::broker::ConnectionBroker::new(300)),
+            image_manager,
             db,
         }
     }
@@ -66,6 +75,7 @@ impl TestDeps {
                 client_registry: Arc::clone(&self.client_registry),
                 web_client_registry: Arc::clone(&self.web_client_registry),
                 env_service: Arc::clone(&self.env_service),
+                image_manager: Arc::clone(&self.image_manager),
                 db: Arc::clone(&self.db),
                 p2p_broker: Arc::clone(&self.p2p_broker),
             },

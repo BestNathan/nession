@@ -476,6 +476,22 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::String,
     },
     FieldSpec {
+        key: "image_blob_dir",
+        kind: FieldKind::String,
+    },
+    FieldSpec {
+        key: "image_build_dir",
+        kind: FieldKind::String,
+    },
+    FieldSpec {
+        key: "image_max_concurrent_builds",
+        kind: FieldKind::UsizeNonZero,
+    },
+    FieldSpec {
+        key: "image_access_token_expiry_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
         key: "terminal_stall_grace_secs",
         kind: FieldKind::U64,
     },

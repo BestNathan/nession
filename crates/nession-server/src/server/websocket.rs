@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
@@ -8,6 +9,7 @@ use tracing::{debug, error, info, warn};
 use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
+use crate::image::{ImageHttpService, ImageManager};
 use crate::registry::{AgentRegistry, SessionRegistry};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::CommandBroker;
@@ -47,6 +49,10 @@ pub struct WebSocketServer {
     /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
     /// listener and the Server's business services.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Global EROFS image manager (#3022), shared by every connection.
+    image_manager: Arc<ImageManager>,
+    /// Authorized blob HTTP route mounted on this listener.
+    image_http: Arc<ImageHttpService>,
     listener: Option<TcpListener>,
 }
 
@@ -92,6 +98,26 @@ impl WebSocketServer {
             config.p2p_token_expiry_secs,
         ));
 
+        // The global image manager (#3022): one content-addressed blob store,
+        // one bounded build worker, one owner of image metadata.
+        let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
+            .context("failed to open the image blob store")?;
+        let image_builder = nession_erofs::ErofsBuilder::new(
+            Arc::new(nession_erofs::ProcessGitRunner::default()),
+            Arc::new(nession_erofs::ProcessMkfsRunner::default()),
+            blob_store.clone(),
+            &config.image_build_dir,
+        )
+        .context("failed to open the image build workspace")?;
+        let image_manager = Arc::new(ImageManager::new(
+            Arc::clone(&db),
+            Arc::new(image_builder),
+            blob_store,
+            config.image_max_concurrent_builds,
+            config.image_access_token_expiry_secs,
+        ));
+        let image_http = Arc::new(ImageHttpService::new(Arc::clone(&image_manager)));
+
         // Mount MCP on this listener when configured. Building it here (rather
         // than on first request) means a fail-closed configuration error stops
         // the start, before `ready` is announced. It shares the runtime's
@@ -107,6 +133,7 @@ impl WebSocketServer {
                 client_registry: Arc::clone(&client_registry),
                 web_client_registry: Arc::clone(&web_client_registry),
                 env_service: Arc::clone(&env_service),
+                image_manager: Arc::clone(&image_manager),
                 db: Arc::clone(&db),
                 p2p_broker: Arc::clone(&p2p_broker),
             },
@@ -125,6 +152,8 @@ impl WebSocketServer {
             db,
             mutations,
             mcp,
+            image_manager,
+            image_http,
             listener: Some(listener),
         })
     }
@@ -274,6 +303,8 @@ impl WebSocketServer {
                 mutations: Arc::clone(&self.mutations),
                 p2p_broker: Arc::clone(&self.p2p_broker),
                 mcp: self.mcp.clone(),
+                image_manager: Arc::clone(&self.image_manager),
+                image_http: Arc::clone(&self.image_http),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
@@ -344,6 +375,9 @@ struct ServerContext {
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// Global EROFS image manager and its authorized HTTP route (#3022).
+    image_manager: Arc<ImageManager>,
+    image_http: Arc<ImageHttpService>,
     auth_token: String,
     heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
@@ -380,16 +414,29 @@ async fn route_connection<S>(stream: S, ctx: ServerContext) -> anyhow::Result<()
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let Some(mcp) = ctx.mcp.clone() else {
-        return handle_ws_stream(stream, ctx).await;
-    };
-
     match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
         Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { head, body }) => mcp
-            .serve(head, body)
-            .await
-            .map_err(|error| anyhow::anyhow!("MCP response failed: {error}")),
+        Ok(Sniffed::Http { head, body }) => {
+            let is_image = head
+                .path()
+                .starts_with(nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX);
+            if is_image {
+                return ctx
+                    .image_http
+                    .serve(head, body)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("image blob response failed: {error}"));
+            }
+            if let Some(mcp) = ctx.mcp.clone() {
+                mcp.serve(head, body)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("MCP response failed: {error}"))
+            } else {
+                // No service owns this route. The connection closes without a
+                // body; the client sees the closed connection, not a hang.
+                Ok(())
+            }
+        }
         Err(error) => {
             // A non-WebSocket, non-HTTP peer (a scanner or a health check that
             // sent garbage). The stream is gone with the parser, so this is a
@@ -423,7 +470,9 @@ where
         terminal_stall_grace,
         query_concurrency,
         p2p_broker,
+        image_manager,
         mcp: _,
+        image_http: _,
     } = ctx;
 
     let ws_stream = accept_async(stream).await?;
@@ -443,6 +492,7 @@ where
             client_registry: client_registry.clone(),
             web_client_registry: web_client_registry.clone(),
             env_service,
+            image_manager,
             db,
             p2p_broker,
         },

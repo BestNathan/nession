@@ -1,6 +1,7 @@
 pub mod broker;
 pub mod db;
 pub mod env;
+pub mod image;
 pub mod probe;
 pub mod protocol;
 pub mod registry;
