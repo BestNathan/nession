@@ -34,14 +34,23 @@ function SelectTrigger({
   children,
   ...props
 }: SelectPrimitive.Trigger.Props & {
-  size?: "sm" | "default"
+  /**
+   * `content` is the multi-line variant (issue 3089): no fixed height and no
+   * nowrap/line-clamp, so a selected record with several lines sets the
+   * control's height instead of overflowing it. Single-line triggers keep
+   * `default`/`sm` unchanged.
+   */
+  size?: "sm" | "default" | "content"
 }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-solid aria-invalid:focus-visible:outline-[length:var(--nession-focus-ring-width)] aria-invalid:focus-visible:outline-ring aria-invalid:focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))] data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-md *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex w-fit justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm transition-colors outline-none select-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-solid aria-invalid:focus-visible:outline-[length:var(--nession-focus-ring-width)] aria-invalid:focus-visible:outline-ring aria-invalid:focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))] data-placeholder:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        size === "content"
+          ? "items-start whitespace-normal *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-start *:data-[slot=select-value]:gap-1.5"
+          : "items-center whitespace-nowrap data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-md *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5",
         className
       )}
       {...props}
@@ -111,18 +120,32 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  multiline = false,
   ...props
-}: SelectPrimitive.Item.Props) {
+}: SelectPrimitive.Item.Props & {
+  /**
+   * Drops the item's single-line contract (issue 3089) so a multi-line record can
+   * wrap inside the anchored popup instead of being clipped by its width.
+   */
+  multiline?: boolean
+}) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
+      data-multiline={multiline ? "true" : undefined}
       className={cn(
-        "relative flex w-full cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        multiline ? "items-start" : "items-center",
         className
       )}
       {...props}
     >
-      <SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
+      <SelectPrimitive.ItemText
+        className={cn(
+          "flex flex-1 gap-2",
+          multiline ? "min-w-0 whitespace-normal" : "shrink-0 whitespace-nowrap"
+        )}
+      >
         {children}
       </SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator

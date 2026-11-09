@@ -116,7 +116,8 @@ function ProjectLocationSelect({
               concatenated them, so a long directory could hide the Agent. */}
           <SelectTrigger
             id="project-location"
-            className="h-auto min-h-10 w-full py-2 [&>span]:min-w-0"
+            size="content"
+            className="min-h-10 w-full py-2 [&>span]:min-w-0"
             data-testid="project-location-trigger"
           >
             {selectedLocation ? (
@@ -129,7 +130,11 @@ function ProjectLocationSelect({
             {locations.map((location, index) => {
               const agent = agents.find((candidate) => candidate.agent_id === location.agent_id);
               return (
-                <SelectItem key={`${location.agent_id}:${location.path}`} value={String(index)}>
+                <SelectItem
+                  key={`${location.agent_id}:${location.path}`}
+                  value={String(index)}
+                  multiline
+                >
                   <ProjectLocationDetails location={location} agent={agent} />
                 </SelectItem>
               );
