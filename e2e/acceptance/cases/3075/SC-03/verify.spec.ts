@@ -96,7 +96,9 @@ test('SC-03: state, Terminal and Workspace context survive the rail round trip',
   await page.getByTestId('sidebar-rail-search').click();
   const search = page.getByLabel('Search sessions');
   await expect(search).toBeFocused();
-  await search.fill('design');
+  // This term matches only the currently selected Session, so the same filter
+  // also proves the selection survived the round trip.
+  await search.fill('reconnect');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
   const selectedBefore = await page
     .locator('[data-testid="session-item-row"][data-selected="true"]')
@@ -105,7 +107,7 @@ test('SC-03: state, Terminal and Workspace context survive the rail round trip',
   await expect.poll(() => columnWidth(page)).toBe(56);
   await page.getByTestId('sidebar-rail-expand').click();
   await expect.poll(() => columnWidth(page)).toBe(246);
-  await expect(search).toHaveValue('design');
+  await expect(search).toHaveValue('reconnect');
   await expect(page.getByTestId('session-item-row')).toHaveCount(1);
   expect(
     await page

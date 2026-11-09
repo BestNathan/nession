@@ -81,6 +81,9 @@ test.describe('Web navigation rail (#3075)', () => {
     await expect(page.getByTestId('sidebar-rail')).toHaveCount(0);
     await page.getByLabel('Search sessions').fill('design');
     await expect(page.getByTestId('session-item-row')).toHaveCount(1);
+    // The Project return path picks the selected row, which the filter above
+    // excluded; clear it so the destination returns through that Session.
+    await page.getByLabel('Search sessions').fill('');
 
     // Projects is present only with a navigable destination, and opens the
     // standalone Project detail without unmounting the Terminal.
