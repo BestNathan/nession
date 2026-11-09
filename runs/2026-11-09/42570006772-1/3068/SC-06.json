@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1182fdad4722bcd97db10c0ee94a2430f6f70ebda6693068d64913521cb25f43",
+  "run_id": 42570006772,
+  "run_attempt": 1,
+  "issue": 3068,
+  "criterion": "SC-06",
+  "criterion_text": "Historical GitOps acceptance remains usable through the explicit compatibility path, but structured/no-source Issues neither fall through to an implicit whole-branch archive nor snapshot unrelated Issue comments.",
+  "stage": "post-merge",
+  "target_sha": "cdfe86f00cad21dc5f204316d26020bc8a8c5f04",
+  "contract_sha256": "ad327c779c03088b22a427d9302a208a61d80dfe9591a986a4942180586cab94",
+  "case_revision": "cdfe86f00cad21dc5f204316d26020bc8a8c5f04",
+  "case_tree_sha": "18df8a8f4d30918c229ccddcf80c749be7087a10",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T05:57:45.286Z",
+  "finished_at": "2026-11-09T05:57:51.275Z",
+  "duration_ms": 5989,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "lse\\n' +\n  '\\n' +\n  '      - name: Checkout target ref for read-only verification\\n' +\n  '        uses: actions/checkout@v4\\n' +\n  '        with:\\n' +\n  '          ref: ${{ inputs.target_ref }}\\n' +\n  '          path: workspace\\n' +\n  '          persist-credentials: false\\n' +\n  '          # Source ancestry evidence must include parents and reachable history;\\n' +\n  '          # depth-1 leaves only the commit SHA in .git/shallow and makes\\n' +\n  '          # exact-source merge/parent proofs incorrectly Pending.\\n' +\n  '          fetch-depth: 0\\n' +\n  '\\n' +\n  '      - name: Checkout immutable authenticated Provider evidence\\n' +\n  \"        if: inputs.provider_source_run_id != '' || (inputs.stage == 'post-merge' && (inputs.issue_number == 1749 || inputs.issue_number == 2817))\\n\" +\n  '        uses: actions/checkout@v4\\n' +\n  '        with:\\n' +\n  '          ref: metrics\\n' +\n  '          path: provider-metrics\\n' +\n  '          persist-credentials: false\\n' +\n  '\\n' +\n  '      - uses: actions/setup-node@v4\\n' +\n  '        with:\\n' +\n  \"          node-version: '24'\\n\" +\n  '\\n' +\n  '      - name: Self-test trusted Acceptance tooling\\n' +\n  '        working-directory: trusted\\n' +\n  '        run: |\\n' +\n  '          ./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-agent-selftest acceptance-ci-evidence-selftest\\n' +\n  '\\n' +\n  '      - name: Validate invocation\\n' +\n  '        run: |\\n' +\n  '          set -euo pipefail\\n' +\n  '          if ! [[ \"${ISSUE_NUMBER}\" =~ ^[0-9]+$ ]] || [[ \"${ISSUE_NUMBER}\" -le 0 ]]; then\\n' +\n  '            echo \"Invalid issue number: ${ISSUE_NUMBER}\" >&2\\n' +\n  '            exit 1\\n' +\n  '          fi\\n' +\n  '          case \"${ACCEPTANCE_STAGE}\" in\\n' +\n  '            pre-merge|staging|post-merge) ;;\\n' +\n  '            *) echo \"Unsupported acceptance stage: ${ACCEPTANCE_STAGE}\" >&2; exit 1 ;;\\n' +\n  '          esac\\n' +\n  '          case \"${ACCEPTANCE_PROVIDER}\" in\\n' +\n  '            cursor|deepseek|qwen) ;;\\n' +\n  '            *) echo \"Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}\" >&2; exit 1 ;;\\n' +\n  '          esac\\n' +\n  '\\n' +\n  '      # PR-stage CI readback remains exceptional: #2917 has bounded timing\\n' +\n  '      # evidence and #3001 independently proves its original Qwen implementing\\n' +\n  '      # PR and Reviewer against pinned GitHub/Store source. Trusted Main owns\\n' +\n  '      # both collectors; other PR-stage SCs have no GitHub evidence cost.\\n' +\n  '      - name: Collect trusted GitHub Actions evidence\\n' +\n  \"        if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001'))\\n\" +\n  '        working-directory: trusted\\n' +\n  '        env:\\n' +\n  '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\\n' +\n  '          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\\n' +\n  '        run: |\\n' +\n  '          set -euo pipefail\\n' +\n  '          if [[ \"${ACCEPTANCE_STAGE}\" == \"pre-merge\" ]]; then\\n' +\n  '            case \"${ISSUE_NUMBER}\" in\\n' +\n  '              2917) node scripts/acceptance-ci-evidence.mjs collect-pr-quality \\\\\\n' +\n  '                \"${GITHUB_WORKSPACE}/workspace\" \\\\\\n' +\n  '                \"${RUNNER_TEMP}/acceptance-ci-evidence.json\" ;;\\n' +\n  '              3001) node scripts/acceptance-ci-evidence.mjs collect-pr-fixture \\\\\\n' +\n  '                \"${GITHUB_WORKSPACE}/workspace\" \\\\\\n' +\n  '                \"${RUNNER_TEMP}/acceptance-ci-evidence.json\" ;;\\n' +\n  '              *) echo \"Unsupported PR-stage collector Issue: ${ISSUE_NUMBER}\" >&2; exit 1 ;;\\n' +\n  '            esac\\n' +\n  '          else\\n' +\n  '            node scripts/acceptance-ci-evidence.mjs collect \\\\\\n' +\n  '              \"${GITHUB_WORKSPACE}/workspace\" \\\\\\n' +\n  '              \"${RUNNER_TEMP}/acceptance-ci-evidence.json\"\\n' +\n  '          fi\\n' +\n  '\\n' +\n  '      - name: Prepare stage-specific immutable acceptance context\\n' +\n  '        id: prepare\\n' +\n  '        working-directory: trusted\\n' +\n  '        env:\\n' +\n  '          ACCEPTANCE_RUN_ID: ${{ github.run_id }}\\n' +\n  '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\\n' +\n  '          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\\n' +\n  '        run: |\\n' +\n  '          set -euo pipefail\\n' +\n  '          ci_evidence_file=\"-\"\\n' +\n  '          if [[ \"${ACCEPTANCE_STAGE}\" != \"pre-merge\" || \"${ISSUE_NUMBER}'... 10872 more characters",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 45,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42570006772,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cdfe86f00cad21dc5f204316d26020bc8a8c5f04",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42570006772",
+    "record_path": "runs/2026-11-09/42570006772-1/3068/SC-06.json",
+    "source_result_sha256": "fbe7516e0b1569c880a54a0705d53e42ec1ee9e0fc49c6e622dbcf89b9620d68"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42570006772-1",
+    "sha256": "fbe7516e0b1569c880a54a0705d53e42ec1ee9e0fc49c6e622dbcf89b9620d68",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42570006772",
+    "durability": "time-limited; object archival not configured"
+  }
+}
