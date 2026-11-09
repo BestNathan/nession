@@ -142,3 +142,7 @@ The Project prototype now tests a **first-class Projects section in Web Sidebar*
 ## Project maintenance refinement
 
 The Project/EROFS prototype now provides Projects + Create, per-row edit/delete action menu, explicit delete confirmation, optional Project Source and Agent location, and per-Project detail selection. Project deletion does not touch existing Sessions or shared image data. UI is a mock; see #3021/#3025 for API implementation and verification.
+
+## Session Project context (#3082, 2026-11-09)
+
+The shared Project prototype now shows a context-sensed Terminal Project Capsule/Peek derived from the focused Session's explicit project_id, an in-Session Project capability view, and an explicit Associate/Change/Remove form. Sidebar Project remains an independent resource. No Workspace/Project identity conflation or runtime migration.

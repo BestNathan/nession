@@ -47,3 +47,11 @@ No extra EROFS Manager top-level dashboard, automatic scheduler, real session cr
 ## Project maintenance decision
 
 Projects in the Web Sidebar and App Sessions are direct maintenance entry points: + creates a name-only Project, rows select the standalone detail, ··· opens Rename/Settings or Delete (confirmation required). Detail settings control name, optional GitHub Source/ref and Existing Agent directory. Project deletion does not destroy Sessions, owned directories or globally shared EROFS. Multi-project mock state is not Server persistence. Browser tests and public SHA must be renewed for this revision.
+
+## Session Project capability / association (2026-11-09, #3082)
+
+- Project relation is an **explicit optional Session.project_id** managed by Server, not inferred from Agent, cwd, Git or the Project selected in the Sidebar. A Project may have multiple Sessions; a Session belongs to zero or one. Project and Workspace IDs stay separate.
+- A focused Session with a Project exposes a compact Terminal Capsule Project hint (relevant state) and a Peek with current Project ID, name, Source/ref and actions; the Workspace Project capability (active only when opened) shows Source, Locations, EROFS, related Sessions and links to Project Settings or standalone ProjectDetail. Return preserves the exact focused Session.
+- No Project: small discoverable `+ Project` association action. Explicit Assign, Change and Remove act on Session metadata only, never cwd, env, mount or actual process; deleting Project clears its mock links without killing Sessions. The mock inspector reports `available/relevant/active` per focus.
+- Switch Session A/B after creating a second Project, and compare Peek; unbind one and ensure no stale Project. Same flows should work at App 390/375 with one host-owned Back/Header.
+- This mock does not implement Server persistence, authorization, Session reincarnation protection, Agent metadata, or production Capability Registry wiring. Browser and published Pages evidence must be freshly collected for this new SHA.
