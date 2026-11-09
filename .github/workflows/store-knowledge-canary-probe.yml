@@ -1,0 +1,83 @@
+name: Store / Knowledge Canary Probe
+
+# #2358 SC-02 operator-only disposable-ref runtime evidence.
+# NO step mutates refs/heads/knowledge; tests are explicitly pinned to the
+# dedicated knowledge-probe and knowledge-probe-control branches.
+# The owner must first activate two canary-only Rulesets after manual review.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-knowledge-canary-probe-2358
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.actor == 'BestNathan' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    # Only this approved one-shot operator job gets write permission for its
+    # ordinary GITHUB_TOKEN control/denial probes; no PR/Agent receives it.
+    permissions:
+      contents: write
+    environment: knowledge-publish
+    steps:
+      - name: Checkout exact trusted main probe implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify normal writer is capable and denied on protected canary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KNOWLEDGE_PUBLISHER_APP_ID: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-canary-probe.mjs self-test
+          node scripts/knowledge-canary-probe.mjs ordinary
+      - name: Mint only the dedicated Knowledge App for the positive and negative probes
+        id: app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.KNOWLEDGE_PUBLISHER_APP_PRIVATE_KEY }}
+          owner: BestNathan
+          repositories: nession
+          permission-contents: write
+      - name: Verify App fast-forward succeeds but force/deletion are rejected
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KNOWLEDGE_CANARY_APP_TOKEN: ${{ steps.app.outputs.token }}
+          KNOWLEDGE_PUBLISHER_APP_ID: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-canary-probe.mjs app
+          {
+            echo '## Disposable Knowledge canary'
+            echo '- Run: '${{ github.run_id }}'/'${{ github.run_attempt }}
+            echo '- Actor: '${{ github.actor }}
+            echo '- Control: ordinary write succeeded'
+            echo '- Canary: ordinary denied, App fast-forward succeeded, App force/delete denied'
+            echo '- Production knowledge ref: never mutated by this workflow'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve bounded authenticated operator evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-canary-2358-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/knowledge-canary-result.json
+          if-no-files-found: error
+          retention-days: 90
