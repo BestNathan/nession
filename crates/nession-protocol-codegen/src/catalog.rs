@@ -2051,6 +2051,137 @@ wires: &["server.commands.update"],
         },
         Unit {
             owner: "core",
+            id: "server.project.list",
+            version: 1,
+            wires: &["server.project.list"],
+            // First-class Project declarations (#3021). `Project` is
+            // self-contained in every file that carries it, so the optional
+            // source, locations and defaults travel with it.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::project::v1::ProjectListPayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectListResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::Project>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSource>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectLocation>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSessionDefaults>(cfg),
+            ],
+            request: Some((
+                "ProjectListCall",
+                nession_protocol::contracts::project::v1::ProjectListPayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectListPayload>,
+            )),
+            response: Some((
+                "ProjectListReply",
+                nession_protocol::contracts::project::v1::ProjectListResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectListResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.project.get",
+            version: 1,
+            wires: &["server.project.get"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::project::v1::ProjectGetPayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectGetResponsePayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::Project>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSource>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectLocation>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSessionDefaults>(cfg),
+            ],
+            request: Some((
+                "ProjectGetCall",
+                nession_protocol::contracts::project::v1::ProjectGetPayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectGetPayload>,
+            )),
+            response: Some((
+                "ProjectGetReply",
+                nession_protocol::contracts::project::v1::ProjectGetResponsePayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectGetResponsePayload>,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.project.create",
+            version: 1,
+            wires: &["server.project.create"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::project::v1::ProjectCreatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectCreateResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::project::v1::Project>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSource>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectLocation>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSessionDefaults>(cfg),
+            ],
+            request: Some((
+                "ProjectCreateCall",
+                nession_protocol::contracts::project::v1::ProjectCreatePayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectCreatePayload>,
+            )),
+            response: Some((
+                "ProjectCreateReply",
+                nession_protocol::contracts::project::v1::ProjectCreateResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::project::v1::ProjectCreateResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.project.update",
+            version: 1,
+            wires: &["server.project.update"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::project::v1::ProjectUpdatePayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectUpdateResponsePayload>(
+                    cfg,
+                ),
+                decl_of::<nession_protocol::contracts::project::v1::Project>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSource>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectLocation>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectSessionDefaults>(cfg),
+            ],
+            request: Some((
+                "ProjectUpdateCall",
+                nession_protocol::contracts::project::v1::ProjectUpdatePayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectUpdatePayload>,
+            )),
+            response: Some((
+                "ProjectUpdateReply",
+                nession_protocol::contracts::project::v1::ProjectUpdateResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::project::v1::ProjectUpdateResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
+            id: "server.project.delete",
+            version: 1,
+            wires: &["server.project.delete"],
+            decls: vec![
+                decl_of::<nession_protocol::contracts::project::v1::ProjectDeletePayload>(cfg),
+                decl_of::<nession_protocol::contracts::project::v1::ProjectDeleteResponsePayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "ProjectDeleteCall",
+                nession_protocol::contracts::project::v1::ProjectDeletePayload::inline,
+                schema_of::<nession_protocol::contracts::project::v1::ProjectDeletePayload>,
+            )),
+            response: Some((
+                "ProjectDeleteReply",
+                nession_protocol::contracts::project::v1::ProjectDeleteResponsePayload::inline,
+                schema_of::<
+                    nession_protocol::contracts::project::v1::ProjectDeleteResponsePayload,
+                >,
+            )),
+        },
+        Unit {
+            owner: "core",
             id: "agent.terminal.output.applied",
             version: 1,
             wires: &["agent.terminal.output.applied"],

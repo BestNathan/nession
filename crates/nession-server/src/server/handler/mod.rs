@@ -1323,6 +1323,7 @@ pub(crate) use routes::{dispatch_server, server_descriptors, unit_policy, SERVER
 use routes::{env_file_key, session_by_id, session_by_parts};
 
 mod control;
+mod project;
 mod relay;
 mod routes;
 mod server_agent_address_update_v1;
@@ -1345,6 +1346,11 @@ mod server_env_get_v1;
 mod server_env_list_v1;
 mod server_env_write_v1;
 mod server_info_v1;
+mod server_project_create_v1;
+mod server_project_delete_v1;
+mod server_project_get_v1;
+mod server_project_list_v1;
+mod server_project_update_v1;
 mod server_session_attach_v1;
 mod server_session_capture_preview_v1;
 mod server_session_create_v1;

@@ -58,7 +58,8 @@ The key downstream interpretation of the Principles is:
 
 | Document | Status | Responsibility |
 |----------|--------|----------------|
-| [product-model.md](product-model.md) | Canonical | Product concepts and relationships: Workspace, Workspace Location, Session, Terminal, Agent, contextual capabilities |
+| [product-model.md](product-model.md) | Canonical | Product concepts and relationships: Project, Workspace, Workspace Location, Session, Terminal, Agent, contextual capabilities |
+| [project.md](project.md) | Canonical | Project declaration semantics and Project/Workspace/Location/Session/Image ownership map |
 | [information-architecture.md](information-architecture.md) | Canonical | Session-first IA, progressive disclosure, contextual capability presence, Workspace depth |
 | [workspace.md](workspace.md) | Canonical | Logical Workspace semantics, locations, capability contribution and visibility rules |
 | [capability-emergence.md](capability-emergence.md) | Canonical | Progressive capability disclosure across Terminal and Workspace; Peek / Workspace depth and context-preserving deepening |
