@@ -2,7 +2,7 @@
 // #565 SC-11: CI includes the shared contract tests and all three modes'
 // integration tests; every tool mapping is exercised, and each mode covers
 // list, create/destroy and an error path.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -18,9 +18,19 @@ run(({ evidence }) => {
     'mcp::embedded_mcp_answers_cluster_reads_from_the_server',
     'mcp::embedded_mcp_node_tools_route_to_the_named_agent',
   ]);
-  const agent = crateTests('nession-agent', ['--test', 'integration', 'mcp::'], 900000);
+  const agent = crateTests(
+    'nession-agent',
+    ['--test', 'integration', 'mcp::'],
+    900000,
+    isolatedTmuxEnv('nession-565-sc11-agent'),
+  );
   assertRan(agent, ['mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server']);
-  const standalone = crateTests('nession-mcp', ['--test', 'integration'], 900000);
+  const standalone = crateTests(
+    'nession-mcp',
+    ['--test', 'integration'],
+    900000,
+    isolatedTmuxEnv('nession-565-sc11-node'),
+  );
   assertRan(standalone, [
     'standalone::standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint',
     'standalone::all_three_hosts_share_one_tool_catalog',

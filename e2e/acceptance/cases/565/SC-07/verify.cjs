@@ -1,7 +1,7 @@
 'use strict';
 // #565 SC-07: with no Server, Agent-local tools still work and cluster tools
 // return a structured unreachable/absent-backend error.
-const { run, targetSha, crateTests, assertRan } = require('../../../shared/mcp-cases.cjs');
+const { run, targetSha, crateTests, assertRan, isolatedTmuxEnv } = require('../../../shared/mcp-cases.cjs');
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -9,6 +9,7 @@ run(({ evidence }) => {
     'nession-agent',
     ['--test', 'integration', 'mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server'],
     900000,
+    isolatedTmuxEnv('nession-565-sc07'),
   );
   assertRan(out, ['mcp::agent_mcp_serves_local_tools_and_reports_a_missing_server']);
   evidence.push(
