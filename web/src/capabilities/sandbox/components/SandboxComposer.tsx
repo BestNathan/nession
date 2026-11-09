@@ -143,6 +143,7 @@ export function SandboxComposer({
 
       <SandboxComposerActions
         preflight={preflight}
+        preflightFresh={preflight !== null && preflight.signature === signature}
         preflightValid={preflightValid}
         preflightBusy={preflightBusy}
         busy={busy}

@@ -6,6 +6,8 @@ import type { SandboxActionError } from '../model';
 
 export interface SandboxComposerActionsProps {
   preflight: { signature: string; result: SandboxPreflightResult } | null;
+  /** The result still describes the draft on screen. */
+  preflightFresh: boolean;
   preflightValid: boolean;
   preflightBusy: boolean;
   busy: boolean;
@@ -16,9 +18,57 @@ export interface SandboxComposerActionsProps {
   onRequestEnter: () => void;
 }
 
+function PreflightOutcome({
+  preflight,
+  preflightFresh,
+  preflightValid,
+}: {
+  preflight: { signature: string; result: SandboxPreflightResult } | null;
+  preflightFresh: boolean;
+  preflightValid: boolean;
+}) {
+  if (!preflight || !preflightFresh) {
+    return null;
+  }
+  return (
+    <>
+      {preflight.result.error ? (
+        <p data-testid="sandbox-preflight-error" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
+          {preflight.result.error}
+        </p>
+      ) : null}
+      {!preflight.result.ok && preflight.result.errors.length > 0 ? (
+        <ul data-testid="sandbox-preflight-errors" className="flex flex-col gap-1">
+          {preflight.result.errors.map((error, index) => (
+            <li
+              key={`${error.field}-${index}`}
+              data-testid={`sandbox-preflight-error-${index}`}
+              className={cn(chromeSansRole('secondary'), 'text-destructive')}
+            >
+              <span className={chromeMonoRole('code')}>{error.field}</span>: {error.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {preflightValid ? (
+        <p data-testid="sandbox-preflight-ok" className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
+          Validated: {preflight.result.backend ?? 'backend'} · digest{' '}
+          <span className={chromeMonoRole('code')}>{preflight.result.policy_digest}</span>
+        </p>
+      ) : (
+        <p data-testid="sandbox-preflight-invalid" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
+          {preflight.result.error ??
+            'The draft is not valid yet. Fix the field errors above and validate again.'}
+        </p>
+      )}
+    </>
+  );
+}
+
 /** Preflight result, field errors and the two explicit transitions. */
 export function SandboxComposerActions({
   preflight,
+  preflightFresh,
   preflightValid,
   preflightBusy,
   busy,
@@ -39,33 +89,14 @@ export function SandboxComposerActions({
           {catalogReason ? ` — ${catalogReason}` : ''}
         </p>
       ) : null}
-      {preflight?.result.error ? (
-        <p data-testid="sandbox-preflight-error" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
-          {preflight.result.error}
-        </p>
-      ) : null}
-      {preflight && !preflight.result.ok && preflight.result.errors.length > 0 ? (
-        <ul data-testid="sandbox-preflight-errors" className="flex flex-col gap-1">
-          {preflight.result.errors.map((error, index) => (
-            <li
-              key={`${error.field}-${index}`}
-              data-testid={`sandbox-preflight-error-${index}`}
-              className={cn(chromeSansRole('secondary'), 'text-destructive')}
-            >
-              <span className={chromeMonoRole('code')}>{error.field}</span>: {error.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <PreflightOutcome
+        preflight={preflight}
+        preflightFresh={preflightFresh}
+        preflightValid={preflightValid}
+      />
       {actionError ? (
         <p data-testid="sandbox-enter-error" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
           {actionError.message}
-        </p>
-      ) : null}
-      {preflight && preflightValid ? (
-        <p data-testid="sandbox-preflight-ok" className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-          Validated: {preflight.result.backend ?? 'backend'} · digest{' '}
-          <span className={chromeMonoRole('code')}>{preflight.result.policy_digest}</span>
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
