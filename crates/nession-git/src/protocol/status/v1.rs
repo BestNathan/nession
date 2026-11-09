@@ -3,10 +3,9 @@
 //! Everything the Workspace and the Terminal Signal need about one repository,
 //! in one read: which branch, how far from its upstream, and what has changed.
 
-use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
+use crate::protocol::{GitResponseV1, SessionTargetV1};
 
 /// This contract's wire message type — its transport projection.
 ///
@@ -104,10 +103,6 @@ pub struct StatusOkV1 {
     pub truncated_bytes: usize,
 }
 
-pub fn descriptor() -> Result<ProtocolDescriptor, IdentityError> {
-    v1_descriptor(super::ID, WIRE)
-}
-
 /// The response this contract produces.
 pub type StatusResponseV1 = GitResponseV1<StatusOkV1>;
 
@@ -185,15 +180,5 @@ mod tests {
         assert_eq!(value["message"], "not a git repository");
         // No `reason`: a state that does not have one must not emit an empty one.
         assert!(value.get("reason").is_none());
-    }
-
-    #[test]
-    fn the_descriptor_names_this_unit_its_owner_and_its_wire_type() {
-        let d = descriptor().unwrap();
-        assert_eq!(d.id.as_str(), "git.status");
-        assert_eq!(d.owner, "nession-git");
-        assert_eq!(d.versions(), vec![nession_protocol::ContractVersion::V1]);
-        assert_eq!(d.contracts[0].wire, vec!["git.status".to_string()]);
-        assert!(d.validate().is_ok());
     }
 }

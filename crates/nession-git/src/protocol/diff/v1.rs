@@ -1,9 +1,8 @@
 //! `git.diff` / v1.
 
-use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::{v1_descriptor, GitResponseV1, SessionTargetV1};
+use crate::protocol::{GitResponseV1, SessionTargetV1};
 
 /// One file's diff against HEAD, as the caller receives it.
 #[derive(Debug, Clone, Serialize)]
@@ -46,10 +45,6 @@ pub struct DiffOkV1 {
     pub diff: FileDiff,
 }
 
-pub fn descriptor() -> Result<ProtocolDescriptor, IdentityError> {
-    v1_descriptor(super::ID, WIRE)
-}
-
 pub type DiffResponseV1 = GitResponseV1<DiffOkV1>;
 
 #[cfg(test)]
@@ -67,14 +62,5 @@ mod tests {
         assert!(
             serde_json::from_value::<DiffRequestV1>(serde_json::json!({"session": "s"})).is_err()
         );
-    }
-
-    #[test]
-    fn the_descriptor_names_this_unit_its_owner_and_its_wire_type() {
-        let d = descriptor().unwrap();
-        assert_eq!(d.id.as_str(), "git.diff");
-        assert_eq!(d.owner, "nession-git");
-        assert_eq!(d.contracts[0].wire, vec!["git.diff".to_string()]);
-        assert!(d.validate().is_ok());
     }
 }

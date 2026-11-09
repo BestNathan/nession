@@ -20,6 +20,11 @@ use super::ops::{TmuxDep, TmuxOps};
 /// reports nothing, which is a binding that never appears rather than an error
 /// anyone sees.
 ///
+/// The path is fenced by the tmux Session instance (`#2974`): the same instance
+/// id is delivered to the Session's environment and later stored as
+/// [`INSTANCE_ID_OPTION`], so a delete/recreate of the same name reads and
+/// writes a different file.
+///
 /// The derivation itself lives in [`crate::claude_binding`], which the reader
 /// uses too; see that module for why it is shared rather than written out here.
 /// See it also for why nothing is created here: the hook writes with `cat >`,
@@ -28,8 +33,8 @@ use super::ops::{TmuxDep, TmuxOps};
 /// session. The agent creates it at startup, beside the plugin whose hook needs
 /// it — the only time it can matter, because the hook cannot run before it is
 /// installed. This function reads no filesystem.
-fn claude_binding_env(session_name: &str) -> Vec<(String, String)> {
-    crate::claude_binding::env_for(session_name)
+fn claude_binding_env(session_name: &str, instance_id: &str) -> Vec<(String, String)> {
+    crate::claude_binding::env_for(session_name, instance_id)
 }
 
 /// Resolve the shell a new Session will actually run.
@@ -151,6 +156,24 @@ const TMUX_CREATE_RECONCILE_TIMEOUT: Duration = Duration::from_secs(3);
 /// environment profiles cannot control `NESSON_*` keys.
 const CREATE_TOKEN_ENV: &str = "NESSON_CREATE_TOKEN";
 
+/// The environment variable carrying this tmux Session's instance identity.
+///
+/// Delivered by the same `new-session` that creates the Session, so a hook
+/// started from that Session can be handed an instance-fenced binding file and
+/// [`SessionManager::session_instance_id`] can adopt the *same* id when the
+/// durable option is first read (`#2974`). A Session created before the fence
+/// has no such variable, which is what lets the reader tell it apart from a
+/// fenced Session whose binding is simply absent.
+///
+/// Reserved like every `NESSON_*` key ([`NEVER_FORWARDED_ENV`] and the env
+/// profile policy), so neither a parent Nession Session nor a profile can
+/// substitute one.
+pub(crate) const INSTANCE_ID_ENV: &str = "NESSON_SESSION_INSTANCE_ID";
+
+/// The tmux user option that durably stores a Session's instance identity
+/// (`#2789`), beside the environment variable above.
+const INSTANCE_ID_OPTION: &str = "@nession_instance_id";
+
 /// Variables never forwarded from the agent process into a tmux session.
 ///
 /// `TERM`/`LANG`/`LC_ALL` are forced explicitly below, whatever the host has.
@@ -162,14 +185,16 @@ const CREATE_TOKEN_ENV: &str = "NESSON_CREATE_TOKEN";
 /// user's real sessions. nession addresses tmux by `-S` alone and passes none of
 /// this on. [`CREATE_TOKEN_ENV`] is withheld for the other direction: an Agent
 /// that itself runs inside a nession Session must not inherit a stale token
-/// into the create it is performing.
-const NEVER_FORWARDED_ENV: [&str; 6] = [
+/// into the create it is performing. [`INSTANCE_ID_ENV`] is withheld for the
+/// same reason — every create states its own identity.
+const NEVER_FORWARDED_ENV: [&str; 7] = [
     "TERM",
     "LANG",
     "LC_ALL",
     "TMUX",
     "TMUX_TMPDIR",
     CREATE_TOKEN_ENV,
+    INSTANCE_ID_ENV,
 ];
 
 /// Whether an inherited env var is withheld from a new session — either
@@ -440,31 +465,45 @@ impl SessionManager {
             .collect())
     }
 
-    /// The Nession-owned instance identity for a tmux Session (#2789).
+    /// The Nession-owned instance identity for a tmux Session (#2789, #2974).
     ///
     /// Stored as the `@nession_instance_id` tmux user option, so it outlives an
     /// Agent restart (the tmux server owns the Session) and dies with the
     /// Session: killing and recreating the same name starts without the option,
-    /// so the new instance gets a fresh id and cannot inherit metadata. A
-    /// legacy Session initializes one on first access; an invalid stored value
-    /// is replaced rather than becoming a path component.
+    /// so the new instance gets a fresh id and cannot inherit metadata or a
+    /// Claude binding. A legacy Session initializes one on first access; an
+    /// invalid stored value is replaced rather than becoming a path component.
+    ///
+    /// When the option is absent — a legacy Session, or a Session whose durable
+    /// identity was removed after creation — the identity is seeded from
+    /// [`INSTANCE_ID_ENV`] if the Session carries it. A create delivers its id
+    /// there by the same `new-session` that creates the Session and builds the
+    /// Claude binding path from it, so adopting that value cannot race the
+    /// create into a second identity (which would point the reader at a file no
+    /// hook was told to write).
     pub async fn session_instance_id(&self, session_name: &str) -> Result<String> {
-        const OPTION: &str = "@nession_instance_id";
         let ops = self.sdk_ops();
-        if let Some(stored) = ops.show_option(session_name, OPTION).await? {
+        if let Some(stored) = ops.show_option(session_name, INSTANCE_ID_OPTION).await? {
             if let Ok(id) = uuid::Uuid::parse_str(stored.trim()) {
                 return Ok(id.to_string());
             }
         }
 
-        let fresh = uuid::Uuid::new_v4();
-        ops.set_option(session_name, OPTION, &fresh.to_string())
+        let delivered = ops
+            .show_environment(session_name, INSTANCE_ID_ENV)
+            .await
+            .with_context(|| format!("read the instance identity of session {session_name}"))?;
+        let fresh = delivered
+            .as_deref()
+            .and_then(|value| uuid::Uuid::parse_str(value.trim()).ok())
+            .unwrap_or_else(uuid::Uuid::new_v4);
+        ops.set_option(session_name, INSTANCE_ID_OPTION, &fresh.to_string())
             .await?;
         // Two callers may race the first initialization. The winner's value is
         // what tmux now holds, and it is the one this Session's metadata must
         // use even if this caller's UUID lost.
         let stored = ops
-            .show_option(session_name, OPTION)
+            .show_option(session_name, INSTANCE_ID_OPTION)
             .await?
             .ok_or_else(|| anyhow::anyhow!("instance id was not stored for {session_name}"))?;
         uuid::Uuid::parse_str(stored.trim())
@@ -753,7 +792,14 @@ impl SessionManager {
         let mut caller_keys: Vec<&str> = overlay.vars.iter().map(|(k, _)| k.as_str()).collect();
         caller_keys.extend(adapter.env.iter().map(|(k, _)| k.as_str()));
         let has_ps1 = overlay.vars.iter().any(|(key, _)| key == "PS1");
-        let claude_env = claude_binding_env(name);
+        // This tmux Session instance's identity (#2974), fixed before the
+        // `new-session` that creates it. The same value goes into the Session's
+        // environment, the Claude binding path, and — recorded at the end of
+        // the post-create phase — the durable `@nession_instance_id` option, so
+        // the hook, the reader and an Agent restart cannot disagree. Nothing
+        // derived from the name can fence a delete/recreate; this can.
+        let instance_id = uuid::Uuid::new_v4().to_string();
+        let claude_env = claude_binding_env(name, &instance_id);
 
         // Force TERM and locale first so TUI apps render correctly. Containers
         // default to C/POSIX (no Unicode) and an unset or "dumb" TERM.
@@ -772,6 +818,11 @@ impl SessionManager {
             ));
         }
         session_env.extend(claude_env);
+        // The instance identity the binding path was built from. This is what
+        // lets a reader of the same tmux Session (including one in a restarted
+        // Agent) derive that path without the name, and what marks the Session
+        // as fenced at all (#2974).
+        session_env.push((INSTANCE_ID_ENV.to_string(), instance_id.clone()));
         // This create's ownership fence, delivered by the `new-session` below.
         // Profiles cannot set it: `NESSON_*` keys are reserved.
         session_env.push((CREATE_TOKEN_ENV.to_string(), token.to_string()));
@@ -820,6 +871,22 @@ impl SessionManager {
         // Session before the error is returned, so a retry of the same name is
         // not refused by a Session nobody is tracking.
         let post_create = async move {
+            // Deliver the instance identity to the Session's environment as a
+            // required part of the create (#2974). `new-session -e` already
+            // carries it and `propagate_env_best_effort` replays it, but where
+            // the replay cannot reach the Session environment a marker-less
+            // Session is indistinguishable from a pre-fence one — and the
+            // Claude reader would then consult the name-derived file a deleted
+            // Session may have left. A Session whose binding fence cannot be
+            // established is not the Session that was asked for, so this is
+            // Required: the compensation below removes it and the retry starts
+            // clean.
+            self.sdk_ops()
+                .set_environment(name, INSTANCE_ID_ENV, &instance_id)
+                .await
+                .with_context(|| {
+                    format!("record the instance identity of session {name} in its environment")
+                })?;
             // The requested size is the Session's width, not whatever client
             // tmux considers "latest" on a shared server. On tmux 3.4 with the
             // default `window-size latest`, a client attached to another
@@ -902,6 +969,21 @@ impl SessionManager {
                         format!("record the Environment Binding for session {name}")
                     })?;
             }
+
+            // Last, record the durable owner of the identity (#2789, #2974).
+            // The value is the same one the environment marker and the hook's
+            // binding path carry, so the reader derives the path the hook was
+            // handed. Writing it at the end — and Required, like the marker —
+            // means a first-time lazy initialization (`session_instance_id`)
+            // that read this name before the Session was deleted can only
+            // clobber it by executing its name-addressed `set-option` after
+            // the whole create; the residual window is a stalled process, and
+            // a lost id there fails toward "no binding", never toward another
+            // Session's conversation.
+            self.sdk_ops()
+                .set_option(name, INSTANCE_ID_OPTION, &instance_id)
+                .await
+                .with_context(|| format!("record the tmux instance identity of session {name}"))?;
 
             Ok::<Vec<String>, anyhow::Error>(warnings)
         };
@@ -1041,6 +1123,11 @@ impl SessionManager {
         // Session inherit a stale baseline.
         self.env.clear_session_binding(name).await;
 
+        // The Claude binding file is deliberately not removed. It is fenced by
+        // this Session's instance id (#2974), so a later same-name Session
+        // cannot read it; and a `SessionEnd` hook still finishing from this
+        // instance may write it after the kill, so deleting it here would
+        // mostly race that write rather than make anything safer.
         Ok(())
     }
 }
@@ -1578,6 +1665,11 @@ mod legacy_stage_two_tests {
             sent.contains(&format!("{file_var}='")),
             "the fallback path must name the binding file too: {sent}"
         );
+        assert!(
+            sent.contains(&format!("{INSTANCE_ID_ENV}='")),
+            "the fallback path must export the instance identity the binding \
+             file is fenced by: {sent}"
+        );
     }
 
     #[cfg(unix)]
@@ -1633,17 +1725,19 @@ mod legacy_stage_two_tests {
         // statement above typed), the `window-size latest` restore after the
         // create's explicit resize, and `set-option mouse on` (presentation —
         // see the class comment at that call site) are `BestEffort`, and the
-        // fake refuses all three.
+        // fake refuses every `set-option` except the create's required instance
+        // identity (#2974).
         //
-        // Reddens on: making either one `Required` (the `expect` below then
-        // fails), and on removing either call (the recorded-call assertions
-        // fail) — which is what says this test is about those two calls and not
-        // about the create.
+        // Reddens on: making any of those `Required` (the `expect` below then
+        // fails), and on removing either recorded call (the assertions fail) —
+        // which is what says this test is about those calls and not about the
+        // create.
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = stage_two_fake(
             dir.path(),
             "clear-history) echo 'injected tmux refuses clear-history' >&2; exit 1;;\n\
-             set-option) echo 'injected tmux refuses set-option' >&2; exit 1;;\n",
+             set-option) case \"$*\" in *@nession_instance_id*) exit 0;; esac; \
+             echo 'injected tmux refuses set-option' >&2; exit 1;;\n",
         );
         let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("step7-best-effort-stage2");
@@ -1659,14 +1753,30 @@ mod legacy_stage_two_tests {
              that operation, on this manager's own tmux: {:#?}",
             fake.calls()
         );
+        let set_options = calls_of(&fake, "set-option");
+        for expected in [
+            ["set-option", "-t", session.name(), "window-size", "latest"],
+            ["set-option", "-t", session.name(), "mouse", "on"],
+        ] {
+            let expected: Vec<String> = expected.into_iter().map(str::to_string).collect();
+            assert!(
+                set_options.contains(&expected),
+                "the dynamic window-size restore and mouse mode are still requested, \
+                 targeted at the session: {:#?}",
+                fake.calls()
+            );
+        }
+        // The identity write is the one `set-option` that is *not* best-effort,
+        // and it must address this Session by name or it would stamp another
+        // Session's durable identity.
+        let identity = set_options
+            .iter()
+            .find(|args| args.get(3).map(String::as_str) == Some(INSTANCE_ID_OPTION))
+            .expect("the create records the durable instance identity");
         assert_eq!(
-            calls_of(&fake, "set-option"),
-            vec![
-                vec!["set-option", "-t", session.name(), "window-size", "latest"],
-                vec!["set-option", "-t", session.name(), "mouse", "on"],
-            ],
-            "the dynamic window-size restore and mouse mode are still requested,              targeted at the session: {:#?}",
-            fake.calls()
+            identity.get(2).map(String::as_str),
+            Some(session.name()),
+            "the identity write must target this Session: {identity:?}"
         );
     }
 }
@@ -1791,9 +1901,94 @@ mod injected_tmux_tests {
             .lines()
             .find(|line| line.starts_with(&format!("{file_var}=")))
             .expect("the binding file is named");
+        // #2974: the hook must be handed the file of the tmux Session instance
+        // this create is making, not a name-derived file a deleted Session of
+        // the same name could have written.
+        let instance_line = argv
+            .lines()
+            .find(|line| line.starts_with(&format!("{INSTANCE_ID_ENV}=")))
+            .expect("the create delivers the instance identity");
+        let instance = instance_line
+            .strip_prefix(&format!("{INSTANCE_ID_ENV}="))
+            .expect("the line names the variable");
         assert!(
-            binding_line.ends_with(&format!("{name}.json")),
+            binding_line.ends_with(&format!(".{instance}.json")),
+            "the binding file must be fenced by this Session's instance: {binding_line}"
+        );
+        assert!(
+            binding_line.contains(&format!("/{name}.")),
             "the binding file must be this session's, not a shared one: {binding_line}"
+        );
+        // The durable owner must hold exactly the id the hook was given, or an
+        // Agent restart would derive a different file from the same Session.
+        let recorded = calls
+            .iter()
+            .find(|args| args.get(3).map(String::as_str) == Some(INSTANCE_ID_OPTION))
+            .expect("the create records the durable instance identity");
+        assert_eq!(
+            recorded.get(1).map(String::as_str),
+            Some("-t"),
+            "the identity write addresses a tmux Session: {recorded:?}"
+        );
+        assert_eq!(
+            recorded.get(2).map(String::as_str),
+            Some(name),
+            "the identity write must target this Session by name, not another: {recorded:?}"
+        );
+        assert_eq!(
+            recorded.get(4).map(String::as_str),
+            Some(instance),
+            "the tmux option must hold the id the hook's environment carries: {recorded:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_instance_identity_adopts_the_id_the_create_delivered() {
+        // #2974. The durable option is initialized from the id the create
+        // delivered to the Session's environment, not from a fresh UUID. That
+        // is what keeps a reader racing the create — or a Session whose eager
+        // option write was refused — on the exact file the hook was told to
+        // write. A fresh id here would silently unbind the Session.
+        //
+        // The fake is stateful on purpose: the option starts absent, and the
+        // read-back after `set-option` is the same operation's proof, so a
+        // write that stored the wrong value is visible.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = dir.path().join("instance");
+        let delivered = "2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60";
+        let fake = crate::test_support::FakeTmux::new(
+            dir.path(),
+            &format!(
+                "case \"$1\" in\n\
+                 show-options) [ -f \"{state}\" ] && cat \"{state}\"; exit 0;;\n\
+                 set-option) printf '%s' \"$5\" > \"{state}\"; exit 0;;\n\
+                 show-environment) printf '%s\\n' '{INSTANCE_ID_ENV}={delivered}'; exit 0;;\n\
+                 *) exit 0;;\n\
+                 esac",
+                state = state.display(),
+            ),
+        );
+        let mgr = crate::test_support::manager_with_fake(&fake);
+
+        let instance = mgr
+            .session_instance_id("delivered-identity")
+            .await
+            .expect("the identity resolves against the injected tmux");
+
+        assert_eq!(
+            instance, delivered,
+            "the create-delivered id is adopted, not replaced"
+        );
+        let stored = fake
+            .calls()
+            .into_iter()
+            .find(|args| args.first().map(String::as_str) == Some("set-option"))
+            .and_then(|args| args.last().cloned());
+        assert_eq!(
+            stored.as_deref(),
+            Some(delivered),
+            "the delivered id is what the durable option received"
         );
     }
 
@@ -1804,8 +1999,10 @@ mod injected_tmux_tests {
         // `BestEffort` *by experiment* (stage 1 already delivered the value to
         // the shell that exists, so turning this off left the callers' tests
         // green). The fake is what makes the failure observable instead of
-        // argued: every `set-environment` it is handed fails, so the only arm
-        // the call can take is the warn — and the session is created anyway.
+        // argued: every `set-environment` it is handed fails — except the
+        // create's required instance marker (#2974), whose delivery is a
+        // separate, stronger contract — so the propagation arm can only warn
+        // and the session is created anyway.
         //
         // Reddens on: making the propagation `Required` (the `expect` below
         // then fails), and on dropping the calls entirely (`propagated` is 0 —
@@ -1814,9 +2011,11 @@ mod injected_tmux_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
-            "case \"$*\" in *' -e '*) echo 'no -e support' >&2; exit 1;; esac; \
-             case \"$1\" in set-environment) echo 'unknown flag -e' >&2; exit 1;; \
-             *) exit 0;; esac",
+            "case \"$1\" in \
+             set-environment) case \"$*\" in *NESSON_SESSION_INSTANCE_ID*) exit 0;; \
+             *) echo 'unknown flag -e' >&2; exit 1;; esac;; \
+             *) case \"$*\" in *' -e '*) echo 'no -e support' >&2; exit 1;; \
+             *) exit 0;; esac;; esac",
         );
         let mgr = crate::test_support::manager_with_fake(&fake);
         let session = crate::test_support::TestSession::new("step6-best-effort");
@@ -1850,8 +2049,8 @@ mod injected_tmux_tests {
             .await;
         assert!(
             required.is_err(),
-            "this fake refuses every set-environment, so the manager's required \
-             path must fail on it too: {required:?}"
+            "this fake refuses every set-environment but the identity marker, \
+             so the manager's required path must fail on it too: {required:?}"
         );
     }
 

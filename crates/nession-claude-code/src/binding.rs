@@ -145,15 +145,12 @@ pub fn parse(raw: &str) -> Option<Binding> {
     })
 }
 
-/// The filename a session's binding lives in.
+/// A session name or instance id made safe for a filename.
 ///
-/// Session names reach this from a tmux session name, which can hold characters
-/// a filename should not. Anything outside `[A-Za-z0-9._-]` becomes `_`, and a
-/// name that sanitises to nothing falls back to a fixed stem — the binding is
-/// per-session and the directory is per-agent, so a collision here would need
-/// two sessions whose names differ only in unsafe characters.
-pub fn binding_filename(session_id: &str) -> String {
-    let mut safe: String = session_id
+/// Anything outside `[A-Za-z0-9._-]` becomes `_`. `None` when nothing usable is
+/// left, so the caller can choose its own fixed stem.
+fn safe_stem(value: &str) -> Option<String> {
+    let safe: String = value
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
@@ -163,9 +160,32 @@ pub fn binding_filename(session_id: &str) -> String {
             }
         })
         .collect();
-    if safe.is_empty() || safe.chars().all(|c| c == '.') {
-        safe = "session".to_string();
-    }
+    (!safe.is_empty() && !safe.chars().all(|c| c == '.')).then_some(safe)
+}
+
+/// The filename a Session's binding lives in, fenced by the tmux Session
+/// instance that produced it (`#2974`).
+///
+/// The instance id is what keeps a deleted Session's conversation from being
+/// inherited by a new Session created under the same name: the two instances
+/// name different files, so neither a pre-existing file nor a late write from
+/// the old instance's hook is visible to the new one. The instance id is a
+/// Nession-generated UUID, so it is already filename-safe; `safe_stem` still
+/// applies because this function takes an opaque string.
+pub fn binding_filename_for_instance(session_id: &str, instance_id: &str) -> String {
+    let session = safe_stem(session_id).unwrap_or_else(|| "session".to_string());
+    let instance = safe_stem(instance_id).unwrap_or_else(|| "instance".to_string());
+    format!("{session}.{instance}.json")
+}
+
+/// The name-derived filename used before the instance fence (`#2974`).
+///
+/// A Session created by an older Agent was handed this path and its hook keeps
+/// writing there for the rest of that Session's life, so it is still read for
+/// those Sessions. Nothing new is ever written through it: every create now
+/// hands its hook [`binding_filename_for_instance`].
+pub fn binding_filename(session_id: &str) -> String {
+    let mut safe = safe_stem(session_id).unwrap_or_else(|| "session".to_string());
     safe.push_str(".json");
     safe
 }
@@ -253,6 +273,42 @@ mod tests {
         // `.json` (a dotfile) or `...json`.
         assert_eq!(binding_filename(""), "session.json");
         assert_eq!(binding_filename(".."), "session.json");
+    }
+
+    #[test]
+    fn an_instance_fenced_filename_differs_for_every_instance() {
+        // #2974: the file is the fence. Two Sessions of one name must not
+        // address the same file, or a recreated Session reads the deleted
+        // instance's conversation.
+        assert_eq!(
+            binding_filename_for_instance("plain", "2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60"),
+            "plain.2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60.json"
+        );
+        assert_ne!(
+            binding_filename_for_instance("s", "instance-a"),
+            binding_filename_for_instance("s", "instance-b"),
+            "two instances of one name must not share a binding file"
+        );
+        // The pre-fence path is a distinct file, so a legacy read cannot
+        // accidentally serve a fenced instance's binding (or the reverse).
+        assert_ne!(
+            binding_filename_for_instance("s", "instance-a"),
+            binding_filename("s")
+        );
+    }
+
+    #[test]
+    fn unsafe_characters_are_sanitised_in_both_components() {
+        assert_eq!(
+            binding_filename_for_instance("agent:one", "a/b"),
+            "agent_one.a_b.json"
+        );
+        // A component that sanitises to nothing still leaves one file per
+        // session name rather than a shared `.json` dotfile.
+        assert_eq!(
+            binding_filename_for_instance("", ".."),
+            "session.instance.json"
+        );
     }
 
     #[test]

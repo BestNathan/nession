@@ -18,14 +18,20 @@ import type { Agent, Session } from '@/types';
 const FIXTURE_MANIFEST: ProtocolManifest = {
   provider: 'fixture',
   protocols: {
-    'git.status': { versions: [1], wire: ['git.status'] },
-    'git.diff': { versions: [1], wire: ['git.diff'] },
+    // v2 carries the reviewed snapshot; v1 stays advertised so a read-only
+    // consumer still resolves, exactly as the agent's manifest does.
+    'git.status': { versions: [1, 2], wire: ['git.status'] },
+    'git.diff': { versions: [1, 2], wire: ['git.diff'] },
     'git.preview': { versions: [1], wire: ['git.preview'] },
     'git.root': { versions: [1], wire: ['git.root'] },
     'git.log': { versions: [1], wire: ['git.log'] },
     'git.commit': { versions: [1], wire: ['git.commit'] },
     'git.branches': { versions: [1], wire: ['git.branches'] },
     'git.worktrees': { versions: [1], wire: ['git.worktrees'] },
+    // #845: the three local write units.
+    'git.stage': { versions: [1], wire: ['git.stage'] },
+    'git.unstage': { versions: [1], wire: ['git.unstage'] },
+    'git.create-commit': { versions: [1], wire: ['git.create-commit'] },
     'claude-code.list': { versions: [1], wire: ['claude-code.list'] },
     'claude-code.read': { versions: [1], wire: ['claude-code.read'] },
     // The retired `claude-code.conversation` unit became two (#1222): the list

@@ -83,6 +83,31 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.getByRole('link',{name:/Review event changes requested/})).toHaveAttribute('href',
     'https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89');
  });
+ test('authenticated closed Issue and merged PR remain reachable without joining Open Work',async({page})=>{
+  const historical=await startPagesFixture({historicalLineage:true});
+  try{
+   await page.setViewportSize({width:390,height:844});
+   await page.goto(historical.origin+'/#/work');
+   await expect(page.getByRole('heading',{name:'Verified historical Agent lineage'})).toBeVisible();
+   await expect(page.getByRole('link',{name:'Issue #3001 · inspect authenticated source'})).toBeVisible();
+   await expect(page.getByRole('link',{name:/PR #3017 · historical HEAD/})).toBeVisible();
+   await expect(page.getByText('Logical Slice: Unlinked · current Review: Unknown · Acceptance SC: Unknown')).toBeVisible();
+   await page.getByRole('link',{name:'Issue #3001 · inspect authenticated source'}).click();
+   await expect(page.getByRole('heading',{name:'Issue #3001 · authenticated historical lineage'})).toBeVisible();
+   await expect(page.getByRole('link',{name:/PR #3017 · attested historical HEAD/})).toHaveAttribute('href',
+     'https://github.com/BestNathan/nession/pull/3017');
+   await expect(page.getByRole('link',{name:/Agent developer \/ dev-qwen-01/})).toHaveAttribute('href',
+     'https://github.com/BestNathan/nession/actions/runs/42488022265');
+   await expect(page.getByText('Logical Slice: Unlinked',{exact:false})).toBeVisible();
+   await page.goto(historical.origin+'/#/work/pr/3017');
+   await expect(page.getByRole('heading',{name:'PR #3017 · authenticated historical lineage'})).toBeVisible();
+   await expect(page.getByText('current PR approval: Unknown · Acceptance SC: Unknown',{exact:false})).toBeVisible();
+   await page.goto(historical.origin+'/#/work/pr/3018');
+   await expect(page.getByText('Evidence unavailable in this bounded snapshot')).toBeVisible();
+  }finally{
+   await historical.close();
+  }
+ });
  test('unknown, malformed and unlisted evidence routes never show a forged source',async({page})=>{
   for(const route of [
     '/work/issue/99999','/work/pr/99999',

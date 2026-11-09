@@ -63,7 +63,7 @@ export function useGitRequest<T>({
   agentId: string | undefined;
   sessionId: string | undefined;
   load: (target: GitRequestTarget) => Promise<T>;
-}): GitRequestState<T> & { refresh: () => void } {
+}): GitRequestState<T> & { refresh: () => void; apply: (data: T) => void } {
   const [state, setState] = useState<GitRequestState<T>>({
     data: null,
     // Optimistic: the effect below starts a load on mount, so starting at
@@ -161,5 +161,19 @@ export function useGitRequest<T>({
     void run(generation.current);
   }, [run]);
 
-  return { ...state, refresh };
+  /**
+   * Adopt an authoritative answer the caller already holds.
+   *
+   * A mutation's response carries the post-mutation state, and re-querying it
+   * would be a second read that can fail, race, or answer an older state than
+   * the one the mutation just proved. Taking the newest request identity makes
+   * any read already in flight unable to publish over this answer, exactly as a
+   * manual Refresh does.
+   */
+  const apply = useCallback((data: T) => {
+    requestSequence.current += 1;
+    setState({ data, loading: false, error: null });
+  }, []);
+
+  return { ...state, refresh, apply };
 }

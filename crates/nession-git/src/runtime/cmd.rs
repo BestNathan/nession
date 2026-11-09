@@ -18,12 +18,22 @@
 //!
 //! ## Read-only is enforced, not assumed
 //!
-//! This module never runs a mutating subcommand (see `MUTATING_SUBCOMMANDS`,
-//! which `run` refuses). `GIT_OPTIONAL_LOCKS=0` additionally stops git from
-//! taking the index lock for commands that only refresh it — `git status` would
-//! otherwise rewrite `.git/index` as a side effect of being asked to look.
-//! `GIT_TERMINAL_PROMPT=0` keeps a credential prompt from hanging the agent
-//! forever on a repository with a remote that wants auth.
+//! The read path ([`GitCmd::run`]) never runs a mutating subcommand (see
+//! `MUTATING_SUBCOMMANDS`, which it refuses). `GIT_OPTIONAL_LOCKS=0`
+//! additionally stops git from taking the index lock for commands that only
+//! refresh it — `git status` would otherwise rewrite `.git/index` as a side
+//! effect of being asked to look. `GIT_TERMINAL_PROMPT=0` keeps a credential
+//! prompt from hanging the agent forever on a repository with a remote that
+//! wants auth.
+//!
+//! ## The write boundary is narrow, typed and still one place
+//!
+//! #845 opened exactly three writes: stage, unstage and create-commit. Each has
+//! a typed method below that constructs its own argv from already-validated
+//! input; none accepts a command or arbitrary arguments. The read guard is not
+//! weakened — it is a different [`Access`] on the same constructor, reachable
+//! only from those methods. That is the difference between "the denylist was
+//! deleted" and "the allowed forms are enumerated".
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -31,7 +41,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use crate::runtime::security::MAX_LINE_BYTES;
@@ -47,11 +57,11 @@ const INHERITED_REPO_VARS: [&str; 6] = [
     "GIT_CEILING_DIRECTORIES",
 ];
 
-/// Subcommands that write. `run` refuses them outright rather than relying on
-/// review: this capability is read-only (#750 Non-Goals), and a read-only
-/// viewer that can `commit` is a different product with a different risk
-/// surface. Adding one here should be a deliberate, reviewable act.
-const MUTATING_SUBCOMMANDS: [&str; 14] = [
+/// Subcommands that write. The read path refuses them outright rather than
+/// relying on review. Three typed mutation forms are the deliberate exception
+/// (#845); they construct their argv inside this module and never pass through
+/// the read path's checks.
+const MUTATING_SUBCOMMANDS: [&str; 15] = [
     "add",
     "am",
     "apply",
@@ -66,6 +76,9 @@ const MUTATING_SUBCOMMANDS: [&str; 14] = [
     "rebase",
     "reset",
     "restore",
+    // `rm` mutates the index; the typed unstage form is the only caller that
+    // needs it, and it does not travel through the read path.
+    "rm",
 ];
 
 /// Subcommands that have a read form and a write form under the **same name**.
@@ -97,6 +110,28 @@ const HASH_OBJECT_WRITE_FLAGS: [&str; 2] = ["-w", "--write"];
 /// repository is normally fast; this is here so a pathological repository (or a
 /// hung filesystem) returns an error instead of pinning an agent task forever.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Output ceiling for the narrowly typed mutation forms. They print status
+/// lines, not diffs, so anything larger is reported as truncation rather than
+/// held.
+const MAX_MUTATION_BYTES: usize = 64 * 1024;
+
+/// Output ceiling for a commit. Hooks are allowed to be chatty; the answer is
+/// diagnostics, never repository content.
+const MAX_COMMIT_BYTES: usize = 256 * 1024;
+
+/// Whether a child is allowed to write.
+///
+/// The read-only guard in [`GitCmd::build_with`] is the module's whole reason
+/// for existing, so a write is not "the same spawn with a flag": it is a
+/// separate path reachable only from the typed methods below, each of which
+/// constructs its own argv. No caller can hand this module an arbitrary
+/// mutating command (#845 §8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    ReadOnly,
+    Mutation,
+}
 
 /// A git binary bound to the working directory every command will address.
 #[derive(Debug, Clone)]
@@ -147,36 +182,55 @@ impl GitCmd {
     /// Build the child process. Private: [`run`](Self::run) is the only way to
     /// start one, so no caller can spawn a git process that skipped the env
     /// scrub, the `-C`, or the timeout.
+    /// The read-only constructor, used by the guard tests below.
+    ///
+    /// Production dispatch goes through [`GitCmd::run_with`]; this exists so a
+    /// test can prove the read path refuses a mutating argv without spawning a
+    /// process.
+    #[cfg(test)]
     fn build(&self, args: &[&str]) -> Result<Command> {
-        let subcommand = args.first().copied().unwrap_or_default();
-        if MUTATING_SUBCOMMANDS.contains(&subcommand) {
-            anyhow::bail!(
-                "refusing mutating git subcommand `{subcommand}`: this capability is read-only"
-            );
-        }
+        self.build_with(args, Access::ReadOnly)
+    }
 
-        // The other half of the same guarantee. A subcommand whose name is also
-        // a write is only a read in the listed forms; `worktree add` reaches
-        // here with `subcommand == "worktree"`, which the check above cannot see.
-        if let Some((_, forms)) = READ_ONLY_SUBCOMMAND_FORMS
-            .iter()
-            .find(|(name, _)| *name == subcommand)
-        {
-            let form = args.get(1).copied().unwrap_or_default();
-            if !forms.contains(&form) {
+    /// The one constructor, parameterised by what the child is allowed to do.
+    ///
+    /// Every check below is read-only policy: the mutation path is not a
+    /// relaxation of it, because nothing outside this module can call
+    /// `build_with(_, Access::Mutation)` and the typed methods construct their
+    /// own argv.
+    fn build_with(&self, args: &[&str], access: Access) -> Result<Command> {
+        let subcommand = args.first().copied().unwrap_or_default();
+        if access == Access::ReadOnly {
+            if MUTATING_SUBCOMMANDS.contains(&subcommand) {
                 anyhow::bail!(
-                    "refusing `git {subcommand} {form}`: `git {subcommand}` is read-only only as {}",
-                    forms.join(" or ")
+                    "refusing mutating git subcommand `{subcommand}`: this path is read-only"
                 );
             }
-        }
 
-        if subcommand == "hash-object"
-            && args.iter().any(|arg| HASH_OBJECT_WRITE_FLAGS.contains(arg))
-        {
-            anyhow::bail!(
-                "refusing `hash-object` with a write flag: this capability only computes object ids"
-            );
+            // The other half of the same guarantee. A subcommand whose name is
+            // also a write is only a read in the listed forms; `worktree add`
+            // reaches here with `subcommand == "worktree"`, which the check
+            // above cannot see.
+            if let Some((_, forms)) = READ_ONLY_SUBCOMMAND_FORMS
+                .iter()
+                .find(|(name, _)| *name == subcommand)
+            {
+                let form = args.get(1).copied().unwrap_or_default();
+                if !forms.contains(&form) {
+                    anyhow::bail!(
+                        "refusing `git {subcommand} {form}`: `git {subcommand}` is read-only only as {}",
+                        forms.join(" or ")
+                    );
+                }
+            }
+
+            if subcommand == "hash-object"
+                && args.iter().any(|arg| HASH_OBJECT_WRITE_FLAGS.contains(arg))
+            {
+                anyhow::bail!(
+                    "refusing `hash-object` with a write flag: this capability only computes object ids"
+                );
+            }
         }
 
         // The binary is a field because a host may point the agent at a
@@ -204,9 +258,16 @@ impl GitCmd {
             cmd.env_remove(var);
         }
         cmd.env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_PAGER", "cat")
             .env("LC_ALL", "C");
+        if access == Access::ReadOnly {
+            cmd.env("GIT_OPTIONAL_LOCKS", "0");
+        } else {
+            // Writes participate in Git's real locking. Suppressing optional
+            // locks is a read-side convenience and would be the wrong promise
+            // for a child that is about to take the index lock on purpose.
+            cmd.env_remove("GIT_OPTIONAL_LOCKS");
+        }
 
         Ok(cmd)
     }
@@ -219,12 +280,36 @@ impl GitCmd {
     /// the caller can say so — a half diff presented as a whole one is worse
     /// than an error (#750 C3).
     pub async fn run(&self, args: &[&str], cap: usize) -> Result<GitOutput> {
-        let mut cmd = self.build(args)?;
+        self.run_with(args, cap, Access::ReadOnly, None).await
+    }
+
+    /// The one spawn path, shared by reads and the typed mutation forms.
+    async fn run_with(
+        &self,
+        args: &[&str],
+        cap: usize,
+        access: Access,
+        stdin: Option<&[u8]>,
+    ) -> Result<GitOutput> {
+        let mut cmd = self.build_with(args, access)?;
+        if stdin.is_some() {
+            cmd.stdin(Stdio::piped());
+        }
         let display = format!("git {}", args.join(" "));
 
         let mut child = cmd
             .spawn()
             .with_context(|| format!("failed to spawn `{display}` (is git installed?)"))?;
+
+        // Commit messages travel on stdin, never as an argument, so a message
+        // that begins with `-` or contains anything argv-hostile is data.
+        if let Some(bytes) = stdin {
+            let mut sink = child.stdin.take().context("child stdin was not piped")?;
+            sink.write_all(bytes)
+                .await
+                .with_context(|| format!("writing stdin to `{display}`"))?;
+            drop(sink);
+        }
 
         let mut stdout = child.stdout.take().context("child stdout was not piped")?;
         let mut stderr = child.stderr.take().context("child stderr was not piped")?;
@@ -296,6 +381,66 @@ impl GitCmd {
         Ok(out.stdout_string().trim().to_string())
     }
 
+    // ── Narrowly typed mutations (#845 §8) ───────────────────────────────
+    //
+    // The allowed argv is constructed here, from already-validated paths. No
+    // method takes a raw command or arbitrary arguments, so opening the write
+    // boundary did not turn this module into an argv passthrough.
+
+    /// Stage one repository-relative path, including its deletion.
+    pub async fn stage_path(&self, path: &str) -> Result<GitOutput> {
+        self.run_with(
+            &["add", "-A", "--", path],
+            MAX_MUTATION_BYTES,
+            Access::Mutation,
+            None,
+        )
+        .await
+    }
+
+    /// Restore the index entry of each path without touching worktree bytes.
+    ///
+    /// With a HEAD, `reset` restores the entries from it. An unborn branch has
+    /// nothing to restore from, so the index entry is removed instead — the
+    /// same index mutation, expressed for the one state that has no baseline.
+    pub async fn unstage_paths(&self, paths: &[&str], has_head: bool) -> Result<GitOutput> {
+        let mut args: Vec<&str> = if has_head {
+            vec!["reset", "-q", "HEAD", "--"]
+        } else {
+            vec!["rm", "--cached", "-q", "--"]
+        };
+        args.extend_from_slice(paths);
+        self.run_with(&args, MAX_MUTATION_BYTES, Access::Mutation, None)
+            .await
+    }
+
+    /// Create one commit from the current index, honouring hooks and signing.
+    ///
+    /// `-F -` instead of `-m`: the message is data on stdin, and Git's own
+    /// cleanup rules still apply. `--no-verify` is deliberately absent.
+    pub async fn commit_staged(&self, message: &str) -> Result<GitOutput> {
+        self.run_with(
+            &["commit", "-F", "-"],
+            MAX_COMMIT_BYTES,
+            Access::Mutation,
+            Some(message.as_bytes()),
+        )
+        .await
+    }
+
+    /// The author identity Git would use for a commit.
+    ///
+    /// `git var` answers with the effective value (configuration, environment
+    /// and fallback included) rather than this crate guessing from `user.name`.
+    pub async fn author_identity(&self) -> Result<String> {
+        let raw = self.run_line(&["var", "GIT_AUTHOR_IDENT"]).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("git returned an empty author identity");
+        }
+        Ok(trim_ident(trimmed))
+    }
+
     /// Whether `git` runs at all. Distinguishes "no git installed" from "not a
     /// repository", which #750 requires be reported separately.
     pub async fn available(&self) -> bool {
@@ -338,6 +483,17 @@ pub fn describe(args: &[impl AsRef<OsStr>]) -> String {
         .map(|a| a.as_ref().to_string_lossy().into_owned())
         .collect();
     format!("git {}", parts.join(" "))
+}
+
+/// `A U Thor <a@example.com> 1794122676 +0800` -> `A U Thor <a@example.com>`.
+///
+/// The trailing timestamp and timezone are Git's, not the identity the user
+/// needs confirmed before committing.
+fn trim_ident(raw: &str) -> String {
+    match raw.rfind('>') {
+        Some(end) => raw.get(..=end).unwrap_or(raw).to_string(),
+        None => raw.to_string(),
+    }
 }
 
 /// Whether a git failure means "this is not a repository".
@@ -403,6 +559,29 @@ mod tests {
         ] {
             assert!(guard(&args).is_err(), "expected {args:?} to be refused");
         }
+    }
+
+    #[test]
+    fn the_read_path_still_refuses_the_mutation_subcommands() {
+        // Opening the typed write forms must not have opened the read path:
+        // `stage_path` constructs its argv inside this module, but a caller
+        // reaching `build` with the same words is still refused.
+        for args in [
+            vec!["add", "-A", "--", "a.txt"],
+            vec!["reset", "-q", "HEAD", "--", "a.txt"],
+            vec!["rm", "--cached", "a.txt"],
+        ] {
+            assert!(guard(&args).is_err(), "expected {args:?} to be refused");
+        }
+    }
+
+    #[test]
+    fn the_identity_reports_the_person_not_the_timestamp() {
+        assert_eq!(
+            trim_ident("A U Thor <a@example.com> 1794122676 +0800"),
+            "A U Thor <a@example.com>"
+        );
+        assert_eq!(trim_ident("odd"), "odd");
     }
 
     #[test]

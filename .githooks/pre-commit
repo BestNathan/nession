@@ -12,4 +12,12 @@ if [ -n "$staged_root_pngs" ]; then
   echo "→ unstaged root PNGs (moved to .playwright-mcp/screenshots/)"
 fi
 
+# Pin the exact post-maintenance index before route selection. The staged
+# runner checks this identity again before and after validation.
+if ! NESSION_INDEX_TREE="$(git write-tree)"; then
+  echo "→ pre-commit: unable to materialize the Git index; refusing to pass" >&2
+  exit 2
+fi
+export NESSION_INDEX_TREE
+export NESSION_PRE_COMMIT_STAGED=1
 exec ./gates/route pre-commit

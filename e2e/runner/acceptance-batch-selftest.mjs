@@ -8,7 +8,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { executeAcceptanceBatches, planAcceptanceBatches } from './acceptance-batch.mjs';
+import {
+  batchOutcome,
+  executeAcceptanceBatches,
+  planAcceptanceBatches,
+} from './acceptance-batch.mjs';
 
 const manifests = new Map([
   ['1:SC-01', { runtime: 'full-stack-local', isolation: 'shared' }],
@@ -24,6 +28,20 @@ const resolveManifest = (_root, entry) => {
   return manifest;
 };
 const plan = (cases) => planAcceptanceBatches({ repoRoot: '.', cases, resolveManifest });
+
+// Pending is acceptance data, not a workflow failure. Only Fail (1) or an
+// execution error (2) makes the batch command non-zero, so an open Pending SC
+// cannot turn into an infrastructure-red main push.
+assert.deepEqual(batchOutcome([{ result: 'Pass' }], []),
+  { failed: 0, pending: 0, errored: 0, exitCode: 0 });
+assert.deepEqual(batchOutcome([{ result: 'Pass' }, { result: 'Pending' }], []),
+  { failed: 0, pending: 1, errored: 0, exitCode: 0 });
+assert.deepEqual(batchOutcome([{ result: 'Fail' }, { result: 'Pending' }], []),
+  { failed: 1, pending: 1, errored: 0, exitCode: 1 });
+assert.deepEqual(batchOutcome([{ result: 'Error' }], []),
+  { failed: 0, pending: 0, errored: 1, exitCode: 2 });
+assert.deepEqual(batchOutcome([{ result: 'Pass' }], [{ message: 'batch failed' }]),
+  { failed: 0, pending: 0, errored: 0, exitCode: 2 });
 const shape = (batches) => batches.map((batch) => ({
   shared: batch.shared,
   profile: batch.profile,
@@ -144,4 +162,5 @@ try {
 }
 
 console.log('acceptance batch isolation: opt-in sharing, isolated default, ' +
-  'profile mismatch, unknown-Case and batch-failure fallbacks passed');
+  'profile mismatch, unknown-Case, batch-failure fallbacks and ' +
+  'pending-is-data exit policy passed');
