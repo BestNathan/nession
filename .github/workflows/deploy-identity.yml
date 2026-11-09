@@ -199,6 +199,27 @@ jobs:
             --out "$RUNNER_TEMP/deployment-attestation.json"
           cat "$RUNNER_TEMP/deployment-attestation.json" >> "$GITHUB_STEP_SUMMARY"
 
+      # Runs only on trusted main with the existing read-only tunnel and
+      # kubeconfig. Never execute source-SHA Cases/Playwright or arbitrary
+      # scripts with the connection credentials.
+      - name: Collect bounded remote-staging observations through existing tunnel
+        shell: bash
+        env:
+          KUBECONFIG: ${{ runner.temp }}/nession-ci-kubeconfig
+        run: |
+          set -euo pipefail
+          node scripts/remote-staging-observe.mjs run \
+            --profile remote-staging \
+            --attestation "$RUNNER_TEMP/deployment-attestation.json" \
+            --overlay-path "$OVERLAY_PATH" \
+            --overlay "$RUNNER_TEMP/overlay.yaml" \
+            --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
+            --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
+            --out "$RUNNER_TEMP/deployment-attestation.json"
+          # A remote observation is a zero-verdict identity/readiness fact, not
+          # an Acceptance Case Pass. Trust/source provenance is bound on ingest.
+          echo "Two real read-only Staging snapshots observed; Acceptance evaluation remains null." >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: nession-deployment-attestation-${{ github.event.inputs.environment }}

@@ -36,6 +36,22 @@ pub enum ClientError {
     #[error("authentication failed: {message}")]
     Auth { message: String },
 
+    /// An Agent answered `agent.session.*` with its own structured refusal.
+    ///
+    /// A refusal is a *delivered answer*, so it is not one of the transport
+    /// variants above; the MCP adapter maps it to a tool error that preserves
+    /// both halves.
+    #[error("the agent refused `{wire}` ({code}): {message}")]
+    AgentRefused {
+        wire: String,
+        code: String,
+        message: String,
+    },
+
+    /// A correlated reply arrived with a wire type this call cannot use.
+    #[error("the agent answered `{wire}` with `{got}`, which is not a reply")]
+    UnexpectedReply { wire: String, got: String },
+
     /// The connection ended while a reply was outstanding.
     #[error("the server closed the connection while `{wire}` was outstanding")]
     Closed { wire: String },

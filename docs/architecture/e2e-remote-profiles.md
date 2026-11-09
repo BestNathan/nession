@@ -1,6 +1,6 @@
 # Remote E2E runtime profiles and VPN access trust contract
 
-Status: **design contract; remote profiles not enabled**. This document specifies the independently gated `remote-staging` and `remote-production` profiles for the common `e2e/runner/` platform. The project already has VPN access configuration; this document does not claim that the intended GitHub workflow has exercised that route or that a live cluster has been attested. The only executable profile today is `full-stack-local`; requests for either remote profile must fail closed until the gates below are proven.
+Status: **read-only remote-staging observation implemented; remote Case profiles not enabled**. This document specifies the independently gated `remote-staging` and `remote-production` profiles for the common `e2e/runner/` platform. The project already has VPN access configuration; this document does not claim that the intended GitHub workflow has exercised that route or that a live cluster has been attested. The only executable **Acceptance Case** profile today is `full-stack-local`; the observation-only `remote-staging` collector does not enable remote Case execution. Requests for remote Case profiles must fail closed until the gates below are proven.
 
 ## Deployment identity before execution
 
@@ -55,6 +55,41 @@ attested source SHA and must not be called live deployed-environment E2E.
 Remote Case execution remains disabled until its trusted read-only collector,
 profile admission and evidence ingestion are actually implemented.
 
+## Read-only remote-staging observation (implementation boundary)
+
+The existing main-controlled `Deploy / Identity` job now invokes
+`scripts/remote-staging-observe.mjs run --profile remote-staging` using the
+**same** GOST/WSS tunnel and Kubernetes read-only kubeconfig, after successfully
+attesting the exact GitOps overlay, build digest and ready workloads. It takes
+two separately read `kubectl get deployments/pods -o json` snapshots with
+fixed argv and bounded time/output, and reuses the canonical identity adapter
+to reject a changed source SHA, deployment UID/generation, readiness, imageID
+or registry digest during sampling. No PR-head verifier, Playwright, shell
+session, pod creation, port-forward or cluster mutation executes with tunnel
+credentials.
+
+The bounded `remote_observation` is an **optional part of the existing
+authenticated deployment Run Record**, rather than a second Store or an Issue
+acceptance result. It records UTC and monotonic relative sample offsets,
+source/GitOps identity, approved roles, UID/generation/readiness and immutable
+digest; it cannot contain raw kubectl JSON, internal IPs, hostnames, secrets,
+headers or terminal content. The observation always has `evaluation: null`.
+`scripts/deployment-identity-policy.mjs` validates its exact field allowlist
+and binding; `scripts/deployment-attestation-ingest.mjs` includes it in the
+canonical authenticated Run/Attempt execution identity only for new records,
+preserving old persisted record hashes. Failed/mismatched sampling fails the
+trusted source workflow and produces no new attestation artifact/Pass.
+
+**This is live read-only Staging observation, not a general remote E2E Case
+runner.** The canonical `Acceptance / Cases` workflow and
+`./e2e/run acceptance` still support only `full-stack-local`. Do not
+advertise remote Case execution, evaluate a deployed SC as Pass from an
+`Observed` record alone, or reuse an observation as proof for a different
+source SHA/run. Additional app-level remote Case protocols would require a
+separately approved noncredentialed executor and normal exact-source Case
+ingestion. Production remains opt-in and blocked pending its own approval,
+credentials and read-only policy.
+
 ## Trust and runner isolation
 
 1. Reuse the **existing project VPN access path** from a trusted main-controlled workflow and protected environment where that execution environment supports it. Do not provision a second VPN or dedicated runner group by default. Only propose additional runner/network infrastructure if a concrete limitation of the existing path is demonstrated.
@@ -93,13 +128,13 @@ A remote profile is intentionally **not** an alternative implementation of `full
 
 ## Infrastructure dependencies and acceptance gates
 
-The implementation lane is **blocked until all of the following are evidenced**:
+Full remote Case execution and production inspection remain **blocked until all of the following are evidenced**, beyond the narrow read-only Staging observation:
 
 - The existing VPN route is exercised from the intended trusted workflow environment, with positive/negative egress checks and no duplicate runner/VPN infrastructure unless evidence shows it is required.
 - GitHub protected environments and OIDC federation with verified audience/subject, short-lived scoped identity and read-only cluster RBAC.
 - GitOps/cluster reconcile observation and immutable image digest/source provenance for the target deployment.
 - Synthetic fixture namespace/tenant with quota, owner-UID cleanup and zero production data access if stateful tests are introduced; independent dry-run cleanup safety test.
 - Negative security tests for forged source SHA/digest, wrong environment, cross-run replay, missing deployment proof, hostile parameters, redaction leaks and interrupted-run cleanup.
-- A main-owned workflow executing one staging read-only verification over the existing VPN path, recording a properly bounded orphan Run Record and explicitly proving **no production promotion**.
+- A main-owned workflow executing Staging read-only observation over the existing VPN path, recording a bounded authenticated deployment Run Record with `evaluation: null` and explicitly proving **no production promotion**. The code path exists; a successful post-merge live observation in the append-only Store must still be checked.
 
-Until those gates are evidenced, `./e2e/run acceptance --profile remote-staging` and `remote-production` must continue to reject the request, and any Issue criterion requiring an actual remote run must remain Pending. This document is the **specification**, not an implementation or acceptance report.
+Until full remote Case gates are evidenced, `./e2e/run acceptance --profile remote-staging` and `remote-production` must continue to reject the request. Read-only observation may be recorded without fabricating a Case Pass; criteria requiring actual remote Case or production behavior remain Pending. This document is the **specification**, not an implementation or acceptance report.
