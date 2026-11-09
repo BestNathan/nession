@@ -34,8 +34,13 @@ export function attestPublicPagesLineage(repo,sha,run,jobs,publisherLog,publicBy
      json?.source?.main_sha!==sha)
     throw Error('public historical lineage source identity mismatch');
   const history=json?.work?.lineage;
+  // The public lineage contract carries source SHA per edge, not on its
+  // parent object. Cross-check with the separately published pinned Store
+  // inventory so that an arbitrary edge cannot supply its own source ref.
+  const store=json?.evidence?.stores?.find(x=>x.name==='agent-store'&&
+    x.state==='present')?.sha;
   if(!['verified','truncated'].includes(history?.status)||
-     !SHA.test(history?.source_ref_sha??'')||
+     !SHA.test(store??'')||
      !Array.isArray(history.edges)||history.edges.length<1||history.edges.length>12)
     return null; // No independent Producer proof is Unknown, not Pass.
   // Only the exact independently authenticated Worker/Publisher/Writer/PR
@@ -47,7 +52,7 @@ export function attestPublicPagesLineage(repo,sha,run,jobs,publisherLog,publicBy
      edge.agent_id!=='dev-qwen-01'||edge.run_id!==RUN||edge.attempt!==1||
      edge.verification!=='authenticated_at_attestation'||
      edge.slice_id!==null||!HEX.test(edge.action_id??'')||
-     edge.source_ref_sha!==history.source_ref_sha||
+     edge.source_ref_sha!==store||
      edge.source_url!=='https://github.com/'+REPO+'/actions/runs/'+RUN)
     return null;
   return Object.freeze({
@@ -55,7 +60,7 @@ export function attestPublicPagesLineage(repo,sha,run,jobs,publisherLog,publicBy
     target_sha:sha,run_id:proof.run_id,run_attempt:proof.run_attempt,
     build_job_id:proof.build_job_id,publish_job_id:proof.publish_job_id,
     public_json_sha256:proof.digest,public_url:PUBLIC,
-    lineage_status:history.status,source_ref_sha:history.source_ref_sha,
+    lineage_status:history.status,source_ref_sha:store,
     issue:ISSUE,pr_number:PR,pr_head_sha:PR_HEAD,
     developer_run_id:RUN,developer_attempt:1,slice_id:null,
     verification:'authenticated_at_attestation',
@@ -119,7 +124,8 @@ export async function selfTestPublicPagesLineage(){
     action_id:'c'.repeat(64),source_ref_sha:store,
     source_url:'https://github.com/'+REPO+'/actions/runs/'+RUN};
   const fixture={schema_version:1,source:{repository:REPO,main_sha:sha},
-    work:{lineage:{status:'verified',source_ref_sha:store,edges:[edge]}}};
+    evidence:{stores:[{name:'agent-store',state:'present',sha:store}]},
+    work:{lineage:{status:'verified',edges:[edge]}}};
   const encode=data=>Buffer.from(JSON.stringify(data));
   const logFor=bytes=>'2026-11-09T02:22:51.9441687Z Public Issue Agent Run observation: source_backed_observation (source=truncated, runs=1, digest='+
     createHash('sha256').update(bytes).digest('hex')+')\n';
