@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42603216397,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3089-experience-attach-session-surfaces",
+    "target_sha": "a2661b9c598b9195a4c8505ca1b2defdbdafe544",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42603216397",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "17d0bf9d75de8f63d0d0988bf6676fc1cdd6017a704567dd6001712256e8a889"
+  },
+  "record": "runs/2026-11-09/42603216397-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "0fd70b8684c9898d20082487ac3c6a740592a6f99a6e750e96fe053e622d5197"
+}
