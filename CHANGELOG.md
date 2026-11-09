@@ -499,3 +499,10 @@
 - Categories: architecture, erofs, images, server, storage, security, agent
 - Reason: Record the completed SC-05 one-time controlled Kubernetes Task observation (run 42660858103: kind/Kubernetes, bound PVC, real EROFS digest survival across Pod delete/recreate, exactly one blob GET), label it an untrusted Task receipt rather than a committed Case lane, and note that the Issue closed with every criterion Pass after SC-01/03/04 were projected from Case Smoke run 42637855144
 - Source: https://github.com/BestNathan/nession/issues/3023
+
+## 2026-11-09T17:09:40Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Add the #3124 context capability and existing-Session Enter: active-Pane inside/outside/unknown, Web-safe empty-first draft materialized by nession-sandbox, measured capability catalog, generation-bound idempotent Enter that preserves the Native Pane, Pane-keyed durable records and reconciliation, and the inside effective-policy projection; correct the "disabled by default" wording and the Session-set reconciliation statement
+- Source: https://github.com/BestNathan/nession/issues/3124
