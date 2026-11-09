@@ -504,3 +504,81 @@ describe('CreateSessionDialog', () => {
     });
   });
 });
+
+// ── Project Existing-location path (#3025) ─────────────────────────────
+
+const PROJECT: import('@/product/project/types').Project = {
+  project_id: 'project-123e4567-e89b-42d3-a456-426614174000',
+  name: 'Nession',
+  locations: [{ agent_id: 'macbook', path: '/Users/nathan/code/nession' }],
+  created_at: 1,
+  updated_at: 2,
+};
+
+describe('CreateSessionDialog Project mode', () => {
+  it('creates with the declared location and project_id', async () => {
+    const user = userEvent.setup();
+    const onCreated = vi.fn();
+    const onClose = vi.fn();
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={onClose}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={onCreated}
+        project={PROJECT}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Session Name'), 'project-session');
+    await user.click(screen.getByTestId('create-session-submit'));
+
+    await waitFor(() => {
+      expect(createSessionMock).toHaveBeenCalledWith(
+        'macbook',
+        'project-session',
+        [],
+        {
+          workingDir: '/Users/nathan/code/nession',
+          projectId: PROJECT.project_id,
+        },
+      );
+    });
+    expect(onCreated).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('refuses an offline Existing Location instead of falling back', async () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', status: 'offline' })]}
+        onCreated={vi.fn()}
+        project={PROJECT}
+      />,
+    );
+
+    expect(screen.getByTestId('project-location-offline')).toBeInTheDocument();
+    expect(screen.getByTestId('create-session-submit')).toBeDisabled();
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('explains a Project with no Existing Location', () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent()]}
+        onCreated={vi.fn()}
+        project={{ ...PROJECT, locations: [] }}
+      />,
+    );
+    expect(screen.getByText(/No Existing Location/)).toBeInTheDocument();
+    expect(screen.getByTestId('create-session-submit')).toBeDisabled();
+  });
+});

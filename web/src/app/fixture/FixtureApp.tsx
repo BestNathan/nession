@@ -9,6 +9,10 @@ import { useDashboardFilter } from '@/app/useDashboardFilter';
 import { mapDomainState, type DomainState } from '@/product/session/model/domainState';
 import { FixtureTerminal } from '@/app/fixture/FixtureTerminal';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import { useFixtureProjectShell } from './fixtureProjects';
+import { FixtureProjectDialogs } from './FixtureProjectDialogs';
+import { FixtureAppProjectDetail } from './FixtureAppProjectDetail';
+import type { ProjectShellProps } from '@/product/project/types';
 import type { TerminalChrome } from '@/app/ShellMain';
 import type { Agent, Session } from '@/types';
 import type { SidebarProps } from '@/app/Sidebar';
@@ -110,6 +114,7 @@ function fixtureSidebarProps({
   connectionStatus,
   domain,
   sessionDetails,
+  projectShell,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
@@ -127,6 +132,7 @@ function fixtureSidebarProps({
   connectionStatus: SidebarProps['connectionStatus'];
   domain: DomainState | null;
   sessionDetails: ReturnType<typeof useFixtureSessionDetails>;
+  projectShell: ProjectShellProps;
 }) {
   return {
     agents,
@@ -153,6 +159,42 @@ function fixtureSidebarProps({
     onKill: () => {},
     onViewDetails: sessionDetails.onViewDetails,
     onEditDetails: sessionDetails.onEditDetails,
+    projectShell,
+  };
+}
+
+function fixtureAppMainShared({
+  selectedSession,
+  selectedAgent,
+  agents,
+  domain,
+  tool,
+  setSurface,
+  setTool,
+}: {
+  selectedSession: Session | null;
+  selectedAgent: Agent | undefined;
+  agents: Agent[];
+  domain: DomainState | null;
+  tool: CapabilityId;
+  setSurface: (surface: Surface) => void;
+  setTool: (tool: CapabilityId) => void;
+}) {
+  return {
+    selectedSession,
+    selectedAgent,
+    agents,
+    domain,
+    tool,
+    fileOps: fixtureOps,
+    connectionStatus: 'connected' as const,
+    onSurfaceChange: setSurface,
+    onToolChange: setTool,
+    onOpenAgent: () => {},
+    // Inert, like every other handler here: the home's "New Session" opens the
+    // product's dialog, and a fixture that opened one would be asserting on a
+    // flow it does not own (#1082).
+    onCreate: () => {},
   };
 }
 
@@ -161,6 +203,7 @@ export function FixtureApp() {
   const search = useLocation().search;
   // #2789: rows and the Workspace Session view read the Agent-owned store.
   useFixtureSessionMetadata(search);
+  const projectLayer = useFixtureProjectShell(search);
 
   // A capability projection has to be reachable from a fixture to be captured,
   // and until #838 the capsule did not render here at all. This stub is what
@@ -221,13 +264,7 @@ export function FixtureApp() {
   const connectionStatus = fixtureConnection(search);
 
   const filteredSessions = useMemo(
-    () =>
-      filterSessions(sessions, agents, {
-        statusFilter,
-        searchQuery,
-        sortField,
-        sortDirection,
-      }),
+    () => filterSessions(sessions, agents, { statusFilter, searchQuery, sortField, sortDirection }),
     [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
   );
 
@@ -273,24 +310,19 @@ export function FixtureApp() {
     connectionStatus,
     domain,
     sessionDetails,
+    projectShell: projectLayer.projectShell,
   });
 
-  const mainShared = {
+
+  const mainShared = fixtureAppMainShared({
     selectedSession,
     selectedAgent,
     agents,
     domain,
     tool,
-    fileOps: fixtureOps,
-    connectionStatus,
-    onSurfaceChange: setSurface,
-    onToolChange: setTool,
-    onOpenAgent: () => {},
-    // Inert, like every other handler here: the home's "New Session" opens the
-    // product's dialog, and a fixture that opened one would be asserting on a
-    // flow it does not own (#1082).
-    onCreate: () => {},
-  };
+    setSurface,
+    setTool,
+  });
 
   const { layer, onLayerChange, onLayerSelect, workspaceAvailable } = useAppLayer({
     selectedId,
@@ -314,6 +346,11 @@ export function FixtureApp() {
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
+        projectDetail={
+          projectLayer.projectShell.selectedProjectId ? (
+            <FixtureAppProjectDetail shell={projectLayer.projectShell} agents={agents} />
+          ) : null
+        }
         terminal={(chrome: TerminalChrome) => (
           <FixtureTerminal
             chrome={chrome}
@@ -326,6 +363,7 @@ export function FixtureApp() {
         )}
       />
       {sessionDetails.dialog}
+      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
     </div>
   );
 }

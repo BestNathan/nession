@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import { PanelLeftOpen } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,12 @@ export interface WebLayoutProps {
   surface: Surface;
   /** Fixture/testing override for the terminal; see `ShellMain.terminal`. */
   terminal?: MainProps['terminal'];
+  /**
+   * A standalone Project detail destination (#3025). It replaces the Session
+   * work region without changing the selected Session, so the Terminal stays
+   * mounted behind it in the App and selecting a Session returns to it.
+   */
+  projectDetail?: ReactNode;
 }
 
 const sidebarColumnWidth = 'w-[min(var(--nession-shell-sidebar-width),90vw)]';
@@ -94,6 +100,7 @@ export function WebLayout(props: WebLayoutProps) {
     mainShared,
     surface,
     terminal,
+    projectDetail,
   } = props;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -159,12 +166,14 @@ export function WebLayout(props: WebLayoutProps) {
             onClick={onBackToSessions}
           />
         ) : null}
-        <ShellMain
-          {...mainShared}
-          surface={surface}
-          onOpenDrawer={() => onBackToSessions?.()}
-          terminal={terminal}
-        />
+        {projectDetail ?? (
+          <ShellMain
+            {...mainShared}
+            surface={surface}
+            onOpenDrawer={() => onBackToSessions?.()}
+            terminal={terminal}
+          />
+        )}
       </main>
     </div>
   );

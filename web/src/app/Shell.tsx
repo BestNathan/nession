@@ -8,6 +8,7 @@ import { useShellState } from '@/app/useShellState';
 import { currentExperienceMode } from '@/app/experienceMode';
 import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
 import { useSessionDetails } from '@/app/useSessionDetails';
+import { useProjectShell } from '@/app/useProjectShell';
 import type { ConnectionState } from '@/platform/socket';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -75,7 +76,6 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
     staleAgentIds: data.staleAgents,
     clientSessionId: state.clientSessionId,
   });
-
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard
   // refreshes its lists, and the shell state makes the created Session current
@@ -89,6 +89,8 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
     },
     [data, state],
   );
+
+  const { projectShell, projectDialogs } = useProjectShell(state, handleSessionCreated);
 
   const dialogs = (
     <>
@@ -112,6 +114,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
         onConfigureConfirm={state.saveAttachSettings}
         onAttachClose={state.cancelAttach}
       />
+      {projectDialogs}
     </>
   );
 
@@ -173,6 +176,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             showDetail={state.showDetail}
             onBackToSessions={state.openList}
             onCloseDrawer={state.openDetail}
+            projectShell={projectShell}
           />
         )}
       </div>

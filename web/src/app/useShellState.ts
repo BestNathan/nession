@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { toast } from 'sonner';
 import { useDashboard } from '@/app/useDashboard';
 import { useAttachFlow } from '@/app/useAttachFlow';
 import { useDeepLink } from '@/app/useDeepLink';
@@ -9,14 +8,13 @@ import { useSessionRuntime } from '@/product/terminal/hooks/useSessionRuntime';
 import { useWebSocket } from '@/shared/hooks/useWebSocket';
 import { relayServerHandle } from '@/platform/attach/relayServerConnection';
 import { attachDialogIntentAtom, sessionIdAtom } from '@/product/session/state';
-import { persistConfirmedChoice } from '@/platform/attach/sessionAttachProfile';
 import { terminalServerApi } from '@/product/terminal';
-import { mapDomainState } from '@/product/session/model/domainState';
-import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
 import { useOpenWorktreeSession } from '@/app/useOpenWorktreeSession';
+import { useAttachSettingsPersistence, useProjectSelection } from '@/app/useShellSelections';
+import { useSelectedSession } from '@/app/useSelectedSession';
 import { sessionFromCreateAck } from '@/product/session/model/sessionFromCreateAck';
 
 /**
@@ -47,18 +45,21 @@ function createdSessionSelection(
  * Session appearing — so it must leave the user's surface alone: restoring the
  * same selection is not a route change.
  */
-function useSessionSelectionCommands(
-  setSelectedId: (sessionId: string) => void,
-  setSurface: (surface: Surface) => void,
-  setTool: (tool: CapabilityId) => void,
-  openDetail: () => void,
-) {
+function useSessionSelectionCommands(commands: {
+  setSelectedId: (sessionId: string) => void;
+  setSurface: (surface: Surface) => void;
+  setTool: (tool: CapabilityId) => void;
+  openDetail: () => void;
+  clearProject: () => void;
+}) {
+  const { setSelectedId, setSurface, setTool, openDetail, clearProject } = commands;
   const restore = useCallback((s: Session) => {
+    clearProject();
     setSelectedId(s.session_id);
     setSurface('terminal');
     setTool('files');
     openDetail();
-  }, [openDetail, setSelectedId, setSurface, setTool]);
+  }, [clearProject, openDetail, setSelectedId, setSurface, setTool]);
   const sync = useCallback((s: Session) => {
     setSelectedId(s.session_id);
     openDetail();
@@ -90,27 +91,23 @@ export function useShellState() {
   const attachDialogIntent = useAtomValue(attachDialogIntentAtom);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const {
+    selectedProjectId,
+    selectProject: handleSelectProject,
+    closeProject: handleCloseProject,
+  } = useProjectSelection();
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
   const { isWide, showList, showDetail, openDetail, openList } =
     useMobileNav(selectedId);
 
-  const selectedSession = selectedId
-    ? sessions.find((session) => session.session_id === selectedId) ?? null
-    : null;
-  const selectedAgent = selectedSession
-    ? agents.find((a) => a.agent_id === selectedSession.agent_id) ?? undefined
-    : undefined;
-  const domain = selectedSession
-    ? mapDomainState({
-        session: selectedSession,
-        agent: selectedAgent,
-        staleAgentIds: staleAgents,
-        clientSessionId,
-        attachInFlightId: null,
-        attachFailedId: null,
-      })
-    : null;
+  const { selectedSession, selectedAgent, domain } = useSelectedSession({
+    sessions,
+    agents,
+    selectedId,
+    staleAgents,
+    clientSessionId,
+  });
 
   const onKilled = useCallback(() => {
     if (sessionToKill?.session_id === selectedId) {
@@ -121,11 +118,12 @@ export function useShellState() {
 
   const handleSelect = useCallback((s: Session) => {
     setSelectedId(s.session_id);
+    handleCloseProject();
     setSurface('terminal');
     setTool('files');
     openDetail();
     requestAttach(s);
-  }, [openDetail, requestAttach]);
+  }, [handleCloseProject, openDetail, requestAttach]);
 
   const selectSessionInWorkspace = useCallback((s: Session) => {
     setSelectedId(s.session_id);
@@ -140,14 +138,16 @@ export function useShellState() {
   });
 
   const { restore: onRestoreSession, sync: syncSelectedSession } =
-    useSessionSelectionCommands(setSelectedId, setSurface, setTool, openDetail);
+    useSessionSelectionCommands({
+      setSelectedId,
+      setSurface,
+      setTool,
+      openDetail,
+      clearProject: handleCloseProject,
+    });
 
   /** Settings Save: persist the profile only — never attach or reconnect. */
-  const saveAttachSettings = useCallback((session: Session, choice: AttachChoice) => {
-    persistConfirmedChoice(session, choice, choice.attachInfo);
-    cancelAttach();
-    toast.success('Attach settings saved — applies to the next attach');
-  }, [cancelAttach]);
+  const saveAttachSettings = useAttachSettingsPersistence(cancelAttach);
 
   /** Create ACK → current Session, without a wait on the sessions projection. */
   const selectCreatedSession = useCallback(
@@ -169,6 +169,7 @@ export function useShellState() {
   return {
     data,
     selectedId,
+    selectedProjectId,
     surface,
     tool,
     selectedSession,
@@ -185,6 +186,8 @@ export function useShellState() {
     saveAttachSettings,
     onKilled,
     handleSelect,
+    handleSelectProject,
+    handleCloseProject,
     selectCreatedSession,
     handleOpenWorktreeSession,
     setSurface,
