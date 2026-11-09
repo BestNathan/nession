@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a0ceb2bef5978b4592205cf10129ae4468dc9a114995e77086204f8da18a1d3c",
+  "run_id": 42569484222,
+  "run_attempt": 1,
+  "issue": 565,
+  "criterion": "SC-05",
+  "criterion_text": "相同权限和后端能力下，三种模式的共同工具名称、schema、结果及错误语义一致。",
+  "stage": "staging",
+  "target_sha": "9f93a810100beb5fe413010d6f8760780447bc2c",
+  "contract_sha256": "9f6fdca575ede13e7989327f9bcdf29be47a69a3a74f19163fa2051f341f89dc",
+  "case_revision": "9f93a810100beb5fe413010d6f8760780447bc2c",
+  "case_tree_sha": "11821c434d466685c18bd9a1a3ea490f500ff770",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T05:53:22.817Z",
+  "finished_at": "2026-11-09T05:53:23.283Z",
+  "duration_ms": 466,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "All three hosting modes serve the same tool names, descriptions and input schemas",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the three live /mcp endpoints returned byte-identical tools/list definitions at 9f93a810100beb5fe413010d6f8760780447bc2c"
+        }
+      ],
+      "duration_ms": 438,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42569484222,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "9f93a810100beb5fe413010d6f8760780447bc2c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42569484222",
+    "record_path": "runs/2026-11-09/42569484222-1/565/SC-05.json",
+    "source_result_sha256": "215682b89d83e7e1d45025315e910299d26f10e3814f02f77012e2a061787eb0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42569484222-1",
+    "sha256": "215682b89d83e7e1d45025315e910299d26f10e3814f02f77012e2a061787eb0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42569484222",
+    "durability": "time-limited; object archival not configured"
+  }
+}
