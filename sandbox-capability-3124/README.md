@@ -64,7 +64,8 @@ All product data and IDs are synthetic and contain no private endpoints or secre
 ### Checks / verification
 - Source and catalog files on the shared `prototype` branch are verified through the GitHub connector.
 - The proposed direct HTML path is not automatically evidence of Pages deployment. **Do not claim live publication until `/nession/prototypes/manifest.json` SHA agrees with the remote commit and its HTTPS HTML is checked.**
-- JS syntax, desktop/mobile browser click-through, viewport geometry, stage left/right edge reachability, console/network and screenshot checks must be recorded after actual execution. No existing #3025 browser record proves this prototype.
+- **Authoring smoke (2026-11-09):** GitHub sources fetched; standalone JS parsed as valid JavaScript; 17/17 deterministic V8 synthetic-DOM assertions passed (initial Terminal, Workspace entry, scoped execution copy, detail open/return, Native/offline/unavailable/recreated/partial negative states, App one-header depth, App→Web mode roundtrip, Terminal return, gallery/catalog links). This is not Chromium and does not prove layout pixels, real focus/scroll or backend security.
+- **Remaining:** real Chromium desktop/mobile click-through, viewport geometry, stage left/right edge reachability, actual focus/scroll, console/network, screenshots and actual React fixture side-by-side. No existing #3025 browser record proves this prototype.
 - Production Acceptance/E2E is independent and remains Pending in #3124.
 
 ## Non-goals
