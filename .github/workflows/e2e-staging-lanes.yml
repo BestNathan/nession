@@ -170,13 +170,17 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REPOSITORY" == "BestNathan/nession" && "$GITHUB_REF" == "refs/heads/main" ]] \
             || { echo "::error::identity revalidation requires trusted main push"; exit 1; }
-          [[ "$PUSH_BEFORE" =~ ^[0-9a-f]{40}$ && "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] \
+          [[ "$PUSH_BEFORE" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] \
             || { echo "::error::identity refresh requires exact source and destination SHAs"; exit 1; }
           git cat-file -e "${PUSH_BEFORE}^{commit}" \
             || { echo "::error::missing trusted main parent for identity refresh"; exit 1; }
+          git cat-file -e "${GITHUB_SHA}^{commit}" \
+            || { echo "::error::missing trusted triggering main commit"; exit 1; }
+          git merge-base --is-ancestor "$PUSH_BEFORE" "$GITHUB_SHA" \
+            || { echo "::error::identity refresh requires main event ancestry"; exit 1; }
           # Capture the exact source delta and fail on Git errors rather than
           # mistaking a failed diff command for a changed verifier.
-          git diff --name-only "$PUSH_BEFORE" "$MAIN_SHA" -- \
+          git diff --name-only "$PUSH_BEFORE" "$GITHUB_SHA" -- \
             .github/workflows/e2e-staging-lanes.yml \
             .github/workflows/deploy-identity.yml \
             scripts/ci/deploy-identity-tunnel.sh \
