@@ -23,17 +23,13 @@ async function openWebSandbox(page: Page, query: string): Promise<void> {
 }
 
 async function openAppSandbox(page: Page, query = ''): Promise<void> {
-  await page.goto('/#/fixture/app');
+  // The scenario is a route input read at load: navigate with it first. A
+  // second hash-only `goto` does not reload the app, and the already-mounted
+  // capability would keep its previous Agent answer.
+  await page.goto(`/#/fixture/app${query}`);
   await page.getByTestId('app-header-workspace').click();
   await page.getByTestId('workspace-tool-sandbox').click();
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
-  if (query) {
-    // The route is read at load; a scenario needs a fresh route.
-    await page.goto(`/#/fixture/app${query}`);
-    await page.getByTestId('app-header-workspace').click();
-    await page.getByTestId('workspace-tool-sandbox').click();
-    await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
-  }
 }
 
 test.describe('Web 1180', () => {
