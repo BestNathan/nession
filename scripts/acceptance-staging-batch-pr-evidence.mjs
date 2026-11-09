@@ -175,6 +175,16 @@ export async function selfTestOriginalPr(){
     }},/missing successful quality Job tooling-check/],
     [{...good,runs:[{...runs[0],head_repository:{full_name:'attacker/repo'}},...runs.slice(1)]},
       /missing or ambiguous exact-head quality/],
+    [{...good,get:async route=>{
+      const jobs=await get(route);
+      return route.includes('/102/')
+        ? {jobs:jobs.jobs.map(j=>j.name==='case-smoke'?{...j,steps:[]}:j)} : jobs;
+    }},/Case-method selection did not execute/],
+    [{...good,get:async route=>{
+      const jobs=await get(route);
+      return route.includes('/103/')
+        ? {jobs:jobs.jobs.map(j=>j.name==='e2e'?{...j,steps:[]}:j)} : jobs;
+    }},/selected E2E obligations were not evaluated/],
   ];
   for(const [bad,pattern] of negative){
     await assert.rejects(()=>verifySourceBoundOriginalPr(bad),pattern);
