@@ -38,6 +38,7 @@ impl ConnectionHandler {
             working_dir,
             env_files: env_refs,
             sandbox,
+            project_id,
         }) = serde_json::from_value::<ClientSessionCreatePayload>(msg.payload)
         else {
             return Ok(session_create_reply(
@@ -53,6 +54,48 @@ impl ConnectionHandler {
             ));
         }
         let agent_id = agent_id.as_str();
+
+        // A Project is a declaration; the Session owns its realized
+        // environment (#3025). Naming one ties this create to an Existing
+        // Location the Project actually declares, so a client cannot attach an
+        // arbitrary Agent/path pair by asserting a Project id. The Project may
+        // be edited or deleted later without mutating this Session.
+        if let Some(project_id) = project_id.as_deref() {
+            let project = match self.db.get_project(project_id).await {
+                Ok(Some(project)) => project,
+                Ok(None) => {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal(&format!("Project '{project_id}' not found")),
+                    ));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to read project {project_id}: {e:#}");
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal("Project could not be loaded"),
+                    ));
+                }
+            };
+            let Some(working_dir) = working_dir.as_deref() else {
+                return Ok(session_create_reply(
+                    &msg.id,
+                    refusal("A Project Session requires an Existing Location directory"),
+                ));
+            };
+            if !project
+                .locations
+                .iter()
+                .any(|location| location.agent_id == agent_id && location.path == working_dir)
+            {
+                return Ok(session_create_reply(
+                    &msg.id,
+                    refusal(&format!(
+                        "Agent '{agent_id}' and directory '{working_dir}' are not an Existing Location of Project '{project_id}'"
+                    )),
+                ));
+            }
+        }
 
         // Check agent exists and is online
         let agent = self.agent_registry.get(agent_id).await;
