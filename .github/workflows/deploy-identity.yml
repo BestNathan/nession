@@ -113,8 +113,8 @@ jobs:
               # API alias only. A wildcard/loopback listener would expose the
               # tunnel outside the intended destination on this runner.
               # Probe only loopback; never send requests to unapproved LAN IPs.
-              if curl --noproxy '*' --silent --insecure --max-time 2 \
-                  --output /dev/null https://127.0.0.1:6443/healthz; then
+              if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6443' \
+                  >/dev/null 2>&1; then
                 echo "::error::gost listener unexpectedly accepts a different local destination"
                 exit 1
               fi
