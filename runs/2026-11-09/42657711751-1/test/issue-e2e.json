@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "38503d2d8e8894a5a17a51769ac9fb4f7651b2d2",
+  "run_id": 42657711751,
+  "run_attempt": 1,
+  "plan_digest": "00d1b264c3134cb1ba23e41a1ee65b0cddafbcc5dd56965dc69b38a68f0911df",
+  "artifact_digest": "sha256:db584ea4e8709cf5d7b528cd4c0863b0a0d772fa6b2e1706af8f93477f5e857e",
+  "results": [
+    {
+      "id": "project-management",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 29
+    }
+  ]
+}
