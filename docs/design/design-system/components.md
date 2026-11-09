@@ -42,6 +42,15 @@ That ordering matters. A plugin registering a view must not automatically create
 - Extension-specific components may exist inside an extension, but shared/global chrome still follows Nession patterns and visual language.
 - A primitive should not encode product policy such as `always show this tab`, `Agent is navigation parent`, or `one extension = one button`.
 
+### Sticky dialog footer
+
+A dialog whose form scrolls under its action row uses the footer's `sticky`
+variant, not a hand-written `sticky bottom-0` on the default footer. The sticky
+band is opaque (`muted` surface, never a translucent mix) and reaches the
+dialog's bottom padding edge: fields may scroll beneath it, but no field, label
+or border shows through, and the action row sits flush with the surface. A
+footer that stays in flow keeps the lighter translucent band.
+
 ### Focus treatment
 
 Focus is a modality-aware interaction state, not decoration (#2750). Pointer and

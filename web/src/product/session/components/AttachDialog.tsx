@@ -95,7 +95,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
             </p>
           ) : null}
         </div>
-        <DialogFooter className="sticky bottom-0 z-10">
+        <DialogFooter sticky>
           <Button type="button" variant="outline" onClick={() => onClose()}>
             Cancel
           </Button>
