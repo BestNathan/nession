@@ -401,3 +401,10 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the merged-staging Linux acceptance receipts (SC-02/03/04/05/07 Pass in Acceptance / Cases run 42575857638 at 1987709a), the packaged Bubblewrap Agent images and entrypoint [sandbox] projection, and keep SC-06 macOS plus a deployed-environment proof explicitly pending
 - Source: https://github.com/BestNathan/nession/pull/3096
+
+## 2026-11-09T07:29:20Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the staging deployment patch (host cgroup mounted writable, privileged Agent, /nession-staging root) and the deployed Session that verified network deny, PID/IPC/User namespaces, cgroup membership and seccomp; keep SC-06 macOS and a trusted when:deployed Case lane explicitly pending
+- Source: https://github.com/BestNathan/nession/pull/3099
