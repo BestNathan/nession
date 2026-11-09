@@ -48,11 +48,43 @@ function offlineProjects(): Project[] {
   return projects;
 }
 
-export type FixtureProjectsScenario = 'canonical' | 'empty' | 'error' | 'loading' | 'offline';
+/**
+ * Two online Existing Locations with multi-segment paths (#3089 SC-07). The
+ * canonical single short location cannot exercise the Select's wrapping
+ * boundary, and the offline scenario cannot exercise selection.
+ */
+function longLocationProjects(): Project[] {
+  const projects = seedProjects();
+  projects[0].locations = [
+    {
+      agent_id: 'macbook',
+      path: '/Users/nathan/code/nession/.claude/worktrees/fix-3089-select-location-geometry/web/src/product/session/components',
+    },
+    {
+      agent_id: 'devbox-01',
+      path: '/workspace/nession/services/web/src/product/session/components/very-long-directory-name-for-geometry',
+    },
+  ];
+  return projects;
+}
+
+export type FixtureProjectsScenario =
+  | 'canonical'
+  | 'empty'
+  | 'error'
+  | 'loading'
+  | 'offline'
+  | 'long';
 
 export function fixtureProjectsScenario(search: string): FixtureProjectsScenario {
   const value = new URLSearchParams(search).get('projects');
-  if (value === 'empty' || value === 'error' || value === 'loading' || value === 'offline') {
+  if (
+    value === 'empty' ||
+    value === 'error' ||
+    value === 'loading' ||
+    value === 'offline' ||
+    value === 'long'
+  ) {
     return value;
   }
   return 'canonical';
@@ -199,7 +231,9 @@ export function createFixtureProjectHarness(search: string): {
       ? []
       : scenario === 'offline'
         ? offlineProjects()
-        : seedProjects(),
+        : scenario === 'long'
+          ? longLocationProjects()
+          : seedProjects(),
     lists: 0,
     creates: [],
     updates: [],

@@ -11,6 +11,7 @@ describe('fixtureProjects', () => {
     expect(fixtureProjectsScenario('?projects=empty')).toBe('empty');
     expect(fixtureProjectsScenario('?projects=error')).toBe('error');
     expect(fixtureProjectsScenario('?projects=offline')).toBe('offline');
+    expect(fixtureProjectsScenario('?projects=long')).toBe('long');
   });
 
   it('answers the five Project wires with deterministic data', async () => {
@@ -63,5 +64,15 @@ describe('fixtureProjects', () => {
     const { surface } = createFixtureProjectHarness('?projects=offline');
     const list = await surface.request<{ projects: Project[] }>('server.project.list', {});
     expect(list.projects[0].locations[0].agent_id).toBe('sg-prod');
+  });
+
+  it('gives the long scenario two online multi-segment locations', async () => {
+    const { surface } = createFixtureProjectHarness('?projects=long');
+    const list = await surface.request<{ projects: Project[] }>('server.project.list', {});
+    const locations = list.projects[0].locations;
+    expect(locations).toHaveLength(2);
+    expect(locations[0].agent_id).toBe('macbook');
+    expect(locations[1].agent_id).toBe('devbox-01');
+    expect(locations.every((location) => location.path.split('/').length > 8)).toBe(true);
   });
 });
