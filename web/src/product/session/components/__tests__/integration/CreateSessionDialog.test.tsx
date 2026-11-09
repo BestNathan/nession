@@ -567,6 +567,30 @@ describe('CreateSessionDialog Project mode', () => {
     expect(createSessionMock).not.toHaveBeenCalled();
   });
 
+  it('uses the content-sized multi-line Select for Existing Locations', () => {
+    const { CreateSessionDialog } = CreateSessionDialogModule;
+    render(
+      <CreateSessionDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        agents={[makeAgent({ agent_id: 'macbook', hostname: 'macbook' })]}
+        onCreated={vi.fn()}
+        project={PROJECT}
+      />,
+    );
+
+    const trigger = screen.getByTestId('project-location-trigger');
+    expect(trigger).toHaveAttribute('data-size', 'content');
+    // The content variant drops the single-line height and nowrap contract;
+    // the selected Agent/path/status lines set the control's height.
+    expect(trigger.className).toContain('whitespace-normal');
+    expect(trigger.className).not.toContain('whitespace-nowrap');
+    expect(trigger.className).not.toContain('h-8');
+    expect(screen.getByTestId('project-location-path')).toHaveTextContent(
+      '/Users/nathan/code/nession',
+    );
+  });
+
   it('explains a Project with no Existing Location', () => {
     const { CreateSessionDialog } = CreateSessionDialogModule;
     render(
