@@ -29,7 +29,7 @@ run(({ evidence }) => {
 
   requireText('.github/workflows/acceptance-cases.yml', [
     'execute-macos:',
-    'runs-on: macos-14',
+    'runs-on: macos-13',
     'if: github.event_name != \'workflow_dispatch\' || inputs.platform == \'macos\'',
     'ACCEPTANCE_PLATFORM: macos',
     'ACCEPTANCE_PLATFORM: linux',
@@ -50,7 +50,7 @@ run(({ evidence }) => {
   });
   evidence.push({
     type: 'runtime',
-    value: 'the macOS job pins macos-14, sets ACCEPTANCE_PLATFORM=macos, and the ingest downloads both platform artifacts from one run',
+    value: 'the macOS job pins macos-13, sets ACCEPTANCE_PLATFORM=macos, and the ingest downloads both platform artifacts from one run',
   });
   return 'Acceptance Cases are routed only to their declared platform and both platform artifacts are ingested from one source run';
 });
