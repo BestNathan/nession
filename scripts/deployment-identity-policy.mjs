@@ -306,6 +306,92 @@ export function attestDeployment({ overlay, provenance, gitopsRevision, observat
   };
 }
 
+// Observation-only profile for the already trusted Deploy / Identity job.
+// It does not execute target-SHA code or give Case/Acceptance Pass. The runner
+// obtains two fresh read-only Kubernetes API snapshots over the existing relay;
+// this policy projects only bounded identity and timing facts into Run Store.
+export function validateRemoteStagingObservation(raw, attestation) {
+  const reject = (object, keys, label) => {
+    if (!object || typeof object !== 'object' || Array.isArray(object)) {
+      fail(label + ' must be an object');
+    }
+    for (const key of Object.keys(object)) {
+      if (!keys.includes(key)) fail(label + ' contains forbidden field ' + key);
+    }
+  };
+  reject(raw, [
+    'schema_version', 'kind', 'profile', 'status', 'evaluation',
+    'environment_id', 'source_sha', 'gitops_revision', 'attestation_observed_at',
+    'samples',
+  ], 'remote-staging observation');
+  if (raw.schema_version !== 1 || raw.kind !== 'nession_remote_staging_observation' ||
+      raw.profile !== 'remote-staging' || raw.status !== 'Observed' ||
+      raw.evaluation !== null) {
+    fail('remote-staging observation must be observation-only');
+  }
+  if (!['staging', 'staging-01'].includes(attestation.environment_id) ||
+      raw.environment_id !== attestation.environment_id ||
+      raw.source_sha !== attestation.source_sha ||
+      raw.gitops_revision !== attestation.gitops_revision ||
+      raw.attestation_observed_at !== attestation.observed_at) {
+    fail('remote-staging observation disagrees with the pinned deployment attestation');
+  }
+  if (!Array.isArray(raw.samples) || raw.samples.length !== 2) {
+    fail('remote-staging observation requires exactly two bounded samples');
+  }
+  const baseline = new Map(attestation.workloads.map((workload) => [workload.role, workload]));
+  let lastOffset = -1;
+  let lastAt = Date.parse(attestation.observed_at);
+  const samples = raw.samples.map((sample) => {
+    reject(sample, ['at', 'offset_ms', 'workloads'], 'remote-staging sample');
+    if (typeof sample.at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(sample.at) ||
+        !Number.isFinite(Date.parse(sample.at))) {
+      fail('remote-staging sample requires a canonical UTC timestamp');
+    }
+    const at = Date.parse(sample.at);
+    if (at < lastAt || at - Date.parse(attestation.observed_at) > 120000) {
+      fail('remote-staging sample is stale, unordered, or beyond the sampling budget');
+    }
+    lastAt = at;
+    if (!Number.isSafeInteger(sample.offset_ms) || sample.offset_ms < 0 ||
+        sample.offset_ms > 120000 || sample.offset_ms <= lastOffset) {
+      fail('remote-staging sample offset must be bounded and strictly monotonic');
+    }
+    lastOffset = sample.offset_ms;
+    if (!Array.isArray(sample.workloads) || sample.workloads.length !== ROLES.length) {
+      fail('remote-staging sample must contain three workload identities');
+    }
+    const seen = new Set();
+    const workloads = sample.workloads.map((workload) => {
+      reject(workload, ['role', 'uid', 'generation', 'observed_generation', 'digest', 'ready'],
+        'remote-staging sampled workload');
+      const roleName = role(workload.role, 'remote-staging role');
+      if (seen.has(roleName)) fail('remote-staging sample contains duplicate workload role');
+      seen.add(roleName);
+      const expected = baseline.get(roleName);
+      if (!expected || workload.ready !== true || workload.uid !== expected.uid ||
+          workload.generation !== expected.generation ||
+          workload.observed_generation !== expected.observed_generation ||
+          workload.digest !== expected.digest) {
+        fail('remote-staging workload identity/readiness drifted during sampling');
+      }
+      return {
+        role: roleName, uid: expected.uid, generation: expected.generation,
+        observed_generation: expected.observed_generation, digest: expected.digest,
+        ready: true,
+      };
+    });
+    return { at: sample.at, offset_ms: sample.offset_ms, workloads };
+  });
+  return {
+    schema_version: 1, kind: 'nession_remote_staging_observation',
+    profile: 'remote-staging', status: 'Observed', evaluation: null,
+    environment_id: attestation.environment_id, source_sha: attestation.source_sha,
+    gitops_revision: attestation.gitops_revision,
+    attestation_observed_at: attestation.observed_at, samples,
+  };
+}
+
 // Re-validate a stored attestation receipt without the original overlay,
 // provenance or cluster JSON. This is the durable-store trust boundary: a
 // receipt is only acceptable when its own fields still form one consistent
@@ -403,6 +489,15 @@ export function validateAttestation(receipt) {
     source_sha: sourceSha,
     images: ROLES.map((roleName) => ({ role: roleName, ...images.get(roleName) })),
     workloads: ROLES.map((roleName) => workloads.get(roleName)),
+    ...(receipt.remote_observation === undefined ? {} : {
+      remote_observation: validateRemoteStagingObservation(receipt.remote_observation, {
+        environment_id: environmentId,
+        source_sha: sourceSha,
+        gitops_revision: gitopsRevision,
+        observed_at: new Date(Date.parse(observedAt)).toISOString(),
+        workloads: ROLES.map((roleName) => workloads.get(roleName)),
+      }),
+    }),
   };
 }
 
