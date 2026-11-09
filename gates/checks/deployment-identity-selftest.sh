@@ -20,7 +20,8 @@ gate_check() {
   gate_require_path './scripts/staging-lane-admission-state.mjs' "Restore scripts/staging-lane-admission-state.mjs." || return $?
   gate_run_invariant node scripts/deployment-identity-policy.mjs self-test
   gate_run_invariant node scripts/deployment-identity-collect.mjs self-test
-  gate_run_invariant node scripts/remote-staging-observe.mjs self-test && node scripts/deployment-attestation-ingest.mjs self-test
+  gate_run_invariant node scripts/remote-staging-observe.mjs self-test
+  gate_run_invariant node scripts/deployment-attestation-ingest.mjs self-test
   gate_run_invariant node scripts/deployment-binding-lookup.mjs self-test
   gate_run_invariant node scripts/staging-lane-scheduler.mjs self-test
   gate_run_invariant node scripts/staging-lane-admission-state.mjs self-test
