@@ -313,6 +313,30 @@ function selfTest() {
     fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01/prototype'), 0o700);
     fs.chmodSync(path.join(dir, SOURCE_ROOT, 'SC-01'), 0o700);
     fs.rmSync(path.join(dir, SOURCE_ROOT), { recursive: true, force: true });
+    // Tree safety is enforced on actual Git object modes and bytes, not
+    // inferred from a path extension or untrusted Issue Markdown.
+    fs.symlinkSync('index.html', path.join(dir, 'demo-123/link.html'));
+    fs.writeFileSync(path.join(dir, 'demo-123/binary.html'), Buffer.from([0, 8, 13]));
+    fs.writeFileSync(path.join(dir, 'demo-123/large.html'), Buffer.alloc(MAX_FILE_BYTES + 1, 65));
+    git(dir, 'add', '.');
+    git(dir, 'commit', '-qm', 'unsafe blob fixtures');
+    const unsafeSha = git(dir, 'rev-parse', 'HEAD');
+    git(dir, 'update-ref', 'refs/remotes/origin/prototype', unsafeSha);
+    for (const [filename, why] of [
+      ['link.html', /unsafe Git tree mode/],
+      ['binary.html', /non-text content/],
+      ['large.html', /oversized source file/],
+    ]) {
+      const unsafe = {
+        ...localContext,
+        acceptance_sources: {
+          'SC-01': [{ branch: 'prototype', sha: unsafeSha, files: ['demo-123/' + filename] }],
+        },
+      };
+      assert.throws(() => materializeSources(unsafe, dir), why);
+      assert.equal(fs.existsSync(path.join(dir, SOURCE_ROOT)), false,
+        'invalid staged blob must never create a visible source directory');
+    }
     git(dir, 'checkout', '--orphan', 'unrelated');
     git(dir, 'rm', '-qrf', '.');
     fs.mkdirSync(path.join(dir, 'demo-123'), { recursive: true });
