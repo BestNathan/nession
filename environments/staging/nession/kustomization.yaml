@@ -27,17 +27,20 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: agent-b015fae
+  newTag: agent-f34b24b
 - name: ghcr.io/bestnathan/nession-server
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: server-b015fae
+  newTag: server-f34b24b
 - name: ghcr.io/bestnathan/nession-ui
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: ui-b015fae
+  newTag: ui-f34b24b
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
 
+# Appended after the two index-based subPath patches so their indices stay
+# stable; the Sandbox Agent needs the host cgroup tree writable at its
+# canonical mount path (#2681).
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
@@ -63,9 +66,6 @@ patches:
   target:
     kind: Deployment
     name: nession-agent
-# Appended after the two index-based subPath patches so their indices stay
-# stable; the Sandbox Agent needs the host cgroup tree writable at its
-# canonical mount path (#2681).
 - patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/-
