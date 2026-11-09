@@ -76,11 +76,21 @@ test('SC-03: state, Terminal and Workspace context survive the rail round trip',
   await page.getByTestId('surface-action-open-terminal').click();
   const xterm = page.locator('.xterm').first();
   await expect(xterm).toBeVisible();
-  const widthExpanded = (await xterm.boundingBox())?.width ?? 0;
+  await xterm.evaluate((element) => {
+    (element as HTMLElement).dataset.sc03Xterm = 'same';
+  });
+  // The fixture pins the column count and fits its font to the well (the
+  // product's build-config rule), so the geometry that must follow the column
+  // is the terminal well's width, not a grid recomputation.
+  const terminalWell = page.getByTestId('fixture-terminal');
+  const widthExpanded = (await terminalWell.boundingBox())?.width ?? 0;
   await page.getByTestId('sidebar-collapse').click();
   await expect.poll(() => columnWidth(page)).toBe(56);
-  const widthCollapsed = (await xterm.boundingBox())?.width ?? 0;
+  const widthCollapsed = (await terminalWell.boundingBox())?.width ?? 0;
   expect(widthCollapsed).toBeGreaterThan(widthExpanded + 100);
+  expect(
+    await xterm.evaluate((element) => (element as HTMLElement).dataset.sc03Xterm),
+  ).toBe('same');
 
   // Search text and selection survive collapse/reopen in the mounted Sidebar.
   await page.getByTestId('sidebar-rail-search').click();
@@ -131,7 +141,7 @@ test('SC-03: state, Terminal and Workspace context survive the rail round trip',
     description:
       'exact SHA ' + sha + ': list scrollTop ' + scroll.top + '/' + scroll.max +
       ', Workspace surface, search draft and selected Session survived the rail round trip; ' +
-      'the same xterm node grew from ' + widthExpanded + 'px to ' + widthCollapsed +
-      'px on collapse; Project round trip preserved the mounted Terminal',
+      'the same xterm node followed the terminal well from ' + widthExpanded + 'px to ' +
+      widthCollapsed + 'px on collapse; Project round trip preserved the mounted Terminal',
   });
 });
