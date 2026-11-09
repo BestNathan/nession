@@ -13,6 +13,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use nession_protocol::contracts::agent::v1::{AgentListPayload, AgentListReply};
 use nession_protocol::contracts::client::v1::{AuthResponsePayload, ClientAuthPayload};
+use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::session::v1::{
     ClientRelayBeginPayload, ClientSessionAttachPayload, ClientSessionAttachReply,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionKillPayload,
@@ -340,6 +341,7 @@ impl ClientConnection {
         &mut self,
         agent_id: &str,
         name: &str,
+        sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.request_within(
             proto_msg(
@@ -349,7 +351,7 @@ impl ClientConnection {
                     name: name.to_string(),
                     working_dir: None,
                     env_files: Vec::new(),
-                    sandbox: None,
+                    sandbox,
                 },
             ),
             SESSION_CREATE_TIMEOUT,

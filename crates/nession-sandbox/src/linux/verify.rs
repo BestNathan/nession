@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, SandboxError};
-use crate::facts::BridgeFacts;
 use crate::linux::channel::ControlPeer;
 use crate::util::is_descendant_of;
 

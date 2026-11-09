@@ -1956,6 +1956,7 @@ dependencies = [
  "nession-git",
  "nession-protocol",
  "nession-runtime",
+ "nession-sandbox",
  "nession-server",
  "nession-tmux",
  "portable-pty",

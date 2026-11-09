@@ -304,7 +304,7 @@ pub fn is_forbidden_address(ip: IpAddr) -> bool {
                 || v6.is_unique_local()
                 || v6.is_unicast_link_local()
                 || v6.is_multicast()
-                || v6.segments()[..2] == [0x2001, 0x0db8]
+                || matches!(v6.segments(), [0x2001, 0x0db8, ..])
             {
                 return true;
             }

@@ -10,6 +10,7 @@
 //! Agent process without touching unrelated processes, cgroups or the shared
 //! tmux server.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,18 +24,21 @@ use crate::settings::SandboxSettings;
 use crate::util::write_atomic;
 
 /// Everything the Agent knows at create time that the sandbox needs.
+///
+/// Owned so the Agent can move it onto a blocking task: probing spawns
+/// bounded processes and must not run on an async worker.
 #[derive(Debug, Clone)]
-pub struct LaunchRequest<'a> {
-    pub policy: &'a SandboxPolicy,
-    pub session_name: &'a str,
+pub struct LaunchRequest {
+    pub policy: SandboxPolicy,
+    pub session_name: String,
     /// The Session's durable instance id (`@nession_instance_id`).
-    pub instance_id: &'a str,
+    pub instance_id: String,
     /// The Session's initial working directory. It must exist and be visible.
-    pub working_dir: &'a str,
+    pub working_dir: String,
     /// The shell/adapter argv to run inside the sandbox.
-    pub inner_command: &'a [String],
+    pub inner_command: Vec<String>,
     /// The private tmux socket to hide from the sandbox.
-    pub tmux_socket: Option<&'a Path>,
+    pub tmux_socket: Option<PathBuf>,
 }
 
 /// One live execution record, durable across Agent restarts.
@@ -93,6 +97,21 @@ impl CleanupReport {
     }
 }
 
+/// Kernel-visible controls the Agent observed at release time.
+#[derive(Debug, Clone, Default)]
+pub struct VerifiedControls {
+    /// `/proc/self/ns/*` link targets reported from inside the sandbox.
+    pub namespaces: BTreeMap<String, String>,
+    /// The execution cgroup entry, when one was requested.
+    pub cgroup: Option<String>,
+    /// `Seccomp:` mode from `/proc/self/status`.
+    pub seccomp: Option<String>,
+    /// `NoNewPrivs:` from `/proc/self/status`.
+    pub no_new_privs: Option<String>,
+    /// How many filesystem probes the bridge confirmed.
+    pub filesystem_probes: usize,
+}
+
 /// A prepared but not yet verified launch.
 pub struct PreparedSandbox {
     pub compiled: CompiledSandboxPolicy,
@@ -101,6 +120,7 @@ pub struct PreparedSandbox {
     extra_env: Vec<(String, String)>,
     settings: SandboxSettings,
     record: ExecutionRecord,
+    verified: Option<VerifiedControls>,
     #[cfg(target_os = "linux")]
     linux: Option<crate::linux::PreparedLinux>,
     #[cfg(target_os = "macos")]
@@ -125,6 +145,7 @@ impl PreparedSandbox {
             extra_env,
             settings,
             record,
+            verified: None,
             linux,
         }
     }
@@ -146,6 +167,7 @@ impl PreparedSandbox {
             extra_env,
             settings,
             record,
+            verified: None,
             macos,
         }
     }
@@ -160,9 +182,19 @@ impl PreparedSandbox {
         &self.extra_env
     }
 
+    /// The verified execution report carried by the create response.
+    pub fn report(&self) -> &SandboxExecutionReport {
+        &self.report
+    }
+
     /// The record, for diagnostics.
     pub fn record(&self) -> &ExecutionRecord {
         &self.record
+    }
+
+    /// What the launch barrier observed, once verification succeeded.
+    pub fn verified_controls(&self) -> Option<&VerifiedControls> {
+        self.verified.as_ref()
     }
 
     /// Verify the installed controls and release the launch barrier.
@@ -173,11 +205,19 @@ impl PreparedSandbox {
     pub fn verify(&mut self, pane_pid: u32) -> Result<()> {
         #[cfg(target_os = "linux")]
         if let Some(linux) = self.linux.as_mut() {
-            crate::linux::verify_launch(linux, pane_pid, &self.settings)?;
+            self.verified = Some(crate::linux::verify_launch(
+                linux,
+                pane_pid,
+                &self.settings,
+            )?);
         }
         #[cfg(target_os = "macos")]
         if let Some(macos) = self.macos.as_mut() {
-            crate::macos::verify_launch(macos, pane_pid, &self.settings)?;
+            self.verified = Some(crate::macos::verify_launch(
+                macos,
+                pane_pid,
+                &self.settings,
+            )?);
         }
         self.record.pane_pid = Some(pane_pid);
         write_record(&self.settings, &self.record)?;
@@ -274,8 +314,8 @@ impl SandboxExecutionHandle {
 /// A disabled policy is refused here: the Agent treats an absent or disabled
 /// policy as Native and never calls `prepare` for it, so receiving one here is
 /// a caller error rather than a silent fallback.
-pub fn prepare(request: &LaunchRequest<'_>, settings: &SandboxSettings) -> Result<PreparedSandbox> {
-    let compiled = compile(request.policy)?;
+pub fn prepare(request: &LaunchRequest, settings: &SandboxSettings) -> Result<PreparedSandbox> {
+    let compiled = compile(&request.policy)?;
     if !request.policy.enabled {
         return Err(SandboxError::InvalidPolicy(
             "a disabled Sandbox policy must not be prepared for a Session".to_string(),
@@ -287,7 +327,7 @@ pub fn prepare(request: &LaunchRequest<'_>, settings: &SandboxSettings) -> Resul
         ));
     }
 
-    let working_dir = validate_working_dir(request.working_dir, compiled.filesystem.as_ref())?;
+    let working_dir = validate_working_dir(&request.working_dir, compiled.filesystem.as_ref())?;
 
     #[cfg(target_os = "linux")]
     {

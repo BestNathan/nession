@@ -197,8 +197,30 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             }
         }
         mgr.with_memory_threshold(Some(config.memory_threshold_percent));
+        // Sandbox host configuration and the execution reaper (#2681). The
+        // runtime is always present; `sandbox.enabled = false` makes every
+        // explicit policy fail closed with a backend-unavailable reason.
+        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(&config);
+        mgr = mgr.with_sandbox(Arc::clone(&sandbox));
         Arc::new(mgr)
     };
+
+    // Reconcile Sandbox records left by a previous Agent process against the
+    // tmux Sessions that actually exist. A failed listing is not "no
+    // Sessions"; the pass is skipped and the records stay for the next start.
+    if let Some(sandbox) = tmux_for_client.sandbox_runtime() {
+        match tmux_for_client.list_sessions().await {
+            Ok(sessions) => {
+                let live: Vec<String> = sessions.into_iter().map(|session| session.name).collect();
+                if let Err(error) = sandbox.reconcile(&live) {
+                    tracing::warn!("Sandbox reconciliation failed: {error:#}");
+                }
+            }
+            Err(error) => tracing::warn!(
+                "skipping Sandbox reconciliation because tmux did not answer: {error:#}"
+            ),
+        }
+    }
 
     // One metadata store for the process: the P2P listener and the central
     // connection are two entrypoints into the same Session-owned state (#2789).

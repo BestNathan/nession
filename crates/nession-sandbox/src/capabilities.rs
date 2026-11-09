@@ -328,6 +328,150 @@ fn validate_macos(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::compile;
+    use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
+
+    fn compiled(value: serde_json::Value) -> CompiledSandboxPolicy {
+        let policy: SandboxPolicy = serde_json::from_value(value).expect("policy fixture");
+        compile(&policy).expect("compiled")
+    }
+
+    fn linux_capabilities() -> Capabilities {
+        Capabilities {
+            platform: Platform::Linux,
+            backend: Some("linux-bwrap"),
+            unavailable: None,
+            namespaces: NamespaceSupport {
+                user: true,
+                pid: true,
+                ipc: true,
+                uts: true,
+                cgroup: true,
+                net: true,
+            },
+            cgroup_v2: Some(CgroupSupport {
+                root: PathBuf::from("/sys/fs/cgroup/nession"),
+                controllers: ["memory", "cpu", "pids"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                detail: "delegated".to_string(),
+            }),
+            seccomp: true,
+            filesystem: true,
+            network_allow: true,
+            network_deny: true,
+            network_restricted: true,
+            seatbelt: None,
+            bridge: true,
+            detail: Vec::new(),
+        }
+    }
+
+    fn macos_capabilities() -> Capabilities {
+        Capabilities {
+            platform: Platform::Macos,
+            backend: Some("macos-seatbelt"),
+            unavailable: None,
+            namespaces: NamespaceSupport::default(),
+            cgroup_v2: None,
+            seccomp: false,
+            filesystem: false,
+            network_allow: true,
+            network_deny: true,
+            network_restricted: false,
+            seatbelt: Some(SeatbeltSupport {
+                filesystem: false,
+                network_deny: true,
+                detail: "network denial verified; path allow-lists not verified".to_string(),
+            }),
+            bridge: false,
+            detail: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_missing_backend_is_refused_with_its_measured_reason() {
+        let mut capabilities = linux_capabilities();
+        capabilities.backend = None;
+        capabilities.unavailable = Some("sandbox disabled by Agent configuration".to_string());
+        let error = validate(
+            &compiled(serde_json::json!({ "enabled": true })),
+            &capabilities,
+        )
+        .expect_err("no backend must refuse");
+        assert!(matches!(error, SandboxError::BackendUnavailable(_)));
+        assert!(error
+            .to_string()
+            .contains("disabled by Agent configuration"));
+    }
+
+    #[test]
+    fn linux_native_keys_are_refused_on_macos() {
+        let capabilities = macos_capabilities();
+        for policy in [
+            serde_json::json!({
+                "enabled": true,
+                "process": { "linux_namespaces": { "pid": true } }
+            }),
+            serde_json::json!({
+                "enabled": true,
+                "resource": { "cgroup_v2": { "memory.max": "1024" } }
+            }),
+            serde_json::json!({
+                "enabled": true,
+                "syscall": { "seccomp": { "profile": "nession-interactive-v1" } }
+            }),
+            serde_json::json!({
+                "enabled": true,
+                "filesystem": { "access": { "read": ["/usr"], "write": [] } }
+            }),
+        ] {
+            let error = validate(&compiled(policy), &capabilities)
+                .expect_err("macOS must refuse a guarantee it did not verify");
+            assert!(
+                matches!(error, SandboxError::UnsupportedPolicy(_)),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn undelegated_cgroup_controllers_are_refused() {
+        let mut capabilities = linux_capabilities();
+        capabilities.cgroup_v2 = Some(CgroupSupport {
+            root: PathBuf::from("/sys/fs/cgroup/nession"),
+            controllers: ["cpu"].into_iter().map(str::to_string).collect(),
+            detail: "cpu only".to_string(),
+        });
+        let error = validate(
+            &compiled(serde_json::json!({
+                "enabled": true,
+                "resource": { "cgroup_v2": { "pids.max": "64" } }
+            })),
+            &capabilities,
+        )
+        .expect_err("an undelegated pids controller must fail closed");
+        assert!(matches!(error, SandboxError::UnsupportedPolicy(_)));
+        assert!(error.to_string().contains("not delegated"));
+    }
+
+    #[test]
+    fn restricted_network_requires_the_bridge() {
+        let mut capabilities = linux_capabilities();
+        capabilities.bridge = false;
+        capabilities.network_restricted = false;
+        let error = validate(
+            &compiled(serde_json::json!({
+                "enabled": true,
+                "network": { "mode": "restricted", "egress": { "allow": ["example.com:443"] } }
+            })),
+            &capabilities,
+        )
+        .expect_err("restricted mode without the bridge must fail closed");
+        assert!(matches!(error, SandboxError::UnsupportedPolicy(_)));
+        assert!(error.to_string().contains("bridge"));
+    }
 
     #[test]
     fn namespace_support_requires_every_requested_flag() {

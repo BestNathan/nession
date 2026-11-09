@@ -102,6 +102,7 @@ Read these when modifying their trees:
 - [web/AGENTS.md](web/AGENTS.md) — Web layering, state/import/transport boundaries.
 - [crates/nession-protocol/AGENTS.md](crates/nession-protocol/AGENTS.md) — Protocol Kernel and contract evolution.
 - [crates/nession-agent/AGENTS.md](crates/nession-agent/AGENTS.md) — Agent runtime and tmux safety.
+- [crates/nession-sandbox/AGENTS.md](crates/nession-sandbox/AGENTS.md) — Sandbox isolation ownership, launch barrier and fail-closed rules.
 - [design/AGENTS.md](design/AGENTS.md) — design sources/generated artifacts.
 - [scripts/AGENTS.md](scripts/AGENTS.md) — repository automation/checker ownership.
 - [.github/AGENTS.md](.github/AGENTS.md) — workflow/router and trust-boundary rules.

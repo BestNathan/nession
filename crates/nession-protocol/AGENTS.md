@@ -23,6 +23,15 @@ When adding/changing a Protocol Unit:
 
 Notification/control wires without generated operation contracts still have one declaring owner. Follow the protocol architecture and validator rather than inventing another registry.
 
+## Sandbox policy contract (#2681)
+
+`contracts/sandbox/v1.rs` owns the versioned `SandboxPolicy` shape. The policy
+rides the session-create payloads; `nession-sandbox` owns validation and
+execution, and the Web projection deliberately omits the policy document (V1
+has no Web Sandbox surface; native cgroup keys such as `memory.max` cannot be
+generated under the Web naming rule). Do not add a second sandbox schema in a
+provider crate.
+
 ## Verification
 
 `scripts/protocol-gate.mjs` owns the live static protocol-integrity rules. Do not duplicate its matcher/rule list here.

@@ -1784,24 +1784,25 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
                 match ctx
                     .tmux
-                    .create_session_with_binding(
+                    .create_session_with_options(
                         &payload.name,
                         terminal_cols,
                         payload.height,
                         &working_dir,
-                        SessionBindingInput {
+                        Some(SessionBindingInput {
                             revision,
                             profiles: &profiles,
                             snapshots: &payload.env_snapshots,
-                        },
+                        }),
+                        payload.sandbox.as_ref(),
                     )
                     .await
                 {
-                    Ok(warnings) => {
+                    Ok(outcome) => {
                         let resp = SessionCreateResponse {
                             name: payload.name,
-                            warnings,
-                            sandbox: None,
+                            warnings: outcome.warnings,
+                            sandbox: outcome.sandbox,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -2792,22 +2793,23 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let terminal_cols = payload.terminal_cols.unwrap_or(ctx.terminal_cols);
                 match ctx
                     .tmux
-                    .create_session(
+                    .create_session_with_options(
                         &payload.name,
                         terminal_cols,
                         payload.height,
                         &working_dir,
-                        &[],
+                        None,
+                        payload.sandbox.as_ref(),
                     )
                     .await
                 {
-                    Ok(()) => {
+                    Ok(outcome) => {
                         let session_id = format!("{}:{}", ctx.agent_id, payload.name);
                         let resp = WebSessionCreateResponse {
                             success: true,
                             session_id: Some(session_id),
                             error: None,
-                            sandbox: None,
+                            sandbox: outcome.sandbox,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()

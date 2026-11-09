@@ -221,7 +221,7 @@ impl Drop for CgroupGuard {
 
 /// Prepare Linux-owned resources.
 pub fn prepare(
-    request: &LaunchRequest<'_>,
+    request: &LaunchRequest,
     compiled: &CompiledSandboxPolicy,
     settings: &SandboxSettings,
     working_dir: &Path,
@@ -255,7 +255,7 @@ pub fn prepare(
 
 #[allow(clippy::too_many_arguments)]
 fn prepare_inner(
-    request: &LaunchRequest<'_>,
+    request: &LaunchRequest,
     compiled: &CompiledSandboxPolicy,
     settings: &SandboxSettings,
     working_dir: &Path,
@@ -298,11 +298,7 @@ fn prepare_inner(
     let channel = channel::Channel::start(execution_id, execution_dir, proxy_rules)?;
 
     let mut forbidden = bwrap::ForbiddenPaths {
-        files: request
-            .tmux_socket
-            .map(Path::to_path_buf)
-            .into_iter()
-            .collect(),
+        files: request.tmux_socket.clone().into_iter().collect(),
         directories: vec![settings.state_dir.clone(), PathBuf::from("/sys/fs/cgroup")],
     };
     forbidden
@@ -356,7 +352,7 @@ fn prepare_inner(
             .as_ref()
             .map(cgroup::ExecutionCgroup::procs_file)
             .as_deref(),
-        request.inner_command,
+        &request.inner_command,
         settings,
     )?;
 
@@ -383,8 +379,8 @@ fn prepare_inner(
     );
     let record = ExecutionRecord {
         execution_id: execution_id.to_string(),
-        session_name: request.session_name.to_string(),
-        instance_id: request.instance_id.to_string(),
+        session_name: request.session_name.clone(),
+        instance_id: request.instance_id.clone(),
         backend: "linux-bwrap".to_string(),
         policy_digest: compiled.digest.clone(),
         created_at: now_seconds(),
@@ -429,7 +425,7 @@ pub fn verify_launch(
     prepared: &mut PreparedLinux,
     pane_pid: u32,
     settings: &SandboxSettings,
-) -> Result<()> {
+) -> Result<crate::exec::VerifiedControls> {
     let Some(channel) = prepared.channel.as_ref() else {
         return Err(SandboxError::Verify(
             "the sandbox channel is already closed".to_string(),
@@ -466,12 +462,15 @@ pub fn verify_launch(
         visible_probes: &prepared.visible_probes,
         hidden_probes: &prepared.hidden_probes,
     };
-    if let Err(error) = verify::verify(&request) {
-        if let Some(channel) = prepared.channel.as_ref() {
-            channel.deny(peer);
+    let facts = match verify::verify(&request) {
+        Ok(facts) => facts,
+        Err(error) => {
+            if let Some(channel) = prepared.channel.as_ref() {
+                channel.deny(peer);
+            }
+            return Err(error);
         }
-        return Err(error);
-    }
+    };
     let Some(channel) = prepared.channel.as_mut() else {
         return Err(SandboxError::Verify(
             "the sandbox channel is already closed".to_string(),
@@ -490,7 +489,13 @@ pub fn verify_launch(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    Ok(())
+    Ok(crate::exec::VerifiedControls {
+        namespaces: facts.namespaces,
+        cgroup: facts.cgroup,
+        seccomp: Some(facts.seccomp),
+        no_new_privs: Some(facts.no_new_privs),
+        filesystem_probes: facts.filesystem_probes,
+    })
 }
 
 /// Release resources for a prepared launch that never verified.
@@ -521,11 +526,9 @@ fn cleanup_linux(
 ) -> Result<()> {
     if let Some(group) = prepared.cgroup.take() {
         report.evidence.extend(group.evidence());
-        if let Err(error) = group.remove() {
-            // Keep the record: reconciliation retries the owned cgroup rather
-            // than forgetting it.
-            return Err(error);
-        }
+        // Keep the record on failure: reconciliation retries the owned
+        // cgroup rather than forgetting it.
+        group.remove()?;
     }
     // Dropping the channel stops the listener and unlinks its socket. A live
     // restricted proxy cannot be reconstructed after an Agent restart; the

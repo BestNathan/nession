@@ -266,6 +266,29 @@ fn resolve_under_mount(mount: &Path, path: &Path) -> Option<PathBuf> {
     Some(mount.join(relative))
 }
 
+/// Remove an execution cgroup named by a durable record.
+///
+/// Only a direct child of the Nession-owned root is accepted, so a damaged or
+/// edited record cannot point cleanup at an unrelated cgroup.
+pub fn remove_execution(root: &Path, path: &Path) -> Result<()> {
+    if !root.is_absolute() || path.parent() != Some(root) {
+        return Err(SandboxError::Cleanup(format!(
+            "refusing to remove {}: not a direct child of the Nession cgroup root {}",
+            path.display(),
+            root.display()
+        )));
+    }
+    if !path.exists() {
+        return Ok(());
+    }
+    let group = ExecutionCgroup {
+        root: root.to_path_buf(),
+        path: path.to_path_buf(),
+        limits: CgroupLimits::default(),
+    };
+    group.remove()
+}
+
 /// Whether a `0::/path` cgroup entry names `expected`.
 pub fn cgroup_entry_matches(entry: &str, expected: &Path) -> bool {
     let Some(path) = entry.strip_prefix("0::") else {

@@ -45,51 +45,6 @@ pub fn wait_until(
     }
 }
 
-/// Read `/proc/<pid>/status` field values (`Key:\tvalue`).
-#[cfg(target_os = "linux")]
-pub fn proc_status_fields(pid: u32) -> io::Result<std::collections::BTreeMap<String, String>> {
-    let text = std::fs::read_to_string(format!("/proc/{pid}/status"))?;
-    let mut fields = std::collections::BTreeMap::new();
-    for line in text.lines() {
-        if let Some((key, value)) = line.split_once(':') {
-            fields.insert(key.trim().to_string(), value.trim().to_string());
-        }
-    }
-    Ok(fields)
-}
-
-/// Read `/proc/<pid>/stat` field 22 (`starttime`) for PID-reuse fencing.
-#[cfg(target_os = "linux")]
-pub fn proc_start_time(pid: u32) -> io::Result<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
-    // The command field may contain spaces and parentheses; everything after
-    // the final `)` is space-separated and starts at field 3.
-    let Some(close) = stat.rfind(')') else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "malformed /proc stat",
-        ));
-    };
-    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
-    // starttime is field 22 overall; the tail begins at field 3, so index 19.
-    let start_time = fields
-        .get(19)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no starttime field"))?;
-    start_time
-        .parse()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid starttime"))
-}
-
-/// Direct child PIDs of `pid` from `/proc/<pid>/task/<pid>/children`.
-#[cfg(target_os = "linux")]
-pub fn proc_children(pid: u32) -> io::Result<Vec<u32>> {
-    let text = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))?;
-    Ok(text
-        .split_whitespace()
-        .filter_map(|token| token.parse().ok())
-        .collect())
-}
-
 /// Walk the parent chain from `pid` and return true when `ancestor` is visited.
 #[cfg(target_os = "linux")]
 pub fn is_descendant_of(pid: u32, ancestor: u32) -> bool {

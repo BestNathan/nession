@@ -4006,22 +4006,23 @@ core_routes!(agent, msg, responses;
                     let revision = payload
                         .binding_revision
                         .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
-                    let (success, error, session_name, warnings) = match agent
+                    let (success, error, session_name, warnings, sandbox_report) = match agent
                         .tmux
-                        .create_session_with_binding(
+                        .create_session_with_options(
                             &name,
                             terminal_cols,
                             payload.height,
                             &initial_working_dir,
-                            SessionBindingInput {
+                            Some(SessionBindingInput {
                                 revision,
                                 profiles: &profiles,
                                 snapshots: &payload.env_snapshots,
-                            },
+                            }),
+                            payload.sandbox.as_ref(),
                         )
                         .await
                     {
-                        Ok(warnings) => {
+                        Ok(outcome) => {
                             if let Some(publish) = agent.session_publish_handle() {
                                 if let Err(e) = crate::sync::session_watcher::publish_session_snapshot(
                                     &publish,
@@ -4035,9 +4036,15 @@ core_routes!(agent, msg, responses;
                                     );
                                 }
                             }
-                            (true, None, Some(name.clone()), warnings)
+                            (
+                                true,
+                                None,
+                                Some(name.clone()),
+                                outcome.warnings,
+                                outcome.sandbox,
+                            )
                         }
-                        Err(e) => (false, Some(e.to_string()), None, Vec::new()),
+                        Err(e) => (false, Some(e.to_string()), None, Vec::new(), None),
                     };
 
                     let response = serde_json::json!({
@@ -4051,6 +4058,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "session_name": session_name,
                             "warnings": warnings,
+                            "sandbox": sandbox_report,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

@@ -8,12 +8,13 @@ pub async fn run(
     auth_token: &str,
     agent_id: &str,
     session_name: &str,
+    sandbox: Option<nession_protocol::contracts::sandbox::v1::SandboxPolicy>,
 ) -> Result<()> {
     let mut client = connect(server_url, auth_token).await?;
     println!("Creating session '{session_name}' on agent '{agent_id}'...");
 
     let reply = client
-        .create_session(agent_id, session_name)
+        .create_session(agent_id, session_name, sandbox)
         .await
         .with_context(|| {
             format!("Failed to create session '{session_name}' on agent '{agent_id}'")
@@ -32,6 +33,21 @@ pub async fn run(
         "Session '{}' created successfully.",
         reply.session_id.as_deref().unwrap_or(session_name)
     );
+    if let Some(report) = reply.sandbox {
+        println!(
+            "Sandbox: execution {} on {} ({})",
+            report.execution_id, report.backend, report.policy_digest
+        );
+        for mechanism in &report.mechanisms {
+            println!("  verified: {mechanism}");
+        }
+        if let Some(cgroup) = report.cgroup_path {
+            println!("  cgroup: {cgroup}");
+        }
+        if let Some(proxy) = report.proxy_endpoint {
+            println!("  proxy: {proxy}");
+        }
+    }
 
     Ok(())
 }

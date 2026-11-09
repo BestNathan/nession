@@ -183,7 +183,7 @@ fn executable(path: &Path) -> bool {
 
 /// Prepare a Seatbelt launch.
 pub fn prepare(
-    request: &LaunchRequest<'_>,
+    request: &LaunchRequest,
     compiled: &CompiledSandboxPolicy,
     settings: &SandboxSettings,
     working_dir: &Path,
@@ -222,8 +222,8 @@ pub fn prepare(
     );
     let record = ExecutionRecord {
         execution_id,
-        session_name: request.session_name.to_string(),
-        instance_id: request.instance_id.to_string(),
+        session_name: request.session_name.clone(),
+        instance_id: request.instance_id.clone(),
         backend: "macos-seatbelt".to_string(),
         policy_digest: compiled.digest.clone(),
         created_at: now_seconds(),
@@ -253,7 +253,7 @@ pub fn verify_launch(
     prepared: &mut PreparedMacos,
     pane_pid: u32,
     _settings: &SandboxSettings,
-) -> Result<()> {
+) -> Result<crate::exec::VerifiedControls> {
     let grace = Instant::now() + Duration::from_millis(500);
     while Instant::now() < grace {
         if !process_alive(pane_pid) {
@@ -264,7 +264,10 @@ pub fn verify_launch(
         std::thread::sleep(Duration::from_millis(20));
     }
     let _ = &prepared.execution_dir;
-    Ok(())
+    // macOS exposes no equivalent of `/proc/<pid>/status`; the capability
+    // probe is the enforcement evidence and this check only refuses a shell
+    // that died immediately.
+    Ok(crate::exec::VerifiedControls::default())
 }
 
 fn process_alive(pid: u32) -> bool {

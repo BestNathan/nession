@@ -24,7 +24,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use crate::error::{Result, SandboxError};
-use crate::linux::verify::BridgeFacts;
+use crate::facts::BridgeFacts;
 use crate::network::{EgressDenial, EgressRules};
 
 const HELLO_PREFIX: &str = "NESSON-SANDBOX-1";
@@ -34,6 +34,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TUNNEL_IDLE_TIMEOUT: Duration = Duration::from_secs(3600);
 
 /// One accepted control connection, already classified as the bridge.
+#[derive(Debug)]
 pub struct ControlPeer {
     execution_id_ok: bool,
     pid: u32,
@@ -244,7 +245,7 @@ fn accept_loop(
 }
 
 fn classify(
-    stream: UnixStream,
+    mut stream: UnixStream,
     execution_id: &str,
     control_tx: &mpsc::Sender<ControlPeer>,
     bridge_pid: &AtomicU32,
@@ -255,9 +256,11 @@ fn classify(
     stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
 
     let mut first = [0u8; 1];
-    stream.peek(&mut first)?;
-    if first[0] == b'N' {
-        let mut reader = BufReader::new(stream);
+    stream.read_exact(&mut first)?;
+    let [first] = first;
+    if first == b'N' {
+        let chain = std::io::Cursor::new(vec![first]).chain(stream);
+        let mut reader = BufReader::new(chain);
         let mut hello = String::new();
         reader.read_line(&mut hello)?;
         let hello = hello.trim_end();
@@ -271,7 +274,8 @@ fn classify(
             Ok(_) => serde_json::from_str::<BridgeFacts>(facts_line.trim_end()).ok(),
             Err(_) => None,
         };
-        let stream = reader.into_inner();
+        let chain = reader.into_inner();
+        let (_prefix, stream) = chain.into_inner();
         let peer = ControlPeer {
             execution_id_ok: named,
             pid,
@@ -308,7 +312,7 @@ fn classify(
         .name("nession-sandbox-proxy".to_string())
         .spawn(move || {
             let _slot = slot;
-            serve_proxy(stream, &rules);
+            serve_proxy(stream, &rules, first);
         })
         .map_err(|error| io::Error::other(error.to_string()))?;
     Ok(())
@@ -321,7 +325,13 @@ fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
         uid: 0,
         gid: 0,
     };
-    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let mut length =
+        libc::socklen_t::try_from(std::mem::size_of::<libc::ucred>()).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "ucred size does not fit socklen_t",
+            )
+        })?;
     // SAFETY: `credentials` and `length` are valid for the call; the socket is
     // owned by this process.
     let result = unsafe {
@@ -341,21 +351,16 @@ fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
 }
 
 /// Serve one restricted-network connection: SOCKS5 or HTTP `CONNECT`.
-fn serve_proxy(mut client: UnixStream, rules: &EgressRules) {
+fn serve_proxy(mut client: UnixStream, rules: &EgressRules, first: u8) {
     let _ = client.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
     let _ = client.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
-    let mut first = [0u8; 1];
-    let Ok(1) = client.read(&mut first) else {
-        return;
-    };
-    let first = first.first().copied().unwrap_or_default();
     let result = if first == 0x05 {
         socks5_connect(&mut client, rules)
     } else {
         http_connect(&mut client, rules, first)
     };
     match result {
-        Ok((mut upstream, leftover)) => {
+        Ok((upstream, leftover)) => {
             let _ = client.set_read_timeout(Some(TUNNEL_IDLE_TIMEOUT));
             let _ = client.set_write_timeout(Some(TUNNEL_IDLE_TIMEOUT));
             let _ = upstream.set_read_timeout(Some(TUNNEL_IDLE_TIMEOUT));
@@ -373,10 +378,14 @@ fn socks5_connect(
     rules: &EgressRules,
 ) -> std::result::Result<(TcpStream, Vec<u8>), EgressDenial> {
     let mut header = [0u8; 1];
-    if read_exact(client, &mut header).is_err() || header[0] == 0 {
+    if read_exact(client, &mut header).is_err() {
         return Err(EgressDenial::NotAllowed);
     }
-    let mut methods = vec![0u8; header[0] as usize];
+    let [method_count] = header;
+    if method_count == 0 {
+        return Err(EgressDenial::NotAllowed);
+    }
+    let mut methods = vec![0u8; method_count as usize];
     if read_exact(client, &mut methods).is_err() || !methods.contains(&0x00) {
         let _ = client.write_all(&[0x05, 0xff]);
         return Err(EgressDenial::NotAllowed);
@@ -385,17 +394,21 @@ fn socks5_connect(
         return Err(EgressDenial::NotAllowed);
     }
 
-    let mut request = [0u8; 3];
-    if read_exact(client, &mut request).is_err() || request[0] != 0x05 {
+    let mut request = [0u8; 4];
+    if read_exact(client, &mut request).is_err() {
         return Err(EgressDenial::NotAllowed);
     }
-    if request[1] != 0x01 {
+    let [version, command, _reserved, address_type] = request;
+    if version != 0x05 {
+        return Err(EgressDenial::NotAllowed);
+    }
+    if command != 0x01 {
         // BIND and UDP ASSOCIATE are not part of the V1 contract.
         let _ = client.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
         return Err(EgressDenial::NotAllowed);
     }
 
-    let target = match request[3] {
+    let target = match address_type {
         0x01 => {
             let mut octets = [0u8; 4];
             if read_exact(client, &mut octets).is_err() {
@@ -415,7 +428,8 @@ fn socks5_connect(
             if read_exact(client, &mut length).is_err() {
                 return Err(EgressDenial::NotAllowed);
             }
-            let mut name = vec![0u8; length[0] as usize];
+            let [name_length] = length;
+            let mut name = vec![0u8; name_length as usize];
             if read_exact(client, &mut name).is_err() {
                 return Err(EgressDenial::NotAllowed);
             }

@@ -99,16 +99,16 @@ pub fn build(
         ));
     }
     let mut warnings = Vec::new();
-    let mut args: Vec<String> = Vec::new();
-
-    args.push("--die-with-parent".to_string());
     // Backend baseline namespaces. The policy's `process.linux_namespaces`
     // request is a subset: an unrequested namespace may still be created as a
     // safety prerequisite, and never weakens a requested one.
-    args.push("--unshare-user".to_string());
-    args.push("--unshare-pid".to_string());
-    args.push("--unshare-ipc".to_string());
-    args.push("--unshare-uts".to_string());
+    let mut args: Vec<String> = vec![
+        "--die-with-parent".to_string(),
+        "--unshare-user".to_string(),
+        "--unshare-pid".to_string(),
+        "--unshare-ipc".to_string(),
+        "--unshare-uts".to_string(),
+    ];
     if policy.namespaces.cgroup {
         args.push("--unshare-cgroup".to_string());
     }
@@ -135,6 +135,17 @@ pub fn build(
                     working_dir.display()
                 )));
             }
+            // The private /tmp must be mounted *before* user paths: a visible
+            // workspace under /tmp is bound on top of it. Mounting the tmpfs
+            // afterwards would hide that bind.
+            if !filesystem.is_visible(Path::new("/tmp")) {
+                args.push("--tmpfs".to_string());
+                args.push("/tmp".to_string());
+                warnings.push(
+                    "backend baseline: a private tmpfs /tmp was added because /tmp is not visible"
+                        .to_string(),
+                );
+            }
             for path in &filesystem.read {
                 push_bind(&mut args, "--ro-bind", path, path);
             }
@@ -145,14 +156,6 @@ pub fn build(
                 args.push("--symlink".to_string());
                 args.push(target);
                 args.push(link);
-            }
-            if !filesystem.is_visible(Path::new("/tmp")) {
-                args.push("--tmpfs".to_string());
-                args.push("/tmp".to_string());
-                warnings.push(
-                    "backend baseline: a private tmpfs /tmp was added because /tmp is not visible"
-                        .to_string(),
-                );
             }
         }
         None => {

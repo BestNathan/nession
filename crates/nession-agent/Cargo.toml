@@ -23,6 +23,7 @@ nession-tmux = { path = "../nession-tmux" }
 nession-runtime = { path = "../nession-runtime" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
+nession-sandbox = { path = "../nession-sandbox" }
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 rustls.workspace = true
