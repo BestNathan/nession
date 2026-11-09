@@ -19,6 +19,7 @@
 
 pub mod bridge;
 pub mod capabilities;
+pub mod draft;
 pub mod error;
 pub mod exec;
 pub mod facts;
@@ -32,11 +33,13 @@ pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
-pub use capabilities::Capabilities;
+pub use capabilities::{catalog, Capabilities};
+pub use draft::{draft_from_policy, materialize};
 pub use error::{Result, SandboxError};
 pub use exec::{
-    cleanup_record, prepare, probe, reconcile, CleanupReport, ExecutionRecord, LaunchRequest,
-    PreparedSandbox, ReconcileOutcome, SandboxExecutionHandle,
+    cleanup_record, preflight, prepare, probe, reconcile, CleanupReport, ExecutionRecord,
+    LaunchRequest, LivePane, PreflightReport, PreparedSandbox, ReconcileOutcome,
+    SandboxExecutionHandle,
 };
 pub use policy::{compile, CompiledSandboxPolicy};
 pub use settings::SandboxSettings;

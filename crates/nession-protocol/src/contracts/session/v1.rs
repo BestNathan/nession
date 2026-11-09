@@ -4,7 +4,9 @@ use crate::contracts::agent::v1::ProbedAddress;
 use crate::contracts::env::v1::{
     ActiveEnvFile, EnvFileRef, EnvSnapshot, SessionEnvBindingState, SessionEnvProfile,
 };
-use crate::contracts::sandbox::v1::{SandboxExecutionReport, SandboxPolicy};
+use crate::contracts::sandbox::v1::{
+    SandboxCurrentContext, SandboxExecutionReport, SandboxPolicy, SandboxPolicyDraft,
+};
 
 // --- Server → Agent command payloads ---
 
@@ -1746,4 +1748,150 @@ pub fn validate_session_metadata(
         description,
         tags: normalized,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox capability commands (#3124)
+//
+// The capability is addressed at one Session; the Agent resolves the
+// authenticated Session's *active Pane* itself. The Server never names a Pane
+// or an execution and never interprets a policy: it authorizes the client,
+// checks the registered Session/Agent and forwards the typed draft.
+//
+// `enter_id` is the client's idempotency key. It travels in the payload
+// because the Server's command broker injects its own `request_id` for
+// correlation, and the two identities must not be conflated.
+// ---------------------------------------------------------------------------
+
+/// `server.session.sandbox.context` — a browser asks for the active Pane's
+/// Sandbox context.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxContextPayload {
+    /// `agent_id:session_name`, the registry key the Session list already uses.
+    pub session_id: String,
+}
+
+/// `server.session.sandbox.context`'s reply: the context, or the refusal.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxContextResponse {
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SandboxCurrentContext>,
+}
+
+/// `agent.session.sandbox.context` — the Server asks the Session's Agent.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxContextPayload {
+    /// Injected by the Server's command broker, like every `agent.*` command.
+    pub request_id: String,
+    pub session_name: String,
+}
+
+/// `server.session.sandbox.preflight` — validate one draft against the exact
+/// context revision without creating host resources.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxPreflightPayload {
+    pub session_id: String,
+    /// The context generation the draft was composed against.
+    pub generation: String,
+    pub policy: SandboxPolicyDraft,
+    /// The Pane's initial working directory. Empty asks the Agent to use the
+    /// active Pane's own current directory.
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `agent.session.sandbox.preflight` — the Server forwards the draft.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxPreflightPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub generation: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `server.session.sandbox.enter` — the one explicit Enter mutation.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxEnterPayload {
+    pub session_id: String,
+    /// The generation returned by the last preflight/context read.
+    pub generation: String,
+    /// Client-minted idempotency key for this Enter attempt.
+    pub enter_id: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `agent.session.sandbox.enter` — the Server forwards the same attempt.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxEnterPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub generation: String,
+    pub enter_id: String,
+    pub policy: SandboxPolicyDraft,
+    #[serde(default)]
+    pub working_dir: String,
+}
+
+/// `server.session.sandbox.return-to-native` — focus the preserved Native
+/// Pane; never a teardown.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxReturnPayload {
+    pub session_id: String,
+}
+
+/// `agent.session.sandbox.return-to-native` — the Server forwards the intent.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxReturnPayload {
+    pub request_id: String,
+    pub session_name: String,
+}
+
+/// `server.session.sandbox.focus` — focus one existing, tracked Sandbox Pane.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientSessionSandboxFocusPayload {
+    pub session_id: String,
+    /// The `pane_id` from `SandboxPaneRef`.
+    pub pane_id: String,
+}
+
+/// `agent.session.sandbox.focus` — the Server forwards the target Pane id.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerSessionSandboxFocusPayload {
+    pub request_id: String,
+    pub session_name: String,
+    pub pane_id: String,
 }

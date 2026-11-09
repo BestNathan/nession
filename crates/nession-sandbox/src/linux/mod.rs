@@ -431,6 +431,12 @@ fn prepare_inner(
         policy_digest: compiled.digest.clone(),
         created_at: now_seconds(),
         pane_pid: None,
+        pane_id: None,
+        window_id: None,
+        working_dir: working_dir.display().to_string(),
+        effective_policy: Some(compiled.normalized.clone()),
+        native_window_id: None,
+        native_pane_id: None,
         cgroup_path: cgroup_guard
             .as_ref()
             .map(|group| group.relative_path().display().to_string()),
