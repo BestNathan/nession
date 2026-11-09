@@ -1,7 +1,8 @@
 schema_version: 1
 issue: 2681
 criterion: SC-06
-stage: pre-merge
+stage: staging
+platform: macos
 runtime: full-stack-local
 verifiers:
   - type: runtime
