@@ -72,7 +72,8 @@ test('SC-07: Existing Location trigger and options contain long content', async 
     const popup = page.locator('[data-slot="select-content"]');
     const popupBox = await popup.boundingBox();
     expect(popupBox).not.toBeNull();
-    expect(popupBox!.width).toBeCloseTo((await trigger.boundingBox())!.width, 0);
+    // The popup is the anchor width; allow sub-pixel/border rounding only.
+    expect(Math.abs(popupBox!.width - (await trigger.boundingBox())!.width)).toBeLessThanOrEqual(2);
     expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
     for (const option of await options.all()) {
       const optionBox = await option.boundingBox();

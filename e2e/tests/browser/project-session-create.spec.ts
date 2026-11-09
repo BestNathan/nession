@@ -126,6 +126,8 @@ test.describe('Project Existing-location Session creation', () => {
       const popupBox = await popup.boundingBox();
       expect(popupBox).not.toBeNull();
       expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
+      const openTriggerBox = await trigger.boundingBox();
+      expect(Math.abs(popupBox!.width - openTriggerBox!.width)).toBeLessThanOrEqual(2);
       for (const option of await options.all()) {
         const optionBox = await option.boundingBox();
         expect(optionBox).not.toBeNull();
