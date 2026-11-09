@@ -19,7 +19,7 @@ const TEXT_EXT = /\.(?:md|markdown|txt|html|css|js|mjs|ts|tsx|json|yaml|yml|svg)
 const MAX_FILES = 128;
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
-const SHA = /^[0-9a-f]{40}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 const SOURCE_ROOT = '.nession-acceptance-sources';
 
 const digest = (obj) => crypto.createHash('sha256').update(JSON.stringify(obj)).digest('hex');
@@ -145,7 +145,7 @@ export function validateSourceEvidence(context, criterion) {
   if (!selected && citations.length) reject(criterion.criterion + ' supplied an undeclared source citation');
   if (criterion.result !== 'Pass' || !selected) return;
   const manifest = context.source_manifest;
-  if (!manifest || !SHA.test(manifest.sha256) || !Array.isArray(manifest.entries)) {
+  if (!manifest || !SHA256.test(manifest.sha256) || !Array.isArray(manifest.entries)) {
     reject(criterion.criterion + ' source manifest is missing');
   }
   const allowed = new Set(manifest.entries
@@ -187,12 +187,15 @@ export function materializeSources(context, workspace) {
     for (const entry of entries) {
       const rel = path.join(entry.criterion, entry.branch, entry.path);
       const target = path.join(root, rel);
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o500 });
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
       fs.writeFileSync(target, entry.bytes, { flag: 'wx', mode: 0o400 });
       entry.staged_path = SOURCE_ROOT + '/' + rel.replaceAll(path.sep, '/');
       delete entry.bytes;
     }
     const manifestEntries = entries.map((e) => ({ ...e }));
+    // Lock generated subdirectories only after all writes are complete.
+    const directories = new Set(entries.map((e) => path.dirname(path.join(root, e.staged_path.slice(SOURCE_ROOT.length + 1)))));
+    for (const dir of [...directories].sort((a, b) => b.length - a.length)) fs.chmodSync(dir, 0o500);
     const manifest = {
       schema_version: 1, issue: context.issue.number,
       target_ref: context.target_ref, contract_sha256: context.contract_sha256,
@@ -201,8 +204,10 @@ export function materializeSources(context, workspace) {
     manifest.sha256 = digest(manifest);
     fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n',
       { flag: 'wx', mode: 0o400 });
+    fs.chmodSync(root, 0o500);
     return manifest;
   } catch (error) {
+    fs.chmodSync(root, 0o700);
     fs.rmSync(root, { recursive: true, force: true });
     throw error;
   }
