@@ -1,5 +1,5 @@
 'use strict';
-const { assert, inspect, test, proof } = require('../case-shared.cjs');
+const { assert, inspect, test, proof } = require('../../../shared/acceptance-source-cases.cjs');
 proof(({ evidence, sha }) => {
   const workflow = inspect('.github/workflows/agent-sc-acceptance.yml');
   assert.match(workflow, /node scripts\/acceptance-sources\.mjs stage/);

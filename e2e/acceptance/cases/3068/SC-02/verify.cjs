@@ -1,5 +1,5 @@
 'use strict';
-const { assert, inspect, test, proof } = require('../case-shared.cjs');
+const { assert, inspect, test, proof } = require('../../../shared/acceptance-source-cases.cjs');
 proof(({ evidence, sha }) => {
   const output = test(['scripts/acceptance-sources.mjs', 'self-test']);
   assert.match(output, /source materialization, drift and citation fixtures passed/);
