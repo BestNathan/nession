@@ -224,8 +224,10 @@ ok(() => {
     const exact = '--sha "' + dollar + '{TARGET_SHA}"';
     const missing = '--target-sha "' + dollar + '{TARGET_SHA}"';
     assert.ok(original.includes(exact), 'canonical SHA assertion fixture absent');
+    // Both platform jobs carry the canonical line; the negative must remove
+    // every occurrence or the remaining macOS job would satisfy the check.
     fs.writeFileSync(path.join(folder, 'acceptance-cases.yml'),
-      original.replace(exact, missing));
+      original.replaceAll(exact, missing));
     const negative = spawnSync(process.execPath, ['-e', command], {
       cwd: repoRoot, env: { ...env, NESSION_ACCEPTANCE_TRUSTED_ROOT: fixture },
       encoding: 'utf8', timeout: 5000,
