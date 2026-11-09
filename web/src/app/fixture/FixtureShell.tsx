@@ -15,12 +15,15 @@ import {
   type StatusFilter,
 } from '@/app/useDashboard';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
+import type { Agent, Session } from '@/types';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixturePaneCommand } from './fixturePaneCommand';
 import { fixtureSessions } from './fixtureSessions';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
+import { useFixtureProjectShell } from './fixtureProjects';
+import { FixtureProjectDialogs } from './FixtureProjectDialogs';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
 
 /**
@@ -37,6 +40,19 @@ import { fixtureStaleAgents } from './fixtureStaleAgents';
  * route asks for Web explicitly (`?experience=web`); that explicit route is
  * what makes the Web overlay drawer a reachable screen at 390px (#2851).
  */
+function fixtureDomain(session: Session | null, agent: Agent | undefined) {
+  return session
+    ? mapDomainState({
+        session,
+        agent,
+        staleAgentIds: [],
+        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
+        attachInFlightId: null,
+        attachFailedId: null,
+      })
+    : null;
+}
+
 export function FixtureShell() {
   // FixtureShell is also mounted directly by component tests without a Router.
   // Canonical browser routes use HashRouter (`/#/fixture?pane=...`), so read
@@ -49,6 +65,7 @@ export function FixtureShell() {
   // the sidebar's Session rows resolve their display titles through the same
   // product path the shipped app uses. Absent `?sessionMetadata=` is legacy.
   useFixtureSessionMetadata(search);
+  const projectLayer = useFixtureProjectShell(search);
 
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
@@ -101,16 +118,7 @@ export function FixtureShell() {
     staleAgentIds: staleAgents,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,
   });
-  const domain = selectedSessionWithCommand
-    ? mapDomainState({
-        session: selectedSessionWithCommand,
-        agent: selectedAgent,
-        staleAgentIds: [],
-        clientSessionId: FIXTURE_CLIENT_SESSION_ID,
-        attachInFlightId: null,
-        attachFailedId: null,
-      })
-    : null;
+  const domain = fixtureDomain(selectedSessionWithCommand, selectedAgent);
 
   return (
     <div
@@ -150,7 +158,10 @@ export function FixtureShell() {
           fileOps={null}
           onCreate={() => {}}
           onRefresh={() => {}}
-          onSelect={(session) => setSelectedId(session.session_id)}
+          onSelect={(session) => {
+            projectLayer.projectShell.onClose();
+            setSelectedId(session.session_id);
+          }}
           onConfigure={() => {}}
           onKill={() => {}}
           onViewSessionDetails={(session) => sessionDetails.show(session, false)}
@@ -164,6 +175,7 @@ export function FixtureShell() {
           showDetail
           onBackToSessions={() => setListOpen(true)}
           connectionStatus={connectionStatus}
+          projectShell={projectLayer.projectShell}
           terminal={(chrome: TerminalChrome) => (
             <FixtureTerminal chrome={chrome} experience="web" />
           )}
@@ -175,6 +187,7 @@ export function FixtureShell() {
         editing={sessionDetails.target?.editing ?? false}
         onClose={sessionDetails.close}
       />
+      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
     </div>
   );
 }

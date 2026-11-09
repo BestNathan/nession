@@ -122,6 +122,15 @@ pub struct ClientSessionCreatePayload {
     #[cfg_attr(feature = "codegen", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
+    /// Optional Project this Session is created from (#3025).
+    ///
+    /// When present, `agent_id` and `working_dir` must name one of the
+    /// Project's Existing Locations. The Project is only a declaration: the
+    /// Session owns its realized Environment Binding and runtime identity, so
+    /// a later Project edit never mutates this Session. Absent preserves the
+    /// pre-Project create path unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

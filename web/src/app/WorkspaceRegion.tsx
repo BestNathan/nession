@@ -9,6 +9,9 @@ import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
+import { emptyProjectShell, type ProjectShellProps } from '@/product/project/types';
+import { ProjectDetail } from '@/product/project/components/ProjectDetail';
+import { AppProjectDetail } from '@/app/patterns/AppProjectDetail';
 
 export interface WorkspaceRegionProps {
   connectionStatus: ConnectionState;
@@ -58,6 +61,8 @@ export interface WorkspaceRegionProps {
   onCloseDrawer: () => void;
   showDetail: boolean;
   onBackToSessions?: () => void;
+  /** Project data and maintenance callbacks; a Project is independent of Session. */
+  projectShell?: ProjectShellProps;
   /**
    * Fixture/testing override for the terminal. Defaults to the real attached
    * terminal. Applies only to the wide (non-spatial) render path; the spatial
@@ -76,6 +81,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     onConfigure, onKill, onViewSessionDetails, onEditSessionDetails,
     onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
     experienceOverride, showList, onBackToSessions, onCloseDrawer, terminal,
+    projectShell = emptyProjectShell(),
   } = props;
 
   // Which experience renders is a **viewport** fact by default (#1082), with
@@ -97,7 +103,33 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
     onConfigure, onKill, onViewDetails: onViewSessionDetails, onEditDetails: onEditSessionDetails,
+    projectShell,
   };
+
+  // A Project's detail is a sibling destination, not a Session-scoped
+  // Workspace view: both experiences render it without touching the current
+  // Session selection, so the mounted Terminal survives the round trip.
+  const selectedProject =
+    projectShell.projects.find(
+      (project) => project.project_id === projectShell.selectedProjectId,
+    ) ?? null;
+  const projectDetail = selectedProject ? (
+    <ProjectDetail
+      project={selectedProject}
+      agents={agents}
+      onCreateSession={projectShell.onCreateSession}
+      onSettings={projectShell.onSettings}
+    />
+  ) : undefined;
+  const appProjectDetail = selectedProject ? (
+    <AppProjectDetail
+      project={selectedProject}
+      agents={agents}
+      onCreateSession={projectShell.onCreateSession}
+      onSettings={projectShell.onSettings}
+      onBack={projectShell.onClose}
+    />
+  ) : null;
 
   const mainShared = {
     selectedSession, selectedAgent, agents, domain, tool, fileOps,
@@ -121,6 +153,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
         onLayerSelect={onLayerSelect}
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
+        projectDetail={appProjectDetail}
       />
     );
   }
@@ -137,6 +170,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
       mainShared={mainShared}
       surface={surface}
       terminal={terminal}
+      projectDetail={projectDetail}
     />
   );
 }

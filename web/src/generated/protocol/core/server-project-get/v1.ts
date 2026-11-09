@@ -33,7 +33,13 @@ export type Project = { project_id: string, name: string, description?: string |
 image_digest?: string | null, created_at: number, updated_at: number, };
 export type ProjectSource = { repository_url: string, ref: string, };
 export type ProjectLocation = { agent_id: string, path: string, };
-export type ProjectSessionDefaults = { shell?: string | null, env_profile_ids: Array<string>, sandbox_policy_ref?: string | null, };
+export type ProjectSessionDefaults = { shell?: string | null, 
+/**
+ * Server env file names applied at create time when the request selects
+ * no env files. An explicit request selection takes precedence, and the
+ * resulting binding belongs to the Session, not the Project.
+ */
+env_profile_ids: Array<string>, sandbox_policy_ref?: string | null, };
 
 // ── Operations ──
 

@@ -223,13 +223,14 @@ export class SessionsPlugin implements TransportPlugin {
     agentId: string,
     name: string,
     envFiles: EnvFileRef[] = [],
-    workingDir?: string,
+    options: { workingDir?: string; projectId?: string } = {},
   ): Promise<CreateSessionResponse> {
     return this.requireConnection().request<CreateSessionResponse>(SESSION_CREATE_WIRE, {
       agent_id: agentId,
       name,
       env_files: envFiles,
-      ...(workingDir ? { working_dir: workingDir } : {}),
+      ...(options.workingDir ? { working_dir: options.workingDir } : {}),
+      ...(options.projectId ? { project_id: options.projectId } : {}),
     });
   }
 

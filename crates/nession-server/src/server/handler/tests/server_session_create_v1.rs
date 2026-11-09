@@ -148,6 +148,63 @@ async fn session_create_agent_not_found() {
         .contains("not found"));
 }
 
+/// SC-01: an offline Agent is an explicit refusal. The Project declaration is
+/// preserved and no create reaches the Agent.
+#[tokio::test]
+async fn project_session_create_reports_an_offline_agent_without_creating() {
+    let mut h = handler_with_online_agent().await;
+    h.agent_registry
+        .register(AgentInfo {
+            agent_id: "offline".to_string(),
+            hostname: "h".to_string(),
+            ip_address: "10.0.0.2".to_string(),
+            port: 8080,
+            display_name: None,
+            connect_url: None,
+            addresses: vec![],
+            registered_at: chrono::Utc::now(),
+            last_heartbeat: chrono::Utc::now(),
+            status: AgentStatus::Offline,
+            metadata: AgentMetadata {
+                tmux_version: "3.3".to_string(),
+                os_version: "Linux".to_string(),
+                nession_version: "0.1.0".to_string(),
+                image_tag: "test".to_string(),
+            },
+            session_count: 0,
+            active_sessions: 0,
+            protocol_manifest: None,
+            probe_generation: 0,
+            offline_generation: 1,
+        })
+        .await;
+    seed_project(&h, PROJECT_ID, vec![location("offline", "/srv/project")]).await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "offline",
+            "name": "blocked",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("offline"),
+        "{reply}"
+    );
+    assert!(
+        h.db.get_project(PROJECT_ID).await.unwrap().is_some(),
+        "the Project declaration must survive a refused create"
+    );
+}
+
 fn env_file(name: &str) -> EnvFileRef {
     EnvFileRef {
         name: name.to_string(),
@@ -459,4 +516,375 @@ async fn concurrent_same_name_creates_keep_the_accepted_binding() {
         assert_eq!(stored.profiles[0].profile.name, "a.env");
         assert!(deps.session_registry.get("a1:race").await.is_some());
     }
+}
+
+// ── Project-aware create (#3025) ────────────────────────────────────────
+
+use nession_protocol::contracts::project::v1::{ProjectLocation, ProjectSessionDefaults};
+
+const PROJECT_ID: &str = "project-123e4567-e89b-42d3-a456-426614174000";
+
+async fn seed_project(h: &ConnectionHandler, project_id: &str, locations: Vec<ProjectLocation>) {
+    seed_project_with_defaults(h, project_id, locations, None).await;
+}
+
+async fn seed_project_with_defaults(
+    h: &ConnectionHandler,
+    project_id: &str,
+    locations: Vec<ProjectLocation>,
+    session_defaults: Option<ProjectSessionDefaults>,
+) {
+    h.db.insert_project(&crate::db::ProjectRow {
+        project_id: project_id.to_string(),
+        name: "Fixtures".to_string(),
+        description: None,
+        source: None,
+        locations,
+        session_defaults,
+        image_digest: None,
+        created_at: 1,
+        updated_at: 1,
+    })
+    .await
+    .unwrap();
+}
+
+fn location(agent_id: &str, path: &str) -> ProjectLocation {
+    ProjectLocation {
+        agent_id: agent_id.to_string(),
+        path: path.to_string(),
+    }
+}
+
+/// A Project-aware create validates the declared Existing Location, then sends
+/// that directory as the Agent's initial cwd. The Project itself never reaches
+/// the Agent: the Session owns the realized environment.
+#[tokio::test]
+async fn project_session_create_uses_the_declared_existing_location() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID, vec![location("a1", "/srv/project")]).await;
+
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let broker = Arc::clone(&h.command_broker);
+
+    let create = h.handle_message(proto_msg(
+        "server.session.create",
+        json!({
+            "agent_id": "a1",
+            "name": "from-project",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+        }),
+    ));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("Agent receives session.create")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["payload"]["working_dir"], "/srv/project");
+        assert_eq!(parsed["payload"]["name"], "from-project");
+        assert!(
+            parsed["payload"].get("project_id").is_none(),
+            "the Project declaration must not leak into the Agent payload: {parsed}"
+        );
+        let request_id = parsed["payload"]["request_id"].as_str().unwrap();
+        broker
+            .resolve_command("a1", request_id, json!({ "success": true }))
+            .await;
+    };
+    let (action, ()) = tokio::join!(create, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(reply["payload"]["session_id"], "a1:from-project");
+}
+
+#[tokio::test]
+async fn project_session_create_rejects_an_unknown_project() {
+    let mut h = handler_with_online_agent().await;
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "unknown-project",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
+    assert!(h.session_registry.get("a1:unknown-project").await.is_none());
+}
+
+#[tokio::test]
+async fn project_session_create_rejects_a_directory_outside_the_project() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID, vec![location("a1", "/srv/project")]).await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "wrong-directory",
+            "working_dir": "/srv/other",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("not an Existing Location"));
+}
+
+#[tokio::test]
+async fn project_session_create_requires_a_directory() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID, vec![location("a1", "/srv/project")]).await;
+
+    let reply = create_reply(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "missing-directory",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], false);
+    assert!(reply["payload"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("requires an Existing Location"));
+}
+
+/// The pre-Project create path is unchanged even when Projects exist.
+#[tokio::test]
+async fn legacy_session_create_without_a_project_is_unchanged() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID, vec![location("a1", "/srv/project")]).await;
+
+    let reply = answer_create(
+        &mut h,
+        "legacy-create",
+        json!([]),
+        json!({ "success": true }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], true);
+    assert_eq!(reply["payload"]["session_id"], "a1:legacy-create");
+}
+
+/// Run one create and answer it as the Agent would, returning both the reply
+/// and the command payload the Server sent.
+async fn create_and_capture(
+    h: &mut ConnectionHandler,
+    payload: serde_json::Value,
+) -> (serde_json::Value, serde_json::Value) {
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let broker = Arc::clone(&h.command_broker);
+
+    let create = h.handle_message(proto_msg("server.session.create", payload));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("Agent receives session.create")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let request_id = parsed["payload"]["request_id"].as_str().unwrap();
+        broker
+            .resolve_command("a1", request_id, json!({ "success": true }))
+            .await;
+        parsed
+    };
+    let (action, parsed) = tokio::join!(create, agent);
+    (parse_reply(action.unwrap()), parsed)
+}
+
+fn env_defaults(ids: &[&str]) -> Option<ProjectSessionDefaults> {
+    Some(ProjectSessionDefaults {
+        shell: None,
+        env_profile_ids: ids.iter().map(|id| (*id).to_string()).collect(),
+        sandbox_policy_ref: None,
+    })
+}
+
+/// SC-03: with no explicit request selection, the Project's declared ENV
+/// profiles apply and become the Session's own binding.
+#[tokio::test]
+async fn project_session_create_applies_project_env_defaults() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("shared.env", "SHARED=1", false)
+        .await
+        .unwrap();
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+
+    let (reply, command) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "from-defaults",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], true);
+    let snapshots = command["payload"]["env_snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0]["name"], "shared.env");
+    let stored = h
+        .env_service
+        .bindings
+        .get("a1:from-defaults")
+        .await
+        .unwrap()
+        .expect("the create-time binding is Session-owned");
+    assert_eq!(stored.desired_revision, 1);
+    assert_eq!(stored.profiles[0].profile.name, "shared.env");
+}
+
+/// SC-03 precedence: an explicit request selection outranks Project defaults.
+#[tokio::test]
+async fn project_session_create_explicit_env_selection_wins() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("shared.env", "SHARED=1", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("explicit.env", "EXPLICIT=1", false)
+        .await
+        .unwrap();
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+
+    let (reply, command) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "explicit",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+            "env_files": [{ "name": "explicit.env", "source": "server" }],
+        }),
+    )
+    .await;
+
+    assert_eq!(reply["payload"]["success"], true);
+    let snapshots = command["payload"]["env_snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0]["name"], "explicit.env");
+    let stored = h
+        .env_service
+        .bindings
+        .get("a1:explicit")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.profiles[0].profile.name, "explicit.env");
+}
+
+/// SC-03 immutability: a later Project defaults edit does not touch an
+/// existing Session's realized binding.
+#[tokio::test]
+async fn project_defaults_edit_does_not_change_an_existing_session() {
+    let mut h = handler_with_online_agent().await;
+    h.env_service
+        .store
+        .write("shared.env", "SHARED=1", false)
+        .await
+        .unwrap();
+    h.env_service
+        .store
+        .write("other.env", "OTHER=1", false)
+        .await
+        .unwrap();
+    seed_project_with_defaults(
+        &h,
+        PROJECT_ID,
+        vec![location("a1", "/srv/project")],
+        env_defaults(&["shared.env"]),
+    )
+    .await;
+    let (reply, _) = create_and_capture(
+        &mut h,
+        json!({
+            "agent_id": "a1",
+            "name": "stable",
+            "working_dir": "/srv/project",
+            "project_id": PROJECT_ID,
+        }),
+    )
+    .await;
+    assert_eq!(reply["payload"]["success"], true);
+
+    let mut updated = crate::db::ProjectRow {
+        project_id: PROJECT_ID.to_string(),
+        name: "Fixtures".to_string(),
+        description: None,
+        source: None,
+        locations: vec![location("a1", "/srv/project")],
+        session_defaults: env_defaults(&["other.env"]),
+        image_digest: None,
+        created_at: 1,
+        updated_at: 2,
+    };
+    updated.updated_at = 3;
+    h.db.update_project(&updated).await.unwrap().unwrap();
+
+    let stored = h
+        .env_service
+        .bindings
+        .get("a1:stable")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.profiles[0].profile.name, "shared.env");
+}
+
+/// A create that is refused before any Agent command is sent.
+async fn create_reply(h: &mut ConnectionHandler, payload: serde_json::Value) -> serde_json::Value {
+    parse_reply(
+        h.handle_message(proto_msg("server.session.create", payload))
+            .await
+            .unwrap(),
+    )
 }

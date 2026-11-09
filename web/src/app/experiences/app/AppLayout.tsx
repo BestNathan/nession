@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { AppLayers, type AppLayer } from './AppLayers';
 import { AppSessionsSurface } from './AppSessionsSurface';
 import { ShellMain } from '@/app/ShellMain';
@@ -68,6 +68,12 @@ export function AppLayout(props: {
    * `FixtureTerminal` here so a baseline can be captured without a live attach.
    */
   terminal?: MainProps['terminal'];
+  /**
+   * A standalone Project detail (#3025). When present it replaces the Sessions
+   * list inside the Sessions layer; the Terminal layer stays mounted, so the
+   * selected Session and its attach state survive Back.
+   */
+  projectDetail?: ReactNode;
 }) {
   const {
     layer,
@@ -77,6 +83,7 @@ export function AppLayout(props: {
     mainShared,
     workspaceAvailable,
     terminal,
+    projectDetail,
   } = props;
 
   // Whether a Workspace capability has pushed a detail (#1081).
@@ -106,9 +113,11 @@ export function AppLayout(props: {
         onLayerChange={onLayerChange}
         workspaceDetailPushed={workspaceDetailPushed}
         sessions={
-          <div className="flex h-full min-h-0 flex-col">
-            <AppSessionsSurface {...sidebarProps} onSelect={onLayerSelect} />
-          </div>
+          projectDetail ?? (
+            <div className="flex h-full min-h-0 flex-col">
+              <AppSessionsSurface {...sidebarProps} onSelect={onLayerSelect} />
+            </div>
+          )
         }
         terminal={
           <div className="flex h-full min-h-0 flex-col">

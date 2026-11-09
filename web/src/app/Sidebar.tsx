@@ -10,6 +10,8 @@ import { SidebarAgentsEntry } from '@/app/patterns/SidebarAgentsEntry';
 import { SidebarServerStatus } from '@/app/patterns/SidebarServerStatus';
 import { SidebarTopActions } from '@/app/patterns/SidebarTopActions';
 import { SessionListHeader } from '@/app/patterns/SessionListHeader';
+import { ProjectNavSection } from '@/app/patterns/ProjectsSection';
+import { emptyProjectShell, type ProjectShellProps } from '@/product/project/types';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { Agent, Session } from '@/types';
 import type { ConnectionState } from '@/platform/socket';
@@ -57,6 +59,8 @@ export interface SidebarProps {
   onKill: (session: Session) => void;
   onViewDetails?: (session: Session) => void;
   onEditDetails?: (session: Session) => void;
+  /** Projects are a first-class sibling destination, not a Session parent (#3025). */
+  projectShell?: ProjectShellProps;
 }
 
 function WebSearchMiss({
@@ -153,6 +157,7 @@ export function Sidebar({
   onKill,
   onViewDetails,
   onEditDetails,
+  projectShell = emptyProjectShell(),
 }: SidebarProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -231,6 +236,7 @@ export function Sidebar({
           }
         />
       </div>
+      <ProjectNavSection shell={projectShell} />
       <SidebarAgentsEntry
         agents={agents}
         activeAgentId={activeAgentId}

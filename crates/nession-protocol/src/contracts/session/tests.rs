@@ -293,12 +293,37 @@ fn test_client_session_create_payload() {
         working_dir: None,
         env_files: Vec::new(),
         sandbox: None,
+        project_id: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.agent_id, "agent-1");
     assert_eq!(decoded.name, "new-session");
     assert!(decoded.env_files.is_empty());
+    assert!(decoded.project_id.is_none());
+}
+
+#[test]
+fn test_client_session_create_project_reference_is_optional_and_round_trips() {
+    // #3025: a Project reference is additive. An old client omits it and is
+    // unchanged; a Project-aware client names it together with the Existing
+    // Location's Agent and directory.
+    let json = serde_json::json!({
+        "agent_id": "agent-1",
+        "name": "new-session",
+        "working_dir": "/srv/project",
+        "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+    });
+    let decoded: ClientSessionCreatePayload = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        decoded.project_id.as_deref(),
+        Some("project-123e4567-e89b-42d3-a456-426614174000")
+    );
+    assert_eq!(decoded.working_dir.as_deref(), Some("/srv/project"));
+
+    let legacy: ClientSessionCreatePayload =
+        serde_json::from_value(serde_json::json!({ "agent_id": "a", "name": "n" })).unwrap();
+    assert!(legacy.project_id.is_none());
 }
 
 #[test]

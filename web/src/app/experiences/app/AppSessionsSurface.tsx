@@ -20,6 +20,8 @@ import { SearchBar } from '@/product/session/components/SearchBar';
 import { SessionList } from '@/product/session/patterns/SessionList';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
 import { SidebarFooter } from '@/app/SidebarFooter';
+import { ProjectNavSection } from '@/app/patterns/ProjectsSection';
+import { emptyProjectShell } from '@/product/project/types';
 import { appHeaderBandClass } from '@/app/patterns/SessionHeader';
 import {
   shellIconButtonClass,
@@ -342,8 +344,10 @@ function SessionsFilterPanel({
  *   expression.
  * - **`emptyState` / `searchMissState`**, which the App words because it owns
  *   the creation action the empty state offers.
- * - **`footer`**, the Agents entry, which belongs below history rather than in
- *   the chrome.
+ *
+ * The Projects section and the Agents entry are siblings rendered *below* this
+ * region by the surface: Projects sit after Session history and before Agents
+ * (#3025), and both remain reachable when the list is empty.
  */
 function SessionsListRegion({
   buckets,
@@ -364,8 +368,6 @@ function SessionsListRegion({
   onCreate,
   searchQuery,
   setSearchQuery,
-  activeAgentId,
-  onlineCount,
 }: {
   buckets: SessionBucket[];
   grouped: boolean;
@@ -385,8 +387,6 @@ function SessionsListRegion({
   onCreate: () => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
-  activeAgentId: string | null;
-  onlineCount: number;
 }) {
   return (
     <div
@@ -439,13 +439,6 @@ function SessionsListRegion({
           <SessionsSearchMiss
             searchQuery={searchQuery}
             onClearSearch={() => setSearchQuery('')}
-          />
-        }
-        footer={
-          <AgentsDisclosure
-            agents={agents}
-            activeAgentId={activeAgentId}
-            onlineCount={onlineCount}
           />
         }
       />
@@ -759,6 +752,7 @@ export function AppSessionsSurface({
   onKill,
   onViewDetails,
   onEditDetails,
+  projectShell = emptyProjectShell(),
 }: AppSessionsSurfaceProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
@@ -818,6 +812,13 @@ export function AppSessionsSurface({
         onCreate={onCreate}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+      />
+      {/* Projects are a sibling destination below history and above the
+          secondary Agents entry (#3025). They stay reachable with zero
+          Sessions, which is why they are not part of the list's footer. */}
+      <ProjectNavSection shell={projectShell} variant="app" />
+      <AgentsDisclosure
+        agents={agents}
         activeAgentId={activeAgentId}
         onlineCount={onlineCount}
       />
