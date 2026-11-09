@@ -274,6 +274,18 @@ jobs:
           done
           echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
 
+      # Emit an event hint only AFTER the canonical ingester has verified its
+      # immutable Store write. The downstream Acceptance waker revalidates the
+      # native source Run, exact-SHA Store bytes and original K8s attestation.
+      # The hint is not itself permission to Pass any criterion.
+      - name: Emit source-aligned Staging Acceptance wake
+        if: steps.source.outputs.run_id != '' && steps.records.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          node trusted/scripts/acceptance-staging-deployment-wake.mjs emit \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$GITHUB_WORKSPACE/results-repo" "$RUNNER_TEMP/persisted-records.txt"
+
       - name: Preserve Run Store post-commit receipts
         if: always()
         uses: actions/upload-artifact@v4

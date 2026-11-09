@@ -29,7 +29,15 @@ assert.match(yaml,/target_ref: \$\{\{ needs\.select\.outputs\.target_sha \}\}/);
 assert.match(yaml,/types: \[completed\]/);
 assert.match(yaml,/workflow_run:\s*\n(?:[^\n]*\n)*?\s+branches: \[main\]/,
   'subscribe only to main upstream runs, not PR completion events');
-assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "CI \/ Run Store Integrity Audit", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/);
+assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "CI \/ Run Store Signed Checkpoint", "CI \/ Run Store Integrity Audit", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages", "Deploy \/ Identity Ingest"\]/);
+assert.ok(selectGuard.includes("github.event.workflow_run.name != 'Deploy / Identity Ingest'"),
+  "an ingester event must not be allowed through the existing merged-Main source path");
+assert.match(yaml,/select-staging:\s*\n\s*if: >-[\s\S]*?github\.event\.workflow_run\.name == 'Deploy \/ Identity Ingest'/);
+assert.match(yaml,/node scripts\/acceptance-staging-deployment-wake\.mjs verify/);
+assert.match(yaml,/ACCEPTANCE_STAGE=staging/);
+assert.match(yaml,/target_ref: \$\{\{ needs\.select-staging\.outputs\.target_sha \}\}/);
+assert.match(yaml,/stage: staging/);
+assert.match(yaml,/evaluate-staging:\s*\n\s*needs: select-staging/);
 // A Not Required Full run concludes success with the `full` job skipped; only
 // a real exact-SHA Full execution may wake release qualification.
 assert.match(yaml,/Original Rekor audit Job did not execute successfully; no acceptance wake/);
