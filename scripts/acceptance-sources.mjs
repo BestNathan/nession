@@ -237,7 +237,7 @@ function selfTest() {
   const item = { criterion: 'SC-01', branch: 'prototype', sha: 'a'.repeat(40),
     path: 'demo-123/index.html', sha256: 'b'.repeat(64) };
   const context = { acceptance_sources: source,
-    source_manifest: { sha256: 'c'.repeat(40), entries: [item] } };
+    source_manifest: { sha256: 'c'.repeat(64), entries: [item] } };
   const pass = { criterion: 'SC-01', result: 'Pass',
     evidence: [{ type: 'source', value: sourceCitation(item) }] };
   validateSourceEvidence(context, pass);
