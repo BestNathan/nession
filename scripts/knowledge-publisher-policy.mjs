@@ -26,12 +26,16 @@ function requireRuleset(r, spec, appId) {
   if (JSON.stringify(types) !== JSON.stringify([...spec.types].sort()))
     fail(spec.name + ': Ruleset rule types differ from approved policy');
   const actors = r.bypass_actors;
-  if (!Array.isArray(actors)) fail(spec.name + ': missing bypass actor readback');
+  // GitHub deliberately redacts bypass_actors for callers without ruleset
+  // administration authority. Do not give the publisher Admin:write merely
+  // to observe this field. Admin-side signed receipts + canary are separate SCs.
+  if (!Array.isArray(actors)) return false;
   if (spec.bypass === 'none' && actors.length) fail(spec.name + ': append-only must have zero bypass actors');
   if (spec.bypass === 'app' &&
       (actors.length !== 1 || Number(actors[0].actor_id) !== appId ||
        actors[0].actor_type !== 'Integration' || actors[0].bypass_mode !== 'always'))
     fail(spec.name + ': bypass identity is not the dedicated Knowledge App');
+  return true;
 }
 export function verifyPolicy(branch, list, details, appId) {
   if (!Number.isSafeInteger(appId) || appId <= 0) fail('real dedicated App ID required');
@@ -40,17 +44,19 @@ export function verifyPolicy(branch, list, details, appId) {
     fail('live knowledge ref must have protected=true and exact SHA readback');
   if (!Array.isArray(list) || !Array.isArray(details) || list.length >= 100)
     fail('missing or incomplete GitHub Ruleset enumeration');
+  const bypassReadbacks = [];
   for (const spec of SPECS) {
     const found = list.filter(x => x.name === spec.name && x.target === 'branch' && x.source_type === 'Repository');
     if (found.length !== 1) fail(spec.name + ': expected one repository-owned Ruleset');
     const rule = details.find(x => x.id === found[0].id);
     if (!rule) fail(spec.name + ': missing authenticated Ruleset detail');
-    requireRuleset(rule, spec, appId);
+    bypassReadbacks.push(requireRuleset(rule, spec, appId));
   }
   return { knowledge_head: branch.commit.sha,
     writer_ruleset_id: details.find(x => x.name === SPECS[0].name).id,
     append_only_ruleset_id: details.find(x => x.name === SPECS[1].name).id,
-    app_id: appId, result: 'active_exact_ref_policy_verified' };
+    app_id: appId, bypass_metadata_visible: bypassReadbacks.every(Boolean),
+    result: 'active_ruleset_structure_verified_readonly' };
 }
 function test() {
   const appId = 876543;
@@ -67,7 +73,11 @@ function test() {
     bypass_actors:[] };
   const list=[{id:11,name:writer.name,target:'branch',source_type:'Repository'},
     {id:12,name:append.name,target:'branch',source_type:'Repository'}];
-  assert.equal(verifyPolicy(branch,list,[writer,append],appId).result,'active_exact_ref_policy_verified');
+  assert.equal(verifyPolicy(branch,list,[writer,append],appId).bypass_metadata_visible,true);
+  const masked = verifyPolicy(branch,list,[{...writer,bypass_actors:undefined},
+    {...append,bypass_actors:undefined}],appId);
+  assert.equal(masked.result,'active_ruleset_structure_verified_readonly');
+  assert.equal(masked.bypass_metadata_visible,false);
   for (const changed of [
     {branch:{...branch,protected:false}},
     {list:list.slice(0,1)},
