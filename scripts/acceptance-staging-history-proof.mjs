@@ -6,7 +6,7 @@
 // This collector never grants an SC verdict or accepts a desired-state-only
 // GitOps write as a deployment observation.
 import assert from 'node:assert/strict';
-import { indexRecord, validateStoredRecord } from './deployment-attestation-ingest.mjs';
+import { enrichReceipt, indexRecord, validateStoredRecord } from './deployment-attestation-ingest.mjs';
 
 const REPO = 'BestNathan/nession';
 const SHA = /^[a-f0-9]{40}$/;
@@ -194,7 +194,83 @@ export async function selfTest() {
       p.endsWith('/commits/' + head) ? integrated :
       [{type:'file',name:'1-1-staging.json',path:'forged'}],
   }), /historical index path mismatch/);
-  console.log('staging history proof: exact merge ancestry, missing proof and forged index fail closed');
+  // Positive example: the SAME immutable bytes are indexed by exact target,
+  // and the independent native Run/Job/Step facts must corroborate them.
+  const repository = 'ghcr.io/bestnathan/nession';
+  const roles = ['agent', 'server', 'ui'];
+  const receipt = {
+    schema_version: 1, kind: 'nession_deployment_attestation',
+    status: 'Attested', environment_id: 'staging', namespace: 'nession',
+    cluster_context: 'ci', gitops_revision: 'e'.repeat(40),
+    observed_at: '2026-11-08T14:03:30Z', source_sha: target,
+    images: roles.map((role,i) => ({
+      role, repository, declared_repository: repository,
+      tag: role + '-ddddddd', digest: 'sha256:' + String(i+1).repeat(64),
+    })),
+    workloads: roles.map((role,i) => ({
+      role, name: 'nession-' + role + '-staging', namespace: 'nession',
+      uid: 'uid-' + role, generation: 3, observed_generation: 3, ready: true,
+      image: repository + ':' + role + '-ddddddd',
+      image_id: repository + '@sha256:' + String(i+1).repeat(64),
+      repository, declared_repository: repository,
+      digest: 'sha256:' + String(i+1).repeat(64),
+    })),
+  };
+  const source = { repository:REPO, run_id:123, run_attempt:1, workflow_id:42,
+    event:'workflow_dispatch', head_sha:main, head_branch:'main' };
+  const durable = 'runs/2026-11-08/123-1/deployment/staging.json';
+  const stored = enrichReceipt(receipt, {
+    source, recordPath: durable,
+    workflowUrl:'https://github.com/BestNathan/nession/actions/runs/123',
+  });
+  const index = indexRecord(stored);
+  const indexPath = 'indexes/by-sha/' + target + '/deployment/123-1-staging.json';
+  const content = (path,value) => ({
+    type:'file', path, encoding:'base64',
+    size:Buffer.byteLength(JSON.stringify(value)),
+    content:Buffer.from(JSON.stringify(value)).toString('base64'),
+  });
+  const run = {id:123,run_attempt:1,workflow_id:42,head_sha:main,head_branch:'main',
+    name:'Deploy / Identity',path:'.github/workflows/deploy-identity.yml',
+    event:'workflow_dispatch',status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO}};
+  const jobs = {jobs:[{name:'attest',run_id:123,run_attempt:1,conclusion:'success',
+    steps:[
+      {name:'Verify read-only Kubernetes identity',conclusion:'success'},
+      {name:'Observe deployed workloads',conclusion:'success'},
+      {name:'Attest deployment identity',conclusion:'success'},
+    ]}]};
+  const get = async p => {
+    if (p.endsWith('/commits/' + target)) return commit;
+    if (p.endsWith('/commits/' + head)) return integrated;
+    if (p === normalizedPath(indexPath.slice(0,-'123-1-staging.json'.length))) {
+      return [{type:'file',path:indexPath,name:'123-1-staging.json'}];
+    }
+    if (p === normalizedPath(indexPath)) return content(indexPath,index);
+    if (p === normalizedPath(durable)) return content(durable,stored);
+    if (p.endsWith('/actions/runs/123')) return run;
+    if (p.includes('/actions/runs/123/attempts/1/jobs')) return jobs;
+    throw Error('unexpected historical proof API request: ' + p);
+  };
+  const actual = await collectExactStagingBatchProof({repo:REPO,
+    targetSha:target,body:batch,get});
+  assert.equal(actual.historical_deployments.length,1);
+  assert.equal(actual.missing_exact_deployment_attestation,false);
+  assert.deepEqual(actual.historical_deployments[0].image_digests, {
+    agent:'sha256:'+'1'.repeat(64), server:'sha256:'+'2'.repeat(64),
+    ui:'sha256:'+'3'.repeat(64),
+  });
+  await assert.rejects(() => collectExactStagingBatchProof({
+    repo:REPO,targetSha:target,body:batch,
+    get:p => p.endsWith('/actions/runs/123')
+      ? Promise.resolve({...run,conclusion:'failure'}) : get(p),
+  }), /source GitHub Run identity mismatch/);
+  await assert.rejects(() => collectExactStagingBatchProof({
+    repo:REPO,targetSha:target,body:batch,
+    get:p => p.includes('/actions/runs/123/attempts/1/jobs')
+      ? Promise.resolve({jobs:[]}) : get(p),
+  }), /missing exact-attempt attestation Job/);
+  console.log('staging history proof: exact merge ancestry, immutable Run/Job proof, missing/stale/forged cases passed');
 }
 
 if (process.argv[1]?.endsWith('acceptance-staging-history-proof.mjs')) {
