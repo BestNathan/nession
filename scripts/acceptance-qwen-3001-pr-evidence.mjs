@@ -185,7 +185,7 @@ export function selfTestOriginalQwenReview(){
   bad(x=>{x.pr.merge_commit_sha='1'.repeat(40);});
   bad(x=>{x.comparison.merge_base_commit.sha='1'.repeat(40);});
   bad(x=>{x.files.push({...x.files[0]});});
-  bad(x=>{x.files[0].patch+=' +unrelated\n';});
+  bad(x=>{x.files[0].patch+='+unrelated\n';});
   bad(x=>{x.files[0].patch=x.files[0].patch.replace(' review: pending',' review: approved');});
   bad(x=>{x.reviewRun.run_attempt=2;});
   bad(x=>{x.reviewRun.conclusion='failure';});
