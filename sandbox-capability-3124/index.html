@@ -135,6 +135,18 @@
 .nession-ui .app .action{min-height:44px}
 .nession-ui .app .actionline{gap:8px}
 .nession-ui .app .actionline .action{flex:1 1 120px}
+
+/* Optional native-policy KV composer: Resource/Syscall are empty until Add is clicked. */
+.nession-ui .kv-editor{min-width:0;width:100%}
+.nession-ui .kv-editor .hint2{margin:0 0 10px;line-height:1.6}
+.nession-ui .kv-empty{font-size:12px;color:var(--nession-muted-foreground);border:1px dashed var(--nession-border);border-radius:9px;padding:11px 12px}
+.nession-ui .kv-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;margin:10px 0;min-width:0}
+.nession-ui .kv-row .field{min-width:0}
+.nession-ui .kv-remove{white-space:nowrap;min-height:38px}
+.nession-ui .kv-editor .actionline{margin-top:12px}
+.nession-ui .app .kv-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.nession-ui .app .kv-remove{grid-column:1/-1;justify-self:end;min-height:44px}
+.nession-ui .app .kv-editor .actionline .action{flex:0 1 auto}
 </style>
 </head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
