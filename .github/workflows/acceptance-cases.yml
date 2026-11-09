@@ -250,16 +250,23 @@ jobs:
           bwrap --version
           sandbox_root=/sys/fs/cgroup/nession-accept
           if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-            sudo sh -c '
-              for controller in cpu memory pids; do
-                grep -qw "$controller" /sys/fs/cgroup/cgroup.controllers || continue
-                grep -qw "$controller" /sys/fs/cgroup/cgroup.subtree_control || \
-                  echo "+$controller" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
-              done
-            '
+            # Enable the controllers at the root cgroup so the delegated
+            # directory inherits them. A root that still hosts processes
+            # refuses this; the Case then reports Pending instead of passing.
+            for controller in cpu memory pids; do
+              if grep -qw "${controller}" /sys/fs/cgroup/cgroup.controllers &&
+                 ! grep -qw "${controller}" /sys/fs/cgroup/cgroup.subtree_control; then
+                echo "+${controller}" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null || \
+                  echo "::warning::could not enable ${controller} on the root cgroup"
+              fi
+            done
             if sudo mkdir -p "${sandbox_root}" &&
-               sudo chown "$(id -u):$(id -g)" "${sandbox_root}"; then
+               sudo chown -R "$(id -u):$(id -g)" "${sandbox_root}"; then
               echo "SANDBOX_CGROUP_ROOT=/nession-accept" >> "${GITHUB_ENV}"
+              echo "delegated controllers: $(cat "${sandbox_root}/cgroup.controllers" 2>/dev/null || echo none)"
+              if [ ! -w "${sandbox_root}/cgroup.subtree_control" ]; then
+                echo "::warning::the delegated cgroup root is not writable by the Case user"
+              fi
             else
               echo "::warning::could not delegate ${sandbox_root}; Sandbox cgroup Cases will report Pending"
             fi
