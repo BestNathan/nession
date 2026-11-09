@@ -19,7 +19,7 @@ export function shouldCollectPublicPagesE2E(stage,issue) {
 
 
 // Never send the GitHub token to a public (possibly redirected) endpoint.
-async function fetchAnonymousPublic(sha) {
+export async function fetchAnonymousPublic(sha) {
   const response=await fetch(PUBLIC+'?revision='+sha,{
     method:'GET',redirect:'error',cache:'no-store',credentials:'omit',
     headers:{'Cache-Control':'no-cache','Accept':'application/json'},
