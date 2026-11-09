@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6b943bef2fa7026eae156ce99cba35b0d0122172536b95b4e959546eda90e740",
+  "run_id": 42638717201,
+  "run_attempt": 1,
+  "issue": 3023,
+  "criterion": "SC-05",
+  "criterion_text": "In a controlled Kubernetes Pod-delete/recreate fixture binding the same PVC, the downloaded EROFS blob and digest survive and are reused with no second full download; run/volume/kernel identities and bytes transferred are recorded.",
+  "stage": "staging",
+  "target_sha": "a0a970da27ba97da76e5dd7c619d9c9dc0c44b88",
+  "contract_sha256": "bb07c31405bc1f6b1ccbbb8f591e480af86390a6c15eae7d52718d5bca4da210",
+  "case_revision": "a0a970da27ba97da76e5dd7c619d9c9dc0c44b88",
+  "case_tree_sha": "841fa45daf78f5360629376ca5889064d9c82943",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-09T14:54:40.272Z",
+  "finished_at": "2026-11-09T14:54:46.256Z",
+  "duration_ms": 5983,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "SC-05 requires a controlled Kubernetes Pod-delete/recreate fixture binding the same PVC, but no trusted K8s Case lane exists and ephemeral cluster/PVC provisioning exceeds the 120-second verifier budget; the Issue keeps this criterion Pending instead of claiming live proof",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "exact staging SHA a0a970da27ba97da76e5dd7c619d9c9dc0c44b88: no Kubernetes runner in the trusted Case lanes; kind/PVC provisioning cannot complete within the canonical 120s verifier cap; the /data PVC contract is declared in GitOps and reviewed by SC-02, but this Case did not observe live Pod/PVC survival"
+        }
+      ],
+      "duration_ms": 41,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42638717201,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a0a970da27ba97da76e5dd7c619d9c9dc0c44b88",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42638717201",
+    "record_path": "runs/2026-11-09/42638717201-1/3023/SC-05.json",
+    "source_result_sha256": "2b3261b788e1ef9a5c0a9800931b69d55451b92c523e08aee29881ec021d9ad1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42638717201-1",
+    "sha256": "2b3261b788e1ef9a5c0a9800931b69d55451b92c523e08aee29881ec021d9ad1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42638717201",
+    "durability": "time-limited; object archival not configured"
+  }
+}
