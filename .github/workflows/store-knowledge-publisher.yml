@@ -43,6 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/knowledge-publisher-request.mjs self-test
+          node scripts/knowledge-publisher-policy.mjs self-test
           node scripts/knowledge-ledger-publish.mjs self-test
           node scripts/knowledge-publisher-request.mjs prepare \
             "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/knowledge-candidate"
@@ -74,12 +75,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Reverify source and expected Knowledge head before App token
+      - name: Reverify source and effective GitHub protection before App token
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KNOWLEDGE_PUBLISHER_APP_ID: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
         run: |
           set -euo pipefail
           node scripts/knowledge-publisher-request.mjs prepare \
             "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/knowledge-candidate"
+          node scripts/knowledge-publisher-policy.mjs self-test
+          node scripts/knowledge-publisher-policy.mjs check
           node scripts/knowledge-ledger-publish.mjs self-test
       - name: Mint dedicated Knowledge App token only after admission
         id: writer
