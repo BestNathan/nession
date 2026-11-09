@@ -26,7 +26,7 @@ export function exactBatch(body) {
   return Object.freeze({ branch, main, lane, head });
 }
 
-function parseContents(entry, expectedPath) {
+export function parseContents(entry, expectedPath) {
   if (!entry || entry.type !== 'file' || entry.path !== expectedPath ||
       entry.encoding !== 'base64' || !Number.isSafeInteger(entry.size) ||
       entry.size < 1 || entry.size > 65536 ||
@@ -39,7 +39,7 @@ function parseContents(entry, expectedPath) {
   catch { reject('invalid append-only record JSON'); }
 }
 
-function normalizedPath(path) {
+export function normalizedPath(path) {
   return '/repos/' + REPO + '/contents/' + path + '?ref=acceptance-results';
 }
 
