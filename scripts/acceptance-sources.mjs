@@ -145,6 +145,12 @@ export function validateSourceEvidence(context, criterion) {
   if (!manifest || !SHA256.test(manifest.sha256) || !Array.isArray(manifest.entries)) {
     reject(criterion.criterion + ' source manifest is missing');
   }
+  const core = {
+    schema_version: 1, issue: context.issue?.number,
+    target_ref: context.target_ref, contract_sha256: context.contract_sha256,
+    entries: manifest.entries,
+  };
+  if (manifest.sha256 !== digest(core)) reject(criterion.criterion + ' source manifest digest mismatch');
   const allowed = new Set(manifest.entries
     .filter((entry) => entry.criterion === criterion.criterion).map(sourceCitation));
   if (!citations.length) reject(criterion.criterion + ' Pass requires a source citation');
@@ -236,11 +242,19 @@ function selfTest() {
   rejectBody(body.replace('  SC-01:', '  SC-99:'));
   const item = { criterion: 'SC-01', branch: 'prototype', sha: 'a'.repeat(40),
     path: 'demo-123/index.html', sha256: 'b'.repeat(64) };
-  const context = { acceptance_sources: source,
-    source_manifest: { sha256: 'c'.repeat(64), entries: [item] } };
+  const context = { issue: { number: 1 }, target_ref: 'd'.repeat(40),
+    contract_sha256: 'e'.repeat(64), acceptance_sources: source,
+    source_manifest: { entries: [item] } };
+  context.source_manifest.sha256 = digest({
+    schema_version: 1, issue: 1, target_ref: context.target_ref,
+    contract_sha256: context.contract_sha256, entries: [item],
+  });
   const pass = { criterion: 'SC-01', result: 'Pass',
     evidence: [{ type: 'source', value: sourceCitation(item) }] };
   validateSourceEvidence(context, pass);
+  assert.throws(() => validateSourceEvidence({
+    ...context, source_manifest: { ...context.source_manifest, sha256: '0'.repeat(64) },
+  }, pass), /manifest digest mismatch/);
   assert.throws(() => validateSourceEvidence(context, { ...pass, evidence: [] }), /source citation/);
   assert.throws(() => validateSourceEvidence(context, { ...pass,
     evidence: [{ type: 'source', value: 'forged' }] }), /forged/);
