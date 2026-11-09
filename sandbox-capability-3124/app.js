@@ -118,7 +118,7 @@
        '</div></section>';
   }
   function insideView(){
-    return '<div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
+    return '<h3>Inside Sandbox</h3><div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
        '<section class="info-section"><h3>当前生效配置 · Effective Policy</h3><p class="subline">只读：由 Agent 的实际执行记录返回，不是上次保存的编辑草稿。</p>'+
        policyDescription(actualPolicy())+'</section>'+
        '<div class="actionline"><button class="action primary" data-action="detail">查看验证信息 →</button><button class="action" data-action="return-native">← 返回 Native Pane</button></div>'+
@@ -144,7 +144,7 @@
   }
   function draftView(){
     var s=settings();
-    var c='<div class="statusline">'+summary()+'</div><div class="notice '+(!s.online||s.unsupported||s.recreated?'danger':'')+'">'+message()+'</div>'+
+    var c='<h3>'+headline()+'</h3><div class="statusline">'+summary()+'</div><div class="notice '+(!s.online||s.unsupported||s.recreated?'danger':'')+'">'+message()+'</div>'+
       '<div class="info-grid">'+line('Agent / Location',s.offline?'nession-dev · offline':'nession-dev · '+(s.macos?'macOS':'Linux'))+
       line('当前 Pane','Native · %1')+'</div>'+
       '<div class="info-section"><h3>配置 Sandbox</h3><p class="subline">填写 Policy 草稿，预检后明确 Enter；启动新的隔离 Pane，原 Native Pane 不变。</p>'+
