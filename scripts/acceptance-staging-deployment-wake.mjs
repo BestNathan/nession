@@ -144,9 +144,7 @@ export async function verifyWake({event,get,getText}) {
   });
 }
 
-async function main() {
-  const mode = process.argv[2];
-  if (mode === 'self-test') {
+export async function selfTestWake() {
     const sample = {
       schema_version:1,kind:'staging_deployment_ingested',repository:REPO,
       ingest_run_id:50,ingest_run_attempt:1,source_run_id:30,source_run_attempt:1,
@@ -166,6 +164,12 @@ async function main() {
       get:async() => ({id:50,run_attempt:1,name:'other'}),
       getText:async()=>''}),/untrusted deployment-ingest/);
     console.log('staging deployment wake: source, SHA, duplicate and forged receipt fixtures passed');
+}
+
+async function main() {
+  const mode = process.argv[2];
+  if (mode === 'self-test') {
+    await selfTestWake();
     return;
   }
   if (mode === 'emit') {
