@@ -101,3 +101,24 @@ No production React code, no new backend endpoint, no changes to domain semantic
 **Fidelity & proof:** This mock uses the current design token snapshot but is not the React UI. The changed prototype is not considered browser-verified until a new exact-SHA Chromium/Playwright run checks these cases; a previous successful Pages deployment or the JavaScript source parser is not sufficient. Production issues SC-07/SC-08 remain independent Pending obligations.
 
 **Knowledge Impact:** None — correcting geometry and fidelity of existing Session/Project interactions, no new domain concepts.
+
+
+## Component-level correction — 2026-11-09: Location and Env anatomy
+
+**User correction:** The earlier “6/6 geometry” result missed obviously broken Env controls and an oversized/mismatched Location Select. On the actual Chromium screenshot, `dialog-form .field input` styled every `<input>`, including Env checkboxes: those inputs inherited full width and 42px height. The old mock also put online status on every Location dropdown option, and its expanded options occupied normal document flow, shifting subsequent fields. These defects invalidated any claim of visual fidelity despite passing outer box tests.
+
+**Source of truth:** `staging:web/src/product/session/components/CreateSessionDialog.tsx`, `CreateSessionParts.tsx`, `web/src/capabilities/env/components/EnvFileMultiSelect.tsx`, `AppCreateSessionSurface.tsx` and the shared `select.tsx`. The React primitives remain unmodified by this prototype correction.
+
+**Rebuilt visuals and interactions:**
+- Web Existing Location: trigger contains Agent, path and *Agent online/offline*; options contain only Agent/path, with selected indicator. Height grows only as required by real text; control and popup have exactly the same anchor width; the popup overlays instead of shifting Session Name/Env fields.
+- Web Env Files: 32px search input, 224px separately scrollable list, compact 16×16 selection checkmarks, file icon, full filename, source badge (`server` / `agent:build-agent`), var count and selected-file count. Search and selection are functional. No simulated raw checkbox-in-form styling.
+- App New Session order: Session Name → Existing Location → Environment files (matching the App implementation, **not** copied from Web). The App summary is a single disclosure row; the child Env page has a search and a page-scrollable list, without a nested fixed-height box.
+- Project's Agent/Directory row retains its distinct Input/textarea semantics; Web Remove is an icon-sized control, App Remove is full-width. No change to Project/Session API objects.
+
+**Chromium recheck** for exact source `9c48f466248149707eaffa2c2d06928318eed031`:
+- [Ephemeral Task #42639910237](https://github.com/BestNathan/nession/actions/runs/42639910237) successfully executed a source-pinned, secretless Chromium run: Web 1440/1180/1024 and App 390x844/375x812/844x390 (6/6 diagnostic cases).
+- Measured Web Location trigger **594px wide × 68px high** (ordinary path), menu **594px wide**, item heights **50px** with no status duplicated in the options, no form displacement on opening, 0px horizontal overflow.
+- Web Env search **32px** high, each selection box **16×16px**, list **224px** high; three badge/var rows, filter by text and selection update checked. App child Env search **32px**, three rows without fixed list height; selections retained on Back.
+- The run captured screenshots of Web Session closed/open and App Session/Env (diagnostic log). These checks prove the **mock** at that exact source, not production React fidelity or accepted SC-07.
+
+**Critical distinction:** Source-aligned component anatomy is a better approximation; this remains a dependency-free static mock rather than `@base-ui/react` / React itself. #3089 stays open until the production Select implementation is fixed and authenticated Acceptance verifies the real UI. Publication verification is independent of the browser diagnostic.
