@@ -48,11 +48,11 @@ function offlineProjects(): Project[] {
   return projects;
 }
 
-export type FixtureProjectsScenario = 'canonical' | 'empty' | 'error' | 'offline';
+export type FixtureProjectsScenario = 'canonical' | 'empty' | 'error' | 'loading' | 'offline';
 
 export function fixtureProjectsScenario(search: string): FixtureProjectsScenario {
   const value = new URLSearchParams(search).get('projects');
-  if (value === 'empty' || value === 'error' || value === 'offline') {
+  if (value === 'empty' || value === 'error' || value === 'loading' || value === 'offline') {
     return value;
   }
   return 'canonical';
@@ -61,6 +61,7 @@ export function fixtureProjectsScenario(search: string): FixtureProjectsScenario
 interface ProjectHarnessState {
   scenario: FixtureProjectsScenario;
   projects: Project[];
+  lists: number;
   creates: Record<string, unknown>[];
   updates: Record<string, unknown>[];
   deletes: Record<string, unknown>[];
@@ -68,6 +69,7 @@ interface ProjectHarnessState {
 }
 
 function answerList(state: ProjectHarnessState): unknown {
+  state.lists += 1;
   if (state.scenario === 'error') {
     return { projects: [], error: 'Projects could not be loaded' };
   }
@@ -145,6 +147,10 @@ function fixtureProjectSurface(state: ProjectHarnessState): PluginSurface {
     request<T>(type: string, payload: Record<string, unknown>): Promise<T> {
       switch (type) {
         case 'server.project.list':
+          if (state.scenario === 'loading') {
+            state.lists += 1;
+            return new Promise<T>(() => {});
+          }
           return Promise.resolve(answerList(state)) as Promise<T>;
         case 'server.project.get':
           return Promise.resolve(answerGet(state, payload)) as Promise<T>;
@@ -176,6 +182,7 @@ function fixtureProjectSurface(state: ProjectHarnessState): PluginSurface {
 
 export interface FixtureProjectControls {
   projects: () => Project[];
+  listRequests: () => number;
   createRequests: () => Record<string, unknown>[];
   updateRequests: () => Record<string, unknown>[];
   deleteRequests: () => Record<string, unknown>[];
@@ -188,11 +195,12 @@ export function createFixtureProjectHarness(search: string): {
   const scenario = fixtureProjectsScenario(search);
   const state: ProjectHarnessState = {
     scenario,
-    projects: scenario === 'empty' || scenario === 'error'
+    projects: scenario === 'empty' || scenario === 'error' || scenario === 'loading'
       ? []
       : scenario === 'offline'
         ? offlineProjects()
         : seedProjects(),
+    lists: 0,
     creates: [],
     updates: [],
     deletes: [],
@@ -202,6 +210,7 @@ export function createFixtureProjectHarness(search: string): {
     surface: fixtureProjectSurface(state),
     controls: {
       projects: () => state.projects,
+      listRequests: () => state.lists,
       createRequests: () => state.creates,
       updateRequests: () => state.updates,
       deleteRequests: () => state.deletes,

@@ -1,6 +1,14 @@
-import { GitBranch, MapPin, Plus, Settings } from 'lucide-react';
+import { useState } from 'react';
+import { Boxes, GitBranch, MapPin, Plus, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { agentDisplayName } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -82,10 +90,12 @@ function LocationRow({ agents, location }: { agents: Agent[]; location: ProjectL
 function ProjectHeader({
   project,
   onCreateSession,
+  onManagedUnavailable,
   onSettings,
 }: {
   project: Project;
   onCreateSession: (project: Project) => void;
+  onManagedUnavailable: () => void;
   onSettings: (project: Project) => void;
 }) {
   return (
@@ -122,6 +132,15 @@ function ProjectHeader({
         >
           <Plus className="size-4" aria-hidden />
           New Session
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          data-testid="project-detail-managed-session"
+          onClick={() => onManagedUnavailable()}
+        >
+          <Boxes className="size-4" aria-hidden />
+          Managed (EROFS)
         </Button>
         <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
           Project is a declaration; the Session owns its runtime and environment.
@@ -226,6 +245,29 @@ function ImageSection({ project }: { project: Project }) {
   );
 }
 
+/** A fail-closed Managed entry: the EROFS/Sandbox runtime does not exist yet. */
+function ManagedUnavailableDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent data-testid="project-managed-unavailable" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Managed Session is not available yet</DialogTitle>
+        </DialogHeader>
+        <p className={chromeSansRole('secondary')}>
+          A Managed Session needs the native EROFS/Sandbox runtime, which this
+          Server does not provide yet. Nothing was created and no Native
+          fallback was attempted. The Project configuration is preserved.
+        </p>
+        <DialogFooter>
+          <Button type="button" onClick={() => onClose()}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** The standalone Project detail body, shared by Web and App (#3025). */
 export function ProjectDetailContent({
   project,
@@ -233,6 +275,7 @@ export function ProjectDetailContent({
   onCreateSession,
   onSettings,
 }: ProjectDetailProps) {
+  const [managedOpen, setManagedOpen] = useState(false);
   return (
     <div
       data-testid="project-detail"
@@ -242,6 +285,7 @@ export function ProjectDetailContent({
       <ProjectHeader
         project={project}
         onCreateSession={onCreateSession}
+        onManagedUnavailable={() => setManagedOpen(true)}
         onSettings={onSettings}
       />
       <Separator />
@@ -249,6 +293,7 @@ export function ProjectDetailContent({
       <LocationsSection project={project} agents={agents} />
       <DefaultsSection project={project} />
       <ImageSection project={project} />
+      <ManagedUnavailableDialog open={managedOpen} onClose={() => setManagedOpen(false)} />
     </div>
   );
 }

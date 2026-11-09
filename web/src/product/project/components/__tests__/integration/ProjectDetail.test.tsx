@@ -83,6 +83,25 @@ describe('ProjectDetailContent', () => {
     expect(onSettings).toHaveBeenCalledWith(PROJECT);
   });
 
+  it('fails Managed creation closed instead of falling back to Native', async () => {
+    const user = userEvent.setup();
+    const onCreateSession = vi.fn();
+    render(
+      <ProjectDetailContent
+        project={PROJECT}
+        agents={AGENTS}
+        onCreateSession={onCreateSession}
+        onSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByTestId('project-detail-managed-session'));
+    const dialog = screen.getByTestId('project-managed-unavailable');
+    expect(dialog).toHaveTextContent('Managed Session is not available yet');
+    expect(dialog).toHaveTextContent('Nothing was created and no Native fallback was attempted');
+    expect(onCreateSession).not.toHaveBeenCalled();
+  });
+
   it('explains absent source, locations, defaults and image', () => {
     render(
       <ProjectDetailContent
