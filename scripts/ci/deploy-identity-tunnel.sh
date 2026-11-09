@@ -142,10 +142,10 @@ start() {
 }
 
 self_test() {
-  local temp owned unrelated exe born rc=0
+  local temp owned unrelated stubborn exe born
   temp="$(mktemp -d)"
   RUNNER_TEMP="$temp"
-  trap 'kill "${owned:-}" "${unrelated:-}" 2>/dev/null || true; rm -rf -- "$temp"' EXIT
+  trap 'kill "${owned:-}" "${unrelated:-}" "${stubborn:-}" 2>/dev/null || true; rm -rf -- "$temp"' EXIT
   exe="$(readlink -f "$(command -v sleep)")"
   sleep 20 & owned=$!
   sleep 20 & unrelated=$!
@@ -160,6 +160,13 @@ self_test() {
   ! owned_process "$owned" "$born" "$exe" 'sleep 20'
   stop_owned_pid "$temp/gost-ci.pid" "$exe" 'sleep 20' # idempotent
   kill -0 "$unrelated" # never touch unowned processes
+  # Simulate a timed-out child ignoring TERM; enforce bounded KILL fallback.
+  bash -c 'trap "" TERM; exec sleep 20' & stubborn=$!
+  sleep 0.1
+  printf '%s %s\n' "$stubborn" "$(ticks "$stubborn")" > "$temp/stubborn.pid"
+  stop_owned_pid "$temp/stubborn.pid" "$exe" 'sleep 20'
+  ! owned_process "$stubborn" "$(ticks "$stubborn" || echo 0)" "$exe" 'sleep 20'
+  kill -0 "$unrelated"
   printf '%s' 'malformed' > "$temp/gost-ci.pid"
   if stop_owned_pid "$temp/gost-ci.pid" "$exe" 'sleep 20' 2>/dev/null; then
     fail 'forged PID marker must fail closed'; return 1
@@ -205,7 +212,7 @@ self_test() {
     ! -e "$temp/gost-ci.pid" ]]
   fake_error=0
   kill "$unrelated" 2>/dev/null || true
-  echo 'Deploy / Identity tunnel: live child TERM, forged/replayed PID, fail-closed alias inspection, owned cleanup and idempotency passed'
+  echo 'Deploy / Identity tunnel: live child TERM/KILL timeout, forged/replayed PID, fail-closed alias inspection, owned cleanup and idempotency passed'
 }
 
 [[ "${1:-}" == 'self-test' ]] || [[ -n "${RUNNER_TEMP:-}" ]] ||
