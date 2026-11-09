@@ -61,7 +61,9 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     if (!expected.has(normalized.criterion)) throw new Error('unknown or wrong-stage criterion ' + normalized.criterion);
     if (seen.has(normalized.criterion)) throw new Error('duplicate criterion ' + normalized.criterion);
     seen.add(normalized.criterion);
-    if (String(source).startsWith('agent-')) validateSourceEvidence(context, normalized);
+    if (String(source) === 'agent' || String(source).startsWith('agent-')) {
+      validateSourceEvidence(context, normalized);
+    }
     return normalized;
   });
   const missing = [...expected].filter((id) => !seen.has(id));
