@@ -38,6 +38,7 @@ import {
   parseDeploymentAttestationReceipt,
 } from './deployment-identity-collect.mjs';
 import { formatAdmissionReceipt, parseAdmissionReceipt } from './staging-lane-scheduler.mjs';
+import { collectExactStagingBatchProof, selfTest as selfTestStagingHistoryProof } from './acceptance-staging-history-proof.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
   parseE2eFullGateLog,attestE2eFullGateReceipt,
@@ -186,7 +187,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], authenticatedQwenChainFixture = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -278,6 +279,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     provider_wake_evidence: providerWakeEvidence,
     deployment_attestation_receipts: deploymentAttestationReceipts,
     staging_lane_admission_receipts: stagingLaneAdmissionReceipts,
+    historical_staging_batch_proof: historicalStagingBatchProof,
   };
 }
 
@@ -1892,6 +1894,7 @@ async function collectCommand(workspace, outFile) {
   // run ID, exact SHA, PR identity and attempt. These are bounded reads only.
   const historicalE2EByPr = new Map();
   const linkedIssueE2E = [];
+  let stagingBatchIssue = null;
   let implementationPulls = [];
   let historicalReporterE2eRerun = null;
   let relatedAcceptance = [];
@@ -1899,6 +1902,7 @@ async function collectCommand(workspace, outFile) {
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
+    stagingBatchIssue = currentIssue;
     const section = String(currentIssue.body ?? '').match(/^## E2E Verification\s*$/m);
     if (section) {
       for (const pull of selectedPulls) {
@@ -1958,6 +1962,11 @@ async function collectCommand(workspace, outFile) {
   // SC-02 is a pre-merge criterion about the two-lane topology, so lane
   // receipts must be available at every stage, not only merged/staging.
   const laneEvidence = await collectLaneEvidenceReceipts(repo, githubGet, githubJobLog);
+  // #3072: a rolling newest-Run window misses historic SHA deployment proof.
+  // Re-attest immutable by-SHA records and native GitHub Run/Job identities.
+  const historicalStagingBatchProof = process.env.ACCEPTANCE_STAGE === 'staging' && stagingBatchIssue
+    ? await collectExactStagingBatchProof({repo, targetSha:sha,
+      body:stagingBatchIssue.body, get:githubGet}) : null;
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
@@ -1974,7 +1983,8 @@ async function collectCommand(workspace, outFile) {
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
     authenticatedRunStoreFiveModeReadback,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
-    stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts });
+    stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts,
+    historicalStagingBatchProof });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -2060,6 +2070,7 @@ async function selfTest() {
   await selfTestIssueAuditReadback();
   selfTestStagingAcrEvidence();
   await selfTestLaneEvidenceReceipts();
+  await selfTestStagingHistoryProof();
   await selfTestDevelopmentReadback();
   selfTestPublicPagesObservation();
   selfTestPublicWorkflowPublication();
