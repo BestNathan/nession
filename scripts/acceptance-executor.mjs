@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateAcceptancePlan, isProofEligible, deploymentProofEligible } from './acceptance-plan.mjs';
+import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import { verifiedIssueAuditCriterion, SIDEBAR_AUDIT_REPAIR_PROOF } from './acceptance-issue-audit-readback.mjs';
@@ -48,7 +49,8 @@ function parseContract(body) {
   const acceptedPlan = validateAcceptancePlan(body, success.criteria.keys(), report.rows);
   errors.push(...acceptedPlan.errors);
   if (errors.length) throw new Error('invalid acceptance contract:\n- ' + errors.join('\n- '));
-  return { criteria: success.criteria, rows: report.rows, plan: acceptedPlan.plan };
+  const sources = parseAcceptanceSources(body, success.criteria.keys(), acceptedPlan.plan);
+  return { criteria: success.criteria, rows: report.rows, plan: acceptedPlan.plan, sources };
 }
 
 function contractDigest(contract) {
@@ -62,7 +64,9 @@ function contractDigest(contract) {
         acceptance_plan: contract.plan.get(criterion.id),
       } : {}),
     }));
-  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  // No declaration must retain the historical digest byte-for-byte.
+  const payload = contract.sources ? { criteria: canonical, acceptance_sources: contract.sources } : canonical;
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
 export function buildAcceptanceContext(issue, stage, options = {}) {
@@ -113,6 +117,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
     deployment_binding: deploymentBinding,
     ci_evidence: options.ciEvidence ?? null,
     criteria,
+    ...(contract.sources ? { acceptance_sources: contract.sources } : {}),
     requirement_body: String(issue.body ?? ''),
   };
 }
