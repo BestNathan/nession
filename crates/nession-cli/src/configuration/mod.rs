@@ -383,6 +383,34 @@ pub const AGENT_FIELDS: &[FieldSpec] = &[
         key: "terminal_cols",
         kind: FieldKind::U16NonZero,
     },
+    FieldSpec {
+        key: "sandbox.enabled",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
+        key: "sandbox.bubblewrap_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "sandbox.sandbox_exec_path",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "sandbox.cgroup_root",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "sandbox.state_dir",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "sandbox.bridge_executable",
+        kind: FieldKind::OptionalString,
+    },
+    FieldSpec {
+        key: "sandbox.launch_timeout_secs",
+        kind: FieldKind::U64,
+    },
 ];
 
 /// Every editable `ServerConfig` field.
@@ -919,10 +947,24 @@ mod tests {
     fn every_serialized_field_has_a_schema_entry() {
         let agent = toml::Value::try_from(AgentConfig::default()).expect("agent defaults");
         let agent_table = agent.as_table().expect("agent table");
-        for key in agent_table.keys().filter(|key| *key != "logging") {
+        for key in agent_table
+            .keys()
+            .filter(|key| *key != "logging" && *key != "sandbox")
+        {
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == key),
                 "AgentConfig field '{key}' is missing from AGENT_FIELDS"
+            );
+        }
+        let agent_sandbox = agent_table
+            .get("sandbox")
+            .and_then(toml::Value::as_table)
+            .expect("agent sandbox table");
+        for key in agent_sandbox.keys() {
+            let dotted = format!("sandbox.{key}");
+            assert!(
+                AGENT_FIELDS.iter().any(|field| field.key == dotted),
+                "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
             );
         }
         let agent_logging = agent_table

@@ -397,7 +397,7 @@ mod tests {
             ),
             (
                 "sessions create".to_string(),
-                strings(&["--agent-id", "--name"]),
+                strings(&["--agent-id", "--name", "--sandbox-policy"]),
             ),
             (
                 "sessions kill".to_string(),
