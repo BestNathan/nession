@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { auditIssue } from './issue-contract.mjs';
-import { issueBody } from './staging-convergence-batch.mjs';
+import { batchIdentity, issueBody } from './staging-convergence-batch.mjs';
 
 const REPO='BestNathan/nession';
 const ISSUE=2984, PR=2985;
@@ -114,6 +114,9 @@ export async function verifySourceBoundOriginalPr({issue,pr,runs,comments,headCo
 
 export async function selfTestOriginalPr(){
   const body=issueBody({
+    identity: batchIdentity({
+      branch:'staging',main_sha:MAIN,lane_sha:LANE,integration_head:HEAD,
+    }),
     branch:'staging',main_sha:MAIN,lane_sha:LANE,integration_head:HEAD,
     impact:{category:'unknown'},changedPaths:Array.from({length:76},(_,i)=>'file'+i),
     newIds:[],regressionIds:[],removed:[],
