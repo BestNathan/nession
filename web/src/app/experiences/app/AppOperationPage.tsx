@@ -111,12 +111,8 @@ export function AppSheet({
         <DialogContent
           data-experience="app"
           data-testid={testId}
+          variant="sheet"
           showCloseButton
-          className={cn(
-            'fixed top-auto bottom-0 left-0 max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0',
-            'rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0',
-            'data-open:slide-in-from-bottom-4 data-closed:slide-out-to-bottom-4',
-          )}
         >
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
