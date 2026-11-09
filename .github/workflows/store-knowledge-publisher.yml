@@ -1,0 +1,154 @@
+name: Store / Knowledge Publisher
+
+# #2358: A distinct App identity publishes a precommitted, data-only Knowledge
+# proposal. repository_dispatch always executes the default-branch workflow;
+# unlike workflow_dispatch it does NOT accept an attacker-selected source ref.
+# The non-privileged job authenticates the request before the protected job
+# can access knowledge-publish Environment secrets.
+on:
+  repository_dispatch:
+    types: [knowledge-publish-v1]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-knowledge-publisher
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.event.sender.login == 'BestNathan' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact trusted main request verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify only authenticated owner/main requests and valid inert data
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-publisher-request.mjs self-test
+          node scripts/knowledge-ledger-publish.mjs self-test
+          node scripts/knowledge-publisher-request.mjs prepare \
+            "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/knowledge-candidate"
+
+  publish:
+    needs: verify
+    if: >-
+      needs.verify.result == 'success' &&
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.event.sender.login == 'BestNathan' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # Environment MUST be precreated by admin: selected deployment branch main,
+    # authorized reviewer, and only the dedicated Knowledge App private key.
+    # A missing/unreviewed Environment is not a substitute for protection.
+    environment: knowledge-publish
+    steps:
+      - name: Checkout only approved main-owned Publisher code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Reverify source and expected Knowledge head before App token
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/knowledge-publisher-request.mjs prepare \
+            "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/knowledge-candidate"
+          node scripts/knowledge-ledger-publish.mjs self-test
+      - name: Mint dedicated Knowledge App token only after admission
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.KNOWLEDGE_PUBLISHER_APP_PRIVATE_KEY }}
+          owner: BestNathan
+          repositories: nession
+          permission-contents: write
+      - name: Publish one non-force validated fast-forward and verify GitHub SHA
+        shell: bash
+        env:
+          KNOWLEDGE_GIT_TOKEN: ${{ steps.writer.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          KNOWLEDGE_APP_ID: ${{ vars.KNOWLEDGE_PUBLISHER_APP_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$KNOWLEDGE_GIT_TOKEN"
+          test -n "$KNOWLEDGE_APP_ID"
+          # Git asks for credentials only during push. Do not put the
+          # installation token in a Git remote URL, persistent config or log.
+          cat > "$RUNNER_TEMP/knowledge-askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$KNOWLEDGE_GIT_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$RUNNER_TEMP/knowledge-askpass"
+          trap 'rm -f "$RUNNER_TEMP/knowledge-askpass"' EXIT
+          export GIT_ASKPASS="$RUNNER_TEMP/knowledge-askpass"
+          export GIT_TERMINAL_PROMPT=0
+          expected="$(jq -er .expected_head "$RUNNER_TEMP/knowledge-publisher-admission.json")"
+          proposal="$(jq -er .source_sha "$RUNNER_TEMP/knowledge-publisher-admission.json")"
+          node scripts/knowledge-ledger-publish.mjs publish \
+            "$RUNNER_TEMP/knowledge-candidate" "$expected" \
+            > "$RUNNER_TEMP/knowledge-publish-result.json"
+          jq -e --arg sha "$proposal" '.ledger_head == $sha' \
+            "$RUNNER_TEMP/knowledge-publish-result.json" >/dev/null
+          observed="$(gh api "repos/$GITHUB_REPOSITORY/branches/knowledge" --jq '.commit.sha')"
+          test "$observed" = "$proposal"
+          jq -n \
+            --arg event knowledge-publish-v1 \
+            --arg run "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg main "$GITHUB_SHA" \
+            --arg app "$KNOWLEDGE_APP_ID" \
+            --arg expected "$expected" \
+            --arg published "$observed" \
+            --arg ref "$(jq -er .source_ref "$RUNNER_TEMP/knowledge-publisher-admission.json")" \
+            '{schema_version:1,event:$event,run_id:$run,run_attempt:$attempt,
+              trusted_main_sha:$main,app_id:$app,expected_previous_sha:$expected,
+              published_sha:$published,proposal_ref:$ref,result:"published_exact_sha"}' \
+            > "$RUNNER_TEMP/knowledge-publisher-receipt.json"
+          {
+            echo "## Approved Knowledge publication"
+            echo "- Source: $GITHUB_SHA"
+            echo "- Run: $GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
+            echo "- Previous Knowledge SHA: $expected"
+            echo "- Published Knowledge SHA: $observed"
+            echo "- Dedicated App ID: $KNOWLEDGE_APP_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve bounded sanitized publication evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-publisher-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/knowledge-publisher-receipt.json
+          if-no-files-found: error
+          retention-days: 90
