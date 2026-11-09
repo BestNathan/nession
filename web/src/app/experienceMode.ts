@@ -1,6 +1,21 @@
 export type ExperienceMode = 'web' | 'app';
 
 /**
+ * The Experience that owns a composition (#3089).
+ *
+ * An explicit `?experience=web|app` decides; otherwise the viewport default
+ * does: wide Web, narrow App. The composition is the Experience fact, while
+ * the viewport still selects the geometry inside it (a narrow forced Web is
+ * the Web overlay drawer; a wide forced App keeps the App navigation model).
+ */
+export function resolveExperienceMode(
+  isWide: boolean,
+  override: ExperienceMode | undefined,
+): ExperienceMode {
+  return override ?? (isWide ? 'web' : 'app');
+}
+
+/**
  * Read an explicit experience mode from a query string.
  *
  * The default composition is a **viewport** decision: wide is Web, narrow is

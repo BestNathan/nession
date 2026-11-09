@@ -79,8 +79,12 @@ export function useCreateSessionForm({
     }
   }, [isOpen]);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  /**
+   * The one create action. It is exposed without a form-event dependency so a
+   * surface whose anchored CTA lives outside its `<form>` (the App operation
+   * page, #3089) runs the same validation and submission.
+   */
+  const submit = async () => {
     const nameError = validateName(sessionName);
     if (nameError) {
       setError(nameError);
@@ -125,7 +129,14 @@ export function useCreateSessionForm({
     }
   };
 
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void submit();
+  };
+
   return {
+    submit,
+    handleSubmit,
     agentId,
     setAgentId,
     locationIndex,
@@ -142,6 +153,5 @@ export function useCreateSessionForm({
     locations,
     selectedLocation,
     locationUnavailable,
-    handleSubmit,
   };
 }

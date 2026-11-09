@@ -7,7 +7,7 @@ import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { SessionDetailsDialog } from '@/app/patterns/SessionDetailsDialog';
 import { useSessionDetails } from '@/app/useSessionDetails';
-import { experienceFromSearch } from '@/app/experienceMode';
+import { experienceFromSearch, resolveExperienceMode } from '@/app/experienceMode';
 import {
   filterSessions,
   type SortDirection,
@@ -26,6 +26,10 @@ import { useFixtureSessions } from './useFixtureSessions';
 import { useFixtureProjectShell } from './fixtureProjects';
 import { FixtureProjectDialogs } from './FixtureProjectDialogs';
 import { fixtureStaleAgents } from './fixtureStaleAgents';
+import { fixtureOperation } from './fixtureOperations';
+import { fixtureSelectedSession } from './fixtureSelectedSession';
+import { AttachDialog } from '@/product/session/components/AttachDialog';
+import { CreateSessionDialog } from '@/product/session/components/CreateSessionDialog';
 
 /**
  * Canonical Active Terminal screen (#561 Phase 2A): the real shell composition
@@ -54,6 +58,98 @@ function fixtureDomain(session: Session | null, agent: Agent | undefined) {
     : null;
 }
 
+/** The route-named operation and whether its surface is open. */
+function useFixtureOperation(search: string) {
+  const operation = fixtureOperation(search);
+  const [open, setOpen] = useState(operation !== null);
+  return { operation, open, close: () => setOpen(false) };
+}
+
+/** The fixture's route-derived data and experience decision. */
+function useFixtureShellData(search: string) {
+  const agents = useMemo(() => fixtureAgents(search), [search]);
+  const sessions = useFixtureSessions(search);
+  const [operationsReady, setOperationsReady] = useState(false);
+  useEffect(() => setOperationsReady(true), []);
+  const staleAgents = useMemo(() => fixtureStaleAgents(search), [search]);
+  const connectionStatus = fixtureConnection(search);
+  const experienceOverride = experienceFromSearch(search);
+  const operationState = useFixtureOperation(search);
+  const mediaWide = useMediaQuery('(min-width: 1024px)');
+  // jsdom has no matchMedia. Component tests mount this fixture as the wide
+  // screen they have always described; a real browser uses its actual width.
+  const isWide = typeof window.matchMedia === 'function' ? mediaWide : true;
+  return {
+    agents,
+    sessions,
+    staleAgents,
+    connectionStatus,
+    experienceOverride,
+    operationState,
+    operationsReady,
+    isWide,
+  };
+}
+
+function useFixtureFilteredSessions(
+  sessions: Session[],
+  agents: Agent[],
+  filters: {
+    statusFilter: StatusFilter;
+    searchQuery: string;
+    sortField: SortField;
+    sortDirection: SortDirection;
+  },
+): Session[] {
+  const { statusFilter, searchQuery, sortField, sortDirection } = filters;
+  return useMemo(
+    () =>
+      filterSessions(sessions, agents, {
+        statusFilter,
+        searchQuery,
+        sortField,
+        sortDirection,
+      }),
+    [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
+  );
+}
+
+/** The fixture route's interactive view state. */
+function useFixtureShellUi() {
+  const [selectedId, setSelectedId] = useState(FIXTURE_SELECTED_ID);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [listOpen, setListOpen] = useState(true);
+  const [surface, setSurface] = useState<Surface>('terminal');
+  const [tool, setTool] = useState<CapabilityId>('files');
+  return {
+    selectedId, setSelectedId,
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortField, setSortField,
+    sortDirection, setSortDirection,
+    listOpen, setListOpen,
+    surface, setSurface,
+    tool, setTool,
+  };
+}
+
+function toggleFixtureSort(
+  field: SortField,
+  sortField: SortField,
+  setSortField: (field: SortField) => void,
+  setSortDirection: (update: (direction: SortDirection) => SortDirection) => void,
+): void {
+  if (field === sortField) {
+    setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'));
+  } else {
+    setSortField(field);
+    setSortDirection(() => 'desc');
+  }
+}
+
 export function FixtureShell() {
   // FixtureShell is also mounted directly by component tests without a Router.
   // Canonical browser routes use HashRouter (`/#/fixture?pane=...`), so read
@@ -75,53 +171,47 @@ export function FixtureShell() {
   // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
 
-  const agents = useMemo(() => fixtureAgents(search), [search]);
-  const sessions = useFixtureSessions(search);
-  const staleAgents = useMemo(() => fixtureStaleAgents(search), [search]);
-  const connectionStatus = fixtureConnection(search);
-  const experienceOverride = experienceFromSearch(search);
+  const {
+    agents,
+    sessions,
+    staleAgents,
+    connectionStatus,
+    experienceOverride,
+    operationState,
+    operationsReady,
+    isWide,
+  } = useFixtureShellData(search);
+  const {
+    selectedId, setSelectedId,
+    searchQuery, setSearchQuery,
+    statusFilter, setStatusFilter,
+    sortField, setSortField,
+    sortDirection, setSortDirection,
+    listOpen, setListOpen,
+    surface, setSurface,
+    tool, setTool,
+  } = useFixtureShellUi();
 
-  const [selectedId, setSelectedId] = useState(FIXTURE_SELECTED_ID);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [listOpen, setListOpen] = useState(true);
-  const [surface, setSurface] = useState<Surface>('terminal');
-  const [tool, setTool] = useState<CapabilityId>('files');
-
-  const mediaWide = useMediaQuery('(min-width: 1024px)');
-  // jsdom has no matchMedia. Component tests mount this fixture as the wide
-  // screen they have always described; a real browser uses its actual width.
-  const isWide = typeof window.matchMedia === 'function' ? mediaWide : true;
-
-  const filteredSessions = useMemo(
-    () =>
-      filterSessions(sessions, agents, {
-        statusFilter,
-        searchQuery,
-        sortField,
-        sortDirection,
-      }),
-    [sessions, agents, statusFilter, searchQuery, sortField, sortDirection],
+  const filteredSessions = useFixtureFilteredSessions(sessions, agents, {
+    statusFilter,
+    searchQuery,
+    sortField,
+    sortDirection,
+  });
+  const selectedSession = fixtureSelectedSession(
+    sessions,
+    selectedId,
+    fixturePaneCommand(search),
   );
-  const isSearchActive = searchQuery.trim().length > 0 || statusFilter !== 'all';
-
-  const selectedSession = sessions.find((session) => session.session_id === selectedId) ?? null;
-  const paneCommand = fixturePaneCommand(search);
-  const selectedSessionWithCommand =
-    selectedSession && paneCommand
-      ? { ...selectedSession, foreground_command: paneCommand }
-      : selectedSession;
   const selectedAgent = agents.find(
-    (agent) => agent.agent_id === selectedSessionWithCommand?.agent_id,
+    (agent) => agent.agent_id === selectedSession?.agent_id,
   );
   const sessionDetails = useSessionDetails({
     agents,
     staleAgentIds: staleAgents,
     clientSessionId: FIXTURE_CLIENT_SESSION_ID,
   });
-  const domain = fixtureDomain(selectedSessionWithCommand, selectedAgent);
+  const domain = fixtureDomain(selectedSession, selectedAgent);
 
   return (
     <div
@@ -144,16 +234,9 @@ export function FixtureShell() {
           setStatusFilter={setStatusFilter}
           sortField={sortField}
           sortDirection={sortDirection}
-          toggleSort={(field) => {
-            if (field === sortField) {
-              setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'));
-            } else {
-              setSortField(field);
-              setSortDirection('desc');
-            }
-          }}
-          isSearchActive={isSearchActive}
-          selectedSession={selectedSessionWithCommand}
+          toggleSort={(field) => toggleFixtureSort(field, sortField, setSortField, setSortDirection)}
+          isSearchActive={searchQuery.trim().length > 0 || statusFilter !== 'all'}
+          selectedSession={selectedSession}
           selectedAgent={selectedAgent}
           domain={domain}
           surface={surface}
@@ -190,7 +273,57 @@ export function FixtureShell() {
         editing={sessionDetails.target?.editing ?? false}
         onClose={sessionDetails.close}
       />
-      <FixtureProjectDialogs shell={projectLayer} agents={agents} />
+      <FixtureProjectDialogs
+        shell={projectLayer}
+        agents={agents}
+        experience={resolveExperienceMode(isWide, experienceOverride)}
+      />
+      <FixtureOperationDialogs
+        operation={operationState.operation}
+        open={operationState.open && operationsReady}
+        session={selectedSession}
+        agents={agents}
+        onClose={operationState.close}
+      />
     </div>
+  );
+}
+
+/** The Web attach/create dialogs a #3089 Case opens through the route. */
+function FixtureOperationDialogs({
+  operation,
+  open,
+  session,
+  agents,
+  onClose,
+}: {
+  operation: ReturnType<typeof fixtureOperation>;
+  open: boolean;
+  session: Session | null;
+  agents: Agent[];
+  onClose: () => void;
+}) {
+  if (operation === null) {
+    return null;
+  }
+  if (operation === 'create-session') {
+    return (
+      <CreateSessionDialog
+        isOpen={open}
+        agents={agents}
+        preselectedAgentId={null}
+        onCreated={onClose}
+        onClose={onClose}
+      />
+    );
+  }
+  return (
+    <AttachDialog
+      isOpen={open}
+      intent={operation === 'attach-settings' ? 'configure' : 'attach'}
+      session={session}
+      onClose={onClose}
+      onConfirm={onClose}
+    />
   );
 }

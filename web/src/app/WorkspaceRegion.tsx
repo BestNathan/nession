@@ -1,7 +1,10 @@
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
 import { WebLayout, type MainProps } from '@/app/experiences/web/WebLayout';
-import type { ExperienceMode } from '@/app/experienceMode';
+import {
+  resolveExperienceMode,
+  type ExperienceMode,
+} from '@/app/experienceMode';
 import type { SortDirection, SortField, StatusFilter } from '@/app/useDashboard';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Surface } from '@/app/patterns/SessionHeader';
@@ -98,7 +101,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   // cannot reach: Web's narrow overlay drawer (#2851). The override selects
   // which composition renders; `isWide` still decides its geometry, so a
   // narrow Web remains a drawer rather than a squeezed column.
-  const isApp = experienceOverride === undefined ? !isWide : experienceOverride === 'app';
+  const isApp = resolveExperienceMode(isWide, experienceOverride) === 'app';
   const projectBinding = useSessionProjectBinding();
   const focusedProject = resolveFocusedProject(
     selectedSession,

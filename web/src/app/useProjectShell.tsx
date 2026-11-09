@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
 import { useProjects } from '@/product/project/hooks/useProjects';
 import { useProjectDialogs } from '@/product/project/hooks/useProjectDialogs';
-import { ProjectDialogs } from '@/product/project/components/ProjectDialogs';
+import { ProjectShellDialogs } from '@/app/ProjectShellDialogs';
 import type { ProjectShellProps } from '@/product/project/types';
 import type { useShellState } from '@/app/useShellState';
+import type { ExperienceMode } from '@/app/experienceMode';
 
 /**
  * Project data, destination and dialogs for the shipped shell (#3025).
@@ -17,6 +18,7 @@ import type { useShellState } from '@/app/useShellState';
 export function useProjectShell(
   state: ReturnType<typeof useShellState>,
   onSessionCreated: (sessionId?: string) => void,
+  experience: ExperienceMode,
 ) {
   const projects = useProjects();
   const dialogs = useProjectDialogs();
@@ -47,7 +49,8 @@ export function useProjectShell(
   };
 
   const projectDialogs = (
-    <ProjectDialogs
+    <ProjectShellDialogs
+      experience={experience}
       dialogs={dialogs}
       agents={state.data.agents}
       onChanged={projects.refresh}
