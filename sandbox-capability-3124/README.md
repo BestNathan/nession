@@ -45,12 +45,21 @@ Source-based layout baseline: `staging`, 2026-11-09.
 |---|---|---|---|
 | Native / can enter | Native | Compose → Preflight → Enter | Success switches to new verified Sandbox Pane |
 | Already in Sandbox | Managed Sandbox | View effective policy → details / Return to Native | Does not offer duplicate Enter |
-| Preflight fail | Native | Edit → Validate | Capability error blocks Enter |
+| Limited delegation | Native | Agent-discovered Resource list excludes `cpu.max` | Key list follows delegated controller capabilities |\n| Preflight fail | Native | Edit → Validate | Capability error blocks Enter |
 | Launch fail | Native | Validate → Confirm Enter | Refuses, Native and draft unchanged |
 | Agent offline | Unknown | Read-only explanation, retained draft | No Enter / false inside |
 | Unsupported | Native/Unknown | Explanation (previous view can remain open) | Capsule has no unavailable slot |
 | macOS Seatbelt | Native | Network deny / allowed subset, Resource/Syscall KV add disabled | Linux-only controls are unavailable; no assumed fallback |
 | Same-name recreated | Unknown (unverified) | No Enter until identity re-established | Old report never reused |
+
+### Agent-discovered field catalog (design revision)
+
+Resource and Syscall KV candidate keys are **not intended as frontend-maintained hardcoded lists**. The Agent must return a typed capability catalog scoped to the selected host/location, probe generation, backend and actual delegated execution root:
+- **Linux Resource:** read `cgroup.controllers`, probe delegated `cgroup.subtree_control` and **child cgroup control files**, then intersect actually installable files with the V1 protocol allowlist. Return key, native value-format help, availability/reason; validate again at Enter. Host visibility alone is not sufficient proof of writable delegation.
+- **Syscall:** discover installed **Agent-registered profiles** and probe kernel/Bubblewrap seccomp loadability. The V1 registered profile is `nession-interactive-v1` at key `seccomp.profile`. Linux syscall names/numbers (which may be exposed for read-only profile explanation) are **not arbitrary configurable filters**.
+- **macOS/offline:** no Linux-native Resource/Syscall keys available; for offline, status is unknown, not a confirmed empty kernel feature set.
+- **Current prototype:** `agentFieldCatalog()` returns **synthetic Agent fixture responses, not live OS data**. Select `仅 Memory/PIDs 委派` to see `cpu.max` disappear from the candidate list, or `macOS Seatbelt` for no Linux-native choices. The production UI will consume a real authenticated Agent catalog and must not depend on these fixture literals.
+- **Validation:** key suggestion is a convenience; final compilation and launch verification must remain Agent-authoritative, with unknown/duplicate/invalid keys rejected and no fallback.
 
 ### Resource and Syscall wire mapping (UI shape ≠ unrestricted policy)
 
@@ -63,7 +72,7 @@ Source-based layout baseline: `staging`, 2026-11-09.
 
 **Fidelity:** synthetic in-page JavaScript fixtures; no network calls, backend writes, durable storage, active tmux PIDs, cgroup resources, Bubblewrap, Seatbelt, Socket proxy, native policy compiler or process reparenting. Clicking Enter only simulates a successful *future* backend command. Read-only effective policy is also synthetic and illustrates the **post-verification** display shape, not proof that a real Agent returned it.
 
-**Verification status (2026-11-09):** GitHub source and JavaScript syntax inspected; **28/28 V8 synthetic-DOM assertions passed** for the KV revision: default Native with empty Resource/Syscall, optional-field omission, Add/Remove, empty-row rejection, `cpu.max` quota/period parsing and period-range rejection, duplicate/unknown key rejection, invalid seccomp profile, valid nested `syscall.seccomp.profile` mapping, Enter and effective readback of KV values, Native return, macOS groups disabled, failed preflight/launch, and Web/App responsive state. These are **synthetic checks, not real browser or native runtime evidence**. Previous `17/17` and `26/26` smoke results are superseded by this revision. Real Chromium/Playwright, keyboard/focus, true CSS-pixel layout/scroll, fixture pixel parity, native runtime/authorization, and publication manifest SHA remain **unverified**.
+**Verification status (2026-11-09, see latest pinned Issue):** GitHub source and JavaScript syntax inspected; **28/28 V8 synthetic-DOM assertions passed** for the KV revision: default Native with empty Resource/Syscall, optional-field omission, Add/Remove, empty-row rejection, `cpu.max` quota/period parsing and period-range rejection, duplicate/unknown key rejection, invalid seccomp profile, valid nested `syscall.seccomp.profile` mapping, Enter and effective readback of KV values, Native return, macOS groups disabled, failed preflight/launch, and Web/App responsive state. These are **synthetic checks, not real browser or native runtime evidence**. Previous `17/17` and `26/26` smoke results are superseded by this revision. Real Chromium/Playwright, keyboard/focus, true CSS-pixel layout/scroll, fixture pixel parity, native runtime/authorization, and publication manifest SHA remain **unverified**.
 
 **Pages publication:** the direct HTML link above is a *candidate*, not proven live with the revised source. Verify `/nession/prototypes/manifest.json` equals exact source commit and read back the public HTML before calling it current.
 
