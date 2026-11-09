@@ -443,3 +443,16 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the full merged-staging Acceptance run 42615261597 at 0173f403, including SC-06 on the GitHub-hosted macos-15-intel runner; keep only the trusted when:deployed Case lane (#1616) pending
 - Source: https://github.com/BestNathan/nession/pull/3122
+## 2026-11-09T12:54:48Z | create | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security
+- Reason: Record #3022's delivered global EROFS Image Manager: canonical public-GitHub/local source validation, shallow/tagless non-executing Git snapshots, fixed mkfs.erofs packaging and sha256 digest identity, atomic content-addressed blob store, aliases, Project-scoped expiring grants, Range/ETag HTTP with 403/404/416, reference-safe GC, and the m007 lifecycle tables; EROFS remains a global resource referenced by Projects, not a ProjectEnvironment
+- Source: https://github.com/BestNathan/nession/pull/3120
+
+## 2026-11-09T12:54:48Z | update | Project declaration and Workspace location ownership
+- Path: topics/engineering/project-declaration-and-workspace-location-ownership.md
+- Topic: engineering
+- Categories: architecture, project, workspace, session, ownership, server, protocol
+- Reason: Link the Project image-digest reference to the now-delivered global EROFS Image Manager (#3022), name the delivered build/store dependency and keep managed EROFS creation/mount with #3062/#3024
+- Source: https://github.com/BestNathan/nession/pull/3120

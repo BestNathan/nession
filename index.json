@@ -20,6 +20,21 @@
     ],
     "engineering": [
       {
+        "title": "Global EROFS Image Manager",
+        "description": "Server-owned immutable EROFS artifacts: deterministic public-GitHub/local builds, content-addressed bytes, mutable aliases, Project-scoped access grants, Range HTTP and reference-safe GC",
+        "path": "topics/engineering/global-erofs-image-manager.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "erofs",
+          "images",
+          "server",
+          "storage",
+          "security"
+        ],
+        "updated_at": "2026-11-09T12:54:48Z"
+      },
+      {
         "title": "Karpathy LLM Wiki principles for Nession project knowledge",
         "description": "How Nession adapts the LLM Wiki pattern into source-grounded, incrementally maintained project knowledge",
         "path": "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -73,7 +88,7 @@
           "server",
           "protocol"
         ],
-        "updated_at": "2026-11-09T11:34:00Z"
+        "updated_at": "2026-11-09T12:54:48Z"
       },
       {
         "title": "Session metadata and display identity ownership",
@@ -280,6 +295,7 @@
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
     ],
     "architecture": [
+      "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
@@ -304,6 +320,9 @@
     "e2e": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
+    "erofs": [
+      "topics/engineering/global-erofs-image-manager.md"
+    ],
     "files": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
@@ -313,6 +332,9 @@
     ],
     "identity": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
+    ],
+    "images": [
+      "topics/engineering/global-erofs-image-manager.md"
     ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
@@ -396,11 +418,13 @@
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md"
     ],
     "security": [
+      "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "server": [
+      "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md"
     ],
     "session": [
@@ -414,6 +438,9 @@
     "skills": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
+    ],
+    "storage": [
+      "topics/engineering/global-erofs-image-manager.md"
     ],
     "terminal": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",

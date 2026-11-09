@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "project", "workspace", "session", "ownership", "server", "protocol"]
 status: verified
 created_at: 2026-11-09T01:09:24Z
-updated_at: 2026-11-09T11:34:00Z
-sources: ["https://github.com/BestNathan/nession/issues/3021", "https://github.com/BestNathan/nession/pull/3046", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/docs/design/project.md", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-protocol/src/contracts/project/v1.rs", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-server/src/db/migration/m005_projects.rs", "https://github.com/BestNathan/nession/issues/3025", "https://github.com/BestNathan/nession/pull/3064", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-server/src/server/handler/server_session_create_v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/app/patterns/ProjectsSection.tsx", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/product/project/components/ProjectDetail.tsx", "https://github.com/BestNathan/nession/issues/3082", "https://github.com/BestNathan/nession/pull/3102", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/db/migration/m006_session_project_bindings.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/server/handler/server_session_project_set_v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/registry/session.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/capabilities/project/model.ts", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/app/workspace/ProjectWorkspaceView.tsx", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/e2e/acceptance/cases/3082/SC-07/verify.cjs"]
+updated_at: 2026-11-09T12:54:48Z
+sources: ["https://github.com/BestNathan/nession/issues/3021", "https://github.com/BestNathan/nession/pull/3046", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/docs/design/project.md", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-protocol/src/contracts/project/v1.rs", "https://github.com/BestNathan/nession/blob/54e3044acd9641eb9990af8a6d638869654e4425/crates/nession-server/src/db/migration/m005_projects.rs", "https://github.com/BestNathan/nession/issues/3025", "https://github.com/BestNathan/nession/pull/3064", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/crates/nession-server/src/server/handler/server_session_create_v1.rs", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/app/patterns/ProjectsSection.tsx", "https://github.com/BestNathan/nession/blob/0929326e13c4349a5798064e931789b27d84597a/web/src/product/project/components/ProjectDetail.tsx", "https://github.com/BestNathan/nession/issues/3082", "https://github.com/BestNathan/nession/pull/3102", "https://github.com/BestNathan/nession/pull/3120", "https://github.com/BestNathan/nession/blob/5e9a2d82118a8ea4da2b2418af6b161d86bf3841/docs/architecture/erofs-image-manager.md", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-protocol/src/contracts/session/v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/db/migration/m006_session_project_bindings.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/server/handler/server_session_project_set_v1.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/crates/nession-server/src/registry/session.rs", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/capabilities/project/model.ts", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/web/src/app/workspace/ProjectWorkspaceView.tsx", "https://github.com/BestNathan/nession/blob/a1f90a2ef226dba1a578e0dd7330157819bce3c5/e2e/acceptance/cases/3082/SC-07/verify.cjs"]
 ---
 
 # Project declaration and Workspace location ownership
@@ -22,7 +22,9 @@ image, a Workspace, or a persistent `ProjectEnvironment`.
   Locations (`{agent_id, path}`), optional Session defaults (shell, env profile
   ids, sandbox policy ref) and an optional immutable `sha256:<64 hex>` image
   digest reference. Materializing a Session environment remains Session-owned
-  (#170); managed EROFS build/mount work belongs to #3022–#3024.
+  (#170); the [global EROFS Image Manager](global-erofs-image-manager.md)
+  owns build/store (#3022, delivered at `5e9a2d821`), while managed
+  creation/mount remains #3062/#3024.
 - **Existing Locations are references to user-owned directories.** The Server
   never clones, mutates or deletes them because a Project is edited or deleted.
   An offline or unknown Agent does not prevent persistence: desired references
@@ -59,7 +61,8 @@ image, a Workspace, or a persistent `ProjectEnvironment`.
   Project edit never changes an existing Session's environment, source version
   or mounts.
 - **Managed EROFS/Sandbox creation is a separate requirement.** It is owned by
-  #3062 and remains blocked on #3022, #3023, #3024 and #2681. The Project detail
+  #3062 and remains blocked on #3023, #3024 and #2681; the #3022 image
+  build/store dependency is delivered. The Project detail
   exposes a Managed entry that fails closed: it creates nothing, preserves the
   declaration and never falls back to a Native Session.
 - **Session→Project membership is zero-or-one and Server-owned.** A Session may
@@ -163,7 +166,9 @@ the archived 32/32 Chromium record. #3062 still owns Managed EROFS creation.
 ## Limits and when to revisit
 
 - This article does not describe EROFS build/registry or image storage; a
-  Project only references an immutable digest owned by the global Image Manager.
+  Project only references an immutable digest owned by the
+  [global EROFS Image Manager](global-erofs-image-manager.md), which owns the
+  deterministic build, content-addressed bytes, aliases and authorized access.
 - A Project has no mandatory Agent binding, and it is not a navigation parent.
   The delivered Projects section is a sibling destination over a flat Session
   list; it must keep legacy Sessions with no Project valid.
