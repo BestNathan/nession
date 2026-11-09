@@ -243,7 +243,7 @@ export async function selfTest() {
   const get = async p => {
     if (p.endsWith('/commits/' + target)) return commit;
     if (p.endsWith('/commits/' + head)) return integrated;
-    if (p === normalizedPath(indexPath.slice(0,-'123-1-staging.json'.length))) {
+    if (p === normalizedPath(indexPath.slice(0,-('123-1-staging.json'.length + 1)))) {
       return [{type:'file',path:indexPath,name:'123-1-staging.json'}];
     }
     if (p === normalizedPath(indexPath)) return content(indexPath,index);
