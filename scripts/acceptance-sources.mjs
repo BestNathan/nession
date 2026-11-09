@@ -41,6 +41,12 @@ export function parseAcceptanceSources(body, criteria, plan) {
   const section = extractSection(String(body ?? ''), 'Acceptance Sources');
   if (section == null) return null;
   const lines = section.replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
+  // Issue examples use fenced YAML. Accept either a single fenced block or
+  // a bare canonical subset, never trailing prose inside the evidence contract.
+  if (lines[0] === '```yaml') {
+    lines.shift();
+    if (lines.pop() !== '```') reject('unclosed Acceptance Sources YAML fence');
+  }
   if (lines.shift() !== 'acceptance_sources:') reject('expected acceptance_sources: root');
   const allowed = new Set(criteria);
   const result = new Map();
@@ -229,6 +235,12 @@ function selfTest() {
     '| SC-01 | Pending | - |'].join('\n');
   const source = parseAcceptanceSources(body, ['SC-01'], new Map([['SC-01', { method: 'agent' }]]));
   assert.equal(source['SC-01'][0].files[0], 'demo-123/index.html');
+  const fenced = body.replace('acceptance_sources:', '```yaml\nacceptance_sources:')
+    .replace('## Acceptance Report', '```\n## Acceptance Report');
+  assert.deepEqual(parseAcceptanceSources(fenced, ['SC-01'],
+    new Map([['SC-01', { method: 'agent' }]])), source);
+  assert.throws(() => parseAcceptanceSources(fenced.replace('```\n## Acceptance Report', '## Acceptance Report'),
+    ['SC-01'], new Map([['SC-01', { method: 'agent' }]])), /unclosed/);
   assert.equal(parseAcceptanceSources(body.replace('## Acceptance Sources', '## Not Sources'),
     ['SC-01'], new Map()), null);
   const rejectBody = (next) => assert.throws(() =>
