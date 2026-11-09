@@ -21,6 +21,7 @@ const mockedPreview = vi.mocked(gitApi.gitPreview);
 function diffResponse(path: string, marker: string, truncated = false): GitDiffResponse {
   return {
     state: 'ok',
+    snapshot: { token: 'test-git-selection-snapshot', head: null, root: '/fixture' },
     diff: {
       path,
       text: `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-${marker}_DIFF_RESPONSE\n+${marker}_DIFF_RESPONSE\n`,
@@ -58,8 +59,9 @@ function deferred<T>() {
 }
 
 const tracked: GitRow = {
-  kind: 'tracked',
+  kind: 'unstaged',
   path: 'src/reselect.ts',
+  key: 'unstaged:src/reselect.ts',
   file: {
     path: 'src/reselect.ts',
     kind: 'modified',
@@ -67,9 +69,9 @@ const tracked: GitRow = {
     unstaged: true,
   },
 };
-const untracked: GitRow = { kind: 'untracked', path: 'notes/reselect.ts' };
-const untrackedOther: GitRow = { kind: 'untracked', path: 'notes/reselect-other.ts' };
-const unmerged: GitRow = { kind: 'unmerged', path: 'src/reselect-conflict.ts' };
+const untracked: GitRow = { kind: 'untracked', path: 'notes/reselect.ts', key: 'untracked:notes/reselect.ts' };
+const untrackedOther: GitRow = { kind: 'untracked', path: 'notes/reselect-other.ts', key: 'untracked:notes/reselect-other.ts' };
+const unmerged: GitRow = { kind: 'unmerged', path: 'src/reselect-conflict.ts', key: 'unmerged:src/reselect-conflict.ts' };
 
 type SelectionProps = Parameters<typeof useGitSelection>[0];
 
