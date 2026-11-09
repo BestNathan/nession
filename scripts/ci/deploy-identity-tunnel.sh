@@ -5,7 +5,7 @@ set -euo pipefail
 
 API_ALIAS=192.168.2.162
 API_PORT=6443
-GOST_BIN=/tmp/gost
+GOST_BIN="${RUNNER_TEMP:-/tmp}/gost"
 LISTENER="tcp://${API_ALIAS}:${API_PORT}/${API_ALIAS}:${API_PORT}"
 
 fail() { echo "::error::deploy-identity tunnel: $*" >&2; return 1; }
@@ -83,7 +83,8 @@ cleanup() {
     "$RUNNER_TEMP/pods.json" "$RUNNER_TEMP/overlay.yaml" \
     "$RUNNER_TEMP/cluster-context" "$RUNNER_TEMP/gitops-revision" \
     "$RUNNER_TEMP/deployment-attestation.json" \
-    "$RUNNER_TEMP/deployment-attestation.json.remote.tmp"
+    "$RUNNER_TEMP/deployment-attestation.json.remote.tmp" \
+    "$RUNNER_TEMP/gost" "$RUNNER_TEMP/gost.tgz"
   rm -rf -- "$RUNNER_TEMP/provenance"
   ((state == 0)) || return 1
   echo 'DEPLOY_IDENTITY_CLEANUP_V1 status=success owned_pid=stopped alias=removed scope=job'
