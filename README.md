@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Layout Consistency Lab: shared Experience / semantic layout vs local class drift, Web/App / three surfaces / scroll metrics | [#3194](https://github.com/BestNathan/nession/issues/3194) | [Interactive HTML](layout-consistency-3194/index.html) · [Scenario & fidelity](layout-consistency-3194/README.md) |
+
 | Select / Choice Items: Base UI current vs Nession option visual candidate, Web/App / long-path / keyboard / dark | [#3164](https://github.com/BestNathan/nession/issues/3164) | [Interactive HTML](choice-list-3164/index.html) · [Scenario & fidelity](choice-list-3164/README.md) |
 
 | Unified Overlay & Operation Surfaces (Dialog / Alert / anchored choices / Web-App depth, interaction & visual system) | [#3142](https://github.com/BestNathan/nession/issues/3142) | [Interactive HTML](overlay-system-3142/index.html) · [Scenario & fidelity](overlay-system-3142/README.md) |

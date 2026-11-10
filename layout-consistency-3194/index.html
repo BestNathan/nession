@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Layout consistency · #3194</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css"><link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a><span>/</span><span>Layout consistency</span></nav>
+<span class="np-eyebrow">Nession / Design System / Layout Contract</span>
+<div class="np-header-main"><div><h1 class="np-title">One layout language, many capabilities.</h1>
+<p class="np-subtitle">对比同一份 Workspace 内容的两种呈现：独立拼接布局与受统一 Composition Contract 约束的布局。体验 Web/App、长内容、表单、Files 分栏和真正的滚动归属。</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3194">Issue #3194</a><a href="https://github.com/BestNathan/nession/issues/3142">Overlay baseline</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">View source</a></div></div>
+<div class="np-meta"><span>Decision: <strong>Experience → Semantic Layout → Local composition</strong></span><span>Basis: <strong>main / design contracts</strong></span><span>Evidence: <strong>deterministic mock only</strong></span></div>
+</header>
+<main><section class="np-preview" aria-label="Interactive layout consistency prototype">
+<div class="np-section-heading"><div><h2>Product preview · 1:1 CSS pixels</h2><p>对比控件留在外部审查区；下面仅显示模拟的 Nession 产品 UI。</p></div>
+<div class="np-preview-toolbar" role="group" aria-label="Preview size">
+<button type="button" data-np-size="1180" data-np-experience="web" aria-pressed="true">Web 1180</button>
+<button type="button" data-np-size="1024" data-np-experience="web">Web 1024</button>
+<button type="button" data-np-size="390" data-np-experience="app">App 390</button>
+<button type="button" data-np-size="375" data-np-experience="app">App 375</button>
+<button type="button" data-np-reset>Reset</button></div></div>
+<div class="review-controls" role="group" aria-label="Review fixtures">
+<div class="control-set"><span>Composition</span><button type="button" data-mode="contract" aria-pressed="true">Unified contract</button><button type="button" data-mode="unmanaged">Local classes</button></div>
+<div class="control-set"><span>Surface</span><button type="button" data-surface="detail" aria-pressed="true">Detail</button><button type="button" data-surface="form">Form</button><button type="button" data-surface="files">Files</button></div>
+<div class="control-set"><span>Content</span><button type="button" data-content="normal" aria-pressed="true">Normal</button><button type="button" data-content="long">Long</button></div>
+</div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px">
+<div id="nession-product" class="nession-product" data-experience="web" aria-label="Nession Workspace product mock"></div>
+</div></div><p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+<div class="readout" aria-live="polite"><div><small>Rendered content width</small><strong id="read-width">—</strong></div><div><small>Horizontal overflow</small><strong id="read-overflow">—</strong></div><div><small>Scroll owner</small><strong id="read-scroll">—</strong></div><div><small>Layout contract</small><strong id="read-owner">—</strong></div></div>
+</section>
+<section class="np-details"><h2>为什么 UI 一致性不能只靠 Token？</h2><p class="np-details-lede">布局也是产品行为：同一个角色必须拥有一致的宽度、排列、滚动、响应式与操作区域，即便每一行 Tailwind 都是合法语法。</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>① Experience owns the frame</h3><p>Web 使用 Sidebar + Workspace work surface，App 使用单一页面级 Back/Header + capability content。只有上层决定工作区尺寸、滚动祖先和 Web/App 布局；能力组件不重复构建外壳。</p></article>
+<article class="np-detail"><h3>② Semantic layout owns repeated geometry</h3><p>详情页的内容宽度、表单控件高度/对齐、Files split 或 App push、内容滚动与操作栏保持一致。不是对每个 <code>flex</code> 做禁用，而是复用稳定布局 recipe。</p></article>
+<article class="np-detail"><h3>③ Local composition still stays flexible</h3><p><code>cn('flex min-w-0 flex-col', ...)</code> 可以安全用于组件内部的内容排列；当它改变 Workspace host 的 flex sizing、滚动或跨端结构时，需要使用受约束的 owner。</p></article>
+<article class="np-detail"><h3>④ Gate must check both static and rendered</h3><p>静态负例检测未经授权的 host 尺寸/滚动/私有间距。Chromium Case 进一步测量 scrollWidth、滚动祖先、对齐、App header 数量和可访问操作区。这里的只读数值是<strong>原型 DOM 测量</strong>，不是生产验收。</p></article>
+</div>
+<details class="np-inspector"><summary>Suggested contract and example violations</summary><pre>ExperienceLayout
+  ├─ owns: frame, sidebar, safe-area, scroll boundary
+  └─ WorkspaceLayout
+      ├─ owns: content width, split/stack, action position
+      └─ CapabilityContent
+          └─ may use: local flex / grid / min-w-0 / min-h-0
+
+Allowed: className={cn('flex min-w-0 flex-col', condition && 'flex-1')}
+Reject if host-owned: h-[423px], arbitrary Workspace overflow,
+  independent App header, unrelated form control heights.
+Gate: canonical design-system-full + Chromium layout Cases.</pre></details>
+</section></main><footer class="np-footer">Read-only deterministic design mock · 2026-11-10 · No API / no production mutation · production UI requires separate Acceptance</footer>
+</div><script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script></body></html>
