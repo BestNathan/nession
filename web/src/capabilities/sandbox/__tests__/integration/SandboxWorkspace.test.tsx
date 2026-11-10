@@ -475,6 +475,10 @@ describe('SandboxWorkspace (#3124)', () => {
     const user = userEvent.setup();
     render(<SandboxWorkspace ctx={workspaceContext()} />);
     await screen.findByTestId('sandbox-composer');
+    expect(screen.getByTestId('sandbox-tabs')).toHaveAttribute(
+      'aria-orientation',
+      'vertical',
+    );
 
     const panelContent: Record<string, string> = {
       overview: 'sandbox-policy-preview',
