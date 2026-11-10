@@ -10,6 +10,7 @@ fn nession(home: &TempDir) -> Command {
     command
         .env("NESSION_NO_UPDATE_CHECK", "1")
         .env("NESSION_HOME", home.path())
+        .env("NESSION_RUNTIME_DIR", home.path().join("runtime"))
         .env_remove("NESSION_SERVER_URL")
         .env_remove("NESSION_AUTH_TOKEN");
     command
