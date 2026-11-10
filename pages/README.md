@@ -38,15 +38,42 @@ The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct de
 
 ## Documents / Protocol Reference
 
-The first version of `#/documents` is a **Protocol Reference**. It projects the entire compile-checked Protocol Unit catalog from canonical Rust contracts with `cargo run --quiet -p nession-protocol-codegen -- --schema`. The content includes owner, wire, each protocol contract version, full request/response JSON Schema, nested field paths, and response variants. Pages does not parse Rust or create another protocol registry.
+The first version of `#/documents` is a **Protocol Reference**. It projects
+the compile-checked Protocol Unit catalog from canonical Rust contracts via
+`cargo run --quiet -p nession-protocol-codegen -- --schema`. Each protocol shows
+its owner, wire, contract versions (v1/v2), full request/response JSON Schema,
+nested field paths, response variants, types, requiredness and descriptions.
+No handwritten Pages protocol registry is maintained.
 
-**Two independent version dimensions:** The protocol contract version (e.g. `git.status` v1/v2) is selected in the reader; the Nession **release** version (e.g. `0.35.0`) is the field support axis. A field is marked present in a release only when its tagged release has a verified schema snapshot. A missing snapshot means **unknown (`?`)**, never unsupported. `N/A` indicates a protocol/contract was not declared in an otherwise verified release. First observed is not automatically the first historical introduction.
+**Since Nession** is **one field**, e.g. `0.36.0`, not a compatibility
+matrix. Contract v1/v2 selects which protocol schema is being displayed.
+Nession release SemVer (0.x.y) instead identifies **when the field started
+being supported**. The version is displayed only when the release-tagged
+schemas prove a transition from absent in the immediately preceding release
+to present in that release, with no later unverified gap. Otherwise the
+value is `Unknown`. If the latest verified release lacks a field visible
+in current main, the value is `Unreleased`; this is not a claim that main
+is a published release. Never infer the introduction date from the latest
+Cargo workspace version or assume all prior Releases lacked the field.
 
-`pages/scripts/protocol-release-history.mjs` reads official public GitHub Releases. Each version may publish an asset named `nession-protocol-schema.json`, containing a JSON envelope with `schema_version: 1`, `source: {repository, tag, sha, version}` and `schema` equal to the actual JSON Schema generated at the pinned release tag. The Pages builder verifies the tag commit SHA and release identity, and validates the asset's SHA-256 if supplied by GitHub. It never treats the moving main branch as a historic release. Existing older tags (including v0.35.0) lack this generator; there is not yet a release asset publisher or verified backfill for these versions. Their fields remain unknown.
+`pages/scripts/protocol-release-history.mjs` reads official public GitHub
+Releases. Each version may publish `nession-protocol-schema.json`, an envelope
+with `schema_version: 1`, `source: {repository, tag, sha, version}`, and
+`schema` set to the *actual* Rust codegen JSON Schema at the tagged commit.
+The build verifies tag provenance and checks an asset digest when GitHub
+supplies it. Older Releases including v0.35.0 lack this generator, and
+historical assets have not yet been backfilled; their introduction values
+remain `Unknown`. A release-asset producer is a separate delivery task.
 
-The main source schema is generated at the trusted `SOURCE_MAIN_SHA`. Its Cargo package version is development-source metadata, **not** evidence that a Release supports those fields. Every static Pages release publishes its main source SHA and available release provenance. A generator error blocks publication; a build without a pinned main SHA reports an explicit unavailable catalog. Protocol source documents are not SC Acceptance proof.
+The Pages static artifact carries exact main SHA and observed release
+provenance. The Rust generator runs at the pinned main checkout; failure
+blocks a trusted public build. The current main source Cargo version is
+development metadata, never a statement of released availability.
 
-Node 24 is the base Pages tooling, with no npm dependencies. With a trusted main SHA the Protocol Reference requires Rust/Cargo. For deterministic test fixtures, `PAGES_PROTOCOL_SCHEMA_FILE` can provide the generator's JSON output without invoking Cargo.
+The base Pages build requires Node 24 with no npm dependencies. Trusted
+Protocol projection additionally needs Rust/Cargo. Deterministic fixtures
+may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo.
+
 ## Knowledge Explorer / public reading surface (#2664)
 
 The native Pages route \`#/knowledge\` reads \`data/knowledge.json\`, an allowlisted,
