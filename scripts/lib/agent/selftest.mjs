@@ -7,6 +7,7 @@ import { renderIssueAuditPrompt, applyIssueAuditProposal, applyIssueAuditWithCon
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { issueBody as convergenceIssueBody } from '../../staging-convergence-batch.mjs';
 import { auditIssue } from '../../issue-contract.mjs';
+import { auditOutcomeAllowsAttestation } from '../../staging-convergence-audit-attest.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
 } from './tasks/e2e-failure-analysis.mjs';
@@ -53,6 +54,24 @@ for (const code of [
     classification.reason.includes('approval'));
   assert.ok(!classification.reason.includes('untrusted'));
 }
+// A green needs-review Job cannot authorize the source-bound Staging audit
+// attestor. This test runs on every issue-audit-agent-selftest Gate.
+const approvedAuditRecord={
+  schema_version:1,issue:{number:3139},
+  trigger:'workflow_dispatch',result:'repaired',errors:[],
+};
+assert.equal(auditOutcomeAllowsAttestation(approvedAuditRecord,3139),true);
+assert.equal(auditOutcomeAllowsAttestation({...approvedAuditRecord,result:'contract-pass'},3139),true);
+for(const result of ['needs-review','agent-error','contract-fail','agent-not-authorized']){
+  assert.equal(auditOutcomeAllowsAttestation({...approvedAuditRecord,result},3139),false);
+}
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,review:{code:'ISSUE_AUDIT_E2E_PROTECTED'}},3139),false);
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,errors:['still invalid']},3139),false);
+assert.equal(auditOutcomeAllowsAttestation(approvedAuditRecord,3140),false);
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,trigger:'issues'},3139),false);
 for (const error of [
   new Error('Unauthorized E2E Verification / Report mutation by Issue Agent'),
   new Error('Issue Contract validation failed before write: still broken'),
