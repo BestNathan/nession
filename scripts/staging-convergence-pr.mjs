@@ -9,6 +9,8 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
+import {catalogFromPaths} from './issue-e2e-plan.mjs';
+import {BROWSER_DESIGN_IDS} from '../design/scripts/browser-design-catalog.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
@@ -53,6 +55,59 @@ export function convergencePrMarker(batch){
     ' lane='+batch.lane_sha+' head='+batch.integration_head+
     ' digest='+convergenceBatchDigest(batch)+' -->';
 }
+// #3211: promotion is a separate PR-native batch. Its exact source
+// identity comes from GitHub's bot-authored PR, pinned main/lane declarations
+// and current Git ancestry; a title or human-authored body alone is insufficient.
+export function isNativePromotionPr(pr){
+  if(pr?.title!=='release: promote staging to main' ||
+      pr.user?.login!=='nession-publisher[bot]' ||
+      pr.base?.ref!=='main'||pr.head?.ref!=='staging'||
+      pr.base?.repo?.full_name!==REPO||pr.head?.repo?.full_name!==REPO||
+      !SHA.test(pr.base?.sha??'')||!SHA.test(pr.head?.sha??'')||
+      typeof pr.body!=='string'||
+      !pr.body.startsWith('Staging Convergence automated proposal (source: Release / Staging Convergence).'))
+    return false;
+  const source=pr.body.match(/^- Planned main SHA: ([a-f0-9]{40})$/gm);
+  const lane=pr.body.match(/^- Planned lane SHA: ([a-f0-9]{40})$/gm);
+  if(source?.length!==1||lane?.length!==1)return false;
+  return source[0].endsWith(pr.base.sha)&&lane[0].endsWith(pr.head.sha)&&
+    pr.body.includes('- Direction: staging -> main');
+}
+
+// A promotion has no disposable Requirement Issue. Run a real, source-pinned
+// scoped browser plan: the canonical Browser Design contract plus runnable
+// browser IDs changed between the exact main/lane commits. The independent
+// Main postmerge Full regression and promotion source/Issue/Deploy gates remain
+// mandatory. Never turn an unknown or missing test into Not Required.
+export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
+  if(!isNativePromotionPr(pr)||baseSha!==pr.base.sha||
+      targetSha!==pr.head.sha||git(repoRoot,'rev-parse','HEAD')!==targetSha||
+      !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha)
+    throw Error('untrusted or stale Staging promotion E2E source');
+  const deleted=git(repoRoot,'diff','--name-only','--diff-filter=D',
+    baseSha,targetSha,'--','e2e/tests').split('\n').filter(Boolean);
+  if(deleted.some(file=>/\.spec\.ts$/.test(file)))
+    throw Error('removed runnable E2E IDs require source repair before promotion');
+  const touched=git(repoRoot,'diff','--name-only','--diff-filter=AMRC',
+    baseSha,targetSha,'--','e2e/tests').split('\n').filter(Boolean);
+  const current=git(repoRoot,'ls-tree','-r','--name-only',targetSha,'--','e2e/tests')
+    .split('\n').filter(Boolean);
+  const liveIds=new Set(catalogFromPaths(current));
+  const ids=[...new Set([...BROWSER_DESIGN_IDS,...catalogFromPaths(touched)])].sort();
+  if(ids.length===0||ids.some(id=>!liveIds.has(id)))
+    throw Error('promotion Browser Design or touched E2E ID absent from exact target');
+  const identity={
+    type:'promotion',source_head_sha:targetSha,main_sha:baseSha,
+    lane_sha:targetSha,risk:'staging-to-main',
+    selection_digest:sha256({baseSha,targetSha,ids}),
+  };
+  const plan={schema_version:1,kind:'issue_e2e_selection',
+    base_sha:baseSha,target_sha:targetSha,issues:[],
+    selected:ids.map(id=>({id,owners:[]})),mode:'selected',
+    convergence:identity};
+  return {...plan,plan_digest:sha256(plan)};
+}
+
 export function isNativeConvergencePr(pr){
   return typeof pr?.body==='string'&&
     pr.body.startsWith('Staging Convergence automated proposal')&&
