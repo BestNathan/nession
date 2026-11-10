@@ -38,8 +38,12 @@ export function SandboxKvRow({
   onChange,
   onRemove,
 }: SandboxKvRowProps) {
+  const optionUnavailable = option !== undefined && !option.available;
+  const valueDisabled = disabled || optionUnavailable;
   const hint = option
-    ? `${option.value_format} — e.g. ${option.example}`
+    ? optionUnavailable
+      ? `${option.value_format} — unavailable: ${option.reason ?? 'not measured on this Agent'}`
+      : `${option.value_format} — e.g. ${option.example}`
     : 'Known keys and their native value formats appear here.';
   return (
     <div
@@ -83,10 +87,18 @@ export function SandboxKvRow({
             id={`sandbox-${group}-value-${index}`}
             data-testid={`sandbox-${group}-value-${index}`}
             value={row.value}
-            disabled={disabled}
+            disabled={valueDisabled}
             autoComplete="off"
             onChange={(event) => onChange({ value: event.target.value })}
           />
+          {optionUnavailable ? (
+            <p
+              data-testid={`sandbox-${group}-value-unavailable-${index}`}
+              className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
+            >
+              {option.reason ?? 'This key is not installable on this Agent.'}
+            </p>
+          ) : null}
           {valueError ? (
             <p
               data-testid={`sandbox-${group}-value-error-${index}`}

@@ -248,6 +248,40 @@ barrier remain the only policy authorities. The Agent's capability catalog
 real delegated child cgroup and profile registry; it feeds UI suggestions, and
 stale probes are revalidated on preflight/Enter.
 
+### Per-implementation support discovery (#3161)
+
+`SandboxCapabilityCatalog.catalog_version = 2` adds `implementations`, one
+entry per **canonical policy path** (`filesystem.access`,
+`filesystem.composition`, `network`, `process.linux_namespaces`,
+`resource.cgroup_v2`, `syscall.seccomp`). Each entry has a typed
+`available | unavailable | unknown` status, a stable `reason_code`
+(`platform_unsupported`, `backend_missing`, `kernel_feature_missing`,
+`controller_not_delegated`, `permission_denied`, `profile_unavailable`,
+`implementation_not_built`, `not_probed`, `timeout`), a diagnostic reason, and
+implementation-owned typed `options`/`fields`. Only schema-known paths can
+appear; a frontend label never authorizes policy bytes, and a hypothetical
+future `resource.macos_*` is not synthesized until its backend registers it.
+
+The catalog is measured from the same `Capabilities` that `validate` consumes:
+network modes, namespace flags, allowlisted child-cgroup files and the pinned
+seccomp profile each carry their own status. `probe_generation` hashes the
+measured implementation facts, so a capability change changes both the context
+`generation` and the catalog generation. A backend-missing probe reports every
+implementation unavailable (Linux-native paths on macOS keep
+`platform_unsupported`); it never advertises eligibility.
+`SandboxCapabilityCatalog::unknown(reason)` lists every registered path as
+`unknown`/`not_probed`, so an unreachable Agent stays discoverable without a
+protection claim.
+
+Preflight and Enter both take the client's `context_generation` and
+`probe_generation`; either mismatch is a `stale-generation` field error before
+any host resource is created. `nession-sandbox::unsupported_requests` projects
+every explicitly requested implementation/option the host cannot install into
+canonical field paths (for example `resource.cgroup_v2.cpu.max`), with no
+partial fallback; the single `validate` gate remains the backstop. The flat
+`resource_fields`/`syscall_fields` arrays remain as a pre-v2 projection for
+older clients; new clients read `implementations`.
+
 The inside view shows the execution's **observed normalized policy**, verified
 mechanisms, warnings, execution/PID identity and its Pane-only scope. The
 normalized policy is persisted in the durable execution record, so an Agent
@@ -319,7 +353,8 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |
 | Launch barrier and proxy identity | `crates/nession-sandbox/src/linux/channel.rs`, `src/bridge.rs` |
 | Context snapshot, generation and Enter idempotency | `crates/nession-agent/src/tmux/sandbox_context.rs`, `crates/nession-server/src/server/handler/server_session_sandbox_*_v1.rs` |
-| Draft rows → canonical policy, catalog | `crates/nession-sandbox/src/draft.rs`, `capabilities.rs` |
+| Draft rows → canonical policy, per-implementation catalog | `crates/nession-sandbox/src/draft.rs`, `capabilities.rs` |
+| Preflight/Enter generation binding and unsupported field paths | `crates/nession-sandbox/src/capabilities.rs` (`unsupported_requests`), `crates/nession-agent/src/tmux/sandbox_context.rs` |
 | Owned-resource reconciliation (by Pane) | `crates/nession-sandbox/src/exec.rs`, `crates/nession-agent/src/sandbox_runtime.rs` |
 | Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs`, `e2e/acceptance/cases/2681/` and `e2e/acceptance/cases/3024/` |
 | Existing-Session Enter and active-Pane context | `e2e/acceptance/cases/3124/` (real Server + Agent), `e2e/tests/browser/sandbox-workspace-capability.spec.ts` |
@@ -330,6 +365,8 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 - #2681 — normative Requirement and Acceptance Plan (create-time V1).
 - [#3124](https://github.com/BestNathan/nession/issues/3124) — context
   capability, policy editor and existing-Session Enter.
+- [#3161](https://github.com/BestNathan/nession/issues/3161) — per-policy
+  implementation support discovery and Agent-gated configuration.
 - [#2469](session-tmux-sdk-ownership.md) — Session/tmux ownership.
 - [#2514](agent-process-discovery.md) — read-only process discovery.
 - [#170](session-env-binding.md) — independent Session Environment Binding.

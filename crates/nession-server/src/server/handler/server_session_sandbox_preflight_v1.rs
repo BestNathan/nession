@@ -69,6 +69,7 @@ impl ConnectionHandler {
                 json!({
                     "session_name": session_name,
                     "generation": payload.generation,
+                    "probe_generation": payload.probe_generation,
                     "policy": payload.policy,
                     "working_dir": payload.working_dir,
                 }),

@@ -1806,6 +1806,10 @@ pub struct ClientSessionSandboxPreflightPayload {
     pub session_id: String,
     /// The context generation the draft was composed against.
     pub generation: String,
+    /// The catalog probe generation the draft was composed against. A host
+    /// capability change between composition and preflight is stale.
+    #[serde(default)]
+    pub probe_generation: String,
     pub policy: SandboxPolicyDraft,
     /// The Pane's initial working directory. Empty asks the Agent to use the
     /// active Pane's own current directory.
@@ -1821,6 +1825,8 @@ pub struct ServerSessionSandboxPreflightPayload {
     pub request_id: String,
     pub session_name: String,
     pub generation: String,
+    #[serde(default)]
+    pub probe_generation: String,
     pub policy: SandboxPolicyDraft,
     #[serde(default)]
     pub working_dir: String,
@@ -1835,6 +1841,9 @@ pub struct ClientSessionSandboxEnterPayload {
     pub session_id: String,
     /// The generation returned by the last preflight/context read.
     pub generation: String,
+    /// The catalog probe generation the confirmed preflight was bound to.
+    #[serde(default)]
+    pub probe_generation: String,
     /// Client-minted idempotency key for this Enter attempt.
     pub enter_id: String,
     pub policy: SandboxPolicyDraft,
@@ -1850,6 +1859,8 @@ pub struct ServerSessionSandboxEnterPayload {
     pub request_id: String,
     pub session_name: String,
     pub generation: String,
+    #[serde(default)]
+    pub probe_generation: String,
     pub enter_id: String,
     pub policy: SandboxPolicyDraft,
     #[serde(default)]

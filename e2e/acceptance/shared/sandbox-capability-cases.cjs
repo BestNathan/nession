@@ -126,19 +126,48 @@ async function context(client, sessionId) {
   return client.request('server.session.sandbox.context', { session_id: sessionId }, 30_000);
 }
 
-async function preflight(client, sessionId, generation, policy, workingDir) {
+/** Bind the draft to the catalog generation the caller composed it against. */
+async function probeGenerationFor(client, sessionId, probeGeneration) {
+  if (probeGeneration) {
+    return probeGeneration;
+  }
+  const reply = await context(client, sessionId);
+  if (!reply.success || !reply.context) {
+    throw new Error('the active Pane context is unavailable while binding the catalog');
+  }
+  return reply.context.catalog.probe_generation;
+}
+
+async function preflight(
+  client,
+  sessionId,
+  generation,
+  policy,
+  workingDir,
+  probeGeneration,
+) {
   return client.request('server.session.sandbox.preflight', {
     session_id: sessionId,
     generation,
+    probe_generation: await probeGenerationFor(client, sessionId, probeGeneration),
     policy,
     working_dir: workingDir || '',
   }, 45_000);
 }
 
-async function enter(client, sessionId, generation, enterId, policy, workingDir) {
+async function enter(
+  client,
+  sessionId,
+  generation,
+  enterId,
+  policy,
+  workingDir,
+  probeGeneration,
+) {
   return client.request('server.session.sandbox.enter', {
     session_id: sessionId,
     generation,
+    probe_generation: await probeGenerationFor(client, sessionId, probeGeneration),
     enter_id: enterId,
     policy,
     working_dir: workingDir || '',

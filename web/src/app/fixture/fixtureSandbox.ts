@@ -7,7 +7,9 @@ import {
   type SandboxContextResponse,
   type SandboxCurrentContext,
   type SandboxFieldError,
+  type SandboxImplementationStatus,
   type SandboxKvEntry,
+  type SandboxUnsupportedReason,
   type SandboxPolicyDraft,
   type SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -74,63 +76,212 @@ function fieldEntry(entry: {
   key: string;
   valueFormat: string;
   example: string;
+  controller?: string;
   available?: boolean;
+  reasonCode?: SandboxUnsupportedReason;
   reason?: string;
 }) {
   const available = entry.available ?? true;
   return {
     key: entry.key,
+    controller: entry.controller,
     value_format: entry.valueFormat,
     example: entry.example,
     available,
+    reason_code: available ? undefined : (entry.reasonCode ?? 'permission_denied'),
     reason: available ? undefined : (entry.reason ?? 'not measured'),
   };
 }
 
-function catalogFor(scenario: Scenario): SandboxCapabilityCatalog {
-  if (scenario === 'unsupported') {
-    return {
-      status: 'unavailable',
-      platform: 'linux',
-      backend: undefined,
-      probe_generation: 'fixture-probe-unsupported',
-      source: 'agent-host-probe',
-      detail: ['bubblewrap is not executable on this host'],
-      reason: 'bubblewrap is not executable on this host',
-      resource_fields: [],
-      syscall_fields: [],
-    };
-  }
-  if (scenario === 'macos') {
-    return {
-      status: 'available',
-      platform: 'macos',
-      backend: 'macos-seatbelt',
-      probe_generation: 'fixture-probe-macos',
-      source: 'agent-host-probe',
-      detail: [
-        'Seatbelt network denial verified',
-        'filesystem path allow-lists are not verified on macOS',
-      ],
-      resource_fields: [],
-      syscall_fields: [],
-    };
-  }
-  if (scenario === 'offline') {
-    return {
-      status: 'unknown',
-      platform: 'unknown',
-      backend: undefined,
-      probe_generation: '',
-      source: 'unavailable',
-      detail: [],
-      reason: 'the Agent did not answer',
-      resource_fields: [],
-      syscall_fields: [],
-    };
-  }
-  const limited = scenario === 'limited';
+function optionEntry(
+  id: string,
+  status: SandboxImplementationStatus = 'available',
+  reason?: string,
+  reasonCode?: SandboxUnsupportedReason,
+) {
   return {
+    id,
+    status,
+    reason_code: status === 'available' ? undefined : (reasonCode ?? 'not_probed'),
+    reason: status === 'available' ? undefined : (reason ?? 'not measured'),
+  };
+}
+
+const REGISTERED_IMPLEMENTATION_PATHS = [
+  'filesystem.access',
+  'filesystem.composition',
+  'network',
+  'process.linux_namespaces',
+  'resource.cgroup_v2',
+  'syscall.seccomp',
+];
+
+interface ImplementationState {
+  status?: SandboxImplementationStatus;
+  options?: ReturnType<typeof optionEntry>[];
+  fields?: ReturnType<typeof fieldEntry>[];
+  reasonCode?: SandboxUnsupportedReason;
+  reason?: string;
+}
+
+function implementationEntry(
+  path: string,
+  state: ImplementationState = {},
+): ReturnType<typeof importImplementation> {
+  return importImplementation(path, state);
+}
+
+function importImplementation(path: string, state: ImplementationState) {
+  const status = state.status ?? 'available';
+  return {
+    path,
+    status,
+    reason_code: status === 'available' ? undefined : (state.reasonCode ?? 'not_probed'),
+    reason: status === 'available' ? undefined : (state.reason ?? 'not measured'),
+    options: state.options ?? [],
+    fields: state.fields ?? [],
+  };
+}
+
+function registeredUnknownImplementations(reason: string) {
+  return REGISTERED_IMPLEMENTATION_PATHS.map((path) =>
+    implementationEntry(path, {
+      status: 'unknown',
+      reasonCode: 'not_probed',
+      reason,
+    }),
+  );
+}
+
+function unsupportedCatalog(): SandboxCapabilityCatalog {
+  const reason = 'bubblewrap is not executable on this host';
+  return {
+    catalog_version: 2,
+    status: 'unavailable',
+    platform: 'linux',
+    backend: undefined,
+    probe_generation: 'fixture-probe-unsupported',
+    source: 'agent-host-probe',
+    detail: [reason],
+    reason,
+    implementations: REGISTERED_IMPLEMENTATION_PATHS.map((path) =>
+      implementationEntry(path, {
+        status: 'unavailable',
+        reasonCode: 'backend_missing',
+        reason,
+      }),
+    ),
+    resource_fields: [],
+    syscall_fields: [],
+  };
+}
+
+function macosCatalog(): SandboxCapabilityCatalog {
+  const platformReason = 'this implementation is Linux-native and is not built for macOS Seatbelt';
+  return {
+    catalog_version: 2,
+    status: 'available',
+    platform: 'macos',
+    backend: 'macos-seatbelt',
+    probe_generation: 'fixture-probe-macos',
+    source: 'agent-host-probe',
+    detail: [
+      'Seatbelt network denial verified',
+      'filesystem path allow-lists are not verified on macOS',
+    ],
+    implementations: [
+      implementationEntry('filesystem.access', {
+        status: 'unavailable',
+        reasonCode: 'kernel_feature_missing',
+        reason: 'filesystem access could not be verified under macOS Seatbelt',
+      }),
+      implementationEntry('filesystem.composition', {
+        status: 'unavailable',
+        reasonCode: 'platform_unsupported',
+        reason: platformReason,
+      }),
+      implementationEntry('network', {
+        options: [
+          optionEntry('allow'),
+          optionEntry('deny'),
+          optionEntry(
+            'restricted',
+            'unavailable',
+            'network.mode restricted is not supported by the macOS backend in V1',
+            'platform_unsupported',
+          ),
+        ],
+      }),
+      implementationEntry('process.linux_namespaces', {
+        status: 'unavailable',
+        reasonCode: 'platform_unsupported',
+        reason: platformReason,
+      }),
+      implementationEntry('resource.cgroup_v2', {
+        status: 'unavailable',
+        reasonCode: 'platform_unsupported',
+        reason: platformReason,
+      }),
+      implementationEntry('syscall.seccomp', {
+        status: 'unavailable',
+        reasonCode: 'platform_unsupported',
+        reason: platformReason,
+      }),
+    ],
+    resource_fields: [],
+    syscall_fields: [],
+  };
+}
+
+function offlineCatalog(): SandboxCapabilityCatalog {
+  const reason = 'the Agent did not answer';
+  return {
+    catalog_version: 2,
+    status: 'unknown',
+    platform: 'unknown',
+    backend: undefined,
+    probe_generation: '',
+    source: 'unavailable',
+    detail: [],
+    reason,
+    implementations: registeredUnknownImplementations(reason),
+    resource_fields: [],
+    syscall_fields: [],
+  };
+}
+
+function linuxCatalog(limited: boolean): SandboxCapabilityCatalog {
+  const resourceFields = [
+    fieldEntry({
+      key: 'memory.max',
+      controller: 'memory',
+      valueFormat: 'uint64 bytes or `max`',
+      example: '2147483648',
+    }),
+    fieldEntry({
+      key: 'cpu.max',
+      controller: 'cpu',
+      valueFormat: '`quota period` (quota microseconds or `max`; period 1000..=1000000)',
+      example: '200000 100000',
+      available: !limited,
+      reasonCode: 'controller_not_delegated',
+      reason: 'the cpu controller is not delegated to this Agent’s execution root',
+    }),
+    fieldEntry({
+      key: 'pids.max',
+      controller: 'pids',
+      valueFormat: 'uint64 tasks or `max`',
+      example: '256',
+    }),
+    fieldEntry({
+      key: 'memory.oom.group',
+      controller: 'memory',
+      valueFormat: '`0` or `1`',
+      example: '0',
+    }),
+  ];
+  return {
+    catalog_version: 2,
     status: 'available',
     platform: 'linux',
     backend: 'linux-bwrap',
@@ -139,22 +290,23 @@ function catalogFor(scenario: Scenario): SandboxCapabilityCatalog {
     detail: limited
       ? ['delegated controllers: memory, pids']
       : ['delegated controllers: memory, cpu, pids'],
-    resource_fields: [
-      fieldEntry({
-        key: 'memory.max',
-        valueFormat: 'uint64 bytes or `max`',
-        example: '2147483648',
+    implementations: [
+      implementationEntry('filesystem.access'),
+      implementationEntry('filesystem.composition', {
+        options: [optionEntry('workspace_image')],
       }),
-      fieldEntry({
-        key: 'cpu.max',
-        valueFormat: '`quota period` (quota microseconds or `max`; period 1000..=1000000)',
-        example: '200000 100000',
-        available: !limited,
-        reason: 'the cpu controller is not delegated to this Agent’s execution root',
+      implementationEntry('network', {
+        options: [optionEntry('allow'), optionEntry('deny'), optionEntry('restricted')],
       }),
-      fieldEntry({ key: 'pids.max', valueFormat: 'uint64 tasks or `max`', example: '256' }),
-      fieldEntry({ key: 'memory.oom.group', valueFormat: '`0` or `1`', example: '0' }),
+      implementationEntry('process.linux_namespaces', {
+        options: ['pid', 'ipc', 'user', 'uts', 'cgroup'].map((name) => optionEntry(name)),
+      }),
+      implementationEntry('resource.cgroup_v2', { fields: resourceFields }),
+      implementationEntry('syscall.seccomp', {
+        options: [optionEntry('nession-interactive-v1')],
+      }),
     ],
+    resource_fields: resourceFields,
     syscall_fields: [
       fieldEntry({
         key: 'seccomp.profile',
@@ -163,6 +315,19 @@ function catalogFor(scenario: Scenario): SandboxCapabilityCatalog {
       }),
     ],
   };
+}
+
+function catalogFor(scenario: Scenario): SandboxCapabilityCatalog {
+  if (scenario === 'unsupported') {
+    return unsupportedCatalog();
+  }
+  if (scenario === 'macos') {
+    return macosCatalog();
+  }
+  if (scenario === 'offline') {
+    return offlineCatalog();
+  }
+  return linuxCatalog(scenario === 'limited');
 }
 
 function effectivePolicy(): SandboxPolicyDraft {

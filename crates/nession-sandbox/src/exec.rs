@@ -448,6 +448,10 @@ pub fn preflight(request: &LaunchRequest, settings: &SandboxSettings) -> Result<
     }
     let working_dir = validate_working_dir(&request.working_dir, compiled.filesystem.as_ref())?;
     let capabilities = probe(settings);
+    let field_errors = crate::capabilities::unsupported_requests(&request.policy, &capabilities);
+    if !field_errors.is_empty() {
+        return Err(SandboxError::UnsupportedRequests(field_errors));
+    }
     crate::capabilities::validate(&compiled, &capabilities)?;
     let mut warnings = capabilities.detail.clone();
     if let Some(filesystem) = &compiled.filesystem {

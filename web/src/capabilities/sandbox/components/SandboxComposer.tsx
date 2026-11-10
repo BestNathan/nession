@@ -7,12 +7,10 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
 import {
-  catalogOptions,
   draftSignature,
   fieldErrorsByField,
+  IMPLEMENTATION_PATHS,
   preflightIsValid,
-  resourceDisabledReason,
-  syscallDisabledReason,
   type SandboxActionError,
 } from '../model';
 import { SandboxComposerActions } from './SandboxComposerActions';
@@ -66,7 +64,12 @@ export function SandboxComposer({
   onCancelConfirm,
 }: SandboxComposerProps) {
   const signature = draftSignature(draft.draft);
-  const preflightValid = preflightIsValid(preflight, signature, context.generation);
+  const preflightValid = preflightIsValid(
+    preflight,
+    signature,
+    context.generation,
+    context.catalog.probe_generation,
+  );
   const fieldErrors = {
     ...fieldErrorsByField(preflight?.result.errors),
     ...(actionError?.fieldErrors ?? {}),
@@ -113,15 +116,15 @@ export function SandboxComposer({
         onWorkingDirChange={onWorkingDirChange}
       />
 
-      <SandboxNetworkProcessFields draft={draft} />
+      <SandboxNetworkProcessFields draft={draft} catalog={context.catalog} />
 
       <SandboxKvEditor
         group="resource"
         title="Resource controls"
         description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
         rows={draft.draft.resource}
-        options={catalogOptions(context.catalog, 'resource')}
-        disabledReason={resourceDisabledReason(context.catalog)}
+        catalog={context.catalog}
+        implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
         errors={fieldErrors}
         onAdd={() => draft.addRow('resource')}
         onChange={(index, patch) => draft.updateRow('resource', index, patch)}
@@ -133,8 +136,8 @@ export function SandboxComposer({
         title="Syscall controls"
         description="Only the Agent's registered seccomp profiles are accepted. Empty omits the Syscall group."
         rows={draft.draft.syscall}
-        options={catalogOptions(context.catalog, 'syscall')}
-        disabledReason={syscallDisabledReason(context.catalog)}
+        catalog={context.catalog}
+        implementationPath={IMPLEMENTATION_PATHS.seccomp}
         errors={fieldErrors}
         onAdd={() => draft.addRow('syscall')}
         onChange={(index, patch) => draft.updateRow('syscall', index, patch)}

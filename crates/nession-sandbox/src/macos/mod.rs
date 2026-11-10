@@ -193,6 +193,12 @@ pub fn prepare(
     working_dir: &Path,
 ) -> Result<PreparedSandbox> {
     let capabilities = probe(settings);
+    let field_errors = crate::capabilities::unsupported_requests(&request.policy, &capabilities);
+    if !field_errors.is_empty() {
+        return Err(crate::error::SandboxError::UnsupportedRequests(
+            field_errors,
+        ));
+    }
     crate::capabilities::validate(compiled, &capabilities)?;
     let _ = working_dir;
     let _ = request.inner_command;

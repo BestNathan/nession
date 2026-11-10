@@ -15,8 +15,9 @@ use anyhow::{Context as _, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCatalogStatus,
     SandboxContextStatus, SandboxCurrentContext, SandboxExecutionView, SandboxFieldError,
-    SandboxNativePane, SandboxPaneRef, SandboxPaneScope, SandboxPolicyDraft,
-    SandboxPreflightResult,
+    SandboxImplementationSupport, SandboxNativePane, SandboxPaneRef, SandboxPaneScope,
+    SandboxPolicyDraft, SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS,
+    SANDBOX_CATALOG_VERSION,
 };
 use nession_sandbox::{
     draft_from_policy, materialize, requested_mechanisms, ExecutionRecord, LaunchRequest,
@@ -123,6 +124,7 @@ impl SessionManager {
         &self,
         session_name: &str,
         generation: &str,
+        probe_generation: &str,
         draft: &SandboxPolicyDraft,
         working_dir: &str,
     ) -> SandboxPreflightResult {
@@ -143,6 +145,21 @@ impl SessionManager {
             }
         };
         let catalog = context.catalog.clone();
+        let stale_field = |field: &str, message: &str| SandboxPreflightResult {
+            ok: false,
+            error: Some(message.to_string()),
+            generation: context.generation.clone(),
+            policy_digest: None,
+            backend: None,
+            mechanisms: Vec::new(),
+            errors: vec![SandboxFieldError {
+                field: field.to_string(),
+                code: "stale-generation".to_string(),
+                message: message.to_string(),
+            }],
+            warnings: Vec::new(),
+            catalog: catalog.clone(),
+        };
         let refuse = |error: String, code: &str| SandboxPreflightResult {
             ok: false,
             error: Some(error.clone()),
@@ -163,6 +180,12 @@ impl SessionManager {
             return refuse(
                 "the Sandbox context changed since the draft was composed; re-read it".to_string(),
                 "stale-generation",
+            );
+        }
+        if context.catalog.probe_generation != probe_generation {
+            return stale_field(
+                "catalog.probe_generation",
+                "the Agent's measured Sandbox capability changed since the draft was composed; re-read the context and run preflight again",
             );
         }
         if context.status == SandboxContextStatus::Inside {
@@ -248,6 +271,20 @@ impl SessionManager {
                     catalog,
                 }
             }
+            Ok(Err(SandboxError::UnsupportedRequests(field_errors))) => SandboxPreflightResult {
+                ok: false,
+                error: Some(
+                    "the host cannot install one or more explicitly requested policy elements"
+                        .to_string(),
+                ),
+                generation: context.generation.clone(),
+                policy_digest: None,
+                backend: None,
+                mechanisms: Vec::new(),
+                errors: field_errors,
+                warnings: Vec::new(),
+                catalog,
+            },
             Ok(Err(error)) => {
                 let code = preflight_error_code(&error);
                 SandboxPreflightResult {
@@ -276,6 +313,7 @@ impl SessionManager {
         &self,
         session_name: &str,
         generation: &str,
+        probe_generation: &str,
         enter_id: &str,
         draft: &SandboxPolicyDraft,
         working_dir: &str,
@@ -323,6 +361,18 @@ impl SessionManager {
                 SandboxActionErrorKind::Conflict,
                 "the Sandbox context changed since preflight; re-run it".to_string(),
                 None,
+            );
+        }
+        if context.catalog.probe_generation != probe_generation {
+            return refusal(
+                SandboxActionErrorKind::Conflict,
+                "the Agent's measured Sandbox capability changed since preflight; run it again"
+                    .to_string(),
+                Some(vec![SandboxFieldError {
+                    field: "catalog.probe_generation".to_string(),
+                    code: "stale-generation".to_string(),
+                    message: "the host capability changed between preflight and Enter".to_string(),
+                }]),
             );
         }
         if !context.enterable {
@@ -404,15 +454,19 @@ impl SessionManager {
         let mut prepared = match prepared {
             Ok(Ok(prepared)) => prepared,
             Ok(Err(error)) => {
-                let kind = match error.downcast_ref::<SandboxError>() {
-                    Some(SandboxError::InvalidPolicy(_)) => SandboxActionErrorKind::Invalid,
+                let (kind, field_errors) = match error.downcast_ref::<SandboxError>() {
+                    Some(SandboxError::UnsupportedRequests(field_errors)) => (
+                        SandboxActionErrorKind::Unavailable,
+                        Some(field_errors.clone()),
+                    ),
+                    Some(SandboxError::InvalidPolicy(_)) => (SandboxActionErrorKind::Invalid, None),
                     Some(SandboxError::UnsupportedPolicy(_))
                     | Some(SandboxError::BackendUnavailable(_)) => {
-                        SandboxActionErrorKind::Unavailable
+                        (SandboxActionErrorKind::Unavailable, None)
                     }
-                    _ => SandboxActionErrorKind::Failed,
+                    _ => (SandboxActionErrorKind::Failed, None),
                 };
-                return refusal(kind, format!("{error:#}"), None);
+                return refusal(kind, format!("{error:#}"), field_errors);
             }
             Err(error) => {
                 return refusal(
@@ -909,13 +963,18 @@ fn generation(
 
 fn unavailable_catalog(reason: String) -> SandboxCapabilityCatalog {
     SandboxCapabilityCatalog {
+        catalog_version: SANDBOX_CATALOG_VERSION,
         status: SandboxCatalogStatus::Unavailable,
         platform: "unknown".to_string(),
         backend: None,
         probe_generation: nession_sandbox::hex_sha256(reason.as_bytes()),
         source: "agent-host-probe".to_string(),
         detail: Vec::new(),
-        reason: Some(reason),
+        reason: Some(reason.clone()),
+        implementations: REGISTERED_IMPLEMENTATION_PATHS
+            .iter()
+            .map(|path| SandboxImplementationSupport::unknown(*path, reason.clone()))
+            .collect(),
         resource_fields: Vec::new(),
         syscall_fields: Vec::new(),
     }
@@ -924,7 +983,7 @@ fn unavailable_catalog(reason: String) -> SandboxCapabilityCatalog {
 fn preflight_error_code(error: &SandboxError) -> &'static str {
     match error {
         SandboxError::InvalidPolicy(_) => "invalid-policy",
-        SandboxError::UnsupportedPolicy(_) => "unsupported",
+        SandboxError::UnsupportedPolicy(_) | SandboxError::UnsupportedRequests(_) => "unsupported",
         SandboxError::BackendUnavailable(_) => "unavailable",
         SandboxError::Prepare(_) => "prepare-failed",
         SandboxError::Verify(_) => "verify-failed",

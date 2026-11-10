@@ -5,6 +5,7 @@ import type {
   SandboxActionResult,
   SandboxCapabilityCatalog,
   SandboxCurrentContext,
+  SandboxImplementationSupport,
   SandboxPolicyDraft,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -30,23 +31,51 @@ vi.mock('../../SandboxPlugin', () => ({
 function catalog(): SandboxCapabilityCatalog {
   const field = (key: string, valueFormat: string, example: string) => ({
     key,
+    controller: key.split('.')[0],
     value_format: valueFormat,
     example,
     available: true,
   });
+  const resourceFields = [
+    field('memory.max', 'uint64 bytes or `max`', '2147483648'),
+    field('cpu.max', '`quota period`', '200000 100000'),
+    field('pids.max', 'uint64 tasks or `max`', '256'),
+    field('memory.oom.group', '`0` or `1`', '0'),
+  ];
+  const implementation = (
+    path: string,
+    options: SandboxImplementationSupport['options'] = [],
+    fields: SandboxImplementationSupport['fields'] = [],
+  ): SandboxImplementationSupport => ({ path, status: 'available', options, fields });
   return {
+    catalog_version: 2,
     status: 'available',
     platform: 'linux',
     backend: 'linux-bwrap',
     probe_generation: 'probe-1',
     source: 'agent-host-probe',
     detail: ['delegated controllers: memory, cpu, pids'],
-    resource_fields: [
-      field('memory.max', 'uint64 bytes or `max`', '2147483648'),
-      field('cpu.max', '`quota period`', '200000 100000'),
-      field('pids.max', 'uint64 tasks or `max`', '256'),
-      field('memory.oom.group', '`0` or `1`', '0'),
+    implementations: [
+      implementation('filesystem.access'),
+      implementation('filesystem.composition', [
+        { id: 'workspace_image', status: 'available' },
+      ]),
+      implementation('network', [
+        { id: 'allow', status: 'available' },
+        { id: 'deny', status: 'available' },
+        { id: 'restricted', status: 'available' },
+      ]),
+      implementation(
+        'process.linux_namespaces',
+        ['pid', 'ipc', 'user', 'uts', 'cgroup'].map((id) => ({
+          id,
+          status: 'available' as const,
+        })),
+      ),
+      implementation('resource.cgroup_v2', [], resourceFields),
+      implementation('syscall.seccomp', [{ id: 'nession-interactive-v1', status: 'available' }]),
     ],
+    resource_fields: resourceFields,
     syscall_fields: [field('seccomp.profile', 'profile', 'nession-interactive-v1')],
   };
 }
@@ -146,7 +175,8 @@ describe('SandboxWorkspace (#3124)', () => {
   it('starts the outside draft empty and requires a fresh validation for Enter', async () => {
     const user = userEvent.setup();
     api.preflight.mockImplementation(
-      (_sessionId: string, _generation: string, draft: SandboxPolicyDraft) => {
+      (request: { policy: SandboxPolicyDraft }) => {
+        const draft = request.policy;
         const cpu = draft.resource.find((row) => row.key === 'cpu.max');
         const result: SandboxPreflightResult = cpu?.value === '200000 100000'
           ? {
@@ -320,5 +350,102 @@ describe('SandboxWorkspace (#3124)', () => {
     expect(await screen.findByTestId('sandbox-context-error')).toBeInTheDocument();
     expect(screen.queryByTestId('sandbox-inside')).toBeNull();
     expect(screen.getByTestId('sandbox-retry')).toBeInTheDocument();
+  });
+
+  it('renders per-implementation support and disables unmeasured options and fields', async () => {
+    const user = userEvent.setup();
+    const base = outsideContext();
+    const partial: SandboxCurrentContext = {
+      ...base,
+      catalog: {
+        ...base.catalog,
+        implementations: base.catalog.implementations.map((implementation) => {
+          if (implementation.path === 'network') {
+            return {
+              ...implementation,
+              options: [
+                { id: 'allow', status: 'available' as const },
+                { id: 'deny', status: 'available' as const },
+                {
+                  id: 'restricted',
+                  status: 'unavailable' as const,
+                  reason_code: 'platform_unsupported' as const,
+                  reason: 'restricted is not supported',
+                },
+              ],
+            };
+          }
+          if (implementation.path === 'process.linux_namespaces') {
+            return {
+              ...implementation,
+              options: implementation.options?.map((option) =>
+                option.id === 'pid'
+                  ? {
+                      ...option,
+                      status: 'unavailable' as const,
+                      reason_code: 'kernel_feature_missing' as const,
+                      reason: 'no pid namespace',
+                    }
+                  : option,
+              ),
+            };
+          }
+          if (implementation.path === 'resource.cgroup_v2') {
+            return {
+              ...implementation,
+              fields: implementation.fields?.map((field) =>
+                field.key === 'cpu.max'
+                  ? {
+                      ...field,
+                      available: false,
+                      reason_code: 'controller_not_delegated' as const,
+                      reason: 'cpu is not delegated',
+                    }
+                  : field,
+              ),
+            };
+          }
+          if (implementation.path === 'syscall.seccomp') {
+            return {
+              ...implementation,
+              status: 'unavailable' as const,
+              reason_code: 'profile_unavailable' as const,
+              reason: 'no loadable profile',
+              options: [],
+            };
+          }
+          return implementation;
+        }),
+      },
+    };
+    api.context.mockResolvedValue({ success: true, context: partial });
+    render(<SandboxWorkspace ctx={workspaceContext()} />);
+
+    await screen.findByTestId('sandbox-composer');
+    expect(screen.getByTestId('sandbox-implementation-status-network')).toHaveTextContent(
+      'available',
+    );
+    expect(
+      screen.getByTestId('sandbox-implementation-status-syscall.seccomp'),
+    ).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('sandbox-syscall-disabled')).toHaveTextContent(
+      'no loadable profile',
+    );
+    expect(screen.getByTestId('sandbox-syscall-add')).toBeDisabled();
+    expect(screen.getByTestId('sandbox-namespace-pid')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('sandbox-namespace-ipc')).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+
+    await user.click(screen.getByTestId('sandbox-resource-add'));
+    await user.type(screen.getByTestId('sandbox-resource-key-0'), 'cpu.max');
+    expect(screen.getByTestId('sandbox-resource-value-0')).toBeDisabled();
+    expect(screen.getByTestId('sandbox-resource-value-unavailable-0')).toHaveTextContent(
+      'cpu is not delegated',
+    );
   });
 });

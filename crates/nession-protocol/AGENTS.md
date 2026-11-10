@@ -38,6 +38,14 @@ schema or a second row→policy interpreter in a provider crate. The context
 snapshot, catalog, preflight and action results are session-scoped contract
 types, generated for the Web.
 
+`SandboxCapabilityCatalog` is versioned: `catalog_version = 2` adds typed
+`implementations` (canonical policy path → status + stable reason code +
+implementation-owned options/fields). Only schema-registered paths may appear;
+do not let a frontend register or synthesize support. The flat
+`resource_fields`/`syscall_fields` arrays are the pre-v2 projection. Preflight
+and Enter client payloads carry both the context `generation` and
+`probe_generation`; the Agent refuses either stale binding.
+
 ## Verification
 
 `scripts/protocol-gate.mjs` owns the live static protocol-integrity rules. Do not duplicate its matcher/rule list here.
