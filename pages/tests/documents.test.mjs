@@ -205,7 +205,7 @@ test('Git Tag codegen uses a SHA-verified isolated worktree and a SHA cache',asy
     if(program==='git'&&args.includes('rev-parse'))return OLD_SHA;
     if(program==='git'&&args.includes('cat-file'))return '';
     if(program==='git'&&args.includes('add')){
-      const dest=args.at(-2)==='--detach'?args.at(-1):null;
+      const dest=args.at(-2); // git worktree add --detach <path> <sha>
       assert.ok(dest);
       await mkdir(dest,{recursive:true});
       await writeFile(join(dest,'Cargo.toml'),
