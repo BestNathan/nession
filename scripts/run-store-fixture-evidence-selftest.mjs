@@ -23,9 +23,16 @@ for(const [name,source] of [
   ['E2E / Full Regression','.github/workflows/e2e-full-regression.yml'],
   ['Deploy / Public Pages','.github/workflows/deploy-pages.yml'],
 ]){
-  assert.ok(waker.includes('.name == "'+name+'" and') &&
-    waker.includes('.path == "'+source+'"'),
-  'waker must authenticate the workflow name/path pair, not name alone: '+name);
+  // Full Regression has a dynamic Main run-name in GitHub REST. Preserve
+  // both the exact-SHA dynamic identity and the canonical workflow path.
+  const paired = name === 'E2E / Full Regression'
+    ? waker.includes('(.name == "E2E / Full Regression" or') &&
+      waker.includes('.name == ("Full Regression main@" + $sha)) and') &&
+      waker.includes('.path == "'+source+'"')
+    : waker.includes('.name == "'+name+'" and') &&
+      waker.includes('.path == "'+source+'"');
+  assert.ok(paired,
+    'waker must authenticate the workflow name/path pair, not name alone: '+name);
 }
 assert.match(waker,/\.id == \$id and \.run_attempt == \$attempt and/,
   'Waker must authenticate exact GitHub run ID and attempt');
