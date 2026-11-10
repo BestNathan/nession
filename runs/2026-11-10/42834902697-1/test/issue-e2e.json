@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "c9ac3bf1522101bb8e94c523420c6f31e5efaddb",
+  "run_id": 42834902697,
+  "run_attempt": 1,
+  "plan_digest": "9613b089edd7e312925109ec1eaeaa2ccb60df9a19fe1719ff6212ff5623d370",
+  "artifact_digest": "sha256:ed3131365ac95cf31f74596d94d70042d35241f9ec9c77890ec6c7a7c52347ae",
+  "results": [
+    {
+      "id": "app-session-operations",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "project-management",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "project-session-create",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
