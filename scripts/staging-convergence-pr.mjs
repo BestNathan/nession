@@ -70,7 +70,8 @@ function parseMarker(body){
 // Rebuild the batch from immutable Git bytes and authenticate the PR metadata.
 // For a merged staging push, targetSha is the merge commit and its second
 // parent must be the PR integration head. No Issue is consulted or created.
-export function verifiedConvergenceBatch(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
+export function verifiedConvergenceBatch(pr,repoRoot,baseSha,
+  targetSha=pr?.head?.sha,{requireCheckout=true}={}){
   if(!isNativeConvergencePr(pr)||pr.head?.repo?.full_name!==REPO||
     pr.base?.repo?.full_name!==REPO||!safeBranch(pr.base?.ref)||
     !SHA.test(baseSha??'')||!SHA.test(targetSha??'')||
@@ -81,7 +82,7 @@ export function verifiedConvergenceBatch(pr,repoRoot,baseSha,targetSha=pr?.head?
     marker.head!==pr.head.sha||pr.head.ref!==integrationBranch(
       marker.branch,marker.main,marker.lane))
     throw Error('native convergence PR metadata does not match exact source');
-  if(git(repoRoot,'rev-parse','HEAD')!==targetSha)
+  if(requireCheckout&&git(repoRoot,'rev-parse','HEAD')!==targetSha)
     throw Error('native convergence checked source differs from target SHA');
   const parents=git(repoRoot,'rev-list','--parents','-n','1',marker.head).split(/\s+/);
   if(parents.length!==3||parents[0]!==marker.head||
