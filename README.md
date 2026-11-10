@@ -15,6 +15,8 @@
 
 ## Catalog
 
+| Select / Choice Items: Base UI current vs Nession option visual candidate, Web/App / long-path / keyboard / dark | [#3164](https://github.com/BestNathan/nession/issues/3164) | [Interactive HTML](choice-list-3164/index.html) · [Scenario & fidelity](choice-list-3164/README.md) |
+
 | Unified Overlay & Operation Surfaces (Dialog / Alert / anchored choices / Web-App depth, interaction & visual system) | [#3142](https://github.com/BestNathan/nession/issues/3142) | [Interactive HTML](overlay-system-3142/index.html) · [Scenario & fidelity](overlay-system-3142/README.md) |
 
 | Sandbox strategy tabs: Web sticky left nav + wide scrolling panel / App horizontal tabs + vertical content; five independent policy editors, Overview Enter, Inside effective inspection | [#3143](https://github.com/BestNathan/nession/issues/3143), [#3141](https://github.com/BestNathan/nession/issues/3141), [#3124](https://github.com/BestNathan/nession/issues/3124) | [Interactive HTML](sandbox-capability-3124/index.html) · [Scenario & fidelity](sandbox-capability-3124/README.md) |
