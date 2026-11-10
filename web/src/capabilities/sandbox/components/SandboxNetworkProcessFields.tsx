@@ -5,7 +5,6 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import type {
   SandboxCapabilityCatalog,
   SandboxNetworkMode,
@@ -14,7 +13,6 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
 import {
-  entriesToLines,
   implementationDisabledReason,
   implementationEditable,
   IMPLEMENTATION_PATHS,
@@ -22,6 +20,7 @@ import {
   networkModeDisabledReason,
 } from '../model';
 import { SandboxImplementationStatus } from './SandboxImplementationStatus';
+import { SandboxStringListEditor } from './SandboxStringListEditor';
 
 const NETWORK_MODES: readonly SandboxNetworkMode[] = ['allow', 'deny', 'restricted'];
 const NAMESPACES = ['pid', 'ipc', 'user', 'uts', 'cgroup'] as const;
@@ -37,15 +36,15 @@ function FieldLabel({ htmlFor, children }: { htmlFor: string; children: string }
   );
 }
 
-export interface SandboxNetworkProcessFieldsProps {
+export interface SandboxFieldsetProps {
   draft: SandboxDraftState;
   catalog: SandboxCapabilityCatalog;
 }
 
-function NetworkFields({
+export function SandboxNetworkFields({
   draft,
   catalog,
-}: SandboxNetworkProcessFieldsProps) {
+}: SandboxFieldsetProps) {
   const mode = draft.draft.network?.mode ?? 'allow';
   const networkDisabled =
     implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network) !== null;
@@ -116,25 +115,39 @@ function NetworkFields({
       {mode === 'restricted' ? (
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <FieldLabel htmlFor="sandbox-egress-allow">Allowed destinations</FieldLabel>
-            <Textarea
-              id="sandbox-egress-allow"
-              data-testid="sandbox-egress-allow"
-              rows={2}
-              disabled={networkDisabled}
-              value={entriesToLines(draft.draft.network?.egress?.allow ?? [])}
-              onChange={(event) => draft.setEgress('allow', event.target.value)}
+            <SandboxStringListEditor
+              title="Allowed destinations"
+              items={draft.draft.network?.egress?.allow ?? []}
+              placeholder="api.example.com:443"
+              addLabel="Add allowed rule"
+              testIdPrefix="sandbox-egress-allow"
+              emptyText="No destinations are allowed."
+              disabledReason={
+                networkDisabled
+                  ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
+                  : null
+              }
+              onAdd={() => draft.addEgressRule('allow')}
+              onChange={(index, value) => draft.updateEgressRule('allow', index, value)}
+              onRemove={(index) => draft.removeEgressRule('allow', index)}
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <FieldLabel htmlFor="sandbox-egress-deny">Denied destinations</FieldLabel>
-            <Textarea
-              id="sandbox-egress-deny"
-              data-testid="sandbox-egress-deny"
-              rows={2}
-              disabled={networkDisabled}
-              value={entriesToLines(draft.draft.network?.egress?.deny ?? [])}
-              onChange={(event) => draft.setEgress('deny', event.target.value)}
+            <SandboxStringListEditor
+              title="Denied destinations"
+              items={draft.draft.network?.egress?.deny ?? []}
+              placeholder="*.internal.example"
+              addLabel="Add denied rule"
+              testIdPrefix="sandbox-egress-deny"
+              emptyText="No extra destinations are denied."
+              disabledReason={
+                networkDisabled
+                  ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
+                  : null
+              }
+              onAdd={() => draft.addEgressRule('deny')}
+              onChange={(index, value) => draft.updateEgressRule('deny', index, value)}
+              onRemove={(index) => draft.removeEgressRule('deny', index)}
             />
           </div>
         </div>
@@ -143,7 +156,7 @@ function NetworkFields({
   );
 }
 
-function ProcessFields({ draft, catalog }: SandboxNetworkProcessFieldsProps) {
+export function SandboxProcessFields({ draft, catalog }: SandboxFieldsetProps) {
   const namespaces = draft.draft.process?.linux_namespaces;
   const namespacesEditable = implementationEditable(
     catalog,
@@ -205,24 +218,5 @@ function ProcessFields({ draft, catalog }: SandboxNetworkProcessFieldsProps) {
           })
         : null}
     </fieldset>
-  );
-}
-
-/**
- * Network mode/egress and the explicit Linux namespace requests (#3161).
- *
- * Each mode and namespace is an independently measured option. An unsupported
- * option stays visible with its Agent-provided reason, but cannot be selected;
- * the Agent still revalidates the whole request before it launches anything.
- */
-export function SandboxNetworkProcessFields({
-  draft,
-  catalog,
-}: SandboxNetworkProcessFieldsProps) {
-  return (
-    <>
-      <NetworkFields draft={draft} catalog={catalog} />
-      <ProcessFields draft={draft} catalog={catalog} />
-    </>
   );
 }
