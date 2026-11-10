@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
-import {isNativeConvergencePr,convergenceE2ESelection} from './staging-convergence-pr.mjs';
+import {isNativeConvergencePr,convergenceE2ESelection,isNativePromotionPr,promotionE2ESelection} from './staging-convergence-pr.mjs';
 import { summarize } from '../e2e/runner/selected-report.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
@@ -56,11 +56,15 @@ export function assertSourcePlanBase(pr,claimed) {
 }
 export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
   const effectiveBase=assertSourcePlanBase(pr,claimed);
-  const native=isNativeConvergencePr(pr);
-  if(native&&issues.length)throw Error('PR-native convergence has unexpected Issue contracts');
-  const rebuilt = native
+  const nativeSync=isNativeConvergencePr(pr);
+  const nativePromotion=isNativePromotionPr(pr);
+  const native=nativeSync||nativePromotion;
+  if(native&&issues.length)throw Error('PR-native convergence/promotion has unexpected Issue contracts');
+  const rebuilt = nativeSync
     ? convergenceE2ESelection(pr,sourceRoot,effectiveBase)
-    : buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
+    : nativePromotion
+      ? promotionE2ESelection(pr,sourceRoot,effectiveBase)
+      : buildGitPlan(sourceRoot,issues,effectiveBase);
   assert.equal(claimed.mode,rebuilt.mode);
   assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
   assert.deepEqual(claimed.issues,rebuilt.issues,'Issue contract differs from captured plan');
