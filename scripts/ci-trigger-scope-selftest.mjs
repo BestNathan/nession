@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {prPaths} from './lib/workflow-pr-paths.mjs';
+import {prPaths,matchesAny} from './lib/workflow-pr-paths.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sources = {};
@@ -103,7 +103,7 @@ function select(files,eventName='pull_request') {
 }
 for(const fixture of cases) {
   for(const key of ['quality','e2e','cases','scenario']) {
-    const matched=fixture.files.some(file=>globs[key].some(pattern=>path.matchesGlob(file,pattern)));
+    const matched=fixture.files.some(file=>matchesAny(globs[key],file));
     // A PR event cannot use a path filter if empty-tree integration heads
     // must be checked. The canonical Quality job selector still scopes work.
     const expected=key==='scenario'?fixture.scenario:true;
