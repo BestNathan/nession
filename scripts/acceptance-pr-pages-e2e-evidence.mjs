@@ -210,14 +210,51 @@ function zipJson(zip,member){
       encoding:'utf8',timeout:20000,maxBuffer:1_500_000}));
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
-async function downloadZip(artifact,token){
-  const response=await api(API+'/actions/artifacts/'+artifact.id+'/zip',
-    token,'application/octet-stream');
-  const length=Number(response.headers.get('content-length')||0);
-  if(length>MAX_ZIP)throw Error('oversized source artifact');
-  const buf=Buffer.from(await response.arrayBuffer());
-  if(!buf.length||buf.length>MAX_ZIP)throw Error('invalid ZIP size');
-  return buf;
+// GitHub's artifact API returns a 302 to a short-lived signed HTTPS URL,
+// not a ZIP directly. Only the GitHub API request receives GITHUB_TOKEN.
+// Never follow that redirect with an Authorization header.
+export async function downloadZip(artifact,token,fetcher=fetch){
+  assert.ok(Number.isSafeInteger(artifact?.id)&&artifact.id>0);
+  if(!token)throw Error('authenticated GitHub artifact metadata required');
+  const response=await fetcher(API+'/actions/artifacts/'+artifact.id+'/zip',{
+    redirect:'manual',signal:AbortSignal.timeout(20000),
+    headers:{
+      accept:'application/vnd.github+json',
+      'x-github-api-version':'2022-11-28',
+      'user-agent':'nession-trusted-pr-pages-acceptance',
+      authorization:'Bearer '+token
+    }});
+  if(response.status!==302)
+    throw Error('GitHub artifact API must return signed 302; HTTP '+response.status);
+  const location=response.headers.get('location');
+  if(!location)throw Error('GitHub artifact redirect is missing Location');
+  let signed;
+  try{signed=new URL(location);}catch{throw Error('invalid artifact redirect URL');}
+  const host=signed.hostname.toLowerCase();
+  if(signed.protocol!=='https:'||signed.username||signed.password||
+    !host||host==='localhost'||host.endsWith('.localhost')||
+    host==='127.0.0.1'||host==='[::1]'||host.endsWith('.internal'))
+    throw Error('invalid artifact redirect origin');
+  // Signed storage URL is independently fetched, without the GitHub token,
+  // with redirects disabled (a second unexpected hop is not authorized).
+  const zip=await fetcher(signed.href,{redirect:'error',
+    signal:AbortSignal.timeout(20000)});
+  if(zip.status!==200)throw Error('signed artifact HTTP '+zip.status);
+  const declared=zip.headers.get('content-length');
+  if(declared!==null&&(!/^\\d+$/.test(declared)||Number(declared)>MAX_ZIP))
+    throw Error('oversized/invalid source artifact length');
+  if(!zip.body)throw Error('signed artifact has no ZIP body');
+  const parts=[];let total=0;
+  for await (const part of zip.body){
+    const buf=Buffer.from(part);
+    total+=buf.length;
+    if(total>MAX_ZIP)throw Error('oversized source artifact stream');
+    parts.push(buf);
+  }
+  if(!total)throw Error('empty source artifact ZIP');
+  if(declared!==null&&Number(declared)!==total)
+    throw Error('source artifact size disagrees with response');
+  return Buffer.concat(parts,total);
 }
 function pick(runs,name,path,sha){
   const selected=runs.filter(r=>r.name===name&&r.path===path&&
@@ -346,7 +383,51 @@ function selfTestFixture(){
   };
   return {data,sha};
 }
-function test(){
+async function test(){
+  const bytes=Buffer.from('PK\\x03\\x04mock source ZIP');
+  const headerMap=o=>({get:key=>o[key]??null});
+  const goodZip={status:200,headers:headerMap({'content-length':String(bytes.length)}),
+    body:(async function*(){yield bytes.slice(0,4);yield bytes.slice(4);})()};
+  const calls=[];
+  const signed='https://productionresultssa1.blob.core.windows.net/artifacts/zip?sig=signed';
+  const fetcher=async(url,options)=>{
+    calls.push({url,options});
+    return calls.length===1?{status:302,headers:headerMap({location:signed})}:goodZip;
+  };
+  assert.deepEqual(await downloadZip({id:777},'test-only-token',fetcher),bytes);
+  assert.equal(calls.length,2);
+  assert.match(calls[0].url,/\\/actions\\/artifacts\\/777\\/zip$/);
+  assert.equal(calls[0].options.headers.accept,'application/vnd.github+json');
+  assert.equal(calls[0].options.headers.authorization,'Bearer test-only-token');
+  assert.equal(calls[0].options.redirect,'manual');
+  assert.equal(calls[1].url,signed);
+  assert.equal(calls[1].options.headers,undefined,
+    'signed storage must never see a GitHub bearer token');
+  assert.equal(calls[1].options.redirect,'error');
+  const rejects=async(first,second,reason)=>{
+    await assert.rejects(()=>downloadZip({id:777},'token',async(url,opts)=>
+      opts.redirect==='manual'?first:second),reason);
+  };
+  await rejects({status:415,headers:headerMap({})},goodZip,/HTTP 415/);
+  await rejects({status:302,headers:headerMap({})},goodZip,/missing Location/);
+  for(const url of ['http://example.com/data','https://localhost/data',
+    'https://127.0.0.1/data','https://user:password@example.com/data',
+    'not-a-URL']){
+    await rejects({status:302,headers:headerMap({location:url})},goodZip,
+      /invalid artifact redirect/);
+  }
+  const signedRedirect={status:302,headers:headerMap({location:signed})};
+  await rejects(signedRedirect,{...goodZip,status:301},/signed artifact HTTP/);
+  await rejects(signedRedirect,{...goodZip,body:null},/no ZIP body/);
+  await rejects(signedRedirect,{...goodZip,headers:
+    headerMap({'content-length':String(MAX_ZIP+1)})},/oversized/);
+  await rejects(signedRedirect,{...goodZip,headers:
+    headerMap({'content-length':'1'})},/size disagrees/);
+  await rejects(signedRedirect,{...goodZip,
+    body:(async function*(){yield Buffer.alloc(MAX_ZIP);yield Buffer.of(1);})()},
+    /oversized source artifact stream/);
+  await rejects(signedRedirect,{...goodZip,
+    body:(async function*(){})(),headers:headerMap({})},/empty source artifact/);
   assert.throws(()=>verifyProtocolPagesEvidence({},'invalid'),/regular expression/);
   assert.throws(()=>verifyProtocolPagesEvidence({issue:{number:ISSUE}},'a'.repeat(40)),
     /open/);
@@ -384,11 +465,11 @@ function test(){
   deny(x=>({...x,ingestRun:{...x.ingestRun,conclusion:'failure'}}));
   deny(x=>({...x,ingestJobs:{jobs:[{...x.ingestJobs.jobs[0],
     steps:x.ingestJobs.jobs[0].steps.slice(0,1)}]}}));
-  console.log('PR Pages acceptance: authenticated fixture and 12 fail-closed negatives passed');
+  console.log('PR Pages acceptance: authenticated fixture, ZIP 302 credential isolation and 12+ fail-closed negatives passed');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===new URL(import.meta.url).pathname){
   const [mode,root,out]=process.argv.slice(2);
-  if(mode==='self-test')test();
+  if(mode==='self-test')test().catch(e=>{console.error(e);process.exitCode=1;});
   else if(mode==='collect'){
     collect({root,token:process.env.GITHUB_TOKEN||process.env.GH_TOKEN,
       issueNumber:process.env.ISSUE_NUMBER,stage:process.env.ACCEPTANCE_STAGE})
