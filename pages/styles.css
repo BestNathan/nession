@@ -297,7 +297,7 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
   .documents-snapshot{gap:7px 13px}
 }
 
-/* Protocol Reference: contract versions are separate from Nession release semvers. */
+/* Protocol Reference: one verified Nession introduction per field, not a matrix. */
 .documents-release-note{font:12px/1.7 "DM Sans",sans-serif;color:var(--muted);
   margin:0 0 20px;max-width:1050px;overflow-wrap:anywhere}
 .documents-versions{display:flex;flex-wrap:wrap;gap:7px;margin:20px 0}
@@ -322,10 +322,12 @@ a{color:inherit;text-decoration:none}a:hover{text-decoration:none}button,a{ -web
 .documents-field-path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
   font-size:11px;color:var(--ink);font-weight:650}
 .documents-field-variant{font-size:11px;color:var(--muted)}
-.documents-version-cell{text-align:center!important;font-weight:700}
-.documents-version-cell.supported,.documents-version-cell.present{color:#28845f}
-.documents-version-cell.unknown{color:#c18f3d}
-.documents-version-cell.not-supported,.documents-version-cell.absent{color:var(--muted)}
+.documents-since{font-size:12px;font-weight:650}
+.documents-since.verified{color:#28845f}
+.documents-since.unknown{color:var(--muted)}
+.documents-since.unreleased{color:#c18f3d}
+.documents-field-description{min-width:180px;white-space:normal!important;
+  color:var(--muted);font-size:12px}
 .documents-no-response{border-left:3px solid var(--line);color:var(--muted);padding:7px 15px;
   font-size:13px}
 .documents-raw{border:1px solid var(--line);border-radius:11px;padding:12px 16px;
