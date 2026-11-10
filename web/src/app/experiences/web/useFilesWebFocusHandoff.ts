@@ -45,6 +45,15 @@ export function useFilesWebFocusHandoff({
     : null;
 
   useEffect(() => {
+    // With no provider there is nothing to resolve; consume the focus so a
+    // later reattach cannot replay an old navigation unexpectedly. The layout
+    // itself renders the explicit source-unavailable state.
+    if (handoffKey && !fileOps) {
+      onFocusConsumed?.();
+    }
+  }, [handoffKey, fileOps, onFocusConsumed]);
+
+  useEffect(() => {
     if (!handoffKey || !path || !fileOps || !sessionId) {
       return;
     }

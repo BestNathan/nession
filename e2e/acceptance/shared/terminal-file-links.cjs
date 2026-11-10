@@ -86,8 +86,9 @@ async function openAppShell(page, expect, runtime, prefix) {
   // Files needs the direct Agent transport; select P2P explicitly instead of
   // relying on the saved/auto preference.
   await page.getByTestId('app-attach-settings-entry').click();
-  await expect(page.getByTestId('app-attach-settings-page')).toBeVisible();
-  await page.getByRole('button', { name: /^P2P\b/ }).click();
+  const settings = page.getByTestId('app-attach-settings-page');
+  await expect(settings).toBeVisible();
+  await settings.getByRole('button', { name: /^P2P\b/ }).click();
   await page.getByTestId('app-attach-settings-submit').click();
   await expect(sheet).toBeVisible();
   const confirm = page.getByTestId('app-attach-confirm');
