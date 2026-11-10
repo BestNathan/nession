@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// #2031: applicability of the canonical Quality and E2E PR sources for one
-// exact change set. The workflow YAML owns `pull_request.paths` routing; this
-// script only interprets that text. An absent source run is `waiting` when the
-// diff is applicable and explicit `not-required` only when it is not.
+// #2031: applicability of canonical Quality and E2E PR producers.
+// GitHub PR trigger scope is the executable source: explicitly allowlisted
+// unfiltered exact-head producers are applicable even for docs-only changes.
+// Their trusted job selectors decide required work; absent runs stay waiting.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +28,7 @@ export function sourceApplicability(changedFiles, {truncated = false, rootDir = 
   for (const [key, file] of Object.entries(WORKFLOWS)) {
     result[key] = isApplicable(
       fs.readFileSync(path.join(rootDir, '.github/workflows', file), 'utf8'),
-      changedFiles,
+      changedFiles, file,
     );
   }
   return result;
@@ -36,28 +36,28 @@ export function sourceApplicability(changedFiles, {truncated = false, rootDir = 
 
 function selfTest() {
   const cases = [
-    ['workflow-only', ['.github/workflows/agent-controller-dispatch.yml'], {quality: true, e2e: false}],
-    ['quality-yaml', ['.github/workflows/ci-quality.yml'], {quality: true, e2e: false}],
-    ['e2e-yaml', ['.github/workflows/e2e-tests.yml'], {quality: true, e2e: true}],
-    ['rust-only', ['crates/nession-server/src/lib.rs'], {quality: true, e2e: true}],
-    ['web-only', ['web/src/App.tsx'], {quality: true, e2e: true}],
-    ['design-only', ['design/tokens.json'], {quality: true, e2e: true}],
-    ['e2e-case', ['e2e/acceptance/cases/1258/SC-03/verify.js'], {quality: true, e2e: true}],
-    ['gate', ['gates/checks/quality.sh'], {quality: true, e2e: true}],
-    ['script', ['scripts/acceptance-dependency-state.mjs'], {quality: true, e2e: true}],
-    ['automation', ['automation/collector.mjs'], {quality: true, e2e: false}],
-    ['clippy', ['clippy.toml'], {quality: true, e2e: false}],
-    ['rust-toolchain', ['rust-toolchain.toml'], {quality: true, e2e: true}],
-    ['cargo-config', ['.cargo/config.toml'], {quality: true, e2e: true}],
-    ['justfile', ['justfile'], {quality: true, e2e: true}],
-    ['docs-only', ['docs/engineering/notes.md'], {quality: false, e2e: false}],
+    ['workflow-only', ['.github/workflows/agent-controller-dispatch.yml']],
+    ['quality-yaml', ['.github/workflows/ci-quality.yml']],
+    ['e2e-yaml', ['.github/workflows/e2e-tests.yml']],
+    ['rust-only', ['crates/nession-server/src/lib.rs']],
+    ['web-only', ['web/src/App.tsx']],
+    ['design-only', ['design/tokens.json']],
+    ['e2e-case', ['e2e/acceptance/cases/1258/SC-03/verify.js']],
+    ['gate', ['gates/checks/quality.sh']],
+    ['script', ['scripts/acceptance-dependency-state.mjs']],
+    ['automation', ['automation/collector.mjs']],
+    ['clippy', ['clippy.toml']],
+    ['rust-toolchain', ['rust-toolchain.toml']],
+    ['cargo-config', ['.cargo/config.toml']],
+    ['justfile', ['justfile']],
+    ['docs-only', ['docs/engineering/notes.md']],
   ];
-  for (const [name, files, expected] of cases) {
+  for (const [name, files] of cases) {
     const actual = sourceApplicability(files);
     assert.deepEqual(
       {quality: actual.quality, e2e: actual.e2e},
-      expected,
-      `${name} applicability mismatch`,
+      {quality:true,e2e:true},
+      `${name} unfiltered exact-head producer must be applicable`,
     );
     assert.equal(actual.truncated, false, `${name} must not claim truncation`);
   }
@@ -76,7 +76,7 @@ function selfTest() {
   assert.throws(() => sourceApplicability(Array.from({length: MAX_FILES + 1}, (_, i) => `f/${i}`)),
     /bounded applicability window/);
   assert.throws(() => sourceApplicability(['x'], {rootDir: path.join(root, 'missing')}), /ENOENT/);
-  console.log(`Acceptance source applicability: ${cases.length} exact-diff fixtures and fail-closed negatives passed`);
+  console.log(`Acceptance source applicability: ${cases.length} unfiltered PR producer fixtures and fail-closed negatives passed`);
 }
 
 function parseFlag(name) {
