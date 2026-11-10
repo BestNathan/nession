@@ -23,7 +23,10 @@ gate_check() {
   }
   local status=0
   if ! git rev-parse --verify --quiet origin/gitops >/dev/null 2>&1; then
-    if ! git fetch --no-tags --depth=1 origin gitops >/dev/null 2>&1; then
+    # A plain `git fetch origin gitops` only populates FETCH_HEAD in a shallow
+    # CI checkout; write the remote-tracking ref the checker reads.
+    if ! git fetch --no-tags --depth=1 origin \
+      gitops:refs/remotes/origin/gitops >/dev/null 2>&1; then
       rm -rf "$root"
       gate_runtime_error \
         "cannot read the gitops deployment branch" \
