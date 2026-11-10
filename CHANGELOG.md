@@ -513,3 +513,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the #3024 prepared EROFS root composition: versioned filesystem.composition input and validation, unprivileged erofsfuse read-only mounts plus fuse-overlayfs upper/work (or writable bind), empty tmpfs + Base Runtime root and toolchain mount ordering, the Base Runtime mountpoint-directory contract, recorded reverse-order unmount and reconciliation, fail-closed helper/digest/macOS behavior, and the exact PR/staging Case and one-time Task evidence (SC-01/02/04/05 Case passes; SC-03 Task receipt labeled untrusted; helpers remain a #3062 packaging prerequisite)
 - Source: https://github.com/BestNathan/nession/issues/3024
+
+## 2026-11-10T04:45:00Z | create | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Record the #3142 overlay system: six surface roles, token-owned compact/standard/wide roles and viewport clamp, one scrim/surface/title vocabulary, body-only scroll with flush opaque footer, token-owned tooltip/anchored/dialog stacking, Experience-scoped popups with the shared control band, first-innermost Escape and dismiss-never-confirms semantics, the #3137 boundary, and the merged PR/SC-01..SC-05/E2E receipts
+- Source: https://github.com/BestNathan/nession/issues/3142
+
+## 2026-11-10T04:45:00Z | update | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Link the new Unified overlay and operation surface system article as the cross-family presentation contract these compositions select from
+- Source: https://github.com/BestNathan/nession/issues/3142

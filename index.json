@@ -201,7 +201,23 @@
           "presentation",
           "responsive"
         ],
-        "updated_at": "2026-11-09T15:56:17Z"
+        "updated_at": "2026-11-10T04:45:00Z"
+      },
+      {
+        "title": "Unified overlay and operation surface system",
+        "description": "One cross-family overlay contract: six roles, token-owned Web size roles and viewport clamp, one scrim/surface/title vocabulary, one scroll owner, explicit tooltip/anchored/dialog stacking, Experience-scoped popups, and first-innermost Escape/dismissal semantics",
+        "path": "topics/web/unified-overlay-and-operation-surface-system.md",
+        "status": "verified",
+        "categories": [
+          "design",
+          "interaction",
+          "overlay",
+          "dialog",
+          "ownership",
+          "web",
+          "app"
+        ],
+        "updated_at": "2026-11-10T04:45:00Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
@@ -294,7 +310,8 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
-      "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
+      "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
+      "topics/web/unified-overlay-and-operation-surface-system.md"
     ],
     "architecture": [
       "topics/engineering/global-erofs-image-manager.md",
@@ -317,7 +334,11 @@
     ],
     "design": [
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
+      "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
+    ],
+    "dialog": [
+      "topics/web/unified-overlay-and-operation-surface-system.md"
     ],
     "e2e": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
@@ -345,6 +366,7 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
+      "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
@@ -364,6 +386,9 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
+    "overlay": [
+      "topics/web/unified-overlay-and-operation-surface-system.md"
+    ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -372,6 +397,7 @@
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
+      "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
@@ -460,6 +486,7 @@
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
+      "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
