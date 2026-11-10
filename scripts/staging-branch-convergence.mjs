@@ -4,7 +4,9 @@
 // push branch refs, waive Gates, or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
-import {planBatch,ensureBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
+import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
+import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
+  convergenceApproval} from './staging-convergence-pr.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -304,7 +306,8 @@ function pendingSyncIntegration(repo,lane,liveMainSha) {
   const tree=shell('git',['merge-tree','--write-tree',lane.sha,pinnedMain]).split(/\s+/)[0];
   if(!SHA.test(tree)||shell('git',['rev-parse',remote+'^{tree}'])!==tree)
     reject('active sync integration tree differs from trusted source');
-  return {branch:pr.head.ref,sha:remote,main_sha:pinnedMain,created:false,reused:true};
+  return {branch:pr.head.ref,sha:remote,main_sha:pinnedMain,created:false,reused:true,
+    pr,native:isNativeConvergencePr(pr)};
 }
 
 function closeSupersededSyncPrs(repo,lane,currentHead) {
@@ -321,9 +324,11 @@ function closeSupersededSyncPrs(repo,lane,currentHead) {
   return closed;
 }
 
-function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
+function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null, batch=null) {
   const found = existingPr(repo, owner, head, base);
   if (found) {
+    if(batch&&!batchIssueNumber&&!found.body?.includes(convergencePrMarker(batch)))
+      reject('existing PR is not a source-bound native convergence batch');
     // Only automation-owned PRs may have their missing source association
     // repaired. A body edit never counts as a successful E2E re-run.
     if(batchIssueNumber && !found.body?.includes('Refs #'+batchIssueNumber)) {
@@ -352,7 +357,11 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
     '**This PR is a proposal, not release or acceptance evidence.**',
     'Preserve merge commits; verify exact-head CI, applicable Acceptance/E2E, conflicts and deployment before merging.',
     'The controller may request a merge commit only after the independent exact-head Gates approve. It never bypasses checks, force-pushes, bumps versions or deploys Production.',
-    ...(batchIssueNumber ? ['', 'Refs #'+batchIssueNumber] : []),
+    ...(batchIssueNumber ? ['', 'Refs #'+batchIssueNumber] :
+      batch ? ['', '- Historical changed paths: '+batch.changedPaths.length,
+        '- Source risk: '+batch.impact.category,
+        '- Selected E2E IDs: '+([...batch.newIds,...batch.regressionIds].join(', ')||'none'),
+        '',convergencePrMarker(batch)] : []),
   ].join('\n');
   try {
     const created = gh(['--method', 'POST', 'repos/' + repo + '/pulls',
@@ -457,27 +466,36 @@ function reconcile(plan) {
         continue;
       }
       let batch=null,batchIssueNumber=null;
+      const legacy=sync&&pinned&&!pinned.native;
       if(sync){
-        // The immutable integration ref was materialized remotely; fetch and
-        // verify the real two-parent Git object before deriving Issue E2E IDs.
+        // Always verify the same exact historical test obligations. New
+        // integrations keep this digest on their PR and never mint an Issue.
         fetchForComparison(integration.branch);
         batch=planBatch({branch:lane.branch,main_sha:syncMainSha,
           lane_sha:lane.sha,integration_head:integration.sha});
-        const prepared=ensureBatchIssue(batch);
-        batchIssueNumber=prepared.issue.number;
-        const approval=issueApproval(batch,batchIssueNumber);
-        if(!approval.approved){
-          const audit=dispatchBatchAudit(repo,prepared.issue);
-          if(audit.status==='BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED')
-            reject('source-bound Issue Audit run inventory too old for safe redispatch');
+        if(legacy){
+          // Transitional, already-open Issue-backed PRs remain valid until
+          // merged or superseded. NEVER create a new legacy batch Issue.
+          const existing=findBatchIssue(batch);
+          if(!existing)reject('legacy integration PR has no existing source Issue');
+          batchIssueNumber=existing.number;
+          const approval=issueApproval(batch,batchIssueNumber);
+          if(!approval.approved){
+            const audit=dispatchBatchAudit(repo,existing);
+            if(audit.status==='BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED')
+              reject('legacy Issue Audit inventory truncated');
+          }
         }
       }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
       const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
-      const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber);
+      const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber,batch);
       const record={branch:lane.branch,direction:action,...receipt,
-        ...(sync?{integration_head:integration.sha,issue_number:batchIssueNumber,
+        ...(sync?{integration_head:integration.sha,
+          batch_digest:convergenceBatchDigest(batch),
+          approval_source:legacy?'legacy_issue':'native_pr',
+          ...(legacy?{issue_number:batchIssueNumber}:{}),
           superseded_prs:superseded}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
@@ -487,7 +505,17 @@ function reconcile(plan) {
         continue;
       }
       if(sync){
-        const approval=issueApproval(batch,batchIssueNumber);
+        let approval;
+        if(legacy)approval=issueApproval(batch,batchIssueNumber);
+        else{
+          const sourcePr=gh(['--method','GET','repos/'+repo+'/pulls/'+receipt.number]);
+          if(sourcePr.head?.sha!==integration.sha||
+             !sourcePr.body?.includes(convergencePrMarker(batch)))
+            reject('native sync PR source/digest mismatch before approval');
+          const comments=gh(['--method','GET','repos/'+repo+'/issues/'+
+            receipt.number+'/comments?per_page=100']);
+          approval=convergenceApproval(batch,comments);
+        }
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
