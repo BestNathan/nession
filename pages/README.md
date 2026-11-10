@@ -61,20 +61,22 @@ Releases, resolves every `vX.Y.Z` Git Tag to its **commit SHA**, and prefers
 a verified immutable `nession-protocol-schema.json` Release asset (envelope
 `schema_version: 1`, `source: {repository, tag, sha, version}`, `schema`
 containing that tag's Rust-generated JSON Schema). Without an asset,
-`pages/scripts/protocol-git-history.mjs` can fetch the exact tag, compare its
-commit SHA to GitHub's resolved tag SHA, create an isolated temporary Git
-worktree, and run the **tag's own** Rust codegen with a credential-free
-environment. The result is cached under its commit SHA. Only the latest eight
-asset-less Releases are auto-reconstructed per build, with missing older
-snapshots shown as `Unknown`, not assumed absent.
+a separate credential-free build step (`generate-protocol-history.mjs`)
+can fetch the exact tag, compare its commit SHA to GitHub's resolved SHA,
+create an isolated temporary Git worktree, and run **that tag's** Rust codegen.
+The result is cached under its commit SHA. Only the latest eight asset-less
+Releases are auto-reconstructed per run; cached older versions remain
+available to the reader. Missing older snapshots show `Unknown`, never
+an assumed absence.
 
-Historical Rust codegen runs without inherited GitHub tokens or the runner's
-HOME/CARGO_HOME, and their compilation is bounded. It executes only repository
-Release-tagged sources; for stricter isolation, history artifacts can be
-produced in a separate read-only job. Older Releases such as v0.35.0 predate
-the generator and therefore remain `Unknown` until a verifiable historical
-schema is available. A future release-asset producer can eliminate repeated
-historical compilation without any manually maintained `since` metadata.
+Historical Rust codegen runs **before** the credentialed publisher step,
+without inherited GitHub tokens or the runner's HOME/CARGO_HOME; its
+compilation is bounded. `build.mjs` is a read-only cache consumer and
+**never executes a historical tag** in the token-bearing process. Older
+Releases such as v0.35.0 predate the generator and therefore remain
+`Unknown` until a verifiable historical schema is available. A future
+Release-asset producer can replace historical compilation without adding
+manually maintained `since` metadata.
 
 The Pages static artifact carries exact main SHA and observed release
 provenance. The Rust generator runs at the pinned main checkout; failure
@@ -87,6 +89,13 @@ tag reconstruction). Set `PAGES_PROTOCOL_CACHE_DIR` to a persistent,
 trusted build cache to reuse previously compiled tag snapshots. Deterministic
 fixtures may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo
 for the current main revision; `PAGES_OFFLINE=1` disables GitHub history reads.
+
+Run `node pages/scripts/generate-protocol-history.mjs` **in a separate,
+credential-free environment** before the credential-bearing Pages
+`node pages/scripts/build.mjs` step. Both commands must share
+`PAGES_PROTOCOL_CACHE_DIR`. The Deploy workflow caches only the
+`schema-<tag-commit-SHA>.json` files, never historical source or build
+outputs.
 
 ## Knowledge Explorer / public reading surface (#2664)
 
