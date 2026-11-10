@@ -162,8 +162,12 @@ point it at a repository or a user directory.
 
 ## Runtime prerequisites
 
-- `mkfs.erofs` from `erofs-utils` on the build host (Ubuntu 24.04 CI installs it
-  for the acceptance Case; the ordinary Rust gates use a deterministic fake).
+- `mkfs.erofs` on the build host. Both Server images ship a pinned build of
+  `erofs-utils` (`deploy/build-erofs-utils.sh`) because Debian bookworm's 1.5
+  package cannot run the V1 argv; Ubuntu CI test hosts install `erofs-utils`
+  for the acceptance Case, and the ordinary Rust gates use a deterministic
+  fake. The `runtime-image-tools` guard covers both the from-source and
+  prebuilt image paths (#3178).
 - Git with normal HTTPS support; no credential is required for a public source.
 - Enough temporary disk for one snapshot plus its image per concurrent build.
 

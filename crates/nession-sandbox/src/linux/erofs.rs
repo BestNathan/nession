@@ -675,3 +675,56 @@ fn hex(bytes: &[u8]) -> String {
     }
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn settings(root: &Path) -> SandboxSettings {
+        let images = root.join("images");
+        std::fs::create_dir_all(&images).unwrap();
+        let mut settings = SandboxSettings::new(
+            root.join("state"),
+            PathBuf::from("/bin/true"),
+            PathBuf::from("/bin/true"),
+            PathBuf::from("/bin/true"),
+        );
+        settings.erofs_image_root = Some(images);
+        settings.erofsfuse_path = root.join("erofsfuse");
+        settings.fusermount_path = root.join("fusermount3");
+        settings.fuse_overlayfs_path = root.join("fuse-overlayfs");
+        settings
+    }
+
+    fn executable(path: &Path) {
+        std::fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[test]
+    fn a_missing_erofsfuse_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let (available, reason) = probe(&settings(root.path()));
+        assert!(!available);
+        assert!(reason.unwrap().contains("erofsfuse"));
+    }
+
+    #[test]
+    fn a_missing_fusermount_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = settings(root.path());
+        executable(&settings.erofsfuse_path);
+        let (available, reason) = probe(&settings);
+        assert!(!available);
+        assert!(reason.unwrap().contains("fusermount3"));
+    }
+
+    #[test]
+    fn a_missing_overlay_helper_reports_overlay_unavailable() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!overlay_available(&settings(root.path())));
+    }
+}
