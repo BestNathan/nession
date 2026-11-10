@@ -129,19 +129,58 @@ export function convergenceApprovalCommand(batch){
   return '/approve-staging-convergence '+batch.integration_head+' '+
     convergenceBatchDigest(batch);
 }
-export function convergenceApproval(batch,comments=[]){
-  if(!Array.isArray(comments)||comments.length>=100)
-    throw Error('unbounded native convergence approval inventory');
-  const command=convergenceApprovalCommand(batch);
-  const selected=batch.newIds.length+batch.regressionIds.length+batch.removed.length;
-  // Pure CI tooling with no runnable test obligations is not an Owner risk
-  // exception; all mixed/runner/runtime/unknown scopes still require approval.
-  if(batch.impact.category==='tooling'&&selected===0)
-    return {approved:true,reason:'SOURCE_BOUND_TOOLING_POLICY',approval_command:command};
-  const owner=comments.some(c=>c?.body?.trim()===command &&
-    c.user?.login==='BestNathan'&&!c.deleted_at);
-  return {approved:owner,reason:owner?'SOURCE_BOUND_OWNER_APPROVED':
-    'OWNER_APPROVAL_REQUIRED',approval_command:command};
+// A fully verified independent Full E2E source run replaces per-batch
+// human approval for risk-bearing known source changes. Missing/failed source
+// evidence never becomes a policy Pass, and unknown or removed test scope
+// cannot be rubber-stamped by either an Owner comment or a model verdict.
+export function fullRegressionTitle(batch){
+  convergenceBatchDigest(batch); // validate immutable source/plan identity
+  return 'Convergence Full '+integrationBranch(batch.branch,
+    batch.main_sha,batch.lane_sha)+'@'+batch.integration_head;
+}
+export function attestConvergenceFull(batch,run,jobs=[]){
+  const title=fullRegressionTitle(batch);
+  if(!run||run.name!=='E2E / Full Regression'||
+    run.path?.split('@')[0]!=='.github/workflows/e2e-full-regression.yml'||
+    run.display_title!==title||run.event!=='workflow_dispatch'||
+    run.head_branch!=='main'||run.repository?.full_name!==REPO||
+    run.head_repository?.full_name!==REPO||
+    run.status!=='completed'||run.conclusion!=='success'||
+    !Number.isSafeInteger(run.id)||run.id<=0||
+    !Number.isSafeInteger(run.run_attempt)||run.run_attempt<=0||
+    !Array.isArray(jobs)||jobs.length>100)return null;
+  const full=jobs.filter(j=>j.name==='full'&&
+    j.run_id===run.id&&j.run_attempt===run.run_attempt);
+  if(full.length!==1||full[0].status!=='completed'||
+      full[0].conclusion!=='success')return null;
+  const completed=new Set((full[0].steps??[])
+    .filter(step=>step.status==='completed'&&step.conclusion==='success')
+    .map(step=>step.name));
+  for(const step of ['Resolve immutable branch/SHA target',
+      'Run full canonical Playwright suite at pinned SHA',
+      'Verify complete per-ID assertions']){
+    if(!completed.has(step))return null;
+  }
+  return {verified:true,source_head_sha:batch.integration_head,
+    batch_digest:convergenceBatchDigest(batch),
+    run_id:run.id,run_attempt:run.run_attempt};
+}
+export function convergenceApproval(batch,fullReceipt=null){
+  const digest=convergenceBatchDigest(batch);
+  if(batch.impact.category==='unknown')
+    return {approved:false,reason:'UNCLASSIFIED_BATCH_SCOPE'};
+  if(batch.removed.length>0)
+    return {approved:false,reason:'REMOVED_E2E_TESTS_REQUIRE_SOURCE_REPAIR'};
+  if(batch.impact.category==='tooling-only' &&
+      batch.newIds.length===0&&batch.regressionIds.length===0)
+    return {approved:true,reason:'AUTOMATED_TOOLING_SOURCE_POLICY'};
+  if(!fullReceipt?.verified||fullReceipt.source_head_sha!==batch.integration_head||
+      fullReceipt.batch_digest!==digest||
+      !Number.isSafeInteger(fullReceipt.run_id)||fullReceipt.run_id<=0)
+    return {approved:false,reason:'AWAITING_EXACT_HEAD_FULL_E2E',
+      full_run_title:fullRegressionTitle(batch)};
+  return {approved:true,reason:'AUTOMATED_VERIFIED_FULL_E2E',
+    full_run_id:fullReceipt.run_id};
 }
 export function selfTest(){
   const a='a'.repeat(40),b='b'.repeat(40),c='c'.repeat(40);
@@ -153,15 +192,36 @@ export function selfTest(){
   assert.match(convergencePrMarker(batch),/nession-convergence-pr:v1/);
   assert.notEqual(convergenceBatchDigest({...batch,changedPaths:['scripts/b.mjs']}),digest);
   assert.notEqual(convergenceBatchDigest({...batch,impact:{category:'tooling'}}),digest);
-  assert.equal(convergenceApproval(batch,[]).approved,false);
-  assert.equal(convergenceApproval(batch,[{body:convergenceApprovalCommand(batch),
-    user:{login:'BestNathan'}}]).approved,true);
-  assert.equal(convergenceApproval(batch,[{body:convergenceApprovalCommand(batch),
-    user:{login:'untrusted'}}]).approved,false);
-  assert.equal(convergenceApproval({...batch,impact:{category:'tooling'}},[]).approved,true);
-  assert.equal(convergenceApproval({...batch,impact:{category:'tooling'},
-    regressionIds:['login']},[]).approved,false);
-  assert.throws(()=>convergenceApproval(batch,new Array(100)),/unbounded/);
+  assert.equal(convergenceApproval(batch).reason,'AWAITING_EXACT_HEAD_FULL_E2E');
+  assert.equal(convergenceApproval(batch,{verified:true,source_head_sha:c,
+    batch_digest:digest,run_id:777}).approved,true);
+  assert.equal(convergenceApproval({...batch,impact:{category:'tooling-only'}}).approved,true);
+  assert.equal(convergenceApproval({...batch,impact:{category:'unknown'}}).reason,
+    'UNCLASSIFIED_BATCH_SCOPE');
+  assert.equal(convergenceApproval({...batch,removed:['deleted-test']}).reason,
+    'REMOVED_E2E_TESTS_REQUIRE_SOURCE_REPAIR');
+  const fullTitle=fullRegressionTitle(batch);
+  assert.match(fullTitle,/^Convergence Full chore\/staging-sync-/);
+  const run={id:777,run_attempt:2,name:'E2E / Full Regression',
+    path:'.github/workflows/e2e-full-regression.yml@refs/heads/main',
+    display_title:fullTitle,event:'workflow_dispatch',
+    head_branch:'main',repository:{full_name:REPO},
+    head_repository:{full_name:REPO},status:'completed',conclusion:'success'};
+  const fullJob={name:'full',run_id:777,run_attempt:2,
+    status:'completed',conclusion:'success',
+    steps:['Resolve immutable branch/SHA target',
+      'Run full canonical Playwright suite at pinned SHA',
+      'Verify complete per-ID assertions'].map(name=>({
+        name,status:'completed',conclusion:'success'}))};
+  const fullReceipt=attestConvergenceFull(batch,run,[fullJob]);
+  assert.ok(fullReceipt?.verified);
+  assert.equal(convergenceApproval(batch,fullReceipt).approved,true);
+  assert.equal(attestConvergenceFull(batch,{...run,conclusion:'failure'},[fullJob]),null);
+  assert.equal(attestConvergenceFull(batch,{...run,display_title:'other'},[fullJob]),null);
+  assert.equal(attestConvergenceFull(batch,run,[{...fullJob,run_attempt:1}]),null);
+  assert.equal(attestConvergenceFull(batch,run,[{...fullJob,steps:fullJob.steps.slice(1)}]),null);
+  assert.equal(attestConvergenceFull(batch,run,[{...fullJob,conclusion:'skipped'}]),null);
+  assert.equal(convergenceApproval(batch,{...fullReceipt,source_head_sha:a}).approved,false);
   assert.throws(()=>convergenceBatchDigest({...batch,branch:'bad..branch'}),/invalid/);
   // Real Git object graph: test source-scope reconstruction, historical
   // changed-browser-ID selection, later Main advance and merged-push proof.
