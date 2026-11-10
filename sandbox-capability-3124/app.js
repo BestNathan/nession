@@ -9,7 +9,7 @@
   var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,resourceRows:[],syscallRows:[]};
   function cloneDraft(d){return Object.assign({},d,{resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)})});}
   var activeEffective=cloneDraft(Object.assign({},defaultDraft,{resourceRows:[{id:101,key:"memory.max",value:"2147483648"}],syscallRows:[{id:102,key:"seccomp.profile",value:"nession-interactive-v1"}]}));
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:cloneDraft(defaultDraft),nextRowId:1,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:cloneDraft(defaultDraft),nextRowId:1,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
   var execution="sbx-70df40f4";
@@ -153,24 +153,89 @@
   function toggler(id,label,checked,disabled){
     return '<label><input type="checkbox" data-draft="'+id+'" '+(checked?'checked':'')+' '+(disabled?'disabled':'')+'>'+label+'</label>';
   }
+
+  var compositionClusters=[
+    {label:"执行环境",subtitle:"进程看到的文件与工作目录",groups:["filesystem"]},
+    {label:"隔离边界",subtitle:"网络可达性与命名空间",groups:["network","process"]},
+    {label:"执行约束",subtitle:"原生控制文件与安全过滤",groups:["resource","syscall"]}
+  ];
+  var dimensionNames={filesystem:"Filesystem",network:"Network",process:"Process",resource:"Resource",syscall:"Syscall"};
+  function compositionState(d,id,observed){
+    var s=settings(),unavailable=s.macos&&(id==="resource"||id==="syscall"||id==="process");
+    var entries=[],active=false,description="";
+    if(id==="filesystem"){
+      var reads=(d.readOnly||"").split(",").filter(function(x){return !!x.trim()});
+      var writes=(d.write||"").split(",").filter(function(x){return !!x.trim()});
+      active=reads.length+writes.length>0;
+      description=active?reads.length+" 只读路径 · "+writes.length+" 可写路径":"无额外路径白名单；仅后端基础挂载";
+      if(s.macos)description="该 backend 的路径隔离能力需按 Agent 实测";
+    }else if(id==="network"){
+      active=true;
+      description=(d.network||"allow")+" · "+(d.network==="restricted"?(d.egress||"").split(",").filter(Boolean).length+" 个允许目标":"无自定义 egress 列表");
+    }else if(id==="process"){
+      entries=["pid","ipc","user"].filter(function(k){return !!d[k]});
+      active=entries.length>0;
+      description=active?"Namespaces: "+entries.map(function(x){return x.toUpperCase()}).join(" / "):"没有额外申请 Linux namespace";
+    }else{
+      entries=d[id+"Rows"]||[];active=entries.length>0;
+      description=active?entries.length+" 条 · "+entries.map(function(x){return x.key||"未填写 Key"}).slice(0,2).join("、")+(entries.length>2?" 等":""):"未添加额外控制";
+    }
+    var kind=unavailable?"unavailable":observed?(active?"observed":"not-requested"):(active?"requested":"not-requested");
+    return {key:id,name:dimensionNames[id],kind:kind,summary:description,count:entries.length};
+  }
+  function compositionOverview(d,observed,selectable){
+    var classes=observed?" observed":selectable?" editable":"";
+    var header='<div class="composition-header"><div><h3>'+(observed?"当前生效组合 · Effective Composition":"Sandbox 组合 · Policy Composition")+'</h3>'+
+      '<p class="subline">'+(observed?"当前 Pane 的 Agent 观测结果（示例 Mock）；不可编辑或沿用上次草稿。":"组合以下五个策略维度，集中提交给同一次 Sandbox Enter；点击分组编辑。")+'</p></div>'+
+      '<span class="pill">'+(observed?"Observed / read-only":"Draft / requested")+'</span></div>';
+    var groups=compositionClusters.map(function(cluster){
+      return '<section class="composition-cluster"><div class="composition-cluster-head"><strong>'+cluster.label+'</strong><span>'+cluster.subtitle+'</span></div>'+
+        cluster.groups.map(function(id){
+          var p=compositionState(d,id,observed),selected=selectable&&state.openGroup===id;
+          var status={unavailable:"当前不可用",observed:"示例已生效",requested:"已申请", "not-requested":"未申请"}[p.kind];
+          var core='<span class="composition-row-main"><span class="composition-name">'+p.name+'</span>'+
+            '<span class="composition-summary">'+escapeHtml(p.summary)+'</span></span>'+
+            '<span class="composition-state '+p.kind+'">'+status+'</span>'+
+            (selectable?'<span class="composition-chevron" aria-hidden="true">'+(selected?"−":"›")+'</span>':'');
+          return selectable?'<button type="button" class="composition-row'+(selected?' selected':'')+'" data-action="select-policy:'+id+'" aria-pressed="'+selected+'" aria-label="Edit '+p.name+'">'+core+'</button>':
+            '<div class="composition-row static" data-composition-dimension="'+id+'">'+core+'</div>';
+        }).join("")+'</section>';
+    }).join("");
+    return '<section data-testid="sandbox-composition" class="policy-composition'+classes+'" aria-label="'+(observed?"Effective Sandbox composition":"Draft Sandbox composition")+'">'+header+groups+'</section>';
+  }
+  function policyJson(d,title,always){
+    var view=always||state.showPolicyJson;
+    return '<section class="policy-json-section">'+
+      (always?'<div class="policy-json-heading"><h3>'+title+'</h3><span class="subtxt">只读 · 合成协议视图</span></div>':
+        '<button type="button" class="action policy-json-trigger" data-action="toggle-policy-json" aria-expanded="'+state.showPolicyJson+'">'+(view?"收起组合 Policy JSON":"查看组合 Policy JSON")+'</button>')+
+      (view?'<pre data-testid="sandbox-composed-json" class="policy-json" aria-label="'+title+'">'+escapeHtml(JSON.stringify(policyProjection(d),null,2))+'</pre>':'')+
+      '</section>';
+  }
   function editor(){
-    var d=state.draft,s=settings(),m=s.macos;
-    var disabled=m?' disabled':'';
-    return '<section class="policy-editor" data-testid="sandbox-policy-editor" aria-label="Sandbox Policy Draft">'+
-      '<div class="policy-group"><div><h3>Filesystem</h3><div class="hint2">'+(m?'macOS 本地路径白名单不可保证':'绝对路径 · 按读写权限显式挂载')+'</div></div><div class="policy-fields">'+
-      configInput('readOnly','Read-only paths',m?'':d.readOnly,'input','full'+(m?' unavailable':''))+
-      configInput('write','Writable paths',m?'':d.write,'input','full'+(m?' unavailable':''))+
-      '</div></div>'+
-      '<div class="policy-group"><div><h3>Network</h3><div class="hint2">V1 仅支持 Ingress deny</div></div><div class="policy-fields">'+
-      configInput('network','Network mode',d.network,'select')+
-      configInput('egress','Restricted egress allow',d.egress,'input',d.network==='restricted'?'':'unavailable')+
-      '</div></div>'+
-      '<div class="policy-group"><div><h3>Process</h3><div class="hint2">Linux namespaces</div></div><div class="checkrow">'+
-      toggler('pid','PID',d.pid,m)+toggler('ipc','IPC',d.ipc,m)+toggler('user','USER',d.user,m)+
-      (m?'<span class="subtxt">macOS 不提供 Linux namespaces</span>':'')+'</div></div>'+
-      '<div class="policy-group"><div><h3>Resource</h3><div class="hint2">Linux cgroup v2 · KV</div></div>'+kvRows("resource",m)+'</div>'+
-      '<div class="policy-group"><div><h3>Syscall</h3><div class="hint2">Linux seccomp · KV</div></div>'+kvRows("syscall",m)+'</div>'+
-      '<div class="extra-dim">Enforcement: <strong>required</strong> · Draft Policy v1 · 目标：同一 Session 的新隔离 Pane。不会对已有 Native PID 追加限制。</div></section>';
+    var d=state.draft,m=settings().macos;
+    var key=state.openGroup;
+    var head='<section class="policy-editor" data-testid="sandbox-policy-editor" aria-label="Sandbox Policy Draft">'+
+      '<div class="editor-focus-head"><div><h3>'+dimensionNames[key]+'</h3><p class="subline">当前只编辑此组。切换分组不会丢失草稿，也不会重新校验。</p></div>'+
+      '<span class="pill">Policy v1</span></div>';
+    var fields='';
+    if(key==="filesystem"){
+      fields='<div class="policy-group focus-group"><div><h3>Filesystem Access</h3><div class="hint2">'+(m?'macOS 的本地路径白名单以实测为准':'显式路径授权；预制 EROFS composition 是另一种互斥的执行输入')+'</div></div><div class="policy-fields">'+
+        configInput('readOnly','Read-only paths',m?'':d.readOnly,'input','full'+(m?' unavailable':''))+
+        configInput('write','Writable paths',m?'':d.write,'input','full'+(m?' unavailable':''))+'</div></div>';
+    }else if(key==="network"){
+      fields='<div class="policy-group focus-group"><div><h3>Network</h3><div class="hint2">mode + egress，当前 V1 ingress deny</div></div><div class="policy-fields">'+
+        configInput('network','Network mode',d.network,'select')+
+        configInput('egress','Restricted egress allow',d.egress,'input',d.network==='restricted'?'':'unavailable')+'</div></div>';
+    }else if(key==="process"){
+      fields='<div class="policy-group focus-group"><div><h3>Process</h3><div class="hint2">原生 Linux namespaces</div></div><div class="checkrow">'+
+        toggler('pid','PID',d.pid,m)+toggler('ipc','IPC',d.ipc,m)+toggler('user','USER',d.user,m)+
+        (m?'<span class="subtxt">macOS 不提供 Linux namespaces</span>':'')+'</div></div>';
+    }else if(key==="resource"){
+      fields='<div class="policy-group focus-group"><div><h3>Resource</h3><div class="hint2">Agent 发现 · Linux cgroup v2 原生 Key/Value</div></div>'+kvRows("resource",m)+'</div>';
+    }else if(key==="syscall"){
+      fields='<div class="policy-group focus-group"><div><h3>Syscall</h3><div class="hint2">Agent 注册的 seccomp profile</div></div>'+kvRows("syscall",m)+'</div>';
+    }
+    return head+fields+'<div class="extra-dim">Enforcement: <strong>required</strong> · 一份 Policy，作用于新隔离 Pane；不是整个 Session。</div></section>';
   }
   function policyDescription(d){
     return '<div class="dimlist">'+
@@ -192,8 +257,9 @@
   }
   function insideView(){
     return '<h3>Inside Sandbox</h3><div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
-       '<section class="info-section"><h3>当前生效配置 · Effective Policy</h3><p class="subline">只读：由 Agent 的实际执行记录返回，不是上次保存的编辑草稿。</p>'+
-       policyDescription(actualPolicy())+'</section>'+
+       '<section class="info-section">'+compositionOverview(actualPolicy(),true,false)+
+       '<div class="effective-dimension-details"><h3>生效值明细</h3>'+policyDescription(actualPolicy())+'</div>'+
+       policyJson(actualPolicy(),"Effective Policy JSON",false)+'</section>'+
        '<div class="actionline"><button class="action primary" data-action="detail">查看验证信息 →</button><button class="action" data-action="return-native">← 返回 Native Pane</button></div>'+
        '<p class="extra-dim">Return to Native 仅切换焦点。原 Sandbox Pane 保持运行，不是终止或清理命令。</p>';
   }
@@ -223,7 +289,9 @@
       line('当前 Pane','Native · %1')+'</div>'+
       '<div class="info-section"><h3>配置 Sandbox</h3><p class="subline">填写 Policy 草稿，预检后明确 Enter；启动新的隔离 Pane，原 Native Pane 不变。</p>'+
       '<div style="max-width:530px;margin-top:12px">'+configInput('workingDir','Start working directory',state.draft.workingDir,'input')+'</div>'+
-      editor()+'</div>';
+      compositionOverview(state.draft,false,true)+
+      editor()+
+      policyJson(state.draft,"Composed Policy JSON",false)+'</div>';
     if(state.preflight==='passed')c+='<div data-preflight-status class="notice success validated"><strong>预检通过</strong> · Policy 语法与当前 Agent 能力匹配（仅模拟）。进入时还需重新校验实际主机并验证执行机制。</div>';
     if(state.preflight==='failed')c+='<div data-preflight-status class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
     if(state.error)c+='<div class="notice danger validated" role="alert"><strong>Enter 失败</strong> · '+escapeHtml(state.error)+'。仍位于原 Native Pane，草稿已保留。</div>';
@@ -235,13 +303,17 @@
   function confirmation(){
     return '<div class="statusline"><span class="pill strong">Ready to Enter · explicit confirmation</span></div>'+
        '<div class="notice warning"><strong>确认进入隔离执行环境：</strong>将在当前 tmux Session 中新建 Sandbox Pane；Agent 必须在启动 shell 前验证请求的全部机制。原 Native Pane 保留。失败不会向原 Pane 发送命令，也不会声称已受保护。</div>'+
-       '<section class="info-section"><h3>即将使用的 Policy 草稿</h3>'+policyDescription(state.draft)+'</section>'+
+       '<section class="info-section">'+compositionOverview(state.draft,false,false)+
+       policyJson(state.draft,"确认提交 · 完整 Policy JSON",true)+
+       '<p class="subline">Target: nession-dev · Native Pane %1 → 新隔离 Pane · policy revision v1 · Mock Agent generation '+escapeHtml(agentFieldCatalog().generation)+'</p></section>'+
        '<div class="actionline"><button class="action" data-action="cancel-enter">返回修改</button><button class="action primary" data-action="confirm-enter">确认 Enter Sandbox</button></div>';
   }
   function detail(){
     if(!settings().inside)return '<div class="notice danger">当前 Pane 没有可验证的 SandboxExecution。</div>';
     return '<div class="notice warning">以下配置由当前 Pane 的 SandboxExecution 验证，并不约束 Native Pane 或共享 tmux server。</div>'+
-      '<section class="info-section"><h3>生效策略 · 当前 Pane</h3>'+policyDescription(actualPolicy())+'</section>'+diagnostics()+
+      '<section class="info-section">'+compositionOverview(actualPolicy(),true,false)+
+      '<div class="effective-dimension-details"><h3>生效策略明细 · 当前 Pane</h3>'+policyDescription(actualPolicy())+'</div>'+
+      policyJson(actualPolicy(),"Effective Policy JSON",false)+'</section>'+diagnostics()+
       '<div class="actionline"><button class="action" data-action="detail-back">← 返回 Sandbox 概览</button></div>';
   }
   function sandbox(){
@@ -281,7 +353,7 @@
     var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
     mock.setAttribute("data-mode",state.mode);
     mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
-    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
+    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),selected_policy_group:state.openGroup,show_policy_json:state.showPolicyJson,composition:compositionClusters.map(function(cluster){return {cluster:cluster.label,dimensions:cluster.groups.map(function(key){return compositionState(settings().inside?actualPolicy():state.draft,key,settings().inside)})}}),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
     var target=mock.querySelector('.cap-item[aria-current="page"]');
     if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
@@ -293,7 +365,7 @@
     state.preflight="none";
     state.preflightError="";
     state.error="";
-    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;
+    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.openGroup="filesystem";state.showPolicyJson=false;
     state.entered=false;
     state.pane=value==="active"?"sandbox":"native";
     state.effective=value==="active"?cloneDraft(activeEffective):null;
@@ -345,10 +417,15 @@
     else if(action==="toggle-peek"){state.peek=!state.peek;}
     else if(action==="detail"){state.depth="detail";}
     else if(action==="detail-back"){state.depth="root";}
+    else if(action.indexOf("select-policy:")===0){
+      var group=action.slice("select-policy:".length);
+      if(Object.prototype.hasOwnProperty.call(dimensionNames,group))state.openGroup=group;
+    }
+    else if(action==="toggle-policy-json"){state.showPolicyJson=!state.showPolicyJson;}
     else if(action.indexOf("add-kv:")===0){
       var kind=action.slice(7);
       if((kind==="resource"||kind==="syscall")&&!settings().macos){
-        state.draft[kind+"Rows"].push({id:state.nextRowId++,key:"",value:""});
+        state.draft[kind+"Rows"].push({id:state.nextRowId++,key:"",value:""});state.openGroup=kind;
         state.preflight="none";state.preflightError="";state.error="";
       }
     }
