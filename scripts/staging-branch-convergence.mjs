@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
 import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
 import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
-  convergenceApproval} from './staging-convergence-pr.mjs';
+  convergenceApproval,fullRegressionTitle,latestConvergenceFull,
+  attestConvergenceFull} from './staging-convergence-pr.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -402,6 +403,52 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null, batch=nu
   }
 }
 
+// Trusted, exact-source Full E2E is the automated substitute for manual
+// approval of a risk-bearing source batch. A completed failing Full blocks;
+// no manual comment, extra dispatch or stale historical green waives it.
+function nativeFullDecision(repo,batch,sourcePr){
+  const policy=convergenceApproval(batch);
+  if(policy.approved||policy.reason!=='AWAITING_EXACT_HEAD_FULL_E2E')
+    return policy;
+  const reader=process.env.READ_GITHUB_TOKEN;
+  const dispatcher=process.env.DISPATCH_GITHUB_TOKEN;
+  if(!reader||!dispatcher)reject('trusted Full evidence tokens unavailable');
+  const since=String(sourcePr.created_at??'').slice(0,10);
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(since))
+    reject('native source PR creation fence missing');
+  const readArgs={env:{...process.env,GH_TOKEN:reader}};
+  const inventory=JSON.parse(shell('gh',['api','--method','GET',
+    'repos/'+repo+'/actions/workflows/e2e-full-regression.yml/runs',
+    '-f','event=workflow_dispatch','-f','created=>='+since,
+    '-f','per_page=100'],readArgs));
+  if(!Array.isArray(inventory.workflow_runs)||inventory.workflow_runs.length>=100)
+    reject('unbounded native Full E2E inventory; no approval granted');
+  const run=latestConvergenceFull(batch,inventory.workflow_runs);
+  if(!run){
+    shell('gh',['api','--method','POST',
+      'repos/'+repo+'/actions/workflows/e2e-full-regression.yml/dispatches',
+      '-f','ref=main',
+      '-f','inputs[target_ref]='+sourcePr.head.ref,
+      '-f','inputs[target_sha]='+batch.integration_head],
+      {env:{...process.env,GH_TOKEN:dispatcher}});
+    return {approved:false,reason:'EXACT_HEAD_FULL_E2E_DISPATCHED',
+      full_run_title:fullRegressionTitle(batch)};
+  }
+  if(run.status!=='completed')return {approved:false,
+    reason:'AWAITING_EXACT_HEAD_FULL_E2E',full_run_id:run.id};
+  if(run.conclusion!=='success')return {approved:false,
+    reason:'EXACT_HEAD_FULL_E2E_FAILED',full_run_id:run.id,
+    full_run_url:run.html_url};
+  const jobs=JSON.parse(shell('gh',['api','--method','GET',
+    'repos/'+repo+'/actions/runs/'+run.id+'/attempts/'+
+      run.run_attempt+'/jobs','-f','per_page=100'],readArgs));
+  if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
+    reject('unbounded exact-attempt Full E2E jobs');
+  const receipt=attestConvergenceFull(batch,run,jobs.jobs);
+  const result=convergenceApproval(batch,receipt);
+  return {...result,full_run_id:run.id,full_run_url:run.html_url};
+}
+
 function dispatchBatchAudit(repo,issue){
   const token=process.env.DISPATCH_GITHUB_TOKEN;
   if(!token)reject('trusted Issue Audit dispatcher token missing');
@@ -581,17 +628,16 @@ function reconcile(plan) {
           if(sourcePr.head?.sha!==integration.sha||
              !sourcePr.body?.includes(convergencePrMarker(batch)))
             reject('native sync PR source/digest mismatch before approval');
-          const comments=gh(['--method','GET','repos/'+repo+'/issues/'+
-            receipt.number+'/comments?per_page=100']);
-          approval=convergenceApproval(batch,comments);
+          approval=nativeFullDecision(repo,batch,sourcePr);
         }
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
           if(legacy)record.issue_approval_command=approval.approval_command;
           else{
-            record.pr_approval_command=approval.approval_command;
-            record.approval_pr_url=receipt.url;
+            if(approval.full_run_id)record.full_run_id=approval.full_run_id;
+            if(approval.full_run_url)record.full_run_url=approval.full_run_url;
+            if(approval.full_run_title)record.full_run_title=approval.full_run_title;
           }
           results.push(record);
           continue;
