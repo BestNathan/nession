@@ -47,6 +47,14 @@ function codegenEnvironment(cacheDir,checkoutDir){
     CI:'true',
   };
 }
+// The privileged Pages publisher may consume cache entries, but MUST NEVER
+// execute historical Cargo code. Its caller separately verifies tag -> SHA
+// against the official GitHub Release before reading this SHA-keyed snapshot.
+export async function cachedTaggedProtocolSchema({tag,sha,cacheDir}){
+  if(!TAG.test(tag||'')||!SHA.test(sha||''))return null;
+  const cache=resolve(cacheDir||join(tmpdir(),'nession-pages-protocol-cache'));
+  return readCache(join(cache,'schema-'+sha+'.json'),tag,sha);
+}
 export async function taggedProtocolSchema({tag,sha,repoRoot,cacheDir,command=shell}){
   if(!TAG.test(tag||'')||!SHA.test(sha||'')||!repoRoot)return null;
   const root=resolve(repoRoot);
