@@ -5,7 +5,7 @@ topic: engineering
 categories: ["agent","architecture","sandbox","security"]
 status: candidate
 created_at: 2026-11-03T08:52:21.743Z
-updated_at: 2026-11-10T04:59:00Z
+updated_at: 2026-11-10T11:18:40Z
 sources: ["https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/issues/3124","https://github.com/BestNathan/nession/pull/3066","https://github.com/BestNathan/nession/blob/59e0bbbe380e678a88e331c8b0fe131cfbe2fd48/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/1987709a23240312758663c4a522d53b8abd5033/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/0173f403c6d791e9d8152e196dad288fce113e66/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/943e9e7f43265cbd7199c9979e6a8bf7d8f55f06/environments/staging/nession/patch-agent-sandbox.yaml","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/session-tmux-sdk-ownership.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/architecture/agent-process-discovery.md","https://github.com/BestNathan/nession/blob/cbd20ff8ea2e5d45850aef5c17287083eee9922a/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/issues/3024", "https://github.com/BestNathan/nession/pull/3135", "https://github.com/BestNathan/nession/blob/27c200961bb3a95aed9cd7368062a099a633e2d4/docs/architecture/sandbox-policy-and-execution.md", "https://github.com/BestNathan/nession/blob/27c200961bb3a95aed9cd7368062a099a633e2d4/crates/nession-sandbox/src/linux/erofs.rs", "https://github.com/BestNathan/nession/blob/27c200961bb3a95aed9cd7368062a099a633e2d4/crates/nession-sandbox/src/policy.rs", "https://github.com/BestNathan/nession/blob/27c200961bb3a95aed9cd7368062a099a633e2d4/crates/nession-sandbox/src/linux/bwrap.rs", "https://github.com/BestNathan/nession/blob/27c200961bb3a95aed9cd7368062a099a633e2d4/crates/nession-sandbox/tests/linux_runtime.rs"]
 ---
 
@@ -211,6 +211,7 @@ macOS sandbox-exec is deprecated and should be treated as a version-probed, risk
 
 ### Related knowledge
 
+- [Nession runtime directories and daemon process state ownership](nession-runtime-directories-and-daemon-process-state-ownership.md) — where Agent/Server PID and readiness state lives is a separate daemon-lifecycle boundary, not part of Sandbox confinement.
 - [Web terminal emulator engine and component ownership](../terminal/web-terminal-emulator-engine-and-component-ownership.md) — xterm/terminal transport ownership stays separate from Sandbox process isolation.
 - [Nession instruction architecture and knowledge ownership](nession-instruction-architecture-and-knowledge-ownership.md) — source and current-knowledge ownership rules.
 - [Files capability identity, creation context and safe mutation ownership](../web/files-capability-identity-creation-context-and-safe-mutation-ownership.md) — Agent-host Files resolves and writes through an explicit source; its browse root is not a SandboxPolicy or isolation guarantee.

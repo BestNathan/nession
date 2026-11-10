@@ -63,6 +63,21 @@
         "updated_at": "2026-11-03T09:34:15Z"
       },
       {
+        "title": "Nession runtime directories and daemon process state ownership",
+        "description": "OS-scoped runtime roots for Agent/Server PID and readiness state, private-directory safety, service-manager pinning and legacy home-relative migration",
+        "path": "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "cli",
+          "lifecycle",
+          "process",
+          "security",
+          "storage"
+        ],
+        "updated_at": "2026-11-10T11:18:40Z"
+      },
+      {
         "title": "Nession Sandbox policy and execution isolation architecture",
         "description": "Approved policy boundaries, native OS mechanisms, prepared EROFS root composition, network domain controls, backend ownership, and persistent tmux execution constraints",
         "path": "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
@@ -73,7 +88,7 @@
           "sandbox",
           "security"
         ],
-        "updated_at": "2026-11-10T04:59:00Z"
+        "updated_at": "2026-11-10T11:18:40Z"
       },
       {
         "title": "Project declaration and Workspace location ownership",
@@ -315,6 +330,7 @@
     ],
     "architecture": [
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
@@ -328,6 +344,9 @@
     "ci": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+    ],
+    "cli": [
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
     "delivery": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
@@ -375,6 +394,9 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
+    "lifecycle": [
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
+    ],
     "media": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
@@ -408,6 +430,9 @@
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md"
+    ],
+    "process": [
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
     "project": [
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -447,6 +472,7 @@
     ],
     "security": [
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
@@ -468,7 +494,8 @@
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "storage": [
-      "topics/engineering/global-erofs-image-manager.md"
+      "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
     "terminal": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",

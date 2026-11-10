@@ -542,3 +542,17 @@
 - Reason: Document the real orphan-create trigger failure and its corrected owner Issue-comment handoff to the protected Knowledge Publisher without lowering CAS or security gates (Issue #3156)
 - Source: https://github.com/BestNathan/nession/issues/3156
 
+## 2026-11-10T11:18:40Z | create | Nession runtime directories and daemon process state ownership
+- Path: topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, security, storage
+- Reason: Record #3155: OS-scoped runtime roots for Agent/Server PID and readiness state, the Linux XDG/root and macOS per-user default contract, private-directory and symlink/ownership rejection, explicit --pid-file authority, legacy home-relative identity-based migration and fail-closed handling, and service-manager state-file pinning
+- Source: https://github.com/BestNathan/nession/issues/3155
+
+## 2026-11-10T11:18:40Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Add the inbound related-knowledge link to the new runtime-directories article, keeping daemon lifecycle state ownership distinct from Sandbox confinement (#3155)
+- Source: https://github.com/BestNathan/nession/issues/3155
+
