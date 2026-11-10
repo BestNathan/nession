@@ -123,7 +123,7 @@
     const rows = locations.length ? '<div class="locations-stack">'+locations.map((loc,i)=>
       '<div class="location-editor" data-location-editor="'+i+'">'+
       '<label class="field"><span class="label">Agent</span><select name="agent-'+i+'" aria-label="Agent '+(i+1)+'"><option'+(loc.agent==='Build Agent'?' selected':'')+'>Build Agent</option><option'+(loc.agent==='Test Agent'?' selected':'')+'>Test Agent</option></select></label>'+
-      '<label class="field"><span class="label">Directory</span><textarea class="project-path-input" aria-label="Directory '+(i+1)+'" name="directory-'+i+'" rows="'+(app?3:1)+'" placeholder="/workspace/project">'+esc(loc.path)+'</textarea></label>'+
+      '<label class="field"><span class="label">Directory</span><textarea class="project-path-input" aria-label="Directory '+(i+1)+'" name="directory-'+i+'" rows="1" placeholder="/workspace/project">'+esc(loc.path)+'</textarea></label>'+
       button(app?'Remove':'×','remove-location','ghost remove-location','data-idx="'+i+'" aria-label="Remove Existing Location '+(i+1)+'"')+
       '</div>').join('')+'</div>' :
       '<p class="form-empty">No Existing Locations. You can create a Project now and add one later.</p>';

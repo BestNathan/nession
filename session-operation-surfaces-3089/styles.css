@@ -117,7 +117,7 @@
 .nession-product .sheet-footer{padding:12px 18px max(16px,env(safe-area-inset-bottom));border-top:1px solid var(--nession-border)}
 .nession-product .sheet-footer .btn{width:100%;min-height:46px}
 .nession-product .app-operation .app-contents{padding:18px 16px 25px}
-.nession-product .app-operation .field input{height:46px}
+.nession-product .app-operation .field input{height:44px}
 .nession-product .app-operation .choice{min-height:48px}
 .nession-product .app-select-row{border:1px solid var(--nession-border);border-radius:11px;padding:14px;width:100%;background:var(--nession-background);text-align:left;display:flex;flex-direction:column;gap:4px;min-width:0}
 .nession-product .app-select-row:hover{background:var(--nession-surface)}
@@ -127,7 +127,7 @@
 .nession-product .checkline input{accent-color:var(--nession-primary);width:18px;height:18px}
 .nession-product .location-editor{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end}
 .nession-product .location-editor .field{min-width:0}
-.nession-product .location-editor .btn{height:40px}
+.nession-product .location-editor .btn{height:32px}
 .nession-product .app-operation .location-editor{display:flex;flex-direction:column;align-items:stretch}
 .nession-product .app-operation .location-editor .btn{width:100%}
 .nession-product .toast{position:absolute;z-index:50;bottom:20px;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px);background:var(--nession-primary);color:var(--nession-primary-foreground);padding:12px 18px;border-radius:11px;font-size:12px;text-align:center;box-shadow:0 5px 26px #2222}
@@ -194,7 +194,7 @@
 .nession-product .dialog-form .field{gap:7px;min-width:0}
 .nession-product .dialog-form .field input:not([type="checkbox"]):not([type="radio"]),
 .nession-product .dialog-form .field select{
-  display:block;box-sizing:border-box;width:100%;height:42px;min-width:0;
+  display:block;box-sizing:border-box;width:100%;height:32px;min-width:0;
   background:var(--nession-background);border:1px solid var(--nession-border);
   border-radius:var(--nession-radius-control);padding:9px 12px;
   text-overflow:ellipsis;
@@ -229,7 +229,7 @@
 }
 .nession-product .locations-stack{display:flex;flex-direction:column;gap:11px;min-width:0}
 .nession-product .location-editor{
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) 42px;
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) 32px;
   align-items:start;gap:12px;min-width:0;padding:0;
   border:0;background:transparent;
 }
@@ -237,7 +237,7 @@
 .nession-product .location-editor > .field select,
 .nession-product .location-editor > .field textarea{margin:0}
 .nession-product .location-editor .remove-location{
-  align-self:start;margin-top:25px;height:42px;min-height:42px;max-height:42px;
+  align-self:start;margin-top:25px;height:32px;min-height:32px;max-height:32px;
 }
 .nession-product .env-editor{
   border:1px solid var(--nession-border);border-radius:var(--nession-radius-control);
@@ -246,12 +246,15 @@
 .nession-product .env-editor .checkline:last-child{border-bottom:0}
 .nession-product .dialog-form .location-trigger{width:100%;min-width:0}
 .nession-product .app-operation .dialog-form .field input:not([type="checkbox"]):not([type="radio"]),
-.nession-product .app-operation .dialog-form .field select{height:46px}
+.nession-product .app-operation .dialog-form .field select{height:44px}
 .nession-product .app-operation .dialog-form .source-fields{grid-template-columns:minmax(0,1fr)}
 .nession-product .app-operation .dialog-form .location-editor{
   display:flex;flex-direction:column;align-items:stretch;gap:11px;
   padding:12px;border:1px solid var(--nession-border);
   border-radius:var(--nession-radius-control);background:var(--nession-background);
+}
+.nession-product .app-operation .dialog-form .location-editor > .field{
+  align-self:stretch;width:100%;
 }
 .nession-product .app-operation .dialog-form .location-editor .remove-location{
   align-self:stretch;margin-top:0;height:auto;min-height:44px;max-height:none;
@@ -406,22 +409,23 @@
 }
 .nession-product .app-operation .env-file-row{min-height:44px}
 .nession-product .location-editor .remove-location{
-  width:42px;min-width:42px;padding:0;font-size:17px;
+  width:32px;min-width:32px;padding:0;font-size:17px;
 }
 .nession-product .app-operation .location-editor .remove-location{
   width:100%;min-width:0;padding:9px 12px;font-size:13px;
 }
 
 
-/* Web Project Location: Agent Select and an ordinary one-line directory share
-   a 42px baseline. The directory expands for multiline/long paths instead of
-   permanently occupying a taller two-row box. App still uses a 3-row editor. */
+/* Web/App Project Location (#3136): Agent and Directory are top-aligned peers
+   on the Experience control band (32px Web / 44px App). The directory starts at
+   that band and grows with a wrapped long path; it is not a fixed multi-row box.
+   The trailing Remove action sits in the label slot above the band. */
 .nession-product[data-experience="web"] .dialog-form .location-editor .field .project-path-input{
   box-sizing:border-box;width:100%;min-width:0;
-  height:auto;min-height:42px;max-height:160px;
+  height:auto;min-height:32px;max-height:160px;padding:4px 10px;
   field-sizing:content;resize:vertical;overflow-x:hidden;overflow-y:auto;
   overflow-wrap:anywhere;word-break:break-all;
 }
 .nession-product[data-experience="app"] .dialog-form .location-editor .field .project-path-input{
-  min-height:80px;field-sizing:fixed;
+  min-height:44px;field-sizing:content;
 }

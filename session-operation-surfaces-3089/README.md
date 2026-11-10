@@ -2,6 +2,8 @@
 
 **Owning Requirement:** https://github.com/BestNathan/nession/issues/3089
 
+**Field-alignment revision:** [#3136](https://github.com/BestNathan/nession/issues/3136) — this same prototype is revised in place; do not create a competing mock.
+
 **Separate owners:** #3025 (Project-aware Session creation: accepted domain behavior), #3082 (Session→Project binding), #2875 (App Sessions actions), #3075 (Web rail). This mock only studies **presentation of existing operations**. Previous #3025 prototype remains valuable for Project semantics, but its narrow Create Session dialog presentation is **superseded** by the candidate in #3089.
 
 ## Product baseline and source
@@ -124,10 +126,17 @@ No production React code, no new backend endpoint, no changes to domain semantic
 **Critical distinction:** Source-aligned component anatomy is a better approximation; this remains a dependency-free static mock rather than `@base-ui/react` / React itself. #3089 stays open until the production Select implementation is fixed and authenticated Acceptance verifies the real UI. Publication verification is independent of the browser diagnostic.
 
 
-### Follow-up: equal-height Project Location fields (same review)
+### Follow-up: compact top-aligned Project Location fields (#3136)
 
-The source-first Web Project editor's Agent Select and initial Directory textarea were visibly mismatched at 42px versus 64px, even with correctly aligned top edges. The mock now keeps them **both 42px high initially**; Web Directory is a content-sized textarea (`field-sizing: content`) that grows on long/wrapped paths instead of adding a permanently taller field. Agent/Directory keep the responsive 1:2 width allocation to give directory paths more space; App still uses a longer stacked multiline editor.
-
-[Source-pinned Chromium task #42640999912](https://github.com/BestNathan/nession/actions/runs/42640999912) checked `d7b3fce854dc763124c1d0a6649ba0f3661a7858` at Web 1440/1180/1024: 3/3 Pass. Initial controls: Agent **42px**, Directory **42px**, identical top coordinates. A long directory expands to **76px** with 0px horizontal overflow. Both the initial and expanded states were captured as browser screenshots. This demonstrates the *proposed* input behavior in the mock; production `ProjectLocationsEditor` still uses a two-row textarea and needs its own implementation review if parity is expected.
+This revision supersedes the earlier 42px mock baseline. The Web Project editor
+now follows one field-row rule: Agent Select and Directory textarea are
+top-aligned peers on the Experience control band (**32px Web**, **44px App**);
+the Directory is a content-sized textarea that starts at the band and grows on
+a wrapped long path; the Remove action sits in the label slot above the band,
+so it aligns with the controls rather than the bottom of a grown field. App
+stacks full-width 44px controls with the same growing Directory. The earlier
+42px diagnostic is historical. Chromium verification of this revision is
+recorded on Issue #3136 (SC-03); the mock remains prototype evidence, not
+production parity.
 
 The earlier source-only “6/6” result checked **outer form alignment**, not Env child geometry, and should not be interpreted as proof that the earlier visual was correct. The subsequent [component-level Chromium run #42639910237](https://github.com/BestNathan/nession/actions/runs/42639910237) covers inner search, checkbox, list and popup dimensions explicitly; [long Location path run #42640529645](https://github.com/BestNathan/nession/actions/runs/42640529645) checked 594px control/popup width and long-path wrapping at Web 1440/1180/1024 (3/3 Pass). These are diagnostic mock results, not a replacement for production SC Acceptance.
