@@ -32,9 +32,11 @@ objects, own attach state or mutate Session environment bindings (#170).
 ## Policy contract
 
 The versioned shape lives in the Protocol Kernel:
-`nession-protocol/src/contracts/sandbox/v1.rs`. Every struct refuses unknown
-fields, so an unrecognised key fails at parse time, before any host resource
-exists.
+`nession-protocol/src/contracts/sandbox/v1.rs`. Named-field structs refuse
+unknown fields, so an unrecognised key fails at parse time, before any host
+resource exists. `resource.cgroup_v2` is deliberately the one open-keyed map:
+its keys are kernel control-file basenames, validated by the generic naming
+rule in `nession-sandbox/src/cgroup_file.rs` and ultimately by the kernel.
 
 | Dimension | Meaning |
 |---|---|
@@ -43,7 +45,7 @@ exists.
 | `network.mode` | `allow` inherits host networking; `deny` blocks external and host-local IP networking; `restricted` is default-deny with Domain/IP/Port allow/deny rules enforced by the host-side proxy. |
 | `network.egress` | Only for `restricted`. Exact host or IP with optional port; leading `*.` matches strict subdomains; deny wins. `private_network: deny` and `ingress: deny` are the only V1 values and are always in force. |
 | `process.linux_namespaces` | Direct Linux PID/IPC/User/UTS/Cgroup namespace requests. Mount and network namespaces are owned by `filesystem`/`network`. Unsupported on macOS. |
-| `resource.cgroup_v2` | Allowlisted native control files and values: `memory.max`, `cpu.max`, `pids.max`, `memory.oom.group`. Unsupported on macOS. |
+| `resource.cgroup_v2` | A native map of control-file basename to raw text value (`cpu.weight`, `memory.high`, `io.max`, ...). The Agent discovers the declarative files its delegated child exposes; the kernel validates each value. No per-resource application parsers or fixed four-key allowlist. Unsupported on macOS. See [#3141](#native-cgroup-v2-resource-passthrough-3141). |
 | `syscall.seccomp.profile` | The pinned `nession-interactive-v1` profile. Unsupported on macOS. |
 | `enforcement` | Only `required`: an explicitly requested guarantee that cannot be installed refuses the launch. |
 
@@ -165,6 +167,46 @@ PID 1 does not. Operators can point `[sandbox] cgroup_root` at a delegated
 sibling. The backend probes rather than assumes: an unavailable delegation
 reports `UnsupportedPolicy(resource.cgroup_v2)` and the create is refused.
 
+### Native cgroup v2 resource passthrough (#3141)
+
+The policy map is the kernel's own interface, not a Nession quota schema. There
+are no CPU-core, byte or device conversions and no per-file value parsers:
+`cpu.max` carries `quota period`, `io.max` carries its device/limit text, and
+`memory.high` carries bytes or `max`, exactly as the kernel documents them.
+
+Discovery and editing share one naming owner
+(`nession-sandbox/src/cgroup_file.rs`):
+
+- a key must be a single basename (no `/`, traversal, absolute path or
+  surrounding whitespace);
+- `cgroup.*` hierarchy/lifecycle interfaces (`cgroup.procs`, `cgroup.kill`,
+  `cgroup.freeze`, `cgroup.subtree_control`, ...) are never policy writes —
+  Nession owns enrollment, kill and delegation;
+- read-only status suffixes (`.stat`, `.events`, `.current`, `.peak`,
+  `.pressure`, `.numa_stat`, `.effective`) and command-style pseudo-files
+  (`memory.reclaim`) are excluded. This is a shape rule, not a resource
+  allowlist: a new declarative controller file needs no Nession change.
+
+The capability probe creates a short-lived, empty child under the delegated
+root, enables the delegated controllers, and enumerates the declarative files
+that child actually exposes, with their current reads as UI hints. File
+presence plus controller delegation is informational; it does not claim that a
+particular value will install. The probe child is removed without enrolling a
+process, so discovery never mutates a live execution or a foreign cgroup.
+
+Enter creates the execution's owned child, writes every requested value
+verbatim through a basename-only `O_NOFOLLOW` handle, and reads each file back
+before the launcher enrolls any process. A kernel refusal (for example
+`EINVAL` from an invalid `cpu.max`) names the file and OS error, fails the
+create, removes the partial child, and leaves the Native Pane untouched — there
+is no fallback. The observed readback, not the requested string, becomes the
+execution's recorded effective Resource values; inside users therefore see what
+the kernel reports.
+
+Syscall is deliberately independent: seccomp is a loaded BPF program referenced
+by the pinned `syscall.seccomp.profile` registry, not a cgroup pseudo-file.
+`resource.cgroup_v2` passthrough does not relax that registry.
+
 ## Deployment packaging and host prerequisites
 
 The Agent image carries the `bubblewrap` launcher (`Dockerfile.agent` and
@@ -244,10 +286,12 @@ effect of returning.
 The editor model (`SandboxPolicyDraft`) cannot carry the canonical dotted
 cgroup keys under the generated-binding naming rules. Resource/Syscall are
 therefore typed `{key, value}` rows that start empty. `nession-sandbox`
-materializes them into `resource.cgroup_v2` / `syscall.seccomp`, validating
-unknown, duplicate, blank and malformed rows with field-level errors, and
-**omits an empty group** rather than sending `{}`. `compile` and the launch
-barrier remain the only policy authorities. The Agent's capability catalog
+materializes them into `resource.cgroup_v2` / `syscall.seccomp`, applying the
+generic native-basename rule (blank, malformed, lifecycle/status/command keys,
+duplicates) and the pinned Syscall registry with field-level errors, and
+**omits an empty group** rather than sending `{}`. It never parses a Resource
+value's kernel format. `compile` and the launch barrier remain the only policy
+authorities. The Agent's capability catalog
 (`resource_fields`, `syscall_fields`, `probe_generation`) is measured from its
 real delegated child cgroup and profile registry; it feeds UI suggestions, and
 stale probes are revalidated on preflight/Enter.
@@ -267,15 +311,14 @@ appear; a frontend label never authorizes policy bytes, and a hypothetical
 future `resource.macos_*` is not synthesized until its backend registers it.
 
 The catalog is measured from the same `Capabilities` that `validate` consumes:
-network modes, namespace flags, allowlisted child-cgroup files and the pinned
-seccomp profile each carry their own status. `probe_generation` hashes the
-measured implementation facts, so a capability change changes both the context
-`generation` and the catalog generation. A backend-missing probe reports every
-implementation unavailable (Linux-native paths on macOS keep
-`platform_unsupported`); it never advertises eligibility.
-`SandboxCapabilityCatalog::unknown(reason)` lists every registered path as
-`unknown`/`not_probed`, so an unreachable Agent stays discoverable without a
-protection claim.
+network modes, namespace flags, discovered child-cgroup controller files and
+the pinned seccomp profile each carry their own status. `probe_generation`
+hashes the measured implementation facts, so a capability change changes both
+the context `generation` and the catalog generation. A backend-missing probe
+reports every implementation unavailable (Linux-native paths on macOS keep
+`platform_unsupported`); it never advertises eligibility, and it does not
+fabricate a cgroup file list without a measurable child. An offline Agent is
+`unknown`/`not_probed` rather than an empty kernel feature set.
 
 Preflight and Enter both take the client's `context_generation` and
 `probe_generation`; either mismatch is a `stale-generation` field error before

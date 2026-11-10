@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/button';
+import { DetailGroup, DetailSection } from '@/components/ui/resource-detail';
+import { detailRowClass } from '@/components/ui/resource-detailStyles';
 import type { SandboxPaneRef } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 
 export interface SandboxExistingPanesProps {
@@ -18,16 +20,16 @@ export function SandboxExistingPanes({ panes, busy, onFocus }: SandboxExistingPa
     return null;
   }
   return (
-    <section className="flex min-w-0 flex-col gap-2" aria-label="Existing Sandbox Panes">
-      <h3 className={chromeSansRole('primary')}>Existing Sandbox Panes</h3>
-      <ul data-testid="sandbox-existing-panes" className="flex min-w-0 flex-col gap-2">
+    <DetailSection title="Existing Sandbox Panes" level="h3">
+      <DetailGroup data-testid="sandbox-existing-panes">
         {panes.map((pane) => (
-          <li
+          <div
             key={pane.pane_id}
             data-testid={`sandbox-existing-pane-${pane.pane_id}`}
-            className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-[var(--nession-radius-surface)] bg-muted/30 px-2 py-1"
+            data-recipe-part="detail-row"
+            className={detailRowClass}
           >
-            <span className={cn(chromeMonoRole('code'), 'min-w-0 break-all')}>
+            <span className={cn(chromeMonoRole('code'), 'min-w-0 flex-1 break-all')}>
               {pane.pane_id} · {pane.backend}
             </span>
             <Button
@@ -40,9 +42,9 @@ export function SandboxExistingPanes({ panes, busy, onFocus }: SandboxExistingPa
             >
               Focus
             </Button>
-          </li>
+          </div>
         ))}
-      </ul>
-    </section>
+      </DetailGroup>
+    </DetailSection>
   );
 }

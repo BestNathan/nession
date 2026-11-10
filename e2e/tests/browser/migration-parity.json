@@ -27,7 +27,7 @@
   ],
   "baseline_png_blobs": {
     "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "c2147a1f1dd52e23575f35edc57d94cba4efb746",
-    "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "9ed341b623cba99f5eafcb615fde1ace6e825eea",
+    "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "d633c157ab7ec463ee37119d7ba8f917468a2e60",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "c8d2d844928672bb1e64dd184def15e2dc3ee2ad",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-view-tabs-linux.png": "30ce3acdd52cf8e1318b0067e4d0f6213bf96d85",
@@ -64,7 +64,7 @@
     "__snapshots__/fixture-visual.spec.ts/web-compact-workspace-linux.png": "d6cdc88abeed05de3bab1aa595565f65705a35da",
     "__snapshots__/fixture-visual.spec.ts/web-env-edit-dirty-linux.png": "f6103d894cb8b4fd22efbe1652d8ddb33fddd714",
     "__snapshots__/fixture-visual.spec.ts/web-env-profile-linux.png": "7162aee689e410de30216275dfd43a9435140bce",
-    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "5f3c475a7cad1dfb71b92448d15f5c0c4b055eef",
+    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "6d54d5f52b6a9bf823b4c92aaa696820a8c968fc",
     "__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png": "c1a92d134ab250927f39d7e9077a10ed58e0eb6f",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-linux.png": "31e9b920243a2a57f42013e7b48c2b54276a916c",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "d3da4db5b5b50603ad9a5680db139e48654b4ab4",
@@ -73,8 +73,8 @@
     "__snapshots__/fixture-visual.spec.ts/web-sidebar-collapsed-linux.png": "f4f61f5702d231d2022baee7c3c246712891665f"
   },
   "baseline_set_updated": {
-    "requirement": 3146,
-    "reason": "approved #3142 unified Dialog/AlertDialog 40% scrim; exact 1440x900 Chromium actual from Full E2E run 42793707966 artifact 13751874935 (402 passed, one stale visual baseline)",
-    "date": "2026-11-10"
+    "requirement": 3137,
+    "reason": "approved shared surface title role: an overlay title now uses the same 16px/600 1.25 title role as a detail surface, shifting the two dialog baselines that paint it",
+    "date": "2026-11-11"
   }
 }

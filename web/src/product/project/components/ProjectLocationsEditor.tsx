@@ -9,6 +9,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select';
 import { ChoiceItemContent } from '@/components/ui/choice-item';
+import { FormRow, FormSection } from '@/components/ui/configuration-form';
 import { agentDisplayName } from '@/shared/lib/format';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
@@ -183,9 +184,9 @@ function LocationRows({
     <>
       {locations.map((location, index) =>
         stacked ? (
-          <div
+          <FormRow
             key={index}
-            className="flex flex-col gap-3 rounded-[var(--nession-radius-surface)] border p-3"
+            className="gap-3"
             data-testid="project-location-editor"
           >
             <div className="flex items-center justify-between">
@@ -214,7 +215,7 @@ function LocationRows({
               idPrefix={idPrefix}
               onChange={(patch) => onChange(index, patch)}
             />
-          </div>
+          </FormRow>
         ) : (
           <div
             key={index}
@@ -295,9 +296,10 @@ export function ProjectLocationsEditor({
   const stacked = layout === 'stacked';
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <Label>Existing Locations (optional)</Label>
+    <FormSection
+      title="Existing Locations"
+      description="Optional. Agent directories this Project can start Sessions from."
+      action={
         <Button
           type="button"
           variant="ghost"
@@ -318,7 +320,8 @@ export function ProjectLocationsEditor({
           <Plus className="size-4" aria-hidden />
           Add Location
         </Button>
-      </div>
+      }
+    >
       {agents.length === 0 ? (
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
           No Agents are known yet. A Project can be created now and gain a location later.
@@ -338,6 +341,6 @@ export function ProjectLocationsEditor({
           onRemove={removeLocation}
         />
       )}
-    </div>
+    </FormSection>
   );
 }

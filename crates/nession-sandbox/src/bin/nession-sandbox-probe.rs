@@ -100,6 +100,16 @@ fn main() {
         serde_json::json!({
             "root": support.root.display().to_string(),
             "controllers": support.controllers.iter().collect::<Vec<_>>(),
+            "fields": support.fields.iter().map(|(key, field)| {
+                (
+                    key.clone(),
+                    serde_json::json!({
+                        "available": field.available,
+                        "reason": field.reason,
+                        "current_value": field.current_value,
+                    }),
+                )
+            }).collect::<std::collections::BTreeMap<_, _>>(),
             "detail": support.detail,
         })
     });

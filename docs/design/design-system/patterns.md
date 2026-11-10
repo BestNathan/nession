@@ -40,6 +40,9 @@ Patterns that display capabilities must respect that lifecycle and progressive d
 | [TerminalSurface](patterns/terminal-surface.md) | work surface | xterm well, focus, scroll, clearance, attachment lifecycle |
 | [PopupMenu](patterns/popup-menu.md) | primitive-backed surface | The list a control collapses into; its action row keeps the Experience control band, while a contracted resource-choice anatomy can wrap and grow (#3164); contracted here because a popup is not a DOM descendant of its trigger (#1066) |
 | [OverlaySurfaces](patterns/overlay-surfaces.md) | cross-family overlay contract | Which surface role presents an action/operation, and its shared anatomy, stacking, dismissal, focus and portal rules across Dialog/Alert/menus/Select/Popover/Tooltip (#3142) |
+| [ResourceDetail](patterns/resource-detail.md) | content grammar | Identity, quiet scope, observed facts, resource groups and recovery for a resource destination or a capability's observed state; Project and Sandbox consume one hierarchy while keeping their own shells (#3137) |
+| [ConfigurationForm](patterns/configuration-form.md) | content grammar | Named sections, field label/control/help/error, related fields, repeated dynamic rows and grouped actions for editable resource configuration (#3137) |
+| [OperationSurface](patterns/operation-surface.md) | operation depth | The body and action grammar inside a deliberate operation; composes the existing Web Dialog and App operation page/sheet rather than forking them (#3137) |
 
 The catalog is not a mandatory shell anatomy. Each pattern is used only when the current product context justifies it.
 
@@ -96,6 +99,16 @@ caused drift. Capsule is the reference family: Context and Peek occupy one upper
 slot and therefore consume one Nession-owned upper-surface recipe. Workspace
 navigation is the second enforced family: inactive/active capability state may
 change semantic emphasis, but geometry and typography remain one recipe.
+
+The content-region family is the third: [ResourceDetail](patterns/resource-detail.md),
+[ConfigurationForm](patterns/configuration-form.md) and
+[OperationSurface](patterns/operation-surface.md). They are domain-agnostic
+recipes in `web/src/components/ui/` because both `product` (Project, Session)
+and `capabilities` (Sandbox, Environment) consume them, and the layer model
+does not let a capability import product presentation. A recipe is justified
+only when at least two independent consumers need the same stable relationship.
+The first consumers are Project Detail/Create/Settings, Sandbox Inside/Outside
+and the Session work-context reference (#3137).
 
 For Agent-authored changes this boundary must be mechanically enforceable.
 Stable relationships should be asserted **between** analogous components

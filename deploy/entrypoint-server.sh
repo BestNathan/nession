@@ -69,7 +69,7 @@ export SERVER_HEARTBEAT_INTERVAL SERVER_HEARTBEAT_TIMEOUT
 
 echo "=== nession-server ==="
 echo "  Listen:       $SERVER_LISTEN"
-echo "  Nession Home: ${NESSIN_HOME:-$HOME/.nession}"
+echo "  Nession Home: ${NESSION_HOME:-$HOME/.nession}"
 echo "  Terminal:     cols=$NESSION_TERMINAL_COLS web_max_font=${NESSION_TERMINAL_WEB_FONT_SIZE}px"
 echo "  Config dir:   $NESSON_CONFIG_DIR"
 echo "  Nginx:        :${LISTEN_PORT} -> $SERVER_BACKEND"

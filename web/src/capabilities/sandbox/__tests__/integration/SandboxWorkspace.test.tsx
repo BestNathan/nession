@@ -37,10 +37,12 @@ function catalog(): SandboxCapabilityCatalog {
     available: true,
   });
   const resourceFields = [
-    field('memory.max', 'uint64 bytes or `max`', '2147483648'),
-    field('cpu.max', '`quota period`', '200000 100000'),
-    field('pids.max', 'uint64 tasks or `max`', '256'),
-    field('memory.oom.group', '`0` or `1`', '0'),
+    field('memory.max', 'native cgroup v2 control-file text', 'max'),
+    field('memory.high', 'native cgroup v2 control-file text', 'max'),
+    field('cpu.max', 'native cgroup v2 control-file text', 'max 100000'),
+    field('cpu.weight', 'native cgroup v2 control-file text', '100'),
+    field('pids.max', 'native cgroup v2 control-file text', 'max'),
+    field('memory.oom.group', 'native cgroup v2 control-file text', '0'),
   ];
   const implementation = (
     path: string,
@@ -177,8 +179,9 @@ describe('SandboxWorkspace (#3124)', () => {
     api.preflight.mockImplementation(
       (request: { policy: SandboxPolicyDraft }) => {
         const draft = request.policy;
-        const cpu = draft.resource.find((row) => row.key === 'cpu.max');
-        const result: SandboxPreflightResult = cpu?.value === '200000 100000'
+        const row = draft.resource[0];
+        const invalidKey = row?.key.trim().startsWith('cgroup.');
+        const result: SandboxPreflightResult = row && !invalidKey
           ? {
               ok: true,
               generation: 'gen-outside',
@@ -195,9 +198,9 @@ describe('SandboxWorkspace (#3124)', () => {
               mechanisms: [],
               errors: [
                 {
-                  field: 'resource[0].value',
-                  code: 'invalid-value',
-                  message: 'not a valid native value for cpu.max',
+                  field: 'resource[0].key',
+                  code: 'invalid-key',
+                  message: '`cgroup.procs` is a cgroup hierarchy/lifecycle interface',
                 },
               ],
               warnings: [],
@@ -220,20 +223,25 @@ describe('SandboxWorkspace (#3124)', () => {
     await user.click(screen.getByTestId('sandbox-tab-resource'));
     expect(screen.getByTestId('sandbox-resource-empty')).toBeInTheDocument();
     await user.click(screen.getByTestId('sandbox-resource-add'));
-    await user.type(screen.getByTestId('sandbox-resource-key-0'), 'cpu.max');
-    await user.type(screen.getByTestId('sandbox-resource-value-0'), '200000 999');
+    await user.type(screen.getByTestId('sandbox-resource-key-0'), 'cgroup.procs');
+    await user.type(screen.getByTestId('sandbox-resource-value-0'), '4242');
 
     // Validation belongs to Overview; switching back preserves the draft.
     await user.click(screen.getByTestId('sandbox-tab-overview'));
     await user.click(screen.getByTestId('sandbox-preflight'));
     expect(await screen.findByTestId('sandbox-preflight-error-0')).toHaveTextContent(
-      'not a valid native value',
+      'lifecycle',
     );
     expect(screen.getByTestId('sandbox-enter')).toBeDisabled();
 
     await user.click(screen.getByTestId('sandbox-tab-resource'));
+    const key = screen.getByTestId('sandbox-resource-key-0');
+    await user.clear(key);
+    await user.type(key, 'cpu.max');
     const value = screen.getByTestId('sandbox-resource-value-0');
     await user.clear(value);
+    // Native text with spaces is written verbatim; this layer does not parse
+    // cpu values into application units.
     await user.type(value, '200000 100000');
     // Merely leaving the tab does not invalidate the draft or its preflight.
     await user.click(screen.getByTestId('sandbox-tab-syscall'));
@@ -493,6 +501,11 @@ describe('SandboxWorkspace (#3124)', () => {
       expect(screen.getByTestId(`sandbox-tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByTestId(panelContent[tab])).toBeInTheDocument();
     }
+    // Every panel consumes one of the shared content-region recipes (#3137).
+    await user.click(screen.getByTestId('sandbox-tab-filesystem'));
+    expect(document.querySelector('[data-recipe="configuration-form"]')).not.toBeNull();
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
+    expect(document.querySelector('[data-recipe="resource-detail"]')).not.toBeNull();
 
     // The Overview summary is a second direct switch to the same peer tabs.
     await user.click(screen.getByTestId('sandbox-tab-overview'));
@@ -522,6 +535,7 @@ describe('SandboxWorkspace (#3124)', () => {
     await user.click(screen.getByTestId('sandbox-tab-resource'));
     expect(screen.getByTestId('sandbox-effective-resource-cpu.max')).toBeInTheDocument();
     expect(screen.queryByTestId('sandbox-resource-add')).toBeNull();
+    expect(document.querySelector('[data-recipe="resource-detail"]')).not.toBeNull();
 
     await user.click(screen.getByTestId('sandbox-tab-syscall'));
     expect(screen.getByTestId('sandbox-effective-syscall-seccomp.profile')).toBeInTheDocument();

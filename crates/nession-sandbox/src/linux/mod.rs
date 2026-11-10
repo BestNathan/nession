@@ -13,7 +13,7 @@ pub mod erofs;
 pub mod seccomp;
 pub mod verify;
 
-use nession_protocol::contracts::sandbox::v1::SandboxNetworkMode;
+use nession_protocol::contracts::sandbox::v1::{SandboxNetworkMode, SandboxPolicy};
 
 use crate::capabilities::{Capabilities, CgroupSupport, NamespaceSupport, Platform};
 use crate::error::{Result, SandboxError};
@@ -340,6 +340,23 @@ fn create_runtime_dir(settings: &SandboxSettings, execution_id: &str) -> Result<
     Ok(dir)
 }
 
+/// The observed policy recorded for the execution: requested dimensions plus
+/// the kernel's actual cgroup control values, never the draft.
+fn effective_policy(
+    compiled: &CompiledSandboxPolicy,
+    cgroup: Option<&cgroup::ExecutionCgroup>,
+) -> Option<SandboxPolicy> {
+    let mut policy = compiled.normalized.clone();
+    if let (Some(group), Some(resource)) = (cgroup, policy.resource.as_mut()) {
+        for (file, value) in resource.cgroup_v2.0.iter_mut() {
+            if let Some(actual) = group.readback().get(file) {
+                *value = actual.clone();
+            }
+        }
+    }
+    Some(policy)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_inner(
     request: &LaunchRequest,
@@ -547,7 +564,7 @@ fn prepare_inner(
         pane_id: None,
         window_id: None,
         working_dir: working_dir.display().to_string(),
-        effective_policy: Some(compiled.normalized.clone()),
+        effective_policy: effective_policy(compiled, cgroup_guard.as_ref()),
         mounts: mounted
             .as_ref()
             .map(erofs::MountedComposition::mountpoints)

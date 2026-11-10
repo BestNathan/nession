@@ -1,5 +1,12 @@
 import type { SandboxPolicyDraft } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import {
+  DetailEmpty,
+  DetailFact,
+  DetailFacts,
+  DetailNote,
+  DetailSection,
+} from '@/components/ui/resource-detail';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 
 function ListSection({
@@ -14,27 +21,24 @@ function ListSection({
   testId: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>{title}</dt>
-      <dd className="min-w-0">
-        {entries.length === 0 ? (
-          <span
-            data-testid={`${testId}-empty`}
-            className={cn(chromeSansRole('secondary'), 'text-muted-foreground')}
-          >
-            {empty}
-          </span>
-        ) : (
-          <ul data-testid={testId} className="flex min-w-0 flex-col gap-1">
-            {entries.map((entry) => (
-              <li key={entry} className={cn(chromeSansRole('code'), 'min-w-0 break-all')}>
-                {entry}
-              </li>
-            ))}
-          </ul>
-        )}
-      </dd>
-    </div>
+    <DetailFact label={title} mono>
+      {entries.length === 0 ? (
+        <span
+          data-testid={`${testId}-empty`}
+          className={cn(chromeSansRole('secondary'), 'text-muted-foreground')}
+        >
+          {empty}
+        </span>
+      ) : (
+        <ul data-testid={testId} className="flex min-w-0 flex-col gap-1">
+          {entries.map((entry) => (
+            <li key={entry} className={cn(chromeMonoRole('code'), 'min-w-0 break-all')}>
+              {entry}
+            </li>
+          ))}
+        </ul>
+      )}
+    </DetailFact>
   );
 }
 
@@ -49,29 +53,24 @@ function KvRows({
 }) {
   if (rows.length === 0) {
     return (
-      <p
-        data-testid={`${testIdPrefix}-empty`}
-        className={cn(chromeSansRole('secondary'), 'text-muted-foreground')}
-      >
+      <DetailEmpty data-testid={`${testIdPrefix}-empty`}>
         No explicit {group} controls are in this policy.
-      </p>
+      </DetailEmpty>
     );
   }
   return (
-    <dl data-testid={testIdPrefix} className="flex min-w-0 flex-col gap-2">
+    <DetailFacts data-testid={testIdPrefix} className="gap-2">
       {rows.map((row) => (
-        <div
+        <DetailFact
           key={row.key}
-          data-testid={`${testIdPrefix}-${row.key}`}
-          className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-surface)] bg-muted/40 px-2 py-1 sm:flex-row sm:gap-3"
+          label={row.key}
+          mono
+          testId={`${testIdPrefix}-${row.key}`}
         >
-          <dt className={cn(chromeSansRole('code'), 'shrink-0')}>{row.key}</dt>
-          <dd className={cn(chromeSansRole('code'), 'min-w-0 break-all text-muted-foreground')}>
-            {row.value}
-          </dd>
-        </div>
+          {row.value}
+        </DetailFact>
       ))}
-    </dl>
+    </DetailFacts>
   );
 }
 
@@ -97,19 +96,19 @@ export function SandboxEffectiveFilesystem({
   return (
     <section aria-label="Effective filesystem" className="flex min-w-0 flex-col gap-4">
       {erofs ? (
-        <div
-          data-testid="sandbox-effective-erofs"
-          className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-surface)] bg-muted/30 p-2"
+        <DetailSection
+          title="Prepared root composition"
+          level="h3"
+          testId="sandbox-effective-erofs"
         >
-          <span className={chromeSansRole('secondary')}>Prepared root composition</span>
-          <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
+          <DetailNote>
             This execution used an Agent-prepared EROFS root: Base Runtime at /, workspace at
             /workspace and read-only toolchains under /opt/&lt;name&gt;. Image sources and digests
             are Server/Agent execution inputs and are not exposed to Web.
-          </p>
-        </div>
+          </DetailNote>
+        </DetailSection>
       ) : null}
-      <dl className="flex min-w-0 flex-col gap-3">
+      <DetailFacts>
         <ListSection
           title="Read-only paths"
           entries={policy.filesystem?.access.read ?? []}
@@ -122,7 +121,7 @@ export function SandboxEffectiveFilesystem({
           empty="No explicit read-write allow-list."
           testId="sandbox-effective-file-write"
         />
-      </dl>
+      </DetailFacts>
     </section>
   );
 }
@@ -132,16 +131,13 @@ export function SandboxEffectiveNetwork({ policy }: { policy: SandboxPolicyDraft
   const network = policy.network;
   return (
     <section aria-label="Effective network" className="flex min-w-0 flex-col gap-3">
-      <dl className="flex min-w-0 flex-col gap-1">
-        <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>Mode</dt>
-        <dd>
-          <span data-testid="sandbox-effective-network-mode" className={chromeSansRole('code')}>
-            {network?.mode ?? 'allow'}
-          </span>
-        </dd>
-      </dl>
+      <DetailFacts className="gap-1.5">
+        <DetailFact label="Mode" mono valueTestId="sandbox-effective-network-mode">
+          {network?.mode ?? 'allow'}
+        </DetailFact>
+      </DetailFacts>
       {network?.egress ? (
-        <dl className="flex min-w-0 flex-col gap-3">
+        <DetailFacts>
           <ListSection
             title="Allowed destinations"
             entries={network.egress.allow}
@@ -154,7 +150,7 @@ export function SandboxEffectiveNetwork({ policy }: { policy: SandboxPolicyDraft
             empty="No extra destinations are denied."
             testId="sandbox-effective-egress-deny"
           />
-        </dl>
+        </DetailFacts>
       ) : null}
     </section>
   );
