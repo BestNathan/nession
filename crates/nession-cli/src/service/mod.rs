@@ -64,10 +64,19 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
     }
     let config_path_str = absolute_path(&selection.path)?;
 
-    let pid_file_str = absolute_path(Path::new(&pid_file::resolve_path(
-        pid_file,
-        pid_file::Component::Agent,
-    )))?;
+    // The same state-file resolution `agent start` uses, so the unit, the
+    // service manager's start and a later CLI `status`/`stop` all name one
+    // PID path.
+    let state = pid_file::StateFiles::from_cli(pid_file, pid_file::Component::Agent)?;
+    let pid_file_str = absolute_path(Path::new(&state.current))?;
+    // Pin the runtime directory only for the default location. An explicit
+    // `--pid-file` remains authoritative and must not be forced through a
+    // runtime root that may be unavailable in the service manager's environment.
+    let runtime_dir = if state.is_default_location() {
+        Some(absolute_path(&nession_common::paths::runtime_dir()?)?)
+    } else {
+        None
+    };
 
     let exe = std::env::current_exe().context("failed to resolve current executable path")?;
     let exe_str = absolute_path(&exe)?;
@@ -77,19 +86,18 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
         .map(|home| absolute_path(Path::new(&home)))
         .transpose()?;
 
-    // Ownership, not a bare pid (#1016): a reused pid is not this Agent.
-    // The platform install hands this fact to the service manager decision:
-    // an agent already running outside the manager must not be duplicated.
-    let agent_running = matches!(
-        pid_file::ownership(&pid_file_str),
-        Ok(pid_file::Ownership::Alive(_))
-    );
+    // Ownership, not a bare pid (#1016): a reused pid is not this Agent. The
+    // platform install hands this fact to the service manager decision: an
+    // agent already running outside the manager (including a live pre-runtime
+    // daemon) must not be duplicated.
+    let agent_running = !pid_file::Inspection::of(&state).live_records().is_empty();
 
     let outcome = install_platform(
         &config_path_str,
         &pid_file_str,
         &exe_str,
         nession_home.as_deref(),
+        runtime_dir.as_deref(),
         agent_running,
     )?;
 
@@ -97,7 +105,10 @@ pub fn install_service(config_path: Option<String>, pid_file: Option<String>) ->
     println!("  Binary: {exe_str}");
     println!("  Config: {config_path_str}");
     if let Some(home) = nession_home.as_ref() {
-        println!("  NENSION_HOME: {home}");
+        println!("  NESSION_HOME: {home}");
+    }
+    if let Some(dir) = runtime_dir.as_ref() {
+        println!("  NESSION_RUNTIME_DIR: {dir}");
     }
     println!();
     match outcome {
@@ -246,6 +257,7 @@ fn install_platform(
     pid_file: &str,
     exe_path: &str,
     nession_home: Option<&str>,
+    runtime_dir: Option<&str>,
     agent_running: bool,
 ) -> Result<InstallOutcome> {
     let unit_dir = systemd_user_unit_dir()?;
@@ -257,7 +269,8 @@ fn install_platform(
     })?;
     let unit_path = unit_dir.join(SYSTEMD_UNIT_NAME);
 
-    let unit_content = systemd_unit_content(exe_path, config_path, pid_file, nession_home);
+    let unit_content =
+        systemd_unit_content(exe_path, config_path, pid_file, nession_home, runtime_dir);
     let previous = fs::read_to_string(&unit_path).ok();
 
     fs::write(&unit_path, &unit_content)
@@ -406,6 +419,7 @@ fn install_platform(
     pid_file: &str,
     exe_path: &str,
     nession_home: Option<&str>,
+    runtime_dir: Option<&str>,
     agent_running: bool,
 ) -> Result<InstallOutcome> {
     let agents_dir = launchd_agents_dir()?;
@@ -417,7 +431,8 @@ fn install_platform(
     })?;
     let plist_path = agents_dir.join(LAUNCHD_PLIST_NAME);
 
-    let plist_content = launchd_plist_content(exe_path, config_path, pid_file, nession_home);
+    let plist_content =
+        launchd_plist_content(exe_path, config_path, pid_file, nession_home, runtime_dir);
     let previous = fs::read_to_string(&plist_path).ok();
 
     fs::write(&plist_path, &plist_content)
@@ -660,6 +675,7 @@ fn install_platform(
     _pid_file: &str,
     _exe_path: &str,
     _nession_home: Option<&str>,
+    _runtime_dir: Option<&str>,
     _agent_running: bool,
 ) -> Result<InstallOutcome> {
     anyhow::bail!(
@@ -749,15 +765,23 @@ fn systemd_unit_content(
     config_path: &str,
     pid_file: &str,
     nession_home: Option<&str>,
+    runtime_dir: Option<&str>,
 ) -> String {
-    let env_lines = nession_home
-        .map(|home| {
-            format!(
-                "Environment=\"NESSION_HOME={}\"\n",
-                systemd_environment_value(home)
-            )
-        })
-        .unwrap_or_default();
+    let mut env_lines = String::new();
+    if let Some(home) = nession_home {
+        env_lines.push_str(&format!(
+            "Environment=\"{}={}\"\n",
+            nession_common::paths::NESSION_HOME_ENV,
+            systemd_environment_value(home)
+        ));
+    }
+    if let Some(dir) = runtime_dir {
+        env_lines.push_str(&format!(
+            "Environment=\"{}={}\"\n",
+            nession_common::paths::NESSION_RUNTIME_DIR_ENV,
+            systemd_environment_value(dir)
+        ));
+    }
     let exec_start = [
         exe_path,
         "agent",
@@ -796,14 +820,27 @@ fn launchd_plist_content(
     config_path: &str,
     pid_file: &str,
     nession_home: Option<&str>,
+    runtime_dir: Option<&str>,
 ) -> String {
-    let env_block = match nession_home {
-        Some(home) => format!(
-            "  <key>EnvironmentVariables</key>\n  <dict>\n    \
-             <key>NESSION_HOME</key>\n    <string>{}</string>\n  </dict>\n",
+    let mut env_entries = String::new();
+    if let Some(home) = nession_home {
+        env_entries.push_str(&format!(
+            "    <key>{}</key>\n    <string>{}</string>\n",
+            nession_common::paths::NESSION_HOME_ENV,
             xml_escape(home)
-        ),
-        None => String::new(),
+        ));
+    }
+    if let Some(dir) = runtime_dir {
+        env_entries.push_str(&format!(
+            "    <key>{}</key>\n    <string>{}</string>\n",
+            nession_common::paths::NESSION_RUNTIME_DIR_ENV,
+            xml_escape(dir)
+        ));
+    }
+    let env_block = if env_entries.is_empty() {
+        String::new()
+    } else {
+        format!("  <key>EnvironmentVariables</key>\n  <dict>\n{env_entries}  </dict>\n")
     };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -1036,6 +1073,7 @@ mod tests {
             "/custom/agent.toml",
             "/custom/agent.pid",
             Some("/custom/home"),
+            Some("/run/user/1000/nession"),
         );
         assert!(
             unit.contains(
@@ -1046,6 +1084,10 @@ mod tests {
         assert!(
             unit.contains("Environment=\"NESSION_HOME=/custom/home\""),
             "{unit}"
+        );
+        assert!(
+            unit.contains("Environment=\"NESSION_RUNTIME_DIR=/run/user/1000/nession\""),
+            "the unit must pin the runtime directory the installer resolved: {unit}"
         );
     }
 
@@ -1100,7 +1142,7 @@ mod tests {
         let pid_file = "/tmp/agent \"quoted\".pid";
         let home = "/home/me/Home %x $y";
 
-        let unit = systemd_unit_content(exe, config, pid_file, Some(home));
+        let unit = systemd_unit_content(exe, config, pid_file, Some(home), None);
         let exec_start = unit
             .lines()
             .find_map(|line| line.strip_prefix("ExecStart="))
@@ -1134,12 +1176,15 @@ mod tests {
             "/home/me/Config & Data/agent.toml",
             "/tmp/agent \"quoted\".pid",
             Some("/home/me/Home <x>"),
+            Some("/var/folders/xy/T/nession"),
         );
         for expected in [
             "<string>/opt/My Tools/nession</string>",
             "<string>/home/me/Config &amp; Data/agent.toml</string>",
             "<string>/tmp/agent &quot;quoted&quot;.pid</string>",
             "<string>/home/me/Home &lt;x&gt;</string>",
+            "<key>NESSION_RUNTIME_DIR</key>",
+            "<string>/var/folders/xy/T/nession</string>",
         ] {
             assert!(plist.contains(expected), "missing {expected}: {plist}");
         }
