@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { DetailSection } from '@/components/ui/resource-detail';
 import type { SandboxPolicyDraft } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
@@ -72,8 +73,10 @@ export function SandboxPolicySummary({ policy, onSelectTab }: SandboxPolicySumma
           key={row.id}
           type="button"
           variant="ghost"
+          size="sm"
+          data-recipe-part="detail-row-button"
           data-testid={`sandbox-summary-${row.id}`}
-          className="min-h-11 w-full justify-between gap-3 px-2"
+          className="w-full justify-between gap-3 px-2"
           onClick={() => onSelectTab(row.id)}
         >
           <span className={chromeSansRole('secondary')}>{row.label}</span>
@@ -99,19 +102,16 @@ export function SandboxPolicySummary({ policy, onSelectTab }: SandboxPolicySumma
  */
 export function SandboxPolicyPreview({ policy }: { policy: SandboxPolicyDraft }) {
   return (
-    <section className="flex min-w-0 flex-col gap-1">
-      <h3 className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-        Assembled policy payload
-      </h3>
+    <DetailSection title="Assembled policy payload" level="h3">
       <pre
         data-testid="sandbox-policy-preview"
         className={cn(
           chromeMonoRole('code'),
-          'max-h-64 min-w-0 overflow-auto rounded-[var(--nession-radius-surface)] bg-muted/30 p-2',
+          'max-h-64 min-w-0 overflow-auto rounded-[var(--nession-radius-surface)] bg-muted/40 p-2',
         )}
       >
         {JSON.stringify(policy, null, 2)}
       </pre>
-    </section>
+    </DetailSection>
   );
 }

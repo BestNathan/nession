@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Boxes, GitBranch, MapPin, Plus, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import {
   Dialog,
   DialogContent,
@@ -9,8 +8,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DetailEmpty,
+  DetailFact,
+  DetailFacts,
+  DetailGroup,
+  DetailHeader,
+  DetailNote,
+  DetailSection,
+  DetailSurface,
+} from '@/components/ui/resource-detail';
+import { detailInteractiveRowClass, detailRowClass } from '@/components/ui/resource-detailStyles';
 import { cn } from '@/shared/lib/utils';
-import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { agentDisplayName } from '@/shared/lib/format';
 import type { Agent, Session } from '@/types';
 import type { Project, ProjectLocation } from '@/product/project/types';
@@ -23,41 +33,12 @@ export interface ProjectDetailProps {
   /** Related Sessions are a Workspace-content projection, not navigation (#3082). */
   sessions?: Session[];
   onOpenSession?: (session: Session) => void;
-}
-
-const boxClass = 'rounded-[var(--nession-radius-surface)] border border-border px-3 py-2';
-
-function Section({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className={chromeSansRole('secondary')}>{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function EmptyRow({ children }: { children: React.ReactNode }) {
-  return (
-    <p
-      className={cn(
-        'rounded-[var(--nession-radius-surface)] border border-dashed border-border px-3 py-3 text-muted-foreground',
-        chromeSansRole('secondary'),
-      )}
-    >
-      {children}
-    </p>
-  );
+  /**
+   * `heading` is a surface that names itself (Web destination). `context`
+   * omits the repeated identity when the host's one App page header already
+   * names the Project (#1051, #3137 SC-03).
+   */
+  identity?: 'heading' | 'context';
 }
 
 function LocationRow({ agents, location }: { agents: Agent[]; location: ProjectLocation }) {
@@ -66,14 +47,15 @@ function LocationRow({ agents, location }: { agents: Agent[]; location: ProjectL
   return (
     <div
       data-testid="project-location-row"
-      className={cn(boxClass, 'flex items-center gap-2')}
+      data-recipe-part="detail-row"
+      className={detailRowClass}
     >
       <MapPin className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={chromeSansRole('primary')}>
           {agent ? agentDisplayName(agent) : location.agent_id}
         </span>
-        <span className={cn('truncate text-muted-foreground', chromeMonoRole('metadata'))}>
+        <span className={cn('break-all text-muted-foreground', chromeMonoRole('metadata'))}>
           {location.path}
         </span>
       </div>
@@ -92,29 +74,26 @@ function LocationRow({ agents, location }: { agents: Agent[]; location: ProjectL
 
 function ProjectHeader({
   project,
+  identity,
   onCreateSession,
   onManagedUnavailable,
   onSettings,
 }: {
   project: Project;
+  identity: 'heading' | 'context';
   onCreateSession: (project: Project) => void;
   onManagedUnavailable: () => void;
   onSettings: (project: Project) => void;
 }) {
+  const heading = identity === 'heading';
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className={cn('text-muted-foreground', chromeLabelRole('caption'))}>Project</p>
-          <h1 data-testid="project-detail-title" className={cn('truncate', chromeSansRole('primary'))}>
-            {project.name}
-          </h1>
-          {project.description ? (
-            <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
-              {project.description}
-            </p>
-          ) : null}
-        </div>
+    <DetailHeader
+      eyebrow={heading ? 'Project' : undefined}
+      title={heading ? project.name : undefined}
+      titleTestId={heading ? 'project-detail-title' : undefined}
+      level={heading ? 'h1' : 'h2'}
+      description={project.description}
+      actions={
         <Button
           type="button"
           variant="ghost"
@@ -126,58 +105,63 @@ function ProjectHeader({
         >
           <Settings className="size-4" aria-hidden />
         </Button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          data-testid="project-detail-create-session"
-          onClick={() => onCreateSession(project)}
-        >
-          <Plus className="size-4" aria-hidden />
-          New Session
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          data-testid="project-detail-managed-session"
-          onClick={() => onManagedUnavailable()}
-        >
-          <Boxes className="size-4" aria-hidden />
-          Managed (EROFS)
-        </Button>
-        <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-          Project is a declaration; the Session owns its runtime and environment.
-        </span>
-      </div>
-    </div>
+      }
+    >
+      <Button
+        type="button"
+        data-testid="project-detail-create-session"
+        onClick={() => onCreateSession(project)}
+      >
+        <Plus className="size-4" aria-hidden />
+        New Session
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        data-testid="project-detail-managed-session"
+        onClick={() => onManagedUnavailable()}
+      >
+        <Boxes className="size-4" aria-hidden />
+        Managed (EROFS)
+      </Button>
+      <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+        Project is a declaration; the Session owns its runtime and environment.
+      </span>
+    </DetailHeader>
   );
 }
 
 function SourceSection({ project }: { project: Project }) {
   return (
-    <Section title="Git Source">
+    <DetailSection title="Git source">
       {project.source ? (
-        <div className={cn(boxClass, 'flex flex-col gap-1')}>
-          <span className="flex items-center gap-2 break-all">
-            <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className={chromeMonoRole('metadata')}>{project.source.repository_url}</span>
-          </span>
-          <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-            Ref · <span data-testid="project-source-ref">{project.source.ref}</span>
-          </span>
-        </div>
+        <DetailFacts className="gap-1.5">
+          <DetailFact
+            label="Repository"
+            mono
+            valueTestId="project-source-repository"
+          >
+            <span className="flex items-start gap-2">
+              <GitBranch className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span>{project.source.repository_url}</span>
+            </span>
+          </DetailFact>
+          <DetailFact label="Ref" mono inline>
+            <span data-testid="project-source-ref">{project.source.ref}</span>
+          </DetailFact>
+        </DetailFacts>
       ) : (
-        <EmptyRow>No Git source configured.</EmptyRow>
+        <DetailEmpty>No Git source configured.</DetailEmpty>
       )}
-    </Section>
+    </DetailSection>
   );
 }
 
 function LocationsSection({ project, agents }: { project: Project; agents: Agent[] }) {
   return (
-    <Section title="Existing Locations">
+    <DetailSection title="Existing Locations">
       {project.locations.length > 0 ? (
-        <div className="flex flex-col gap-2">
+        <DetailGroup>
           {project.locations.map((location) => (
             <LocationRow
               key={`${location.agent_id}:${location.path}`}
@@ -185,46 +169,44 @@ function LocationsSection({ project, agents }: { project: Project; agents: Agent
               location={location}
             />
           ))}
-        </div>
+        </DetailGroup>
       ) : (
-        <EmptyRow>
+        <DetailEmpty>
           No Existing Locations. Add an Agent directory in Project settings before
           creating an Existing Session.
-        </EmptyRow>
+        </DetailEmpty>
       )}
-    </Section>
+    </DetailSection>
   );
 }
 
 function DefaultsSection({ project }: { project: Project }) {
   const defaults = project.session_defaults;
   return (
-    <Section title="Session defaults">
+    <DetailSection title="Session defaults">
       {defaults ? (
-        <div className={cn(boxClass, 'flex flex-col gap-1')}>
-          <span className={chromeSansRole('secondary')}>
-            Shell · <span className={chromeMonoRole('metadata')}>{defaults.shell ?? 'Unset'}</span>
-          </span>
-          <span className={chromeSansRole('secondary')}>
-            Env profiles ·{' '}
-            <span className={chromeMonoRole('metadata')}>
-              {defaults.env_profile_ids.length > 0 ? defaults.env_profile_ids.join(', ') : 'None'}
-            </span>
-          </span>
-          <span className={chromeSansRole('secondary')}>
-            Sandbox policy ·{' '}
-            <span className={chromeMonoRole('metadata')}>
+        <>
+          <DetailFacts className="gap-1">
+            <DetailFact label="Shell" mono inline>
+              {defaults.shell ?? 'Unset'}
+            </DetailFact>
+            <DetailFact label="Env profiles" mono inline>
+              {defaults.env_profile_ids.length > 0
+                ? defaults.env_profile_ids.join(', ')
+                : 'None'}
+            </DetailFact>
+            <DetailFact label="Sandbox policy" mono inline>
               {defaults.sandbox_policy_ref ?? 'Unset'}
-            </span>
-          </span>
-          <span className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+            </DetailFact>
+          </DetailFacts>
+          <DetailNote>
             Desired defaults only. Session creation owns the realized environment.
-          </span>
-        </div>
+          </DetailNote>
+        </>
       ) : (
-        <EmptyRow>No Session defaults.</EmptyRow>
+        <DetailEmpty>No Session defaults.</DetailEmpty>
       )}
-    </Section>
+    </DetailSection>
   );
 }
 
@@ -236,15 +218,16 @@ function RelatedSessionsSection({
   onOpenSession?: (session: Session) => void;
 }) {
   return (
-    <Section title="Related Sessions">
+    <DetailSection title="Related Sessions">
       {sessions.length > 0 ? (
-        <div className="flex flex-col gap-2">
+        <DetailGroup>
           {sessions.map((session) => (
             <button
               key={session.session_id}
               type="button"
               data-testid="project-related-session"
-              className={cn(boxClass, 'flex min-w-0 items-center justify-between gap-2 text-left')}
+              data-recipe-part="detail-row-button"
+              className={cn(detailInteractiveRowClass, 'justify-between gap-2')}
               onClick={() => onOpenSession?.(session)}
             >
               <span className="flex min-w-0 flex-col">
@@ -260,31 +243,28 @@ function RelatedSessionsSection({
               </span>
             </button>
           ))}
-        </div>
+        </DetailGroup>
       ) : (
-        <EmptyRow>No other Sessions are associated with this Project.</EmptyRow>
+        <DetailEmpty>No other Sessions are associated with this Project.</DetailEmpty>
       )}
-    </Section>
+    </DetailSection>
   );
 }
 
 function ImageSection({ project }: { project: Project }) {
   return (
-    <Section title="Image">
+    <DetailSection title="Image">
       {project.image_digest ? (
-        <p
-          data-testid="project-image-digest"
-          className={cn('break-all', boxClass, chromeMonoRole('metadata'))}
-        >
+        <DetailFact label="Image digest" mono valueTestId="project-image-digest">
           {project.image_digest}
-        </p>
+        </DetailFact>
       ) : (
-        <EmptyRow>
+        <DetailEmpty>
           No image digest. Shared EROFS artifacts are referenced by immutable digest
           through the global Image Manager.
-        </EmptyRow>
+        </DetailEmpty>
       )}
-    </Section>
+    </DetailSection>
   );
 }
 
@@ -319,21 +299,22 @@ export function ProjectDetailContent({
   onSettings,
   sessions,
   onOpenSession,
+  identity = 'heading',
 }: ProjectDetailProps) {
   const [managedOpen, setManagedOpen] = useState(false);
   return (
-    <div
+    <DetailSurface
       data-testid="project-detail"
       data-project-id={project.project_id}
-      className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-4 py-4"
+      className={cn('mx-auto max-w-3xl px-4 py-4')}
     >
       <ProjectHeader
         project={project}
+        identity={identity}
         onCreateSession={onCreateSession}
         onManagedUnavailable={() => setManagedOpen(true)}
         onSettings={onSettings}
       />
-      <Separator />
       <SourceSection project={project} />
       <LocationsSection project={project} agents={agents} />
       <DefaultsSection project={project} />
@@ -342,7 +323,7 @@ export function ProjectDetailContent({
       )}
       <ImageSection project={project} />
       <ManagedUnavailableDialog open={managedOpen} onClose={() => setManagedOpen(false)} />
-    </div>
+    </DetailSurface>
   );
 }
 

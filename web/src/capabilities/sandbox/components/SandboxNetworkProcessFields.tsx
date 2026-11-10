@@ -1,5 +1,10 @@
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  FormField,
+  FormGrid,
+  FormSection,
+} from '@/components/ui/configuration-form';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -24,17 +29,6 @@ import { SandboxStringListEditor } from './SandboxStringListEditor';
 
 const NETWORK_MODES: readonly SandboxNetworkMode[] = ['allow', 'deny', 'restricted'];
 const NAMESPACES = ['pid', 'ipc', 'user', 'uts', 'cgroup'] as const;
-
-function FieldLabel({ htmlFor, children }: { htmlFor: string; children: string }) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-    >
-      {children}
-    </label>
-  );
-}
 
 export interface SandboxFieldsetProps {
   draft: SandboxDraftState;
@@ -69,15 +63,21 @@ export function SandboxNetworkFields({
     });
   };
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3">
-      <legend className={cn(chromeSansRole('primary'), 'px-1')}>Network</legend>
+    <FormSection
+      title="Network"
+      description="Restricted mode applies the explicit egress allow/deny lists; the other modes use the backend's baseline."
+    >
       <SandboxImplementationStatus
         catalog={catalog}
         path={IMPLEMENTATION_PATHS.network}
         label="Network policy"
       />
-      <div className="flex min-w-0 flex-col gap-1">
-        <FieldLabel htmlFor="sandbox-network-mode">Mode</FieldLabel>
+      <FormField
+        id="sandbox-network-mode"
+        label="Mode"
+        description={selectedModeReason}
+        descriptionTestId="sandbox-network-mode-reason"
+      >
         <Select value={mode} onValueChange={changeMode}>
           <SelectTrigger
             id="sandbox-network-mode"
@@ -103,56 +103,44 @@ export function SandboxNetworkFields({
             })}
           </SelectContent>
         </Select>
-        {selectedModeReason ? (
-          <p
-            data-testid="sandbox-network-mode-reason"
-            className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-          >
-            {selectedModeReason}
-          </p>
-        ) : null}
-      </div>
+      </FormField>
       {mode === 'restricted' ? (
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <SandboxStringListEditor
-              title="Allowed destinations"
-              items={draft.draft.network?.egress?.allow ?? []}
-              placeholder="api.example.com:443"
-              addLabel="Add allowed rule"
-              testIdPrefix="sandbox-egress-allow"
-              emptyText="No destinations are allowed."
-              disabledReason={
-                networkDisabled
-                  ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
-                  : null
-              }
-              onAdd={() => draft.addEgressRule('allow')}
-              onChange={(index, value) => draft.updateEgressRule('allow', index, value)}
-              onRemove={(index) => draft.removeEgressRule('allow', index)}
-            />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <SandboxStringListEditor
-              title="Denied destinations"
-              items={draft.draft.network?.egress?.deny ?? []}
-              placeholder="*.internal.example"
-              addLabel="Add denied rule"
-              testIdPrefix="sandbox-egress-deny"
-              emptyText="No extra destinations are denied."
-              disabledReason={
-                networkDisabled
-                  ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
-                  : null
-              }
-              onAdd={() => draft.addEgressRule('deny')}
-              onChange={(index, value) => draft.updateEgressRule('deny', index, value)}
-              onRemove={(index) => draft.removeEgressRule('deny', index)}
-            />
-          </div>
-        </div>
+        <FormGrid>
+          <SandboxStringListEditor
+            title="Allowed destinations"
+            items={draft.draft.network?.egress?.allow ?? []}
+            placeholder="api.example.com:443"
+            addLabel="Add allowed rule"
+            testIdPrefix="sandbox-egress-allow"
+            emptyText="No destinations are allowed."
+            disabledReason={
+              networkDisabled
+                ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
+                : null
+            }
+            onAdd={() => draft.addEgressRule('allow')}
+            onChange={(index, value) => draft.updateEgressRule('allow', index, value)}
+            onRemove={(index) => draft.removeEgressRule('allow', index)}
+          />
+          <SandboxStringListEditor
+            title="Denied destinations"
+            items={draft.draft.network?.egress?.deny ?? []}
+            placeholder="*.internal.example"
+            addLabel="Add denied rule"
+            testIdPrefix="sandbox-egress-deny"
+            emptyText="No extra destinations are denied."
+            disabledReason={
+              networkDisabled
+                ? implementationDisabledReason(catalog, IMPLEMENTATION_PATHS.network)
+                : null
+            }
+            onAdd={() => draft.addEgressRule('deny')}
+            onChange={(index, value) => draft.updateEgressRule('deny', index, value)}
+            onRemove={(index) => draft.removeEgressRule('deny', index)}
+          />
+        </FormGrid>
       ) : null}
-    </fieldset>
+    </FormSection>
   );
 }
 
@@ -163,17 +151,15 @@ export function SandboxProcessFields({ draft, catalog }: SandboxFieldsetProps) {
     IMPLEMENTATION_PATHS.linuxNamespaces,
   );
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3">
-      <legend className={cn(chromeSansRole('primary'), 'px-1')}>Process namespaces</legend>
+    <FormSection
+      title="Process namespaces"
+      description="Linux-native. The backend baseline namespaces are always present; these are explicit additional requests."
+    >
       <SandboxImplementationStatus
         catalog={catalog}
         path={IMPLEMENTATION_PATHS.linuxNamespaces}
         label="Linux namespaces"
       />
-      <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-        Linux-native. The backend baseline namespaces are always present; these are explicit
-        additional requests.
-      </p>
       <div className="flex flex-wrap gap-4">
         {NAMESPACES.map((namespace) => {
           const optionReason = namespaceDisabledReason(catalog, namespace);
@@ -199,7 +185,11 @@ export function SandboxProcessFields({ draft, catalog }: SandboxFieldsetProps) {
         })}
       </div>
       {namespaces?.cgroup && !namespaces.user ? (
-        <p className={cn(chromeSansRole('caption'), 'text-destructive')}>
+        <p
+          role="alert"
+          data-recipe-part="form-error"
+          className={cn(chromeSansRole('caption'), 'text-destructive')}
+        >
           The cgroup namespace requires the user namespace.
         </p>
       ) : null}
@@ -217,6 +207,6 @@ export function SandboxProcessFields({ draft, catalog }: SandboxFieldsetProps) {
             ) : null;
           })
         : null}
-    </fieldset>
+    </FormSection>
   );
 }

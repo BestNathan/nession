@@ -4,7 +4,8 @@ import type {
   SandboxCurrentContext,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { FormSurface } from '@/components/ui/configuration-form';
+import { DetailHeader, DetailSurface } from '@/components/ui/resource-detail';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
 import {
@@ -77,27 +78,27 @@ function ComposerOverview({
     onTabChange,
   } = props;
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <header className="flex min-w-0 flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className={chromeSansRole('title')}>Outside Sandbox</h2>
+    <DetailSurface>
+      <DetailHeader
+        level="h2"
+        title="Outside Sandbox"
+        badges={
           <Badge data-testid="sandbox-status" variant="outline">
             outside
           </Badge>
-        </div>
-        <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-          Compose a policy for a new isolated Pane in this Session. Nothing is preselected:
-          optional groups stay empty until you add them, and the backend baseline still applies.
-        </p>
-        {context.reason ? (
-          <p
-            data-testid="sandbox-reason"
-            className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-          >
-            {context.reason}
-          </p>
-        ) : null}
-      </header>
+        }
+        description={
+          <>
+            Compose a policy for a new isolated Pane in this Session. Nothing is preselected:
+            optional groups stay empty until you add them, and the backend baseline still applies.
+            {context.reason ? (
+              <span data-testid="sandbox-reason" className="mt-1 block">
+                {context.reason}
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
       <SandboxPolicySummary policy={draft.draft} onSelectTab={onTabChange} />
       <SandboxPolicyPreview policy={draft.draft} />
@@ -116,7 +117,7 @@ function ComposerOverview({
       />
 
       <SandboxExistingPanes panes={context.sandbox_panes} busy={busy} onFocus={onFocusPane} />
-    </div>
+    </DetailSurface>
   );
 }
 
@@ -204,27 +205,43 @@ export function SandboxComposer(props: SandboxComposerProps) {
       <ComposerOverview props={props} signature={signature} preflightValid={preflightValid} />
     ),
     filesystem: (
-      <SandboxFilesystemFields
-        context={context}
-        draft={draft}
-        workingDir={workingDir}
-        workingDirError={fieldErrors['working_dir']}
-        onWorkingDirChange={onWorkingDirChange}
-      />
+      <FormSurface>
+        <SandboxFilesystemFields
+          context={context}
+          draft={draft}
+          workingDir={workingDir}
+          workingDirError={fieldErrors['working_dir']}
+          onWorkingDirChange={onWorkingDirChange}
+        />
+      </FormSurface>
     ),
-    network: <SandboxNetworkFields draft={draft} catalog={context.catalog} />,
-    process: <SandboxProcessFields draft={draft} catalog={context.catalog} />,
+    network: (
+      <FormSurface>
+        <SandboxNetworkFields draft={draft} catalog={context.catalog} />
+      </FormSurface>
+    ),
+    process: (
+      <FormSurface>
+        <SandboxProcessFields draft={draft} catalog={context.catalog} />
+      </FormSurface>
+    ),
     resource: (
-      <KvPanel
-        props={props}
-        group="resource"
-        title="Resource controls"
-        description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
-        implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
-        fieldErrors={fieldErrors}
-      />
+      <FormSurface>
+        <KvPanel
+          props={props}
+          group="resource"
+          title="Resource controls"
+          description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
+          implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
+          fieldErrors={fieldErrors}
+        />
+      </FormSurface>
     ),
-    syscall: <SandboxSyscallProfile draft={draft} catalog={context.catalog} />,
+    syscall: (
+      <FormSurface>
+        <SandboxSyscallProfile draft={draft} catalog={context.catalog} />
+      </FormSurface>
+    ),
   };
 
   return (

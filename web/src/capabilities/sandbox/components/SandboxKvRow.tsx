@@ -1,5 +1,10 @@
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  FormField,
+  FormGrid,
+  FormRow,
+} from '@/components/ui/configuration-form';
 import { Input } from '@/components/ui/input';
 import type {
   SandboxFieldEntry,
@@ -18,7 +23,6 @@ export interface SandboxKvRowProps {
   valueError: string | undefined;
   disabled: boolean;
   listId: string;
-  labelClass: string;
   onChange: (patch: Partial<SandboxKvEntry>) => void;
   onRemove: () => void;
 }
@@ -34,7 +38,6 @@ export function SandboxKvRow({
   valueError,
   disabled,
   listId,
-  labelClass,
   onChange,
   onRemove,
 }: SandboxKvRowProps) {
@@ -46,18 +49,14 @@ export function SandboxKvRow({
       : `${option.value_format} — e.g. ${option.example}`
     : 'Known keys and their native value formats appear here.';
   return (
-    <div
-      data-testid={`sandbox-${group}-row-${index}`}
-      className="flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] bg-muted/30 p-2"
-    >
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label
-            htmlFor={`sandbox-${group}-key-${index}`}
-            className={cn(labelClass, 'text-muted-foreground')}
-          >
-            Key
-          </label>
+    <FormRow data-testid={`sandbox-${group}-row-${index}`}>
+      <FormGrid>
+        <FormField
+          id={`sandbox-${group}-key-${index}`}
+          label="Key"
+          error={keyError}
+          errorTestId={`sandbox-${group}-key-error-${index}`}
+        >
           <Input
             id={`sandbox-${group}-key-${index}`}
             data-testid={`sandbox-${group}-key-${index}`}
@@ -67,22 +66,19 @@ export function SandboxKvRow({
             autoComplete="off"
             onChange={(event) => onChange({ key: event.target.value })}
           />
-          {keyError ? (
-            <p
-              data-testid={`sandbox-${group}-key-error-${index}`}
-              className={cn(chromeSansRole('caption'), 'text-destructive')}
-            >
-              {keyError}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <label
-            htmlFor={`sandbox-${group}-value-${index}`}
-            className={cn(labelClass, 'text-muted-foreground')}
-          >
-            Value
-          </label>
+        </FormField>
+        <FormField
+          id={`sandbox-${group}-value-${index}`}
+          label="Value"
+          description={
+            optionUnavailable
+              ? (option.reason ?? 'This key is not installable on this Agent.')
+              : undefined
+          }
+          descriptionTestId={`sandbox-${group}-value-unavailable-${index}`}
+          error={valueError}
+          errorTestId={`sandbox-${group}-value-error-${index}`}
+        >
           <Input
             id={`sandbox-${group}-value-${index}`}
             data-testid={`sandbox-${group}-value-${index}`}
@@ -91,24 +87,8 @@ export function SandboxKvRow({
             autoComplete="off"
             onChange={(event) => onChange({ value: event.target.value })}
           />
-          {optionUnavailable ? (
-            <p
-              data-testid={`sandbox-${group}-value-unavailable-${index}`}
-              className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-            >
-              {option.reason ?? 'This key is not installable on this Agent.'}
-            </p>
-          ) : null}
-          {valueError ? (
-            <p
-              data-testid={`sandbox-${group}-value-error-${index}`}
-              className={cn(chromeSansRole('caption'), 'text-destructive')}
-            >
-              {valueError}
-            </p>
-          ) : null}
-        </div>
-      </div>
+        </FormField>
+      </FormGrid>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <p className={cn(chromeSansRole('caption'), 'min-w-0 flex-1 text-muted-foreground')}>
           {hint}
@@ -126,6 +106,6 @@ export function SandboxKvRow({
           Remove
         </Button>
       </div>
-    </div>
+    </FormRow>
   );
 }

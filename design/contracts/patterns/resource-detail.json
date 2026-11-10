@@ -1,0 +1,14 @@
+{
+  "id": "pattern.resource-detail",
+  "$description": "The shared content grammar for a resource destination and a Session-context capability's observed state (#3137). The two hosts keep different shell/navigation owners; the content region keeps one hierarchy. Long identities, paths and digests wrap at the value's own role instead of forcing horizontal overflow, and a read-only fact is never given input chrome. App local rows/actions still honour the touch floor.",
+  "patternRef": "docs/design/design-system/patterns/resource-detail.md",
+  "web": {
+    "wrap": true,
+    "overflow": "wrap"
+  },
+  "app": {
+    "wrap": true,
+    "overflow": "wrap",
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

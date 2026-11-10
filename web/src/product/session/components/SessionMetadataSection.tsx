@@ -7,8 +7,12 @@
 import { useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  FormActions,
+  FormField,
+  FormSection,
+} from '@/components/ui/configuration-form';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -63,8 +67,13 @@ function SessionMetadataView({ entry }: { entry: SessionMetadataEntry }) {
 
 function SessionMetadataTagsEditor({ editor }: { editor: SessionMetadataEditor }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor="session-metadata-tag-input">Tags</Label>
+    <FormField
+      id="session-metadata-tag-input"
+      label="Tags"
+      description={`Up to ${SESSION_METADATA_TAG_LIMIT} tags, ${SESSION_METADATA_TAG_MAX} characters each; duplicates are ignored regardless of case.`}
+      error={editor.tagError}
+      errorTestId="session-metadata-tag-error"
+    >
       <div data-testid="session-metadata-tags-editor" className="flex flex-wrap gap-1.5">
         {editor.draft.tags.length > 0 ? (
           editor.draft.tags.map((tag, index) => (
@@ -116,20 +125,7 @@ function SessionMetadataTagsEditor({ editor }: { editor: SessionMetadataEditor }
           Add
         </Button>
       </div>
-      <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-        Up to {SESSION_METADATA_TAG_LIMIT} tags, {SESSION_METADATA_TAG_MAX} characters each;
-        duplicates are ignored regardless of case.
-      </p>
-      {editor.tagError ? (
-        <p
-          role="alert"
-          data-testid="session-metadata-tag-error"
-          className={cn('text-destructive', chromeSansRole('metadata'))}
-        >
-          {editor.tagError}
-        </p>
-      ) : null}
-    </div>
+    </FormField>
   );
 }
 
@@ -142,13 +138,16 @@ function SessionMetadataEditorForm({
 }) {
   return (
     <div data-testid="session-metadata-editor" className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="session-metadata-title">Title</Label>
+      <FormField
+        id="session-metadata-title"
+        label="Title"
+        labelAction={
           <span className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>
             {codepointLength(editor.draft.title.trim())}/{SESSION_METADATA_TITLE_MAX}
           </span>
-        </div>
+        }
+        description="Shown in navigation. The tmux name is not renamed."
+      >
         <Input
           id="session-metadata-title"
           data-testid="session-metadata-title-input"
@@ -160,19 +159,18 @@ function SessionMetadataEditorForm({
             editor.setDraft({ ...editor.draft, title: event.target.value })
           }
         />
-        <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-          Shown in navigation. The tmux name is not renamed.
-        </p>
-      </div>
+      </FormField>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="session-metadata-description">Description</Label>
+      <FormField
+        id="session-metadata-description"
+        label="Description"
+        labelAction={
           <span className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>
             {codepointLength(editor.draft.description.trim())}/
             {SESSION_METADATA_DESCRIPTION_MAX}
           </span>
-        </div>
+        }
+      >
         <Textarea
           id="session-metadata-description"
           data-testid="session-metadata-description-input"
@@ -185,7 +183,7 @@ function SessionMetadataEditorForm({
             editor.setDraft({ ...editor.draft, description: event.target.value })
           }
         />
-      </div>
+      </FormField>
 
       <SessionMetadataTagsEditor editor={editor} />
 
@@ -226,15 +224,7 @@ function SessionMetadataEditorForm({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          data-testid="session-metadata-save"
-          disabled={editor.saving || !editor.dirty}
-          onClick={() => void editor.save()}
-        >
-          {editor.saving ? 'Saving…' : 'Save'}
-        </Button>
+      <FormActions>
         <Button
           type="button"
           variant="outline"
@@ -244,7 +234,15 @@ function SessionMetadataEditorForm({
         >
           Cancel
         </Button>
-      </div>
+        <Button
+          type="button"
+          data-testid="session-metadata-save"
+          disabled={editor.saving || !editor.dirty}
+          onClick={() => void editor.save()}
+        >
+          {editor.saving ? 'Saving…' : 'Save'}
+        </Button>
+      </FormActions>
     </div>
   );
 }
@@ -286,16 +284,13 @@ export function SessionMetadataSection({
   }, [editingDisabled, editor, entry.status, initialEditing]);
 
   return (
-    <section
-      data-testid="session-metadata"
-      aria-labelledby="session-metadata-heading"
-      className="flex flex-col gap-3"
-    >
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <h3 id="session-metadata-heading" className={chromeSansRole('secondary')}>
-          Work context
-        </h3>
-        {!editor.editing && entry.status === 'loaded' ? (
+    <FormSection
+      title="Work context"
+      level="h3"
+      titleId="session-metadata-heading"
+      testId="session-metadata"
+      action={
+        !editor.editing && entry.status === 'loaded' ? (
           <Button
             type="button"
             size="sm"
@@ -307,8 +302,9 @@ export function SessionMetadataSection({
           >
             Edit details
           </Button>
-        ) : null}
-      </div>
+        ) : null
+      }
+    >
 
       {editingDisabled && !editor.editing ? (
         <p
@@ -370,6 +366,6 @@ export function SessionMetadataSection({
           {editor.notice.message}
         </p>
       ) : null}
-    </section>
+    </FormSection>
   );
 }
