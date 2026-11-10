@@ -1,7 +1,7 @@
-// Release-protocol snapshots are optional, immutable GitHub Release assets.
-// Without the tagged snapshot, a version's fields are UNKNOWN, never absent.
-// The asset is a JSON envelope with release/tag SHA and Rust-generated Schema;
-// it is not sourced from the moving main branch or a consumer's TS copy.
+// Historical protocol schemas are pinned to official Release tag commit SHAs.
+// Prefer an immutable Release asset; otherwise attempt the same Rust codegen
+// on that exact tag through an optional, credential-free history producer.
+// An unavailable tag is UNKNOWN, never an inferred absence.
 import {createHash} from 'node:crypto';
 
 const REPO='BestNathan/nession';
@@ -40,13 +40,17 @@ async function resolveTag(api,tag){
   }
   return object?.type==='commit'&&SHA.test(object.sha||'')?object.sha:null;
 }
+function validProtocolSchema(schema){
+  return schema?.$schema==='https://json-schema.org/draft/2020-12/schema'&&
+    schema?.protocols&&typeof schema.protocols==='object'&&
+    !Array.isArray(schema.protocols)&&schema?.$defs&&
+    typeof schema.$defs==='object'&&!Array.isArray(schema.$defs);
+}
 function validSnapshot(data,version,tag,sha){
   return data?.schema_version===1&&data.source?.repository===REPO&&
     data.source?.tag===tag&&data.source?.sha===sha&&
     data.source?.version===version&&
-    data.schema?.$schema==='https://json-schema.org/draft/2020-12/schema'&&
-    data.schema?.protocols&&typeof data.schema.protocols==='object'&&
-    data.schema?.$defs&&typeof data.schema.$defs==='object';
+    validProtocolSchema(data.schema);
 }
 async function fetchSnapshot(asset,version,tag,sha,fetcher){
   const url=BASE+encodeURIComponent(tag)+'/'+ASSET;
@@ -63,16 +67,20 @@ async function fetchSnapshot(asset,version,tag,sha,fetcher){
   try{data=JSON.parse(buf.toString('utf8'));}catch{return null;}
   return validSnapshot(data,version,tag,sha)?data.schema:null;
 }
-export async function releaseProtocolHistory({api,fetcher=fetch,releases}){
+export async function releaseProtocolHistory({api,fetcher=fetch,releases,snapshotAtTag=null}){
   const items=sortedReleases(releases);
   const result=[];
   for(const item of items){
     let sha=null, schema=null;
     try{
-      if(item.asset){
-        sha=await resolveTag(api,item.tag);
-        if(sha)schema=await fetchSnapshot(item.asset,item.version,item.tag,sha,fetcher);
-      }
+      // Resolve even when there is no Release asset. The tag commit, not the
+      // Cargo workspace version or the moving main branch, owns this release.
+      sha=await resolveTag(api,item.tag);
+      if(sha&&item.asset)
+        schema=await fetchSnapshot(item.asset,item.version,item.tag,sha,fetcher);
+      if(sha&&!schema&&snapshotAtTag)
+        schema=await snapshotAtTag({tag:item.tag,version:item.version,sha});
+      if(schema&&!validProtocolSchema(schema))schema=null;
     }catch(error){console.warn('Optional Protocol release snapshot unavailable',
       item.tag,error.message);}
     result.push({version:item.version,tag:item.tag,
