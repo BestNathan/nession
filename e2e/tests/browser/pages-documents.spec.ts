@@ -6,15 +6,17 @@ test.describe('standalone Pages Protocol Reference',()=>{
   test.beforeAll(async()=>{site=await startPagesFixture();});
   test.afterAll(async()=>{await site.close();});
 
-  test('desktop shows generated protocol versions and per-Nession-release fields',async({page})=>{
+  test('desktop shows generated protocol versions and a single since-Nession field',async({page})=>{
     await page.setViewportSize({width:1365,height:900});
     await page.goto(site.origin+'/#/documents');
     await expect(page.getByRole('heading',{name:'Protocol reference'})).toBeVisible();
     await expect(page.locator('.documents-entry')).toHaveCount(2);
     await expect(page.locator('.documents-reader > h2')).toHaveText('git.status');
     await expect(page.locator('.documents-field-table')).toHaveCount(2);
-    await expect(page.getByRole('columnheader',{name:'0.35.0'}).first()).toBeVisible();
-    await expect(page.getByRole('columnheader',{name:'0.36.0'}).first()).toBeVisible();
+    await expect(page.getByRole('columnheader',{name:'Since Nession'}).first()).toBeVisible();
+    await expect(page.getByRole('columnheader',{name:'0.35.0'})).toHaveCount(0);
+    await expect(page.locator('.documents-since.verified').first()).toHaveText('0.36.0');
+    await expect(page.locator('.documents-since.unknown').first()).toHaveText('Unknown');
     await expect(page.locator('.documents-version')).toHaveCount(2);
     await page.getByRole('link',{name:'v2',exact:true}).click();
     await expect(page.locator('.documents-version.active')).toHaveText('v2');
