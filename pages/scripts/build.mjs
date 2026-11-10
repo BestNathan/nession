@@ -3,7 +3,11 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
-import { loadDocuments, validPublicDocuments } from './documents-project.mjs';
+import {loadDocuments,projectProtocolSchema,validPublicDocuments}
+  from './documents-project.mjs';
+import {releaseProtocolHistory} from './protocol-release-history.mjs';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
@@ -171,8 +175,27 @@ const generatedAt=new Date().toISOString();
 const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
   sha:process.env.KNOWLEDGE_SHA,generatedAt});
 if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
-const documents=await loadDocuments({schemaPath:process.env.PAGES_PROTOCOL_SCHEMA_FILE,
-  sha:process.env.SOURCE_MAIN_SHA,generatedAt});
+const releaseList=await optionalList('/releases?per_page=100');
+const releases=await releaseProtocolHistory({api,releases:releaseList||[]});
+const mainSha=process.env.SOURCE_MAIN_SHA;
+const validMainSha=/^[a-f0-9]{40}$/.test(mainSha||'');
+const cargoText=await readFile(join(root,'../Cargo.toml'),'utf8');
+const sourceVersion=/\[workspace\.package\][\s\S]*?\bversion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"/
+  .exec(cargoText)?.[1]||null;
+let documents;
+if(validMainSha&&!process.env.PAGES_PROTOCOL_SCHEMA_FILE&&
+   process.env.PAGES_OFFLINE!=='1'){
+  // Compile the sole canonical Rust generator at the pinned main checkout.
+  // A failed generator aborts publication rather than serving stale contracts.
+  const {stdout}=await promisify(execFile)('cargo',
+    ['run','--quiet','-p','nession-protocol-codegen','--','--schema'],
+    {cwd:resolve(root,'..'),maxBuffer:8_000_000,timeout:600_000});
+  documents=projectProtocolSchema(JSON.parse(stdout),
+    {sha:mainSha,generatedAt,releases,sourceVersion});
+}else{
+  documents=await loadDocuments({schemaPath:process.env.PAGES_PROTOCOL_SCHEMA_FILE,
+    sha:validMainSha?mainSha:null,generatedAt,releases,sourceVersion});
+}
 if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
