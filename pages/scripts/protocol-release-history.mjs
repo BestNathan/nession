@@ -3,6 +3,7 @@
 // on that exact tag through an optional, credential-free history producer.
 // An unavailable tag is UNKNOWN, never an inferred absence.
 import {createHash} from 'node:crypto';
+import {projectProtocolSchema} from './documents-project.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
@@ -80,9 +81,17 @@ export async function releaseProtocolHistory({api,fetcher=fetch,releases,snapsho
         schema=await fetchSnapshot(item.asset,item.version,item.tag,sha,fetcher);
       if(sha&&!schema&&snapshotAtTag)
         schema=await snapshotAtTag({tag:item.tag,version:item.version,sha});
-      if(schema&&!validProtocolSchema(schema))schema=null;
-    }catch(error){console.warn('Optional Protocol release snapshot unavailable',
-      item.tag,error.message);}
+      if(schema){
+        if(!validProtocolSchema(schema))throw Error('invalid JSON Schema structure');
+        // A historical compiler may emit a different catalog format. Treat
+        // that tag as unknown rather than aborting the latest-main publication.
+        projectProtocolSchema(schema,{sha,generatedAt:'1970-01-01T00:00:00.000Z'});
+      }
+    }catch(error){
+      schema=null;
+      console.warn('Optional Protocol release snapshot unavailable',
+        item.tag,error.message);
+    }
     result.push({version:item.version,tag:item.tag,
       sha, status:schema?'available':'unavailable',schema});
   }
