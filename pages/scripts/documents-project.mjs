@@ -4,7 +4,7 @@ import {readFile, lstat} from 'node:fs/promises';
 const SHA=/^[a-f0-9]{40}$/;
 const ID=/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const ENTRY=/^([a-z][a-z0-9]*(?:[.-][a-z0-9]+)*)@v([1-9][0-9]*)$/;
-const DRAFT='https://json-schema.org/draft/2020-12';
+const DRAFT='https://json-schema.org/draft/2020-12/schema';
 const REPO='BestNathan/nession';
 const MAX_SOURCE_BYTES=8_000_000;
 const MAX_PROTOCOLS=400;
