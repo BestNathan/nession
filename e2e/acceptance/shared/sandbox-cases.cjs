@@ -80,6 +80,8 @@ function capabilityLine(capabilities) {
     ' namespaces=' + JSON.stringify(capabilities.namespaces) +
     ' seccomp=' + capabilities.seccomp +
     ' filesystem=' + capabilities.filesystem +
+    ' erofs=' + capabilities.erofs +
+    ' erofs_overlay=' + capabilities.erofs_overlay +
     ' network_deny=' + capabilities.network_deny +
     ' network_restricted=' + capabilities.network_restricted +
     ' cgroup_v2=' + (capabilities.cgroup_v2

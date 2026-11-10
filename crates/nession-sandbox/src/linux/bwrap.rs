@@ -92,6 +92,7 @@ pub fn build(
     seccomp_profile: &Path,
     cgroup_procs: Option<&Path>,
     inner_command: &[String],
+    composition: Option<&crate::linux::erofs::ResolvedComposition>,
     settings: &SandboxSettings,
 ) -> Result<BwrapPlan> {
     if inner_command.is_empty() {
@@ -120,15 +121,60 @@ pub fn build(
     } else {
         // No network policy dimension: no additional restriction.
     }
-    args.push("--dev".to_string());
-    args.push("/dev".to_string());
-    args.push("--proc".to_string());
-    args.push("/proc".to_string());
     args.push("--cap-drop".to_string());
     args.push("ALL".to_string());
 
-    match &policy.filesystem {
-        Some(filesystem) => {
+    let composition_requested = policy
+        .filesystem
+        .as_ref()
+        .is_some_and(|filesystem| filesystem.composition.is_some());
+    match (&policy.filesystem, composition) {
+        (Some(_), Some(resolved)) if composition_requested => {
+            let workspace = Path::new("/workspace");
+            if !(working_dir == workspace || working_dir.starts_with(workspace)) {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "the composition working directory {} must be /workspace or below",
+                    working_dir.display()
+                )));
+            }
+            // Start with an empty writable root and bind the prepared,
+            // digest-verified Base Runtime over it. Later mounts shadow
+            // earlier ones, which is exactly how the writable workspace
+            // overrides the read-only Project image.
+            args.push("--tmpfs".to_string());
+            args.push("/".to_string());
+            push_bind(&mut args, "--ro-bind", &resolved.base, Path::new("/"));
+            match &resolved.workspace {
+                crate::linux::erofs::WorkspaceMount::Bind(path) => {
+                    push_bind(&mut args, "--bind", path, workspace);
+                }
+                crate::linux::erofs::WorkspaceMount::Image(path) => {
+                    push_bind(&mut args, "--ro-bind", path, workspace);
+                }
+                crate::linux::erofs::WorkspaceMount::Overlay(path) => {
+                    push_bind(&mut args, "--bind", path, workspace);
+                }
+            }
+            for (target, mountpoint) in &resolved.toolchains {
+                push_bind(&mut args, "--ro-bind", mountpoint, target);
+            }
+            args.push("--tmpfs".to_string());
+            args.push("/tmp".to_string());
+            args.push("--tmpfs".to_string());
+            args.push("/home".to_string());
+            warnings.push(
+                "filesystem composition: empty tmpfs root with read-only Base Runtime, \
+                 writable /workspace bind, read-only toolchain mounts"
+                    .to_string(),
+            );
+        }
+        (Some(filesystem), _) if filesystem.composition.is_some() => {
+            return Err(SandboxError::Prepare(
+                "filesystem.composition was compiled but its EROFS mounts were not prepared"
+                    .to_string(),
+            ));
+        }
+        (Some(filesystem), _) => {
             forbidden.validate_not_visible(filesystem)?;
             if !filesystem.is_visible(working_dir) {
                 return Err(SandboxError::InvalidPolicy(format!(
@@ -162,7 +208,7 @@ pub fn build(
                 args.push(link);
             }
         }
-        None => {
+        (None, None) => {
             args.push("--ro-bind".to_string());
             args.push("/".to_string());
             args.push("/".to_string());
@@ -174,7 +220,19 @@ pub fn build(
                 );
             }
         }
+        (None, Some(_)) => {
+            return Err(SandboxError::Prepare(
+                "EROFS composition mounts were prepared without a composition policy".to_string(),
+            ));
+        }
     }
+
+    // Dev and proc are mounted after the composed root (or host-root bind), so
+    // an empty tmpfs root cannot hide them.
+    args.push("--dev".to_string());
+    args.push("/dev".to_string());
+    args.push("--proc".to_string());
+    args.push("/proc".to_string());
 
     args.push("--tmpfs".to_string());
     args.push(SANDBOX_RUN_DIR.to_string());
@@ -456,6 +514,7 @@ mod tests {
             Path::new("/tmp/seccomp"),
             None,
             &["/bin/sh".to_string(), "-l".to_string()],
+            None,
             &settings(),
         )
         .expect("plan");
@@ -483,6 +542,7 @@ mod tests {
             Path::new("/tmp/seccomp"),
             None,
             &["/bin/sh".to_string(), "-l".to_string()],
+            None,
             &settings(),
         )
         .expect("plan");
@@ -510,6 +570,7 @@ mod tests {
             Path::new("/tmp/seccomp"),
             None,
             &["/bin/sh".to_string(), "-l".to_string()],
+            None,
             &settings(),
         )
         .expect_err("policy exposes the tmux socket");

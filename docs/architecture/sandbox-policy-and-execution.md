@@ -1,11 +1,12 @@
 # Sandbox policy and execution isolation
 
 Status: **V1 delivered in source for #2681**, with the context capability and
-existing-Session Enter added by #3124 (on-demand, Pane-scoped execution; not
-whole-Session enforcement). Real Linux/macOS proof is bound to the Acceptance
-Cases under `e2e/acceptance/cases/2681/` and `e2e/acceptance/cases/3124/`;
-nothing in this document is evidence that a particular runner installed a
-mechanism.
+existing-Session Enter added by #3124 and the prepared EROFS root composition
+added by #3024 (on-demand, Pane-scoped execution; not whole-Session
+enforcement). Real Linux/macOS proof is bound to the Acceptance Cases under
+`e2e/acceptance/cases/2681/`, `e2e/acceptance/cases/3124/` and
+`e2e/acceptance/cases/3024/`; nothing in this document is evidence that a
+particular runner installed a mechanism.
 
 This is the canonical current-architecture owner for Sandbox behaviour. The
 product decision (what V1 promises and explicitly does not) remains Requirement
@@ -38,6 +39,7 @@ exists.
 | Dimension | Meaning |
 |---|---|
 | `filesystem.access.read/write` | Visible host paths. An explicit policy hides every other host path. Write implies visible; listed Unix sockets still obey their own permissions. |
+| `filesystem.composition` | A prepared EROFS root: Base Runtime at `/`, Project source image + bounded writable overlay at `/workspace`, read-only toolchains at `/opt/<name>`. Mutually exclusive with `filesystem.access`. See [#3024 composition](#prepared-erofs-root-composition-3024). |
 | `network.mode` | `allow` inherits host networking; `deny` blocks external and host-local IP networking; `restricted` is default-deny with Domain/IP/Port allow/deny rules enforced by the host-side proxy. |
 | `network.egress` | Only for `restricted`. Exact host or IP with optional port; leading `*.` matches strict subdomains; deny wins. `private_network: deny` and `ingress: deny` are the only V1 values and are always in force. |
 | `process.linux_namespaces` | Direct Linux PID/IPC/User/UTS/Cgroup namespace requests. Mount and network namespaces are owned by `filesystem`/`network`. Unsupported on macOS. |
@@ -64,6 +66,53 @@ These are safety/executability prerequisites, not additional policy:
 - a private `/tmp` tmpfs when `/tmp` is not visible;
 - merged-`/usr` symlinks (`/bin`, `/sbin`, `/lib`, `/lib64`) when they resolve
   into a visible path.
+
+## Prepared EROFS root composition (#3024)
+
+A composition request names already-prepared local EROFS files, never a URL,
+Git source or raw mount command. The Agent verifies/stages those files from its
+authorized EROFS cache (#3023); `nession-sandbox` re-verifies the exact bytes
+before mounting anything.
+
+- **Input.** `base` (read-only at `/`), optional `workspace.image`
+  (read-only Project source) plus `workspace.write` (Agent-owned bounded
+  writable directory), and zero or more `toolchains` whose targets are exactly
+  `/opt/<lowercase name>`. Every image carries its `sha256:<64 hex>` digest and
+  an absolute source path. Sources must be regular files, not symlinks, and
+  must canonicalize beneath the Agent-authorized EROFS image root. Compile
+  rejects malformed digests, unnormalized/relative paths, duplicate toolchain
+  targets, non-`/opt` targets, and combining `composition` with
+  `filesystem.access` (one owner for the root).
+- **Mount mechanics.** The Linux backend mounts each image read-only with the
+  unprivileged `erofsfuse` helper (a usable `/dev/fuse` is required). A Project
+  source image is merged with the bounded write directory through
+  `fuse-overlayfs` (`lowerdir=<Project image>,upperdir=<write>/upper,workdir=<write>/work`);
+  a workspace without an image is a direct writable bind. Bubblewrap starts
+  from an empty tmpfs root, binds the Base Runtime over `/`, installs
+  `/workspace`, then the toolchains, and only then mounts `/dev`, `/proc`,
+  `/tmp`, `/home` and `/run/nession`.
+- **Base Runtime contract.** Because the composed root is read-only, the image
+  must already contain the mountpoint directories the backend installs:
+  `/bin/sh` (or `/usr/bin/sh`), `/workspace`, every declared `/opt/<name>`,
+  `/dev`, `/proc`, `/home`, `/tmp` and `/run/nession`. The Base Runtime also
+  carries the glibc loader/libs the bridge and the shell need. Missing paths
+  are a prepare error; the backend never extracts or copies a fallback root.
+- **No privilege escalation.** The default Agent Pod is not made privileged:
+  both helpers are FUSE-based and unprivileged. A host without `erofsfuse`,
+  `/dev/fuse`, `fuse-overlayfs` when a Project image is present, or the
+  authorized image root reports `UnsupportedPolicy`; there is no Native
+  fallback and no kernel-loop mount substitution.
+- **Lifecycle.** Every mountpoint lives under the execution directory
+  (`mounts/...`), is recorded in the durable execution record, and is unmounted
+  (reverse order: toolchains, overlay, Project image, Base Runtime) before the
+  directory/record are removed. Reconciliation unmounts only recorded paths
+  beneath that execution's own directory. A failed unmount keeps the record for
+  retry rather than leaking the mount. Read-only images remain available to
+  other Sessions because each execution has its own mountpoints over shared
+  image bytes.
+- **macOS.** EROFS composition is rejected with an explicit
+  `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
+  equivalence is claimed.
 
 ## Launch barrier
 
@@ -128,6 +177,14 @@ The deployment must also provide, and the probe must measure:
   at the same **kernel-relative** path configured in `[sandbox] cgroup_root`;
 - the pinned seccomp/no-new-privileges path (the bridge installs its own filter;
   the surrounding container profile must not block it).
+
+A host that serves `filesystem.composition` additionally needs unprivileged
+FUSE: a working `/dev/fuse` (0666 or the Agent user's access), the
+`erofsfuse`, `fuse-overlayfs` and `fusermount3` executables (resolved on
+`PATH` unless configured), and an Agent-authorized EROFS image root from
+`[erofs] storage_dir` (#3023). The current Agent base image does not package
+these helpers; the managed Session lane (#3062) owns supplying them without
+making the Pod privileged. A host without them refuses the composition.
 
 The container entrypoint projects operator configuration into `[sandbox]`:
 `AGENT_SANDBOX_ENABLED` (master switch; when false, every explicit policy
@@ -240,6 +297,14 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
   host-wide immunity.
 - Filesystem policy paths must be absolute, normalized and canonical on the
   host; a symlinked path is refused (name the canonical target).
+- EROFS composition uses unprivileged FUSE helpers only. Kernel loop mounts are
+  not used, and an NFS PVC holding image bytes is not a promise that NFS is
+  suitable for the writable upper/work; the Agent must place the write tree on
+  a supported local filesystem.
+- The Node/Rust toolchain EROFS bundles are supplied by the image/build owner.
+  The bounded packager that would let the staging Case build them inside its
+  verifier budget is not implemented; SC-03 therefore stays Pending until that
+  exact lane exists.
 
 ## Enforcement and proof
 
@@ -248,12 +313,15 @@ The macOS probe executes real allow/deny fixtures under `sandbox-exec`:
 | Policy shape and unknown-key refusal | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + protocol Gates |
 | Validation, capability probing, no fallback | `crates/nession-sandbox/src/policy.rs`, `capabilities.rs` |
 | Launcher argv, masking, seccomp baseline | `crates/nession-sandbox/src/linux/bwrap.rs`, `linux/seccomp.rs` |
+| EROFS composition shape and validation | `crates/nession-protocol/src/contracts/sandbox/v1.rs` + `crates/nession-sandbox/src/policy.rs` |
+| Prepared image digest/mount/overlay and unmount | `crates/nession-sandbox/src/linux/erofs.rs` |
+| Composition mount ordering and read-only root | `crates/nession-sandbox/src/linux/bwrap.rs` |
 | Cgroup delegation, limits and cleanup | `crates/nession-sandbox/src/linux/cgroup.rs` |
 | Launch barrier and proxy identity | `crates/nession-sandbox/src/linux/channel.rs`, `src/bridge.rs` |
 | Context snapshot, generation and Enter idempotency | `crates/nession-agent/src/tmux/sandbox_context.rs`, `crates/nession-server/src/server/handler/server_session_sandbox_*_v1.rs` |
 | Draft rows → canonical policy, catalog | `crates/nession-sandbox/src/draft.rs`, `capabilities.rs` |
 | Owned-resource reconciliation (by Pane) | `crates/nession-sandbox/src/exec.rs`, `crates/nession-agent/src/sandbox_runtime.rs` |
-| Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs` and `e2e/acceptance/cases/2681/` |
+| Real Linux behaviour | `crates/nession-sandbox/tests/linux_runtime.rs`, `e2e/acceptance/cases/2681/` and `e2e/acceptance/cases/3024/` |
 | Existing-Session Enter and active-Pane context | `e2e/acceptance/cases/3124/` (real Server + Agent), `e2e/tests/browser/sandbox-workspace-capability.spec.ts` |
 | macOS verified scope | `crates/nession-sandbox/src/macos/` (probe tests run on macOS) |
 

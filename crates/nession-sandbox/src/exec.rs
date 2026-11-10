@@ -72,6 +72,10 @@ pub struct ExecutionRecord {
     /// path; cleanup removes only a direct child of `runtime_root`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_dir: Option<String>,
+    /// Host mountpoints of prepared EROFS images owned by this execution.
+    /// Reconciliation unmounts only paths beneath `execution_dir`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<String>,
     /// The verified-mechanism names the execution reported.
     #[serde(default)]
     pub mechanisms: Vec<String>,
@@ -447,7 +451,7 @@ pub fn preflight(request: &LaunchRequest, settings: &SandboxSettings) -> Result<
     crate::capabilities::validate(&compiled, &capabilities)?;
     let mut warnings = capabilities.detail.clone();
     if let Some(filesystem) = &compiled.filesystem {
-        warnings.extend(validate_host_paths(filesystem)?);
+        warnings.extend(validate_host_paths(filesystem, settings)?);
     }
     let _ = working_dir;
     Ok(PreflightReport {
@@ -468,6 +472,18 @@ pub(crate) fn validate_working_dir(
         return Err(SandboxError::InvalidPolicy(
             "the Session working directory must be absolute".to_string(),
         ));
+    }
+    if filesystem.is_some_and(|filesystem| filesystem.composition.is_some()) {
+        // The composed root does not exist on the host; `/workspace` is the
+        // only writable working tree and Bubblewrap creates/chdirs into it.
+        let workspace = Path::new("/workspace");
+        if path != workspace && !path.starts_with(workspace) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "the composition working directory {} must be /workspace or below",
+                path.display()
+            )));
+        }
+        return Ok(path.to_path_buf());
     }
     let metadata = std::fs::metadata(path).map_err(|error| {
         SandboxError::InvalidPolicy(format!(
@@ -502,7 +518,11 @@ pub(crate) fn validate_working_dir(
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn validate_host_paths(
     filesystem: &crate::policy::CompiledFilesystem,
+    settings: &SandboxSettings,
 ) -> Result<Vec<String>> {
+    if let Some(composition) = &filesystem.composition {
+        return validate_composition_paths(composition, settings);
+    }
     let mut warnings = Vec::new();
     for path in filesystem.visible() {
         let metadata = std::fs::symlink_metadata(path).map_err(|error| {
@@ -532,6 +552,80 @@ pub(crate) fn validate_host_paths(
         }
     }
     Ok(warnings)
+}
+
+/// Validate composition host paths without mounting or hashing the images.
+fn validate_composition_paths(
+    composition: &crate::policy::CompiledComposition,
+    settings: &SandboxSettings,
+) -> Result<Vec<String>> {
+    let root = settings.erofs_image_root.as_ref().ok_or_else(|| {
+        SandboxError::UnsupportedPolicy(
+            "filesystem.composition requires an Agent-authorized EROFS image root".to_string(),
+        )
+    })?;
+    if !root.is_absolute() || !root.is_dir() {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "EROFS image root {} is not an absolute directory",
+            root.display()
+        )));
+    }
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut images = vec![&composition.base];
+    if let Some(workspace) = &composition.workspace {
+        if let Some(image) = &workspace.image {
+            images.push(image);
+        }
+    }
+    images.extend(composition.toolchains.iter());
+    for image in images {
+        let metadata = std::fs::symlink_metadata(&image.source).map_err(|error| {
+            SandboxError::InvalidPolicy(format!(
+                "EROFS image {} does not exist: {error}",
+                image.source.display()
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "EROFS image {} must be a regular file, not a symlink",
+                image.source.display()
+            )));
+        }
+        let canonical =
+            std::fs::canonicalize(&image.source).unwrap_or_else(|_| image.source.clone());
+        if !canonical.starts_with(&canonical_root) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "EROFS image {} is outside the Agent-authorized image root {}",
+                canonical.display(),
+                canonical_root.display()
+            )));
+        }
+    }
+    if let Some(workspace) = &composition.workspace {
+        let metadata = std::fs::symlink_metadata(&workspace.write).map_err(|error| {
+            SandboxError::InvalidPolicy(format!(
+                "workspace write directory {} does not exist: {error}",
+                workspace.write.display()
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "workspace write directory {} must be a real directory",
+                workspace.write.display()
+            )));
+        }
+        let canonical_write =
+            std::fs::canonicalize(&workspace.write).unwrap_or_else(|_| workspace.write.clone());
+        let canonical_state = std::fs::canonicalize(&settings.state_dir)
+            .unwrap_or_else(|_| settings.state_dir.clone());
+        if !canonical_write.starts_with(&canonical_state) {
+            return Err(SandboxError::InvalidPolicy(format!(
+                "workspace write directory {} is outside the Agent sandbox state directory",
+                canonical_write.display()
+            )));
+        }
+    }
+    Ok(Vec::new())
 }
 
 /// Build the report shared by both backends.
@@ -625,6 +719,13 @@ pub(crate) fn remove_owned_paths(
     record: &ExecutionRecord,
     report: &mut CleanupReport,
 ) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    crate::linux::erofs::unmount_recorded(
+        &record.mounts,
+        Path::new(&record.execution_dir),
+        &settings.fusermount_path,
+        report,
+    );
     let execution_dir = Path::new(&record.execution_dir);
     let state_dir =
         std::fs::canonicalize(&settings.state_dir).unwrap_or_else(|_| settings.state_dir.clone());
@@ -807,6 +908,7 @@ mod tests {
             window_id: None,
             working_dir: String::new(),
             effective_policy: None,
+            mounts: Vec::new(),
             channel_dir: None,
             mechanisms: Vec::new(),
             warnings: Vec::new(),

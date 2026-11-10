@@ -14,7 +14,12 @@ use nession_sandbox::SandboxSettings;
 /// delegated subtree that is not the Agent's own cgroup. The environment
 /// override lets the same probe measure that subtree without pretending the
 /// default `<own cgroup>/nession` delegation exists.
-fn settings(state_dir: PathBuf, bridge: PathBuf, cgroup_root: Option<PathBuf>) -> SandboxSettings {
+fn settings(
+    state_dir: PathBuf,
+    bridge: PathBuf,
+    cgroup_root: Option<PathBuf>,
+    erofs_image_root: Option<PathBuf>,
+) -> SandboxSettings {
     let mut settings = SandboxSettings::new(
         state_dir,
         bridge,
@@ -22,12 +27,19 @@ fn settings(state_dir: PathBuf, bridge: PathBuf, cgroup_root: Option<PathBuf>) -
         PathBuf::from("/usr/bin/sandbox-exec"),
     );
     settings.cgroup_root = cgroup_root;
+    settings.erofs_image_root = erofs_image_root;
     settings
 }
 
 fn cgroup_override() -> Option<PathBuf> {
     std::env::var_os("SANDBOX_CGROUP_ROOT")
         .or_else(|| std::env::var_os("NESSON_SANDBOX_CGROUP_ROOT"))
+        .map(PathBuf::from)
+}
+
+fn erofs_image_root_override() -> Option<PathBuf> {
+    std::env::var_os("SANDBOX_EROFS_IMAGE_ROOT")
+        .or_else(|| std::env::var_os("NESSON_SANDBOX_EROFS_IMAGE_ROOT"))
         .map(PathBuf::from)
 }
 
@@ -68,7 +80,12 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("nession-sandbox-bridge"));
 
-    let settings = settings(state_dir, bridge, cgroup_override());
+    let settings = settings(
+        state_dir,
+        bridge,
+        cgroup_override(),
+        erofs_image_root_override(),
+    );
     let capabilities = nession_sandbox::probe(&settings);
 
     let namespaces = serde_json::json!({
@@ -101,6 +118,8 @@ fn main() {
         "cgroup_v2": cgroup_v2,
         "seccomp": capabilities.seccomp,
         "filesystem": capabilities.filesystem,
+        "erofs": capabilities.erofs,
+        "erofs_overlay": capabilities.erofs_overlay,
         "network_allow": capabilities.network_allow,
         "network_deny": capabilities.network_deny,
         "network_restricted": capabilities.network_restricted,
@@ -123,12 +142,18 @@ mod tests {
 
     #[test]
     fn a_delegated_cgroup_override_reaches_the_probe_settings() {
-        let base = settings(PathBuf::from("/tmp/state"), PathBuf::from("bridge"), None);
+        let base = settings(
+            PathBuf::from("/tmp/state"),
+            PathBuf::from("bridge"),
+            None,
+            None,
+        );
         assert_eq!(base.cgroup_root, None);
         let delegated = settings(
             PathBuf::from("/tmp/state"),
             PathBuf::from("bridge"),
             Some(PathBuf::from("/nession-accept")),
+            Some(PathBuf::from("/data/erofs")),
         );
         assert_eq!(
             delegated.cgroup_root,

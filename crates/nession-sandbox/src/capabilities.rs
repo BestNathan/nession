@@ -102,6 +102,12 @@ pub struct Capabilities {
     pub cgroup_v2: Option<CgroupSupport>,
     pub seccomp: bool,
     pub filesystem: bool,
+    /// Prepared EROFS images can be mounted read-only without privileges
+    /// (`erofsfuse` plus a usable `/dev/fuse` and an Agent-authorized root).
+    pub erofs: bool,
+    /// A Project image can be merged with a bounded writable upper/work via
+    /// the unprivileged `fuse-overlayfs` helper.
+    pub erofs_overlay: bool,
     pub network_allow: bool,
     pub network_deny: bool,
     pub network_restricted: bool,
@@ -125,6 +131,8 @@ pub fn probe(settings: &SandboxSettings) -> Capabilities {
             cgroup_v2: None,
             seccomp: false,
             filesystem: false,
+            erofs: false,
+            erofs_overlay: false,
             network_allow: false,
             network_deny: false,
             network_restricted: false,
@@ -153,6 +161,8 @@ pub fn probe(settings: &SandboxSettings) -> Capabilities {
             cgroup_v2: None,
             seccomp: false,
             filesystem: false,
+            erofs: false,
+            erofs_overlay: false,
             network_allow: false,
             network_deny: false,
             network_restricted: false,
@@ -340,6 +350,30 @@ fn validate_linux(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
             "filesystem.access requires a working Bubblewrap mount view".to_string(),
         ));
     }
+    let composition = compiled
+        .filesystem
+        .as_ref()
+        .is_some_and(|filesystem| filesystem.composition.is_some());
+    if composition && !capabilities.erofs {
+        return Err(SandboxError::UnsupportedPolicy(
+            "filesystem.composition requires an unprivileged EROFS mount \
+             (erofsfuse, fusermount and a usable /dev/fuse) plus an Agent-authorized image root"
+                .to_string(),
+        ));
+    }
+    let needs_overlay = compiled
+        .filesystem
+        .as_ref()
+        .and_then(|filesystem| filesystem.composition.as_ref())
+        .and_then(|composition| composition.workspace.as_ref())
+        .is_some_and(|workspace| workspace.image.is_some());
+    if needs_overlay && !capabilities.erofs_overlay {
+        return Err(SandboxError::UnsupportedPolicy(
+            "filesystem.composition with a Project source image requires the unprivileged \
+             fuse-overlayfs helper for its bounded writable upper/work"
+                .to_string(),
+        ));
+    }
 
     if let Some(network) = &compiled.network {
         match network.mode {
@@ -458,6 +492,15 @@ fn validate_macos(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
             "macOS Seatbelt is unavailable; no sandbox guarantee can be installed".to_string(),
         )
     })?;
+    if compiled
+        .filesystem
+        .as_ref()
+        .is_some_and(|filesystem| filesystem.composition.is_some())
+    {
+        return Err(SandboxError::UnsupportedPolicy(
+            "filesystem.composition (EROFS mounts) is unsupported on macOS".to_string(),
+        ));
+    }
     if compiled.filesystem.is_some() && !seatbelt.filesystem {
         return Err(SandboxError::UnsupportedPolicy(
             "filesystem.access could not be verified under macOS Seatbelt".to_string(),
@@ -531,6 +574,8 @@ mod tests {
             }),
             seccomp: true,
             filesystem: true,
+            erofs: true,
+            erofs_overlay: true,
             network_allow: true,
             network_deny: true,
             network_restricted: true,
@@ -549,6 +594,8 @@ mod tests {
             cgroup_v2: None,
             seccomp: false,
             filesystem: false,
+            erofs: false,
+            erofs_overlay: false,
             network_allow: true,
             network_deny: true,
             network_restricted: false,
@@ -726,6 +773,66 @@ mod tests {
             catalog.reason.as_deref(),
             Some("bubblewrap is not executable on this host")
         );
+    }
+
+    fn composition_policy(with_workspace_image: bool) -> CompiledSandboxPolicy {
+        let workspace = if with_workspace_image {
+            serde_json::json!({
+                "image": {
+                    "digest": format!("sha256:{}", "b".repeat(64)),
+                    "source": "/data/erofs/sha256/source"
+                },
+                "write": "/tmp/nession-sandbox/workspace"
+            })
+        } else {
+            serde_json::json!({ "write": "/tmp/nession-sandbox/workspace" })
+        };
+        compile(
+            &serde_json::from_value(serde_json::json!({
+                "version": 1,
+                "enabled": true,
+                "filesystem": {
+                    "access": { "read": [], "write": [] },
+                    "composition": {
+                        "base": {
+                            "digest": format!("sha256:{}", "a".repeat(64)),
+                            "source": "/data/erofs/sha256/base"
+                        },
+                        "workspace": workspace
+                    }
+                }
+            }))
+            .expect("composition fixture"),
+        )
+        .expect("compiled")
+    }
+
+    #[test]
+    fn a_linux_composition_without_erofs_support_is_refused() {
+        let policy = composition_policy(false);
+        let mut capabilities = linux_capabilities();
+        capabilities.erofs = false;
+        let error = validate(&policy, &capabilities).expect_err("no EROFS capability");
+        assert!(matches!(error, SandboxError::UnsupportedPolicy(_)));
+        assert!(error.to_string().contains("erofsfuse"));
+    }
+
+    #[test]
+    fn a_linux_workspace_image_without_overlay_support_is_refused() {
+        let policy = composition_policy(true);
+        let mut capabilities = linux_capabilities();
+        capabilities.erofs_overlay = false;
+        let error = validate(&policy, &capabilities).expect_err("no overlay capability");
+        assert!(matches!(error, SandboxError::UnsupportedPolicy(_)));
+        assert!(error.to_string().contains("fuse-overlayfs"));
+    }
+
+    #[test]
+    fn macos_rejects_composition_without_fallback() {
+        let policy = composition_policy(false);
+        let error = validate(&policy, &macos_capabilities()).expect_err("macOS cannot mount EROFS");
+        assert!(matches!(error, SandboxError::UnsupportedPolicy(_)));
+        assert!(error.to_string().contains("unsupported on macOS"));
     }
 
     #[test]
