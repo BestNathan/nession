@@ -4,7 +4,9 @@
 // push branch refs, waive Gates, or invoke an Agent with privileged credentials.
 import assert from 'node:assert/strict';
 import {qualify} from './staging-convergence-readiness.mjs';
-import {planBatch,ensureBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
+import {planBatch,findBatchIssue,issueApproval} from './staging-convergence-batch.mjs';
+import {isNativeConvergencePr,convergencePrMarker,convergenceBatchDigest,
+  convergenceApproval} from './staging-convergence-pr.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -259,6 +261,55 @@ export function staleGeneratedSyncPr(pr,repo,lane,currentHead) {
     pr.head.ref.startsWith('chore/staging-sync-'+lane.replace(/[\/._]/g,'-')+'-');
 }
 
+// Keep a checked two-parent integration PR alive while Main advances. Only a
+// changed Staging first parent, broken ancestry, or invalid head invalidates it.
+export function pinnedSyncIdentity(pr,repo,lane,laneSha,headSha,parents,mainIsAncestor) {
+  const prefix='chore/staging-sync-'+lane.replace(/[\\/._]/g,'-')+'-';
+  if(pr?.state!=='open'||pr.draft||pr.base?.ref!==lane||
+      pr.head?.repo?.full_name!==repo||!pr.head?.ref?.startsWith(prefix)||
+      !pr.body?.startsWith('Staging Convergence automated proposal')||
+      !SHA.test(pr.head?.sha||'')||pr.head.sha!==headSha||
+      !Array.isArray(parents)||parents.length!==2||
+      parents[0]!==laneSha||!SHA.test(parents[1]||'')||
+      !mainIsAncestor)return false;
+  return pr.head.ref===integrationBranchName(lane,parents[1],laneSha);
+}
+function pendingSyncIntegration(repo,lane,liveMainSha) {
+  const opened=gh(['--method','GET','repos/'+repo+'/pulls',
+    '-f','base='+lane.branch,'-f','state=open','-f','per_page=100']);
+  if(!Array.isArray(opened)||opened.length>=100)
+    reject('unbounded active Staging PR inventory');
+  const prefix='chore/staging-sync-'+lane.branch.replace(/[\\/._]/g,'-')+'-';
+  const generated=opened.filter(pr=>pr.state==='open'&&
+    pr.base?.ref===lane.branch&&pr.head?.repo?.full_name===repo&&
+    pr.head?.ref?.startsWith(prefix)&&
+    pr.body?.startsWith('Staging Convergence automated proposal'));
+  if(generated.length>1)reject('multiple generated sync PRs; resolve before continuing');
+  const pr=generated[0];
+  if(!pr)return null;
+  // Changed staging requires a new approval and exact-head check. The
+  // obsolete PR is closed by the existing supersession path, not reused.
+  if(pr.base?.sha!==lane.sha)return null;
+  const remote=optionalRemoteHead(branchName(pr.head.ref));
+  if(remote!==pr.head?.sha)reject('active sync PR ref does not match GitHub head');
+  fetchForComparison(pr.head.ref);
+  const parents=shell('git',['show','-s','--format=%P',remote]).split(/\s+/);
+  const pinnedMain=parents[1];
+  let mainIsAncestor=false;
+  if(SHA.test(pinnedMain||'')){
+    try{shell('git',['merge-base','--is-ancestor',pinnedMain,liveMainSha]);
+      mainIsAncestor=true;
+    }catch(error){if(error.status!==1)throw error;}
+  }
+  if(!pinnedSyncIdentity(pr,repo,lane.branch,lane.sha,remote,parents,mainIsAncestor))
+    reject('active sync PR has invalid pinned ancestry or identity');
+  const tree=shell('git',['merge-tree','--write-tree',lane.sha,pinnedMain]).split(/\s+/)[0];
+  if(!SHA.test(tree)||shell('git',['rev-parse',remote+'^{tree}'])!==tree)
+    reject('active sync integration tree differs from trusted source');
+  return {branch:pr.head.ref,sha:remote,main_sha:pinnedMain,created:false,reused:true,
+    pr,native:isNativeConvergencePr(pr)};
+}
+
 function closeSupersededSyncPrs(repo,lane,currentHead) {
   const list=gh(['--method','GET','repos/'+repo+'/pulls',
     '-f','base='+lane,'-f','state=open','-f','per_page=100']);
@@ -273,9 +324,11 @@ function closeSupersededSyncPrs(repo,lane,currentHead) {
   return closed;
 }
 
-function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
+function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null, batch=null) {
   const found = existingPr(repo, owner, head, base);
   if (found) {
+    if(batch&&!batchIssueNumber&&!found.body?.includes(convergencePrMarker(batch)))
+      reject('existing PR is not a source-bound native convergence batch');
     // Only automation-owned PRs may have their missing source association
     // repaired. A body edit never counts as a successful E2E re-run.
     if(batchIssueNumber && !found.body?.includes('Refs #'+batchIssueNumber)) {
@@ -304,7 +357,11 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null) {
     '**This PR is a proposal, not release or acceptance evidence.**',
     'Preserve merge commits; verify exact-head CI, applicable Acceptance/E2E, conflicts and deployment before merging.',
     'The controller may request a merge commit only after the independent exact-head Gates approve. It never bypasses checks, force-pushes, bumps versions or deploys Production.',
-    ...(batchIssueNumber ? ['', 'Refs #'+batchIssueNumber] : []),
+    ...(batchIssueNumber ? ['', 'Refs #'+batchIssueNumber] :
+      batch ? ['', '- Historical changed paths: '+batch.changedPaths.length,
+        '- Source risk: '+batch.impact.category,
+        '- Selected E2E IDs: '+([...batch.newIds,...batch.regressionIds].join(', ')||'none'),
+        '',convergencePrMarker(batch)] : []),
   ].join('\n');
   try {
     const created = gh(['--method', 'POST', 'repos/' + repo + '/pulls',
@@ -377,6 +434,13 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   return { status: 'ANALYSIS_DISPATCHED' };
 }
 
+// One-time transition: preserve already-approved legacy batches but retire
+// unapproved Issue-backed PRs so the lane cannot remain stuck forever behind
+// the old Issue approval model. No approved source SHA is silently abandoned.
+export function shouldMigrateLegacy(pinned,approval){
+  return Boolean(pinned&&!pinned.native&&!approval?.approved);
+}
+
 function reconcile(plan) {
   validatePlan(plan);
   const repo = process.env.GITHUB_REPOSITORY || '';
@@ -392,7 +456,21 @@ function reconcile(plan) {
   for (const lane of plan.branches) {
     for (const action of lane.actions) {
       const sync=action==='sync-main-to-lane';
-      const integration=sync?ensureIntegrationBranch(repo,plan,lane):null;
+      let pinned=sync?pendingSyncIntegration(repo,lane,plan.main_sha):null;
+      let legacyRetirement=null;
+      if(sync&&pinned&&!pinned.native){
+        const oldBatch=planBatch({branch:lane.branch,main_sha:pinned.main_sha,
+          lane_sha:lane.sha,integration_head:pinned.sha});
+        const oldIssue=findBatchIssue(oldBatch);
+        const oldApproval=oldIssue?issueApproval(oldBatch,oldIssue.number):null;
+        if(shouldMigrateLegacy(pinned,oldApproval)){
+          legacyRetirement={pinned,batch:oldBatch,issue:oldIssue};
+          pinned=null; // use the latest Main, mint one native PR instead
+        }
+      }
+      const syncMainSha=pinned?.main_sha||plan.main_sha;
+      const integration=sync?(pinned||ensureIntegrationBranch(repo,
+        {...plan,main_sha:syncMainSha},lane)):null;
       // On an actual merge-tree conflict, the direct-source PR exists only as
       // an authenticated, SHA-bound read-only Agent analysis surface; it is not
       // qualified for merge under the protected staging rules.
@@ -406,28 +484,67 @@ function reconcile(plan) {
         continue;
       }
       let batch=null,batchIssueNumber=null;
+      const legacy=sync&&pinned&&!pinned.native;
       if(sync){
-        // The immutable integration ref was materialized remotely; fetch and
-        // verify the real two-parent Git object before deriving Issue E2E IDs.
+        // Always verify the same exact historical test obligations. New
+        // integrations keep this digest on their PR and never mint an Issue.
         fetchForComparison(integration.branch);
-        batch=planBatch({branch:lane.branch,main_sha:plan.main_sha,
+        batch=planBatch({branch:lane.branch,main_sha:syncMainSha,
           lane_sha:lane.sha,integration_head:integration.sha});
-        const prepared=ensureBatchIssue(batch);
-        batchIssueNumber=prepared.issue.number;
-        const approval=issueApproval(batch,batchIssueNumber);
-        if(!approval.approved){
-          const audit=dispatchBatchAudit(repo,prepared.issue);
-          if(audit.status==='BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED')
-            reject('source-bound Issue Audit run inventory too old for safe redispatch');
+        if(legacy){
+          // Transitional, already-open Issue-backed PRs remain valid until
+          // merged or superseded. NEVER create a new legacy batch Issue.
+          const existing=findBatchIssue(batch);
+          if(!existing)reject('legacy integration PR has no existing source Issue');
+          batchIssueNumber=existing.number;
+          const approval=issueApproval(batch,batchIssueNumber);
+          if(!approval.approved){
+            const audit=dispatchBatchAudit(repo,existing);
+            if(audit.status==='BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED')
+              reject('legacy Issue Audit inventory truncated');
+          }
         }
       }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
+      // Re-read the exact owner comment before retiring any still-open
+      // historical batch. An approval arriving during planning wins; abort
+      // and allow the next run to consume its immutable legacy PR.
+      if(legacyRetirement?.issue){
+        const approved=issueApproval(legacyRetirement.batch,
+          legacyRetirement.issue.number);
+        if(approved.approved)reject('legacy approval raced migration; rerun');
+      }
       const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
-      const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber);
+      if(legacyRetirement&&legacyRetirement.pinned.branch===head){
+        const old=gh(['--method','GET','repos/'+repo+'/pulls/'+
+          legacyRetirement.pinned.pr.number]);
+        if(old.state==='open'){
+          if(old.head?.sha!==legacyRetirement.pinned.sha)
+            reject('legacy head changed during native migration');
+          gh(['--method','PATCH','repos/'+repo+'/pulls/'+old.number,
+            '-f','state=closed']);
+          superseded.push(old.number);
+        }
+      }
+      const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber,batch);
+      if(legacyRetirement?.issue&&superseded.includes(
+        legacyRetirement.pinned.pr.number)){
+        const oldNumber=legacyRetirement.issue.number;
+        gh(['--method','POST','repos/'+repo+'/issues/'+oldNumber+'/comments',
+          '-f','body=Superseded by PR-native Staging integration #'+receipt.number+
+          ' (checked head '+integration.sha+'). This historical per-SHA batch '+
+          'is not an open product Requirement; no evidence or old approval was reused.']);
+        gh(['--method','PATCH','repos/'+repo+'/issues/'+oldNumber,
+          '-f','state=closed','-f','state_reason=not_planned']);
+      }
       const record={branch:lane.branch,direction:action,...receipt,
-        ...(sync?{integration_head:integration.sha,issue_number:batchIssueNumber,
-          superseded_prs:superseded}: {})};
+        ...(sync?{integration_head:integration.sha,
+          batch_digest:convergenceBatchDigest(batch),
+          approval_source:legacy?'legacy_issue':'native_pr',
+          ...(legacy?{issue_number:batchIssueNumber}:{}),
+          superseded_prs:superseded,
+          ...(legacyRetirement?.issue?{retired_legacy_issue:legacyRetirement.issue.number}:{})}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
       if (receipt.action === 'created'||receipt.action === 'relinked') {
@@ -436,17 +553,31 @@ function reconcile(plan) {
         continue;
       }
       if(sync){
-        const approval=issueApproval(batch,batchIssueNumber);
+        let approval;
+        if(legacy)approval=issueApproval(batch,batchIssueNumber);
+        else{
+          const sourcePr=gh(['--method','GET','repos/'+repo+'/pulls/'+receipt.number]);
+          if(sourcePr.head?.sha!==integration.sha||
+             !sourcePr.body?.includes(convergencePrMarker(batch)))
+            reject('native sync PR source/digest mismatch before approval');
+          const comments=gh(['--method','GET','repos/'+repo+'/issues/'+
+            receipt.number+'/comments?per_page=100']);
+          approval=convergenceApproval(batch,comments);
+        }
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
-          record.issue_approval_command=approval.approval_command;
+          if(legacy)record.issue_approval_command=approval.approval_command;
+          else{
+            record.pr_approval_command=approval.approval_command;
+            record.approval_pr_url=receipt.url;
+          }
           results.push(record);
           continue;
         }
       }
       const decision = qualify({action,prNumber:receipt.number,
-        mainSha:plan.main_sha,laneSha:lane.sha,branch:lane.branch,
+        mainSha:syncMainSha,laneSha:lane.sha,branch:lane.branch,
         syncRef:integration?.branch,syncHeadSha:integration?.sha,
         deployment_workflows:lane.deployment_workflows});
       if (!decision.ready) {
@@ -460,9 +591,19 @@ function reconcile(plan) {
       }
       // Never use `--auto`: acceptance might become stale before delayed merge.
       // Revalidate current refs and emit one exact-head merge request at a time.
-      if (gitRemoteHead('main') !== plan.main_sha ||
-          gitRemoteHead(lane.branch) !== lane.sha) {
-        reject('stale head between qualification and merge: ' + lane.branch);
+      // Main can advance without invalidating the checked integration.
+      // Its pinned second parent must remain an ancestor of Main; the Staging
+      // first parent must match exactly. No head rewrite or approval reuse.
+      const liveMain=gitRemoteHead('main');
+      let pinnedAncestor=false;
+      if(sync){
+        try{shell('git',['merge-base','--is-ancestor',syncMainSha,liveMain]);
+          pinnedAncestor=true;
+        }catch(error){if(error.status!==1)throw error;}
+      }
+      if (gitRemoteHead(lane.branch)!==lane.sha ||
+          (sync&&!pinnedAncestor)||(!sync&&liveMain!==plan.main_sha)) {
+        reject('stale or divergent sources before merge: '+lane.branch);
       }
       const expectedHead = sync ? integration.sha : lane.sha;
       const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
@@ -537,7 +678,29 @@ function selfTest() {
     'BestNathan/nession','staging','another'),false);
   assert.equal(staleGeneratedSyncPr({...sample,head:{...sample.head,
     repo:{full_name:'external/fork'}}},'BestNathan/nession','staging','another'),false);
-  assert.throws(() => deriveActions(-1, 0), /invalid/);
+  const pinned={...sample,base:{ref:'staging',sha:bb},
+    head:{...sample.head,sha:'c'.repeat(40)}};
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],true),true);
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],false),false,'divergent Main must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    aa,'c'.repeat(40),[bb,aa],true),false,'changed Staging must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'d'.repeat(40),[bb,aa],true),false,'head mismatch must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[aa,bb],true),false,'parent inversion must block');
+  assert.equal(pinnedSyncIdentity({...pinned,head:{...pinned.head,
+    repo:{full_name:'attacker/fork'}}},'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],true),false,'fork must block');
+  assert.equal(pinnedSyncIdentity({...pinned,body:'manual integration'},'BestNathan/nession',
+    'staging',bb,'c'.repeat(40),[bb,aa],true),false,'manual PR cannot be adopted');
+  assert.equal(shouldMigrateLegacy({native:false},{approved:false}),true);
+  assert.equal(shouldMigrateLegacy({native:false},{approved:true}),false,
+    'existing owner-approved PR must not be discarded');
+  assert.equal(shouldMigrateLegacy({native:true},{approved:false}),false,
+    'native PR cannot be treated as legacy');
+    assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
 

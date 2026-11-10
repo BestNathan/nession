@@ -1,0 +1,30 @@
+name: Store / Knowledge Proposal Signal
+
+# #3156: A GitHub create event is the authenticated owner's publication
+# request. This job runs NO candidate code and has no write or App secrets.
+# The trusted main-only Publisher re-authenticates its Run/Attempt/SHA via
+# workflow_run before any protected Knowledge ref mutation is possible.
+on:
+  create:
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.ref_type == 'branch' &&
+      startsWith(github.event.ref, 'knowledge-proposals/') &&
+      github.actor == 'BestNathan' &&
+      github.event.sender.login == 'BestNathan' &&
+      github.run_attempt == 1
+    name: Emit approved owner proposal creation signal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Record nonprivileged proposal event provenance
+        shell: bash
+        run: |
+          printf '%s\n' 'Owner-created Knowledge proposal signal accepted.'
+          printf '%s\n' 'No source checkout, no untrusted commands, no secrets, no write operations.'
