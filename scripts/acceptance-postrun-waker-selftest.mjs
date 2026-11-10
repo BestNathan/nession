@@ -43,6 +43,9 @@ assert.match(yaml,/evaluate-staging:\s*\n\s*needs: select-staging/);
 assert.match(yaml,/Original Rekor audit Job did not execute successfully; no acceptance wake/);
 assert.match(yaml,/\.name == "Read-only original Rekor checkpoint \+ forensic drill" and \.conclusion == "success"/);
 assert.match(yaml,/Full Regression did not execute the Full browser job/);
+assert.ok(yaml.includes('if [[ "$(jq -r .path "$RUNNER_TEMP/source.json")" == '+
+  "'"+'.github/workflows/e2e-full-regression.yml'+"'"+' ]]; then'),
+  'Full-job evidence gate must follow trusted workflow path, not a dynamic run name');
 assert.match(yaml,/select\(\.name == "full" and \.conclusion == "success"\)/);
 assert.match(yaml,/if: steps\.verify\.outputs\.wake == 'true'/);
 assert.match(yaml,/ref: main/);
@@ -102,6 +105,25 @@ for(const [name,route] of sources) {
       'must reject untrusted source '+name+': '+JSON.stringify(bad));
     rejections++;
   }
+}
+// Live GitHub REST behavior for a completed Main Full run uses dynamic
+// `run-name` in both name/display_title, even when workflow YAML name is static.
+const fullRoute='.github/workflows/e2e-full-regression.yml';
+const dynamicFull=source('Full Regression main@'+sha,fullRoute);
+assert.equal(evaluate(dynamicFull),true,
+  'real successful Main Full run-name must authenticate using exact source SHA');
+passes++;
+for(const [bad,why] of [
+  [{...dynamicFull,name:'Full Regression main@'+'b'.repeat(40)},'stale title SHA'],
+  [{...dynamicFull,name:'Full Regression staging@'+sha},'non-main title'],
+  [{...dynamicFull,name:'Convergence Full main@'+sha},'dispatched Full title'],
+  [{...dynamicFull,name:'Untrusted Full'},'forged run name'],
+  [{...dynamicFull,path:'.github/workflows/other.yml'},'untrusted path'],
+  [{...dynamicFull,head_sha:'b'.repeat(40)},'untrusted source SHA'],
+  [{...dynamicFull,event:'workflow_dispatch'},'untrusted event'],
+]) {
+  assert.equal(evaluate(bad),false,why+' must be rejected by real source jq');
+  rejections++;
 }
 // Verify the Git ancestry gate is actually effective rather than only present
 // as a string. This uses a disposable repository with no external connectivity.
