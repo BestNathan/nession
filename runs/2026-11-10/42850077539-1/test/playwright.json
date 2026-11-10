@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "80e8875a3503e4aa23ce744c0101ef9d725e5baa",
+  "source_tree_sha": "2e9f79c089661fb5338a524e40255087fa6184e3",
+  "run_id": 42850077539,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 42850077539,
+    "run_attempt": 1,
+    "head_sha": "80e8875a3503e4aa23ce744c0101ef9d725e5baa",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-11-10T15:59:15Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "selected",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_selected_run",
+    "run_id": 42850077539,
+    "run_attempt": 1,
+    "sha": "80e8875a3503e4aa23ce744c0101ef9d725e5baa",
+    "event": "push",
+    "branch": "main",
+    "selected_ids": [
+      "pages-documents",
+      "pages-overview"
+    ],
+    "selected_count": 2,
+    "provisioned_runtimes": 1,
+    "reused_full": null,
+    "one_runtime_for_selected_run": true,
+    "evidence": "GitHub API Run/Attempt/job/step outcomes + exact original selected E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "selected",
+    "target_sha": "80e8875a3503e4aa23ce744c0101ef9d725e5baa",
+    "run_id": 42850077539,
+    "run_attempt": 1,
+    "verified_ids": [
+      "pages-documents",
+      "pages-overview"
+    ],
+    "plan_digest": "6fb2a4ede584395811ff9289683153f618898c0c683ced44bdb8e4651b530806",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": {
+    "artifact_id": 13780853933,
+    "name": "issue-e2e-verification",
+    "size_bytes": 27504,
+    "sha256": "d4e11d09c156d9c2b79b259ce664bb0f7a10d606973e7857c268f855186b7ec2",
+    "expires_at": "2026-11-24T16:20:57Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "test_job": {
+    "job_id": 129948016042,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 13780853933,
+    "name": "issue-e2e-verification",
+    "size_bytes": 27504,
+    "sha256": "d4e11d09c156d9c2b79b259ce664bb0f7a10d606973e7857c268f855186b7ec2",
+    "expires_at": "2026-11-24T16:20:57Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "a4886b11e9c11bf3ea186f63a6c842573ba2ad5a458e220f69b66ba975d561b5"
+}
