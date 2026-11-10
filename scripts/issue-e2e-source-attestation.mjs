@@ -64,7 +64,7 @@ export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
     ? convergenceE2ESelection(pr,sourceRoot,effectiveBase)
     : nativePromotion
       ? promotionE2ESelection(pr,sourceRoot,effectiveBase)
-      : buildGitPlan(sourceRoot,issues,effectiveBase);
+      : buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
   assert.equal(claimed.mode,rebuilt.mode);
   assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
   assert.deepEqual(claimed.issues,rebuilt.issues,'Issue contract differs from captured plan');
