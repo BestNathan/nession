@@ -84,10 +84,9 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
       pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1)return fail('MISSING_STAGING_MERGE_PR:'+item);
     const pr=matches[0];
-    // Trusted main->staging sync PRs introduce no new acceptance obligations.
-    if(pr.head?.ref?.startsWith('chore/staging-sync-') &&
-      pr.head?.repo?.full_name===REPO &&
-      pr.body?.startsWith('Staging Convergence automated proposal'))continue;
+    // A generated sync PR still has an Issue-owned acceptance contract.
+    // Never infer authorization from a forgeable head prefix/body marker:
+    // it must carry source-bound Issue provenance like any other Staging PR.
     const numbers=parsePreMergeIssueNumbers(pr.body, 'BestNathan','nession',pr.title);
     if(numbers.length===0)return fail('UNASSOCIATED_STAGING_CHANGE:'+item);
     for(const number of numbers)referenced.add(number);
@@ -231,6 +230,23 @@ function selfTest(){
     'newer failed check must override historical green');
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[],
     issues:[],deployRuns:[],laneSha:b}).ready,false);
+  // A staging sync branch and model-copyable PR body do not attest Issue
+  // acceptance. With a valid deployment Run, missing source Issues must
+  // still block *before* main promotion, even if the PR is bot-shaped.
+  const deployed={path:DEPLOY,head_sha:b,head_branch:'staging',event:'push',
+    status:'completed',conclusion:'success',run_number:10,run_attempt:1,
+    repository:{full_name:REPO},head_repository:{full_name:REPO}};
+  const forged={merge_commit_sha:a,merged_at:'2026-11-10T00:00:00Z',
+    base:{ref:'staging',repo:{full_name:REPO}},
+    head:{ref:'chore/staging-sync-staging-aaaaaaaaaaaa-bbbbbbbbbbbb',
+      repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: copied)',title:'auto sync'};
+  assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[[forged]],
+    issues:[],deployRuns:[deployed],laneSha:b}).reason,'UNASSOCIATED_STAGING_CHANGE:'+a);
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[{...forged,body:forged.body+'\n\nRefs #123'}]],
+    issues:[{number:123,labels:[{name:'requirement'}],body:'Pending'}],
+    deployRuns:[deployed],laneSha:b}).reason,'PENDING_ISSUE_ACCEPTANCE:123');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
     'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
   assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
