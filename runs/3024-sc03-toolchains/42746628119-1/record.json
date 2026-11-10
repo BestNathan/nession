@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "3024-sc03-toolchains",
+  "source_sha": "7f4498de2ef27ff083e42682fa3e91b0c879cfc2",
+  "source_digest": "baa01f76b5389d68af4df82b1f8e7f08867022c3c4fb9211de5e3d8552630734",
+  "entry": "run.mjs",
+  "workflow": {
+    "id": 42746628119,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42746628119",
+    "event": "push",
+    "branch": "task/3024-sc03-toolchains",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-10T03:01:16.562Z",
+    "finished_at": "2026-11-10T03:02:15.579Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "erofs_toolchain_composition",
+      "issue": 3024,
+      "source_sha": "7f4498de2ef27ff083e42682fa3e91b0c879cfc2",
+      "base": {
+        "sha256": "289dbf719fa09c311121310b8fd9d86efd25828a3468997e17739ec50986e943",
+        "size": 1727324160
+      },
+      "node": {
+        "sha256": "41096d861c32ceda20660b019b5c4e226e851569d229a30491b977300b51234a",
+        "size": 133013504,
+        "version": "v24.22.2"
+      },
+      "rust": {
+        "sha256": "05cfe32bc739a4157eb4e339c21622196861cb91d8aa6d170fdad05aa3ef2924",
+        "size": 612855808,
+        "version": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+      },
+      "result": "pass",
+      "kernel": "7.0.0-1017-azure",
+      "output": "NODE=v24.22.2\nrust-sc03-ok\nRUSTC=rustc 1.96.0 (ac68faa20 2026-05-25)\nGIT=git version 2.56.0\nFUSE_MOUNTS=3"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/7f4498de2ef27ff083e42682fa3e91b0c879cfc2/3024-sc03-toolchains.json"
+}
