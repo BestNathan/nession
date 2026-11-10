@@ -45,6 +45,9 @@ export function prPaths(source, workflowFile = null) {
 // the checked-in interpreter for that convention; ci-trigger-scope-selftest
 // pins this interpreter against the real workflow routing matrix.
 export function matchesAny(globs, file) {
+  // `**` is the special unfiltered GitHub PR trigger sentinel above.
+  // Node's path.matchesGlob('dir/file','**') does not match nested paths.
+  if (globs.length === 1 && globs[0] === '**') return true;
   return globs.some((pattern) => path.matchesGlob(file, pattern));
 }
 
