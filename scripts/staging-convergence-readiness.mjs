@@ -6,7 +6,7 @@ import {execFileSync} from 'node:child_process';
 import {parsePreMergeIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
 import {isNativeConvergencePr,verifiedConvergenceBatch,convergenceApproval,
-  convergenceBatchDigest}
+  convergenceBatchDigest,latestConvergenceFull,attestConvergenceFull}
   from './staging-convergence-pr.mjs';
 
 const SHA=/^[0-9a-f]{40}$/;
@@ -158,7 +158,7 @@ function git(args){
 // Staging integration. Reconstruct Git bytes, current Owner approval and
 // independent source PR Runs for EVERY merged sync commit.
 export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
-  branch='staging',comments=[],sourceRuns=[]}){
+  branch='staging',sourceRuns=[],fullReceipt=null}){
   if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
      pr.merge_commit_sha!==mergeSha||pr.base?.ref!==branch||
      pr.base?.repo?.full_name!==REPO)
@@ -184,12 +184,32 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   }catch(error){
     return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);
   }
-  const approval=convergenceApproval(batch,comments);
-  if(!approval.approved)return fail('NATIVE_OWNER_APPROVAL_REQUIRED:'+batch.integration_head);
+  const approval=convergenceApproval(batch,fullReceipt);
+  if(!approval.approved)return fail('NATIVE_'+approval.reason+':'+batch.integration_head);
   const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns);
   if(!source.ready)return source;
   return okay({integrationHead:batch.integration_head,
     sourceBatchDigest:convergenceBatchDigest(batch)});
+}
+
+// Independently re-attest the complete Full E2E source before Main
+// promotion. A PR marker and a prior Staging merge do not prove Full success.
+function nativeFullReceipt(batch,pr){
+  if(convergenceApproval(batch).approved)return null;
+  const since=String(pr.created_at??'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(since))
+    throw Error('native PR missing trustworthy creation fence');
+  const inventory=read('actions/workflows/e2e-full-regression.yml/runs?'+
+    'event=workflow_dispatch&created=>='+since+'&per_page=100');
+  if(!Array.isArray(inventory.workflow_runs)||inventory.workflow_runs.length>=100)
+    throw Error('unbounded native Full inventory during promotion');
+  const run=latestConvergenceFull(batch,inventory.workflow_runs);
+  if(!run||run.status!=='completed'||run.conclusion!=='success')return null;
+  const jobs=read('actions/runs/'+run.id+'/attempts/'+
+    run.run_attempt+'/jobs?per_page=100');
+  if(!Array.isArray(jobs.jobs)||jobs.jobs.length>=100)
+    throw Error('unbounded native Full job inventory during promotion');
+  return attestConvergenceFull(batch,run,jobs.jobs);
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
@@ -249,8 +269,20 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
     const nativePr=matches[0];
     const comments=read('issues/'+nativePr.number+'/comments?per_page=100');
     const runs=getRuns('head_sha='+nativePr.head.sha+'&event=pull_request');
+    const sourceBatchSha=nativePr.head.sha;
+    let fullReceipt=null;
+    // Rebuild the pinned source *before* reading any Full Run. This reuses
+    // the sole canonical Git/plan owner and rejects altered PR declarations.
+    const parents=git(['rev-list','--parents','-n','1',commits[i]]).split(/\s+/);
+    if(parents.length!==3||parents[2]!==sourceBatchSha)
+      return fail('NATIVE_MERGE_PARENTS_MISMATCH');
+    let batch;
+    try{batch=verifiedConvergenceBatch(nativePr,process.cwd(),
+      parents[1],commits[i],{requireCheckout:false});}
+    catch(error){return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);}
+    fullReceipt=nativeFullReceipt(batch,nativePr);
     const proof=certifyNativeMerge({pr:nativePr,mergeSha:commits[i],
-      branch,comments,sourceRuns:runs});
+      branch,sourceRuns:runs,fullReceipt});
     if(!proof.ready)return proof;
     authenticatedNative.push(commits[i]);
   }
