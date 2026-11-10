@@ -414,7 +414,7 @@ function nativeFullDecision(repo,batch,sourcePr){
   const dispatcher=process.env.DISPATCH_GITHUB_TOKEN;
   if(!reader||!dispatcher)reject('trusted Full evidence tokens unavailable');
   const since=String(sourcePr.created_at??'').slice(0,10);
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(since))
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(since))
     reject('native source PR creation fence missing');
   const readArgs={env:{...process.env,GH_TOKEN:reader}};
   const inventory=JSON.parse(shell('gh',['api','--method','GET',
