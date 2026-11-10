@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42731295417,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3067-agent-delete-register-race",
+    "target_sha": "92ab79056732902e1c15b07acaa90180573ba22c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42731295417",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "9db7936365db919d4c26fa3c43fde290ee3f66eb9506ab846ae6fcbbfa492685"
+  },
+  "record": "runs/2026-11-10/42731295417-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "68b4554059e12e3c8587c7a5dcf205e5a874b0f6acb2423916d74e78635f1808"
+}
