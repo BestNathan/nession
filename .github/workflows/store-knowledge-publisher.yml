@@ -1,13 +1,16 @@
 name: Store / Knowledge Publisher
 
-# #2358: A distinct App identity publishes a precommitted, data-only Knowledge
-# proposal. repository_dispatch always executes the default-branch workflow;
-# unlike workflow_dispatch it does NOT accept an attacker-selected source ref.
-# The non-privileged job authenticates the request before the protected job
-# can access knowledge-publish Environment secrets.
+# #2358/#3156: A distinct App identity publishes an owner-authorized,
+# precommitted data-only Knowledge proposal. Two trusted default-branch
+# entrypoints: explicit owner repository_dispatch, and completed owner-created
+# Proposal Signal workflow_run. Neither accepts an attacker-selected checkout.
+# Unprivileged source verification must pass before the protected App job.
 on:
   repository_dispatch:
     types: [knowledge-publish-v1]
+  workflow_run:
+    workflows: ['Store / Knowledge Proposal Signal']
+    types: [completed]
 
 permissions:
   contents: read
@@ -21,9 +24,24 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.sender.login == 'BestNathan' &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'create' &&
+         github.event.workflow_run.status == 'completed' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.name == 'Store / Knowledge Proposal Signal' &&
+         github.event.workflow_run.path == '.github/workflows/store-knowledge-proposal-signal.yml' &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         github.event.workflow_run.repository.full_name == github.repository &&
+         github.event.workflow_run.actor.login == 'BestNathan' &&
+         github.event.workflow_run.triggering_actor.login == 'BestNathan' &&
+         startsWith(github.event.workflow_run.head_branch, 'knowledge-proposals/'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
@@ -54,9 +72,24 @@ jobs:
       needs.verify.result == 'success' &&
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.sender.login == 'BestNathan' &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'create' &&
+         github.event.workflow_run.status == 'completed' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.name == 'Store / Knowledge Proposal Signal' &&
+         github.event.workflow_run.path == '.github/workflows/store-knowledge-proposal-signal.yml' &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         github.event.workflow_run.repository.full_name == github.repository &&
+         github.event.workflow_run.actor.login == 'BestNathan' &&
+         github.event.workflow_run.triggering_actor.login == 'BestNathan' &&
+         startsWith(github.event.workflow_run.head_branch, 'knowledge-proposals/'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
