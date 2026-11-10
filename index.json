@@ -219,7 +219,7 @@
       },
       {
         "title": "Session and Project operation surface presentation by Experience",
-        "description": "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records, and Agent/Existing Location choices use the shared resource-choice anatomy",
+        "description": "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records, Agent/Existing Location choices use the shared resource-choice anatomy, and Project Agent/Directory fields follow one compact top-aligned row rule",
         "path": "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
         "status": "verified",
         "categories": [
@@ -231,7 +231,7 @@
           "presentation",
           "responsive"
         ],
-        "updated_at": "2026-11-10T12:12:00Z"
+        "updated_at": "2026-11-10T15:20:00Z"
       },
       {
         "title": "Unified overlay and operation surface system",

@@ -591,3 +591,10 @@
 - Categories: architecture, cli, lifecycle, process, security, storage
 - Reason: Link the new release-versioning article and correct the now-implemented cross-version lifecycle lock and release archive (#3173)
 - Source: https://github.com/BestNathan/nession/issues/3173
+
+## 2026-11-10T15:20:00Z | update | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Record the #3136 compact form-field row rule: top-aligned 32px Web / 44px App Agent/Directory controls, opt-in SelectTrigger field and growing Textarea field variants, Remove in the label slot, dialog as the single scroll owner, App stacked 44px composition, and the in-place #3089 prototype publication plus Case/E2E receipts
+- Source: https://github.com/BestNathan/nession/issues/3136

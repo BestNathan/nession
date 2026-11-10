@@ -1,12 +1,12 @@
 ---
 title: "Session and Project operation surface presentation by Experience"
-description: "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records, and Agent/Existing Location choices use the shared resource-choice anatomy"
+description: "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records, Agent/Existing Location choices use the shared resource-choice anatomy, and Project Agent/Directory fields follow one compact top-aligned row rule"
 topic: web
 categories: ["web", "app", "interaction", "session", "project", "presentation", "responsive"]
 status: verified
 created_at: 2026-11-09T11:34:00Z
-updated_at: 2026-11-10T12:12:00Z
-sources: ["https://github.com/BestNathan/nession/issues/3089", "https://github.com/BestNathan/nession/pull/3109", "https://github.com/BestNathan/nession/pull/3126", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/product/session/components/CreateSessionDialog.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/app/fixture/fixtureProjects.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/tests/browser/project-session-create.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-07/verify.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-08/verify.cjs", "https://github.com/BestNathan/nession/blob/f3c0e8dd0f85f93c6dd3174ba6134c3af138c228/session-operation-surfaces-3089/README.md", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppOperationPage.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppAttachSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppCreateSessionSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppProjectFormSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useAttachConfiguration.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useCreateSessionForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/project/hooks/useProjectDraftForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/tests/browser/app-attach-presentation.spec.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/acceptance/cases/3089/SC-06/verify.cjs", "https://github.com/BestNathan/nession/blob/8a9b670b4b82d93cec48bad81d24c8d677119659/session-operation-surfaces-3089/index.html", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/session/components/CreateSessionDialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/session/components/CreateSessionParts.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/project/components/ProjectLocationsEditor.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/capabilities/env/components/EnvImportDialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts"]
+updated_at: 2026-11-10T15:20:00Z
+sources: ["https://github.com/BestNathan/nession/issues/3089", "https://github.com/BestNathan/nession/pull/3109", "https://github.com/BestNathan/nession/pull/3126", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/product/session/components/CreateSessionDialog.tsx", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/web/src/app/fixture/fixtureProjects.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/tests/browser/project-session-create.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-07/verify.spec.ts", "https://github.com/BestNathan/nession/blob/8dfb163bb4e998198dd23ca5fde7cde3b06021c9/e2e/acceptance/cases/3089/SC-08/verify.cjs", "https://github.com/BestNathan/nession/blob/f3c0e8dd0f85f93c6dd3174ba6134c3af138c228/session-operation-surfaces-3089/README.md", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experienceMode.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppOperationPage.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppAttachSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppCreateSessionSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/app/experiences/app/AppProjectFormSurface.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useAttachConfiguration.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/session/hooks/useCreateSessionForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/web/src/product/project/hooks/useProjectDraftForm.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/tests/browser/app-attach-presentation.spec.ts", "https://github.com/BestNathan/nession/blob/2811fb1967e0f3f4f625c38b9c70933bf1f778e7/e2e/acceptance/cases/3089/SC-06/verify.cjs", "https://github.com/BestNathan/nession/blob/8a9b670b4b82d93cec48bad81d24c8d677119659/session-operation-surfaces-3089/index.html", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/session/components/CreateSessionDialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/session/components/CreateSessionParts.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/product/project/components/ProjectLocationsEditor.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/capabilities/env/components/EnvImportDialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3136", "https://github.com/BestNathan/nession/pull/3213", "https://github.com/BestNathan/nession/blob/bc7c3597bbe12ea200157fc1d5853d7fa35864cf/docs/design/design-system/components.md", "https://github.com/BestNathan/nession/blob/bc7c3597bbe12ea200157fc1d5853d7fa35864cf/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/bc7c3597bbe12ea200157fc1d5853d7fa35864cf/web/src/components/ui/textarea.tsx", "https://github.com/BestNathan/nession/blob/bc7c3597bbe12ea200157fc1d5853d7fa35864cf/web/src/product/project/components/ProjectLocationsEditor.tsx", "https://github.com/BestNathan/nession/blob/bc7c3597bbe12ea200157fc1d5853d7fa35864cf/e2e/acceptance/cases/3136/SC-01/verify.spec.ts", "https://github.com/BestNathan/nession/blob/94ac14d1b623d1f4dde6d1c8c9c70302c17ee853/session-operation-surfaces-3089/README.md"]
 ---
 
 # Session and Project operation surface presentation by Experience
@@ -91,6 +91,30 @@ trigger and the option. The anatomy is opt-in on the data's meaning; see
 [Unified overlay and operation surface system](unified-overlay-and-operation-surface-system.md)
 for the full action/resource contract and the modal popup host.
 
+### Compact form-field row (#3136)
+
+The Project Existing Location row follows one documented field-row rule instead
+of compositing unrelated primitive defaults:
+
+- Labels share one line and one gap; field **tops** align. Mixed controls are
+  never bottom-aligned with `items-end`, so a taller field cannot drag its
+  neighbour down.
+- A single-line Select uses `SelectTrigger size="field"`, which resolves the
+  Experience control band (`control.md`: 32px Web / 44px App) with the same
+  padding band as `Input`.
+- The Directory uses `Textarea variant="field"`: it starts on the same band and
+  grows downward with `field-sizing-content`; a long path wraps inside the field
+  and only the Directory grows.
+- A trailing row action (Remove) occupies the label slot above the band, so it
+  aligns with the field top rather than the bottom of a grown textarea.
+- The default `SelectTrigger`/`Textarea` sizes remain for their existing uses;
+  `field` is an opt-in semantic variant, not a global restyle. The dialog stays
+  the single vertical scroll owner.
+
+App keeps its stacked composition: full-width 44px controls, the same growing
+Directory, one host header/Back and anchored footer, with the draft preserved
+across Add/Remove.
+
 ## Context and evidence
 
 Issue [#3089](https://github.com/BestNathan/nession/issues/3089) owns the
@@ -132,6 +156,20 @@ Selected E2E run `42810520511` passed `app-attach-presentation` 2/2,
 `ui-contract-matrix` 100/100. Staging `deploy-watch` verified image `dae365a` on
 the server, agent and ui pods.
 
+The compact form-field row is PR
+[#3213](https://github.com/BestNathan/nession/pull/3213), merged to staging at
+`bc7c3597bbe12ea200157fc1d5853d7fa35864cf`. Case Smoke run `42841534804` passed
+SC-01 (2 tests, 138 assertions; Web 1440/1180/1024 with short/long paths, the
+row-offset invariant and 8 grown rows under one scroll owner), SC-02 (114
+assertions; App 390/375/844×390 stacked 44px fields, one header/footer and draft
+across Add/Remove) and SC-03 (runtime + 30 browser assertions; the revised
+`session-operation-surfaces-3089` prototype at
+`94ac14d1b623d1f4dde6d1c8c9c70302c17ee853`, published unchanged by Pages). The
+selected E2E run `42841534945` passed `project-management`,
+`project-session-create` and `app-session-operations`. The earlier
+`project-session-create` width equality was already superseded by the #3199
+resource-width repair on staging and was merged, not overwritten.
+
 ## Limits and when to revisit
 
 - Dialog widths (720/640) are initial design targets, not constants; a change to
@@ -156,6 +194,10 @@ the server, agent and ui pods.
 - The resource-choice row is content-height with the Experience control band as
   its floor; do not re-introduce a per-consumer fixed height or a `multiline`
   pseudo-variant. Action rows and their 28/44 band remain unchanged.
+- The compact field variants are opt-in: `SelectTrigger size="field"` and
+  `Textarea variant="field"` are for same-row configuration fields. Do not turn
+  every Select/Textarea into the field band, and do not bottom-align mixed
+  controls with `items-end`.
 
 Related knowledge:
 
