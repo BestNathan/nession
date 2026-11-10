@@ -11,7 +11,7 @@ test.describe('standalone Pages technical Documents',()=>{
     await page.goto(site.origin+'/#/documents');
     await expect(page.getByRole('heading',{name:'Technical documents'})).toBeVisible();
     await expect(page.locator('.documents-entry')).toHaveCount(2);
-    await expect(page.locator('.documents-reader').getByRole('heading',{name:'Protocol Architecture'})).toBeVisible();
+    await expect(page.locator('.documents-reader > h2')).toHaveText('Protocol Architecture');
     await expect(page.locator('.documents-prose table')).toHaveCount(1);
     await expect(page.locator('.documents-prose pre')).toHaveCount(1);
     await expect(page.locator('.documents-reader .documents-source')).toHaveAttribute('href',
@@ -19,10 +19,10 @@ test.describe('standalone Pages technical Documents',()=>{
     await page.getByRole('searchbox',{name:'Search technical documents'}).fill('authentication');
     await expect(page.locator('.documents-entry')).toHaveCount(1);
     await page.locator('.documents-entry').click();
-    await expect(page.locator('.documents-reader').getByRole('heading',{name:'MCP Access Layer'})).toBeVisible();
+    await expect(page.locator('.documents-reader > h2')).toHaveText('MCP Access Layer');
     await expect(page.locator('.documents-reader img')).toHaveCount(0);
     await page.reload();
-    await expect(page.locator('.documents-reader').getByRole('heading',{name:'MCP Access Layer'})).toBeVisible();
+    await expect(page.locator('.documents-reader > h2')).toHaveText('MCP Access Layer');
     await expect(page.getByRole('link',{name:'Documents',exact:true})).toHaveAttribute('aria-current','page');
   });
 
