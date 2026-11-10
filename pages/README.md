@@ -36,6 +36,25 @@ Publishing has a stricter proof than a successful artifact upload or matching ma
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
 
+## Documents / technical reference
+
+The native `#/documents` route is the source-backed, curated technical reference
+reader. Its owner is the checked-in `pages/scripts/documents-project.mjs`
+allowlist, and its content is read directly from the pinned `SOURCE_MAIN_SHA`
+checkout under `docs/architecture/` during the trusted static build. The
+`data/documents.json` artifact carries the exact main SHA and pinned GitHub
+source links. Missing SHA yields an explicit unavailable snapshot, never a
+claim that the repository has no documents. Invalid or unsafe allowlisted
+source files fail the build; there is no client-side GitHub API or writer.
+
+The UI uses Pages-native typography and responsive list/detail navigation,
+supports category and text search, and renders an inert, bounded Markdown
+subset from DOM text nodes (including tables and code blocks). Raw HTML is
+never executed. Technical Documents describe canonical architecture or design;
+Knowledge remains a separate evidence-backed learning and decision-history
+surface. Published source documentation is not itself proof that an intended
+runtime behavior was shipped.
+
 ## Knowledge Explorer / public reading surface (#2664)
 
 The native Pages route \`#/knowledge\` reads \`data/knowledge.json\`, an allowlisted,
