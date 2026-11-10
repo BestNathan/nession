@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "3024-sc03-toolchains",
+  "source_sha": "685ebd022acf63b9fe0fd110f8d7bcdcfd453d9a",
+  "source_digest": "f1566e9008128543deda56b62752fad68877a77e1280b14315a574da083160a1",
+  "entry": "run.mjs",
+  "workflow": {
+    "id": 42743440707,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42743440707",
+    "event": "push",
+    "branch": "task/3024-sc03-toolchains",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-10T02:32:27.007Z",
+    "finished_at": "2026-11-10T02:57:56.080Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "erofs_toolchain_composition",
+      "issue": 3024,
+      "source_sha": "685ebd022acf63b9fe0fd110f8d7bcdcfd453d9a",
+      "base": {},
+      "node": {},
+      "rust": {},
+      "result": "fail",
+      "kernel": "7.0.0-1017-azure",
+      "error": "spawnSync bash ETIMEDOUT"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/685ebd022acf63b9fe0fd110f8d7bcdcfd453d9a/3024-sc03-toolchains.json"
+}
