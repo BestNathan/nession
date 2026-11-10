@@ -127,6 +127,17 @@ function renderAgentConfig(
     `default_working_dir = "${tomlString(requiredText(home, 'home'))}"`,
     'agent default_working_dir',
   );
+
+  // The Acceptance Cases lane provisions a delegated cgroup v2 subtree and
+  // exports its kernel-relative path. Let the real Agent measure the same
+  // subtree its Sandbox Cases execute against; without this the Agent falls
+  // back to its own (non-delegated) cgroup and truthfully reports no
+  // configurable controller files. Local/web-only runs leave the variable
+  // unset and keep the production default.
+  const sandboxCgroupRoot = process.env.SANDBOX_CGROUP_ROOT;
+  if (sandboxCgroupRoot && !/^\[sandbox\]\s*$/m.test(output)) {
+    output += `\n[sandbox]\ncgroup_root = "${tomlString(sandboxCgroupRoot)}"\n`;
+  }
   return output;
 }
 
@@ -484,7 +495,34 @@ function selfTest() {
     /listen_address/,
   );
   assert.throws(() => positivePort(0, 'port'), /TCP port/);
-  console.log('e2e runner runtime self-test: 8 cases passed');
+
+  const previousSandboxRoot = process.env.SANDBOX_CGROUP_ROOT;
+  try {
+    delete process.env.SANDBOX_CGROUP_ROOT;
+    assert.doesNotMatch(
+      renderAgentConfig(agentTemplate, {
+        serverPort: 21090,
+        agentPort: 21091,
+        stalledProbePort: 21092,
+        home,
+      }),
+      /^\[sandbox\]$/m,
+      'a local runtime keeps the production cgroup default',
+    );
+    process.env.SANDBOX_CGROUP_ROOT = '/nession-accept';
+    const sandboxed = renderAgentConfig(agentTemplate, {
+      serverPort: 21090,
+      agentPort: 21091,
+      stalledProbePort: 21092,
+      home,
+    });
+    assert.match(sandboxed, /^\[sandbox\]\ncgroup_root = "\/nession-accept"$/m);
+    assert.equal(sandboxed.match(/^\[sandbox\]$/gm).length, 1);
+  } finally {
+    if (previousSandboxRoot === undefined) delete process.env.SANDBOX_CGROUP_ROOT;
+    else process.env.SANDBOX_CGROUP_ROOT = previousSandboxRoot;
+  }
+  console.log('e2e runner runtime self-test: 10 cases passed');
 }
 
 module.exports = {
