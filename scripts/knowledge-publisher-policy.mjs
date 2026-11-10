@@ -103,7 +103,7 @@ async function check() {
   const token = process.env.GH_TOKEN;
   const appId = Number(process.env.KNOWLEDGE_PUBLISHER_APP_ID);
   if (!token || !Number.isSafeInteger(appId) || appId<=0 ||
-      process.env.GITHUB_EVENT_NAME !== 'repository_dispatch' ||
+      !['repository_dispatch','workflow_run','issue_comment'].includes(process.env.GITHUB_EVENT_NAME) ||
       process.env.GITHUB_REF !== 'refs/heads/main' ||
       process.env.GITHUB_REPOSITORY !== REPO)
     fail('trusted main and read-only API token plus dedicated App ID required');

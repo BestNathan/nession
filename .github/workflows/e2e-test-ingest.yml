@@ -215,7 +215,14 @@ jobs:
             [[ "$number" =~ ^[1-9][0-9]*$ ]] || exit 1
             gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "scratch/metadata/issue-$number.json"
           done
-          jq -s . scratch/metadata/issue-*.json > scratch/metadata/issues.json
+          # PR-native release integrations have zero Issue owners by design.
+          # Keep strict source/Run attestation and store per-ID evidence without
+          # fabricating a disposable Requirement Issue for this batch.
+          if compgen -G 'scratch/metadata/issue-*.json' > /dev/null; then
+            jq -s . scratch/metadata/issue-*.json > scratch/metadata/issues.json
+          else
+            echo '[]' > scratch/metadata/issues.json
+          fi
           node trusted/scripts/issue-e2e-source-attestation.mjs self-test
           node trusted/scripts/issue-e2e-source-attestation.mjs project \
             "$GITHUB_EVENT_PATH" scratch/metadata/run.json scratch/metadata/pr.json \
