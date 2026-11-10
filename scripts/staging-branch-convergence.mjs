@@ -259,6 +259,54 @@ export function staleGeneratedSyncPr(pr,repo,lane,currentHead) {
     pr.head.ref.startsWith('chore/staging-sync-'+lane.replace(/[\/._]/g,'-')+'-');
 }
 
+// Keep a checked two-parent integration PR alive while Main advances. Only a
+// changed Staging first parent, broken ancestry, or invalid head invalidates it.
+export function pinnedSyncIdentity(pr,repo,lane,laneSha,headSha,parents,mainIsAncestor) {
+  const prefix='chore/staging-sync-'+lane.replace(/[\\/._]/g,'-')+'-';
+  if(pr?.state!=='open'||pr.draft||pr.base?.ref!==lane||
+      pr.head?.repo?.full_name!==repo||!pr.head?.ref?.startsWith(prefix)||
+      !pr.body?.startsWith('Staging Convergence automated proposal')||
+      !SHA.test(pr.head?.sha||'')||pr.head.sha!==headSha||
+      !Array.isArray(parents)||parents.length!==2||
+      parents[0]!==laneSha||!SHA.test(parents[1]||'')||
+      !mainIsAncestor)return false;
+  return pr.head.ref===integrationBranchName(lane,parents[1],laneSha);
+}
+function pendingSyncIntegration(repo,lane,liveMainSha) {
+  const opened=gh(['--method','GET','repos/'+repo+'/pulls',
+    '-f','base='+lane.branch,'-f','state=open','-f','per_page=100']);
+  if(!Array.isArray(opened)||opened.length>=100)
+    reject('unbounded active Staging PR inventory');
+  const prefix='chore/staging-sync-'+lane.branch.replace(/[\\/._]/g,'-')+'-';
+  const generated=opened.filter(pr=>pr.state==='open'&&
+    pr.base?.ref===lane.branch&&pr.head?.repo?.full_name===repo&&
+    pr.head?.ref?.startsWith(prefix)&&
+    pr.body?.startsWith('Staging Convergence automated proposal'));
+  if(generated.length>1)reject('multiple generated sync PRs; resolve before continuing');
+  const pr=generated[0];
+  if(!pr)return null;
+  // Changed staging requires a new approval and exact-head check. The
+  // obsolete PR is closed by the existing supersession path, not reused.
+  if(pr.base?.sha!==lane.sha)return null;
+  const remote=optionalRemoteHead(branchName(pr.head.ref));
+  if(remote!==pr.head?.sha)reject('active sync PR ref does not match GitHub head');
+  fetchForComparison(pr.head.ref);
+  const parents=shell('git',['show','-s','--format=%P',remote]).split(/\\s+/);
+  const pinnedMain=parents[1];
+  let mainIsAncestor=false;
+  if(SHA.test(pinnedMain||'')){
+    try{shell('git',['merge-base','--is-ancestor',pinnedMain,liveMainSha]);
+      mainIsAncestor=true;
+    }catch(error){if(error.status!==1)throw error;}
+  }
+  if(!pinnedSyncIdentity(pr,repo,lane.branch,lane.sha,remote,parents,mainIsAncestor))
+    reject('active sync PR has invalid pinned ancestry or identity');
+  const tree=shell('git',['merge-tree','--write-tree',lane.sha,pinnedMain]).split(/\\s+/)[0];
+  if(!SHA.test(tree)||shell('git',['rev-parse',remote+'^{tree}'])!==tree)
+    reject('active sync integration tree differs from trusted source');
+  return {branch:pr.head.ref,sha:remote,main_sha:pinnedMain,created:false,reused:true};
+}
+
 function closeSupersededSyncPrs(repo,lane,currentHead) {
   const list=gh(['--method','GET','repos/'+repo+'/pulls',
     '-f','base='+lane,'-f','state=open','-f','per_page=100']);
