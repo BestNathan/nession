@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {parsePreMergeIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
+import {isNativeConvergencePr,verifiedConvergenceBatch,convergenceApproval,
+  convergenceBatchDigest}
+  from './staging-convergence-pr.mjs';
 
 const SHA=/^[0-9a-f]{40}$/;
 const REPO='BestNathan/nession';
@@ -17,6 +20,27 @@ const DEPLOY='.github/workflows/release-staging.yml';
 const PROMOTION_LIMIT=90;
 const fail=reason=>({ready:false,reason});
 const okay=details=>({ready:true,reason:'QUALIFIED',...details});
+
+// One authoritative exact-HEAD checks policy for initial Staging sync and
+// later main promotion. A merged PR never inherits a status from its newer
+// branch tip, and skipped/missing/failed source jobs cannot authorize release.
+export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[]){
+  if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(expectedHead)||
+      !Array.isArray(workflowRuns)||workflowRuns.length>100)
+    return fail('INVALID_RUN_INVENTORY');
+  for(const path of REQUIRED){
+    const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
+      run.head_sha===expectedHead&&run.event==='pull_request'&&
+      run.head_repository?.full_name===REPO&&
+      Array.isArray(run.pull_requests)&&
+      run.pull_requests.some(p=>p.number===prNumber));
+    const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
+    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
+      return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
+  }
+  return okay({expectedHead});
+}
 
 export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   const branch=action==='sync-main-to-lane'?plan.branch:'main';
@@ -42,26 +66,14 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   // become genuinely clean. Never waive required checks for a behind PR.
   if(pr.mergeable!==true||pr.mergeable_state!=='clean')
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
-  if(!Array.isArray(workflowRuns)||workflowRuns.length>100)
-    return fail('INVALID_RUN_INVENTORY');
-  for(const path of REQUIRED){
-    const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
-      run.head_sha===expectedHead && run.event==='pull_request' &&
-      run.head_repository?.full_name===REPO &&
-      Array.isArray(run.pull_requests) &&
-      run.pull_requests.some(p=>p.number===pr.number));
-    // A failed older attempt must not poison a later authenticated successful
-    // rerun at the *same* target SHA. Only the newest real workflow attempt
-    // determines readiness; an in-progress newer run blocks an older green.
-    const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
-      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
-    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
-      return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
-  }
+  const checks=requiredSourceRuns(pr.number,expectedHead,workflowRuns);
+  if(!checks.ready)return checks;
   return okay({expectedHead,expectedBase});
 }
 
-export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],deployRuns=[],laneSha,branch='staging',deployment_workflows=['release-staging.yml']}) {
+export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],
+  authenticatedNative=[],deployRuns=[],laneSha,branch='staging',
+  deployment_workflows=['release-staging.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
       firstParentCommits.length===0||firstParentCommits.length>PROMOTION_LIMIT)
     return fail('UNBOUNDED_OR_EMPTY_PROMOTION');
@@ -76,7 +88,11 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     return fail('STAGING_RELEASE_NOT_PROVEN');
   if(!Array.isArray(associations)||associations.length!==firstParentCommits.length)
     return fail('INCOMPLETE_PR_PROVENANCE');
-  const referenced=new Set();
+  if(!Array.isArray(authenticatedNative)||authenticatedNative.length>PROMOTION_LIMIT||
+     authenticatedNative.some(x=>!SHA.test(x)||!firstParentCommits.includes(x))||
+     new Set(authenticatedNative).size!==authenticatedNative.length)
+    return fail('INVALID_NATIVE_PROMOTION_PROOF');
+  const native=new Set(authenticatedNative),referenced=new Set();
   for(let n=0;n<firstParentCommits.length;n++){
     const item=firstParentCommits[n],pairs=associations[n];
     if(!SHA.test(item)||!Array.isArray(pairs))return fail('INVALID_PR_PROVENANCE');
@@ -84,14 +100,22 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
       pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1)return fail('MISSING_STAGING_MERGE_PR:'+item);
     const pr=matches[0];
-    // A generated sync PR still has an Issue-owned acceptance contract.
-    // Never infer authorization from a forgeable head prefix/body marker:
-    // it must carry source-bound Issue provenance like any other Staging PR.
+    // Native PRs have no disposable Issue. Their digest, immutable two-parent
+    // Git source, Owner approval and exact PR checks have been independently
+    // re-attested in the trusted Main promoter; never trust this marker alone.
+    if(isNativeConvergencePr(pr)){
+      if(!native.has(item))return fail('UNATTESTED_NATIVE_STAGING_SYNC:'+item);
+      if(parsePreMergeIssueNumbers(pr.body,'BestNathan','nession',pr.title).length)
+        return fail('NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+item);
+      continue;
+    }
+    // Ordinary feature/legacy sync Issues still require their exact source
+    // acceptance. No source PR may inherit a newer unrelated Issue result.
     const numbers=parsePreMergeIssueNumbers(pr.body, 'BestNathan','nession',pr.title);
     if(numbers.length===0)return fail('UNASSOCIATED_STAGING_CHANGE:'+item);
     for(const number of numbers)referenced.add(number);
   }
-  if(referenced.size===0)return fail('NO_ACCEPTANCE_ISSUES');
+  if(referenced.size===0&&native.size===0)return fail('NO_ACCEPTANCE_ISSUES');
   for(const n of referenced){
     const issue=issues.find(x=>x.number===n);
     if(!issue||!isAcceptanceIssue(issue)||issue.state_reason==='not_planned')
@@ -99,7 +123,8 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     const report=validateRequirementBody(issue.body,{mode:'merge',targetBranch:'main'});
     if(!report.ok)return fail('PENDING_ISSUE_ACCEPTANCE:'+n);
   }
-  return okay({issueNumbers:[...referenced].sort((a,b)=>a-b)});
+  return okay({issueNumbers:[...referenced].sort((a,b)=>a-b),
+    nativeMergeShas:[...native].sort()});
 }
 
 function read(route){
@@ -126,6 +151,45 @@ function getRuns(route){
 }
 function git(args){
   return execFileSync('git',args,{encoding:'utf8',maxBuffer:4_000_000}).trim();
+}
+
+// Only Main's trusted controller can supply this proof; an arbitrary PR
+// marker, Issue label or model verdict is never enough to promote a native
+// Staging integration. Reconstruct Git bytes, current Owner approval and
+// independent source PR Runs for EVERY merged sync commit.
+export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
+  branch='staging',comments=[],sourceRuns=[]}){
+  if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
+     pr.merge_commit_sha!==mergeSha||pr.base?.ref!==branch||
+     pr.base?.repo?.full_name!==REPO)
+    return fail('INVALID_NATIVE_MERGE_PR');
+  let parents;
+  try {
+    parents=execFileSync('git',['rev-list','--parents','-n','1',mergeSha],{
+      cwd:repoRoot,encoding:'utf8',maxBuffer:4_000_000,
+      stdio:['ignore','pipe','pipe'],
+    }).trim().split(/\s+/);
+  } catch {
+    // A forged or unavailable merge commit cannot crash the evaluator or be
+    // treated as a successful GitHub merge. Deny deterministically.
+    return fail('NATIVE_MERGE_COMMIT_UNAVAILABLE');
+  }
+  if(parents.length!==3||parents[0]!==mergeSha||
+     parents[2]!==pr.head?.sha)
+    return fail('NATIVE_MERGE_PARENTS_MISMATCH');
+  let batch;
+  try{
+    batch=verifiedConvergenceBatch(pr,repoRoot,parents[1],mergeSha,
+      {requireCheckout:false});
+  }catch(error){
+    return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);
+  }
+  const approval=convergenceApproval(batch,comments);
+  if(!approval.approved)return fail('NATIVE_OWNER_APPROVAL_REQUIRED:'+batch.integration_head);
+  const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns);
+  if(!source.ready)return source;
+  return okay({integrationHead:batch.integration_head,
+    sourceBatchDigest:convergenceBatchDigest(batch)});
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
@@ -177,8 +241,22 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
     }
   }
   const issues=[...numberSet].map(n=>read('issues/'+n));
+  const authenticatedNative=[];
+  for(let i=0;i<commits.length;i++){
+    const matches=associations[i].filter(pr=>pr.merge_commit_sha===commits[i]&&
+      pr.merged_at&&pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
+    if(matches.length!==1||!isNativeConvergencePr(matches[0]))continue;
+    const nativePr=matches[0];
+    const comments=read('issues/'+nativePr.number+'/comments?per_page=100');
+    const runs=getRuns('head_sha='+nativePr.head.sha+'&event=pull_request');
+    const proof=certifyNativeMerge({pr:nativePr,mergeSha:commits[i],
+      branch,comments,sourceRuns:runs});
+    if(!proof.ready)return proof;
+    authenticatedNative.push(commits[i]);
+  }
   const deployRuns=deployment_workflows.flatMap(file=>getRuns('actions/workflows/'+encodeURIComponent(file)+'/runs?head_sha='+laneSha));
-  return evaluatePromotion({firstParentCommits:commits,associations,issues,deployRuns,laneSha,branch,deployment_workflows});
+  return evaluatePromotion({firstParentCommits:commits,associations,issues,
+    authenticatedNative,deployRuns,laneSha,branch,deployment_workflows});
 }
 
 function selfTest(){
@@ -247,6 +325,30 @@ function selfTest(){
     associations:[[{...forged,body:forged.body+'\n\nRefs #123'}]],
     issues:[{number:123,labels:[{name:'requirement'}],body:'Pending'}],
     deployRuns:[deployed],laneSha:b}).reason,'PENDING_ISSUE_ACCEPTANCE:123');
+  // Native generated PRs have no disposable Issue, but a marker cannot
+  // provide its own authorization. Only a complete separately certified
+  // immutable Git/Owner/CI proof may satisfy main promotion.
+  const native={...forged,body:forged.body+
+    '\n\n<!-- nession-convergence-pr:v1 source=fake -->'};
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],deployRuns:[deployed],laneSha:b}).reason,
+    'UNATTESTED_NATIVE_STAGING_SYNC:'+a);
+  const proven=evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],authenticatedNative:[a],
+    deployRuns:[deployed],laneSha:b});
+  assert.equal(proven.ready,true,'authenticated native source needs no fake Issue');
+  assert.deepEqual(proven.issueNumbers,[]);
+  assert.deepEqual(proven.nativeMergeShas,[a]);
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],authenticatedNative:[b],
+    deployRuns:[deployed],laneSha:b}).reason,'INVALID_NATIVE_PROMOTION_PROOF');
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
+    authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
+    'NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+a);
+  assert.equal(certifyNativeMerge({pr:native,mergeSha:a}).reason,
+    'NATIVE_MERGE_COMMIT_UNAVAILABLE',
+    'an unavailable forged PR merge SHA must fail closed, not crash or pass');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
     'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
   assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
