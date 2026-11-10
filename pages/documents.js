@@ -47,8 +47,7 @@ export function validDocumentsSnapshot(data){
   return data.protocols.every(p=>{
     if(!ID.test(p?.id||'')||ids.has(p.id)||typeof p.owner!=='string'||
        !Array.isArray(p.versions)||!p.versions.length||p.versions.length>25||
-       !Array.isArray(p.wires)||!p.wires.every(x=>typeof x==='string')||
-       false)return false;
+       !Array.isArray(p.wires)||!p.wires.every(x=>typeof x==='string'))return false;
     ids.add(p.id);
     const versions=new Set();
     return p.versions.every(v=>{
@@ -56,7 +55,12 @@ export function validDocumentsSnapshot(data){
       versions.add(v.version);
       return ['request','response'].every(k=>v[k]===null||
         (v[k]&&typeof v[k].alias==='string'&&Array.isArray(v[k].fields)&&
-          v[k].fields.length<=6000&&v[k].shape!==undefined));
+          v[k].fields.length<=6000&&v[k].shape!==undefined&&
+          v[k].fields.every(f=>typeof f.path==='string'&&typeof f.type==='string'&&
+            ['verified','unknown','unreleased'].includes(f.since_status)&&
+            (f.since_status==='verified'?
+              /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(f.since||''):
+              f.since===null))));
     });
   });
 }
@@ -80,8 +84,7 @@ function fieldTable(fields){
   for(const f of fields){
     const row=el('tr');
     const label=f.variant?f.path+' ('+f.variant+')':f.path;
-    const since=f.since_status==='verified'&&f.since?
-      '0'===f.since?'Unknown':f.since:
+    const since=f.since_status==='verified'&&f.since?f.since:
       f.since_status==='unreleased'?'Unreleased':'Unknown';
     const sinceCell=el('td','documents-since '+(f.since_status||'unknown'),since);
     sinceCell.title=f.since_status==='verified'?
