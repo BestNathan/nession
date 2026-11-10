@@ -185,7 +185,9 @@ function writeRecord(outDir, record) {
           finished_at: agent.finished_at ?? new Date().toISOString(),
           agent_duration_ms: agent.duration_ms ?? null,
         },
-        result: { status: record.result },
+        result: { status: record.result,
+          ...(record.review ? {rejection_code: record.review.code} : {}),
+        },
       }),
     );
   }
