@@ -85,6 +85,26 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
   });
 }
 
+// A proposal rejected by a trusted pre-write check is an audit finding,
+// not proof of a provider/runtime failure. Only our typed errors may result
+// in needs-review. Unrecognized, GitHub, post-write or provider errors stay red.
+// Reasons deliberately omit untrusted model/Issue text.
+const PREWRITE_REJECTIONS = Object.freeze({
+  ISSUE_AUDIT_LABEL_CONTRACT: 'Canonical kind/area label proposal rejected before write',
+  ISSUE_AUDIT_E2E_PROTECTED: 'Proposed E2E Verification / Report mutation rejected before write',
+  ISSUE_AUDIT_CONTRACT_REJECTED: 'Proposed Issue did not satisfy the full Issue Contract before write',
+  ISSUE_AUDIT_TIER_PROPOSAL: 'Verification tier/reason proposal invalid before write',
+  ISSUE_AUDIT_TIER_DOWNGRADE: 'Verification tier downgrade needs separate trusted approval',
+  ISSUE_AUDIT_PROPOSAL_REJECTED: 'Unsupported or malformed model proposal rejected before write',
+  ISSUE_AUDIT_COMMENT_PROPOSAL: 'Invalid audit comment proposal rejected before write',
+});
+export function describeIssueAuditRejection(error) {
+  const code = error?.code;
+  return Object.hasOwn(PREWRITE_REJECTIONS, code)
+    ? {code, reason: PREWRITE_REJECTIONS[code]}
+    : null;
+}
+
 // This continuation is only for a rejected, non-mutating contract proposal.
 // Validation feedback is trusted, but issue/model content is untrusted data.
 export function renderIssueAuditContractRepairPrompt(issue, previousResult, diagnostic) {
@@ -148,7 +168,8 @@ export function renderIssueAuditContractRepairPrompt(issue, previousResult, diag
 export function isIssueAuditRepairableRejection(error) {
   if (error?.code === 'ISSUE_AUDIT_LABEL_CONTRACT' ||
       error?.code === 'ISSUE_AUDIT_E2E_PROTECTED' ||
-      error?.code === 'ISSUE_AUDIT_TIER_PROPOSAL') return true;
+      error?.code === 'ISSUE_AUDIT_TIER_PROPOSAL' ||
+      error?.code === 'ISSUE_AUDIT_CONTRACT_REJECTED') return true;
   const message = error instanceof Error ? error.message : '';
   return message.startsWith('Issue Contract validation failed before write:') ||
     message.startsWith('Issue Audit proposal left the invalid Issue Contract unrepaired:');
@@ -197,21 +218,50 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   }
   // Reuse the canonical bounded task parser. Only an unparseable response may
   // invoke a single formatting-only retry; never send a truncated draft.
+  // The shared parser reports invalid JSON, but its format-repair wrapper
+  // also catches callback errors. Preserve a real provider/network failure
+  // rather than misclassifying it as a harmless rejected model proposal.
+  let repairFailure=null;
   const boundedRepair=typeof repair==='function' && Buffer.byteLength(raw,'utf8')<=16*1024
-    ? repair : null;
+    ? async bounded=>{
+        try { return await repair(bounded); }
+        catch (error) { repairFailure=error; throw error; }
+      }
+    : null;
   let proposal;
   try { proposal=await parseModelJsonWithRepair(raw,boundedRepair,'Issue Audit repair proposal'); }
-  catch { throw new Error('Issue Audit repair proposal is not valid JSON'+
-    (repair && !boundedRepair?' (oversized response; no formatting retry)':'')); }
+  catch {
+    if (repairFailure) throw repairFailure;
+    throw Object.assign(new Error('Issue Audit repair proposal is not valid JSON'+
+      (repair && !boundedRepair?' (oversized response; no formatting retry)':'')),
+      {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'});
+  }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) {
-    throw new Error('Issue Audit repair proposal must be an object');
+    throw Object.assign(new Error('Issue Audit repair proposal must be an object'),
+      {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'});
   }
   if (Object.keys(proposal).some((key) => !['title', 'body', 'labels', 'comment', 'verification_tier', 'tier_reason'].includes(key))) {
-    throw new Error('Issue Audit proposal contains unauthorized fields');
+    throw Object.assign(new Error('Issue Audit proposal contains unauthorized fields'),
+      {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'});
   }
   const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
   const hasWrites = hasIssueRepair || proposal.verification_tier != null || proposal.comment != null;
-  if (!hasWrites) return;
+  // An empty, well-formed response is not a successful audit if its fixed
+  // source still fails Contract or lacks an explicit risk tier. Return a
+  // typed, pre-write finding so the one-shot correction can repair it.
+  // A no-op on an already valid, tiered Issue remains legitimate.
+  if (!hasWrites) {
+    const validation = auditIssue(issue);
+    if (!validation.ok) {
+      throw Object.assign(new Error('Issue Audit proposal left the invalid Issue Contract unrepaired: ' +
+        validation.errors.join('; ')),{code:'ISSUE_AUDIT_CONTRACT_REJECTED'});
+    }
+    if (!readVerificationTier(issue).explicit) {
+      throw Object.assign(new Error('Issue Audit proposal left verification tier unset'),
+        {code:'ISSUE_AUDIT_TIER_PROPOSAL'});
+    }
+    return;
+  }
   // Validate ALL proposed mutations before the first write, not just the
   // structural fields. Preserve the trusted tool's repeated pre-write checks.
   if (proposal.verification_tier != null &&
@@ -226,7 +276,8 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   if (proposal.comment != null &&
       (typeof proposal.comment !== 'string' || !proposal.comment.trim() ||
        proposal.comment.length > 8000)) {
-    throw new Error('invalid Issue Audit comment proposal');
+    throw Object.assign(new Error('invalid Issue Audit comment proposal'),
+      {code:'ISSUE_AUDIT_COMMENT_PROPOSAL'});
   }
   const current = fetchGitHubIssue(issue.number, repository);
   if (proposal.verification_tier != null) {
@@ -234,7 +285,8 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
     if (beforeTier.explicit &&
         VERIFICATION_TIERS.indexOf(proposal.verification_tier) <
         VERIFICATION_TIERS.indexOf(beforeTier.tier)) {
-      throw new Error('verification-tier downgrade requires separate trusted approval');
+      throw Object.assign(new Error('verification-tier downgrade requires separate trusted approval'),
+        {code:'ISSUE_AUDIT_TIER_DOWNGRADE'});
     }
   }
   const fields = hasIssueRepair ? completeIssueUpdateProposal(current, proposal) : null;
@@ -247,14 +299,14 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
     const candidate = candidateIssue(current, fields.title, fields.body, fields.labels);
     const validation = auditIssue(candidate);
     if (!validation.ok) {
-      throw new Error('Issue Contract validation failed before write: ' +
-        validation.errors.join('; '));
+      throw Object.assign(new Error('Issue Contract validation failed before write: ' +
+        validation.errors.join('; ')),{code:'ISSUE_AUDIT_CONTRACT_REJECTED'});
     }
   } else {
     const validation = auditIssue(current);
     if (!validation.ok) {
-      throw new Error('Issue Audit proposal left the invalid Issue Contract unrepaired: ' +
-        validation.errors.join('; '));
+      throw Object.assign(new Error('Issue Audit proposal left the invalid Issue Contract unrepaired: ' +
+        validation.errors.join('; ')),{code:'ISSUE_AUDIT_CONTRACT_REJECTED'});
     }
   }
   if (fields) {

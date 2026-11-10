@@ -127,10 +127,14 @@ test.describe('Project Existing-location Session creation', () => {
       expect(popupBox).not.toBeNull();
       expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
       const openTriggerBox = await trigger.boundingBox();
-      // #3164 superseded the anchor-width-only option list: a resource list is
-      // never narrower than its trigger, but may grow up to the choice-width
-      // role and the viewport clamp. Equality is no longer the contract.
-      expect(popupBox!.width).toBeGreaterThanOrEqual(openTriggerBox!.width - 0.5);
+      expect(openTriggerBox).not.toBeNull();
+      // The #3199 regression follows the approved resource-choice width contract:
+      // resource choices may grow wider than the narrow anchor to
+      // reveal metadata/long paths. They must still contain the anchor width
+      // and fit inside the viewport; exact equality is the old action-list
+      // contract, not the current rich-choice contract.
+      expect(popupBox!.width).toBeGreaterThanOrEqual(openTriggerBox!.width - 1);
+      expect(popupBox!.x).toBeGreaterThanOrEqual(-0.5);
       for (const option of await options.all()) {
         const optionBox = await option.boundingBox();
         expect(optionBox).not.toBeNull();
