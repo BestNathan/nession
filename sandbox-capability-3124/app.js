@@ -171,10 +171,10 @@
       policy.network={mode:d.network,ingress:"deny"};
       if(d.network==="restricted")policy.network.egress={
         allow:(d.egress||"").split(",").map(function(x){return x.trim()}).filter(Boolean),
-        deny:[],private_network:"deny"};
+        deny:(d.denyEgress||"").split(",").map(function(x){return x.trim()}).filter(Boolean),private_network:"deny"};
     }
     var namespaces={};
-    ["pid","ipc","user"].forEach(function(k){if(d[k])namespaces[k]=true});
+    ["pid","ipc","user","uts","cgroup"].forEach(function(k){if(d[k])namespaces[k]=true});
     if(Object.keys(namespaces).length)policy.process={linux_namespaces:namespaces};
     if(d.resourceRows&&d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value] }))};
     if(d.syscallRows&&d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
@@ -206,7 +206,7 @@
       active=true;
       description=(d.network||"allow")+" · "+(d.network==="restricted"?(d.egress||"").split(",").filter(Boolean).length+" 个允许目标":"无自定义 egress 列表");
     }else if(id==="process"){
-      entries=["pid","ipc","user"].filter(function(k){return !!d[k]});
+      entries=["pid","ipc","user","uts","cgroup"].filter(function(k){return !!d[k]});
       active=entries.length>0;
       description=active?"Namespaces: "+entries.map(function(x){return x.toUpperCase()}).join(" / "):"没有额外申请 Linux namespace";
     }else{
@@ -332,7 +332,7 @@
         d.preparedMounts.map(function(m){return '<div class="mono">'+escapeHtml(m.target)+' · '+escapeHtml(m.source)+' · '+escapeHtml(m.mode)+'</div>';}).join(''):
         escapeHtml(d.readOnly||'no explicit read')+' · read-only<span class="dimmer">'+escapeHtml(d.write||'none')+' · writable</span>')+'</div></div>'+
       '<div class="dimension"><div class="dimlabel">Network</div><div class="dimval">'+escapeHtml(d.network)+'<span class="dimmer">'+(d.network==='restricted'?'Allowed: '+escapeHtml(d.egress):'Ingress denied by V1 policy')+'</span></div></div>'+
-      '<div class="dimension"><div class="dimlabel">Process</div><div class="dimval">'+(['pid','ipc','user'].filter(function(k){return d[k]}).join(' / ')||'no explicitly requested Linux namespaces')+'<span class="dimmer">当前执行上下文的实际机制，不是整个 Session</span></div></div>'+
+      '<div class="dimension"><div class="dimlabel">Process</div><div class="dimval">'+(['pid','ipc','user','uts','cgroup'].filter(function(k){return d[k]}).join(' / ')||'no explicitly requested Linux namespaces')+'<span class="dimmer">当前执行上下文的实际机制，不是整个 Session</span></div></div>'+
       '<div class="dimension"><div class="dimlabel">Resource</div><div class="dimval">'+(d.resourceRows.length?d.resourceRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 cgroup v2 限制')+'</div></div>'+
       '<div class="dimension"><div class="dimlabel">Syscall</div><div class="dimval">'+(d.syscallRows.length?d.syscallRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 seccomp profile；后端基础安全机制仍生效')+'</div></div></div>';
   }
@@ -348,11 +348,9 @@
   }
   function insideView(){
     return '<h3>Inside Sandbox</h3><div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
-       '<section class="info-section">'+compositionOverview(actualPolicy(),true,false)+
-       '<div class="effective-dimension-details"><h3>生效值明细</h3>'+policyDescription(actualPolicy())+'</div>'+
-       policyJson(actualPolicy(),"Effective Policy JSON",false)+'</section>'+
-       '<div class="actionline"><button class="action primary" data-action="detail">查看验证信息 →</button><button class="action" data-action="return-native">← 返回 Native Pane</button></div>'+
-       '<p class="extra-dim">Return to Native 仅切换焦点。原 Sandbox Pane 保持运行，不是终止或清理命令。</p>';
+       compositionOverview(actualPolicy(),true)+
+       '<div class="actionline"><button class="action primary" data-action="detail">执行验证信息 →</button><button class="action" data-action="return-native">← 返回 Native Pane</button></div>'+
+       '<p class="extra-dim">各配置项打开独立的生效详情页（只读）；范围只包含当前 Pane。Return to Native 不会终止 Sandbox Pane。</p>';
   }
   function preflight(){
     var d=state.draft,s=settings();
@@ -375,21 +373,19 @@
   }
   function draftView(){
     var s=settings();
-    var c='<h3>'+headline()+'</h3><div class="statusline">'+summary()+'</div><div class="notice '+(!s.online||s.unsupported||s.recreated?'danger':'')+'">'+message()+'</div>'+
+    var view='<h3>'+headline()+'</h3><div class="statusline">'+summary()+'</div><div class="notice '+(!s.online||s.unsupported||s.recreated?'danger':'')+'">'+message()+'</div>'+
       '<div class="info-grid">'+line('Agent / Location',s.offline?'nession-dev · offline':'nession-dev · '+(s.macos?'macOS':'Linux'))+
       line('当前 Pane','Native · %1')+'</div>'+
-      '<div class="info-section"><h3>配置 Sandbox</h3><p class="subline">填写 Policy 草稿，预检后明确 Enter；启动新的隔离 Pane，原 Native Pane 不变。</p>'+
-      '<div style="max-width:530px;margin-top:12px">'+configInput('workingDir','Start working directory',state.draft.workingDir,'input')+'</div>'+
-      compositionOverview(state.draft,false,true)+
-      editor()+
-      policyJson(state.draft,"Composed Policy JSON",false)+'</div>';
-    if(state.preflight==='passed')c+='<div data-preflight-status class="notice success validated"><strong>预检通过</strong> · Policy 语法与当前 Agent 能力匹配（仅模拟）。进入时还需重新校验实际主机并验证执行机制。</div>';
-    if(state.preflight==='failed')c+='<div data-preflight-status class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
-    if(state.error)c+='<div class="notice danger validated" role="alert"><strong>Enter 失败</strong> · '+escapeHtml(state.error)+'。仍位于原 Native Pane，草稿已保留。</div>';
-    c+='<div class="actionline"><button class="action" data-action="validate" '+(!s.supported?'disabled title="Agent unavailable"':'')+'>校验配置</button>'+
+      compositionOverview(state.draft,false)+
+      '<section class="home-operations"><h3>Sandbox 执行</h3><p class="subline">分别管理配置，最后在这里一次性预检并进入 Sandbox。没有为每类配置创建额外的持久化实体。</p>'+
+      policyJson(state.draft,"Composed Policy JSON",false)+'</section>';
+    if(state.preflight==='passed')view+='<div data-preflight-status class="notice success validated"><strong>预检通过</strong> · 已验证当前草稿结构与 Agent 能力（仅模拟），进入时将重新验证。</div>';
+    if(state.preflight==='failed')view+='<div data-preflight-status class="notice danger validated" role="alert"><strong>预检未通过</strong> · '+escapeHtml(state.preflightError)+'</div>';
+    if(state.error)view+='<div class="notice danger validated" role="alert"><strong>Enter 失败</strong> · '+escapeHtml(state.error)+'。仍在 Native Pane，草稿保持不变。</div>';
+    view+='<div class="actionline"><button class="action" data-action="validate" '+(!s.supported?'disabled title="Agent unavailable"':'')+'>校验配置</button>'+
       '<button class="action primary" data-action="enter" '+(state.preflight!=='passed'||!s.supported?'disabled title="先完成预检"':'')+'>Enter Sandbox →</button>'+
       (state.entered?'<button class="action" data-action="switch-sandbox">切回已有 Sandbox Pane →</button>':'')+'</div>';
-    return c;
+    return view;
   }
   function confirmation(){
     return '<div class="statusline"><span class="pill strong">Ready to Enter · explicit confirmation</span></div>'+
@@ -399,22 +395,75 @@
        '<p class="subline">Target: nession-dev · Native Pane %1 → 新隔离 Pane · policy revision v1 · Mock Agent generation '+escapeHtml(agentFieldCatalog().generation)+'</p></section>'+
        '<div class="actionline"><button class="action" data-action="cancel-enter">返回修改</button><button class="action primary" data-action="confirm-enter">确认 Enter Sandbox</button></div>';
   }
+
+  function observedModule(){
+    var id=state.openGroup,d=actualPolicy(),mode=id==="filesystem"?"Filesystem":dimensionNames[id];
+    var html='<section data-testid="sandbox-module-effective" class="module-observed">'+
+      '<div class="module-hint">Agent-observed · effective · 当前 Pane 的执行记录 (Mock)</div>';
+    if(id==="filesystem"){
+      if(d.preparedMounts){
+        html+='<h3>已准备的文件系统根</h3><p class="subline">EROFS Base Runtime / Workspace / Toolchains，由 Agent 准备。仅展示 mount target，不暴露底层镜像源。</p>'+
+          '<div class="module-readonly-list">'+d.preparedMounts.map(function(m){return '<div class="module-readonly-item"><span class="mono">'+escapeHtml(m.target)+'</span><span>'+escapeHtml(m.source)+'</span><small>'+escapeHtml(m.mode)+'</small></div>';}).join('')+'</div>';
+      }else{
+        html+='<h3>实际路径访问</h3>'+
+          ['readOnly','write'].map(function(field){
+            var paths=d.pathItems?.[field]||String(d[field]||"").split(",").filter(Boolean);
+            return '<div class="module-list"><h4>'+(field==="readOnly"?"Read-only paths":"Writable paths")+' · '+paths.length+'</h4>'+
+              (paths.length?paths.map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>';}).join(''):'<p class="module-empty">没有显式请求；后端基础可见性仍以执行记录为准。</p>')+'</div>';
+          }).join('');
+      }
+    }else if(id==="network"){
+      html+='<h3>网络边界</h3><div class="module-readonly-item"><strong>Mode</strong><code>'+escapeHtml(d.network||"not-requested")+'</code></div>'+
+        (d.network==="restricted"?
+          '<div class="module-list"><h4>Allowed destinations</h4>'+(d.networkRules?.allow||[]).map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>'}).join('')+
+          '<h4>Denied destinations</h4>'+(d.networkRules?.deny||[]).map(function(x){return '<div class="module-readonly-item mono">'+escapeHtml(x)+'</div>'}).join('')+'</div>':
+          '<p class="module-hint">没有单独应用 restricted egress 条目。</p>');
+    }else if(id==="process"){
+      html+='<h3>Namespace 安装状态</h3><div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(x){
+        return '<div class="namespace-item"><span><strong>'+x.toUpperCase()+'</strong><small>Agent execution evidence</small></span>'+
+        '<span class="composition-state">'+(d[x]?"已安装（模拟）":"未申请")+'</span></div>';
+      }).join('')+'</div>';
+    }else if(id==="resource"){
+      html+='<h3>受管 cgroup v2 生效文件</h3><p class="subline">Agent 需要返回执行 cgroup 的只读文件 read-back；仅展示要求配置的原生 KV，不推断其他 controller 值。</p>'+
+        (d.resourceRows.length?'<div class="module-readonly-list">'+d.resourceRows.map(function(x){
+          return '<div class="module-readonly-item"><code>'+escapeHtml(x.key)+'</code><code>'+escapeHtml(x.value)+'</code><small>示例已读回</small></div>';
+        }).join('')+'</div>':'<p class="module-empty">无显式 Resource 配置。</p>');
+    }else if(id==="syscall"){
+      html+='<h3>Seccomp 运行态</h3>'+(d.syscallRows.length?
+        '<div class="module-detail-note"><strong>Agent 已安装的 Profile（Mock）</strong><code>'+escapeHtml(d.syscallRows[0].value)+'</code><p>不是 cgroup controller 文件；需要 seccomp filter 安装证据。</p></div>':
+        '<p class="module-empty">未额外请求 seccomp Profile；后端基础安全行为独立存在。</p>');
+    }
+    return html+'</section>';
+  }
+  function moduleView(){
+    var observed=settings().inside,id=state.openGroup,d=observed?actualPolicy():state.draft;
+    var p=compositionState(d,id,observed),label=observed?"Observed / effective":"Draft / editable";
+    var head='<div class="module-head"><div><small>Sandbox / '+dimensionNames[id]+'</small><h3>'+dimensionNames[id]+'</h3>'+
+      '<p class="subline">'+moduleCopy[id]+'</p></div><span class="pill">'+label+'</span></div>'+
+      '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+(observed?"Sandbox Pane %8":"Native Pane %1")+
+      ' · nession-dev · '+(observed?"生效只读":"草稿配置")+'</div>';
+    var back=state.mode==="web"?'<button class="action module-back" data-action="module-back">← 返回 Sandbox 配置目录</button>':"";
+    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+
+      (observed?observedModule():editor())+
+      (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
+      '<button class="action" data-action="module-back">完成 · 返回 Sandbox</button></div>':
+      '<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>')+
+      '</section>';
+  }
   function detail(){
     if(!settings().inside)return '<div class="notice danger">当前 Pane 没有可验证的 SandboxExecution。</div>';
-    return '<div class="notice warning">以下配置由当前 Pane 的 SandboxExecution 验证，并不约束 Native Pane 或共享 tmux server。</div>'+
-      '<section class="info-section">'+compositionOverview(actualPolicy(),true,false)+
-      '<div class="effective-dimension-details"><h3>生效策略明细 · 当前 Pane</h3>'+policyDescription(actualPolicy())+'</div>'+
-      policyJson(actualPolicy(),"Effective Policy JSON",false)+'</section>'+diagnostics()+
-      '<div class="actionline"><button class="action" data-action="detail-back">← 返回 Sandbox 概览</button></div>';
+    return '<div class="notice warning">验证信息仅覆盖当前 Pane；不影响 Native Pane、共享 tmux server 或未来 Pane。</div>'+
+      diagnostics()+policyJson(actualPolicy(),"Agent 观测 Policy JSON",false)+
+      '<div class="actionline"><button class="action" data-action="detail-back">← 返回 Sandbox 首页</button></div>';
   }
   function sandbox(){
     var s=settings(),detailMode=state.depth==='detail',confirmMode=state.depth==='confirm';
-    var title=detailMode?'Execution details':confirmMode?'Confirm Enter':'Sandbox';
-    var intro=detailMode?'当前 Pane 隔离执行的实际生效配置与证据。':confirmMode?'确认并进入新的 Sandbox Pane。':'感知当前 Pane；若已进入，查看生效配置；否则编辑并 Enter。';
+    var moduleMode=state.depth==="module";var title=detailMode?'Execution details':confirmMode?'Confirm Enter':moduleMode?dimensionNames[state.openGroup]:'Sandbox';
+    var intro=detailMode?'当前 Pane 隔离执行的实际生效配置与证据。':confirmMode?'确认并进入新的 Sandbox Pane。':moduleMode?'当前配置项自己的列表、操作和生效信息。':'按配置类型进入独立管理页面。';
     var first='<section class="workspace" data-testid="sandbox-view"><div class="workspace-inner">'+
-      (state.mode==='web'?'<div class="crumb">Workspace / '+state.session+' / '+title+'</div>':'')+
+      (state.mode==='web'?'<div class="crumb">Workspace / '+state.session+' / Sandbox'+(moduleMode?' / '+title:'')+'</div>':'')+
       '<div class="titlebar"><div><h2>'+title+'</h2><p class="subline">'+intro+'</p></div></div>';
-    var content=detailMode?detail():confirmMode?confirmation():s.inside?insideView():draftView();
+    var content=detailMode?detail():confirmMode?confirmation():moduleMode?moduleView():s.inside?insideView():draftView();
     return first+content+'</div></section>';
   }
   function otherCapability(){
@@ -424,8 +473,8 @@
   function workspace(){
     var current=(state.cap==="sandbox"?sandbox():otherCapability());
     if(state.mode==="app"){
-      var title=state.depth==="detail"?"Execution details":state.depth==="confirm"?"Confirm Enter":titles[state.cap];
-      return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="'+(state.depth==="detail"?'detail-back':state.depth==="confirm"?'cancel-enter':'terminal')+'" aria-label="Back">←</button><span class="app-title">'+title+'</span><span style="width:40px"></span></header><main class="app-body">'+current+'</main>'+zone()+'</div>';
+      var title=state.depth==="detail"?"Execution details":state.depth==="confirm"?"Confirm Enter":state.depth==="module"?dimensionNames[state.openGroup]:titles[state.cap];
+      return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="'+(state.depth==="detail"?'detail-back':state.depth==="confirm"?'cancel-enter':state.depth==="module"?'module-back':'terminal')+'" aria-label="Back">←</button><span class="app-title">'+title+'</span><span style="width:40px"></span></header><main class="app-body">'+current+'</main>'+zone()+'</div>';
     }
     return '<div class="main-content">'+current+'</div>'+zone();
   }
