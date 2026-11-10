@@ -2,7 +2,7 @@
 
 Independent public site for project introduction, AI workflow Agents, repository engineering indicators, active GitHub Issues/PRs, and metadata-only orphan Run Store inventory. See [Issue #1782](https://github.com/BestNathan/nession/issues/1782).
 
-This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`; Node 24 is the only build requirement and there are no npm dependencies.
+This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`; Node 24 is the base build requirement with no npm dependencies; pinned Protocol generation additionally requires Rust/Cargo.
 
 ## Build locally (sanitized / offline-capable)
 
@@ -36,25 +36,17 @@ Publishing has a stricter proof than a successful artifact upload or matching ma
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
 
-## Documents / technical reference
+## Documents / Protocol Reference
 
-The native `#/documents` route is the source-backed, curated technical reference
-reader. Its owner is the checked-in `pages/scripts/documents-project.mjs`
-allowlist, and its content is read directly from the pinned `SOURCE_MAIN_SHA`
-checkout under `docs/architecture/` during the trusted static build. The
-`data/documents.json` artifact carries the exact main SHA and pinned GitHub
-source links. Missing SHA yields an explicit unavailable snapshot, never a
-claim that the repository has no documents. Invalid or unsafe allowlisted
-source files fail the build; there is no client-side GitHub API or writer.
+The first version of `#/documents` is a **Protocol Reference**. It projects the entire compile-checked Protocol Unit catalog from canonical Rust contracts with `cargo run --quiet -p nession-protocol-codegen -- --schema`. The content includes owner, wire, each protocol contract version, full request/response JSON Schema, nested field paths, and response variants. Pages does not parse Rust or create another protocol registry.
 
-The UI uses Pages-native typography and responsive list/detail navigation,
-supports category and text search, and renders an inert, bounded Markdown
-subset from DOM text nodes (including tables and code blocks). Raw HTML is
-never executed. Technical Documents describe canonical architecture or design;
-Knowledge remains a separate evidence-backed learning and decision-history
-surface. Published source documentation is not itself proof that an intended
-runtime behavior was shipped.
+**Two independent version dimensions:** The protocol contract version (e.g. `git.status` v1/v2) is selected in the reader; the Nession **release** version (e.g. `0.35.0`) is the field support axis. A field is marked present in a release only when its tagged release has a verified schema snapshot. A missing snapshot means **unknown (`?`)**, never unsupported. `N/A` indicates a protocol/contract was not declared in an otherwise verified release. First observed is not automatically the first historical introduction.
 
+`pages/scripts/protocol-release-history.mjs` reads official public GitHub Releases. Each version may publish an asset named `nession-protocol-schema.json`, containing a JSON envelope with `schema_version: 1`, `source: {repository, tag, sha, version}` and `schema` equal to the actual JSON Schema generated at the pinned release tag. The Pages builder verifies the tag commit SHA and release identity, and validates the asset's SHA-256 if supplied by GitHub. It never treats the moving main branch as a historic release. Existing older tags (including v0.35.0) lack this generator; there is not yet a release asset publisher or verified backfill for these versions. Their fields remain unknown.
+
+The main source schema is generated at the trusted `SOURCE_MAIN_SHA`. Its Cargo package version is development-source metadata, **not** evidence that a Release supports those fields. Every static Pages release publishes its main source SHA and available release provenance. A generator error blocks publication; a build without a pinned main SHA reports an explicit unavailable catalog. Protocol source documents are not SC Acceptance proof.
+
+Node 24 is the base Pages tooling, with no npm dependencies. With a trusted main SHA the Protocol Reference requires Rust/Cargo. For deterministic test fixtures, `PAGES_PROTOCOL_SCHEMA_FILE` can provide the generator's JSON output without invoking Cargo.
 ## Knowledge Explorer / public reading surface (#2664)
 
 The native Pages route \`#/knowledge\` reads \`data/knowledge.json\`, an allowlisted,
