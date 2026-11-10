@@ -11,12 +11,14 @@ import {prPaths} from './lib/workflow-pr-paths.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sources = {};
-for (const [name,filename] of Object.entries({
+const sourceFiles = {
   quality:'ci-quality.yml',
   e2e:'e2e-tests.yml',
   cases:'acceptance-case-smoke.yml',
   scenario:'e2e-scenario-smoke.yml',
-})) sources[name] = fs.readFileSync(path.join(root,'.github/workflows',filename),'utf8');
+};
+for (const [name,filename] of Object.entries(sourceFiles))
+  sources[name] = fs.readFileSync(path.join(root,'.github/workflows',filename),'utf8');
 
 function classifier() {
   const lines=sources.quality.split('\n');
@@ -37,7 +39,16 @@ function classifier() {
     'Quality selector must use exact PR diff');
   return script;
 }
-const globs=Object.fromEntries(Object.entries(sources).map(([key,s])=>[key,prPaths(s)]));
+const globs=Object.fromEntries(Object.entries(sources)
+  .map(([key,s])=>[key,prPaths(s,sourceFiles[key])]));
+// Only the three named exact-head producers may have no PR paths filter;
+// removing the filter on any other workflow or broadening branches fails.
+for(const key of ['quality','e2e','cases']){
+  assert.deepEqual(globs[key],['**'],'zero-net-diff PR must trigger '+key);
+  assert.throws(()=>prPaths(sources[key],'untrusted-workflow.yml'),/paths missing/);
+  assert.throws(()=>prPaths(sources[key].replace('branches: [staging, main]',
+    'branches: [main]'),sourceFiles[key]),/branch\/scope guard/);
+}
 const script=classifier();
 const cases=[
   {name:'controller-only', files:['.github/workflows/agent-controller-dispatch.yml'], quality:[false,false,false,true,false], e2e:false,cases:false,scenario:false},
@@ -93,7 +104,9 @@ function select(files,eventName='pull_request') {
 for(const fixture of cases) {
   for(const key of ['quality','e2e','cases','scenario']) {
     const matched=fixture.files.some(file=>globs[key].some(pattern=>path.matchesGlob(file,pattern)));
-    const expected=key==='quality'?fixture.quality!==null:fixture[key];
+    // A PR event cannot use a path filter if empty-tree integration heads
+    // must be checked. The canonical Quality job selector still scopes work.
+    const expected=key==='scenario'?fixture.scenario:true;
     assert.equal(matched,expected,key+' trigger mismatch for '+fixture.name);
   }
   if(fixture.quality!==null)
