@@ -125,6 +125,20 @@ jobs:
           key: pages-protocol-schemas-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             pages-protocol-schemas-v1-
+      - name: Reconstruct missing historical Protocol schemas without credentials
+        if: steps.detect.outputs.active == 'true'
+        env:
+          PAGES_PROTOCOL_CACHE_DIR: ${{ runner.temp }}/nession-protocol-schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Feature rollout: this workflow may land before the Pages code.
+          # Never pass github.token to an older source-code compiler.
+          if [[ -f pages/scripts/generate-protocol-history.mjs ]]; then
+            node pages/scripts/generate-protocol-history.mjs
+          else
+            echo 'Protocol history producer is not on main yet.'
+          fi
       - name: Validate Knowledge ledger at pinned checkout
         if: steps.detect.outputs.active == 'true'
         run: node scripts/knowledge-ledger-contract.mjs check knowledge-store
