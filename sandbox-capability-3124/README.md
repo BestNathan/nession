@@ -1,7 +1,7 @@
 # Sandbox Strategy Tabs — Web/App information architecture (#3143)
 
 **Owning Requirement:** https://github.com/BestNathan/nession/issues/3143  
-**Related:** #3124 (Sandbox Pane/Enter/Inspect), #3141 (native cgroup v2 Resource KV), #3137/#3138 (shared visual recipes/design gate), #3024/#3062 (prepared EROFS).  
+**Related:** #3161 (per-native-policy support discovery), #3124 (Sandbox Pane/Enter/Inspect), #3141 (native cgroup v2 Resource KV), #3137/#3138 (shared visual recipes/design gate), #3024/#3062 (prepared EROFS).  
 **Candidate direct Pages HTML (latest publication unverified):** https://bestnathan.github.io/nession/prototypes/sandbox-capability-3124/index.html  
 **Prototype source:** https://github.com/BestNathan/nession/tree/prototype/sandbox-capability-3124
 
@@ -24,6 +24,42 @@ Workspace → Sandbox (single capability route, current Session/Pane)
 **App:** six horizontally scrollable Tabs just under the existing single App header; the selected policy panel uses the full available width with vertically scrollable content. Switching strategy is one tap or tab-keyboard navigation, **not a new route/history entry**. The host Back still leaves Sandbox/Workspace. Confirm and Execution Details keep their own temporary depth, and Back restores the previously selected strategy Tab.
 
 **Shared state:** only one native versioned Policy Draft. Tab selection does not invalidate preflight or discard data; actual edits across any of the five panels do. A read-only Policy JSON preview and global Validate/Enter operations live in Overview, not inside every panel.
+
+
+## Native policy implementation discovery (Requirement #3161, mock vNext)
+
+**New contract owner:** https://github.com/BestNathan/nession/issues/3161. **This prototype is a future protocol/UI design**, not a claim that the existing V1 Agent implements `catalog_version: 2`. The current staging V1 `SandboxCapabilityCatalog` exposes an overall state and two flat `resource_fields` / `syscall_fields` lists. The proposed evolution keeps the same authenticated `server.session.sandbox.context` and `preflight` command family while exposing independent **registered implementation support** and implementation-specific options.
+
+A strategy Tab stays present as an information destination. Within it, **each native policy implementation is an independent, clearly identified panel**. A sample mock catalog with `status = available/unavailable/unknown` drives all panels:
+
+| Policy implementation | Linux full | Linux no cgroup delegation | Linux no seccomp profile | macOS Seatbelt | Offline |
+|---|---|---|---|---|---|
+| `filesystem.access` | available | available | available | unavailable | unknown |
+| `network` | available (all 3 modes) | available | available | available (allow/deny only, restricted disabled) | unknown |
+| `process.linux_namespaces` | available (each namespace measured) | available | available | unavailable | unknown |
+| `resource.cgroup_v2` | available + native child controller files | unavailable + `controller_not_delegated` | available | unavailable | unknown |
+| `syscall.seccomp` | available + registered profile | available | unavailable + `profile_unavailable` | unavailable | unknown |
+
+The existing **仅 Memory/PIDs 委派** fixture demonstrates the second level of discovery: the `resource.cgroup_v2` implementation remains available while only `memory.*` and `pids.*` native control files are exposed. Their Values remain raw Linux strings; the mock does not infer a universally accepted format.
+
+**Rendering rules:** `available` reveals the domain-specific configuration editor; `unavailable` leaves a disabled policy item and the precise source reason; `unknown` disables rather than converting "not probed" to "unsupported". A future `resource.macos_*` policy appears **only once the runtime and versioned schema register a real path**. The client selects that entry's dedicated renderer; an unknown backend path shown by an older client is **client-unsupported and read-only**, never an arbitrary JSON editor. This avoids making the discovery catalog an implicit Schema extension.
+
+The generic sections must also probe the exact implementable guarantee; filesystem access rules are not universally installable, macOS supports `network.deny` but not `network.restricted` in the measured backend, and process Namespace flags cannot be inferred from overall backend availability. `Inside` remains read-only **Agent-authenticated effective** observation, independent of whether catalog support has since changed.
+
+**Policy security:** V1 canonical policy still denies unknown fields. Discovery does not authorize an unsupported value or a new native key; preflight and Enter recheck `context_generation` and `probe_generation`, and explicit unsupported values fail closed with field-level errors. Catalog data must be tied to Agent + Location and not reused between Sessions/Agents without a matching generation. Only real Agent preflight/Enter/backend verification can establish executable support.
+
+### Updated interaction exercises
+
+- Choose **Native / 可进入**, open **Resource**: see `resource.cgroup_v2 · 支持`, native controller candidates and KV editor.
+- Choose **cgroup v2 不可用**, reopen Resource: item remains visible, marked `不支持` with `controller_not_delegated` explanation; editor disappears and cannot add a key.
+- Choose **seccomp 不可用**, open Syscall: `syscall.seccomp` remains visible but disabled with `profile_unavailable`; Resource remains usable.
+- Choose **macOS Seatbelt**: Filesystem access, Linux Namespaces, Resource cgroup v2 and Syscall seccomp are disabled individually; Network still appears, with **restricted** mode disabled while allow/deny remain selectable.
+- Choose **Agent 离线**: all implementation rows show `状态未知`, not `不支持`.
+- Choose **仅 Memory/PIDs 委派**: Resource strategy available but CPU/IO native files absent; this is not an unavailable Resource implementation.
+- Choose **已在 Sandbox**: tabs show read-only observed values and no editable policy item controls.
+- Web/App navigation remains one Sandbox route with six peer Tabs; no new route or Back is created by this implementation model.
+
+**Synthetic verification:** The update passed **43/43** V8 mock assertions against the Tabbed design and status fixtures (before adding the generic unknown-implementation read-only fallback). Covers every policy type, cgroup/delegation/profile/macos/offline cases, preflight-on-navigation, and App sizing. This verifies the mock's rendering/fixtures, **not** real browser geometry, Backend, Policy Schema vNext, or a Pages deployment.
 
 ## Each policy Tab has its own content, actions and inspection
 
