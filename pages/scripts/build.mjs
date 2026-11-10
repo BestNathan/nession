@@ -5,8 +5,8 @@ import { makeProjection, validateProjection } from './project.mjs';
 import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
 import {loadDocuments,projectProtocolSchema,validPublicDocuments}
   from './documents-project.mjs';
-import {releaseProtocolHistory,sortedReleases} from './protocol-release-history.mjs';
-import {taggedProtocolSchema} from './protocol-git-history.mjs';
+import {releaseProtocolHistory} from './protocol-release-history.mjs';
+import {cachedTaggedProtocolSchema} from './protocol-git-history.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
@@ -178,16 +178,14 @@ const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
 if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
 const mainSha=process.env.SOURCE_MAIN_SHA;
 const releaseList=await optionalList('/releases?per_page=100');
-// Build at most the latest eight asset-less tags per invocation. The SHA-keyed
-// history cache makes repeated builds incremental; older unavailable schemas
-// remain explicitly unknown, never fabricated from current main.
-const candidates=new Set(sortedReleases(releaseList||[])
-  .filter(release=>!release.asset).slice(-8).map(release=>release.tag));
+// PRIVILEGED PUBLICATION BOUNDARY: this process holds a read-only GitHub
+// token for the public snapshot. Never compile code from historical commits
+// here. The credential-free producer ran earlier, and the release-tag SHA
+// from GitHub is independently checked when reading its derived cache entry.
 const releases=await releaseProtocolHistory({api,releases:releaseList||[],
   snapshotAtTag:process.env.PAGES_OFFLINE==='1'?null:async({tag,sha})=>
-    candidates.has(tag)?taggedProtocolSchema({
-      tag,sha,repoRoot:resolve(root,'..'),
-      cacheDir:process.env.PAGES_PROTOCOL_CACHE_DIR}):null});
+    cachedTaggedProtocolSchema({tag,sha,
+      cacheDir:process.env.PAGES_PROTOCOL_CACHE_DIR})});
 const validMainSha=/^[a-f0-9]{40}$/.test(mainSha||'');
 const cargoText=await readFile(join(root,'../Cargo.toml'),'utf8');
 const sourceVersion=/\[workspace\.package\][\s\S]*?\bversion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"/
