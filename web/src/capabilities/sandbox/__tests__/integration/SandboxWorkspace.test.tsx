@@ -210,31 +210,44 @@ describe('SandboxWorkspace (#3124)', () => {
 
     expect(await screen.findByTestId('sandbox-composer')).toBeInTheDocument();
     expect(screen.getByTestId('sandbox-status')).toHaveTextContent('outside');
-    expect(screen.getByTestId('sandbox-resource-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('sandbox-syscall-empty')).toBeInTheDocument();
+    for (const tab of ['overview', 'filesystem', 'network', 'process', 'resource', 'syscall']) {
+      expect(screen.getByTestId(`sandbox-tab-${tab}`)).toBeInTheDocument();
+    }
+    // Only the selected peer panel is rendered; the five editors are not inline.
+    expect(screen.queryByTestId('sandbox-resource-empty')).toBeNull();
     expect(screen.getByTestId('sandbox-enter')).toBeDisabled();
 
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
+    expect(screen.getByTestId('sandbox-resource-empty')).toBeInTheDocument();
     await user.click(screen.getByTestId('sandbox-resource-add'));
     await user.type(screen.getByTestId('sandbox-resource-key-0'), 'cpu.max');
     await user.type(screen.getByTestId('sandbox-resource-value-0'), '200000 999');
-    await user.click(screen.getByTestId('sandbox-preflight'));
 
+    // Validation belongs to Overview; switching back preserves the draft.
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
+    await user.click(screen.getByTestId('sandbox-preflight'));
     expect(await screen.findByTestId('sandbox-preflight-error-0')).toHaveTextContent(
       'not a valid native value',
     );
     expect(screen.getByTestId('sandbox-enter')).toBeDisabled();
 
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
     const value = screen.getByTestId('sandbox-resource-value-0');
     await user.clear(value);
     await user.type(value, '200000 100000');
+    // Merely leaving the tab does not invalidate the draft or its preflight.
+    await user.click(screen.getByTestId('sandbox-tab-syscall'));
+    expect(screen.getByTestId('sandbox-syscall-profile')).toBeInTheDocument();
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
     await user.click(screen.getByTestId('sandbox-preflight'));
-
     expect(await screen.findByTestId('sandbox-preflight-ok')).toBeInTheDocument();
     expect(screen.getByTestId('sandbox-enter')).toBeEnabled();
 
-    // An edit invalidates the validation: Enter must not be reachable from a
-    // preflight that describes a different draft.
-    await user.type(value, '0');
+    // An actual edit invalidates the validation: Enter must not be reachable
+    // from a preflight that describes a different draft.
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
+    await user.type(screen.getByTestId('sandbox-resource-value-0'), '0');
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
     await waitFor(() => expect(screen.queryByTestId('sandbox-preflight-ok')).toBeNull());
     expect(screen.getByTestId('sandbox-enter')).toBeDisabled();
   });
@@ -273,13 +286,18 @@ describe('SandboxWorkspace (#3124)', () => {
     expect(screen.getByTestId('sandbox-scope-note')).toHaveTextContent(
       'future Panes or Windows are not inside this Sandbox',
     );
+    // The same peer tabs expose the observed effective policy per domain.
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
     expect(screen.getByTestId('sandbox-effective-resource-cpu.max')).toHaveTextContent(
       '200000 100000',
     );
+    await user.click(screen.getByTestId('sandbox-tab-syscall'));
     expect(screen.getByTestId('sandbox-effective-syscall-seccomp.profile')).toBeInTheDocument();
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
 
     await user.click(screen.getByTestId('sandbox-return-native'));
     expect(await screen.findByTestId('sandbox-composer')).toBeInTheDocument();
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
     expect(screen.getByTestId('sandbox-existing-panes')).toHaveTextContent('%2');
   });
 
@@ -422,16 +440,19 @@ describe('SandboxWorkspace (#3124)', () => {
     render(<SandboxWorkspace ctx={workspaceContext()} />);
 
     await screen.findByTestId('sandbox-composer');
+    await user.click(screen.getByTestId('sandbox-tab-network'));
     expect(screen.getByTestId('sandbox-implementation-status-network')).toHaveTextContent(
       'available',
     );
+    await user.click(screen.getByTestId('sandbox-tab-syscall'));
     expect(
       screen.getByTestId('sandbox-implementation-status-syscall.seccomp'),
     ).toHaveTextContent('unavailable');
     expect(screen.getByTestId('sandbox-syscall-disabled')).toHaveTextContent(
       'no loadable profile',
     );
-    expect(screen.getByTestId('sandbox-syscall-add')).toBeDisabled();
+    expect(screen.getByTestId('sandbox-syscall-profile')).toBeDisabled();
+    await user.click(screen.getByTestId('sandbox-tab-process'));
     expect(screen.getByTestId('sandbox-namespace-pid')).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -441,11 +462,69 @@ describe('SandboxWorkspace (#3124)', () => {
       'true',
     );
 
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
     await user.click(screen.getByTestId('sandbox-resource-add'));
     await user.type(screen.getByTestId('sandbox-resource-key-0'), 'cpu.max');
     expect(screen.getByTestId('sandbox-resource-value-0')).toBeDisabled();
     expect(screen.getByTestId('sandbox-resource-value-unavailable-0')).toHaveTextContent(
       'cpu is not delegated',
     );
+  });
+
+  it('switches all six peer tabs directly and renders only the selected panel', async () => {
+    const user = userEvent.setup();
+    render(<SandboxWorkspace ctx={workspaceContext()} />);
+    await screen.findByTestId('sandbox-composer');
+    expect(screen.getByTestId('sandbox-tabs')).toHaveAttribute(
+      'aria-orientation',
+      'vertical',
+    );
+
+    const panelContent: Record<string, string> = {
+      overview: 'sandbox-policy-preview',
+      filesystem: 'sandbox-fs-read',
+      network: 'sandbox-network-mode',
+      process: 'sandbox-namespace-pid',
+      resource: 'sandbox-resource-add',
+      syscall: 'sandbox-syscall-profile',
+    };
+    for (const tab of ['overview', 'filesystem', 'network', 'process', 'resource', 'syscall']) {
+      await user.click(screen.getByTestId(`sandbox-tab-${tab}`));
+      expect(screen.getByTestId(`sandbox-tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId(panelContent[tab])).toBeInTheDocument();
+    }
+
+    // The Overview summary is a second direct switch to the same peer tabs.
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
+    await user.click(screen.getByTestId('sandbox-summary-network'));
+    expect(screen.getByTestId('sandbox-tabpanel-network')).toBeInTheDocument();
+    expect(screen.getByTestId('sandbox-network-mode')).toBeInTheDocument();
+  });
+
+  it('keeps the inside domain tabs read-only and shows observed data only', async () => {
+    const user = userEvent.setup();
+    const erofs = insideContext();
+    erofs.execution = erofs.execution
+      ? {
+          ...erofs.execution,
+          mechanisms: ['filesystem.erofs', 'network.deny', 'syscall.seccomp'],
+        }
+      : erofs.execution;
+    api.context.mockResolvedValue({ success: true, context: erofs });
+    render(<SandboxWorkspace ctx={workspaceContext()} />);
+
+    expect(await screen.findByTestId('sandbox-inside')).toBeInTheDocument();
+    await user.click(screen.getByTestId('sandbox-tab-filesystem'));
+    expect(screen.getByTestId('sandbox-effective-erofs')).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-fs-read')).toBeNull();
+    expect(screen.queryByTestId('sandbox-fs-write')).toBeNull();
+
+    await user.click(screen.getByTestId('sandbox-tab-resource'));
+    expect(screen.getByTestId('sandbox-effective-resource-cpu.max')).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-resource-add')).toBeNull();
+
+    await user.click(screen.getByTestId('sandbox-tab-syscall'));
+    expect(screen.getByTestId('sandbox-effective-syscall-seccomp.profile')).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-syscall-profile')).toBeNull();
   });
 });

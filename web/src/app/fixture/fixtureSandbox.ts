@@ -47,6 +47,7 @@ const INSTANCE = 'fixture-instance-1';
 type Scenario =
   | 'outside'
   | 'inside'
+  | 'inside-erofs'
   | 'limited'
   | 'macos'
   | 'unsupported'
@@ -59,6 +60,7 @@ function scenarioOf(search: string): Scenario {
   const requested = new URLSearchParams(search).get('sandbox');
   switch (requested) {
     case 'inside':
+    case 'inside-erofs':
     case 'limited':
     case 'macos':
     case 'unsupported':
@@ -395,7 +397,7 @@ function insideContext(scenario: Scenario, revision: number): SandboxCurrentCont
       backend: 'linux-bwrap',
       policy_digest: 'a'.repeat(64),
       mechanisms: [
-        'filesystem.access',
+        scenario === 'inside-erofs' ? 'filesystem.erofs' : 'filesystem.access',
         'network.deny',
         'process.linux_namespaces.pid,ipc,user,uts',
         'resource.cgroup_v2',
@@ -702,7 +704,8 @@ export function fixtureSandboxSurface(search: string): PluginSurface {
   const state: FixtureSandboxState = {
     scenario: scenarioOf(search),
     revision: 0,
-    entered: scenarioOf(search) === 'inside',
+    entered:
+      scenarioOf(search) === 'inside' || scenarioOf(search) === 'inside-erofs',
   };
   const protocols = new ProtocolDirectory();
   protocols.publish(manifestsOf(FIXTURE_AGENTS));
