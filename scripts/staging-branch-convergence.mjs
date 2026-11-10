@@ -434,6 +434,13 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   return { status: 'ANALYSIS_DISPATCHED' };
 }
 
+// One-time transition: preserve already-approved legacy batches but retire
+// unapproved Issue-backed PRs so the lane cannot remain stuck forever behind
+// the old Issue approval model. No approved source SHA is silently abandoned.
+export function shouldMigrateLegacy(pinned,approval){
+  return Boolean(pinned&&!pinned.native&&!approval?.approved);
+}
+
 function reconcile(plan) {
   validatePlan(plan);
   const repo = process.env.GITHUB_REPOSITORY || '';
@@ -449,7 +456,18 @@ function reconcile(plan) {
   for (const lane of plan.branches) {
     for (const action of lane.actions) {
       const sync=action==='sync-main-to-lane';
-      const pinned=sync?pendingSyncIntegration(repo,lane,plan.main_sha):null;
+      let pinned=sync?pendingSyncIntegration(repo,lane,plan.main_sha):null;
+      let legacyRetirement=null;
+      if(sync&&pinned&&!pinned.native){
+        const oldBatch=planBatch({branch:lane.branch,main_sha:pinned.main_sha,
+          lane_sha:lane.sha,integration_head:pinned.sha});
+        const oldIssue=findBatchIssue(oldBatch);
+        const oldApproval=oldIssue?issueApproval(oldBatch,oldIssue.number):null;
+        if(shouldMigrateLegacy(pinned,oldApproval)){
+          legacyRetirement={pinned,batch:oldBatch,issue:oldIssue};
+          pinned=null; // use the latest Main, mint one native PR instead
+        }
+      }
       const syncMainSha=pinned?.main_sha||plan.main_sha;
       const integration=sync?(pinned||ensureIntegrationBranch(repo,
         {...plan,main_sha:syncMainSha},lane)):null;
@@ -489,14 +507,44 @@ function reconcile(plan) {
       }
       const head=sync?integration.branch:lane.branch;
       const base=sync?lane.branch:'main';
+      // Re-read the exact owner comment before retiring any still-open
+      // historical batch. An approval arriving during planning wins; abort
+      // and allow the next run to consume its immutable legacy PR.
+      if(legacyRetirement?.issue){
+        const approved=issueApproval(legacyRetirement.batch,
+          legacyRetirement.issue.number);
+        if(approved.approved)reject('legacy approval raced migration; rerun');
+      }
       const superseded=sync?closeSupersededSyncPrs(repo,base,head):[];
+      if(legacyRetirement&&legacyRetirement.pinned.branch===head){
+        const old=gh(['--method','GET','repos/'+repo+'/pulls/'+
+          legacyRetirement.pinned.pr.number]);
+        if(old.state==='open'){
+          if(old.head?.sha!==legacyRetirement.pinned.sha)
+            reject('legacy head changed during native migration');
+          gh(['--method','PATCH','repos/'+repo+'/pulls/'+old.number,
+            '-f','state=closed']);
+          superseded.push(old.number);
+        }
+      }
       const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber,batch);
+      if(legacyRetirement?.issue&&superseded.includes(
+        legacyRetirement.pinned.pr.number)){
+        const oldNumber=legacyRetirement.issue.number;
+        gh(['--method','POST','repos/'+repo+'/issues/'+oldNumber+'/comments',
+          '-f','body=Superseded by PR-native Staging integration #'+receipt.number+
+          ' (checked head '+integration.sha+'). This historical per-SHA batch '+
+          'is not an open product Requirement; no evidence or old approval was reused.']);
+        gh(['--method','PATCH','repos/'+repo+'/issues/'+oldNumber,
+          '-f','state=closed','-f','state_reason=not_planned']);
+      }
       const record={branch:lane.branch,direction:action,...receipt,
         ...(sync?{integration_head:integration.sha,
           batch_digest:convergenceBatchDigest(batch),
           approval_source:legacy?'legacy_issue':'native_pr',
           ...(legacy?{issue_number:batchIssueNumber}:{}),
-          superseded_prs:superseded}: {})};
+          superseded_prs:superseded,
+          ...(legacyRetirement?.issue?{retired_legacy_issue:legacyRetirement.issue.number}:{})}: {})};
       // A new PR needs GitHub to calculate mergeability and deliver checks.
       // Qualification and merge are considered only on a subsequent run.
       if (receipt.action === 'created'||receipt.action === 'relinked') {
@@ -643,7 +691,12 @@ function selfTest() {
     bb,'c'.repeat(40),[bb,aa],true),false,'fork must block');
   assert.equal(pinnedSyncIdentity({...pinned,body:'manual integration'},'BestNathan/nession',
     'staging',bb,'c'.repeat(40),[bb,aa],true),false,'manual PR cannot be adopted');
-  assert.throws(() => deriveActions(-1, 0), /invalid/);
+  assert.equal(shouldMigrateLegacy({native:false},{approved:false}),true);
+  assert.equal(shouldMigrateLegacy({native:false},{approved:true}),false,
+    'existing owner-approved PR must not be discarded');
+  assert.equal(shouldMigrateLegacy({native:true},{approved:false}),false,
+    'native PR cannot be treated as legacy');
+    assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
 
