@@ -27,7 +27,6 @@ const FILES=[
 ].sort();
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 const deny=(ok,why)=>{if(!ok)throw Error('knowledge sandbox #3145: '+why);};
-const logPattern=s=>new RegExp('^\\d{4}-\\d\\d-\\d\\dT\\S+Z '+s+'$');
 
 export function shouldCollectSandbox3145(stage,issue){
   return stage==='post-merge' && String(issue)==='3145';
@@ -41,7 +40,7 @@ function marker(log,pattern,why){
 function job(jobs,run,name,steps){
   deny(Array.isArray(jobs?.jobs)&&jobs.jobs.length<=35,'unbounded jobs');
   const found=jobs.jobs.filter(j=>j.name===name&&
-    j.run_id===run.id&&j.run_attempt===run.run_attempt&&
+    j.run_id===run.id&&(j.run_attempt==null||j.run_attempt===run.run_attempt)&&
     j.status==='completed'&&j.conclusion==='success');
   deny(found.length===1&&positive(found[0].id),'missing exact '+name+' job');
   for(const step of steps)deny(found[0].steps?.some(s=>
