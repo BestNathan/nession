@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42866679312,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3180-durable-erofs-ownership",
+    "target_sha": "6dbc368089a7c4608abbb7261fc27bfd0c716645",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42866679312",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "fbea57584373db47cd719ae237a4d9ea3352a1131e848f5a9155820085cd776e"
+  },
+  "record": "runs/2026-11-10/42866679312-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "c3774f4fcd6bd09d5d2c1d571b2795c0182bfdc9bc7dd05b2d48f97a58bc7295"
+}
