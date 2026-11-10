@@ -170,6 +170,13 @@ point it at a repository or a user directory.
   prebuilt image paths (#3178).
 - Git with normal HTTPS support; no credential is required for a public source.
 - Enough temporary disk for one snapshot plus its image per concurrent build.
+- Docker Compose (`deploy/docker-compose.yml`) mounts `server-data` at
+  `/data` and sets `NESSION_HOME=/data`, so the effective metadata DB
+  (`/data/server/server.db`), image blobs (`/data/server/images/blobs`) and
+  build workspace (`/data/server/images/build`) survive container
+  recreation. `docker compose down -v` is the explicit storage-deletion
+  operation. The retired Compose value `SERVER_DB_PATH` was never consumed
+  by the entrypoint or the Server; do not reintroduce it (#3179).
 
 ## Non-goals
 

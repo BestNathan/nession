@@ -401,24 +401,14 @@ fn default_heartbeat_timeout() -> u64 {
 }
 
 fn default_image_blob_dir() -> String {
-    crate::paths::server_dir()
-        .map(|dir| {
-            dir.join("images")
-                .join("blobs")
-                .to_string_lossy()
-                .into_owned()
-        })
+    crate::paths::server_image_blob_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "images/blobs".to_string())
 }
 
 fn default_image_build_dir() -> String {
-    crate::paths::server_dir()
-        .map(|dir| {
-            dir.join("images")
-                .join("build")
-                .to_string_lossy()
-                .into_owned()
-        })
+    crate::paths::server_image_build_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "images/build".to_string())
 }
 
@@ -451,6 +441,22 @@ mod tests {
         assert_eq!(config.heartbeat_interval_secs, 10);
         assert_eq!(config.heartbeat_timeout_secs, 30);
         assert!(!config.db_path.is_empty());
+    }
+
+    /// Explicit paths are the operator's declaration (#3179 SC-01): the
+    /// environment projection must not rewrite them.
+    #[test]
+    fn explicit_image_and_db_paths_are_not_rewritten() {
+        let mut config = ServerConfig {
+            db_path: "/srv/nession/server.db".to_string(),
+            image_blob_dir: "/srv/nession/blobs".to_string(),
+            image_build_dir: "/srv/nession/build".to_string(),
+            ..Default::default()
+        };
+        config.apply_env_overrides_from(|_| None).unwrap();
+        assert_eq!(config.db_path, "/srv/nession/server.db");
+        assert_eq!(config.image_blob_dir, "/srv/nession/blobs");
+        assert_eq!(config.image_build_dir, "/srv/nession/build");
     }
 
     /// MCP is off unless asked for, and disabling it never demands a token.

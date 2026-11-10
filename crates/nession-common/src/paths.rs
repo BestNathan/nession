@@ -55,6 +55,20 @@ pub fn server_db_path() -> io::Result<PathBuf> {
     server_dir().map(|d| d.join("server.db"))
 }
 
+/// Server image blob store: ~/.nession/server/images/blobs
+///
+/// The Server owns image identity and bytes (#3022); this default must sit
+/// under the same durable root as the database so a Compose/Kubernetes volume
+/// carries both across container recreation (#3179).
+pub fn server_image_blob_dir() -> io::Result<PathBuf> {
+    server_dir().map(|d| d.join("images").join("blobs"))
+}
+
+/// Server image build workspace: ~/.nession/server/images/build
+pub fn server_image_build_dir() -> io::Result<PathBuf> {
+    server_dir().map(|d| d.join("images").join("build"))
+}
+
 /// The OS runtime directory for Nession process-lifecycle state.
 ///
 /// Resolution order:
@@ -553,6 +567,26 @@ mod tests {
         let _setting = EnvSetting::set(NESSION_HOME_ENV, &tmp);
         let home = nession_home().unwrap();
         assert_eq!(home, tmp);
+    }
+
+    #[test]
+    fn image_paths_follow_the_configured_home() {
+        let _guard = lock_env();
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().to_path_buf();
+        let _setting = EnvSetting::set(NESSION_HOME_ENV, &tmp);
+        assert_eq!(
+            server_db_path().unwrap(),
+            tmp.join("server").join("server.db")
+        );
+        assert_eq!(
+            server_image_blob_dir().unwrap(),
+            tmp.join("server/images/blobs")
+        );
+        assert_eq!(
+            server_image_build_dir().unwrap(),
+            tmp.join("server/images/build")
+        );
     }
 
     #[test]
