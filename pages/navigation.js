@@ -5,6 +5,7 @@ export const NAV_ITEMS = Object.freeze([
   {route:'/work',label:'Collaboration'},
   {route:'/workflows',label:'Workflows',file:'workflows.html'},
   {route:'/knowledge',label:'Knowledge'},
+  {route:'/documents',label:'Documents'},
   {route:'/prototypes',label:'Prototypes',ariaLabel:'Explore interactive product prototypes'},
   {route:'/repository',label:'Repository'},
   {route:'/evidence',label:'Evidence'},
@@ -18,6 +19,7 @@ export function currentNavRoute(pathname,hash){
   if(raw.startsWith('/agents/')||raw.startsWith('/agents?'))return '/agents';
   if(raw.startsWith('/work/'))return '/work';
   if(raw==='/knowledge'||raw.startsWith('/knowledge?'))return '/knowledge';
+  if(raw==='/documents'||raw.startsWith('/documents?'))return '/documents';
   return raw;
 }
 
