@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "c11333c90df85383d8768bc6c346041c7d3aa21a",
+  "source_tree_sha": "2f00e95bb522de45896bd47e2bc91122155e9abd",
+  "run_id": 42769963998,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 42769963998,
+    "run_attempt": 1,
+    "head_sha": "c11333c90df85383d8768bc6c346041c7d3aa21a",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-11-10T06:39:21Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "not-required",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_not_required",
+    "run_id": 42769963998,
+    "run_attempt": 1,
+    "sha": "c11333c90df85383d8768bc6c346041c7d3aa21a",
+    "event": "push",
+    "branch": "main",
+    "plan_mode": "not-required",
+    "skipped_e2e_only_steps": [
+      "rust_toolchain",
+      "cargo_build",
+      "tmux"
+    ],
+    "browser_scope": "tooling-only",
+    "design_gate": "skipped",
+    "evidence": "GitHub API Run/Attempt/job step outcomes + exact original not-required E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "not-required",
+    "target_sha": "c11333c90df85383d8768bc6c346041c7d3aa21a",
+    "run_id": 42769963998,
+    "run_attempt": 1,
+    "verified_ids": [],
+    "plan_digest": "0656e830dfc82a604efa26dc9e2bfbfe7f7f5bd984804c1a8f64616b3a2cf05f",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": null,
+  "test_job": {
+    "job_id": 129675195073,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 13740959213,
+    "name": "issue-e2e-verification",
+    "size_bytes": 1263,
+    "sha256": "34e2130d1dc8130e0f95fb629563c6c0fb1b598376aa1911c795da75f505d21d",
+    "expires_at": "2026-11-24T06:39:37Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "b3f9f89619612ae68549a15aec649f476bcd7f2938e7516007884fd0a68d2f51"
+}
