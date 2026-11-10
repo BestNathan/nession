@@ -556,3 +556,10 @@
 - Reason: Add the inbound related-knowledge link to the new runtime-directories article, keeping daemon lifecycle state ownership distinct from Sandbox confinement (#3155)
 - Source: https://github.com/BestNathan/nession/issues/3155
 
+
+## 2026-11-10T11:27:13Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the #3161 per-policy implementation support discovery: catalog v2 typed per-path/option/field statuses and stable reason codes measured from the same Capabilities validate consumes, backend-missing and unmeasured semantics, probe generation bound to preflight/Enter, unsupported field-path errors without partial fallback, and the discoverable-but-disabled Workspace states
+- Source: https://github.com/BestNathan/nession/issues/3161
