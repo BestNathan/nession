@@ -45,13 +45,13 @@ concurrency:
 jobs:
   converge:
     # The no-approval recheck wakes the same fail-closed controller.
+    # Owner PR comments are wake signals only; trusted source/digest checks remain mandatory.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       (
         github.event_name != 'issue_comment' ||
         (
-          github.event.issue.pull_request == null &&
           github.actor == github.event.comment.user.login &&
           (
             (
@@ -64,6 +64,7 @@ jobs:
             ) ||
             (
               github.actor == 'github-actions[bot]' &&
+              github.event.issue.pull_request == null &&
               github.event.comment.user.type == 'Bot' &&
               startsWith(github.event.comment.body, 'STAGING_CONVERGENCE_AUDIT_V1 ')
             )
