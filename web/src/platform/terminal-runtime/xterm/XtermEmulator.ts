@@ -1,7 +1,7 @@
 import { Terminal, type ITerminalOptions, type ITheme, type ILink } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { TERMINAL_METRICS } from '../../../../../design/generated/terminal';
-import { measuredCellDimensionsOf, readBufferSnapshot, readLogicalLine, readModeSnapshot, cellSizeOf } from './XtermMetrics';
+import { measuredCellDimensionsOf, readBufferSnapshot, readLogicalLine, logicalLinePoint, readModeSnapshot, cellSizeOf } from './XtermMetrics';
 import { mapLineLinks } from './LineLinks';
 import { XtermAddonHost } from './XtermAddonHost';
 import { XtermRenderer, type TerminalRendererType } from './XtermRenderer';
@@ -113,6 +113,21 @@ export class XtermEmulator implements TerminalEmulator {
    */
   private writeOrigin: TerminalWriteOrigin = { source: 'live' };
   private clipboardDisposable: TerminalDisposable | null = null;
+  /**
+   * Product matchers, kept beside the xterm link providers (#3187). xterm's
+   * linkifier only listens to mouse events, so a touch tap never reaches it;
+   * this registry lets the tap handler ask the same matchers about the cell
+   * the finger landed on.
+   */
+  private readonly linkMatchers = new Map<TerminalLinkMatcher, number>();
+  private linkTouchDisposable: TerminalDisposable | null = null;
+  private tapCandidate: {
+    identifier: number;
+    x: number;
+    y: number;
+    moved: boolean;
+    startedAt: number;
+  } | null = null;
 
   constructor(options: XtermEmulatorOptions) {
     const initialFontSize = options.fontSize ?? BASELINE_METRICS.fontSize;
@@ -198,6 +213,7 @@ export class XtermEmulator implements TerminalEmulator {
     // read the buffer (canvas/webgl renderers don't put text in the DOM).
     this.setHostReference(host);
     this.remeasureOnFontLoad();
+    this.ensureLinkTouchHandler();
   }
 
   private setHostReference(host: HTMLElement): void {
@@ -261,6 +277,9 @@ export class XtermEmulator implements TerminalEmulator {
     }
     this.disposed = true;
     this.releaseHostReference();
+    this.linkTouchDisposable?.dispose();
+    this.linkTouchDisposable = null;
+    this.linkMatchers.clear();
     this.renderer.dispose();
     // xterm's own addon manager disposes every registered addon exactly once.
     this.terminal.dispose();
@@ -345,7 +364,9 @@ export class XtermEmulator implements TerminalEmulator {
    * so a stale match cannot underline the wrong cells.
    */
   registerLinkMatcher(matcher: TerminalLinkMatcher): TerminalDisposable {
-    return this.terminal.registerLinkProvider({
+    this.linkMatchers.set(matcher, (this.linkMatchers.get(matcher) ?? 0) + 1);
+    this.ensureLinkTouchHandler();
+    const provider = this.terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber: number, callback: (links: ILink[] | undefined) => void) => {
         const line = readLogicalLine(this.terminal, bufferLineNumber);
         if (line.text.length === 0) {
@@ -361,6 +382,126 @@ export class XtermEmulator implements TerminalEmulator {
         callback(links.length > 0 ? links : undefined);
       },
     });
+    return {
+      dispose: () => {
+        provider.dispose();
+        const count = this.linkMatchers.get(matcher) ?? 0;
+        if (count <= 1) {
+          this.linkMatchers.delete(matcher);
+        } else {
+          this.linkMatchers.set(matcher, count - 1);
+        }
+        this.releaseLinkTouchHandlerIfIdle();
+      },
+    };
+  }
+
+  /**
+   * Install the tap → link activation listeners (#3187).
+   *
+   * A tap is a single finger that moved less than the shell's own 10px
+   * gesture slop and lifted within 500ms. Longer presses (the direction pad)
+   * and drags (scroll/selection) are left to their owners. The handler never
+   * writes to the PTY: it asks the registered Product matchers about the drawn
+   * cell and invokes the same activation the mouse linkifier would.
+   */
+  private ensureLinkTouchHandler(): void {
+    if (this.linkTouchDisposable || this.linkMatchers.size === 0) {
+      return;
+    }
+    const element = this.terminal.element;
+    if (!element) {
+      return;
+    }
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        this.tapCandidate = null;
+        return;
+      }
+      const touch = event.touches[0]!;
+      this.tapCandidate = {
+        identifier: touch.identifier,
+        x: touch.clientX,
+        y: touch.clientY,
+        moved: false,
+        startedAt: Date.now(),
+      };
+    };
+    const onMove = (event: TouchEvent) => {
+      const candidate = this.tapCandidate;
+      if (!candidate) {
+        return;
+      }
+      const touch = Array.from(event.touches).find(
+        (item) => item.identifier === candidate.identifier,
+      );
+      if (!touch) {
+        return;
+      }
+      if (Math.hypot(touch.clientX - candidate.x, touch.clientY - candidate.y) > 10) {
+        candidate.moved = true;
+      }
+    };
+    const onEnd = (event: TouchEvent) => {
+      const candidate = this.tapCandidate;
+      this.tapCandidate = null;
+      if (!candidate) {
+        return;
+      }
+      const touch = Array.from(event.changedTouches).find(
+        (item) => item.identifier === candidate.identifier,
+      );
+      if (
+        !touch ||
+        candidate.moved ||
+        Date.now() - candidate.startedAt > 500
+      ) {
+        return;
+      }
+      this.activateLinkAtPoint(touch.clientX, touch.clientY);
+    };
+    const onCancel = () => {
+      this.tapCandidate = null;
+    };
+    element.addEventListener('touchstart', onStart, { passive: true });
+    element.addEventListener('touchmove', onMove, { passive: true });
+    element.addEventListener('touchend', onEnd, { passive: true });
+    element.addEventListener('touchcancel', onCancel, { passive: true });
+    this.linkTouchDisposable = {
+      dispose: () => {
+        element.removeEventListener('touchstart', onStart);
+        element.removeEventListener('touchmove', onMove);
+        element.removeEventListener('touchend', onEnd);
+        element.removeEventListener('touchcancel', onCancel);
+      },
+    };
+  }
+
+  private releaseLinkTouchHandlerIfIdle(): void {
+    if (this.linkMatchers.size > 0) {
+      return;
+    }
+    this.linkTouchDisposable?.dispose();
+    this.linkTouchDisposable = null;
+    this.tapCandidate = null;
+  }
+
+  /** Activate the Product link drawn at a client point, if any (#3187). */
+  private activateLinkAtPoint(clientX: number, clientY: number): boolean {
+    const point = logicalLinePoint(this.terminal, clientX, clientY);
+    if (!point || point.offset < 0) {
+      return false;
+    }
+    for (const matcher of this.linkMatchers.keys()) {
+      const hit = matcher({ text: point.line.text }).find(
+        (range) => point.offset >= range.startIndex && point.offset < range.endIndex,
+      );
+      if (hit) {
+        hit.activate();
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

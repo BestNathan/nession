@@ -52,13 +52,23 @@ function seedTerminalFiles(home) {
 
 async function openShell(page, expect, runtime, prefix, mode = 'P2P') {
   // No prompt pattern: the local acceptance runner uses the host's shell, whose
-  // prompt is not the CI runner's. The sentinel below proves the PTY is live.
+  // prompt is not the CI runner's. Quiet-before-input lets zsh finish its
+  // startup redraw; sending typeahead into that redraw corrupts the buffer
+  // text the product is supposed to parse.
   const { name } = await createAndAttach(page, expect, runtime, prefix, mode, null);
+  await waitForQuiet(page, expect);
+  // The local runner's zsh sets a title with the SCO `ESC k` string, which
+  // xterm.js does not consume — its payload (the command's first word) would
+  // appear as text and corrupt the references this Case parses. CI's bash has
+  // no such setting; `|| true` keeps the command harmless there.
+  await command(page, 'unsetopt SET_TITLE 2>/dev/null || true');
+  await waitForQuiet(page, expect);
   await command(page, "printf '%s\\n' '__3187_SHELL_READY__'");
   await expect.poll(
     async () => (await readBuffer(page)).includes('__3187_SHELL_READY__'),
     { timeout: 30_000 },
   ).toBe(true);
+  await waitForQuiet(page, expect);
   return name;
 }
 
@@ -99,15 +109,48 @@ async function openAppShell(page, expect, runtime, prefix) {
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('terminal-surface')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await waitForQuiet(page, expect);
+  await command(page, 'unsetopt SET_TITLE 2>/dev/null || true');
+  await waitForQuiet(page, expect);
   await command(page, "printf '%s\\n' '__3187_SHELL_READY__'");
   await expect.poll(
     async () => (await readBuffer(page)).includes('__3187_SHELL_READY__'),
     { timeout: 30_000 },
   ).toBe(true);
+  await waitForQuiet(page, expect);
   return name;
 }
 
 let commandCounter = 0;
+
+/**
+ * Wait until the terminal has stopped changing.
+ *
+ * The local runner's zsh repaints its prompt and line editor asynchronously.
+ * Sending the next command into that repaint makes zLE merge the typed line
+ * with command output in the visible buffer — the product would then parse a
+ * token the user never produced. Waiting for quiet before each write keeps the
+ * screen (and therefore the parser's input) honest.
+ */
+async function waitForQuiet(page, expect, quietMs = 500, timeoutMs = 20_000) {
+  let last = null;
+  let since = Date.now();
+  await expect.poll(async () => {
+    const state = await readTerminalState(page);
+    const text = state.text ?? '';
+    // An empty buffer is not a settled shell: on attach there is a window
+    // before zsh paints its first prompt in which "quiet" would be a lie.
+    if (text.trim() === '') {
+      return false;
+    }
+    if (text !== last) {
+      last = text;
+      since = Date.now();
+      return false;
+    }
+    return Date.now() - since >= quietMs;
+  }, { timeout: timeoutMs, intervals: [100] }).toBe(true);
+}
 
 /**
  * Run a shell command and wait for a fresh completion line.
@@ -116,6 +159,7 @@ let commandCounter = 0;
  * marker must appear twice (typed command echo + produced output).
  */
 async function runLine(page, expect, text) {
+  await waitForQuiet(page, expect);
   commandCounter += 1;
   const marker = '__3187_DONE_' + commandCounter + '__';
   await command(page, text);
@@ -124,15 +168,22 @@ async function runLine(page, expect, text) {
     async () => countInBuffer(page, marker),
     { timeout: 30_000 },
   ).toBeGreaterThanOrEqual(2);
+  await waitForQuiet(page, expect);
 }
 
 /** Print a reference and wait until its output line exists (not just echo). */
 async function printReference(page, expect, reference) {
-  await command(page, "printf '%s\\n' '" + reference + "'");
+  await waitForQuiet(page, expect);
+  // The leading space is deliberate: a shell that emits an SCO `ESC k` title
+  // leaks its payload as visible text, and without a separator the command's
+  // first word would fuse with the reference (e.g. `printftarget.py`). The
+  // product's matcher already accepts a whitespace boundary.
+  await command(page, "printf ' %s\\n' '" + reference + "'");
   await expect.poll(
     async () => countInBuffer(page, reference),
     { timeout: 30_000 },
   ).toBeGreaterThanOrEqual(2);
+  await waitForQuiet(page, expect);
 }
 
 /**
@@ -156,23 +207,48 @@ async function referencePoint(page, needle) {
       throw new Error('xterm instance missing');
     }
     const buffer = term.buffer.active;
-    for (let index = buffer.length - 1; index >= 0; index -= 1) {
-      const line = buffer.getLine(index);
-      if (!line) continue;
-      const bufferText = line.translateToString();
-      const column = bufferText.lastIndexOf(text);
-      if (column < 0) continue;
-      const row = index - buffer.viewportY;
-      if (row < 0 || row >= term.rows) continue;
-      const screen = xterm.querySelector('.xterm-screen') || xterm;
-      const rect = screen.getBoundingClientRect();
-      const cellWidth = rect.width / term.cols;
-      const cellHeight = rect.height / term.rows;
-      return {
-        x: rect.left + (column + 0.5) * cellWidth,
-        y: rect.top + (row + 0.5) * cellHeight,
-        text: bufferText,
-      };
+    // The matcher reads *logical* lines (wrapped continuations joined), so a
+    // long path can be underlined across several physical rows. Find it in the
+    // same joined text, then map the start back to its physical cell.
+    const logical = [];
+    for (let start = 0; start < buffer.length;) {
+      let end = start;
+      while (
+        end + 1 < buffer.length &&
+        buffer.getLine(end + 1)?.isWrapped === true
+      ) {
+        end += 1;
+      }
+      const parts = [];
+      for (let index = start; index <= end; index += 1) {
+        parts.push(buffer.getLine(index)?.translateToString() ?? '');
+      }
+      logical.push({ start, end, text: parts.join('') });
+      start = end + 1;
+    }
+    for (let index = logical.length - 1; index >= 0; index -= 1) {
+      const entry = logical[index];
+      const found = entry.text.lastIndexOf(text);
+      if (found < 0) continue;
+      let remaining = found;
+      for (let physical = entry.start; physical <= entry.end; physical += 1) {
+        const lineText = buffer.getLine(physical)?.translateToString() ?? '';
+        if (remaining >= lineText.length) {
+          remaining -= lineText.length;
+          continue;
+        }
+        const row = physical - buffer.viewportY;
+        if (row < 0 || row >= term.rows) break;
+        const screen = xterm.querySelector('.xterm-screen') || xterm;
+        const rect = screen.getBoundingClientRect();
+        const cellWidth = rect.width / term.cols;
+        const cellHeight = rect.height / term.rows;
+        return {
+          x: rect.left + (remaining + 0.5) * cellWidth,
+          y: rect.top + (row + 0.5) * cellHeight,
+          text: entry.text,
+        };
+      }
     }
     throw new Error('reference not found in the visible terminal: ' + text);
   }, needle);
@@ -336,4 +412,5 @@ module.exports = {
   runLine,
   scrollTerminal,
   seedTerminalFiles,
+  waitForQuiet,
 };
