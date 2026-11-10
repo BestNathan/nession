@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
+import { loadDocuments, validPublicDocuments } from './documents-project.mjs';
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
@@ -170,6 +171,9 @@ const generatedAt=new Date().toISOString();
 const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
   sha:process.env.KNOWLEDGE_SHA,generatedAt});
 if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
+const documents=await loadDocuments({directory:resolve(root,'..'),
+  sha:process.env.SOURCE_MAIN_SHA,generatedAt});
+if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
@@ -273,10 +277,11 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/documents.json'),JSON.stringify(documents,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,
@@ -293,5 +298,6 @@ console.log(JSON.stringify({
   agent_result_observations:result.work.agent_result_observations.status,
   agent_result_count:result.work.agent_result_observations.records.length,
   stores:result.evidence.stores.map(x=>[x.name,x.state]),
-  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null}
+  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null},
+  documents:{status:documents.status,count:documents.documents.length,sha:documents.source?.sha||null}
 }));
