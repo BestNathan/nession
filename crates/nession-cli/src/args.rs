@@ -70,13 +70,32 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// Self-update nession to the latest version
+    /// Install a release: older versions are archived, a newer one becomes Current
+    Install {
+        /// Release version to install (SemVer, optional leading v)
+        version: String,
+
+        /// Show the archive/install plan without changing files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Inspect installed and running releases
+    Version {
+        #[command(subcommand)]
+        action: VersionAction,
+    },
+    /// Install the latest release through the versioned archive rule
     Update {
         /// Only check for updates (don't install)
         #[arg(long)]
         check: bool,
 
-        /// Update/downgrade to a specific version
+        /// Install a specific release (older releases are archived, newer ones
+        /// become Current)
         #[arg(long)]
         version: Option<String>,
 
@@ -201,6 +220,13 @@ pub enum ServerAction {
         #[arg(long)]
         pid_file: Option<String>,
     },
+}
+
+/// `nession version …`
+#[derive(Subcommand)]
+pub enum VersionAction {
+    /// List Current, Archived and Running releases
+    List,
 }
 
 /// `nession agents …`
@@ -415,6 +441,8 @@ mod tests {
             ),
             ("config server show".to_string(), strings(&["--config"])),
             ("config server set".to_string(), strings(&["--config"])),
+            ("install".to_string(), strings(&["--dry-run", "--yes"])),
+            ("version list".to_string(), strings(&[])),
             (
                 "update".to_string(),
                 strings(&[

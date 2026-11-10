@@ -255,17 +255,16 @@ function readIdentity(file) {
     pid: Number(identity.pid),
     started_at: Number(identity.started_at),
     kind: identity.kind,
+    release_version: identity.version || null,
   };
 }
 
-function writeIdentity(file, { pid, startedAt, kind }) {
+function writeIdentity(file, { pid, startedAt, kind, version }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, [
-    'pid=' + pid,
-    'started_at=' + startedAt,
-    'kind=' + kind,
-    '',
-  ].join('\n'));
+  const lines = ['pid=' + pid, 'started_at=' + startedAt, 'kind=' + kind];
+  if (version) lines.push('version=' + version);
+  lines.push('');
+  fs.writeFileSync(file, lines.join('\n'));
 }
 
 function assertPrivateDirectory(dir) {

@@ -256,6 +256,13 @@ pub struct ProcessIdentity {
     /// predates the record); `status` must then say the source is unknown
     /// instead of presenting a default file as live state.
     pub config_source: ConfigRecord,
+    /// The release version of the binary that recorded this identity.
+    ///
+    /// `version list` reports the *Running* release from here, and a `start`
+    /// can detect that the other component belongs to a different release
+    /// before it creates a mixed environment. Older records have no version;
+    /// that is reported as unknown rather than guessed from a path.
+    pub release_version: Option<String>,
 }
 
 impl ProcessIdentity {
@@ -270,6 +277,7 @@ impl ProcessIdentity {
             started_at,
             kind,
             config_source: ConfigRecord::Unknown,
+            release_version: None,
         })
     }
 }
@@ -322,11 +330,13 @@ pub fn write_identity(
         ConfigRecord::Unknown => String::new(),
     };
     identity.config_source = config_source;
+    identity.release_version = Some(env!("CARGO_PKG_VERSION").to_string());
     let body = format!(
-        "pid={}\nstarted_at={}\nkind={}\n{}",
+        "pid={}\nstarted_at={}\nkind={}\nversion={}\n{}",
         identity.pid,
         identity.started_at,
         identity.kind.as_str(),
+        identity.release_version.as_deref().unwrap_or_default(),
         config_lines
     );
     fs::write(path, body).with_context(|| format!("Failed to write state file: {path}"))?;
@@ -343,6 +353,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     let mut kind = None;
     let mut source_kind = None;
     let mut config_path = None;
+    let mut release_version = None;
     for line in content.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -353,6 +364,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             "kind" => kind = Component::parse(value.trim()),
             "config_source" => source_kind = Some(value.trim().to_string()),
             "config_path" => config_path = Some(value.trim().to_string()),
+            "version" => release_version = Some(value.trim().to_string()),
             _ => {}
         }
     }
@@ -374,6 +386,7 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             started_at,
             kind,
             config_source,
+            release_version,
         }),
         // A file the old format wrote — a bare pid — reads as a missing record
         // rather than as an identity, because a bare pid is what this replaces.
@@ -516,6 +529,20 @@ impl Inspection {
             })
             .collect()
     }
+}
+
+/// The live process recorded at the default shared runtime location for
+/// `component`, with the state-file path.
+///
+/// This is the read every release shares: the runtime directory is independent
+/// of the version home, so an archived CLI still observes the process that a
+/// different release started.
+pub fn default_live(component: Component) -> Result<Option<(String, ProcessIdentity)>> {
+    let files = StateFiles::from_cli(None, component)?;
+    let inspection = Inspection::of(&files);
+    Ok(inspection
+        .live()
+        .map(|(record, identity)| (record.path.clone(), identity)))
 }
 
 /// Human report for a location that does not name a live process.
@@ -692,6 +719,43 @@ mod tests {
         assert_eq!(read, written);
         assert_eq!(read.pid, std::process::id());
         assert_eq!(read.kind, Component::Agent);
+    }
+
+    /// The writing release is what `version list` reports as Running and what
+    /// the mixed-release check compares. It is recorded by the writer, not
+    /// guessed from a path.
+    #[test]
+    fn an_identity_records_the_writing_release() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+
+        write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
+
+        assert_eq!(
+            read_identity(path).unwrap().release_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    /// A record written before this field existed must read as unknown, not as
+    /// the current release.
+    #[test]
+    fn an_old_identity_reports_no_release() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+        let current = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "pid={}\nstarted_at={}\nkind=agent\n",
+                current.pid, current.started_at
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(read_identity(path).unwrap().release_version, None);
     }
 
     #[test]

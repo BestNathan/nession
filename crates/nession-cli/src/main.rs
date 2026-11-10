@@ -1,25 +1,23 @@
-//! nession CLI entrypoint: startup and dispatch only.
+//! nession CLI entrypoint: version selection, startup and dispatch only.
 //!
 //! Command and argument definitions live in [`nession_cli::args`]; routing in
-//! [`nession_cli::commands`]; every leaf handler in its own module.
+//! [`nession_cli::commands`]; every leaf handler in its own module. Release
+//! selection happens before Clap so `nession +<version> …` / `NESSION_VERSION`
+//! can hand the command to an archived CLI without changing Current (#3173).
 
 use anyhow::Result;
 use clap::Parser;
 use nession_cli::args::Cli;
 use nession_cli::commands;
+use nession_cli::versions;
+use std::ffi::OsString;
 
-fn should_skip_background_check() -> bool {
+fn should_skip_background_check(args: &[OsString]) -> bool {
     if std::env::var("NESSION_NO_UPDATE_CHECK").is_ok() {
         return true;
     }
-    let args: Vec<String> = std::env::args().collect();
-    for arg in &args {
-        if arg == "--help" || arg == "-h" || arg == "help" {
-            return true;
-        }
-    }
-    for arg in &args {
-        if arg == "--version" || arg == "-V" {
+    for arg in args {
+        if let Some("--help" | "-h" | "help" | "--version" | "-V") = arg.to_str() {
             return true;
         }
     }
@@ -28,7 +26,11 @@ fn should_skip_background_check() -> bool {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if !should_skip_background_check() {
+    // This may `exec` an archived release and never return. When it returns,
+    // the Current CLI owns the command.
+    let prepared = versions::prepare(std::env::args_os())?;
+
+    if !should_skip_background_check(&prepared.args) {
         tokio::spawn(async {
             if let Some(msg) = nession_cli::update::check::background_check().await {
                 eprintln!("{msg}");
@@ -36,5 +38,5 @@ async fn main() -> Result<()> {
         });
     }
 
-    commands::dispatch(Cli::parse()).await
+    commands::dispatch(Cli::parse_from(prepared.args)).await
 }

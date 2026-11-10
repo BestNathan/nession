@@ -1,5 +1,6 @@
 //! `nession agent stop` — stop the Agent daemon by owned PID identity.
 
+use crate::lifecycle::lock::LifecycleLock;
 use crate::lifecycle::pid_file;
 use anyhow::{Context, Result};
 use std::fs;
@@ -8,14 +9,15 @@ use tracing::error;
 
 pub async fn run(pid_file_path: Option<String>) -> Result<()> {
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
-    run_with(state).await
+    let lock = LifecycleLock::acquire()?;
+    run_with(state, &lock).await
 }
 
-/// Stop from already-resolved state locations.
+/// Stop from already-resolved state locations, holding the lifecycle lock.
 ///
 /// `restart` uses this entry point so it stops the same locations it will
 /// start, including a still-live legacy daemon.
-pub(crate) async fn run_with(state: pid_file::StateFiles) -> Result<()> {
+pub(crate) async fn run_with(state: pid_file::StateFiles, _lock: &LifecycleLock) -> Result<()> {
     // Ownership, not liveness (#1016). "A process with this number exists" and
     // "the agent this file was written for is running" are different claims —
     // pids are reused — and a `stop` acting on the weaker one can signal an

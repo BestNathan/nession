@@ -259,7 +259,7 @@ async fn background_check_all_scenarios() {
     cache::write_cache(&UpdateCache {
         checked_at: Utc::now(),
         latest_version: "0.5.0".into(),
-        current_version: "0.4.2".into(),
+        current_version: env!("CARGO_PKG_VERSION").into(),
         update_available: true,
     })
     .unwrap();
@@ -275,7 +275,7 @@ async fn background_check_all_scenarios() {
     cache::write_cache(&UpdateCache {
         checked_at: Utc::now() - Duration::minutes(60),
         latest_version: "0.6.0".into(),
-        current_version: "0.4.2".into(),
+        current_version: env!("CARGO_PKG_VERSION").into(),
         update_available: true,
     })
     .unwrap();
@@ -298,7 +298,7 @@ async fn background_check_all_scenarios() {
     cache::write_cache(&UpdateCache {
         checked_at: Utc::now() - Duration::minutes(60),
         latest_version: "0.1.0".into(),
-        current_version: "0.4.2".into(),
+        current_version: env!("CARGO_PKG_VERSION").into(),
         update_available: false,
     })
     .unwrap();
@@ -317,7 +317,7 @@ async fn background_check_all_scenarios() {
     cache::write_cache(&UpdateCache {
         checked_at: Utc::now(),
         latest_version: "0.4.2".into(),
-        current_version: "0.4.2".into(),
+        current_version: env!("CARGO_PKG_VERSION").into(),
         update_available: false,
     })
     .unwrap();

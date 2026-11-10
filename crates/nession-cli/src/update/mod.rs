@@ -7,6 +7,7 @@ pub mod cache;
 pub mod check;
 pub mod download;
 pub mod github;
+pub mod install;
 pub mod replace;
 pub mod version;
 

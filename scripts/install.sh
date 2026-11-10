@@ -53,6 +53,28 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── Delegate versioned installs to an existing CLI ──────────────────────────
+# A first install (no nession on PATH, or an older CLI without `install`) uses
+# the bootstrap download below. Once a CLI with the archive rule is installed,
+# `install.sh --version` and an upgrade both follow the same transaction as
+# `nession install` / `nession update`, including Current archiving.
+if [ -z "$BINS" ] && command -v nession >/dev/null 2>&1; then
+  if nession install --help >/dev/null 2>&1; then
+    # Keep an explicit destination authoritative for the delegated install as
+    # well; the CLI reads the same NESSION_INSTALL_DIR name.
+    if [ -n "$INSTALL_DIR" ]; then
+      export NESSION_INSTALL_DIR="$INSTALL_DIR"
+    fi
+    if [ "$VERSION" = latest ]; then
+      info "Delegating to the installed nession CLI (update)…"
+      exec nession update --yes
+    else
+      info "Delegating to the installed nession CLI (install ${VERSION})…"
+      exec nession install "$VERSION"
+    fi
+  fi
+fi
+
 # ── Detect platform ─────────────────────────────────────────────────────────
 detect_os() {
   os=$(uname -s)
