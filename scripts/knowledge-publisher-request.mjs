@@ -61,7 +61,7 @@ function parseRequest(event, context) {
         event.comment?.author_association !== 'OWNER' ||
         !Number.isSafeInteger(event.comment?.id) || event.comment.id <= 0 ||
         !Number.isSafeInteger(event.issue?.number) || event.issue.number <= 0 ||
-        event.issue?.pull_request !== undefined ||
+        event.issue?.pull_request != null ||
         event.issue?.repository_url !== 'https://api.github.com/repos/' + REPO)
       fail('an authenticated owner Issue comment is required');
     const lines=String(event.comment.body||'').replace(/\r\n?/g,'\n').trimEnd().split('\n');
