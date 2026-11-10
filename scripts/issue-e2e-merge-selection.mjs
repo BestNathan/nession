@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { prepare, pathsCannotAffectE2E } from './issue-e2e-selection-entry.mjs';
+import {isNativeConvergencePr,convergenceE2ESelection} from './staging-convergence-pr.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { planVerification } from './verification-tier-policy.mjs';
 
@@ -36,7 +37,7 @@ export function mergedSelection(event,commit,prs,issues,repoRoot) {
   // Renames expose both paths: moving runtime code into docs never skips E2E.
   const paths=git(repoRoot,'diff','--no-renames','--name-only',target.baseSha,target.targetSha)
     .split('\n').filter(Boolean);
-  if(!paths.length) throw Error('empty merge change scope');
+  if(!paths.length&&!isNativeConvergencePr(target.pr)) throw Error('empty merge change scope');
   if(!target.pr) {
     if(!pathsCannotAffectE2E(paths))
       throw Error('non-PR runtime push requires trusted risk audit; full E2E is not the fallback');
@@ -44,6 +45,12 @@ export function mergedSelection(event,commit,prs,issues,repoRoot) {
       target_sha:target.targetSha,merge_sha:target.targetSha,source_event:'push',
       mode:'not-required',selected:[],issues:[],
       reason:'verified-unassociated-metadata-only-merge'};
+  }
+  if(isNativeConvergencePr(target.pr)){
+    if(issues.length)throw Error('native convergence push cannot consume Issue contracts');
+    const plan=convergenceE2ESelection(target.pr,repoRoot,target.baseSha,target.targetSha);
+    return {...plan,source_event:'push',merge_sha:target.targetSha,
+      source_pr:target.pr.number,reason:'authenticated-source-bound-convergence'};
   }
   const numbers=parsePreMergeIssueNumbers(target.pr.body, 'BestNathan','nession',target.pr.title);
   if(numbers.length!==issues.length || !issues.every(i=>numbers.includes(i.number)))
