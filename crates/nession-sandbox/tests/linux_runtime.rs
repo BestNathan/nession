@@ -713,7 +713,9 @@ fn native_beyond_v1_controls_apply_readback_and_fail_closed() {
         "enforcement": "required"
     }))
     .expect("invalid native policy fixture");
-    let error = prepare(&bad, &settings).expect_err("the kernel must reject the value");
+    let error = prepare(&bad, &settings)
+        .err()
+        .expect("the kernel must reject the value");
     let text = error.to_string();
     assert!(text.contains("cpu.max"), "{text}");
     assert!(
@@ -736,7 +738,9 @@ fn native_beyond_v1_controls_apply_readback_and_fail_closed() {
         "enforcement": "required"
     }))
     .expect("absent controller fixture");
-    let error = prepare(&absent, &settings).expect_err("undiscovered keys must fail closed");
+    let error = prepare(&absent, &settings)
+        .err()
+        .expect("undiscovered keys must fail closed");
     assert!(
         error.to_string().contains("futuristic.max"),
         "the refusal names the key: {error}"
