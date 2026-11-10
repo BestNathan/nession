@@ -259,6 +259,54 @@ export function staleGeneratedSyncPr(pr,repo,lane,currentHead) {
     pr.head.ref.startsWith('chore/staging-sync-'+lane.replace(/[\/._]/g,'-')+'-');
 }
 
+// Keep a checked two-parent integration PR alive while Main advances. Only a
+// changed Staging first parent, broken ancestry, or invalid head invalidates it.
+export function pinnedSyncIdentity(pr,repo,lane,laneSha,headSha,parents,mainIsAncestor) {
+  const prefix='chore/staging-sync-'+lane.replace(/[\\/._]/g,'-')+'-';
+  if(pr?.state!=='open'||pr.draft||pr.base?.ref!==lane||
+      pr.head?.repo?.full_name!==repo||!pr.head?.ref?.startsWith(prefix)||
+      !pr.body?.startsWith('Staging Convergence automated proposal')||
+      !SHA.test(pr.head?.sha||'')||pr.head.sha!==headSha||
+      !Array.isArray(parents)||parents.length!==2||
+      parents[0]!==laneSha||!SHA.test(parents[1]||'')||
+      !mainIsAncestor)return false;
+  return pr.head.ref===integrationBranchName(lane,parents[1],laneSha);
+}
+function pendingSyncIntegration(repo,lane,liveMainSha) {
+  const opened=gh(['--method','GET','repos/'+repo+'/pulls',
+    '-f','base='+lane.branch,'-f','state=open','-f','per_page=100']);
+  if(!Array.isArray(opened)||opened.length>=100)
+    reject('unbounded active Staging PR inventory');
+  const prefix='chore/staging-sync-'+lane.branch.replace(/[\\/._]/g,'-')+'-';
+  const generated=opened.filter(pr=>pr.state==='open'&&
+    pr.base?.ref===lane.branch&&pr.head?.repo?.full_name===repo&&
+    pr.head?.ref?.startsWith(prefix)&&
+    pr.body?.startsWith('Staging Convergence automated proposal'));
+  if(generated.length>1)reject('multiple generated sync PRs; resolve before continuing');
+  const pr=generated[0];
+  if(!pr)return null;
+  // Changed staging requires a new approval and exact-head check. The
+  // obsolete PR is closed by the existing supersession path, not reused.
+  if(pr.base?.sha!==lane.sha)return null;
+  const remote=optionalRemoteHead(branchName(pr.head.ref));
+  if(remote!==pr.head?.sha)reject('active sync PR ref does not match GitHub head');
+  fetchForComparison(pr.head.ref);
+  const parents=shell('git',['show','-s','--format=%P',remote]).split(/\s+/);
+  const pinnedMain=parents[1];
+  let mainIsAncestor=false;
+  if(SHA.test(pinnedMain||'')){
+    try{shell('git',['merge-base','--is-ancestor',pinnedMain,liveMainSha]);
+      mainIsAncestor=true;
+    }catch(error){if(error.status!==1)throw error;}
+  }
+  if(!pinnedSyncIdentity(pr,repo,lane.branch,lane.sha,remote,parents,mainIsAncestor))
+    reject('active sync PR has invalid pinned ancestry or identity');
+  const tree=shell('git',['merge-tree','--write-tree',lane.sha,pinnedMain]).split(/\s+/)[0];
+  if(!SHA.test(tree)||shell('git',['rev-parse',remote+'^{tree}'])!==tree)
+    reject('active sync integration tree differs from trusted source');
+  return {branch:pr.head.ref,sha:remote,main_sha:pinnedMain,created:false,reused:true};
+}
+
 function closeSupersededSyncPrs(repo,lane,currentHead) {
   const list=gh(['--method','GET','repos/'+repo+'/pulls',
     '-f','base='+lane,'-f','state=open','-f','per_page=100']);
@@ -392,7 +440,10 @@ function reconcile(plan) {
   for (const lane of plan.branches) {
     for (const action of lane.actions) {
       const sync=action==='sync-main-to-lane';
-      const integration=sync?ensureIntegrationBranch(repo,plan,lane):null;
+      const pinned=sync?pendingSyncIntegration(repo,lane,plan.main_sha):null;
+      const syncMainSha=pinned?.main_sha||plan.main_sha;
+      const integration=sync?(pinned||ensureIntegrationBranch(repo,
+        {...plan,main_sha:syncMainSha},lane)):null;
       // On an actual merge-tree conflict, the direct-source PR exists only as
       // an authenticated, SHA-bound read-only Agent analysis surface; it is not
       // qualified for merge under the protected staging rules.
@@ -410,7 +461,7 @@ function reconcile(plan) {
         // The immutable integration ref was materialized remotely; fetch and
         // verify the real two-parent Git object before deriving Issue E2E IDs.
         fetchForComparison(integration.branch);
-        batch=planBatch({branch:lane.branch,main_sha:plan.main_sha,
+        batch=planBatch({branch:lane.branch,main_sha:syncMainSha,
           lane_sha:lane.sha,integration_head:integration.sha});
         const prepared=ensureBatchIssue(batch);
         batchIssueNumber=prepared.issue.number;
@@ -446,7 +497,7 @@ function reconcile(plan) {
         }
       }
       const decision = qualify({action,prNumber:receipt.number,
-        mainSha:plan.main_sha,laneSha:lane.sha,branch:lane.branch,
+        mainSha:syncMainSha,laneSha:lane.sha,branch:lane.branch,
         syncRef:integration?.branch,syncHeadSha:integration?.sha,
         deployment_workflows:lane.deployment_workflows});
       if (!decision.ready) {
@@ -460,9 +511,19 @@ function reconcile(plan) {
       }
       // Never use `--auto`: acceptance might become stale before delayed merge.
       // Revalidate current refs and emit one exact-head merge request at a time.
-      if (gitRemoteHead('main') !== plan.main_sha ||
-          gitRemoteHead(lane.branch) !== lane.sha) {
-        reject('stale head between qualification and merge: ' + lane.branch);
+      // Main can advance without invalidating the checked integration.
+      // Its pinned second parent must remain an ancestor of Main; the Staging
+      // first parent must match exactly. No head rewrite or approval reuse.
+      const liveMain=gitRemoteHead('main');
+      let pinnedAncestor=false;
+      if(sync){
+        try{shell('git',['merge-base','--is-ancestor',syncMainSha,liveMain]);
+          pinnedAncestor=true;
+        }catch(error){if(error.status!==1)throw error;}
+      }
+      if (gitRemoteHead(lane.branch)!==lane.sha ||
+          (sync&&!pinnedAncestor)||(!sync&&liveMain!==plan.main_sha)) {
+        reject('stale or divergent sources before merge: '+lane.branch);
       }
       const expectedHead = sync ? integration.sha : lane.sha;
       const merge = gh(['--method','PUT','repos/' + repo + '/pulls/' + receipt.number + '/merge',
@@ -537,6 +598,23 @@ function selfTest() {
     'BestNathan/nession','staging','another'),false);
   assert.equal(staleGeneratedSyncPr({...sample,head:{...sample.head,
     repo:{full_name:'external/fork'}}},'BestNathan/nession','staging','another'),false);
+  const pinned={...sample,base:{ref:'staging',sha:bb},
+    head:{...sample.head,sha:'c'.repeat(40)}};
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],true),true);
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],false),false,'divergent Main must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    aa,'c'.repeat(40),[bb,aa],true),false,'changed Staging must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'d'.repeat(40),[bb,aa],true),false,'head mismatch must block');
+  assert.equal(pinnedSyncIdentity(pinned,'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[aa,bb],true),false,'parent inversion must block');
+  assert.equal(pinnedSyncIdentity({...pinned,head:{...pinned.head,
+    repo:{full_name:'attacker/fork'}}},'BestNathan/nession','staging',
+    bb,'c'.repeat(40),[bb,aa],true),false,'fork must block');
+  assert.equal(pinnedSyncIdentity({...pinned,body:'manual integration'},'BestNathan/nession',
+    'staging',bb,'c'.repeat(40),[bb,aa],true),false,'manual PR cannot be adopted');
   assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
