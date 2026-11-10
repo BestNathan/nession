@@ -52,6 +52,31 @@
     }
   ],
   "patterns": {
+    "pattern.choice-item": {
+      "id": "pattern.choice-item",
+      "patternRef": "docs/design/design-system/patterns/popup-menu.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true,
+        "minHeightToken": "experience.web.control.sm",
+        "maxWidthToken": "experience.web.overlay.choiceMaxWidth",
+        "scrollOwner": false,
+        "minHeightTokenPx": 28,
+        "maxWidthTokenPx": 480
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "minHeightToken": "experience.app.control.sm",
+        "maxWidthToken": "experience.app.overlay.choiceMaxWidth",
+        "scrollOwner": false,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "minHeightTokenPx": 44,
+        "touchTargetTokenPx": 44,
+        "maxWidthTokenPx": 480
+      }
+    },
     "pattern.context-capsule": {
       "id": "pattern.context-capsule",
       "patternRef": "docs/design/design-system/patterns/context-capsule.md",

@@ -8,6 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ChoiceItemContent } from '@/components/ui/choice-item';
 import {
   Select,
   SelectContent,
@@ -67,10 +68,25 @@ function AgentSelect({
         <SelectTrigger id="agent" className="w-full">
           <span className={selectedAgent ? '' : 'text-muted-foreground'}>{displayText}</span>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent width="content">
           {agents.map((agent) => (
-            <SelectItem key={agent.agent_id} value={agent.agent_id}>
-              {agentDisplayName(agent)}
+            <SelectItem key={agent.agent_id} value={agent.agent_id} anatomy="resource">
+              <ChoiceItemContent
+                title={agentDisplayName(agent)}
+                meta={
+                  agent.display_name && agent.display_name !== agent.hostname
+                    ? agent.hostname
+                    : undefined
+                }
+                status={
+                  agent.status === 'online'
+                    ? 'Online'
+                    : agent.status === 'offline'
+                      ? 'Offline'
+                      : 'Degraded'
+                }
+                statusTone={agent.status === 'online' ? 'neutral' : 'unavailable'}
+              />
             </SelectItem>
           ))}
         </SelectContent>
@@ -126,16 +142,16 @@ function ProjectLocationSelect({
               <span className="truncate">Select a location</span>
             )}
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent width="content">
             {locations.map((location, index) => {
               const agent = agents.find((candidate) => candidate.agent_id === location.agent_id);
               return (
                 <SelectItem
                   key={`${location.agent_id}:${location.path}`}
                   value={String(index)}
-                  multiline
+                  anatomy="resource"
                 >
-                  <ProjectLocationDetails location={location} agent={agent} />
+                  <ProjectLocationDetails location={location} agent={agent} showStatus />
                 </SelectItem>
               );
             })}

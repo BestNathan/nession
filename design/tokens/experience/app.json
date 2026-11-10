@@ -436,6 +436,10 @@
     "viewportMaxHeight": {
       "value": "calc(100dvh - 2rem)"
     },
+    "choiceMaxWidth": {
+      "$description": "The growth ceiling for a resource-rich anchored choice list (#3164). On the App the available width is usually the binding clamp; the shared role keeps Web and App from inventing separate popup widths.",
+      "value": "30rem"
+    },
     "dialogZ": {
       "value": 50
     },

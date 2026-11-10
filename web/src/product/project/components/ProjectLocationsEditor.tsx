@@ -8,6 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import { ChoiceItemContent } from '@/components/ui/choice-item';
 import { agentDisplayName } from '@/shared/lib/format';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
@@ -49,10 +50,25 @@ function AgentField({
             )}
           </span>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent width="content">
           {agents.map((agent) => (
-            <SelectItem key={agent.agent_id} value={agent.agent_id}>
-              {agentDisplayName(agent)}
+            <SelectItem key={agent.agent_id} value={agent.agent_id} anatomy="resource">
+              <ChoiceItemContent
+                title={agentDisplayName(agent)}
+                meta={
+                  agent.display_name && agent.display_name !== agent.hostname
+                    ? agent.hostname
+                    : undefined
+                }
+                status={
+                  agent.status === 'online'
+                    ? 'Online'
+                    : agent.status === 'offline'
+                      ? 'Offline'
+                      : 'Degraded'
+                }
+                statusTone={agent.status === 'online' ? 'neutral' : 'unavailable'}
+              />
             </SelectItem>
           ))}
         </SelectContent>

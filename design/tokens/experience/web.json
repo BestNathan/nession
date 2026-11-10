@@ -576,6 +576,10 @@
     "viewportMaxHeight": {
       "value": "calc(100dvh - 2rem)"
     },
+    "choiceMaxWidth": {
+      "$description": "The intentional growth ceiling for a resource-rich anchored choice list (#3164). The list is never narrower than its trigger and wraps its content rather than clipping; Base UI's available width remains the final viewport clamp.",
+      "value": "30rem"
+    },
     "dialogZ": {
       "value": 50
     },

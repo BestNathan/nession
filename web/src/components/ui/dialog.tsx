@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/shared/lib/utils"
 import { Button } from "@/components/ui/button"
+import { PopupPortalContainerContext, usePopupPortalContainer } from "@/components/ui/popup-portal"
 import {
   overlayDialogZClass,
   overlayScrimClass,
@@ -72,6 +73,11 @@ function DialogContent({
    */
   size?: OverlaySize
 }) {
+  const [popupHost, setPopupHost] = React.useState<HTMLDivElement | null>(null);
+  // The host replaces the outer Experience container for popups opened from
+  // inside the modal, so it must state the same scope. The primitive still
+  // learns only a DOM attribute value; it does not interpret "app".
+  const inheritedScope = usePopupPortalContainer()?.getAttribute("data-experience") ?? undefined;
   const arrangement =
     variant === "centered"
       ? cn(
@@ -94,7 +100,23 @@ function DialogContent({
         className={cn(arrangement, className)}
         {...props}
       >
-        {children}
+        <PopupPortalContainerContext.Provider value={popupHost}>
+          {children}
+          {/*
+            Anchored layers opened from inside a modal mount here rather than
+            into the Experience's body-level container. The host is inside the
+            dialog's floating tree, so base-ui's outside-content hiding, the
+            focus trap and the Experience scope all apply to the popup; a
+            body-level sibling would be aria-hidden and outside the trap.
+            `contents` keeps the empty host out of the dialog's layout.
+          */}
+          <div
+            ref={setPopupHost}
+            data-slot="dialog-popup-portal"
+            data-experience={inheritedScope}
+            className="contents"
+          />
+        </PopupPortalContainerContext.Provider>
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"

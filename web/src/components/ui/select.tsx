@@ -9,6 +9,7 @@ import {
   overlayAnchoredZClass,
   popupMenuItemBandClass,
 } from "@/components/ui/overlayStyles"
+import { resourceChoiceItemClass } from "@/components/ui/choice-itemStyles"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
 const Select = SelectPrimitive.Root
@@ -78,12 +79,21 @@ function SelectContent({
   align = "center",
   alignOffset = 0,
   alignItemWithTrigger = true,
+  width = "anchor",
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
-  >) {
+  > & {
+    /**
+     * `anchor` keeps the list at the trigger's width. `content` lets a
+     * resource-rich list grow beyond a narrow trigger up to the shared choice
+     * width role, clamped by Base UI's available width (issue 3164). The list
+     * never gets narrower than its trigger.
+     */
+    width?: "anchor" | "content"
+  }) {
   // A Select opened inside an Experience scope mounts into that scope's
   // container, so its rows resolve the same control band as their trigger.
   const container = usePopupPortalContainer() ?? undefined
@@ -100,7 +110,7 @@ function SelectContent({
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
-          className={cn("relative", overlayAnchoredZClass, "max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          className={cn("relative", overlayAnchoredZClass, "max-h-(--available-height) origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", width === "content" ? "w-max min-w-(--anchor-width) max-w-[calc(min(var(--nession-overlay-choice-max-width),calc(100vw-1.5rem)))]" : "w-(--anchor-width) min-w-36", className )}
           {...props}
         >
           <SelectScrollUpButton />
@@ -128,38 +138,54 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
-  multiline = false,
+  anatomy = "action",
   ...props
 }: SelectPrimitive.Item.Props & {
   /**
-   * Drops the item's single-line contract (issue 3089) so a multi-line record can
-   * wrap inside the anchored popup instead of being clipped by its width.
+   * The row's job. `action` keeps the single-line PopupMenu action band.
+   * `resource` is the rich-choice anatomy (issue 3164): the row wraps, keeps the
+   * Experience control band as its minimum, and reserves a stable trailing
+   * check. Use it only when the options carry a resource identity/metadata,
+   * not for a plain action list.
    */
-  multiline?: boolean
+  anatomy?: "action" | "resource"
 }) {
+  const resource = anatomy === "resource"
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
-      data-multiline={multiline ? "true" : undefined}
+      data-anatomy={anatomy}
       className={cn(
-        popupMenuItemBandClass,
-        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
-        multiline ? "items-start" : "items-center",
+        resource
+          ? resourceChoiceItemClass
+          : cn(
+              popupMenuItemBandClass,
+              "relative flex w-full cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+            ),
         className
       )}
       {...props}
     >
       <SelectPrimitive.ItemText
+        data-slot="select-item-text"
         className={cn(
           "flex flex-1 gap-2",
-          multiline ? "min-w-0 whitespace-normal" : "shrink-0 whitespace-nowrap"
+          resource
+            ? "min-w-0 whitespace-normal"
+            : "shrink-0 whitespace-nowrap",
         )}
       >
         {children}
       </SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator
         render={
-          <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center" />
+          <span
+            data-slot="select-item-indicator"
+            className={cn(
+              "pointer-events-none absolute right-2 flex size-4 items-center justify-center",
+              resource && "top-1/2 -translate-y-1/2",
+            )}
+          />
         }
       >
         <CheckIcon className="pointer-events-none" />
