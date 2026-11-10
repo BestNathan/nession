@@ -62,9 +62,10 @@ function admission(log,run){
 function policy(log){
   const match=marker(log,/^\d{4}-\d\d-\d\dT\S+Z (\{.*"result":"active_ruleset_structure_verified_readonly"\})$/,'Writer policy');
   const o=JSON.parse(match[1]);
-  deny(o.app_id===5677350&&o.writer_ruleset_id===26835890&&
-    o.append_only_ruleset_id===26836090&&
-    o.result==='active_ruleset_structure_verified_readonly','writer App/ruleset mismatch');
+  deny(o.knowledge_head===REPAIR&&o.app_id===5677350&&
+    o.writer_ruleset_id===26835890&&o.append_only_ruleset_id===26836090&&
+    o.result==='active_ruleset_structure_verified_readonly',
+    'protected predecessor / writer App / ruleset mismatch');
 }
 function publicReceipt(log){
   const sandbox=marker(log,/^\d{4}-\d\d-\d\dT\S+Z Public Sandbox prototype verified: source=([a-f0-9]{40}) html_sha256=([a-f0-9]{64})$/,'Sandbox HTML');
@@ -248,7 +249,8 @@ export function selfTestSandbox3145(){
     run_id:String(PUBLISHER),run_attempt:'1',status:'validated_no_write'
   }));
   const publishLog=admission+markerLine(JSON.stringify({
-    app_id:5677350,writer_ruleset_id:26835890,append_only_ruleset_id:26836090,
+    knowledge_head:REPAIR,app_id:5677350,
+    writer_ruleset_id:26835890,append_only_ruleset_id:26836090,
     result:'active_ruleset_structure_verified_readonly'
   }));
   const expectedSource='https://github.com/'+REPO+'/blob/'+PROTOTYPE+'/'+SANDBOX;
@@ -286,6 +288,7 @@ export function selfTestSandbox3145(){
     {publisher:{...publisher,event:'pull_request'}},
     {publisher:{...publisher,head_sha:'e'.repeat(40)}},
     {publisherJobs:{jobs:publisherJobs.jobs.slice(1)}},
+    {publisherPublishLog:publishLog.replace('"knowledge_head":"'+REPAIR+'"','"knowledge_head":"'+PREVIOUS+'"')},
     {publisherPublishLog:publishLog.replace('"app_id":5677350','"app_id":0')},
     {publisherVerifyLog:admission.replace('"expected_head":"'+REPAIR+'"','"expected_head":"'+PREVIOUS+'"')},
     {pages:{...pages,run_attempt:2}},
