@@ -9,6 +9,7 @@ import { SidebarRail } from '@/app/patterns/SidebarRail';
 import { emptyProjectShell } from '@/product/project/types';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { Session } from '@/types';
+import { useWebFilesNavigation } from './useWebFilesNavigation';
 
 type SidebarProps = ComponentProps<typeof Sidebar>;
 export type MainProps = ComponentProps<typeof ShellMain>;
@@ -147,6 +148,9 @@ export function WebLayout(props: WebLayoutProps) {
   const { searchInputRef, collapseButtonRef, railExpandRef, expand } =
     useSidebarFocus(sidebarCollapsed, setSidebarCollapsed);
 
+  // Terminal → Files navigation (#3187); Files resolves the reference against
+  // the Session CWD and source, so this layout owns only the handoff.
+  const filesNavigation = useWebFilesNavigation(mainShared.onToolChange, mainShared.onSurfaceChange);
   const projectShell = sidebarProps.projectShell ?? emptyProjectShell();
   const createDisabled = sidebarProps.agents.every((agent) => agent.status !== 'online');
 
@@ -239,6 +243,9 @@ export function WebLayout(props: WebLayoutProps) {
           surface={surface}
           onOpenDrawer={() => onBackToSessions?.()}
           terminal={terminal}
+          onOpenWorkspaceFile={filesNavigation.openFileFromTerminal}
+          incomingFocus={filesNavigation.incomingFileFocus}
+          onIncomingFocusApplied={filesNavigation.clearIncomingFileFocus}
         />
         {projectDetail ? (
           <div

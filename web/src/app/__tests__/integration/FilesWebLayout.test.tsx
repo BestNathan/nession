@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { EditorView } from '@uiw/react-codemirror';
 import { FilesWebLayout } from '@/app/experiences/web/FilesWebLayout';
 import type { FileOps, FileEntry } from '@/capabilities/files';
-import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type { CapabilityFocus, WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type { Session } from '@/types';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -28,15 +30,20 @@ function makeFileOps(): FileOps {
   };
 }
 
-function makeCtx(fileOps: FileOps | null): WorkspaceContext {
+function makeCtx(
+  fileOps: FileOps | null,
+  options: { focus?: CapabilityFocus; onFocusConsumed?: () => void } = {},
+): WorkspaceContext {
   return {
-    session: null,
+    session: fileOps ? ({ session_id: 'sess' } as Session) : null,
     agent: undefined,
     agents: [],
     domain: null,
     fileOps,
     experience: 'web',
     onToolChange: vi.fn(),
+    focus: options.focus,
+    onFocusConsumed: options.onFocusConsumed,
   };
 }
 
@@ -80,5 +87,64 @@ describe('FilesWebLayout (web layout)', () => {
     rerender(<FilesWebLayout ctx={makeCtx(makeFileOps())} />);
     expect(screen.getByText('Select a file to view it.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
+  });
+
+  it('resolves a Terminal file focus against the Session CWD and opens it at the line', async () => {
+    const fileOps = makeFileOps();
+    fileOps.getCwd = vi.fn().mockResolvedValue({ path: 'src' });
+    fileOps.listDir = vi.fn().mockResolvedValue({
+      entries: [{
+        name: 'f.txt', path: 'src/f.txt', full_path: '/root/src/f.txt',
+        is_dir: false, size: 18, modified: 0,
+      }],
+    });
+    fileOps.readFile = vi.fn().mockResolvedValue({
+      path: 'src/f.txt', content: btoa('one\ntwo\nthree'), mime_type: 'text/plain',
+    });
+    const onFocusConsumed = vi.fn();
+
+    render(
+      <FilesWebLayout
+        ctx={makeCtx(fileOps, {
+          focus: { capabilityId: 'files', resourceId: 'f.txt', line: 2, column: 3 },
+          onFocusConsumed,
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('.cm-editor')).toBeTruthy();
+    });
+    await waitFor(() => {
+      const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+      const head = view!.state.selection.main.head;
+      const line = view!.state.doc.lineAt(head);
+      expect(line.number).toBe(2);
+      expect(head - line.from + 1).toBe(3);
+    });
+    expect(fileOps.getCwd).toHaveBeenCalledWith('sess');
+    expect(fileOps.listDir).toHaveBeenCalledWith('src');
+    expect(onFocusConsumed).toHaveBeenCalled();
+  });
+
+  it('shows a recoverable message when the focused file does not resolve', async () => {
+    const fileOps = makeFileOps();
+    fileOps.getCwd = vi.fn().mockResolvedValue({ path: 'src' });
+    fileOps.listDir = vi.fn().mockResolvedValue({ entries: [] });
+    const onFocusConsumed = vi.fn();
+
+    render(
+      <FilesWebLayout
+        ctx={makeCtx(fileOps, {
+          focus: { capabilityId: 'files', resourceId: 'missing.py' },
+          onFocusConsumed,
+        })}
+      />,
+    );
+
+    expect(await screen.findByTestId('files-web-handoff-error')).toHaveTextContent(
+      'may have been moved or deleted',
+    );
+    expect(onFocusConsumed).toHaveBeenCalled();
   });
 });

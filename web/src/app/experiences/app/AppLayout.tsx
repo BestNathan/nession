@@ -98,8 +98,8 @@ export function AppLayout(props: {
   const [incomingFileFocus, setIncomingFileFocus] = useState<CapabilityFocus | undefined>();
 
   const handleOpenFileFromTerminal = useCallback(
-    (path: string, line?: number) => {
-      setIncomingFileFocus({ capabilityId: 'files', resourceId: path, line });
+    (path: string, line?: number, column?: number) => {
+      setIncomingFileFocus({ capabilityId: 'files', resourceId: path, line, column });
       mainShared.onToolChange('files');
       onLayerChange('workspace');
     },

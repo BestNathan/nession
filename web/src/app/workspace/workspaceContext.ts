@@ -36,6 +36,8 @@ export interface CapabilityFocus {
   resourceId?: string;
   /** 1-based line when opening a file from the Terminal (#1175). */
   line?: number;
+  /** 1-based column when the Terminal reference carried one (#3187). */
+  column?: number;
 }
 
 /** Everything a Workspace view layout needs from the workspace framework. */

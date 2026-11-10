@@ -5,6 +5,16 @@
 // `window.fixtureFiles` control is the fixture's stand-in for a competing
 // writer; it is not product surface.
 import { expect, test, type Page } from '@playwright/test';
+import {
+  activateReference as activateFileReference,
+  expectEditorAt as expectFileEditorAt,
+  expectFilesSurface as expectFilesAt,
+  openAppShell as openFileLinkApp,
+  printReference as printFileReference,
+  returnToTerminal as returnFromFiles,
+  runLine as runFileLinkCommand,
+  seedTerminalFiles,
+} from '../../acceptance/shared/terminal-file-links.cjs';
 
 declare global {
   interface Window {
@@ -182,4 +192,23 @@ test('Web: selected row surface, disclosure caret and collapse after opening a f
   await row('src').getByTestId('explorer-caret').click();
   await expect(tree.getByText('index.css', { exact: true })).toBeVisible();
   await expect(row('index.css')).toHaveAttribute('aria-selected', 'true');
+});
+
+// #3187: the App's terminal → Files handoff opens the pushed viewer at the
+// referenced line through the same Session's FileOps/CWD.
+test('App: a Terminal file reference opens the pushed Files viewer at its line', async ({ page }) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+  seedTerminalFiles(runtime.home);
+  await openFileLinkApp(page, expect, runtime, 'e2e-3187-app');
+  await runFileLinkCommand(page, expect, 'cd src/deep');
+  await printFileReference(page, expect, 'target.py:7:3');
+  await activateFileReference(page, 'target.py:7:3');
+  await expectFilesAt(page, expect, 'app');
+  await expectFileEditorAt(page, expect, {
+    count: 1, line: 7, column: 3, activeLineText: 'target-line-7',
+  });
+  await returnFromFiles(page, expect, 'app');
+  await expect(page.getByTestId('terminal-surface')).toBeVisible();
 });

@@ -78,7 +78,7 @@ export interface ShellMainProps {
   incomingFocus?: CapabilityFocus;
   onIncomingFocusApplied?: () => void;
   /** App Terminal: open a workspace-relative file in Files. */
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   /** Focused Session's Project context and actions (#3082). */
   sessionProject?: SessionProjectContext;
 }
@@ -202,7 +202,7 @@ function ShellTerminal({
   capsuleProjection?: CapsuleCapabilityProjection;
   surfaceAction?: ReactNode;
   sessionContextAction?: ReactNode;
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   workContext?: ResolvedWorkContext;
 }) {
   return (
