@@ -9,7 +9,7 @@ interface TerminalPaneProps {
   controller: TerminalController | null;
   terminalState: TerminalStatus;
   viewportReady: boolean;
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   /** False while this client may not send input (observer/reconnect/switch). */
   inputDisabled?: boolean;
   /** The App shell's reserved edge band, supplied by the App layer. */

@@ -35,6 +35,8 @@ export interface FileViewerProps {
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   initialLine?: number;
+  /** 1-based column when a Terminal reference carried one (#3187). */
+  initialColumn?: number;
 }
 
 interface FileViewerToolbarProps {
@@ -129,6 +131,7 @@ interface FileViewerContentProps {
   onCancelLoad: () => void;
   onViewModeChange: (mode: ViewMode) => void;
   initialLine?: number;
+  initialColumn?: number;
 }
 
 function FileViewerContent({
@@ -136,7 +139,7 @@ function FileViewerContent({
   isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
   onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
-  onViewModeChange, initialLine,
+  onViewModeChange, initialLine, initialColumn,
 }: FileViewerContentProps) {
   // Chunked progress view — shown while a large file is being downloaded in chunks.
   const chunkedProgressView = (
@@ -231,6 +234,7 @@ function FileViewerContent({
             readOnly={isReadOnly}
             onTextChange={onChange}
             initialLine={initialLine}
+            initialColumn={initialColumn}
           />
         )}
       </div>
@@ -276,6 +280,63 @@ function FileConflictDialog({
   );
 }
 
+interface FileViewerDialogsProps {
+  /** The viewer owns close/discard only when it owns the close affordance. */
+  hasClose: boolean;
+  showUnsavedDialog: boolean;
+  setShowUnsavedDialog: (open: boolean) => void;
+  handleConfirmClose: () => void;
+  conflict: boolean;
+  setConflict: (open: boolean) => void;
+  handleReloadAfterConflict: () => void;
+  handleSaveOverwrite: () => void;
+}
+
+function FileViewerDialogs({
+  hasClose,
+  showUnsavedDialog,
+  setShowUnsavedDialog,
+  handleConfirmClose,
+  conflict,
+  setConflict,
+  handleReloadAfterConflict,
+  handleSaveOverwrite,
+}: FileViewerDialogsProps) {
+  return (
+    <>
+      {/* The viewer's own unsaved dialog exists only for its own close
+          affordance. Without one the caller owns leaving, and the caller's
+          guard is the only one — two guards could disagree (#1051). */}
+      {hasClose ? (
+        <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+              <AlertDialogDescription>
+                You have unsaved changes. Close anyway?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmClose} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Close without saving</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+      <FileConflictDialog
+        open={conflict}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConflict(false);
+          }
+        }}
+        onReload={handleReloadAfterConflict}
+        onOverwrite={handleSaveOverwrite}
+      />
+    </>
+  );
+}
+
 export function FileViewer({
   fileOps,
   path,
@@ -284,6 +345,7 @@ export function FileViewer({
   onClose,
   onDirtyChange,
   initialLine,
+  initialColumn,
 }: FileViewerProps) {
   const {
     viewerType,
@@ -321,7 +383,10 @@ export function FileViewer({
     handleSuggestionPreview,
     handleSuggestionDismiss,
     handleCancelLoad,
-  } = useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize });
+  } = useFileViewer({
+    fileOps, path, filename, onClose, onDirtyChange, fileSize,
+    initialLine, initialColumn,
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -363,35 +428,20 @@ export function FileViewer({
         onCancelLoad={handleCancelLoad}
         onViewModeChange={handleSetViewMode}
         initialLine={initialLine}
+        initialColumn={initialColumn}
       />
       {/* The viewer's own unsaved dialog exists only for its own close
           affordance. Without one the caller owns leaving, and the caller's
           guard is the only one — two guards could disagree (#1051). */}
-      {onClose ? (
-        <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
-              <AlertDialogDescription>
-                You have unsaved changes. Close anyway?
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleConfirmClose} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Close without saving</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : null}
-      <FileConflictDialog
-        open={conflict}
-        onOpenChange={(open) => {
-          if (!open) {
-            setConflict(false);
-          }
-        }}
-        onReload={handleReloadAfterConflict}
-        onOverwrite={handleSaveOverwrite}
+      <FileViewerDialogs
+        hasClose={Boolean(onClose)}
+        showUnsavedDialog={showUnsavedDialog}
+        setShowUnsavedDialog={setShowUnsavedDialog}
+        handleConfirmClose={handleConfirmClose}
+        conflict={conflict}
+        setConflict={setConflict}
+        handleReloadAfterConflict={handleReloadAfterConflict}
+        handleSaveOverwrite={handleSaveOverwrite}
       />
     </div>
   );

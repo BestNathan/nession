@@ -16,6 +16,7 @@ export interface AppFilesViewerLayerProps {
   filename: string;
   size: number;
   initialLine?: number;
+  initialColumn?: number;
   onDirtyChange: (dirty: boolean) => void;
   showDiscardDialog: boolean;
   onDiscardDialogChange: (open: boolean) => void;
@@ -28,6 +29,7 @@ export function AppFilesViewerLayer({
   filename,
   size,
   initialLine,
+  initialColumn,
   onDirtyChange,
   showDiscardDialog,
   onDiscardDialogChange,
@@ -43,6 +45,7 @@ export function AppFilesViewerLayer({
           filename={filename}
           fileSize={size}
           initialLine={initialLine}
+          initialColumn={initialColumn}
           onDirtyChange={onDirtyChange}
         />
       </div>

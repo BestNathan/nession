@@ -8,6 +8,8 @@ export interface FileSourceEditorProps {
   readOnly?: boolean;
   filename?: string;
   initialLine?: number;
+  /** 1-based column when a navigation target carried one (#3187). */
+  initialColumn?: number;
 }
 
 export type FileSourceEditor = ComponentType<FileSourceEditorProps>;
@@ -49,6 +51,7 @@ export interface FileContentViewerProps {
   /** Files' explicit edit path only; ignored when `readOnly`. */
   onTextChange?: (next: string) => void;
   initialLine?: number;
+  initialColumn?: number;
 }
 
 export type { FilePresentation };

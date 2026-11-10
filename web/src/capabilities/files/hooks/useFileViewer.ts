@@ -42,6 +42,13 @@ export interface UseFileViewerParams {
    * safe at that scale.
    */
   fileSize?: number;
+  /**
+   * A navigation target from a Terminal file reference (#3187). A location
+   * makes the viewer open source/raw at that position: a rendered preview has
+   * no source line to show, so it cannot satisfy the reference.
+   */
+  initialLine?: number;
+  initialColumn?: number;
 }
 
 /** Decode base64 content to a Blob URL for media viewers. */
@@ -392,25 +399,63 @@ function useFileSave({
 }
 
 /**
+ * View mode and the markdown suggestion, including the navigation-target rule:
+ * a Terminal reference must open source/raw at its position, and re-activating
+ * the same file elsewhere re-enters raw without discarding the document.
+ */
+function useFileViewMode(
+  opensInPreviewByExt: boolean,
+  initialLine: number | undefined,
+  initialColumn: number | undefined,
+) {
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    initialLine !== undefined ? 'raw' : opensInPreviewByExt ? 'preview' : 'raw',
+  );
+  const [showSuggestion, setShowSuggestion] = useState(false);
+  const locationKey = initialLine === undefined
+    ? null
+    : `${initialLine}:${initialColumn ?? ''}`;
+  const appliedLocationRef = useRef(locationKey);
+
+  useEffect(() => {
+    if (locationKey === null || appliedLocationRef.current === locationKey) {
+      return;
+    }
+    appliedLocationRef.current = locationKey;
+    setViewMode('raw');
+    setShowSuggestion(false);
+  }, [locationKey]);
+
+  return { viewMode, setViewMode, showSuggestion, setShowSuggestion };
+}
+
+/**
  * State and handlers for the FileViewer component: file loading, markdown
  * detection (extension- and content-based), Preview/Raw view mode, dirty
  * tracking, and save. Extracted so the render body stays small.
  */
-export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange, fileSize }: UseFileViewerParams) {
+export function useFileViewer({
+  fileOps, path, filename, onClose, onDirtyChange, fileSize, initialLine, initialColumn,
+}: UseFileViewerParams) {
   const presentation = resolveFilePresentation({ path });
   const jsonPreviewKind: JsonPreviewKind | null = presentation.jsonKind;
   // Markdown detection — extension-based wins, content-based is fallback
   const isMarkdownByExt = presentation.kind === 'markdown';
   const opensInPreviewByExt = isMarkdownByExt || jsonPreviewKind !== null;
   const [isMarkdown, setIsMarkdown] = useState(isMarkdownByExt);
-  const [viewMode, setViewMode] = useState<ViewMode>(opensInPreviewByExt ? 'preview' : 'raw');
-  const [showSuggestion, setShowSuggestion] = useState(false);
+  const { viewMode, setViewMode, showSuggestion, setShowSuggestion } =
+    useFileViewMode(opensInPreviewByExt, initialLine, initialColumn);
   const suggestionDismissedRef = useRef(false);
 
   const [isReadOnly, setIsReadOnly] = useState(true);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   const handleDecoded = useCallback((decoded: string, mimeType?: string) => {
+    // A navigation target is read as source at a line, so content sniffing
+    // must not move the viewer into a preview that cannot show that line.
+    if (initialLine !== undefined) {
+      return;
+    }
     // The extension already settled it, or the user has dismissed the offer.
     if (isMarkdownByExt || suggestionDismissedRef.current) {
       return;
@@ -434,7 +479,7 @@ export function useFileViewer({ fileOps, path, filename, onClose, onDirtyChange,
       setViewMode('raw');
       setShowSuggestion(true);
     }
-  }, [isMarkdownByExt, path]);
+  }, [initialLine, isMarkdownByExt, path, setShowSuggestion, setViewMode]);
 
   const {
     viewerType, content, originalContent, mediaBlobUrl, mediaMimeType, loading, error,
