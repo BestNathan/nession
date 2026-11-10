@@ -4,7 +4,7 @@
 
 **Field-alignment revision:** [#3136](https://github.com/BestNathan/nession/issues/3136) — this same prototype is revised in place; do not create a competing mock.
 
-**Content-region revision (2026-11-11):** [#3137](https://github.com/BestNathan/nession/issues/3137) — Project Create/Settings now use named ConfigurationForm sections (Identity, Git source, Existing Locations, Image), one 16px surface-title role, 13px field labels, Web 32px / App 44px control bands, and one secondary → primary operation action line. The mock mirrors `web/src/components/ui/{configuration-form,operation-surface}.tsx`; production React remains authoritative. Renew the Chromium walkthrough and Pages manifest SHA for this revision.
+**Content-region revision (2026-11-11):** [#3137](https://github.com/BestNathan/nession/issues/3137) — Project Create/Settings now use named ConfigurationForm sections (Identity, Git source, Existing Locations, Image), one 16px surface-title role, 13px field labels, Web 32px / App 44px control bands, and one secondary → primary OperationSurface action line. The mock mirrors `web/src/components/ui/{configuration-form,operation-surface}.tsx`; production React remains authoritative. Renew the Chromium walkthrough and Pages manifest SHA for this revision.
 
 **Separate owners:** #3025 (Project-aware Session creation: accepted domain behavior), #3082 (Session→Project binding), #2875 (App Sessions actions), #3075 (Web rail). This mock only studies **presentation of existing operations**. Previous #3025 prototype remains valuable for Project semantics, but its narrow Create Session dialog presentation is **superseded** by the candidate in #3089.
 
