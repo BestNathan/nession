@@ -60,11 +60,12 @@ test('SC-04: line/column positioning, same-file reposition, clamp and raw previe
     });
     await returnToTerminal(page, expect, 'web');
 
-    // Out-of-range line and column clamp to the document's end.
+    // Out-of-range line and column clamp to the document's end. The seeded
+    // file ends with a newline, so the document's last line is the empty 21st.
     await printReference(page, expect, 'plain.py:999:999');
     await activateReference(page, 'plain.py:999:999');
     await expectEditorAt(page, expect, {
-      count: 1, line: 20, column: 'plain-line-20'.length + 1, activeLineText: 'plain-line-20',
+      count: 1, line: 21, column: 1, activeLineText: '',
     });
     await returnToTerminal(page, expect, 'web');
 
@@ -87,8 +88,9 @@ test('SC-04: line/column positioning, same-file reposition, clamp and raw previe
       type: 'evidence',
       description:
         'exact SHA ' + sha + ': plain.py opened at 1, then visible positions 12:1, 12:4 and ' +
-        '3:2 (same mounted editor); 999:999 clamped to line 20 column 14; notes.md previewed ' +
-        'without a location and notes.md:5:2 switched the same view to source at line 5 column 2',
+        '3:2 (same mounted editor); 999:999 clamped to the document end (line 21, the empty ' +
+        'line after the trailing newline); notes.md previewed without a location and ' +
+        'notes.md:5:2 switched the same view to source at line 5 column 2',
     });
   } finally {
     await context.close();

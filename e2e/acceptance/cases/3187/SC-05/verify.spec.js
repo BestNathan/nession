@@ -37,17 +37,20 @@ test('SC-05 Web: click, selection and scroll keep the same Terminal', async ({ b
     expect(base.xtermCount).toBe(1);
     expect(base.instanceMarker).toBe('original');
 
-    // Plain text is not a link.
+    // Plain text is not a link. The Files pane stays mounted (hidden) behind
+    // the Terminal, so "did not navigate" is about the active surface.
     await activateReference(page, 'NOT_A_FILE_MARKER');
-    await expect(page.getByTestId('file-workspace')).toHaveCount(0);
+    await expect(page.getByTestId('file-workspace')).toBeHidden();
     await expect(page.getByTestId('terminal-surface')).toBeVisible();
 
-    // A selection drag over a valid reference selects text, it does not open.
-    const start = await referencePoint(page, 'plain.py:5');
+    // A selection drag that crosses a valid reference selects text, it does
+    // not open: the press starts on ordinary text, not on the link.
+    const start = await referencePoint(page, 'printf');
+    const link = await referencePoint(page, 'plain.py:5');
     await page.mouse.click(start.x, start.y);
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
-    await page.mouse.move(start.x + 40, start.y, { steps: 6 });
+    await page.mouse.move(link.x + 20, link.y, { steps: 8 });
     await page.mouse.up();
     const selection = await page.evaluate(() => {
       const xterm = Array.from(document.querySelectorAll('.xterm')).find((element) => {
@@ -57,7 +60,7 @@ test('SC-05 Web: click, selection and scroll keep the same Terminal', async ({ b
       return xterm?.parentElement?.xtermInstance?.getSelection?.() ?? '';
     });
     expect(selection.length).toBeGreaterThan(0);
-    await expect(page.getByTestId('file-workspace')).toHaveCount(0);
+    await expect(page.getByTestId('file-workspace')).toBeHidden();
     await page.evaluate(() => {
       const xterm = Array.from(document.querySelectorAll('.xterm')).find((element) => {
         const rect = element.getBoundingClientRect();

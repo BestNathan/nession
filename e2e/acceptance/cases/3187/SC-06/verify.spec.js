@@ -35,15 +35,16 @@ test('SC-06: missing and directory targets fail without sending input', async ({
     await expect(error).toContainText('may have been moved or deleted');
     await expect(error).toContainText('missing.py');
     expect((await readEditor(page)).count).toBe(0);
+    await returnToTerminal(page, expect, 'web');
     const afterMissing = await readTerminalState(page);
     expect(afterMissing.text, 'the link sent no PTY input').toBe(before.text);
-    await returnToTerminal(page, expect, 'web');
 
     await printReference(page, expect, 'folder.py');
     const beforeDirectory = await readTerminalState(page);
     await activateReference(page, 'folder.py');
     await expect(error).toBeVisible();
     await expect(error).toContainText('it is a directory, not a file');
+    await returnToTerminal(page, expect, 'web');
     const afterDirectory = await readTerminalState(page);
     expect(afterDirectory.text, 'the directory refusal sent no PTY input').toBe(
       beforeDirectory.text,
@@ -66,21 +67,22 @@ test('SC-06: unavailable FileOps is a visible state, not a wrong file', async ({
   const context = await browser.newContext({ viewport: { width: 1180, height: 900 } });
   const page = await context.newPage();
   try {
-    // Relay owns only the terminal transport; Files has no provider there.
+    // Relay owns only the terminal transport; Files has no provider there, so
+    // the capability itself reports the state instead of accepting a path.
     await openShell(page, expect, runtime, 'sc06-relay', 'Relay');
     await printReference(page, expect, 'plain.py:2');
     const before = await readTerminalState(page);
     await activateReference(page, 'plain.py:2');
-    const unavailable = page.getByTestId('file-source-unavailable');
-    await expect(unavailable).toBeVisible();
-    await expect(unavailable).toContainText('No file provider is available');
+    await expect(page.getByText('Files is not available here')).toBeVisible();
+    await expect(page.getByTestId('file-source-unavailable')).toHaveCount(0);
+    await returnToTerminal(page, expect, 'web');
     const after = await readTerminalState(page);
     expect(after.text, 'the unavailable Files path sent no PTY input').toBe(before.text);
     test.info().annotations.push({
       type: 'evidence',
       description:
-        'exact SHA ' + sha + ': a Relay-attached Session (no FileOps) showed the ' +
-        'source-unavailable state for plain.py:2 with an unchanged terminal buffer',
+        'exact SHA ' + sha + ': a Relay-attached Session (no FileOps) showed ' +
+        '`Files is not available here` for plain.py:2 with an unchanged terminal buffer',
     });
   } finally {
     await context.close();
@@ -100,9 +102,14 @@ test('SC-06: an observer can open a permitted file without PTY input', async ({ 
     const before = await readTerminalState(controller);
 
     await attachExisting(second, expect, runtime, name, 'P2P', null);
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({
-      timeout: 30_000,
-    });
+    // The observer state is an opt-in notice (#2658): open the capsule's
+    // notices to see it, rather than expecting a permanent bar over the grid.
+    const notices = controller.getByTestId('terminal-notices-trigger');
+    await expect(notices).toBeVisible({ timeout: 30_000 });
+    await notices.click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible();
+    await controller.keyboard.press('Escape');
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeHidden();
 
     await activateReference(controller, 'plain.py:2');
     await expectFilesSurface(controller, expect, 'web');
