@@ -6,8 +6,15 @@
   var mock=document.getElementById("sandbox-product");
   var output=document.getElementById("sandbox-inspector");
   if(!root||!device||!mock)return;
-  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,resourceRows:[],syscallRows:[]};
-  function cloneDraft(d){return Object.assign({},d,{resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)})});}
+  var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",denyEgress:"",pid:true,ipc:true,user:true,uts:false,cgroup:false,resourceRows:[],syscallRows:[]};
+  function cloneDraft(d){return Object.assign({},d,{
+      resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),
+      syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)}),
+      pathItems:{readOnly:(d.pathItems?.readOnly||String(d.readOnly||"").split(",").filter(Boolean)).slice(),
+        write:(d.pathItems?.write||String(d.write||"").split(",").filter(Boolean)).slice()},
+      networkRules:{allow:(d.networkRules?.allow||String(d.egress||"").split(",").filter(Boolean)).slice(),
+        deny:(d.networkRules?.deny||String(d.denyEgress||"").split(",").filter(Boolean)).slice()}
+    });}
   var activeEffective=cloneDraft(Object.assign({},defaultDraft,{resourceRows:[{id:101,key:"memory.max",value:"2147483648"}],syscallRows:[{id:102,key:"seccomp.profile",value:"nession-interactive-v1"}]}));
   // Effective-only prepared filesystem readback fixture: safe mount targets,
   // not editable EROFS image sources, host paths or digests.
@@ -209,25 +216,31 @@
     var kind=unavailable?"unavailable":observed?(active?"observed":"not-requested"):(active?"requested":"not-requested");
     return {key:id,name:dimensionNames[id],kind:kind,summary:description,count:entries.length};
   }
-  function compositionOverview(d,observed,selectable){
-    var classes=observed?" observed":selectable?" editable":"";
-    var header='<div class="composition-header"><div><h3>'+(observed?"当前生效组合 · Effective Composition":"Sandbox 组合 · Policy Composition")+'</h3>'+
-      '<p class="subline">'+(observed?"当前 Pane 的 Agent 观测结果（示例 Mock）；不可编辑或沿用上次草稿。":"组合以下五个策略维度，集中提交给同一次 Sandbox Enter；点击分组编辑。")+'</p></div>'+
-      '<span class="pill">'+(observed?"Observed / read-only":"Draft / requested")+'</span></div>';
-    var groups=compositionClusters.map(function(cluster){
-      return '<section class="composition-cluster"><div class="composition-cluster-head"><strong>'+cluster.label+'</strong><span>'+cluster.subtitle+'</span></div>'+
-        cluster.groups.map(function(id){
-          var p=compositionState(d,id,observed),selected=selectable&&state.openGroup===id;
-          var status={unavailable:"当前不可用",observed:"示例已生效",requested:"已申请", "not-requested":"未申请"}[p.kind];
-          var core='<span class="composition-row-main"><span class="composition-name">'+p.name+'</span>'+
-            '<span class="composition-summary">'+escapeHtml(p.summary)+'</span></span>'+
-            '<span class="composition-state '+p.kind+'">'+status+'</span>'+
-            (selectable?'<span class="composition-chevron" aria-hidden="true">'+(selected?"−":"›")+'</span>':'');
-          return selectable?'<button type="button" class="composition-row'+(selected?' selected':'')+'" data-action="select-policy:'+id+'" aria-pressed="'+selected+'" aria-label="Edit '+p.name+'">'+core+'</button>':
-            '<div class="composition-row static" data-composition-dimension="'+id+'">'+core+'</div>';
-        }).join("")+'</section>';
-    }).join("");
-    return '<section data-testid="sandbox-composition" class="policy-composition'+classes+'" aria-label="'+(observed?"Effective Sandbox composition":"Draft Sandbox composition")+'">'+header+groups+'</section>';
+
+  var moduleCopy={
+    filesystem:"可见路径、读写权限和预制根文件系统",
+    network:"网络模式及出站目标规则",
+    process:"PID / IPC / USER / UTS / CGROUP 命名空间",
+    resource:"Agent 发现的原生 cgroup v2 文件和写入值",
+    syscall:"Agent 注册的 seccomp Profile"
+  };
+  function compositionOverview(d,observed){
+    var labels=["filesystem","network","process","resource","syscall"];
+    return '<section class="config-index" data-testid="sandbox-config-index" aria-label="Sandbox configuration destinations">'+
+      '<div class="composition-header"><div><h3>配置与检查</h3><p class="subline">'+(observed?
+      '逐项查看当前执行的实际生效配置；不能直接修改正在运行的隔离环境。':
+      '每类配置都有自己的管理页面。修改会保存在同一份 Sandbox Policy 草稿中。')+
+      '</p></div><span class="pill">'+(observed?'Inside · observed':'Outside · draft')+'</span></div>'+
+      '<nav class="config-destinations" aria-label="Sandbox configuration sections">'+
+      labels.map(function(id){
+        var p=compositionState(d,id,observed),
+          status=({unavailable:"不可用",observed:"已观测",requested:"已配置","not-requested":"未配置"})[p.kind];
+        return '<button type="button" class="config-destination" data-action="open-module:'+id+'" data-testid="sandbox-nav-'+id+'" aria-label="Open '+dimensionNames[id]+'">'+
+          '<span class="config-destination-copy"><strong>'+dimensionNames[id]+'</strong>'+
+          '<span>'+moduleCopy[id]+'</span><small>'+escapeHtml(p.summary)+'</small></span>'+
+          '<span class="config-destination-state '+p.kind+'">'+status+'</span>'+
+          '<span class="config-destination-chevron" aria-hidden="true">›</span></button>';
+      }).join('')+'</nav></section>';
   }
   function policyJson(d,title,always){
     var view=always||state.showPolicyJson;
@@ -238,31 +251,80 @@
         '<pre data-testid="sandbox-composed-json" class="policy-json" aria-label="'+title+'">'+escapeHtml(JSON.stringify(policyProjection(d),null,2))+'</pre>'):'')+
       '</section>';
   }
-  function editor(){
+
+  function listEditor(field,kind){
+    var isPath=kind==="path",items=isPath?state.draft.pathItems[field]:state.draft.networkRules[field];
+    var title=isPath?(field==="readOnly"?"Read-only paths":"Writable paths"):(field==="allow"?"Allowed destinations":"Denied destinations");
+    var shortName=isPath?"路径":"目标";
+    var disabled=isPath&&settings().macos;
+    return '<section class="module-list" data-list-kind="'+kind+'" data-list-name="'+field+'">'+
+      '<div class="module-list-head"><div><h4>'+title+'</h4><p class="subline">'+items.length+' 项 · 单独增删和编辑</p></div>'+
+      '<button class="action" data-action="add-'+kind+':'+field+'"'+(disabled?' disabled':'')+'>＋ 添加'+shortName+'</button></div>'+
+      (items.length?'<div class="module-items">'+items.map(function(value,index){
+        return '<div class="module-item"><label for="module-'+kind+'-'+field+'-'+index+'">'+shortName+' '+(index+1)+'</label>'+
+          '<div class="module-item-edit"><input id="module-'+kind+'-'+field+'-'+index+'" data-collection="'+kind+'" data-list-name="'+field+'" data-list-index="'+index+'" value="'+escapeHtml(value)+'" aria-label="'+title+' '+(index+1)+'" placeholder="'+(isPath?"/absolute/path":"example.com:443")+'"'+(disabled?' disabled':'')+'>'+
+          '<button class="action" data-action="remove-'+kind+':'+field+':'+index+'" aria-label="Remove '+title+' '+(index+1)+'"'+(disabled?' disabled':'')+'>移除</button></div></div>';
+      }).join('')+'</div>':'<p class="module-empty">尚未添加'+title+'；不会生成额外规则。</p>')+
+      '</section>';
+  }
+  function filesystemEditor(){
+    return '<section class="module-domain"><p class="subline">路径授权由当前 Sandbox 的 mount view 执行；Agent-prepared EROFS Root 是另一种互斥的文件系统输入，不在此编辑内核镜像文件。</p>'+
+      '<div class="module-start-dir">'+configInput("workingDir","Shell working directory",state.draft.workingDir,"input","full")+'</div>'+
+      listEditor("readOnly","path")+listEditor("write","path")+
+      '<div class="module-hint">只有指定路径在 Sandbox 中可见；所有路径及权限最终由 Agent 校验。</div></section>';
+  }
+  function networkEditor(){
+    var d=state.draft;
+    return '<section class="module-domain"><div class="module-mode"><h4>网络模式</h4><p class="subline">选择模式后单独管理目标规则；不是一个自由格式的 KV。</p>'+
+      configInput("network","Mode",d.network,"select")+'</div>'+
+      (d.network==="restricted"?listEditor("allow","network")+listEditor("deny","network"):
+        '<div class="module-hint">当前模式 '+escapeHtml(d.network)+' 不使用自定义 egress 列表。已有草稿保留，切回 restricted 可继续编辑。</div>')+
+      '<p class="module-hint">V1 ingress: deny；restricted 的目标由后端代理执行，Agent 验证最终配置。</p></section>';
+  }
+  function processEditor(){
     var d=state.draft,m=settings().macos;
-    var key=state.openGroup;
-    var head='<section class="policy-editor" data-testid="sandbox-policy-editor" aria-label="Sandbox Policy Draft">'+
-      '<div class="editor-focus-head"><div><h3>'+dimensionNames[key]+'</h3><p class="subline">当前只编辑此组。切换分组不会丢失草稿，也不会重新校验。</p></div>'+
-      '<span class="pill">Policy v1</span></div>';
-    var fields='';
-    if(key==="filesystem"){
-      fields='<div class="policy-group focus-group"><div><h3>Filesystem Access</h3><div class="hint2">'+(m?'macOS 的本地路径白名单以实测为准':'显式路径授权；预制 EROFS composition 是另一种互斥的执行输入')+'</div></div><div class="policy-fields">'+
-        configInput('readOnly','Read-only paths',m?'':d.readOnly,'input','full'+(m?' unavailable':''))+
-        configInput('write','Writable paths',m?'':d.write,'input','full'+(m?' unavailable':''))+'</div></div>';
-    }else if(key==="network"){
-      fields='<div class="policy-group focus-group"><div><h3>Network</h3><div class="hint2">mode + egress，当前 V1 ingress deny</div></div><div class="policy-fields">'+
-        configInput('network','Network mode',d.network,'select')+
-        configInput('egress','Restricted egress allow',d.egress,'input',d.network==='restricted'?'':'unavailable')+'</div></div>';
-    }else if(key==="process"){
-      fields='<div class="policy-group focus-group"><div><h3>Process</h3><div class="hint2">原生 Linux namespaces</div></div><div class="checkrow">'+
-        toggler('pid','PID',d.pid,m)+toggler('ipc','IPC',d.ipc,m)+toggler('user','USER',d.user,m)+
-        (m?'<span class="subtxt">macOS 不提供 Linux namespaces</span>':'')+'</div></div>';
-    }else if(key==="resource"){
-      fields='<div class="policy-group focus-group"><div><h3>Resource</h3><div class="hint2">Agent 发现 · Linux cgroup v2 原生 Key/Value</div></div>'+kvRows("resource",m)+'</div>';
-    }else if(key==="syscall"){
-      fields='<div class="policy-group focus-group"><div><h3>Syscall</h3><div class="hint2">Agent 注册的 seccomp profile</div></div>'+kvRows("syscall",m)+'</div>';
-    }
-    return head+fields+'<div class="extra-dim">Enforcement: <strong>required</strong> · 一份 Policy，作用于新隔离 Pane；不是整个 Session。</div></section>';
+    var desc={pid:"隔离 PID 可见范围",ipc:"隔离 IPC 对象",user:"独立用户命名空间",uts:"独立 UTS 主机名空间",cgroup:"隔离 cgroup 命名空间；需要 USER"};
+    return '<section class="module-domain"><p class="subline">这些是原生 Linux Namespace 能力，不是 Resource 文件，也不是可自由填写的 Key。</p>'+
+      '<div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(key){
+        return '<label class="namespace-item"><span><strong>'+key.toUpperCase()+'</strong><small>'+desc[key]+'</small></span>'+
+          '<input type="checkbox" data-draft="'+key+'"'+(d[key]?' checked':'')+(m?' disabled':'')+' aria-label="'+key.toUpperCase()+' namespace"></label>';
+      }).join('')+'</div>'+
+      (m?'<p class="module-hint">macOS Seatbelt 不提供这些 Linux Namespace 开关。</p>':'')+
+      '<p class="module-hint">真实是否安装由 Agent 的执行验证报告决定；仅勾选不代表当前 Pane 已隔离。</p></section>';
+  }
+  function resourceEditor(){
+    var catalog=agentFieldCatalog(),groups={};
+    catalog.resource.forEach(function(item){if(!groups[item.controller])groups[item.controller]=[];groups[item.controller].push(item)});
+    var selectors=Object.keys(groups).map(function(controller){
+      return '<div class="resource-controller"><strong>'+escapeHtml(controller)+'</strong>'+
+        '<div class="resource-available">'+groups[controller].map(function(item){
+          var selected=state.draft.resourceRows.some(function(row){return row.key===item.key});
+          return '<button type="button" class="resource-available-file" data-action="resource-add:'+escapeHtml(item.key)+'"'+(selected?' disabled':'')+'>'+escapeHtml(item.key)+(selected?' · 已配置':' ＋')+'</button>';
+        }).join('')+'</div></div>';
+    }).join('');
+    return '<section class="module-domain" data-resource-manager><h4>Agent 发现的可配置文件</h4><p class="subline">从当前受管子 cgroup 的 controller 文件中发现；值不由 Nession 解析或换算。单击文件加入下方配置列表。</p>'+
+      (selectors||'<p class="module-empty">此 Agent 暂无可用的原生 Resource 文件。</p>')+
+      '<div class="module-list"><div class="module-list-head"><h4>待写入的 Resource 配置</h4><span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
+      kvRows("resource",settings().macos)+'</div></section>';
+  }
+  function syscallEditor(){
+    var values=agentFieldCatalog().syscall.find(function(x){return x.key==="seccomp.profile"});
+    var picked=state.draft.syscallRows[0]?.value||"";
+    return '<section class="module-domain" data-syscall-profiles><h4>Seccomp Profile</h4>'+
+      '<p class="subline">通过 Agent 注册的 profile 选择完整过滤规则；与 cgroup v2 文件无关，不能填写任意 syscall 或 BPF。</p>'+
+      (values?'<div class="profile-choice"><label for="sandbox-profile">当前选择</label><select id="sandbox-profile" data-sandbox-profile>'+
+        '<option value="">不添加额外 Profile</option>'+
+        values.values.map(function(v){return '<option value="'+escapeHtml(v)+'"'+(picked===v?' selected':'')+'>'+escapeHtml(v)+'</option>'}).join('')+
+        '</select><p class="module-hint">选择只修改待执行的 Policy 草稿。Agent 会在执行时验证该 profile 是否实际安装。</p></div>':
+        '<div class="module-empty">当前 Agent 未报告可用的 seccomp profile；无法选择。</div>')+
+      (picked?'<div class="module-detail-note"><strong>已选 Profile</strong><code>'+escapeHtml(picked)+'</code><p>内核/Bubblewrap 的 seccomp 加载必须通过执行验证；本页不允许上传自定义过滤程序。</p></div>':'')+
+      '</section>';
+  }
+  function editor(){
+    var id=state.openGroup;
+    return '<section class="module-editor" data-testid="sandbox-policy-editor" aria-label="'+dimensionNames[id]+' management">'+
+      ({filesystem:filesystemEditor,network:networkEditor,process:processEditor,resource:resourceEditor,syscall:syscallEditor}[id])()+
+      '</section>';
   }
   function policyDescription(d){
     return '<div class="dimlist">'+
