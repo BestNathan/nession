@@ -90,7 +90,8 @@ jobs:
                .path == ".github/workflows/ci-run-store-integrity-audit.yml") or
               (.name == "E2E / Tests" and
                .path == ".github/workflows/e2e-tests.yml") or
-              (.name == "E2E / Full Regression" and
+              ((.name == "E2E / Full Regression" or
+                .name == ("Full Regression main@" + $sha)) and
                .path == ".github/workflows/e2e-full-regression.yml") or
               (.name == "Deploy / Public Pages" and
                .path == ".github/workflows/deploy-pages.yml")
@@ -98,11 +99,13 @@ jobs:
             .event == "push" and .head_branch == "main" and
             .head_sha == $sha and .status == "completed" and
             .conclusion == "success"' "$RUNNER_TEMP/source.json" > /dev/null
+          # Match Full by canonical workflow path because GitHub REST may expose
+          # the dynamic `run-name` as `name`, not the static workflow name (#3196).
           # A "Not Required" Full run also concludes success, but its `full`
           # job is skipped. Only a real exact-SHA Full execution may wake
           # release qualification; a skipped one authorizes nothing (#2323).
           wake=true
-          if [[ "$(jq -r .name "$RUNNER_TEMP/source.json")" == 'E2E / Full Regression' ]]; then
+          if [[ "$(jq -r .path "$RUNNER_TEMP/source.json")" == '.github/workflows/e2e-full-regression.yml' ]]; then
             gh api \
               "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/attempts/$SOURCE_ATTEMPT/jobs?per_page=100" \
               > "$RUNNER_TEMP/source-jobs.json"
