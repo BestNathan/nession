@@ -44,24 +44,9 @@ on:
       - 'justfile'
   pull_request:
     branches: [staging, main]
-    # Scope PR execution to changes that can affect this validator.
-    # Keep push / manual triggers unchanged for exact-SHA evidence.
-    paths:
-      - '.github/workflows/e2e-tests.yml'
-      # CI Quality workflow-only edits cannot change application/browser behavior.
-      # The Quality workflow-check validates them without a full E2E run.
-      - 'crates/**'
-      - 'web/**'
-      - 'design/**'
-      - 'e2e/**'
-      - 'gates/**'
-      - 'scripts/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.cargo/**'
-      - 'justfile'
-
+    # Do not filter the PR event by changed paths: an exact two-parent
+    # convergence integration can have an empty net diff but still requires
+    # authenticated exact-HEAD checks. Trusted selectors scope actual work.
 # One run per branch/PR. Superseded runs are useless, so cancel them.
 concurrency:
   # A superseded PR can be cancelled; each completed main Push must retain
