@@ -1,5 +1,12 @@
 name: E2E / Full Regression
 
+# Trusted dispatch source identity is visible on REST Workflow Runs. The
+# checked 'full' job still independently pins and verifies this exact commit.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' &&
+      format('Convergence Full {0}@{1}', inputs.target_ref, inputs.target_sha) ||
+      format('Full Regression {0}@{1}', github.ref_name, github.sha) }}
+
 # Periodic Main health is independent of postmerge exact-SHA release
 # qualification (#2323). Default every 12h via GitHub Vars.
 on:

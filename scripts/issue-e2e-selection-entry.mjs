@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
+import {isNativeConvergencePr,convergenceE2ESelection} from './staging-convergence-pr.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -122,6 +123,12 @@ export function prepare(event, issues, repoRoot) {
     ? pr.base.sha
     : currentBaseSha(repoRoot, pr.base.ref);
   if (baseSha === pr.head.sha) throw Error('current PR base and head SHA are identical');
+  // A trusted two-parent release integration carries its E2E obligations on
+  // the immutable PR/source graph, not in a throwaway Requirement Issue.
+  if(isNativeConvergencePr(pr)){
+    if(issues.length)throw Error('PR-native convergence must not depend on Issue contracts');
+    return {...convergenceE2ESelection(pr,repoRoot,baseSha),pr_number:pr.number};
+  }
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
     const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, pr.head.sha);
     return { schema_version:1, kind:'issue_e2e_selection', pr_number:pr.number,
