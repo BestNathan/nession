@@ -196,17 +196,28 @@ await assert.rejects(
   /unauthorized fields/
 );
 await assert.rejects(applyIssueAuditProposal(issue, { result: 'not json' }, 'example/repo'), /not valid JSON/);
+// An empty proposal on an invalid Issue cannot silently produce a successful
+// audit record; after one correction, it must become a typed needs-review.
+await assert.rejects(applyIssueAuditProposal(issue,{result:'{}'},'example/repo'),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
+  return true;
+});
+const tierlessValid={...validBatch,labels:validBatch.labels.filter(x=>!x.name.startsWith('verification:'))};
+await assert.rejects(applyIssueAuditProposal(tierlessValid,{result:'{}'},'example/repo'),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_TIER_PROPOSAL');
+  return true;
+});
 // Provider --output-format json only protects the outer envelope; model text
 // may include fences or a short preamble. Neither should require another call.
 for(const raw of ['{}','```json\n{}\n```','Here is the proposal:\n```json\n{}\n```']){
   let retries=0;
-  await applyIssueAuditProposal(issue,{result:raw},'example/repo',{
+  await applyIssueAuditProposal(validBatch,{result:raw},'example/repo',{
     repair:async()=>{retries++;return '{"unauthorized":true}';},
   });
   assert.equal(retries,0,'valid embedded/fenced JSON must not incur a retry');
 }
 let repairAttempts=0;
-await applyIssueAuditProposal(issue,{result:'not valid json'},'example/repo',{
+await applyIssueAuditProposal(validBatch,{result:'not valid json'},'example/repo',{
   repair:async bounded=>{
     repairAttempts++;
     assert.equal(bounded,'not valid json');
