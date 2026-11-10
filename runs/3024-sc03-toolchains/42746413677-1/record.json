@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "3024-sc03-toolchains",
+  "source_sha": "0484f2da01da84faa1ba6373505a8ac3981d5b00",
+  "source_digest": "56c3d3dd7054aa07e6a49225f213501a03d07339c3c879ef629310a8844e36a3",
+  "entry": "run.mjs",
+  "workflow": {
+    "id": 42746413677,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42746413677",
+    "event": "push",
+    "branch": "task/3024-sc03-toolchains",
+    "conclusion": "failure"
+  },
+  "execution": {
+    "status": "Failed",
+    "exit_code": 1,
+    "started_at": "2026-11-10T02:59:22.919Z",
+    "finished_at": "2026-11-10T03:00:19.455Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "erofs_toolchain_composition",
+      "issue": 3024,
+      "source_sha": "0484f2da01da84faa1ba6373505a8ac3981d5b00",
+      "base": {
+        "sha256": "6b9480cfe1db726e9d85dc2e324f4192ec6203edb78a771d3a0fee7513392360",
+        "size": 1727324160
+      },
+      "node": {
+        "sha256": "7432d7525161f3f2ff10b22728c1d2e910e370a5f7ee6bf488a9fed43fecc164",
+        "size": 133013504
+      },
+      "rust": {
+        "sha256": "392031ab2b345e621717b3fc48a575fa52114bd21756a7bb5d121a1fd1fc91ad",
+        "size": 612855808
+      },
+      "result": "fail",
+      "kernel": "7.0.0-1017-azure",
+      "error": "bash -c bwrap --unshare-user --unshare-pid --unshare-ipc --unshare-uts --tmpfs / --ro-bind /tmp/sc03-mnt/base / --bind /tmp/sc03-ws /workspace --ro-bind /tmp/sc03-mnt/rust /opt/rust --ro-bind /tmp/sc03-mnt/node /opt/node --dev /dev --proc /proc --tmpfs /run/nession --chdir /workspace /bin/sh /workspace/run.sh exited 1: bwrap: setting up uid map: Permission denied\n"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/0484f2da01da84faa1ba6373505a8ac3981d5b00/3024-sc03-toolchains.json"
+}
