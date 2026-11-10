@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -8,6 +8,7 @@ import {describeFields,fieldSince,projectProtocolSchema,loadDocuments,
   validPublicDocuments,unavailableDocuments} from '../scripts/documents-project.mjs';
 import {releaseProtocolHistory,sortedReleases}
   from '../scripts/protocol-release-history.mjs';
+import {taggedProtocolSchema} from '../scripts/protocol-git-history.mjs';
 import {documentsHref,documentsRoute,validDocumentsSnapshot,
   filterDocuments,renderDocuments} from '../documents.js';
 import {NAV_ITEMS} from '../navigation.js';
@@ -161,8 +162,23 @@ test('tagged release assets must be source pinned and cannot be inferred from ma
   assert.deepEqual(history.map(r=>r.version),['0.35.0','0.36.0']);
   const missing=await releaseProtocolHistory({releases:[
     {tag_name:'v0.35.0',assets:[]}
-  ],api:async()=>{throw Error('tag lookup is unnecessary');}});
+  ],api:async()=>({object:{type:'commit',sha:OLD_SHA}})});
   assert.equal(missing[0].status,'unavailable');
+  assert.equal(missing[0].sha,OLD_SHA);
+  const reconstructed=await releaseProtocolHistory({releases:[
+    {tag_name:'v0.36.0',assets:[]}],
+    api:async()=>({object:{type:'commit',sha:OLD_SHA}}),
+    snapshotAtTag:async({tag,version,sha})=>{
+      assert.equal(tag,'v0.36.0');
+      assert.equal(version,'0.36.0');
+      assert.equal(sha,OLD_SHA);
+      return fixture();
+    }});
+  assert.equal(reconstructed[0].status,'available');
+  assert.equal(projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
+    releases:[release('0.35.0',fixture({legacy:true})),...reconstructed]})
+    .protocols.find(p=>p.id==='git.status').versions[1]
+    .response.fields.find(row=>row.path==='snapshot').since,'0.36.0');
   const raw=JSON.stringify({schema_version:1,source:{repository:'BestNathan/nession',
     tag:'v0.36.0',sha:OLD_SHA,version:'0.36.0'},schema:fixture()});
   const url='https://github.com/BestNathan/nession/releases/download/v0.36.0/nession-protocol-schema.json';
@@ -179,6 +195,76 @@ test('tagged release assets must be source pinned and cannot be inferred from ma
     api:async()=>({object:{type:'commit',sha:OLD_SHA}}),
     fetcher:async()=>({ok:true,arrayBuffer:async()=>Buffer.from(poisoned)})});
   assert.equal(bad[0].status,'unavailable');
+});
+test('Git Tag codegen uses a SHA-verified isolated worktree and a SHA cache',async()=>{
+  const base=await mkdtemp(join(tmpdir(),'nession-pages-tag-test-'));
+  const calls=[];
+  let env=null,compiles=0;
+  const command=async(program,args,opts={})=>{
+    calls.push([program,...args]);
+    if(program==='git'&&args.includes('rev-parse'))return OLD_SHA;
+    if(program==='git'&&args.includes('cat-file'))return '';
+    if(program==='git'&&args.includes('add')){
+      const dest=args.at(-2)==='--detach'?args.at(-1):null;
+      assert.ok(dest);
+      await mkdir(dest,{recursive:true});
+      await writeFile(join(dest,'Cargo.toml'),
+        '[workspace]\\nmembers = ["crates/nession-protocol-codegen"]\\n');
+      return '';
+    }
+    if(program==='git'&&args.includes('remove'))return '';
+    if(program==='cargo'){
+      compiles++;
+      env=opts.env;
+      assert.ok(opts.cwd.endsWith('/checkout'));
+      assert.deepEqual(args.slice(0,5),
+        ['run','--locked','--quiet','-p','nession-protocol-codegen']);
+      return JSON.stringify(fixture());
+    }
+    throw Error('unexpected command: '+[program,...args].join(' '));
+  };
+  try{
+    const input={tag:'v0.36.0',sha:OLD_SHA,repoRoot:base,
+      cacheDir:join(base,'cache'),command};
+    const first=await taggedProtocolSchema(input);
+    assert.deepEqual(first,fixture());
+    assert.equal(compiles,1);
+    assert.equal(env.GITHUB_TOKEN,undefined);
+    assert.equal(env.GH_TOKEN,undefined);
+    assert.notEqual(env.HOME,process.env.HOME);
+    assert.equal(calls.some(call=>call.includes('worktree')),true);
+    assert.deepEqual(await taggedProtocolSchema({...input,command:async()=>{
+      throw Error('cache should avoid git/cargo work');
+    }}),fixture());
+    assert.equal(compiles,1);
+    assert.equal(await taggedProtocolSchema({...input,tag:'../../evil'}),null);
+    assert.equal(await taggedProtocolSchema({
+      ...input,sha:SHA,command:async(program,args)=>{
+        if(program==='git'&&args.includes('rev-parse'))return OLD_SHA;
+        return '';
+      }}),null);
+  }finally{await rm(base,{recursive:true,force:true});}
+});
+test('missing historical codegen does not fabricate a field introduction',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'nession-protocol-old-tag-'));
+  try{
+    const result=await taggedProtocolSchema({
+      tag:'v0.35.0',sha:OLD_SHA,repoRoot:dir,cacheDir:join(dir,'cache'),
+      command:async(program,args)=>{
+        if(program==='git'&&args.includes('rev-parse'))return OLD_SHA;
+        if(program==='git'&&args.includes('cat-file'))
+          throw Error('missing historical generator');
+        throw Error('must not compile a missing generator');
+      }});
+    assert.equal(result,null);
+    const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
+      releases:[{version:'0.35.0',tag:'v0.35.0',sha:OLD_SHA,
+        status:'unavailable',schema:null},
+        release('0.36.0',fixture())]});
+    const field=doc.protocols.find(p=>p.id==='git.status').versions[1]
+      .response.fields.find(row=>row.path==='snapshot');
+    assert.equal(field.since_status,'unknown');
+  }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('deep links and search work with contract versions and paths',()=>{
   assert.equal(documentsHref('git.status',2),'#/documents?protocol=git.status&v=2');
