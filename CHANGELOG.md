@@ -527,3 +527,11 @@
 - Categories: web, app, interaction, session, project, presentation, responsive
 - Reason: Link the new Unified overlay and operation surface system article as the cross-family presentation contract these compositions select from
 - Source: https://github.com/BestNathan/nession/issues/3142
+
+## 2026-11-10T04:59:00Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Keep the Sandbox isolation proof while replacing one harmless standard host pathname that the strict public Knowledge screener rejected, blocking unrelated Prototype Pages; see incident reproduction and release checks in Issue #3145
+- Source: https://github.com/BestNathan/nession/issues/3145
+
