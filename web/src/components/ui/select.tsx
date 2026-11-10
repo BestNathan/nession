@@ -43,10 +43,13 @@ function SelectTrigger({
   /**
    * `content` is the multi-line variant (issue 3089): no fixed height and no
    * nowrap/line-clamp, so a selected record with several lines sets the
-   * control's height instead of overflowing it. Single-line triggers keep
-   * `default`/`sm` unchanged.
+   * control's height instead of overflowing it. `field` is the compact
+   * single-line form-field variant (issue 3136): it uses the Experience's
+   * control band (`control.md`, 32px Web / 44px App) with the same padding
+   * band as `Input`, so a Select and a neighbouring single-line field share a
+   * control baseline. Single-line `default`/`sm` triggers are unchanged.
    */
-  size?: "sm" | "default" | "content"
+  size?: "sm" | "default" | "content" | "field"
 }) {
   return (
     <SelectPrimitive.Trigger
@@ -56,7 +59,9 @@ function SelectTrigger({
         "flex w-fit justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm transition-colors outline-none select-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:focus-visible:outline-solid aria-invalid:focus-visible:outline-[length:var(--nession-focus-ring-width)] aria-invalid:focus-visible:outline-ring aria-invalid:focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))] data-placeholder:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         size === "content"
           ? "items-start whitespace-normal *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-start *:data-[slot=select-value]:gap-1.5"
-          : "items-center whitespace-nowrap data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-md *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5",
+          : size === "field"
+            ? "items-center whitespace-nowrap min-h-[length:var(--nession-control-md)] py-1 data-[size=field]:rounded-lg *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5"
+            : "items-center whitespace-nowrap data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-md *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5",
         className
       )}
       {...props}

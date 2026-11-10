@@ -127,7 +127,10 @@ test.describe('Project Existing-location Session creation', () => {
       expect(popupBox).not.toBeNull();
       expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
       const openTriggerBox = await trigger.boundingBox();
-      expect(Math.abs(popupBox!.width - openTriggerBox!.width)).toBeLessThanOrEqual(2);
+      // #3164 superseded the anchor-width-only option list: a resource list is
+      // never narrower than its trigger, but may grow up to the choice-width
+      // role and the viewport clamp. Equality is no longer the contract.
+      expect(popupBox!.width).toBeGreaterThanOrEqual(openTriggerBox!.width - 0.5);
       for (const option of await options.all()) {
         const optionBox = await option.boundingBox();
         expect(optionBox).not.toBeNull();
