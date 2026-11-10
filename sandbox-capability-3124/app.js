@@ -26,7 +26,7 @@
       {target:"/opt/rust",source:"Rust toolchain EROFS",mode:"ro"}
     ]
   }));
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:cloneDraft(defaultDraft),nextRowId:1,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
   var execution="sbx-70df40f4";
@@ -89,7 +89,7 @@
   function configInput(id,label,value,type,attr){
     var disabled=!!(attr&&attr.indexOf('unavailable')>=0);
     return '<div class="field '+(attr||'')+'"><label for="sandbox-'+id+'">'+label+'</label>'+
-      (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"><option value="allow"'+(value==="allow"?' selected':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+'>restricted · 白名单</option></select>':
+      (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"'+(disabled?' disabled':'')+'><option value="allow"'+(value==="allow"?' selected':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+'>restricted · 白名单</option></select>':
       '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
   }
 
@@ -213,7 +213,7 @@
       entries=d[id+"Rows"]||[];active=entries.length>0;
       description=active?entries.length+" 条 · "+entries.map(function(x){return x.key||"未填写 Key"}).slice(0,2).join("、")+(entries.length>2?" 等":""):"未添加额外控制";
     }
-    var kind=unavailable?"unavailable":observed?(active?"observed":"not-requested"):(active?"requested":"not-requested");
+    var kind=!s.supported?"unknown":unavailable?"unavailable":observed?(active?"observed":"not-requested"):(active?"requested":"not-requested");
     return {key:id,name:dimensionNames[id],kind:kind,summary:description,count:entries.length};
   }
 
@@ -234,7 +234,7 @@
       '<nav class="config-destinations" aria-label="Sandbox configuration sections">'+
       labels.map(function(id){
         var p=compositionState(d,id,observed),
-          status=({unavailable:"不可用",observed:"已观测",requested:"已配置","not-requested":"未配置"})[p.kind];
+          status=({unavailable:"不可用",unknown:"状态未知",observed:"已观测",requested:"已配置","not-requested":"未配置"})[p.kind];
         return '<button type="button" class="config-destination" data-action="open-module:'+id+'" data-testid="sandbox-nav-'+id+'" aria-label="Open '+dimensionNames[id]+'">'+
           '<span class="config-destination-copy"><strong>'+dimensionNames[id]+'</strong>'+
           '<span>'+moduleCopy[id]+'</span><small>'+escapeHtml(p.summary)+'</small></span>'+
@@ -256,7 +256,7 @@
     var isPath=kind==="path",items=isPath?state.draft.pathItems[field]:state.draft.networkRules[field];
     var title=isPath?(field==="readOnly"?"Read-only paths":"Writable paths"):(field==="allow"?"Allowed destinations":"Denied destinations");
     var shortName=isPath?"路径":"目标";
-    var disabled=isPath&&settings().macos;
+    var disabled=!settings().supported||(isPath&&settings().macos);
     return '<section class="module-list" data-list-kind="'+kind+'" data-list-name="'+field+'">'+
       '<div class="module-list-head"><div><h4>'+title+'</h4><p class="subline">'+items.length+' 项 · 单独增删和编辑</p></div>'+
       '<button class="action" data-action="add-'+kind+':'+field+'"'+(disabled?' disabled':'')+'>＋ 添加'+shortName+'</button></div>'+
@@ -276,13 +276,13 @@
   function networkEditor(){
     var d=state.draft;
     return '<section class="module-domain"><div class="module-mode"><h4>网络模式</h4><p class="subline">选择模式后单独管理目标规则；不是一个自由格式的 KV。</p>'+
-      configInput("network","Mode",d.network,"select")+'</div>'+
+      configInput("network","Mode",d.network,"select",settings().supported?"":"unavailable")+'</div>'+
       (d.network==="restricted"?listEditor("allow","network")+listEditor("deny","network"):
         '<div class="module-hint">当前模式 '+escapeHtml(d.network)+' 不使用自定义 egress 列表。已有草稿保留，切回 restricted 可继续编辑。</div>')+
       '<p class="module-hint">V1 ingress: deny；restricted 的目标由后端代理执行，Agent 验证最终配置。</p></section>';
   }
   function processEditor(){
-    var d=state.draft,m=settings().macos;
+    var d=state.draft,m=settings().macos||!settings().supported;
     var desc={pid:"隔离 PID 可见范围",ipc:"隔离 IPC 对象",user:"独立用户命名空间",uts:"独立 UTS 主机名空间",cgroup:"隔离 cgroup 命名空间；需要 USER"};
     return '<section class="module-domain"><p class="subline">这些是原生 Linux Namespace 能力，不是 Resource 文件，也不是可自由填写的 Key。</p>'+
       '<div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(key){
@@ -305,14 +305,14 @@
     return '<section class="module-domain" data-resource-manager><h4>Agent 发现的可配置文件</h4><p class="subline">从当前受管子 cgroup 的 controller 文件中发现；值不由 Nession 解析或换算。单击文件加入下方配置列表。</p>'+
       (selectors||'<p class="module-empty">此 Agent 暂无可用的原生 Resource 文件。</p>')+
       '<div class="module-list"><div class="module-list-head"><h4>待写入的 Resource 配置</h4><span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
-      kvRows("resource",settings().macos)+'</div></section>';
+      kvRows("resource",!settings().supported||settings().macos)+'</div></section>';
   }
   function syscallEditor(){
     var values=agentFieldCatalog().syscall.find(function(x){return x.key==="seccomp.profile"});
     var picked=state.draft.syscallRows[0]?.value||"";
     return '<section class="module-domain" data-syscall-profiles><h4>Seccomp Profile</h4>'+
       '<p class="subline">通过 Agent 注册的 profile 选择完整过滤规则；与 cgroup v2 文件无关，不能填写任意 syscall 或 BPF。</p>'+
-      (values?'<div class="profile-choice"><label for="sandbox-profile">当前选择</label><select id="sandbox-profile" data-sandbox-profile>'+
+      (values?'<div class="profile-choice"><label for="sandbox-profile">当前选择</label><select id="sandbox-profile" data-sandbox-profile'+(!settings().supported?' disabled':'')+'>'+
         '<option value="">不添加额外 Profile</option>'+
         values.values.map(function(v){return '<option value="'+escapeHtml(v)+'"'+(picked===v?' selected':'')+'>'+escapeHtml(v)+'</option>'}).join('')+
         '</select><p class="module-hint">选择只修改待执行的 Policy 草稿。Agent 会在执行时验证该 profile 是否实际安装。</p></div>':
@@ -441,17 +441,19 @@
     return html+'</section>';
   }
   function moduleView(){
-    var observed=settings().inside,id=state.openGroup,d=observed?actualPolicy():state.draft;
-    var p=compositionState(d,id,observed),label=observed?"Observed / effective":"Draft / editable";
+    var observed=settings().inside,id=state.openGroup;
+    var label=observed?"Observed / effective":settings().supported?"Draft / editable":"Agent unknown";
     var head='<div class="module-head"><div><p class="subline">'+moduleCopy[id]+'</p></div><span class="pill">'+label+'</span></div>'+
-      '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+(observed?"Sandbox Pane %8":"Native Pane %1")+
-      ' · nession-dev · '+(observed?"生效只读":"草稿配置")+'</div>';
+      '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+
+      (observed?"Sandbox Pane %8":settings().supported?"Native Pane %1":"当前 Pane 状态未知")+
+      ' · nession-dev · '+(observed?"生效只读":settings().supported?"草稿配置":"Agent 未验证")+'</div>';
     var back=state.mode==="web"?'<button class="action module-back" data-action="module-back">← 返回 Sandbox 配置目录</button>':"";
-    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+
+    var availability=!settings().supported?'<div class="notice warning">当前 Agent/Session 状态无法确认；此处仅供查看草稿，不可预检或 Enter。</div>':"";
+    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+availability+
       (observed?observedModule():editor())+
       (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
       (state.mode==="web"?'<button class="action" data-action="module-back">完成 · 返回 Sandbox</button>':'')+'</div>':
-      (state.mode==="web"?'<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>':'') )+
+      (state.mode==="web"?'<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>':''))+
       '</section>';
   }
   function detail(){
@@ -504,6 +506,7 @@
 
   function setFixture(value){
     state.fixture=value;
+    state.nativeFixture=value;
     state.peek=false;
     state.depth="root";
     state.preflight="none";
@@ -612,14 +615,14 @@
     else if(action==="toggle-policy-json"){state.showPolicyJson=!state.showPolicyJson;}
     else if(action.indexOf("add-kv:")===0){
       var kind=action.slice(7);
-      if((kind==="resource"||kind==="syscall")&&!settings().macos){
+      if((kind==="resource"||kind==="syscall")&&settings().supported&&!settings().macos){
         state.draft[kind+"Rows"].push({id:state.nextRowId++,key:"",value:""});state.openGroup=kind;
         state.preflight="none";state.preflightError="";state.error="";
       }
     }
     else if(action.indexOf("remove-kv:")===0){
       var args=action.split(":");var kind=args[1];
-      if((kind==="resource"||kind==="syscall")&&!settings().macos){
+      if((kind==="resource"||kind==="syscall")&&settings().supported&&!settings().macos){
         state.draft[kind+"Rows"]=state.draft[kind+"Rows"].filter(function(row){return String(row.id)!==args[2]});
         state.preflight="none";state.preflightError="";state.error="";
       }
@@ -641,7 +644,7 @@
       }
       else{state.effective=cloneDraft(state.draft);state.entered=true;state.pane="sandbox";state.depth="root";state.preflight="none";state.error="";}
     }
-    else if(action==="return-native"){state.pane="native";state.fixture="native";state.depth="root";state.preflight="none";state.error="";}
+    else if(action==="return-native"){state.pane="native";state.fixture=state.nativeFixture||"native";state.depth="root";state.preflight="none";state.error="";}
     else if(action==="switch-sandbox"){if(state.entered){state.pane="sandbox";state.depth="root";}}
     else if(action.indexOf("cap:")===0){state.cap=action.slice(4);state.depth="root";}
     else if(action.indexOf("session:")===0){
