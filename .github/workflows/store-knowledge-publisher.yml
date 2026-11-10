@@ -46,6 +46,7 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
+      actions: read # Exact upstream signal Job/Step readback; never write
     steps:
       - name: Checkout exact trusted main request verifier
         uses: actions/checkout@v4
@@ -58,6 +59,8 @@ jobs:
           node-version: '24'
       - name: Verify only authenticated owner/main requests and valid inert data
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node scripts/knowledge-publisher-request.mjs self-test
@@ -94,6 +97,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read # Revalidate source Job/Step with the same no-write policy
     # Environment MUST be precreated by admin: selected deployment branch main,
     # authorized reviewer, and only the dedicated Knowledge App private key.
     # A missing/unreviewed Environment is not a substitute for protection.
