@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { projectKnowledge, validatePublicKnowledge } from '../pages/scripts/knowledge-project.mjs';
 
 const LEGACY_CHECKPOINT = '56a85f84f39ca806c58a4f410a0c4a72bade51a3';
 const ID=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -241,6 +242,24 @@ function latestEventForArticle(entry,events) {
     fail('article timestamp differs from latest changelog event: '+entry.path);
   return latest;
 }
+// Admission parity: the governed Knowledge proposal must pass the *same* full
+// public projection that Pages will run, before the trusted Publisher can
+// fast-forward the protected knowledge ref. Pages owns disclosure screening;
+// never copy its regex/frontmatter policy into the Ledger contract.
+export function assertKnowledgePublicProjection({index,files,changelog,sha}) {
+  let projected;
+  try {
+    projected=projectKnowledge({
+      index,files,changelog,sha,
+      generatedAt:'2026-01-01T00:00:00Z', // deterministic non-published dry-run metadata
+    });
+  } catch(error) {
+    fail('public Pages projection rejects Knowledge candidate: '+error.message);
+  }
+  if(!validatePublicKnowledge(projected))
+    fail('public Pages projection returns an invalid public snapshot');
+  return projected.articles.length;
+}
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
     if(!['.git','.github','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
@@ -266,6 +285,13 @@ function verify(root,baseline=null) {
   // every change must have a same-commit global changelog event.
   const current=git(root,'rev-parse','HEAD');
   if(!SHA.test(current))fail('invalid checkout');
+  // Existing ledger schema/source/log checks alone do not guarantee that the
+  // public Pages projector accepts the real article bytes. Share the exact
+  // Pages implementation here instead of accepting a proposal that will later
+  // block unrelated Pages artifacts (Bug #3145).
+  const currentFiles=Object.fromEntries(Object.values(expected.topics).flat()
+    .map(entry=>[entry.path,fs.readFileSync(path.join(root,entry.path),'utf8')]));
+  assertKnowledgePublicProjection({index:expected,files:currentFiles,changelog:changeText,sha:current});
   git(root,'merge-base','--is-ancestor',LEGACY_CHECKPOINT,current);
   git(root,'merge-base','--is-ancestor',TITLE_BASE,current);
   const roots=git(root,'rev-list','--max-parents=0',current).split('\n').filter(Boolean);
@@ -393,6 +419,28 @@ function fixture() {
       {oldIndex:{topics:{workflows:[]}}},
     ])assert.equal(isPinnedSplitIndexRepair({...caseRecord,...bad}),false,
       'index repair exemption must be exact and unreusable');
+    // Regression #3145: the previously accepted Knowledge body could be
+    // committed because the Ledger did not run the public disclosure projector.
+    // Both valid source and the exact formerly missed /etc/ counterexample
+    // must be evaluated by the same Pages rule (without a duplicate regex).
+    const publicIndex={schema_version:2,topics:{engineering:[{
+      title,description:'Full descriptive name',path:file,status:'verified',
+      categories:['architecture','knowledge'],updated_at:at,
+    }]},categories:{architecture:[file],knowledge:[file]}};
+    const publicLog=HEADER+'## '+at+' | create | '+title+'\n'+
+      '- Path: '+file+'\n- Topic: engineering\n'+
+      '- Categories: architecture, knowledge\n'+
+      '- Reason: Initial article\n'+
+      '- Source: https://github.com/BestNathan/nession/issues/2325\n';
+    const pub={index:publicIndex,files:{[file]:article},changelog:publicLog,
+      sha:'a'.repeat(40)};
+    assert.equal(assertKnowledgePublicProjection(pub),1);
+    assert.throws(()=>assertKnowledgePublicProjection({
+      ...pub,files:{[file]:article.replace('Current knowledge.','Host /etc/shadow absent.')},
+    }),/public Pages projection rejects Knowledge candidate:.*sensitive article body/);
+    assert.throws(()=>assertKnowledgePublicProjection({
+      ...pub,files:{[file]:article.replace('Current knowledge.','Host /home/agent/.ssh/id_rsa absent.')},
+    }),/public Pages projection rejects Knowledge candidate:.*sensitive article body/);
     put(file,article);
     const idx=indexFor(d);
     assert.equal(idx.topics.engineering[0].title,title);

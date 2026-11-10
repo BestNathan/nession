@@ -68,7 +68,12 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
   const run=deployRuns.filter(r=>deployment_workflows.some(file=>r.path?.split('@')[0]==='.github/workflows/'+file) &&
     r.head_sha===laneSha && r.head_branch===branch && r.event==='push' &&
     r.repository?.full_name===REPO && r.head_repository?.full_name===REPO);
-  if(!run.length||run[0].conclusion!=='success')return fail('STAGING_RELEASE_NOT_PROVEN');
+  // GitHub run inventories are not a stable ordering guarantee; an older
+  // success must not mask a later failed/in-progress deployment attempt.
+  const latest=[...run].sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+    (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
+  if(!latest||latest.status!=='completed'||latest.conclusion!=='success')
+    return fail('STAGING_RELEASE_NOT_PROVEN');
   if(!Array.isArray(associations)||associations.length!==firstParentCommits.length)
     return fail('INCOMPLETE_PR_PROVENANCE');
   const referenced=new Set();
@@ -79,9 +84,9 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
       pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1)return fail('MISSING_STAGING_MERGE_PR:'+item);
     const pr=matches[0];
-    // Trusted main->staging sync PRs introduce no new acceptance obligations.
-    if(pr.head?.ref==='main' &&
-      pr.body?.includes('Staging Convergence automated proposal'))continue;
+    // A generated sync PR still has an Issue-owned acceptance contract.
+    // Never infer authorization from a forgeable head prefix/body marker:
+    // it must carry source-bound Issue provenance like any other Staging PR.
     const numbers=parsePreMergeIssueNumbers(pr.body, 'BestNathan','nession',pr.title);
     if(numbers.length===0)return fail('UNASSOCIATED_STAGING_CHANGE:'+item);
     for(const number of numbers)referenced.add(number);
@@ -103,8 +108,18 @@ function read(route){
   return JSON.parse(execFileSync('gh',['api','repos/'+REPO+'/'+route],
     {encoding:'utf8',env:{...process.env,GH_TOKEN:token},maxBuffer:4_000_000}));
 }
+// Never nest a workflow-runs endpoint inside the repository-wide runs query.
+// The latter silently lost exact-SHA staging deployment proof during promotion.
+export function workflowRunsRoute(route){
+  if(typeof route!=='string'||!(
+    /^head_sha=[a-f0-9]{40}&event=pull_request$/.test(route)||
+    /^actions\/workflows\/[A-Za-z0-9._-]+\.ya?ml\/runs\?head_sha=[a-f0-9]{40}$/.test(route)
+  ))throw Error('invalid bounded workflow run route');
+  return (route.startsWith('actions/workflows/')?route:'actions/runs?'+route)+
+    '&per_page=100';
+}
 function getRuns(route){
-  const result=read('actions/runs?'+route+'&per_page=100');
+  const result=read(workflowRunsRoute(route));
   if(!Array.isArray(result.workflow_runs)||result.total_count>100)
     throw new Error('unbounded workflow run inventory');
   return result.workflow_runs;
@@ -215,6 +230,31 @@ function selfTest(){
     'newer failed check must override historical green');
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[],
     issues:[],deployRuns:[],laneSha:b}).ready,false);
+  // A staging sync branch and model-copyable PR body do not attest Issue
+  // acceptance. With a valid deployment Run, missing source Issues must
+  // still block *before* main promotion, even if the PR is bot-shaped.
+  const deployed={path:DEPLOY,head_sha:b,head_branch:'staging',event:'push',
+    status:'completed',conclusion:'success',run_number:10,run_attempt:1,
+    repository:{full_name:REPO},head_repository:{full_name:REPO}};
+  const forged={merge_commit_sha:a,merged_at:'2026-11-10T00:00:00Z',
+    base:{ref:'staging',repo:{full_name:REPO}},
+    head:{ref:'chore/staging-sync-staging-aaaaaaaaaaaa-bbbbbbbbbbbb',
+      repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (source: copied)',title:'auto sync'};
+  assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[[forged]],
+    issues:[],deployRuns:[deployed],laneSha:b}).reason,'UNASSOCIATED_STAGING_CHANGE:'+a);
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[{...forged,body:forged.body+'\n\nRefs #123'}]],
+    issues:[{number:123,labels:[{name:'requirement'}],body:'Pending'}],
+    deployRuns:[deployed],laneSha:b}).reason,'PENDING_ISSUE_ACCEPTANCE:123');
+  assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
+    'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
+  assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
+    'actions/workflows/release-staging.yml/runs?head_sha='+b+'&per_page=100');
+  assert.throws(()=>workflowRunsRoute('actions/runs?actions/workflows/x.yml/runs?head_sha='+b),
+    /invalid bounded workflow run route/);
+  assert.throws(()=>workflowRunsRoute('actions/workflows/../runs?head_sha='+b),
+    /invalid bounded workflow run route/);
   console.log('staging convergence readiness self-test: PASS');
 }
 if(process.argv[1]?.endsWith('/staging-convergence-readiness.mjs')){
