@@ -174,7 +174,7 @@ export function projectProtocolSchema(schema,{sha,generatedAt,releases=[],source
     if(group.owner!==data.owner||JSON.stringify(group.wires)!==JSON.stringify(data.wires))
       throw Error('Inconsistent protocol ownership/wires: '+id);
     const decorate=half=>half?{alias:half.alias,shape:half.shape,
-      fields:describeFields(half,schema.$defs)}:null;
+      fields:describeFields(half,schema.$defs).map(f=>({...f,since:null,since_status:'unknown'}))}:null;
     group.versions.push({version,request:decorate(data.request),
       response:decorate(data.response)});
   }
@@ -206,8 +206,7 @@ export function validPublicDocuments(data){
   return data.protocols.every(p=>{
     if(!ID.test(p?.id||'')||ids.has(p.id)||!str(p.owner)||!Array.isArray(p.wires)||
        !p.wires.length||!p.wires.every(str)||!Array.isArray(p.versions)||
-       !p.versions.length||p.versions.length>25||
-       false)return false;
+       !p.versions.length||p.versions.length>25)return false;
     ids.add(p.id);
     const versions=new Set();
     return p.versions.every(v=>{
@@ -219,9 +218,9 @@ export function validPublicDocuments(data){
           half.fields.length<=MAX_FIELDS&&half.fields.every(row=>
             str(row.path)&&str(row.variant)&&str(row.type)&&typeof row.required==='boolean'&&
             (row.description===undefined||typeof row.description==='string'&&row.description.length<=500)&&
-            (row.since===undefined||row.since===null||SEMVER.test(row.since))&&
-            (row.since_status===undefined||
-              ['verified','unreleased','unknown'].includes(row.since_status))));
+            (row.since===null||SEMVER.test(row.since))&&
+            ['verified','unreleased','unknown'].includes(row.since_status)&&
+            (row.since_status==='verified' ? SEMVER.test(row.since||'') : row.since===null)));
       });
     });
   });
