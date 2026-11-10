@@ -811,7 +811,7 @@ async function loadKnowledgeCatalog(){
   }
   if(location.hash.startsWith('#/knowledge'))render();
 }
-// Technical Documents are a curated snapshot of canonical main architecture files.
+// Technical Documents project versioned Protocol contracts from the pinned Rust schema.
 // Their independent loader cannot block Repository, Knowledge or other routes.
 async function loadDocumentsCatalog(){
   try{
