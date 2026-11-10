@@ -244,7 +244,7 @@ function selfTest(){
   assert.equal(evaluatePromotion({firstParentCommits:[a],associations:[[forged]],
     issues:[],deployRuns:[deployed],laneSha:b}).reason,'UNASSOCIATED_STAGING_CHANGE:'+a);
   assert.equal(evaluatePromotion({firstParentCommits:[a],
-    associations:[[{...forged,body:forged.body+'\\n\\nRefs #123'}]],
+    associations:[[{...forged,body:forged.body+'\n\nRefs #123'}]],
     issues:[{number:123,labels:[{name:'requirement'}],body:'Pending'}],
     deployRuns:[deployed],laneSha:b}).reason,'PENDING_ISSUE_ACCEPTANCE:123');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
