@@ -241,7 +241,7 @@ export async function downloadZip(artifact,token,fetcher=fetch){
     signal:AbortSignal.timeout(20000)});
   if(zip.status!==200)throw Error('signed artifact HTTP '+zip.status);
   const declared=zip.headers.get('content-length');
-  if(declared!==null&&(!/^\\d+$/.test(declared)||Number(declared)>MAX_ZIP))
+  if(declared!==null&&(!/^[0-9]+$/.test(declared)||Number(declared)>MAX_ZIP))
     throw Error('oversized/invalid source artifact length');
   if(!zip.body)throw Error('signed artifact has no ZIP body');
   const parts=[];let total=0;
@@ -384,7 +384,7 @@ function selfTestFixture(){
   return {data,sha};
 }
 async function test(){
-  const bytes=Buffer.from('PK\\x03\\x04mock source ZIP');
+  const bytes=Buffer.from([0x50,0x4b,0x03,0x04,0x61]);
   const headerMap=o=>({get:key=>o[key]??null});
   const goodZip={status:200,headers:headerMap({'content-length':String(bytes.length)}),
     body:(async function*(){yield bytes.slice(0,4);yield bytes.slice(4);})()};
@@ -396,7 +396,7 @@ async function test(){
   };
   assert.deepEqual(await downloadZip({id:777},'test-only-token',fetcher),bytes);
   assert.equal(calls.length,2);
-  assert.match(calls[0].url,/\\/actions\\/artifacts\\/777\\/zip$/);
+  assert.ok(calls[0].url.endsWith('/actions/artifacts/777/zip'));
   assert.equal(calls[0].options.headers.accept,'application/vnd.github+json');
   assert.equal(calls[0].options.headers.authorization,'Bearer test-only-token');
   assert.equal(calls[0].options.redirect,'manual');
