@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {parsePreMergeIssueNumbers,validateRequirementBody,isAcceptanceIssue}
   from './requirement-acceptance.mjs';
+import {isNativeConvergencePr,verifiedConvergenceBatch,convergenceApproval}
+  from './staging-convergence-pr.mjs';
 
 const SHA=/^[0-9a-f]{40}$/;
 const REPO='BestNathan/nession';
@@ -17,6 +19,27 @@ const DEPLOY='.github/workflows/release-staging.yml';
 const PROMOTION_LIMIT=90;
 const fail=reason=>({ready:false,reason});
 const okay=details=>({ready:true,reason:'QUALIFIED',...details});
+
+// One authoritative exact-HEAD checks policy for initial Staging sync and
+// later main promotion. A merged PR never inherits a status from its newer
+// branch tip, and skipped/missing/failed source jobs cannot authorize release.
+export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[]){
+  if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(expectedHead)||
+      !Array.isArray(workflowRuns)||workflowRuns.length>100)
+    return fail('INVALID_RUN_INVENTORY');
+  for(const path of REQUIRED){
+    const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
+      run.head_sha===expectedHead&&run.event==='pull_request'&&
+      run.head_repository?.full_name===REPO&&
+      Array.isArray(run.pull_requests)&&
+      run.pull_requests.some(p=>p.number===prNumber));
+    const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
+    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
+      return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
+  }
+  return okay({expectedHead});
+}
 
 export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   const branch=action==='sync-main-to-lane'?plan.branch:'main';
@@ -42,22 +65,8 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   // become genuinely clean. Never waive required checks for a behind PR.
   if(pr.mergeable!==true||pr.mergeable_state!=='clean')
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
-  if(!Array.isArray(workflowRuns)||workflowRuns.length>100)
-    return fail('INVALID_RUN_INVENTORY');
-  for(const path of REQUIRED){
-    const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
-      run.head_sha===expectedHead && run.event==='pull_request' &&
-      run.head_repository?.full_name===REPO &&
-      Array.isArray(run.pull_requests) &&
-      run.pull_requests.some(p=>p.number===pr.number));
-    // A failed older attempt must not poison a later authenticated successful
-    // rerun at the *same* target SHA. Only the newest real workflow attempt
-    // determines readiness; an in-progress newer run blocks an older green.
-    const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
-      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
-    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
-      return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
-  }
+  const checks=requiredSourceRuns(pr.number,expectedHead,workflowRuns);
+  if(!checks.ready)return checks;
   return okay({expectedHead,expectedBase});
 }
 
