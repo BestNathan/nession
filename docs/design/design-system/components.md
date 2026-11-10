@@ -124,6 +124,10 @@ multiline:
   grown textarea.
 - The default `SelectTrigger`/`Textarea` sizes remain for their existing uses;
   `field` is an opt-in semantic variant, not a global restyle.
+- The row as a whole is a [ConfigurationForm](patterns/configuration-form.md)
+  variant (#3137): Project and Sandbox use one `FormField`/`FormSection` owner,
+  and the compact geometry is a semantic control variant rather than a
+  consumer-local form language.
 
 ### A tap target has two geometries, and the band owns only one
 

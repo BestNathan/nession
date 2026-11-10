@@ -1,3 +1,4 @@
+import { FormField, FormSection } from '@/components/ui/configuration-form';
 import {
   Select,
   SelectContent,
@@ -5,8 +6,6 @@ import {
   SelectTrigger,
 } from '@/components/ui/select';
 import type { SandboxCapabilityCatalog } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
 import {
   implementationSupport,
@@ -44,19 +43,21 @@ export function SandboxSyscallProfile({ draft, catalog }: SandboxSyscallProfileP
     });
   };
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3">
-      <legend className={cn(chromeSansRole('primary'), 'px-1')}>Syscall profile</legend>
+    <FormSection
+      title="Syscall profile"
+      description="Optional. Select one Agent-registered profile, or leave the group empty. Arbitrary syscall lists and external BPF are not part of this contract."
+    >
       <SandboxImplementationStatus
         catalog={catalog}
         path={IMPLEMENTATION_PATHS.seccomp}
         label="seccomp"
       />
-      <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-        Select one Agent-registered profile, or leave the optional Syscall group empty. Arbitrary
-        syscall lists and external BPF are not part of this contract.
-      </p>
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>Profile</span>
+      <FormField
+        id="sandbox-syscall-profile"
+        label="Profile"
+        description={disabledReason}
+        descriptionTestId="sandbox-syscall-disabled"
+      >
         <Select value={selected} onValueChange={change} disabled={disabled}>
           <SelectTrigger id="sandbox-syscall-profile" data-testid="sandbox-syscall-profile">
             <span>{selected === NONE ? 'No profile' : selected}</span>
@@ -78,15 +79,7 @@ export function SandboxSyscallProfile({ draft, catalog }: SandboxSyscallProfileP
             ))}
           </SelectContent>
         </Select>
-      </div>
-      {disabledReason ? (
-        <p
-          data-testid="sandbox-syscall-disabled"
-          className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-        >
-          {disabledReason}
-        </p>
-      ) : null}
-    </fieldset>
+      </FormField>
+    </FormSection>
   );
 }

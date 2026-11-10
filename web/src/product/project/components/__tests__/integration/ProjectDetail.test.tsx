@@ -51,6 +51,15 @@ describe('ProjectDetailContent', () => {
     );
 
     expect(screen.getByTestId('project-detail-title')).toHaveTextContent('Nession');
+    // The resource detail surface owns the content hierarchy (#3137).
+    expect(screen.getByTestId('project-detail')).toHaveAttribute(
+      'data-recipe',
+      'resource-detail',
+    );
+    expect(screen.getByTestId('project-detail-title')).toHaveAttribute(
+      'data-recipe-part',
+      'detail-title',
+    );
     expect(screen.getByTestId('project-source-ref')).toHaveTextContent('main');
     expect(screen.getByText('https://github.com/BestNathan/nession.git')).toBeInTheDocument();
     expect(screen.getByText('/Users/nathan/code/nession')).toBeInTheDocument();

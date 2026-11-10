@@ -1,0 +1,16 @@
+{
+  "id": "pattern.operation-surface",
+  "$description": "The shared body/action grammar inside an operation depth (#3137). The surface primitive owns close/Back, focus, dismissal and stacking — see pattern.overlay-surfaces and #3089 — while this block records the body constraint: one scrolling body, wrapped content, one action line, and App actions at the touch floor.",
+  "patternRef": "docs/design/design-system/patterns/operation-surface.md",
+  "web": {
+    "wrap": true,
+    "overflow": "scroll",
+    "scrollOwner": true
+  },
+  "app": {
+    "wrap": true,
+    "overflow": "scroll",
+    "scrollOwner": true,
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { OperationActions, OperationError } from '@/components/ui/operation-surface';
 import type { SandboxPreflightResult } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
@@ -33,9 +34,9 @@ function PreflightOutcome({
   return (
     <>
       {preflight.result.error ? (
-        <p data-testid="sandbox-preflight-error" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
+        <OperationError testId="sandbox-preflight-error">
           {preflight.result.error}
-        </p>
+        </OperationError>
       ) : null}
       {!preflight.result.ok && preflight.result.errors.length > 0 ? (
         <ul data-testid="sandbox-preflight-errors" className="flex flex-col gap-1">
@@ -43,7 +44,7 @@ function PreflightOutcome({
             <li
               key={`${error.field}-${index}`}
               data-testid={`sandbox-preflight-error-${index}`}
-              className={cn(chromeSansRole('secondary'), 'text-destructive')}
+              className={cn(chromeSansRole('caption'), 'text-destructive')}
             >
               <span className={chromeMonoRole('code')}>{error.field}</span>: {error.message}
             </li>
@@ -51,15 +52,18 @@ function PreflightOutcome({
         </ul>
       ) : null}
       {preflightValid ? (
-        <p data-testid="sandbox-preflight-ok" className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
+        <p
+          data-testid="sandbox-preflight-ok"
+          className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
+        >
           Validated: {preflight.result.backend ?? 'backend'} · digest{' '}
           <span className={chromeMonoRole('code')}>{preflight.result.policy_digest}</span>
         </p>
       ) : (
-        <p data-testid="sandbox-preflight-invalid" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
+        <OperationError testId="sandbox-preflight-invalid">
           {preflight.result.error ??
             'The draft is not valid yet. Fix the field errors above and validate again.'}
-        </p>
+        </OperationError>
       )}
     </>
   );
@@ -95,11 +99,9 @@ export function SandboxComposerActions({
         preflightValid={preflightValid}
       />
       {actionError ? (
-        <p data-testid="sandbox-enter-error" className={cn(chromeSansRole('secondary'), 'text-destructive')}>
-          {actionError.message}
-        </p>
+        <OperationError testId="sandbox-enter-error">{actionError.message}</OperationError>
       ) : null}
-      <div className="flex flex-wrap gap-2">
+      <OperationActions>
         <Button
           type="button"
           variant="outline"
@@ -117,7 +119,7 @@ export function SandboxComposerActions({
         >
           Enter Sandbox
         </Button>
-      </div>
+      </OperationActions>
       {!preflightValid ? (
         <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
           Validate the current draft before Enter. Any edit invalidates the validation.

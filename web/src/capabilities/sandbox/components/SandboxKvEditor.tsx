@@ -1,11 +1,11 @@
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { FormSection } from '@/components/ui/configuration-form';
+import { DetailEmpty } from '@/components/ui/resource-detail';
 import type {
   SandboxCapabilityCatalog,
   SandboxKvEntry,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { cn } from '@/shared/lib/utils';
 import {
   catalogOptions,
   resourceDisabledReason,
@@ -56,34 +56,24 @@ export function SandboxKvEditor({
     group === 'resource' ? resourceDisabledReason(catalog) : syscallDisabledReason(catalog);
   const disabled = disabledReason !== null;
   const listId = `sandbox-${group}-key-options`;
-  const metadataClass = chromeSansRole('caption');
   return (
-    <fieldset
-      data-testid={`sandbox-${group}-editor`}
-      className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3"
+    <FormSection
+      title={title}
+      description={description}
+      testId={`sandbox-${group}-editor`}
     >
-      <legend className={cn(chromeSansRole('primary'), 'px-1')}>{title}</legend>
       <SandboxImplementationStatus
         catalog={catalog}
         path={implementationPath}
         label={title}
       />
-      <p className={cn(metadataClass, 'text-muted-foreground')}>{description}</p>
       {disabled ? (
-        <p
-          data-testid={`sandbox-${group}-disabled`}
-          className={cn(metadataClass, 'text-muted-foreground')}
-        >
-          {disabledReason}
-        </p>
+        <DetailEmpty data-testid={`sandbox-${group}-disabled`}>{disabledReason}</DetailEmpty>
       ) : null}
       {rows.length === 0 ? (
-        <p
-          data-testid={`sandbox-${group}-empty`}
-          className={cn(metadataClass, 'text-muted-foreground')}
-        >
+        <DetailEmpty data-testid={`sandbox-${group}-empty`}>
           No entries. Add a row only if you want this restriction.
-        </p>
+        </DetailEmpty>
       ) : null}
       <datalist id={listId}>
         {options.map((option) => (
@@ -105,7 +95,6 @@ export function SandboxKvEditor({
           valueError={errors[`${group}[${index}].value`]}
           disabled={disabled}
           listId={listId}
-          labelClass={metadataClass}
           onChange={(patch) => onChange(index, patch)}
           onRemove={() => onRemove(index)}
         />
@@ -123,6 +112,6 @@ export function SandboxKvEditor({
           Add entry
         </Button>
       </div>
-    </fieldset>
+    </FormSection>
   );
 }

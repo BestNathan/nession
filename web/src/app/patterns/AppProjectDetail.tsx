@@ -12,9 +12,14 @@ export function AppProjectDetail(props: ProjectDetailProps & { onBack: () => voi
       data-testid="app-project-detail"
       className="flex h-full min-h-0 flex-col bg-background"
     >
-      <AppPageHeader backLabel="Sessions" onBack={onBack} title={props.project.name} />
+      <AppPageHeader
+        backLabel="Sessions"
+        onBack={onBack}
+        title={props.project.name}
+        titleTestId="project-detail-title"
+      />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <ProjectDetailContent {...rest} />
+        <ProjectDetailContent {...rest} identity="context" />
       </div>
     </div>
   );
