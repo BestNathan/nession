@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "4399d3d7d530b522503341bb4f4d8a15cfe1d7a0",
+  "run_id": 42807447227,
+  "run_attempt": 1,
+  "plan_digest": "791f87b68e6dd9bf78c484cb813c69be2421e3eb491722964d962aa3f3663167",
+  "artifact_digest": "sha256:db548d4339ee904856bf1ff8819dc48e16bffe32d38c4037915c76c335c8bf13",
+  "results": [
+    {
+      "id": "app-attach-presentation",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "project-management",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
