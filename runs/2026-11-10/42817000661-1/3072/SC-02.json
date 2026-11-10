@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "714b6be210b20550007243a936e09e2dffa4047d5f9adc636b24bdc59fe60b59",
+  "run_id": 42817000661,
+  "run_attempt": 1,
+  "issue": 3072,
+  "criterion": "SC-02",
+  "criterion_text": "A validated completed Staging deployment-attestation source wakes only the matching outstanding `when: merged, branch: staging` Agent SC through the canonical Acceptance/Issue updater, with bounded idempotency and no feedback loop.",
+  "stage": "post-merge",
+  "target_sha": "dfe61b8b5272f820dd9f6ed116b55e0f76ee564a",
+  "contract_sha256": "f1192287358278780e8f2f45ef428efc893292a6596598534109cc1bb2bd6d0d",
+  "case_revision": "dfe61b8b5272f820dd9f6ed116b55e0f76ee564a",
+  "case_tree_sha": "ee384964704efc1c4c31a2c65f2273c3dbcb2977",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T12:38:41.027Z",
+  "finished_at": "2026-11-10T12:38:47.371Z",
+  "duration_ms": 6344,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "Real source->append-only Store->trusted staging wake verified; no matching pending staging Agent criterion was evaluated, so canonical Issue re-evaluation is still unproven",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Exact Case checkout dfe61b8b5272f820dd9f6ed116b55e0f76ee564a; independent source Deploy / Identity 42805092603/1 Staging SHA d466197f3fece03c2e04a3c546fe9edd8a7c538c with immutable Store index and K8s observation"
+        },
+        {
+          "type": "runtime",
+          "value": "Deploy / Identity Ingest 42815588295/1 has successful append, readback and wake-emission steps; Acceptance / Post-Run Waker 42815670151/1 has verified source and exact-SHA staging selector steps"
+        },
+        {
+          "type": "runtime",
+          "value": "Matched staging Agent evaluation was skipped (no eligible outstanding criterion): a new real source->selected SC->canonical Issue update trace is required for SC-02 Pass"
+        }
+      ],
+      "duration_ms": 474,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42817000661,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dfe61b8b5272f820dd9f6ed116b55e0f76ee564a",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42817000661",
+    "record_path": "runs/2026-11-10/42817000661-1/3072/SC-02.json",
+    "source_result_sha256": "3a72b705ae2e0de64885f6c83f8d420e8a4f114f20b3a7c9e9377427035d0a1a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42817000661-1",
+    "sha256": "3a72b705ae2e0de64885f6c83f8d420e8a4f114f20b3a7c9e9377427035d0a1a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42817000661",
+    "durability": "time-limited; object archival not configured"
+  }
+}
