@@ -12,8 +12,8 @@ const MAX_DEFS=2500;
 const MAX_FIELDS=6000;
 
 export function unavailableDocuments(generatedAt){
-  return {schema_version:2,status:'unavailable',generated_at:generatedAt,
-    source:null,definitions:{},protocols:[]};
+  return {schema_version:3,status:'unavailable',generated_at:generatedAt,
+    source:null,definitions:{},releases:[],protocols:[]};
 }
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const plain= x=>object(x)&&Object.getPrototypeOf(x)===Object.prototype;
@@ -114,7 +114,65 @@ function supports(versions,direction){
   }
   return [...fields.values()].sort((a,b)=>a.path.localeCompare(b.path)||a.variant.localeCompare(b.variant));
 }
-export function projectProtocolSchema(schema,{sha,generatedAt}){
+const SEMVER=/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+function decorateReleaseHistory(result,snapshots){
+  // Each verified release includes a schema generated from *its own tag*.
+  // Missing snapshots must remain unknown, even if later code has that field.
+  const verified=snapshots.map(s=>{
+    if(!SEMVER.test(s?.version||'')||s.tag!=='v'+s.version||
+       !['available','unavailable'].includes(s.status))throw Error('Invalid release metadata');
+    if(s.status==='unavailable')return {...s,projected:null};
+    if(!SHA.test(s.sha||'')||!s.schema)throw Error('Unpinned release contract');
+    const projected=projectProtocolSchema(s.schema,{sha:s.sha,generatedAt:result.generated_at});
+    return {...s,projected};
+  });
+  const history=verified.map(s=>({version:s.version,tag:s.tag,
+    sha:s.sha||null,status:s.status}));
+  const seen=new Set();
+  for(const release of history){
+    if(seen.has(release.version))throw Error('Duplicate released Nession version');
+    seen.add(release.version);
+  }
+  result.releases=history;
+  for(const unit of result.protocols){
+    for(const contract of unit.versions){
+      for(const direction of ['request','response']){
+        const fields=contract[direction]?.fields||[];
+        // Include historical fields that later main contracts removed, but
+        // never claim they still exist in current source.
+        const currentSet=new Set(fields.map(f=>f.variant+'|'+f.path));
+        for(const release of verified){
+          const oldUnit=release.projected?.protocols.find(p=>p.id===unit.id);
+          const oldContract=oldUnit?.versions.find(v=>v.version===contract.version);
+          for(const old of oldContract?.[direction]?.fields||[]){
+            const key=old.variant+'|'+old.path;
+            if(!currentSet.has(key)){
+              fields.push({...old,historical:true});
+              currentSet.add(key);
+            }
+          }
+        }
+        fields.sort((a,b)=>a.path.localeCompare(b.path)||a.variant.localeCompare(b.variant));
+        for(const field of fields){
+          const releaseSupport=verified.map(release=>{
+            if(!release.projected)return {version:release.version,status:'unknown'};
+            const oldUnit=release.projected.protocols.find(p=>p.id===unit.id);
+            const oldContract=oldUnit?.versions.find(v=>v.version===contract.version);
+            if(!oldContract||!oldContract[direction])
+              return {version:release.version,status:'contract-not-declared'};
+            const found=oldContract[direction].fields.find(f=>
+              f.path===field.path&&f.variant===field.variant);
+            return found?{version:release.version,status:'supported',type:found.type,
+              required:found.required}:{version:release.version,status:'not-supported'};
+          });
+          field.releases=releaseSupport;
+          field.firstObserved=releaseSupport.find(r=>r.status==='supported')?.version||null;
+        }
+      }
+    }
+  }
+}
+export function projectProtocolSchema(schema,{sha,generatedAt,releases=[],sourceVersion=null}={}){
   if(!SHA.test(sha||''))return unavailableDocuments(generatedAt);
   if(!plain(schema)||schema.$schema!==DRAFT||!plain(schema.protocols)||
      !plain(schema.$defs)||Object.keys(schema.$defs).length>MAX_DEFS)
@@ -146,14 +204,20 @@ export function projectProtocolSchema(schema,{sha,generatedAt}){
     group.support={request:supports(group.versions,'request'),
       response:supports(group.versions,'response')};
   }
-  const result={schema_version:2,status:'available',generated_at:generatedAt,
-    source:{repository:REPO,branch:'main',sha},definitions:schema.$defs,protocols};
+  const result={schema_version:3,status:'available',generated_at:generatedAt,
+    source:{repository:REPO,branch:'main',sha,source_version:sourceVersion},
+    definitions:schema.$defs,releases:[],protocols};
+  if(releases.length)decorateReleaseHistory(result,releases);
   if(!validPublicDocuments(result))throw Error('Invalid projected Protocol Reference');
   return result;
 }
 export function validPublicDocuments(data){
-  if(data?.schema_version!==2||!['available','unavailable'].includes(data.status)||
-     !Array.isArray(data.protocols)||!object(data.definitions))return false;
+  if(data?.schema_version!==3||!['available','unavailable'].includes(data.status)||
+     !Array.isArray(data.protocols)||!object(data.definitions)||
+     !Array.isArray(data.releases)||data.releases.length>30)return false;
+  if(!data.releases.every(r=>SEMVER.test(r?.version||'')&&r.tag==='v'+r.version&&
+    ['available','unavailable'].includes(r.status)&&
+    (r.sha===null||SHA.test(r.sha||''))))return false;
   if(data.status==='unavailable')return data.source===null&&data.protocols.length===0;
   if(data.source?.repository!==REPO||data.source?.branch!=='main'||
      !SHA.test(data.source?.sha||'')||
@@ -175,17 +239,21 @@ export function validPublicDocuments(data){
         const half=v[direction];
         return half===null||(validHalf(half)&&Array.isArray(half.fields)&&
           half.fields.length<=MAX_FIELDS&&half.fields.every(row=>
-            str(row.path)&&str(row.variant)&&str(row.type)&&typeof row.required==='boolean'));
+            str(row.path)&&str(row.variant)&&str(row.type)&&typeof row.required==='boolean'&&
+            (row.releases===undefined||(Array.isArray(row.releases)&&
+              row.releases.length===data.releases.length&&row.releases.every(v=>
+                SEMVER.test(v.version)&&
+                ['supported','not-supported','contract-not-declared','unknown'].includes(v.status))))));
       });
     });
   });
 }
-export async function loadDocuments({schemaPath,sha,generatedAt}){
+export async function loadDocuments({schemaPath,sha,generatedAt,releases=[],sourceVersion=null}){
   if(!SHA.test(sha||'')||!schemaPath)return unavailableDocuments(generatedAt);
   const stat=await lstat(schemaPath);
   if(!stat.isFile()||stat.isSymbolicLink()||stat.size<10||stat.size>MAX_SOURCE_BYTES)
     throw Error('Invalid pinned Protocol Schema source');
   const source=await readFile(schemaPath,'utf8');
   const schema=JSON.parse(source);
-  return projectProtocolSchema(schema,{sha,generatedAt});
+  return projectProtocolSchema(schema,{sha,generatedAt,releases,sourceVersion});
 }
