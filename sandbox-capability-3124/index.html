@@ -304,6 +304,32 @@
 .nession-ui .app .sandbox-tab-main{min-height:0;max-height:none;overflow:visible;padding:18px 0 28px;scrollbar-gutter:auto}
 .nession-ui .app .sandbox-tab-main .kv-row{grid-template-columns:minmax(0,1fr);gap:8px}
 .nession-ui .app .sandbox-tab-main .kv-remove{grid-column:1}
+
+/* Policy implementation support (#3161): registered native modules, not generic fields */
+.nession-ui .policy-implementation{margin:18px 0 28px;border:1px solid var(--nession-border);border-radius:12px;min-width:0;background:var(--nession-background);overflow:hidden}
+.nession-ui .policy-impl-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:17px 18px;background:var(--nession-surface);border-bottom:1px solid var(--nession-border)}
+.nession-ui .policy-impl-header>div{min-width:0}
+.nession-ui .policy-impl-header h4{margin:0;font-size:14px;letter-spacing:-.01em}
+.nession-ui .policy-impl-header .subline{margin:4px 0 9px;line-height:1.5;font-size:11px}
+.nession-ui .policy-native-path{font-size:11px;font-weight:570;color:var(--nession-muted-foreground);overflow-wrap:anywhere}
+.nession-ui .policy-impl-status{flex:none;border:1px solid var(--nession-border);background:var(--nession-background);font-size:11px;font-weight:600;padding:5px 10px;border-radius:7px;white-space:nowrap}
+.nession-ui .policy-impl-status.unavailable,.nession-ui .policy-impl-status.unknown{background:var(--nession-muted)}
+.nession-ui .policy-implementation>.module-domain,.nession-ui .policy-implementation>.policy-support-reason{padding:17px 18px 22px}
+.nession-ui .policy-implementation.is-disabled{background:var(--nession-surface)}
+.nession-ui .policy-support-reason{font-size:12px;line-height:1.6;color:var(--nession-muted-foreground)}
+.nession-ui .policy-support-reason strong{display:block;font-size:12px;color:var(--nession-foreground);margin-bottom:7px;overflow-wrap:anywhere}
+.nession-ui .policy-support-reason p{margin:6px 0}
+.nession-ui .policy-option-list{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 16px}
+.nession-ui .policy-option-state{display:flex;align-items:center;gap:8px;border:1px solid var(--nession-border);padding:8px 10px;border-radius:8px;font-size:11px;min-width:0}
+.nession-ui .policy-option-state code{font-size:11px}
+.nession-ui .policy-option-state span{color:var(--nession-muted-foreground)}
+.nession-ui .policy-option-state[data-option-status="unavailable"],.nession-ui .policy-option-state[data-option-status="unknown"]{background:var(--nession-muted)}
+.nession-ui .policy-option-state small{font-size:10px;line-height:1.4;color:var(--nession-muted-foreground)}
+.nession-ui .app .policy-impl-header{padding:14px 12px;gap:8px;flex-wrap:wrap}
+.nession-ui .app .policy-implementation>.module-domain,.nession-ui .app .policy-implementation>.policy-support-reason{padding:14px 12px}
+.nession-ui .app .policy-option-list{flex-direction:column}
+.nession-ui .app .policy-option-state{width:100%}
+.nession-ui .app .policy-impl-status{margin-left:auto}
 </style>
 </head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
@@ -311,7 +337,7 @@
 <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox Capability</span></nav>
 <span class="np-eyebrow">WORKSPACE · AGENT / LOCATION CAPABILITY · SESSION EXECUTION</span>
 <div class="np-header-main">
-<div><h1 class="np-title">Sandbox · 策略 Tab / 独立配置 / 生效检查</h1><p class="np-subtitle">五类策略保留各自完整配置面板；Web 左侧固定策略 Tab，App 顶部横向滑动 Tab，内容区域可大面积纵向滚动。切换策略不推入新路由或 Back；Overview 统一预检和 Enter。</p></div>
+<div><h1 class="np-title">Sandbox · 策略 Tab / 独立配置 / 生效检查</h1><p class="np-subtitle">五类策略保留完整配置面板；Web 左侧固定 Tab、App 顶部横向滑动 Tab。每个面板内再按 Agent 探测到的原生策略实现展示独立条目：例如 resource.cgroup_v2 与 syscall.seccomp，可用则配置，不支持/未知则禁用并说明原因。Overview 统一预检和 Enter。</p></div>
 <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3143">Composition #3143</a><a href="https://github.com/BestNathan/nession/issues/3141">Native Resource #3141</a><a href="https://github.com/BestNathan/nession/issues/3124">Workspace #3124</a><a href="https://github.com/BestNathan/nession/issues/2681">Sandbox V1 #2681</a><a href="https://github.com/BestNathan/nession/issues/3062">Managed #3062</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
 </div>
 <div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox → Enter</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Interactive mock · no real OS writes</strong></span></div>
@@ -321,11 +347,11 @@
 <div class="np-preview-toolbar"><button type="button" data-np-size="1180" aria-pressed="true">Web 1180</button><button type="button" data-np-size="1024">Web 1024</button><button type="button" data-np-size="390">App 390</button><button type="button" data-np-size="375">App 375</button><button type="button" data-np-reset>Reset</button></div></div>
 <div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:760px"><div id="sandbox-product" class="nession-ui" data-mode="web"></div></div></div>
 <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
-<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟当前执行环境：</b><button type="button" data-fixture="native" aria-pressed="true">Native / 可进入</button><button type="button" data-fixture="active">已在 Sandbox</button><button type="button" data-fixture="prepared">EROFS 已组合</button><button type="button" data-fixture="limited">仅 Memory/PIDs 委派</button><button type="button" data-fixture="preflight-fail">预检失败</button><button type="button" data-fixture="enter-fail">启动失败</button><button type="button" data-fixture="kernel-reject">内核写入失败</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="macos">macOS Seatbelt</button><button type="button" data-fixture="recreated">旧实例记录</button></div>
+<div class="fixtures" aria-label="外部模拟观测条件"><b>模拟当前执行环境：</b><button type="button" data-fixture="native" aria-pressed="true">Native / 可进入</button><button type="button" data-fixture="active">已在 Sandbox</button><button type="button" data-fixture="prepared">EROFS 已组合</button><button type="button" data-fixture="limited">仅 Memory/PIDs 委派</button><button type="button" data-fixture="no-cgroup">cgroup v2 不可用</button><button type="button" data-fixture="no-seccomp">seccomp 不可用</button><button type="button" data-fixture="preflight-fail">预检失败</button><button type="button" data-fixture="enter-fail">启动失败</button><button type="button" data-fixture="kernel-reject">内核写入失败</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="macos">macOS Seatbelt</button><button type="button" data-fixture="recreated">旧实例记录</button></div>
 </section>
 <section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
 <div class="np-detail-grid">
-<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox。Web 左侧或 App 顶部直接在 Overview / Filesystem / Network / Process / Resource / Syscall 六个同级 Tab 间切换。每个策略各有完整的配置区；无需返回 Sandbox 首页。在 Overview 统一预检、查看 JSON 与 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
+<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox。六个同级 Tab 直接切换；进入 Resource 查看 cgroup_v2 条目的实测支持状态，支持才开放 controller 与 Key/Value；进入 Syscall 查看 seccomp 状态和 Agent 注册 Profile。切到「cgroup v2 不可用」「seccomp 不可用」「macOS Seatbelt」「Agent 离线」验证禁用原因。Overview 统一预检、查看 JSON 与 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
 <article class="np-detail"><h3>核心对象和状态</h3><p>宿主能支持 Sandbox ≠ 当前 Pane 位于 Sandbox。状态由 Agent 对 <strong>active Pane + Session instance + execution id</strong> 的观测决定，外部启动的非托管 Sandbox 不能推测为 Nession 已验证。</p><p><strong>Policy Draft</strong> 在提交前可编辑；<strong>Effective Policy</strong> 是成功执行后、Agent 验证并持续可查询的只读配置。预检与 Enter 是两个不同动作。</p></article>
 <article class="np-detail"><h3>运行时设计约束</h3><p>现有 #2681 仅在创建 Session 时提供启动屏障。新的 Enter 需要 Agent 创建 <strong>同一个逻辑 Session 的隔离 Pane</strong>，验证 Linux Bubblewrap / macOS Seatbelt 后切换焦点。原 Native Pane 保留，失败时不影响原 shell，不向已有 Pane 注入文本。</p><p>Return to Native 只是切换焦点，不代表 Sandbox 的进程已经终止。完整的结束/清理与重连需在后端代码及独立 Case 中实现、验收。</p></article>
 <article class="np-detail"><h3>信息架构和证据边界</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox 能力本地视图。App：AppLayers → WorkspacePanel 唯一 AppPageHeader/Back → WorkspaceShell → Sandbox 配置/确认/详情。没有新的永久 Sandbox 页面。</p><p>字体、终端渲染和样式为 Nession token 快照基础上的近似，非真实 React / xterm 画面。静态校验与合成 DOM 测试不等于 Chromium 或真实原生隔离验证。</p><details class="np-inspector"><summary>当前模拟状态</summary><pre id="sandbox-inspector">fixture=native; surface=terminal</pre></details></article>
