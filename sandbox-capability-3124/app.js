@@ -84,22 +84,29 @@
       return {status:"unknown",source:scoped,generation:"unavailable",resource:[],syscall:[],reason:"Agent/Session 观测不可用"};
     if(s.macos)
       return {status:"available",source:scoped,generation:"seatbelt-mock",resource:[],syscall:[],reason:"macOS 不提供 Linux cgroup v2/seccomp"};
-    var controllers=state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids"];
-    var candidates=[
-      {key:"memory.max",controller:"memory",format:"unsigned bytes | max",example:"2147483648"},
-      {key:"cpu.max",controller:"cpu",format:"quota period (microseconds)",example:"200000 100000"},
-      {key:"pids.max",controller:"pids",format:"unsigned tasks | max",example:"256"},
-      {key:"memory.oom.group",controller:"memory",format:"0 | 1",example:"1"}];
-    return {status:"available",source:scoped,generation:"mock-probe-"+state.fixture,
-      resource:candidates.filter(function(x){return controllers.includes(x.controller)}),
+    // Simulated *kernel child-cgroup directory scan*, not an application whitelist.
+    // The real Agent must return the detected resource-controller files.
+    var controllers=state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids","io"];
+    var childCgroupFiles=[
+      {key:"memory.max",controller:"memory",format:"Linux native text",example:"2147483648"},
+      {key:"memory.high",controller:"memory",format:"Linux native text",example:"1073741824"},
+      {key:"memory.low",controller:"memory",format:"Linux native text",example:"1048576"},
+      {key:"memory.oom.group",controller:"memory",format:"Linux native text",example:"1"},
+      {key:"cpu.max",controller:"cpu",format:"Linux native text",example:"200000 100000"},
+      {key:"cpu.weight",controller:"cpu",format:"Linux native text",example:"100"},
+      {key:"pids.max",controller:"pids",format:"Linux native text",example:"256"},
+      {key:"io.max",controller:"io",format:"Linux native text",example:"8:0 rbps=10485760"}
+    ];
+    return {status:"available",source:scoped,generation:"mock-cgroup2-scan-"+state.fixture,
+      resource:childCgroupFiles.filter(function(file){return controllers.includes(file.controller)}),
       syscall:[{key:"seccomp.profile",format:"registered profile",example:"nession-interactive-v1",values:["nession-interactive-v1"]}],
-      reason:"Agent 模拟委派控制器 "+controllers.join(", ")};
+      reason:"模拟 Agent 扫描受管子 cgroup: "+controllers.join(", ")};
   }
   function kvRows(kind,unavailable){
     var rows=state.draft[kind+"Rows"],resource=kind==="resource";
     var suggestionId=resource?"resource-key-suggestions":"syscall-key-suggestions";
     var catalog=agentFieldCatalog(),suggestions=resource?catalog.resource:catalog.syscall;
-    var note=resource?"Agent 可配置的 cgroup v2 字段（已结合委派探测与协议白名单），不预设限制。":"Agent 注册的 seccomp profile，不提供任意 syscall/BPF 编辑。";
+    var note=resource?"原生 cgroup v2 控制文件由 Agent 枚举；Value 原样传给 Linux 内核，不做字段级格式转换。":"Agent 注册的 seccomp profile，不提供任意 syscall/BPF 编辑。";
     var out='<div class="kv-editor" data-kv-editor="'+kind+'"><p class="hint2">'+note+'</p>'+'<p class="hint2"><strong>Agent 发现 · '+(catalog.status==="available"?"已探测":"无法查询")+'</strong> · '+suggestions.length+' 个候选 · '+escapeHtml(catalog.reason)+'</p>'+
       '<datalist id="'+suggestionId+'">'+suggestions.map(function(field){return '<option value="'+escapeHtml(field.key)+'" label="'+escapeHtml(field.format)+'"></option>';}).join('')+'</datalist>';
     if(!rows.length)out+='<p class="kv-empty">'+(resource?"未添加额外的 Resource 限制。":"未添加额外的 Syscall profile；后端基础防护仍生效。")+'</p>';
@@ -128,21 +135,18 @@
         if(key!=="seccomp.profile"||!profile||!profile.values.includes(value))return "seccomp.profile 只支持 Agent 注册的 nession-interactive-v1";
         continue;
       }
-      function u64(s){return /^[0-9]+$/.test(s)&&BigInt(s)<=18446744073709551615n;}
-      if(key==="memory.max"||key==="pids.max"){
-        if(value!=="max"&&!u64(value))return key+" 需要无符号整数或 max";
-      }else if(key==="cpu.max"){
-        var parts=value.split(/\s+/);
-        if(parts.length!==2||(parts[0]!=="max"&&!u64(parts[0]))||!u64(parts[1]))return "cpu.max 需要 quota period 原生格式";
-        var period=BigInt(parts[1]);if(period<1000n||period>1000000n)return "cpu.max period 必须在 1000..1000000 微秒";
-      }else if(key==="memory.oom.group"&&value!=="0"&&value!=="1")return "memory.oom.group 只能为 0 或 1";
+      // No app-specific parsing of native Resource values. Linux performs the
+      // authoritative validation when writing inside the new owned cgroup.
+      if(kind==="resource"&&(!/^[a-zA-Z0-9_.-]+$/.test(key)||key.startsWith("cgroup.")||key.includes("..")))
+        return "Resource Key 必须是受管 cgroup 下的单个 controller 控制文件";
+
     }
     return "";
   }
   function policyProjection(d){
     var policy={version:1,enabled:true,enforcement:"required",filesystem:{access:{read:d.readOnly.split(",").map(function(x){return x.trim()}).filter(Boolean),write:d.write.split(",").map(function(x){return x.trim()}).filter(Boolean)}},network:{mode:d.network,ingress:"deny"},process:{linux_namespaces:{pid:!!d.pid,ipc:!!d.ipc,user:!!d.user}}};
     if(d.network==="restricted")policy.network.egress={allow:d.egress.split(",").map(function(x){return x.trim()}).filter(Boolean),deny:[],private_network:"deny"};
-    if(d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value.trim()]}))};
+    if(d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value]}))};
     if(d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
     return policy;
   }
@@ -366,6 +370,10 @@
       var validationError=preflight();
       if(state.preflight!=="passed"||validationError){state.preflight="failed";state.preflightError=validationError||"预检状态已过期";state.depth="root";}
       else if(settings().enterFail){state.error="Agent 启动屏障验证失败（模拟）。未切换 Pane";state.depth="root";}
+      else if(state.fixture==="kernel-reject"&&state.draft.resourceRows.length){
+        state.error="Linux kernel write cpu.weight: EINVAL (Invalid argument)（模拟）。受管子 cgroup 已回滚，原 Native Pane 未修改";
+        state.depth="root";
+      }
       else{state.effective=cloneDraft(state.draft);state.entered=true;state.pane="sandbox";state.depth="root";state.preflight="none";state.error="";}
     }
     else if(action==="return-native"){state.pane="native";state.fixture="native";state.depth="root";state.preflight="none";state.error="";}
