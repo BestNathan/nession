@@ -157,6 +157,10 @@ jobs:
             echo
             echo 'Merges require authenticated exact-head PR Quality/Case/E2E, clean GitHub mergeability and promotion-specific staging/Issue acceptance. Blockers remain open for repair.'
           } >> "$GITHUB_STEP_SUMMARY"
+          blocked="$(jq '[.[] | select(.outcome != "MERGED")] | length' "$RUNNER_TEMP/convergence-results.json")"
+          if [[ "$blocked" -gt 0 ]]; then
+            echo "::warning::Staging convergence has ${blocked} outstanding item(s); see the Job Summary for exact reasons"
+          fi
 
       - name: Explain no-op or dry-run
         if: steps.plan.outputs.actionable != 'true' || inputs.dry_run == true
