@@ -451,9 +451,11 @@
     var availability=!settings().supported?'<div class="notice warning">当前 Agent/Session 状态无法确认；此处仅供查看草稿，不可预检或 Enter。</div>':"";
     return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+availability+
       (observed?observedModule():editor())+
-      (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
-      (state.mode==="web"?'<button class="action" data-action="module-back">完成 · 返回 Sandbox</button>':'')+'</div>':
-      (state.mode==="web"?'<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>':''))+
+      (state.mode==="web"?
+        (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
+          '<button class="action" data-action="module-back">完成 · 返回 Sandbox</button></div>':
+          '<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>'):
+        '')+
       '</section>';
   }
   function detail(){
