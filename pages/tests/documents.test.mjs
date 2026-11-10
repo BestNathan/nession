@@ -97,6 +97,17 @@ test('a single Since Nession value has a verified introduction boundary',()=>{
   assert.equal(validDocumentsSnapshot(doc),true);
   assert.equal(doc.source.source_version,'0.35.0');
 });
+test('projected fields carry only an introduction version, not release rows',()=>{
+  const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
+    releases:[release('0.35.0',fixture({legacy:true})),
+      release('0.36.0',fixture())]});
+  const git=doc.protocols.find(p=>p.id==='git.status');
+  const f=git.versions[1].response.fields.find(x=>x.path==='snapshot');
+  assert.equal(f.since,'0.36.0');
+  assert.equal(f.since_status,'verified');
+  assert.equal(f.releases,undefined);
+  assert.equal(git.support,undefined);
+});
 test('release introduction is verified only with immediately preceding absence',()=>{
   assert.deepEqual(fieldSince(['absent','supported','supported'],
     ['0.35.0','0.36.0','0.37.0']),{since:'0.36.0',since_status:'verified'});
