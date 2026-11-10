@@ -80,6 +80,27 @@ const knowledge={
  ],
 };
 
+// Browser fixture for the pinned public technical Documents catalog.
+const documents={
+ schema_version:1,status:'available',generated_at:'2026-11-10T10:00:00Z',
+ source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40)},
+ documents:[
+  {path:'docs/architecture/protocol.md',title:'Protocol Architecture',category:'Protocols',
+   description:'Protocol Units and wire contracts.',
+   source:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/docs/architecture/protocol.md',
+   body:'# Protocol Architecture\n\nA source-backed protocol reference.\n\n'+
+      '| Field | Role |\n| --- | --- |\n| wire | locate unit |\n\n'+
+      '\x60\x60\x60rust\nstruct ProtocolUnit;\n\x60\x60\x60\n\n'+
+      '[MCP reference](mcp.md)'},
+  {path:'docs/architecture/mcp.md',title:'MCP Access Layer',category:'Interfaces',
+   description:'MCP tools, hosting, and authentication.',
+   source:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/docs/architecture/mcp.md',
+   body:'# MCP Access Layer\n\nServer and Agent tools.\n\n'+
+      '<img src=x onerror=alert(1)>\n\n'+
+      '[Protocol Architecture](protocol.md)'}
+ ]
+};
+
 // Browser fixture for the independent, source-only workflow definitions UI.
 const topology={
  schema_version:1,
@@ -119,12 +140,13 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
        source_ref_sha:'d'.repeat(40),
        source_url:'https://github.com/BestNathan/nession/actions/runs/42488022265'}]}}
  }:fixture;
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/documents.js':'documents.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(selected));return;}
   if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
   if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
+  if(path==='/data/documents.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(documents));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
   try {const name=allowed[path],content=await readFile(join(root,name));
    res.writeHead(200,{'content-type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html'});
