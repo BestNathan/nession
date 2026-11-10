@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42855295896,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3141-native-cgroup-kv",
+    "target_sha": "1758efc00a781acac5c32e56fcc89306cc410458",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42855295896",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "91df554d9bf30b4eb2487afa55b97615f9397348fa507864e9fbca78786e81e4"
+  },
+  "record": "runs/2026-11-10/42855295896-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "c361360e51d8542e8eb1315fe88d341680b2e5cb67683e192965d78c080b6046"
+}
