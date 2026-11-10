@@ -26,6 +26,11 @@ on:
   # every SHA, Issue declaration, approval, check and protected merge.
   issue_comment:
     types: [created]
+  # Wake only on completed checks for repository-owned immutable sync heads;
+  # the trusted controller still revalidates every source and receipt.
+  workflow_run:
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests']
+    types: [completed]
 
 permissions:
   contents: read
@@ -63,6 +68,15 @@ jobs:
               startsWith(github.event.comment.body, 'STAGING_CONVERGENCE_AUDIT_V1 ')
             )
           )
+        )
+      ) &&
+      (
+        github.event_name != 'workflow_run' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          startsWith(github.event.workflow_run.head_branch, 'chore/staging-sync-')
         )
       )
     runs-on: ubuntu-24.04
@@ -107,7 +121,7 @@ jobs:
           {
             echo '## Staging branch convergence (#2926)'
             echo
-            echo "- Trusted Main SHA: `$(git rev-parse HEAD)`"
+            echo "- Trusted Main SHA: $(git rev-parse HEAD)"
             echo '- Scheduled cadence: every two hours (UTC); runs may be delayed by GitHub'
             echo
             echo '| Deploy-eligible branch | Ahead main | Behind main | Planned actions |'
