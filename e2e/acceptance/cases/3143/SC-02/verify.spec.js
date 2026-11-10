@@ -40,6 +40,10 @@ test('SC-02: sticky left navigation and one scrolling editor at 1180', async ({ 
   expect(Math.abs(tabsAfter.y - tabsBefore.y)).toBeLessThan(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
     .toBeLessThanOrEqual(1);
+  const paddingBottom = await content.evaluate(
+    (element) => getComputedStyle(element).paddingBottom,
+  );
+  expect(parseFloat(paddingBottom)).toBeGreaterThan(0);
 
   test.info().annotations.push({
     type: 'evidence',

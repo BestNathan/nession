@@ -129,6 +129,10 @@ test.describe('Web 1180', () => {
       () => document.documentElement.scrollWidth - window.innerWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
+    const paddingBottom = await content.evaluate(
+      (element) => getComputedStyle(element).paddingBottom,
+    );
+    expect(parseFloat(paddingBottom)).toBeGreaterThan(0);
   });
 
   test('draft and fresh preflight survive tab switches; edits invalidate (#3143 SC-05)', async ({
