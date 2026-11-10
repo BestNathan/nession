@@ -2,6 +2,9 @@
 // PR-native, source-bound Staging integration contract. A GitHub PR is the
 // batch; ordinary feature Issues remain independent. No per-sync Issue writes.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
@@ -159,7 +162,73 @@ export function selfTest(){
     regressionIds:['login']},[]).approved,false);
   assert.throws(()=>convergenceApproval(batch,new Array(100)),/unbounded/);
   assert.throws(()=>convergenceBatchDigest({...batch,branch:'bad..branch'}),/invalid/);
-  console.log('PR-native convergence: immutable digest, risk and Owner approval PASS');
+  // Real Git object graph: test source-scope reconstruction, historical
+  // changed-browser-ID selection, later Main advance and merged-push proof.
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-convergence-pr-'));
+  try{
+    const run=(...args)=>git(root,...args);
+    run('init','-q','-b','main');
+    run('config','user.name','CI Fixture');
+    run('config','user.email','ci@example.invalid');
+    fs.mkdirSync(path.join(root,'e2e/tests/browser'),{recursive:true});
+    fs.writeFileSync(path.join(root,'e2e/tests/browser/login.spec.ts'),'// base\n');
+    run('add','.');run('commit','-qm','base');
+    run('checkout','-qb','staging');
+    fs.writeFileSync(path.join(root,'STAGING.md'),'stage\n');
+    run('add','.');run('commit','-qm','staging own');
+    const lane=run('rev-parse','HEAD');
+    run('checkout','-q','main');
+    fs.writeFileSync(path.join(root,'e2e/tests/browser/login.spec.ts'),'// regression\n');
+    fs.writeFileSync(path.join(root,'e2e/tests/browser/new-browser.spec.ts'),'// new\n');
+    run('add','.');run('commit','-qm','main browser IDs');
+    const main=run('rev-parse','HEAD');
+    run('update-ref','refs/remotes/origin/main',main);
+    const tree=run('merge-tree','--write-tree',lane,main).split(/\s+/)[0];
+    const head=run('commit-tree',tree,'-p',lane,'-p',main,'-m','source integration');
+    const source=planBatch({branch:'staging',main_sha:main,lane_sha:lane,
+      integration_head:head,repoRoot:root});
+    const pr={
+      number:17,state:'open',
+      body:'Staging Convergence automated proposal\n\n'+convergencePrMarker(source),
+      base:{ref:'staging',sha:lane,repo:{full_name:REPO}},
+      head:{ref:integrationBranch('staging',main,lane),sha:head,repo:{full_name:REPO}},
+    };
+    run('checkout','--detach',head);
+    const selected=convergenceE2ESelection(pr,root,lane);
+    assert.equal(selected.mode,'selected');
+    assert.deepEqual(selected.selected.map(x=>x.id),['login','new-browser']);
+    assert.deepEqual(selected.issues,[]);
+    assert.match(selected.plan_digest,DIGEST);
+    assert.deepEqual(convergenceE2ESelection(pr,root,lane),selected);
+    assert.throws(()=>verifiedConvergenceBatch(
+      {...pr,body:pr.body.replace(convergenceBatchDigest(source),'0'.repeat(64))},
+      root,lane),/digest/);
+    assert.throws(()=>verifiedConvergenceBatch(
+      {...pr,base:{...pr.base,sha:'d'.repeat(40)}},
+      root,lane),/base advanced/);
+    // The next Main commit is not part of the approved PR and must not
+    // change its previously verified selected plan or digest.
+    run('checkout','-q','main');
+    fs.writeFileSync(path.join(root,'NEXT.md'),'later main update\n');
+    run('add','.');run('commit','-qm','later main commit');
+    const later=run('rev-parse','HEAD');
+    run('update-ref','refs/remotes/origin/main',later);
+    run('checkout','--detach',head);
+    assert.deepEqual(convergenceE2ESelection(pr,root,lane),selected);
+    // The resulting staging merge has first parent lane and second parent H.
+    const merged=run('commit-tree',tree,'-p',lane,'-p',head,
+      '-m','merge checked source into staging');
+    run('checkout','--detach',merged);
+    const pushed=convergenceE2ESelection(pr,root,lane,merged);
+    assert.equal(pushed.target_sha,merged);
+    assert.deepEqual(pushed.selected,selected.selected);
+    assert.notEqual(pushed.plan_digest,selected.plan_digest);
+    assert.throws(()=>verifiedConvergenceBatch(pr,root,main,merged),
+      /metadata|parents|source/);
+    run('update-ref','refs/remotes/origin/main',lane);
+    assert.throws(()=>verifiedConvergenceBatch(pr,root,lane,merged),/ancestry/);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+  console.log('PR-native convergence: immutable Git source, historical E2E, approval PASS');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href&&
    process.argv[2]==='self-test')selfTest();
