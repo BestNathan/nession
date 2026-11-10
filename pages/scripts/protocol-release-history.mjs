@@ -69,8 +69,10 @@ export async function releaseProtocolHistory({api,fetcher=fetch,releases}){
   for(const item of items){
     let sha=null, schema=null;
     try{
-      sha=await resolveTag(api,item.tag);
-      if(sha&&item.asset)schema=await fetchSnapshot(item.asset,item.version,item.tag,sha,fetcher);
+      if(item.asset){
+        sha=await resolveTag(api,item.tag);
+        if(sha)schema=await fetchSnapshot(item.asset,item.version,item.tag,sha,fetcher);
+      }
     }catch(error){console.warn('Optional Protocol release snapshot unavailable',
       item.tag,error.message);}
     result.push({version:item.version,tag:item.tag,
