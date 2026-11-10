@@ -72,8 +72,9 @@ export function filterDocuments(items,{query='',owner='All'}={}){
 function supportTable(data,selected,direction){
   const table=el('table','documents-field-table');
   const head=el('thead'),hdr=el('tr');
-  for(const text of ['Field path','Response variant','Type','Required',
-      'Main',...data.releases.map(r=>r.version)]){
+  for(const text of ['Field path','Response variant','Type','Required','First observed',
+      data.source.source_version?'Main · '+data.source.source_version+' (dev)':'Main',
+      ...data.releases.map(r=>r.version)]){
     hdr.append(el('th','',text));
   }
   head.append(hdr);table.append(head);
@@ -83,7 +84,8 @@ function supportTable(data,selected,direction){
     row.append(el('td','documents-field-path',f.path),
       el('td','documents-field-variant',f.variant||'—'),
       el('td','',f.type),
-      el('td','',f.required?'Yes':'No'));
+      el('td','',f.required?'Yes':'No'),
+      el('td','',f.firstObserved||'Unknown'));
     const present=!f.historical;
     row.append(el('td','documents-version-cell '+(present?'present':'absent'),
       present?'✓':'—'));
