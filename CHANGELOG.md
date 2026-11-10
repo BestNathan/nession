@@ -506,3 +506,10 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Add the #3124 context capability and existing-Session Enter: active-Pane inside/outside/unknown, Web-safe empty-first draft materialized by nession-sandbox, measured capability catalog, generation-bound idempotent Enter that preserves the Native Pane, Pane-keyed durable records and reconciliation, and the inside effective-policy projection; correct the "disabled by default" wording and the Session-set reconciliation statement
 - Source: https://github.com/BestNathan/nession/issues/3124
+
+## 2026-11-10T03:04:00Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record the #3024 prepared EROFS root composition: versioned filesystem.composition input and validation, unprivileged erofsfuse read-only mounts plus fuse-overlayfs upper/work (or writable bind), empty tmpfs + Base Runtime root and toolchain mount ordering, the Base Runtime mountpoint-directory contract, recorded reverse-order unmount and reconciliation, fail-closed helper/digest/macOS behavior, and the exact PR/staging Case and one-time Task evidence (SC-01/02/04/05 Case passes; SC-03 Task receipt labeled untrusted; helpers remain a #3062 packaging prerequisite)
+- Source: https://github.com/BestNathan/nession/issues/3024

@@ -64,7 +64,7 @@
       },
       {
         "title": "Nession Sandbox policy and execution isolation architecture",
-        "description": "Approved policy boundaries, native OS mechanisms, network domain controls, backend ownership, and persistent tmux execution constraints",
+        "description": "Approved policy boundaries, native OS mechanisms, prepared EROFS root composition, network domain controls, backend ownership, and persistent tmux execution constraints",
         "path": "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
         "status": "candidate",
         "categories": [
@@ -73,7 +73,7 @@
           "sandbox",
           "security"
         ],
-        "updated_at": "2026-11-09T17:09:40Z"
+        "updated_at": "2026-11-10T03:04:00Z"
       },
       {
         "title": "Project declaration and Workspace location ownership",
