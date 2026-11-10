@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 pub mod bwrap;
 pub mod cgroup;
 pub mod channel;
+pub mod erofs;
 pub mod seccomp;
 pub mod verify;
 
@@ -27,6 +28,8 @@ use crate::settings::SandboxSettings;
 pub struct PreparedLinux {
     pub channel: Option<channel::Channel>,
     pub cgroup: Option<cgroup::ExecutionCgroup>,
+    /// Mounted prepared EROFS images owned by this execution.
+    pub mounted: Option<erofs::MountedComposition>,
     pub execution_dir: PathBuf,
     execution_id: String,
     visible_probes: Vec<PathBuf>,
@@ -102,6 +105,21 @@ pub fn probe(settings: &SandboxSettings) -> Capabilities {
         detail.push("in-sandbox bridge executable".to_string());
     }
 
+    let (erofs, erofs_unavailable) = erofs::probe(settings);
+    if let Some(reason) = erofs_unavailable {
+        detail.push(format!("EROFS composition unavailable: {reason}"));
+    } else if erofs {
+        detail.push("EROFS composition: erofsfuse and /dev/fuse available".to_string());
+    }
+    let erofs_overlay = erofs && erofs::overlay_available(settings);
+    if erofs {
+        detail.push(if erofs_overlay {
+            "EROFS workspace overlay: fuse-overlayfs available".to_string()
+        } else {
+            "EROFS workspace overlay unavailable: fuse-overlayfs is not executable".to_string()
+        });
+    }
+
     Capabilities {
         platform: Platform::Linux,
         backend: Some("linux-bwrap"),
@@ -119,6 +137,8 @@ pub fn probe(settings: &SandboxSettings) -> Capabilities {
         // The baseline probe above proved the mount view used by
         // `filesystem.access`.
         filesystem: true,
+        erofs,
+        erofs_overlay,
         network_allow: true,
         network_deny: net,
         network_restricted: net && bridge,
@@ -137,6 +157,8 @@ fn unavailable(reason: &str) -> Capabilities {
         cgroup_v2: None,
         seccomp: false,
         filesystem: false,
+        erofs: false,
+        erofs_overlay: false,
         network_allow: false,
         network_deny: false,
         network_restricted: false,
@@ -235,7 +257,7 @@ pub fn prepare(
     crate::capabilities::validate(compiled, &capabilities)?;
 
     if let Some(filesystem) = &compiled.filesystem {
-        crate::exec::validate_host_paths(filesystem)?;
+        crate::exec::validate_host_paths(filesystem, settings)?;
     }
 
     let execution_id = uuid::Uuid::new_v4().to_string();
@@ -400,13 +422,28 @@ fn prepare_inner(
     // the forbidden directories themselves must be absent. With no filesystem
     // policy the backend *masks* them with a tmpfs/devnull; the masked
     // directory then exists, so the probe names a known child the mask removed.
-    let mut visible_probes = vec![working_dir.to_path_buf()];
-    if let Some(filesystem) = &compiled.filesystem {
-        if let Some(path) = filesystem.visible().find(|path| path.is_dir()) {
-            visible_probes.push(path.to_path_buf());
+    let mut visible_probes = if compiled
+        .filesystem
+        .as_ref()
+        .is_some_and(|filesystem| filesystem.composition.is_some())
+    {
+        // Composition probes are sandbox paths, not host paths: they exist
+        // only after Bubblewrap installs the EROFS mounts.
+        compiled
+            .filesystem
+            .as_ref()
+            .map(crate::policy::CompiledFilesystem::composition_probes)
+            .unwrap_or_default()
+    } else {
+        let mut probes = vec![working_dir.to_path_buf()];
+        if let Some(filesystem) = &compiled.filesystem {
+            if let Some(path) = filesystem.visible().find(|path| path.is_dir()) {
+                probes.push(path.to_path_buf());
+            }
         }
-    }
-    visible_probes.retain(|path| path.exists());
+        probes.retain(|path| path.exists());
+        probes
+    };
     visible_probes.sort();
     visible_probes.dedup();
 
@@ -440,6 +477,18 @@ fn prepare_inner(
     not_socket_probes.sort();
     not_socket_probes.dedup();
 
+    let mounted = match compiled
+        .filesystem
+        .as_ref()
+        .and_then(|filesystem| filesystem.composition.as_ref())
+    {
+        Some(composition) => Some(erofs::mount_composition(
+            composition,
+            execution_dir,
+            settings,
+        )?),
+        None => None,
+    };
     let plan = bwrap::build(
         compiled,
         working_dir,
@@ -454,6 +503,7 @@ fn prepare_inner(
             .map(cgroup::ExecutionCgroup::procs_file)
             .as_deref(),
         &request.inner_command,
+        mounted.as_ref().map(erofs::MountedComposition::resolved),
         settings,
     )?;
 
@@ -492,6 +542,10 @@ fn prepare_inner(
         window_id: None,
         working_dir: working_dir.display().to_string(),
         effective_policy: Some(compiled.normalized.clone()),
+        mounts: mounted
+            .as_ref()
+            .map(erofs::MountedComposition::mountpoints)
+            .unwrap_or_default(),
         channel_dir: runtime_dir.map(|dir| dir.display().to_string()),
         mechanisms: report.mechanisms.clone(),
         warnings: report.warnings.clone(),
@@ -521,6 +575,7 @@ fn prepare_inner(
         Some(PreparedLinux {
             channel: Some(channel),
             cgroup,
+            mounted,
             execution_dir: execution_dir.to_path_buf(),
             execution_id: execution_id.to_string(),
             visible_probes,
@@ -649,6 +704,11 @@ fn cleanup_linux(
     record: &ExecutionRecord,
     report: &mut crate::exec::CleanupReport,
 ) -> Result<()> {
+    if let Some(mut mounted) = prepared.mounted.take() {
+        // A failed unmount keeps the record for a later reconciliation retry;
+        // removing the directory underneath a live FUSE mount would leak it.
+        mounted.unmount(report)?;
+    }
     if let Some(group) = prepared.cgroup.take() {
         report.evidence.extend(group.evidence());
         // Keep the record on failure: reconciliation retries the owned

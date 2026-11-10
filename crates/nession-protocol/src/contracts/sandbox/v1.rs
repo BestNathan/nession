@@ -84,6 +84,79 @@ pub enum SandboxEnforcement {
 #[serde(deny_unknown_fields)]
 pub struct SandboxFilesystemPolicy {
     pub access: SandboxFilesystemAccess,
+    /// A prepared EROFS root composition. When present it replaces
+    /// `access`: the sandbox root is an empty tmpfs carrying the base image,
+    /// with only the declared image mounts and writable workspace visible.
+    ///
+    /// This is an Agent/Server-prepared input, not a Web-editable field: the
+    /// generated draft projection omits it so a client cannot name native
+    /// image paths or digests.
+    #[cfg_attr(feature = "codegen", ts(skip))]
+    #[cfg_attr(feature = "codegen", schemars(skip))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<SandboxFilesystemComposition>,
+}
+
+/// A prepared local EROFS image and the immutable digest it must hash to.
+///
+/// `source` is an Agent-authorized local file, never a URL or a raw mount
+/// request. The Sandbox verifies the digest before it mounts anything.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxImageRef {
+    /// `sha256:<64 lowercase hex>` of the exact image bytes.
+    pub digest: String,
+    /// Absolute local path of the already-prepared image file.
+    pub source: String,
+}
+
+/// The minimal composable root (#3024).
+///
+/// `base` is mounted read-only at `/`. The optional Project source image and
+/// writable directory are both mounted at `/workspace` (the writable bind is
+/// applied after the image and therefore shadows it). Toolchain images are
+/// read-only and restricted to `/opt/<name>` so V1 has no arbitrary
+/// overlapping root ordering language.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxFilesystemComposition {
+    /// The minimal glibc Base Runtime image mounted read-only at `/`.
+    pub base: SandboxImageRef,
+    /// The Project source image and/or the bounded writable workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<SandboxWorkspace>,
+    /// Optional read-only toolchain images mounted at `/opt/<name>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub toolchains: Vec<SandboxToolchainImage>,
+}
+
+/// The `/workspace` view: an optional read-only Project source image plus an
+/// Agent-owned writable directory bound over it.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxWorkspace {
+    /// Read-only Project source EROFS, when the Project has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<SandboxImageRef>,
+    /// Absolute Agent-owned writable directory bound at `/workspace`.
+    pub write: String,
+}
+
+/// One read-only toolchain EROFS and its `/opt/<name>` mount target.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxToolchainImage {
+    pub digest: String,
+    pub source: String,
+    pub target: String,
 }
 
 /// Authorized host path sets. Other host paths are not visible in the
@@ -660,6 +733,60 @@ mod tests {
         }))
         .expect_err("an unknown key is not a policy");
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn an_erofs_composition_parses_and_round_trips() {
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "composition": {
+                    "base": {
+                        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "source": "/data/erofs/sha256/aaaa"
+                    },
+                    "workspace": {
+                        "image": {
+                            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                            "source": "/data/erofs/sha256/bbbb"
+                        },
+                        "write": "/data/sandbox/executions/e1/workspace"
+                    },
+                    "toolchains": [
+                        {
+                            "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                            "source": "/data/erofs/sha256/cccc",
+                            "target": "/opt/node"
+                        }
+                    ]
+                }
+            }
+        }))
+        .expect("a prepared EROFS composition is a policy");
+        let value = serde_json::to_value(&policy).unwrap();
+        assert_eq!(
+            value["filesystem"]["composition"]["toolchains"][0]["target"],
+            "/opt/node"
+        );
+    }
+
+    #[test]
+    fn unknown_composition_fields_are_refused() {
+        for bad in [
+            serde_json::json!({
+                "base": { "digest": "sha256:aa", "source": "/x", "mount": "kernel" }
+            }),
+            serde_json::json!({
+                "base": { "digest": "sha256:aa", "source": "/x" },
+                "workspace": { "write": "/w", "upper": "/u" }
+            }),
+        ] {
+            let error = serde_json::from_value::<SandboxFilesystemComposition>(bad)
+                .expect_err("an unknown composition key is refused");
+            assert!(error.to_string().contains("unknown field"));
+        }
     }
 
     #[test]

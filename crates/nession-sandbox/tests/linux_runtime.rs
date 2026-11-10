@@ -255,6 +255,220 @@ mod helpers {
             .as_ref()
             .is_some_and(|support| support.controllers.contains("pids"))
     }
+
+    /// Build an EROFS image with the product's fixed packaging argv.
+    pub(super) fn mkfs_erofs(source: &Path, image: &Path) {
+        let status = Command::new("mkfs.erofs") // not-tmux: test fixture builds an EROFS image
+            .args([
+                "-T",
+                "0",
+                "-U",
+                "11111111-1111-4111-8111-111111111111",
+                "-b",
+                "4096",
+            ])
+            .arg(image)
+            .arg(source)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run mkfs.erofs");
+        assert!(
+            status.success(),
+            "mkfs.erofs failed for {}",
+            image.display()
+        );
+    }
+
+    fn copy_file_preserving_path(root: &Path, file: &Path) {
+        let relative = file
+            .strip_prefix("/")
+            .unwrap_or_else(|_| panic!("not absolute: {}", file.display()));
+        let destination = root.join(relative);
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).expect("copy parent");
+        }
+        std::fs::copy(file, &destination).expect("copy file");
+    }
+
+    fn copy_libs(root: &Path, binary: &Path) {
+        let output = Command::new("ldd") // not-tmux: test fixture resolves shared libraries
+            .arg(binary)
+            .output()
+            .expect("run ldd");
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Some(path) = line.split_whitespace().find(|token| token.starts_with('/')) {
+                copy_file_preserving_path(root, Path::new(path));
+            }
+        }
+    }
+
+    /// A minimal glibc Base Runtime: shell, git, the bridge's loader/libs and
+    /// the mountpoint directories Bubblewrap needs on a read-only root.
+    pub(super) fn build_base_runtime(root: &Path, bridge: &Path) {
+        for binary in [
+            Path::new("/bin/sh"),
+            Path::new("/usr/bin/git"),
+            Path::new("/usr/bin/sleep"),
+            Path::new("/bin/sleep"),
+        ] {
+            if !binary.exists() {
+                continue;
+            }
+            copy_file_preserving_path(root, binary);
+            copy_libs(root, binary);
+        }
+        copy_libs(root, bridge);
+        for file in ["/etc/passwd", "/etc/group"] {
+            if Path::new(file).exists() {
+                copy_file_preserving_path(root, Path::new(file));
+            }
+        }
+        for directory in [
+            "workspace",
+            "opt/node",
+            "opt/rust",
+            "home",
+            "tmp",
+            "dev",
+            "proc",
+            "run/nession",
+        ] {
+            std::fs::create_dir_all(root.join(directory)).expect("base runtime directory");
+        }
+    }
+
+    pub(super) fn require_composition_tools() {
+        for (tool, args) in [
+            ("bwrap", vec!["--version"]),
+            ("mkfs.erofs", vec!["-V"]),
+            ("erofsfuse", vec!["-V"]),
+            ("fusermount3", vec!["-V"]),
+            ("fuse-overlayfs", vec!["--version"]),
+        ] {
+            let output = Command::new(tool) // not-tmux: composition helper version probe
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            assert!(
+                output.is_ok(),
+                "the composition proof requires `{tool}` on this runner"
+            );
+        }
+        assert!(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/fuse")
+                .is_ok(),
+            "the composition proof requires a usable /dev/fuse"
+        );
+    }
+
+    pub(super) struct CompositionImages {
+        pub(super) base: PathBuf,
+        pub(super) project: PathBuf,
+        pub(super) toolchain: PathBuf,
+        pub(super) base_digest: String,
+        pub(super) project_digest: String,
+        pub(super) toolchain_digest: String,
+    }
+
+    pub(super) fn build_composition_images(dir: &Path) -> CompositionImages {
+        let images = dir.join("images");
+        let base_source = dir.join("base-source");
+        let project_source = dir.join("project-source");
+        let toolchain_source = dir.join("toolchain-source");
+        for path in [&images, &base_source, &project_source, &toolchain_source] {
+            std::fs::create_dir_all(path).expect("fixture directory");
+        }
+        build_base_runtime(
+            &base_source,
+            Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
+        );
+        std::fs::write(project_source.join("project.txt"), "project\n").expect("project file");
+        std::fs::write(toolchain_source.join("marker"), "toolchain\n").expect("tool file");
+        let base = images.join("base.erofs");
+        let project = images.join("project.erofs");
+        let toolchain = images.join("toolchain.erofs");
+        mkfs_erofs(&base_source, &base);
+        mkfs_erofs(&project_source, &project);
+        mkfs_erofs(&toolchain_source, &toolchain);
+        CompositionImages {
+            base_digest: sha256_file(&base),
+            project_digest: sha256_file(&project),
+            toolchain_digest: sha256_file(&toolchain),
+            base,
+            project,
+            toolchain,
+        }
+    }
+
+    pub(super) fn sha256_file(file: &Path) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        let mut handle = std::fs::File::open(file).expect("open image");
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            use std::io::Read as _;
+            let read = handle.read(&mut buffer).expect("read image");
+            if read == 0 {
+                break;
+            }
+            hasher.update(buffer.get(..read).expect("read chunk"));
+        }
+        let digest = hasher.finalize();
+        let mut text = String::with_capacity(64);
+        for byte in digest {
+            text.push_str(&format!("{byte:02x}"));
+        }
+        text
+    }
+
+    pub(super) fn composition_policy(
+        base_image: &Path,
+        base_digest: &str,
+        workspace_image: &Path,
+        workspace_digest: &str,
+        workspace_write: &Path,
+        toolchain_image: &Path,
+        toolchain_digest: &str,
+    ) -> SandboxPolicy {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "composition": {
+                    "base": {
+                        "digest": format!("sha256:{base_digest}"),
+                        "source": base_image.to_string_lossy()
+                    },
+                    "workspace": {
+                        "image": {
+                            "digest": format!("sha256:{workspace_digest}"),
+                            "source": workspace_image.to_string_lossy()
+                        },
+                        "write": workspace_write.to_string_lossy()
+                    },
+                    "toolchains": [
+                        {
+                            "digest": format!("sha256:{toolchain_digest}"),
+                            "source": toolchain_image.to_string_lossy(),
+                            "target": "/opt/node"
+                        }
+                    ]
+                }
+            },
+            "process": { "linux_namespaces": { "pid": true, "ipc": true, "user": true } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } },
+            "enforcement": "required"
+        }))
+        .expect("composition policy fixture")
+    }
 }
 
 use helpers::*;
@@ -668,5 +882,255 @@ fn an_execution_survives_losing_its_client_stream() {
         "execution_id": record.execution_id,
         "survived_client_loss": alive,
         "record_removed": true,
+    }));
+}
+
+#[test]
+fn an_erofs_composition_runs_a_shell_with_a_writable_overlay_workspace() {
+    require_composition_tools();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = dir.path().join("images");
+    let base_source = dir.path().join("base-source");
+    let project_source = dir.path().join("project-source");
+    let toolchain_source = dir.path().join("toolchain-source");
+    for path in [&images, &base_source, &project_source, &toolchain_source] {
+        std::fs::create_dir_all(path).expect("fixture directory");
+    }
+    build_base_runtime(
+        &base_source,
+        Path::new(env!("CARGO_BIN_EXE_nession-sandbox-bridge")),
+    );
+    std::fs::write(project_source.join("project.txt"), "project\n").expect("project file");
+    std::fs::write(toolchain_source.join("marker"), "toolchain\n").expect("tool file");
+
+    let base_image = images.join("base.erofs");
+    let project_image = images.join("project.erofs");
+    let toolchain_image = images.join("toolchain.erofs");
+    mkfs_erofs(&base_source, &base_image);
+    mkfs_erofs(&project_source, &project_image);
+    mkfs_erofs(&toolchain_source, &toolchain_image);
+    let base_digest = sha256_file(&base_image);
+    let project_digest = sha256_file(&project_image);
+    let toolchain_digest = sha256_file(&toolchain_image);
+
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let workspace_write = settings.state_dir.join("workspaces").join("composition");
+    std::fs::create_dir_all(&workspace_write).expect("workspace write");
+
+    let policy = composition_policy(
+        &base_image,
+        &base_digest,
+        &project_image,
+        &project_digest,
+        &workspace_write,
+        &toolchain_image,
+        &toolchain_digest,
+    );
+    let script = "\
+set -eu
+echo SHELL-OK
+printf 'sandbox\n' > /workspace/from-sandbox
+read line < /workspace/project.txt
+[ \"$line\" = project ] && echo LOWER-OK
+git init -q /workspace/repo
+cd /workspace/repo
+git status --porcelain > /tmp/status
+[ -f .git/HEAD ] && echo GIT-OK
+[ -f /opt/node/marker ] && echo TOOL-OK
+erofs=no; overlay=no
+while IFS= read -r mount; do
+  case \"$mount\" in
+    *fuse.erofsfuse*) erofs=yes ;;
+    *fuse.fuse-overlayfs*) overlay=yes ;;
+  esac
+done < /proc/self/mountinfo
+[ \"$erofs\" = yes ] && echo EROFS-OK
+[ \"$overlay\" = yes ] && echo OVERLAY-OK
+[ ! -e /etc/shadow ] && echo HIDDEN-OK
+";
+    let mut running = launch(
+        &settings,
+        LaunchRequest {
+            policy,
+            session_name: format!("composition-{}", std::process::id()),
+            instance_id: "instance-composition".to_string(),
+            working_dir: "/workspace".to_string(),
+            inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()],
+            tmux_socket: None,
+        },
+    );
+    verify_or_report(&mut running, "the composition launch barrier must verify");
+    let record = running.prepared.record().clone();
+    let (status, stdout, stderr) = wait_for_exit(&mut running);
+    assert!(
+        status.success(),
+        "the composed shell failed: status={status:?} stdout={stdout} stderr={stderr}"
+    );
+    for marker in [
+        "SHELL-OK",
+        "LOWER-OK",
+        "GIT-OK",
+        "TOOL-OK",
+        "EROFS-OK",
+        "OVERLAY-OK",
+        "HIDDEN-OK",
+    ] {
+        assert!(
+            stdout.contains(marker),
+            "the composed shell did not prove {marker}: stdout={stdout} stderr={stderr}"
+        );
+    }
+    assert!(
+        workspace_write.join("upper").join("from-sandbox").exists(),
+        "a sandbox write must land in the bounded overlay upper"
+    );
+
+    let mountpoints = record.mounts.clone();
+    let report = running
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the composition");
+    for mountpoint in &mountpoints {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "cleanup must unmount {mountpoint}"
+        );
+    }
+    assert_cleaned(&settings, &record);
+    print_evidence(&serde_json::json!({
+        "execution_id": record.execution_id,
+        "shell": "ok",
+        "git": "ok",
+        "toolchain": "ok",
+        "erofs_mount": true,
+        "overlay_mount": true,
+        "host_etc_shadow_hidden": true,
+        "mounts_unmounted": mountpoints.len(),
+        "cleanup_evidence": report.evidence_lines(),
+    }));
+}
+
+#[test]
+fn two_compositions_share_images_and_release_only_their_own_mounts() {
+    require_composition_tools();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let images = build_composition_images(dir.path());
+    let mut settings = settings(dir.path());
+    settings.erofs_image_root = Some(dir.path().join("images"));
+    std::fs::create_dir_all(&settings.state_dir).expect("state dir");
+    let first_write = settings.state_dir.join("workspaces").join("first");
+    let second_write = settings.state_dir.join("workspaces").join("second");
+    std::fs::create_dir_all(&first_write).expect("first workspace");
+    std::fs::create_dir_all(&second_write).expect("second workspace");
+
+    let launch_one = |write: &Path, name: &str| {
+        launch(
+            &settings,
+            LaunchRequest {
+                policy: composition_policy(
+                    &images.base,
+                    &images.base_digest,
+                    &images.project,
+                    &images.project_digest,
+                    write,
+                    &images.toolchain,
+                    &images.toolchain_digest,
+                ),
+                session_name: name.to_string(),
+                instance_id: format!("instance-{name}"),
+                working_dir: "/workspace".to_string(),
+                inner_command: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo READY; sleep 5".to_string(),
+                ],
+                tmux_socket: None,
+            },
+        )
+    };
+    let mut first = launch_one(&first_write, "composition-first");
+    let mut second = launch_one(&second_write, "composition-second");
+    verify_or_report(&mut first, "the first composition barrier must verify");
+    verify_or_report(&mut second, "the second composition barrier must verify");
+    let first_record = first.prepared.record().clone();
+    let second_record = second.prepared.record().clone();
+    for mountpoint in &first_record.mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "the first composition mount {mountpoint} must be live"
+        );
+    }
+    for mountpoint in &second_record.mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "the second composition mount {mountpoint} must be live"
+        );
+    }
+
+    // Client detach must not release the execution or its mounts.
+    drop(first.child.stdout.take());
+    drop(first.child.stderr.take());
+    std::thread::sleep(Duration::from_millis(700));
+    assert!(
+        Path::new(&format!("/proc/{}", first.pane_pid)).exists(),
+        "the detached composition Pane must stay alive"
+    );
+    for mountpoint in &first_record.mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "a detached composition must keep {mountpoint} mounted"
+        );
+    }
+
+    let _ = first.child.kill();
+    let _ = first.child.wait();
+    first
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the first composition");
+    for mountpoint in &first_record.mounts {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "the first composition's {mountpoint} must be unmounted"
+        );
+    }
+    assert_cleaned(&settings, &first_record);
+    for mountpoint in &second_record.mounts {
+        assert!(
+            nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "the second composition's {mountpoint} must remain mounted"
+        );
+    }
+    assert!(
+        Path::new(&format!("/proc/{}", second.pane_pid)).exists(),
+        "the second composition must stay alive when only its peer is cleaned"
+    );
+
+    let _ = second.child.kill();
+    let _ = second.child.wait();
+    second
+        .prepared
+        .into_handle()
+        .cleanup()
+        .expect("cleanup the second composition");
+    for mountpoint in second_record.mounts.iter() {
+        assert!(
+            !nession_sandbox::linux::erofs::is_mounted(Path::new(mountpoint)),
+            "the second composition's {mountpoint} must be unmounted"
+        );
+    }
+    assert_cleaned(&settings, &second_record);
+    print_evidence(&serde_json::json!({
+        "first_execution": first_record.execution_id,
+        "second_execution": second_record.execution_id,
+        "detached_pane_survived": true,
+        "shared_images_remained_mounted": true,
+        "first_mounts_released": first_record.mounts.len(),
+        "second_mounts_released": second_record.mounts.len(),
     }));
 }

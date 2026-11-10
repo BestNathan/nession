@@ -64,6 +64,28 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   seccomp profile are created for every execution. They are safety
   prerequisites, not additional user-requested constraints.
 
+## Prepared EROFS composition (#3024)
+
+- `filesystem.composition` is a **prepared local image input**, not an image
+  builder/puller. The Sandbox re-verifies every digest and authorizes every
+  source beneath the Agent EROFS image root; it never fetches, extracts or
+  resolves a logical image.
+- The compatibility root is an empty tmpfs + Base Runtime at `/`; `/workspace`
+  is a read-only Project image merged with a bounded writable upper/work via
+  `fuse-overlayfs` (or a direct bind when no Project image exists). Toolchains
+  are read-only and only `/opt/<name>`. Do not add arbitrary overlapping-root
+  ordering or an image with a writable upper inside it.
+- Mount helpers are unprivileged FUSE only (`erofsfuse`, `fuse-overlayfs`,
+  `fusermount3`). Never substitute a kernel loop mount, extraction, container
+  layer, tmpfs or Native fallback when a helper/capability is absent; report
+  `UnsupportedPolicy`.
+- The Base Runtime image owns its mountpoint directories (`/bin/sh`,
+  `/workspace`, each `/opt/<name>`, `/dev`, `/proc`, `/home`, `/tmp`,
+  `/run/nession`). The read-only composed root cannot grow them at launch.
+- Every mountpoint is under the execution directory and recorded. Cleanup
+  unmounts in reverse order and only paths recorded beneath that execution;
+  reconciliation never trusts an arbitrary record path.
+
 ## cgroup delegation
 
 The execution root needs a cgroup with delegated controllers and no processes

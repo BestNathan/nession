@@ -38,6 +38,16 @@ pub struct SandboxSettings {
     pub bridge_subcommand: String,
     /// The trusted launcher shell that enrolls the cgroup and seccomp FD.
     pub launcher_shell: PathBuf,
+    /// Agent-authorized root containing prepared EROFS images. A composition
+    /// may mount only files beneath this directory.
+    pub erofs_image_root: Option<PathBuf>,
+    /// The unprivileged EROFS FUSE helper.
+    pub erofsfuse_path: PathBuf,
+    /// The FUSE unmount helper.
+    pub fusermount_path: PathBuf,
+    /// Unprivileged OverlayFS helper used when a Project image must be merged
+    /// with an Agent-owned writable upper/work.
+    pub fuse_overlayfs_path: PathBuf,
     /// Agent-private directories (identity, credentials, configuration) that
     /// must never be visible inside a sandbox.
     pub private_directories: Vec<PathBuf>,
@@ -62,6 +72,10 @@ impl SandboxSettings {
             bridge_executable,
             bridge_subcommand: "__nession-sandbox-bridge".to_string(),
             launcher_shell: PathBuf::from("/bin/sh"),
+            erofs_image_root: None,
+            erofsfuse_path: PathBuf::from("erofsfuse"),
+            fusermount_path: PathBuf::from("fusermount3"),
+            fuse_overlayfs_path: PathBuf::from("fuse-overlayfs"),
             private_directories: Vec::new(),
         }
     }

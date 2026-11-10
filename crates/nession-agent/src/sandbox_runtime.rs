@@ -122,6 +122,12 @@ impl SandboxRuntime {
         let mut settings = settings;
         settings.enabled = config.sandbox.enabled;
         settings.cgroup_root = config.sandbox.cgroup_root.clone();
+        // The verified EROFS cache is the only root a composition may mount
+        // files from (#3023). Resolution failure leaves it unset, so a
+        // composition request fails closed instead of trusting an arbitrary path.
+        if let Ok(resolved) = config.effective_erofs_storage_dir() {
+            settings.erofs_image_root = Some(resolved.path);
+        }
         if let Some(seconds) = config.sandbox.launch_timeout_secs {
             settings.launch_timeout = Duration::from_secs(seconds);
         }
