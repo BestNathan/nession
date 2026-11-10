@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Choice list visual study · #3164</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a><span>/</span><span>Select &amp; Choice Items</span></nav>
+<span class="np-eyebrow">Nession / Design System / Component Visual Study</span>
+<div class="np-header-main"><div><h1 class="np-title">Select should feel like Nession</h1>
+<p class="np-subtitle">Compare the existing shadcn-like Base UI option treatment with a purpose-built Nession item grammar. Try selecting an Agent, an Existing Location and a connection mode, including long paths and unavailable states. The interaction engine remains Base UI in production; this is a deterministic HTML mock.</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3164" target="_blank" rel="noopener noreferrer">Issue #3164</a><a href="https://github.com/BestNathan/nession/issues/3142" target="_blank" rel="noopener noreferrer">Overlay contract #3142</a>
+<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div></div>
+<div class="np-meta"><span>Decision: <strong>Item anatomy &amp; visual hierarchy</strong></span><span>Not changing: <strong>Base UI, portal, dismissal &amp; operation flow</strong></span><span>Mock: <strong>no Session/API mutations</strong></span></div>
+</header>
+<main><section class="np-preview" aria-label="Interactive choice item design comparison">
+<div class="np-section-heading"><div><h2>Interactive product · actual CSS pixel size</h2><p>Switch the visual proposal externally. Product selection and keyboard interaction happen inside the viewport.</p></div>
+<div class="np-preview-toolbar" role="group" aria-label="Simulated device">
+<button type="button" data-np-size="1180" data-np-experience="web" aria-pressed="true">Web 1180</button>
+<button type="button" data-np-size="1024" data-np-experience="web">Web 1024</button>
+<button type="button" data-np-size="1440" data-np-experience="web">Web 1440</button>
+<button type="button" data-np-size="390" data-np-experience="app">App 390</button>
+<button type="button" data-np-size="375" data-np-experience="app">App 375</button>
+<button type="button" data-np-size="430" data-np-experience="app">App 430</button>
+<button type="button" data-np-reset>Reset</button></div></div>
+<div class="review-compare" role="group" aria-label="Visual candidate comparison">
+<strong>Visual recipe</strong>
+<button type="button" data-recipe="current" aria-pressed="false">Current · Base UI styling</button>
+<button type="button" data-recipe="candidate" aria-pressed="true">Candidate · Nession choice rows</button>
+<span class="review-split"></span><strong>Theme</strong>
+<button type="button" data-theme="light" aria-pressed="true">Light</button><button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+<span class="review-split"></span><strong>Fixture</strong>
+<button type="button" data-fixture="normal" aria-pressed="true">Normal</button>
+<button type="button" data-fixture="long" aria-pressed="false">Long paths / list</button>
+<button type="button" data-fixture="offline" aria-pressed="false">Offline</button>
+</div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1180px;--np-device-height:820px">
+<div class="nession-product" id="nession-product" data-experience="web" data-theme="light" data-recipe="candidate" aria-label="Simulated Nession New Session operation"></div>
+</div></div>
+<p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
+</section>
+<section class="np-details"><h2>Functional design &amp; review notes</h2>
+<p class="np-details-lede">A visual proposal rather than a second Select implementation. The current-mode approximation follows staging `select.tsx`, not a captured production screenshot. A real approval requires current React Chromium side-by-side comparison and Design Gate evidence.</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>What changes</h3><ol class="np-steps">
+<li><strong>Action / short choice:</strong> compact, single-line, one focus treatment; Web density does not change without revising its canonical 28px contract.</li>
+<li><strong>Resource choice:</strong> meaningful title, source/path and quiet status; selected indicator is stable, no competing decorative color.</li>
+<li><strong>Popup width:</strong> current option width tracks trigger; candidate rich choices can use more usable width, capped by viewport, with wrapping instead of hidden data.</li></ol></article>
+<article class="np-detail"><h3>Try the controls</h3><ol class="np-steps">
+<li>Open Existing Location. Compare title/status/path legibility, selected and disabled rows. Switch Current↔Candidate with the same fixture and target.</li>
+<li>Open Agent or Connection Mode for one-line choices. Try ArrowUp/ArrowDown/Home/End, Enter and Escape. Disabled options cannot commit.</li>
+<li>Switch to App 390/375 and Dark. Check touch-target space, selected-state contrast and available-height collision. Repeat after enabling Long Paths.</li></ol></article>
+<article class="np-detail"><h3>Boundaries</h3><p>Do not reinterpret every menu row as a card. Status/source metadata belongs only to data that actually has it. The current `popup-menu.md` Web 28px action band / App 44px touch band remains unchanged in the prototype; rich rows are semantically taller. Existing Location may need the width to grow, not the whole dialog.</p></article>
+<article class="np-detail"><h3>Fidelity and verification</h3><p>Source-informed visual mock with sanitized fixtures. DOM hierarchy approximates the New Session dialog in Web and App operation depth; real Base UI positioning, focus trap, keyboard/IME behavior, reduced motion, computed token values and exact pixel parity are not claimed. This prototype has no backend, no successful Session creation, and no production Acceptance.</p><details class="np-inspector"><summary>Mock state</summary><pre id="state-inspector">Initializing</pre></details></article>
+</div></section></main><footer class="np-footer">Nession prototype · no real service calls · visual proposal only · #3164</footer>
+</div><script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script>
+</body></html>
