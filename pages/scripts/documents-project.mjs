@@ -12,7 +12,7 @@ const MAX_DEFS=2500;
 const MAX_FIELDS=6000;
 
 export function unavailableDocuments(generatedAt){
-  return {schema_version:3,status:'unavailable',generated_at:generatedAt,
+  return {schema_version:4,status:'unavailable',generated_at:generatedAt,
     source:null,definitions:{},releases:[],protocols:[]};
 }
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -85,7 +85,8 @@ export function describeFields(half,definitions){
       for(const [name,value] of Object.entries(schema.properties)){
         const fieldPath=path?path+'.'+name:name;
         const isRequired=requiredSet.has(name);
-        add({path:fieldPath,variant,type:describeType(value),required:isRequired});
+        add({path:fieldPath,variant,type:describeType(value),required:isRequired,
+          description:typeof value?.description==='string'?value.description.slice(0,500):''});
         walk(value,fieldPath,variant,isRequired,stack,depth+1);
       }
     }
@@ -100,73 +101,52 @@ export function describeFields(half,definitions){
   walk(half.shape);
   return rows;
 }
-function supports(versions,direction){
-  const fields=new Map();
-  for(const v of versions){
-    for(const f of v[direction]?.fields||[]){
-      const key=f.variant+'|'+f.path;
-      if(!fields.has(key))fields.set(key,{path:f.path,variant:f.variant,versions:[],
-        descriptions:[],type:f.type,required:f.required});
-      const current=fields.get(key);
-      current.versions.push(v.version);
-      current.descriptions.push({version:v.version,type:f.type,required:f.required});
-    }
-  }
-  return [...fields.values()].sort((a,b)=>a.path.localeCompare(b.path)||a.variant.localeCompare(b.variant));
-}
 const SEMVER=/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+// "Since Nession" is a single proven introduction boundary, not a
+// per-version compatibility matrix. An immediately preceding release MUST be
+// verified absent, and every newer release must be verified present. If a
+// missing snapshot obscures the boundary, do not guess a historical version.
+export function fieldSince(states,versions){
+  if(!states.length||states.length!==versions.length)return {since:null,since_status:'unknown'};
+  const last=states.length-1;
+  if(states[last]==='absent')return {since:null,since_status:'unreleased'};
+  if(states[last]!=='supported')return {since:null,since_status:'unknown'};
+  let start=last;
+  while(start>0&&states[start-1]==='supported')start--;
+  if(start===0||states[start-1]!=='absent')
+    return {since:null,since_status:'unknown'};
+  return {since:versions[start],since_status:'verified'};
+}
 function decorateReleaseHistory(result,snapshots){
-  // Each verified release includes a schema generated from *its own tag*.
-  // Missing snapshots must remain unknown, even if later code has that field.
+  // A release's schema is generated at *its tag*; unknown historical releases
+  // never become "absent" just because today's main is different.
   const verified=snapshots.map(s=>{
     if(!SEMVER.test(s?.version||'')||s.tag!=='v'+s.version||
        !['available','unavailable'].includes(s.status))throw Error('Invalid release metadata');
     if(s.status==='unavailable')return {...s,projected:null};
     if(!SHA.test(s.sha||'')||!s.schema)throw Error('Unpinned release contract');
-    const projected=projectProtocolSchema(s.schema,{sha:s.sha,generatedAt:result.generated_at});
-    return {...s,projected};
+    return {...s,projected:projectProtocolSchema(s.schema,
+      {sha:s.sha,generatedAt:result.generated_at})};
   });
-  const history=verified.map(s=>({version:s.version,tag:s.tag,
-    sha:s.sha||null,status:s.status}));
-  const seen=new Set();
-  for(const release of history){
-    if(seen.has(release.version))throw Error('Duplicate released Nession version');
-    seen.add(release.version);
+  const versions=new Set();
+  for(const release of verified){
+    if(versions.has(release.version))throw Error('Duplicate released Nession version');
+    versions.add(release.version);
   }
-  result.releases=history;
+  result.releases=verified.map(s=>({version:s.version,tag:s.tag,sha:s.sha||null,
+    status:s.status}));
   for(const unit of result.protocols){
     for(const contract of unit.versions){
       for(const direction of ['request','response']){
-        const fields=contract[direction]?.fields||[];
-        // Include historical fields that later main contracts removed, but
-        // never claim they still exist in current source.
-        const currentSet=new Set(fields.map(f=>f.variant+'|'+f.path));
-        for(const release of verified){
-          const oldUnit=release.projected?.protocols.find(p=>p.id===unit.id);
-          const oldContract=oldUnit?.versions.find(v=>v.version===contract.version);
-          for(const old of oldContract?.[direction]?.fields||[]){
-            const key=old.variant+'|'+old.path;
-            if(!currentSet.has(key)){
-              fields.push({...old,historical:true});
-              currentSet.add(key);
-            }
-          }
-        }
-        fields.sort((a,b)=>a.path.localeCompare(b.path)||a.variant.localeCompare(b.variant));
-        for(const field of fields){
-          const releaseSupport=verified.map(release=>{
-            if(!release.projected)return {version:release.version,status:'unknown'};
+        for(const field of contract[direction]?.fields||[]){
+          const states=verified.map(release=>{
+            if(!release.projected)return 'unknown';
             const oldUnit=release.projected.protocols.find(p=>p.id===unit.id);
             const oldContract=oldUnit?.versions.find(v=>v.version===contract.version);
-            if(!oldContract||!oldContract[direction])
-              return {version:release.version,status:'contract-not-declared'};
-            const found=oldContract[direction].fields.find(f=>
-              f.path===field.path&&f.variant===field.variant);
-            return found?{version:release.version,status:'supported',type:found.type,
-              required:found.required}:{version:release.version,status:'not-supported'};
+            return oldContract?.[direction]?.fields.some(f=>
+              f.path===field.path&&f.variant===field.variant)?'supported':'absent';
           });
-          field.releases=releaseSupport;
-          field.firstObserved=releaseSupport.find(r=>r.status==='supported')?.version||null;
+          Object.assign(field,fieldSince(states,verified.map(s=>s.version)));
         }
       }
     }
@@ -201,10 +181,9 @@ export function projectProtocolSchema(schema,{sha,generatedAt,releases=[],source
   const protocols=[...groups.values()].sort((a,b)=>a.id.localeCompare(b.id));
   for(const group of protocols){
     group.versions.sort((a,b)=>a.version-b.version);
-    group.support={request:supports(group.versions,'request'),
-      response:supports(group.versions,'response')};
+    
   }
-  const result={schema_version:3,status:'available',generated_at:generatedAt,
+  const result={schema_version:4,status:'available',generated_at:generatedAt,
     source:{repository:REPO,branch:'main',sha,source_version:sourceVersion},
     definitions:schema.$defs,releases:[],protocols};
   if(releases.length)decorateReleaseHistory(result,releases);
@@ -212,7 +191,7 @@ export function projectProtocolSchema(schema,{sha,generatedAt,releases=[],source
   return result;
 }
 export function validPublicDocuments(data){
-  if(data?.schema_version!==3||!['available','unavailable'].includes(data.status)||
+  if(data?.schema_version!==4||!['available','unavailable'].includes(data.status)||
      !Array.isArray(data.protocols)||!object(data.definitions)||
      !Array.isArray(data.releases)||data.releases.length>30)return false;
   if(!data.releases.every(r=>SEMVER.test(r?.version||'')&&r.tag==='v'+r.version&&
@@ -228,8 +207,7 @@ export function validPublicDocuments(data){
     if(!ID.test(p?.id||'')||ids.has(p.id)||!str(p.owner)||!Array.isArray(p.wires)||
        !p.wires.length||!p.wires.every(str)||!Array.isArray(p.versions)||
        !p.versions.length||p.versions.length>25||
-       !object(p.support)||!Array.isArray(p.support.request)||!Array.isArray(p.support.response)||
-       p.support.request.length>MAX_FIELDS||p.support.response.length>MAX_FIELDS)return false;
+       false)return false;
     ids.add(p.id);
     const versions=new Set();
     return p.versions.every(v=>{
@@ -240,10 +218,10 @@ export function validPublicDocuments(data){
         return half===null||(validHalf(half)&&Array.isArray(half.fields)&&
           half.fields.length<=MAX_FIELDS&&half.fields.every(row=>
             str(row.path)&&str(row.variant)&&str(row.type)&&typeof row.required==='boolean'&&
-            (row.releases===undefined||(Array.isArray(row.releases)&&
-              row.releases.length===data.releases.length&&row.releases.every(v=>
-                SEMVER.test(v.version)&&
-                ['supported','not-supported','contract-not-declared','unknown'].includes(v.status))))));
+            (row.description===undefined||typeof row.description==='string'&&row.description.length<=500)&&
+            (row.since===undefined||row.since===null||SEMVER.test(row.since))&&
+            (row.since_status===undefined||
+              ['verified','unreleased','unknown'].includes(row.since_status))));
       });
     });
   });
