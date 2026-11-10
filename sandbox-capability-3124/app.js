@@ -90,22 +90,49 @@
   function configInput(id,label,value,type,attr){
     var disabled=!!(attr&&attr.indexOf('unavailable')>=0);
     return '<div class="field '+(attr||'')+'"><label for="sandbox-'+id+'">'+label+'</label>'+
-      (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"'+(disabled?' disabled':'')+'><option value="allow"'+(value==="allow"?' selected':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+'>restricted · 白名单</option></select>':
+      (type==="select"?'<select id="sandbox-'+id+'" data-draft="'+id+'"'+(disabled?' disabled':'')+'><option value="allow"'+(value==="allow"?' selected':'')+(optionSupport("network","allow").status!=="available"?' disabled':'')+'>allow · 继承宿主网络</option><option value="deny"'+(value==="deny"?' selected':'')+(optionSupport("network","deny").status!=="available"?' disabled':'')+'>deny · 禁止外网</option><option value="restricted"'+(value==="restricted"?' selected':'')+(optionSupport("network","restricted").status!=="available"?' disabled':'')+'>restricted · 白名单</option></select>':
       '<input id="sandbox-'+id+'" data-draft="'+id+'" value="'+escapeHtml(value)+'" autocomplete="off" spellcheck="false"'+(disabled?' disabled title="Unavailable for this policy/backend"':'')+'>')+'</div>';
   }
 
   // Synthetic Agent responses for the design prototype. Production must fetch this
   // typed catalog from the authenticated Agent, never from frontend literals.
+  // Synthetic VNext contract: real policy implementation support is reported
+  // by Agent/Location and verified by nession-sandbox. This is NOT shipped V1.
   function agentFieldCatalog(){
     var s=settings(),scoped="mock-agent:nession-dev:"+state.fixture;
-    if(!s.online||s.unsupported||s.recreated)
-      return {status:"unknown",source:scoped,generation:"unavailable",resource:[],syscall:[],reason:"Agent/Session 观测不可用"};
-    if(s.macos)
-      return {status:"available",source:scoped,generation:"seatbelt-mock",resource:[],syscall:[],reason:"macOS 不提供 Linux cgroup v2/seccomp"};
-    // Simulated *kernel child-cgroup directory scan*, not an application whitelist.
-    // The real Agent must return the detected resource-controller files.
-    var controllers=state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids","io"];
-    var childCgroupFiles=[
+    var unknown=!s.online||s.unsupported||s.recreated;
+    var mac=s.macos, noCgroup=state.fixture==="no-cgroup", noSeccomp=state.fixture==="no-seccomp";
+    var status=unknown?"unknown":"available";
+    var pstatus=function(available,code,reason){
+      return available?{status:"available"}:unknown?
+        {status:"unknown",reason_code:"unprobed",reason:"Agent 离线或 Session 身份无法验证；不是不支持"}:
+        {status:"unavailable",reason_code:code,reason:reason};
+    };
+    var platformReason="当前 macOS Seatbelt backend 不提供该 Linux 原生机制";
+    var entries=[
+      {path:"filesystem.access",...pstatus(!mac,"platform_unsupported","此 Seatbelt backend 的路径访问白名单无法验证，不能使用")},
+      {path:"network",...pstatus(true,"backend_missing","未找到网络隔离 backend"),
+        options:["allow","deny","restricted"].map(function(mode){
+          return {id:mode,...pstatus(!mac||mode!=="restricted","backend_missing","此 Seatbelt backend 无法验证 restricted 代理")};
+        })},
+      {path:"process.linux_namespaces",...pstatus(!mac,"platform_unsupported",platformReason),
+        options:["pid","ipc","user","uts","cgroup"].map(function(id){return {id:id,...pstatus(!mac,"platform_unsupported",platformReason)};})},
+      {path:"resource.cgroup_v2",...pstatus(!mac&&!noCgroup,
+        noCgroup?"controller_not_delegated":"platform_unsupported",
+        noCgroup?"当前 Agent 未取得可用的子 cgroup v2 控制器委派":platformReason)},
+      {path:"syscall.seccomp",...pstatus(!mac&&!noSeccomp,
+        noSeccomp?"profile_unavailable":"platform_unsupported",
+        noSeccomp?"当前 Agent 无法加载注册的 seccomp profile":platformReason)}
+    ];
+    // Parent unavailability is conclusive only for a completed probe;
+    // unknown can never be derived from empty field/profile arrays.
+    if(unknown)entries.forEach(function(x){
+      x.status="unknown";x.reason_code="unprobed";x.reason="Agent 或 Session 观测不可用";
+    });
+    // Native cgroup file names are examples of a child-cgroup discovery
+    // fixture, not an application whitelist or unit conversion.
+    var controllers=(state.fixture==="limited"?["memory","pids"]:["cpu","memory","pids","io"]);
+    var files=[
       {key:"memory.max",controller:"memory",format:"Linux native text",example:"2147483648"},
       {key:"memory.high",controller:"memory",format:"Linux native text",example:"1073741824"},
       {key:"memory.low",controller:"memory",format:"Linux native text",example:"1048576"},
@@ -115,10 +142,46 @@
       {key:"pids.max",controller:"pids",format:"Linux native text",example:"256"},
       {key:"io.max",controller:"io",format:"Linux native text",example:"8:0 rbps=10485760"}
     ];
-    return {status:"available",source:scoped,generation:"mock-cgroup2-scan-"+state.fixture,
-      resource:childCgroupFiles.filter(function(file){return controllers.includes(file.controller)}),
-      syscall:[{key:"seccomp.profile",format:"registered profile",example:"nession-interactive-v1",values:["nession-interactive-v1"]}],
-      reason:"模拟 Agent 扫描受管子 cgroup: "+controllers.join(", ")};
+    var enabledResource=entries.find(function(x){return x.path==="resource.cgroup_v2"}).status==="available";
+    var enabledSyscall=entries.find(function(x){return x.path==="syscall.seccomp"}).status==="available";
+    var resource=enabledResource?files.filter(function(file){return controllers.includes(file.controller)}):[];
+    var syscall=enabledSyscall?[{key:"seccomp.profile",format:"registered profile",
+      example:"nession-interactive-v1",values:["nession-interactive-v1"]}]:[];
+    entries.find(function(x){return x.path==="resource.cgroup_v2"}).fields=resource.map(function(x){
+      return {key:x.key,controller:x.controller,status:"available",value_format:x.format,example:x.example};
+    });
+    entries.find(function(x){return x.path==="syscall.seccomp"}).options=syscall.flatMap(function(x){
+      return x.values.map(function(v){return {id:v,status:"available"};});
+    });
+    return {catalog_version:2,status:status,platform:unknown?"unknown":mac?"macos":"linux",
+      backend:unknown?null:mac?"macos-seatbelt":"linux-bwrap",
+      source:scoped,generation:unknown?"unavailable":"mock-"+state.fixture+"-generation",
+      implementations:entries,resource:resource,syscall:syscall,
+      reason:unknown?"Agent/Session 观测不可用":mac?"macOS Seatbelt · 仅实测能力可选":
+        "Agent 已按实现路径探测；cgroup 文件仍需另行发现"};
+  }
+  function implementation(path){
+    var c=agentFieldCatalog();
+    return c.implementations.find(function(x){return x.path===path})||
+      {path:path,status:"unknown",reason_code:"not_registered",reason:"协议未注册此策略实现"};
+  }
+  function optionSupport(path,id){
+    var parent=implementation(path);
+    return (parent.options||[]).find(function(x){return x.id===id})||
+      {status:"unknown",reason_code:"not_registered",reason:"此选项未在 Agent 注册"};
+  }
+  function supportStateLabel(status){return status==="available"?"支持":status==="unavailable"?"不支持":"状态未知";}
+  function implementationPanel(path,title,intro,contents){
+    var item=implementation(path),enabled=item.status==="available",code=item.reason_code||"";
+    return '<section class="policy-implementation '+(enabled?'is-available':'is-disabled')+
+      '" data-policy-implementation="'+escapeHtml(path)+'" data-policy-status="'+item.status+'">'+
+      '<div class="policy-impl-header"><div><h4>'+title+'</h4><p class="subline">'+intro+'</p>'+
+      '<code class="policy-native-path">'+escapeHtml(path)+'</code></div>'+
+      '<span class="policy-impl-status '+item.status+'">'+supportStateLabel(item.status)+'</span></div>'+
+      (enabled?contents:'<div class="policy-support-reason"><strong>'+supportStateLabel(item.status)+
+        ' · '+escapeHtml(code||"unprobed")+'</strong><p>'+escapeHtml(item.reason||"不可确认支持状态")+
+        '</p><p>此策略不可编辑/添加；已保存的草稿不会被自动删除，预检仍须逐项拒绝不支持的请求。</p></div>')+
+      '</section>';
   }
   function kvRows(kind,unavailable){
     var rows=state.draft[kind+"Rows"],resource=kind==="resource";
@@ -192,7 +255,8 @@
   ];
   var dimensionNames={filesystem:"Filesystem",network:"Network",process:"Process",resource:"Resource",syscall:"Syscall"};
   function compositionState(d,id,observed){
-    var s=settings(),unavailable=s.macos&&(id==="resource"||id==="syscall"||id==="process");
+    var s=settings(),pathByTab={filesystem:"filesystem.access",network:"network",process:"process.linux_namespaces",resource:"resource.cgroup_v2",syscall:"syscall.seccomp"};
+    var support=implementation(pathByTab[id]),unavailable=support.status==="unavailable";
     var entries=[],active=false,description="";
     if(id==="filesystem"&&d.preparedMounts&&observed){
       active=true;
@@ -214,7 +278,8 @@
       entries=d[id+"Rows"]||[];active=entries.length>0;
       description=active?entries.length+" 条 · "+entries.map(function(x){return x.key||"未填写 Key"}).slice(0,2).join("、")+(entries.length>2?" 等":""):"未添加额外控制";
     }
-    var kind=!s.supported?"unknown":unavailable?"unavailable":observed?(active?"observed":"not-requested"):(active?"requested":"not-requested");
+    var kind=observed?(active?"observed":"not-requested"):
+      support.status==="unknown"?"unknown":unavailable?"unavailable":(active?"requested":"not-requested");
     return {key:id,name:dimensionNames[id],kind:kind,summary:description,count:entries.length};
   }
 
@@ -282,57 +347,75 @@
       '</section>';
   }
   function filesystemEditor(){
-    return '<section class="module-domain"><p class="subline">路径授权由当前 Sandbox 的 mount view 执行；Agent-prepared EROFS Root 是另一种互斥的文件系统输入，不在此编辑内核镜像文件。</p>'+
+    var contents='<div class="module-domain"><p class="subline">受管 mount view 的 read/write 授权；Agent-prepared EROFS 是不同的服务器输入，不在此编辑镜像源。</p>'+
       '<div class="module-start-dir">'+configInput("workingDir","Shell working directory",state.draft.workingDir,"input","full")+'</div>'+
       listEditor("readOnly","path")+listEditor("write","path")+
-      '<div class="module-hint">只有指定路径在 Sandbox 中可见；所有路径及权限最终由 Agent 校验。</div></section>';
+      '<div class="module-hint">所有路径和权限由 Agent 预检及执行阶段验证。</div></div>';
+    return implementationPanel("filesystem.access","Access · 路径权限","通用语义不代表所有 backend 都可以安装",contents);
   }
   function networkEditor(){
     var d=state.draft;
-    return '<section class="module-domain"><div class="module-mode"><h4>网络模式</h4><p class="subline">选择模式后单独管理目标规则；不是一个自由格式的 KV。</p>'+
-      configInput("network","Mode",d.network,"select",settings().supported?"":"unavailable")+'</div>'+
+    var modeItems=["allow","deny","restricted"].map(function(mode){
+      var item=optionSupport("network",mode);
+      return '<div class="policy-option-state" data-policy-option="network.'+mode+'" data-option-status="'+item.status+'">'+
+        '<code>'+mode+'</code><span>'+supportStateLabel(item.status)+'</span>'+
+        (item.reason?'<small>'+escapeHtml(item.reason)+'</small>':'')+'</div>';
+    }).join('');
+    var contents='<div class="module-domain"><div class="module-mode"><h4>网络模式</h4><p class="subline">每个模式单独探测；仅支持的模式可以选择。</p>'+
+      '<div class="policy-option-list">'+modeItems+'</div>'+
+      configInput("network","Mode",d.network,"select","")+'</div>'+
       (d.network==="restricted"?listEditor("allow","network")+listEditor("deny","network"):
-        '<div class="module-hint">当前模式 '+escapeHtml(d.network)+' 不使用自定义 egress 列表。已有草稿保留，切回 restricted 可继续编辑。</div>')+
-      '<p class="module-hint">V1 ingress: deny；restricted 的目标由后端代理执行，Agent 验证最终配置。</p></section>';
+        '<div class="module-hint">当前模式 '+escapeHtml(d.network)+' 不使用自定义 egress 列表。</div>')+
+      '<p class="module-hint">V1 ingress: deny；restricted 需要被 Agent 验证的代理。</p></div>';
+    return implementationPanel("network","Network · 目标访问策略","allow / deny / restricted 分别按 backend 检测",contents);
   }
   function processEditor(){
-    var d=state.draft,m=settings().macos||!settings().supported;
-    var desc={pid:"隔离 PID 可见范围",ipc:"隔离 IPC 对象",user:"独立用户命名空间",uts:"独立 UTS 主机名空间",cgroup:"隔离 cgroup 命名空间；需要 USER"};
-    return '<section class="module-domain"><p class="subline">这些是原生 Linux Namespace 能力，不是 Resource 文件，也不是可自由填写的 Key。</p>'+
+    var d=state.draft,desc={pid:"隔离 PID 可见范围",ipc:"隔离 IPC 对象",user:"独立用户命名空间",uts:"独立 UTS 主机名空间",cgroup:"隔离 cgroup 命名空间；需要 USER"};
+    var contents='<div class="module-domain"><p class="subline">每个 Namespace 以原生 Linux 语义独立探测，不可从 Resource controller 推断。</p>'+
       '<div class="namespace-items">'+["pid","ipc","user","uts","cgroup"].map(function(key){
-        return '<label class="namespace-item"><span><strong>'+key.toUpperCase()+'</strong><small>'+desc[key]+'</small></span>'+
-          '<input type="checkbox" data-draft="'+key+'"'+(d[key]?' checked':'')+(m?' disabled':'')+' aria-label="'+key.toUpperCase()+' namespace"></label>';
-      }).join('')+'</div>'+
-      (m?'<p class="module-hint">macOS Seatbelt 不提供这些 Linux Namespace 开关。</p>':'')+
-      '<p class="module-hint">真实是否安装由 Agent 的执行验证报告决定；仅勾选不代表当前 Pane 已隔离。</p></section>';
+        var option=optionSupport("process.linux_namespaces",key);
+        return '<label class="namespace-item" data-policy-option="process.linux_namespaces.'+key+
+          '" data-option-status="'+option.status+'"><span><strong>'+key.toUpperCase()+'</strong>'+
+          '<small>'+desc[key]+' · '+supportStateLabel(option.status)+'</small></span>'+
+          '<input type="checkbox" data-draft="'+key+'"'+(d[key]?' checked':'')+
+          (option.status!=="available"?' disabled':'')+' aria-label="'+key.toUpperCase()+' namespace"></label>';
+      }).join('')+'</div><p class="module-hint">真实是否安装必须以 Agent 的执行验证报告为准。</p></div>';
+    return implementationPanel("process.linux_namespaces","Linux Namespaces · 进程隔离","PID、IPC、USER、UTS、CGROUP 各自可用性",contents);
   }
   function resourceEditor(){
     var catalog=agentFieldCatalog(),groups={};
-    catalog.resource.forEach(function(item){if(!groups[item.controller])groups[item.controller]=[];groups[item.controller].push(item)});
+    catalog.resource.forEach(function(item){(groups[item.controller]??=[]).push(item)});
     var selectors=Object.keys(groups).map(function(controller){
       return '<div class="resource-controller"><strong>'+escapeHtml(controller)+'</strong>'+
         '<div class="resource-available">'+groups[controller].map(function(item){
           var selected=state.draft.resourceRows.some(function(row){return row.key===item.key});
-          return '<button type="button" class="resource-available-file" data-action="resource-add:'+escapeHtml(item.key)+'"'+(selected?' disabled':'')+'>'+escapeHtml(item.key)+(selected?' · 已配置':' ＋')+'</button>';
+          return '<button type="button" class="resource-available-file" data-action="resource-add:'+escapeHtml(item.key)+'"'+
+            (selected?' disabled':'')+'>'+escapeHtml(item.key)+(selected?' · 已配置':' ＋')+'</button>';
         }).join('')+'</div></div>';
     }).join('');
-    return '<section class="module-domain" data-resource-manager><h4>Agent 发现的可配置文件</h4><p class="subline">从当前受管子 cgroup 的 controller 文件中发现；值不由 Nession 解析或换算。单击文件加入下方配置列表。</p>'+
-      (selectors||'<p class="module-empty">此 Agent 暂无可用的原生 Resource 文件。</p>')+
-      '<div class="module-list"><div class="module-list-head"><h4>待写入的 Resource 配置</h4><span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
-      kvRows("resource",!settings().supported||settings().macos)+'</div></section>';
+    var contents='<div class="module-domain" data-resource-manager><h4>Agent 检测到的子 cgroup v2 控制文件</h4>'+
+      '<p class="subline">实现级可用后，再检查当前受管子 cgroup 的 delegated controller 和原生控制文件。Value 不做业务层单位换算。</p>'+
+      (selectors||'<p class="module-empty">暂无可写的 Resource 控制文件。</p>')+
+      '<div class="module-list"><div class="module-list-head"><h4>待写入的 cgroup v2 配置</h4>'+
+      '<span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
+      kvRows("resource",false)+'</div></div>';
+    return implementationPanel("resource.cgroup_v2","cgroup v2 · 原生资源控制",
+      "只有 Agent 实测 Linux cgroup v2 和当前受管子控制器可用时才启用",contents);
   }
   function syscallEditor(){
     var values=agentFieldCatalog().syscall.find(function(x){return x.key==="seccomp.profile"});
     var picked=state.draft.syscallRows[0]?.value||"";
-    return '<section class="module-domain" data-syscall-profiles><h4>Seccomp Profile</h4>'+
-      '<p class="subline">通过 Agent 注册的 profile 选择完整过滤规则；与 cgroup v2 文件无关，不能填写任意 syscall 或 BPF。</p>'+
-      (values?'<div class="profile-choice"><label for="sandbox-profile">当前选择</label><select id="sandbox-profile" data-sandbox-profile'+(!settings().supported?' disabled':'')+'>'+
+    var contents='<div class="module-domain" data-syscall-profiles><h4>Seccomp Profile</h4>'+
+      '<p class="subline">只允许选择 Agent 已注册且检测过的 Profile；不是任意 syscall 或 BPF 编辑器。</p>'+
+      (values?'<div class="profile-choice"><label for="sandbox-profile">Profile</label><select id="sandbox-profile" data-sandbox-profile>'+
         '<option value="">不添加额外 Profile</option>'+
         values.values.map(function(v){return '<option value="'+escapeHtml(v)+'"'+(picked===v?' selected':'')+'>'+escapeHtml(v)+'</option>'}).join('')+
-        '</select><p class="module-hint">选择只修改待执行的 Policy 草稿。Agent 会在执行时验证该 profile 是否实际安装。</p></div>':
-        '<div class="module-empty">当前 Agent 未报告可用的 seccomp profile；无法选择。</div>')+
-      (picked?'<div class="module-detail-note"><strong>已选 Profile</strong><code>'+escapeHtml(picked)+'</code><p>内核/Bubblewrap 的 seccomp 加载必须通过执行验证；本页不允许上传自定义过滤程序。</p></div>':'')+
-      '</section>';
+        '</select><p class="module-hint">运行时加载必须通过最终执行验证。</p></div>':
+        '<div class="module-empty">Agent 未注册可用 Profile。</div>')+
+      (picked?'<div class="module-detail-note"><strong>已选 Profile</strong><code>'+escapeHtml(picked)+
+        '</code><p>Profile 来源为 Agent Registry，不接受任意上传过滤程序。</p></div>':'')+'</div>';
+    return implementationPanel("syscall.seccomp","seccomp · 系统调用过滤",
+      "依赖实际加载能力和当前 Agent 注册的 Profile",contents);
   }
   function editor(){
     var id=state.openGroup;
@@ -371,6 +454,19 @@
     if(!s.online)return 'Agent 离线，无法预检或进入';
     if(s.unsupported)return 'Agent 无可用 Sandbox backend';
     if(s.recreated)return '当前 Session 实例未通过身份确认';
+    var required=[
+      {path:"filesystem.access",on:Boolean(d.readOnly||d.write)},
+      {path:"network",on:Boolean(d.network)},
+      {path:"process.linux_namespaces",on:["pid","ipc","user","uts","cgroup"].some(function(k){return d[k]})},
+      {path:"resource.cgroup_v2",on:d.resourceRows.length>0},
+      {path:"syscall.seccomp",on:d.syscallRows.length>0}
+    ];
+    for(var req of required)if(req.on&&implementation(req.path).status!=="available")
+      return req.path+" 不可用："+(implementation(req.path).reason||"Agent 尚未确认");
+    if(d.network&&optionSupport("network",d.network).status!=="available")
+      return "network."+d.network+" 不可用："+(optionSupport("network",d.network).reason||"当前 backend 不支持");
+    for(var key of ["pid","ipc","user","uts","cgroup"])if(d[key]&&optionSupport("process.linux_namespaces",key).status!=="available")
+      return "process.linux_namespaces."+key+" 不可用";
     if(!d.workingDir.startsWith('/')||d.workingDir.indexOf('..')>=0)return '工作目录需要是规范化的绝对路径';
     if(s.macos){
       if(d.network==='restricted')return 'macOS Seatbelt 不支持 restricted egress 代理';
@@ -608,14 +704,14 @@
     }
     else if(action.indexOf("add-path:")===0){
       var key=action.slice(9);
-      if((key==="readOnly"||key==="write")&&settings().supported&&!settings().macos){
+      if((key==="readOnly"||key==="write")&&implementation("filesystem.access").status==="available"){
         state.draft.pathItems[key].push("");
         state.preflight="none";state.preflightError="";state.error="";
       }
     }
     else if(action.indexOf("remove-path:")===0){
       var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
-      if((key==="readOnly"||key==="write")&&settings().supported&&!settings().macos){
+      if((key==="readOnly"||key==="write")&&implementation("filesystem.access").status==="available"){
         state.draft.pathItems[key].splice(at,1);
         state.draft[key]=state.draft.pathItems[key].join(",");
         state.preflight="none";state.preflightError="";state.error="";
@@ -623,14 +719,14 @@
     }
     else if(action.indexOf("add-network:")===0){
       var key=action.slice(12);
-      if((key==="allow"||key==="deny")&&settings().supported){
+      if((key==="allow"||key==="deny")&&implementation("network").status==="available"&&optionSupport("network","restricted").status==="available"){
         state.draft.networkRules[key].push("");
         state.preflight="none";state.preflightError="";state.error="";
       }
     }
     else if(action.indexOf("remove-network:")===0){
       var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
-      if((key==="allow"||key==="deny")&&settings().supported){
+      if((key==="allow"||key==="deny")&&implementation("network").status==="available"&&optionSupport("network","restricted").status==="available"){
         state.draft.networkRules[key].splice(at,1);
         state.draft[key==="allow"?"egress":"denyEgress"]=state.draft.networkRules[key].join(",");
         state.preflight="none";state.preflightError="";state.error="";
@@ -638,7 +734,7 @@
     }
     else if(action.indexOf("resource-add:")===0){
       var key=action.slice("resource-add:".length);
-      if(settings().supported&&!settings().macos&&agentFieldCatalog().resource.some(function(x){return x.key===key})&&!state.draft.resourceRows.some(function(x){return x.key===key})){
+      if(implementation("resource.cgroup_v2").status==="available"&&agentFieldCatalog().resource.some(function(x){return x.key===key})&&!state.draft.resourceRows.some(function(x){return x.key===key})){
         state.draft.resourceRows.push({id:state.nextRowId++,key:key,value:""});
         state.preflight="none";state.preflightError="";state.error="";
       }
