@@ -89,7 +89,7 @@ test('SC-04: a kernel-native value failure leaves the Native composer intact', a
   });
 });
 
-test('SC-04: App offers discovered files and the observed readback at 390/375', async ({
+test('SC-04: App 390 offers discovered files and raw text without overflow', async ({
   page,
 }) => {
   const { sha } = verifiedRuntime('SC-04');
@@ -107,6 +107,16 @@ test('SC-04: App offers discovered files and the observed readback at 390/375', 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
     .toBeLessThanOrEqual(1);
 
+  test.info().annotations.push({
+    type: 'evidence',
+    description:
+      'exact SHA ' + sha + ': App 390 offered the discovered files and raw multi-token text ' +
+      'without horizontal overflow',
+  });
+});
+
+test('SC-04: App 375 shows the read-only inside readback', async ({ page }) => {
+  const { sha } = verifiedRuntime('SC-04');
   await page.setViewportSize({ width: 375, height: 812 });
   await openAppSandbox(page, '?sandbox=inside');
   await selectTab(page, 'resource');
@@ -119,7 +129,6 @@ test('SC-04: App offers discovered files and the observed readback at 390/375', 
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ': App 390 offered the discovered files and raw text without ' +
-      'overflow; App 375 showed the read-only inside readback with no draft editor',
+      'exact SHA ' + sha + ': App 375 showed the read-only inside readback with no draft editor',
   });
 });
