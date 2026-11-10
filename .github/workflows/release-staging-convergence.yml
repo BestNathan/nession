@@ -45,15 +45,13 @@ concurrency:
 jobs:
   converge:
     # The no-approval recheck wakes the same fail-closed controller.
+    # Owner PR comments are wake signals only; trusted source/digest checks remain mandatory.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       (
         github.event_name != 'issue_comment' ||
         (
-          # PR-native integration approvals are ordinary PR conversation
-          # comments. Their exact SHA and digest are revalidated in trusted
-          # Controller code, never trusted from this wake-up event alone.
           github.actor == github.event.comment.user.login &&
           (
             (
