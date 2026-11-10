@@ -39,6 +39,11 @@ async fn main() -> Result<()> {
     };
     config.apply_env_overrides()?;
     config.validate()?;
+    // The Server runtime creates the configured component directories before
+    // opening the database; mirror its startup order so the Compose probe
+    // exercises the same canonical layout (#3179).
+    nession_common::paths::ensure_component_dirs()
+        .context("failed to create the configured Nession component directories")?;
 
     let db = Arc::new(Database::new(&config.db_path).await?);
     let blobs = nession_erofs::BlobStore::new(&config.image_blob_dir)
