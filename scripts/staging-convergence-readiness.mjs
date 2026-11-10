@@ -163,9 +163,17 @@ export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
      pr.merge_commit_sha!==mergeSha||pr.base?.ref!==branch||
      pr.base?.repo?.full_name!==REPO)
     return fail('INVALID_NATIVE_MERGE_PR');
-  const parents=execFileSync('git',['rev-list','--parents','-n','1',mergeSha],{
-    cwd:repoRoot,encoding:'utf8',maxBuffer:4_000_000
-  }).trim().split(/\s+/);
+  let parents;
+  try {
+    parents=execFileSync('git',['rev-list','--parents','-n','1',mergeSha],{
+      cwd:repoRoot,encoding:'utf8',maxBuffer:4_000_000,
+      stdio:['ignore','pipe','pipe'],
+    }).trim().split(/\s+/);
+  } catch {
+    // A forged or unavailable merge commit cannot crash the evaluator or be
+    // treated as a successful GitHub merge. Deny deterministically.
+    return fail('NATIVE_MERGE_COMMIT_UNAVAILABLE');
+  }
   if(parents.length!==3||parents[0]!==mergeSha||
      parents[2]!==pr.head?.sha)
     return fail('NATIVE_MERGE_PARENTS_MISMATCH');
@@ -338,8 +346,9 @@ function selfTest(){
     associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
     authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
     'NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+a);
-  assert.equal(certifyNativeMerge({pr:native,mergeSha:a}).ready,false,
-    'a forged PR marker must not be treated as authenticated CI');
+  assert.equal(certifyNativeMerge({pr:native,mergeSha:a}).reason,
+    'NATIVE_MERGE_COMMIT_UNAVAILABLE',
+    'an unavailable forged PR merge SHA must fail closed, not crash or pass');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
     'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
   assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
