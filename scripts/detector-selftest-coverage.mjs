@@ -29,6 +29,7 @@ const pairs = [
   ['gate-consumer-parity', ['gate-consumer-parity'], 'tooling'],
   ['workflow-conventions', ['workflow-conventions'], 'tooling'],
   ['runtime-image-tools', ['runtime-image-tools-selftest'], 'tooling'],
+  ['compose-storage-contract', ['compose-storage-contract-selftest'], 'tooling'],
 ];
 
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');

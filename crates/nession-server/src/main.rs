@@ -28,6 +28,9 @@ async fn main() -> anyhow::Result<()> {
             "{}",
             serde_json::json!({
                 "listen_address": config.listen_address,
+                "db_path": config.db_path,
+                "image_blob_dir": config.image_blob_dir,
+                "image_build_dir": config.image_build_dir,
                 "terminal_cols": config.terminal_cols,
                 "terminal_web_font_size": config.terminal_web_font_size,
             })

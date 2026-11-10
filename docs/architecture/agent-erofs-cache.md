@@ -89,6 +89,14 @@ development convenience and does not claim a PVC.
   data paths.
 - `deploy/entrypoint-agent.sh` writes the optional `[erofs] storage_dir` into
   the generated Agent config; an explicit TOML value wins over the environment.
+- Docker Compose (`deploy/docker-compose.yml`) gives `agent` and
+  `agent-remote` **distinct** named volumes (`agent-data`,
+  `agent-remote-data`) mounted at `/data`, with `NESSION_HOME=/data` and
+  `AGENT_EROFS_STORAGE_DIR=/data/erofs`. `docker compose down` without `-v`
+  preserves them; `down -v` is explicit storage deletion. An operator
+  override of `AGENT_EROFS_STORAGE_DIR` must name a durable mount: the
+  Agent rejects an explicit ephemeral cache root instead of silently using
+  the container layer (#3179).
 - A Kubernetes NFS PVC is suitable for immutable EROFS **bytes**. It is not
   automatically suitable for OverlayFS upper/work or an EROFS kernel mount;
   that decision belongs to Sandbox/managed-location work (#3024).
