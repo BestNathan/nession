@@ -27,6 +27,10 @@ export type ClientSessionSandboxEnterPayload = { session_id: string,
  */
 generation: string, 
 /**
+ * The catalog probe generation the confirmed preflight was bound to.
+ */
+probe_generation: string, 
+/**
  * Client-minted idempotency key for this Enter attempt.
  */
 enter_id: string, policy: SandboxPolicyDraft, working_dir: string, };
@@ -52,7 +56,13 @@ mechanisms: Array<string>, cgroup_path?: string | null, proxy_endpoint?: string 
 created_at: number, };
 export type SandboxNativePane = { window_id: string, pane_id: string, };
 export type SandboxPaneRef = { execution_id: string, window_id: string, pane_id: string, backend: string, };
-export type SandboxCapabilityCatalog = { status: SandboxCatalogStatus, 
+export type SandboxCapabilityCatalog = { 
+/**
+ * The shape version this catalog answers. Newer versions add fields;
+ * an older client must treat unknown entries (and an empty
+ * implementation list) as "not measured", never as "unsupported".
+ */
+catalog_version: number, status: SandboxCatalogStatus, 
 /**
  * `linux`, `macos` or `unsupported`.
  */
@@ -66,15 +76,30 @@ probe_generation: string,
  */
 source: string, detail: Array<string>, reason?: string | null, 
 /**
+ * Per canonical policy path support (#3161). Only schema-known
+ * implementations are listed; an omitted path is not a support claim.
+ */
+implementations: Array<SandboxImplementationSupport>, 
+/**
  * Linux cgroup v2 choices actually installable by this Agent.
+ *
+ * Kept as a flat compatibility projection of
+ * `resource.cgroup_v2.fields` for clients built before catalog v2.
  */
 resource_fields: Array<SandboxFieldEntry>, 
 /**
  * Registered seccomp profile choices whose loading was probed.
+ *
+ * Kept as a flat compatibility projection of
+ * `syscall.seccomp.options` for clients built before catalog v2.
  */
 syscall_fields: Array<SandboxFieldEntry>, };
 export type SandboxCatalogStatus = "available" | "unavailable" | "unknown";
 export type SandboxFieldEntry = { key: string, 
+/**
+ * The native controller/file family this key belongs to, when typed.
+ */
+controller?: string | null, 
 /**
  * Native value-format help, e.g. `quota period` or `uint64 or max`.
  */
@@ -83,7 +108,30 @@ value_format: string, example: string,
  * Whether this Agent could actually install the key in a child cgroup /
  * load the profile. Presence of a file is not installability.
  */
-available: boolean, reason?: string | null, };
+available: boolean, 
+/**
+ * Stable reason code when `available` is false.
+ */
+reason_code?: SandboxUnsupportedReason | null, reason?: string | null, };
+export type SandboxImplementationSupport = { 
+/**
+ * Canonical policy path, for example `network` or `resource.cgroup_v2`.
+ */
+path: string, status: SandboxImplementationStatus, reason_code?: SandboxUnsupportedReason | null, reason?: string | null, 
+/**
+ * Typed options owned by this implementation. Empty when the
+ * implementation has no enumerated options (for example
+ * `filesystem.access`, whose value is a path list).
+ */
+options?: Array<SandboxOptionSupport>, 
+/**
+ * Typed native fields owned by this implementation (cgroup v2 control
+ * files). Empty for implementations without a field catalog.
+ */
+fields?: Array<SandboxFieldEntry>, };
+export type SandboxImplementationStatus = "available" | "unavailable" | "unknown";
+export type SandboxOptionSupport = { id: string, status: SandboxImplementationStatus, reason_code?: SandboxUnsupportedReason | null, reason?: string | null, };
+export type SandboxUnsupportedReason = "platform_unsupported" | "backend_missing" | "kernel_feature_missing" | "controller_not_delegated" | "permission_denied" | "profile_unavailable" | "implementation_not_built" | "not_probed" | "timeout";
 export type SandboxCurrentContext = { status: SandboxContextStatus, 
 /**
  * A truthful reason code/message when the status is not provable or the
@@ -194,6 +242,10 @@ export type SessionSandboxEnterCall = { session_id: string,
  * The generation returned by the last preflight/context read.
  */
 generation: string, 
+/**
+ * The catalog probe generation the confirmed preflight was bound to.
+ */
+probe_generation: string, 
 /**
  * Client-minted idempotency key for this Enter attempt.
  */

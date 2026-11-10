@@ -14,6 +14,10 @@ pub enum SandboxError {
     /// The policy asks for a guarantee this platform/backend cannot install.
     #[error("unsupported sandbox policy: {0}")]
     UnsupportedPolicy(String),
+    /// Explicitly requested implementations/options the host cannot install.
+    /// The field paths are canonical policy paths for the caller to render.
+    #[error("unsupported sandbox policy requests: {}", .0.iter().map(|field| format!("{}: {}", field.field, field.message)).collect::<Vec<_>>().join("; "))]
+    UnsupportedRequests(Vec<nession_protocol::contracts::sandbox::v1::SandboxFieldError>),
     /// The host cannot provide the backend at all (no helper, no delegation).
     #[error("sandbox backend unavailable: {0}")]
     BackendUnavailable(String),

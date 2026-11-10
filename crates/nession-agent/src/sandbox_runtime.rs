@@ -563,6 +563,22 @@ mod tests {
         )
     }
 
+    #[test]
+    fn the_catalog_is_cached_and_forget_recomputes_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = SandboxRuntime::new(settings(dir.path()));
+        let first = runtime.catalog();
+        assert_eq!(first.catalog_version, 2);
+        assert_eq!(first.implementations.len(), 6);
+        let cached = runtime.catalog();
+        assert_eq!(cached.probe_generation, first.probe_generation);
+        assert_eq!(cached.implementations, first.implementations);
+        runtime.forget_catalog();
+        let recomputed = runtime.catalog();
+        assert_eq!(recomputed.probe_generation, first.probe_generation);
+        assert_eq!(recomputed.implementations, first.implementations);
+    }
+
     /// On macOS the verified mechanism is network denial. A policy that asks
     /// for it prepares a Seatbelt launch and reports exactly that.
     #[test]

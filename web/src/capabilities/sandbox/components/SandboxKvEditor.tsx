@@ -1,21 +1,27 @@
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
-  SandboxFieldEntry,
+  SandboxCapabilityCatalog,
   SandboxKvEntry,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
+import {
+  catalogOptions,
+  resourceDisabledReason,
+  syscallDisabledReason,
+} from '../model';
+import { SandboxImplementationStatus } from './SandboxImplementationStatus';
 import { SandboxKvRow } from './SandboxKvRow';
 
 export interface SandboxKvEditorProps {
   group: 'resource' | 'syscall';
   title: string;
   description: string;
+  /** Canonical implementation path this editor composes. */
+  implementationPath: string;
   rows: SandboxKvEntry[];
-  options: SandboxFieldEntry[];
-  /** Why this group's inputs are not available on the current Agent/backend. */
-  disabledReason: string | null;
+  catalog: SandboxCapabilityCatalog;
   /** Field errors keyed by `resource[0].key` and friends. */
   errors: Record<string, string>;
   onAdd: () => void;
@@ -24,27 +30,30 @@ export interface SandboxKvEditorProps {
 }
 
 /**
- * The empty-first native Key/Value editor (#3124).
+ * The empty-first native Key/Value editor (#3124, #3161).
  *
  * Both optional groups use the same interaction: zero rows until the user
  * asks for one, Add inserts a blank row, Remove deletes it, and the key input
- * is a suggestion list fed by the Agent's measured catalog — not a hardcoded
- * array. Typing a key the catalog does not list is allowed here because the
- * Agent, not the UI, is the validator; its preflight then rejects it with a
- * field-level error.
+ * is a suggestion list fed by the Agent's measured implementation catalog —
+ * not a hardcoded array. A measured-unavailable key can be typed or kept, but
+ * its value is not editable and preflight rejects the row with the Agent's
+ * field error; the UI never silently drops it.
  */
 export function SandboxKvEditor({
   group,
   title,
   description,
+  implementationPath,
   rows,
-  options,
-  disabledReason,
+  catalog,
   errors,
   onAdd,
   onChange,
   onRemove,
 }: SandboxKvEditorProps) {
+  const options = catalogOptions(catalog, group);
+  const disabledReason =
+    group === 'resource' ? resourceDisabledReason(catalog) : syscallDisabledReason(catalog);
   const disabled = disabledReason !== null;
   const listId = `sandbox-${group}-key-options`;
   const metadataClass = chromeSansRole('caption');
@@ -54,6 +63,11 @@ export function SandboxKvEditor({
       className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3"
     >
       <legend className={cn(chromeSansRole('primary'), 'px-1')}>{title}</legend>
+      <SandboxImplementationStatus
+        catalog={catalog}
+        path={implementationPath}
+        label={title}
+      />
       <p className={cn(metadataClass, 'text-muted-foreground')}>{description}</p>
       {disabled ? (
         <p

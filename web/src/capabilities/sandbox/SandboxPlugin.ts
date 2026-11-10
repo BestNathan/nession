@@ -46,17 +46,19 @@ export class SandboxPlugin implements TransportPlugin {
   }
 
   /** Validate one draft against the exact context generation. */
-  async preflight(
-    sessionId: string,
-    generation: string,
-    policy: SandboxPolicyDraft,
-    workingDir: string,
-  ): Promise<SandboxPreflightResult> {
+  async preflight(request: {
+    sessionId: string;
+    generation: string;
+    probeGeneration: string;
+    policy: SandboxPolicyDraft;
+    workingDir: string;
+  }): Promise<SandboxPreflightResult> {
     return this.requireConnection().request<SandboxPreflightResult>(PREFLIGHT_WIRE, {
-      session_id: sessionId,
-      generation,
-      policy,
-      working_dir: workingDir,
+      session_id: request.sessionId,
+      generation: request.generation,
+      probe_generation: request.probeGeneration,
+      policy: request.policy,
+      working_dir: request.workingDir,
     });
   }
 
@@ -68,6 +70,7 @@ export class SandboxPlugin implements TransportPlugin {
   async enter(request: {
     sessionId: string;
     generation: string;
+    probeGeneration: string;
     enterId: string;
     policy: SandboxPolicyDraft;
     workingDir: string;
@@ -75,6 +78,7 @@ export class SandboxPlugin implements TransportPlugin {
     return this.requireConnection().request<SandboxActionResult>(ENTER_WIRE, {
       session_id: request.sessionId,
       generation: request.generation,
+      probe_generation: request.probeGeneration,
       enter_id: request.enterId,
       policy: request.policy,
       working_dir: request.workingDir,

@@ -578,6 +578,7 @@ fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
     let enter: ClientSessionSandboxEnterPayload = serde_json::from_value(serde_json::json!({
         "session_id": "agent:work",
         "generation": "gen-1",
+        "probe_generation": "probe-1",
         "enter_id": "enter-1",
         "policy": {
             "enabled": true,
@@ -594,6 +595,7 @@ fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
     assert_eq!(value["policy"]["resource"], serde_json::json!([]));
     let parsed: ClientSessionSandboxEnterPayload = serde_json::from_value(value).unwrap();
     assert_eq!(parsed.enter_id, "enter-1");
+    assert_eq!(parsed.probe_generation, "probe-1");
 
     // The Agent side carries the broker request id *and* the client's enter
     // id: correlation and idempotency are different identities.
@@ -601,13 +603,25 @@ fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
         "request_id": "broker-1",
         "session_name": "work",
         "generation": "gen-1",
+        "probe_generation": "probe-1",
         "enter_id": "enter-1",
         "policy": { "enabled": true, "resource": [{ "key": "memory.max", "value": "max" }] }
     }))
     .expect("the agent draft must parse");
     assert_eq!(agent.request_id, "broker-1");
     assert_eq!(agent.enter_id, "enter-1");
+    assert_eq!(agent.probe_generation, "probe-1");
     assert_eq!(agent.policy.resource[0].key, "memory.max");
+
+    // A client built before catalog v2 omits the probe generation; it parses
+    // as empty and the Agent treats that as a stale, refused binding.
+    let legacy: ClientSessionSandboxPreflightPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent:work",
+        "generation": "gen-1",
+        "policy": { "enabled": true }
+    }))
+    .expect("legacy payload remains readable");
+    assert_eq!(legacy.probe_generation, "");
 }
 
 #[test]
@@ -645,6 +659,7 @@ fn sandbox_context_and_action_replies_round_trip() {
         }],
         warnings: Vec::new(),
         catalog: crate::contracts::sandbox::v1::SandboxCapabilityCatalog {
+            catalog_version: crate::contracts::sandbox::v1::SANDBOX_CATALOG_VERSION,
             status: crate::contracts::sandbox::v1::SandboxCatalogStatus::Available,
             platform: "linux".to_string(),
             backend: Some("linux-bwrap".to_string()),
@@ -652,6 +667,7 @@ fn sandbox_context_and_action_replies_round_trip() {
             source: "agent-host-probe".to_string(),
             detail: Vec::new(),
             reason: None,
+            implementations: Vec::new(),
             resource_fields: Vec::new(),
             syscall_fields: Vec::new(),
         },

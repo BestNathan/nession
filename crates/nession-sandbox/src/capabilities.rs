@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use nession_protocol::contracts::sandbox::v1::{
-    SandboxCapabilityCatalog, SandboxCatalogStatus, SandboxFieldEntry, SandboxNetworkMode,
+    SandboxCapabilityCatalog, SandboxCatalogStatus, SandboxFieldEntry, SandboxFieldError,
+    SandboxImplementationStatus, SandboxImplementationSupport, SandboxNetworkMode,
+    SandboxOptionSupport, SandboxPolicy, SandboxUnsupportedReason, SANDBOX_CATALOG_VERSION,
 };
 
 use crate::error::{Result, SandboxError};
@@ -189,82 +191,515 @@ pub const fn platform() -> Platform {
     }
 }
 
-/// Build the read-only capability catalog the Workspace UI consumes (#3124).
+/// Build the read-only capability catalog the Workspace UI consumes (#3161).
 ///
-/// Hints only: keys are listed when this Agent could actually install them in
-/// a child cgroup / load the profile. The compiler, preflight and launch
-/// barrier remain the final authorities and re-probe on every Enter.
+/// The catalog separates every schema-known implementation by its canonical
+/// policy path and every enumerated option (network mode, namespace, seccomp
+/// profile, cgroup control file) by the same measured facts `validate` uses.
+/// A path this build does not implement is never invented: only
+/// [`crate::REGISTERED_IMPLEMENTATION_PATHS`] can appear.
+///
+/// Hints only: the compiler, preflight and launch barrier remain the final
+/// authorities and re-probe on every Enter.
 pub fn catalog(capabilities: &Capabilities) -> SandboxCapabilityCatalog {
-    let platform = capabilities.platform.as_str().to_string();
-    let mut resource_fields = Vec::new();
-    let mut syscall_fields = Vec::new();
+    let implementations = implementations(capabilities);
+    // The flat arrays are the pre-v2 projection: Linux-native keys only,
+    // exactly as the catalog reported before per-implementation discovery.
+    let (resource_fields, syscall_fields) = if capabilities.platform == Platform::Linux {
+        let resource_fields = implementations
+            .iter()
+            .find(|implementation| implementation.path == "resource.cgroup_v2")
+            .map(|implementation| implementation.fields.clone())
+            .unwrap_or_default();
+        let syscall_fields = implementations
+            .iter()
+            .find(|implementation| implementation.path == "syscall.seccomp")
+            .and_then(|implementation| implementation.options.first())
+            .map(|profile| SandboxFieldEntry {
+                key: crate::draft::SYSCALL_PROFILE_KEY.to_string(),
+                controller: None,
+                value_format: "registered Agent seccomp profile".to_string(),
+                example: profile.id.clone(),
+                available: profile.status == SandboxImplementationStatus::Available,
+                reason_code: profile.reason_code,
+                reason: profile.reason.clone(),
+            })
+            .into_iter()
+            .collect();
+        (resource_fields, syscall_fields)
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
-    if capabilities.platform == Platform::Linux {
-        match &capabilities.cgroup_v2 {
-            Some(cgroup) => {
-                for (key, value_format, example) in crate::draft::RESOURCE_FIELD_METADATA {
-                    let field = cgroup.fields.get(key);
-                    resource_fields.push(SandboxFieldEntry {
-                        key: key.to_string(),
-                        value_format: value_format.to_string(),
-                        example: example.to_string(),
-                        available: field.map(|field| field.available).unwrap_or(false),
-                        reason: match field {
-                            Some(field) if field.available => None,
-                            Some(field) => field.reason.clone().or_else(|| {
-                                Some(
-                                    "the kernel refused a probe write to this control file"
-                                        .to_string(),
-                                )
-                            }),
-                            None => Some(
-                                "the Agent's delegated subtree probe did not measure this control file"
-                                    .to_string(),
-                            ),
-                        },
-                    });
-                }
-            }
-            None => {
-                for (key, value_format, example) in crate::draft::RESOURCE_FIELD_METADATA {
-                    resource_fields.push(SandboxFieldEntry {
-                        key: key.to_string(),
-                        value_format: value_format.to_string(),
-                        example: example.to_string(),
-                        available: false,
-                        reason: Some(
-                            "no writable delegated cgroup v2 subtree on this Agent".to_string(),
-                        ),
-                    });
-                }
-            }
-        }
-        syscall_fields.push(SandboxFieldEntry {
-            key: crate::draft::SYSCALL_PROFILE_KEY.to_string(),
-            value_format: "registered Agent seccomp profile".to_string(),
-            example: crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1.to_string(),
-            available: capabilities.seccomp,
-            reason: (!capabilities.seccomp)
-                .then(|| "the pinned profile could not be loaded on this Agent".to_string()),
-        });
-    }
-
-    let probe_generation = probe_generation(capabilities, &resource_fields, &syscall_fields);
+    let probe_generation = probe_generation(capabilities, &implementations);
     let status = if capabilities.backend.is_some() {
         SandboxCatalogStatus::Available
     } else {
         SandboxCatalogStatus::Unavailable
     };
     SandboxCapabilityCatalog {
+        catalog_version: SANDBOX_CATALOG_VERSION,
         status,
-        platform,
+        platform: capabilities.platform.as_str().to_string(),
         backend: capabilities.backend.map(str::to_string),
         probe_generation,
         source: "agent-host-probe".to_string(),
         detail: capabilities.detail.clone(),
         reason: capabilities.unavailable.clone(),
+        implementations,
         resource_fields,
         syscall_fields,
+    }
+}
+
+/// Build the typed per-implementation support entries from measured facts.
+pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementationSupport> {
+    let backend_missing = capabilities.backend.is_none();
+    let backend_reason = capabilities
+        .unavailable
+        .clone()
+        .unwrap_or_else(|| "no usable Sandbox backend on this Agent".to_string());
+    let linux = capabilities.platform == Platform::Linux;
+    let macos = capabilities.platform == Platform::Macos;
+
+    // Without a backend nothing is usable, even if an individual fact was
+    // measured in an earlier probe. Platform-native paths keep their stronger
+    // platform_unsupported diagnosis; everything else says backend_missing.
+    if backend_missing {
+        return nession_protocol::contracts::sandbox::v1::REGISTERED_IMPLEMENTATION_PATHS
+            .iter()
+            .map(|path| {
+                let native_elsewhere = macos
+                    && matches!(
+                        *path,
+                        "filesystem.composition"
+                            | "process.linux_namespaces"
+                            | "resource.cgroup_v2"
+                            | "syscall.seccomp"
+                    );
+                let code = if native_elsewhere || capabilities.platform == Platform::Unsupported {
+                    SandboxUnsupportedReason::PlatformUnsupported
+                } else {
+                    SandboxUnsupportedReason::BackendMissing
+                };
+                let reason = backend_reason.clone();
+                let mut entry = implementation(path, Unavailable(Some(code), reason.clone()));
+                // Registered options stay discoverable even when no backend
+                // exists; they are all measured unavailable with the same
+                // stable reason. No unregistered future path is invented.
+                match *path {
+                    "network" => {
+                        entry.options = ["allow", "deny", "restricted"]
+                            .into_iter()
+                            .map(|id| SandboxOptionSupport::unavailable(id, code, reason.clone()))
+                            .collect();
+                    }
+                    "process.linux_namespaces" => {
+                        entry.options = ["pid", "ipc", "user", "uts", "cgroup"]
+                            .into_iter()
+                            .map(|id| SandboxOptionSupport::unavailable(id, code, reason.clone()))
+                            .collect();
+                    }
+                    "resource.cgroup_v2" => {
+                        entry.fields = crate::draft::RESOURCE_FIELD_METADATA
+                            .into_iter()
+                            .map(|(key, value_format, example)| SandboxFieldEntry {
+                                key: key.to_string(),
+                                controller: Some(key.split('.').next().unwrap_or(key).to_string()),
+                                value_format: value_format.to_string(),
+                                example: example.to_string(),
+                                available: false,
+                                reason_code: Some(code),
+                                reason: Some(reason.clone()),
+                            })
+                            .collect();
+                    }
+                    "syscall.seccomp" => {
+                        entry.options = vec![SandboxOptionSupport::unavailable(
+                            crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1,
+                            code,
+                            reason,
+                        )];
+                    }
+                    _ => {}
+                }
+                entry
+            })
+            .collect();
+    }
+
+    let mut entries = Vec::new();
+    entries.push(implementation(
+        "filesystem.access",
+        if backend_missing {
+            Unavailable(
+                Some(SandboxUnsupportedReason::BackendMissing),
+                backend_reason.clone(),
+            )
+        } else if linux {
+            match capabilities.filesystem {
+                true => Available,
+                false => Unavailable(
+                    Some(SandboxUnsupportedReason::KernelFeatureMissing),
+                    "the Bubblewrap mount view is unavailable".to_string(),
+                ),
+            }
+        } else if macos {
+            match capabilities.seatbelt.as_ref() {
+                Some(seatbelt) if seatbelt.filesystem => Available,
+                Some(_) => Unavailable(
+                    Some(SandboxUnsupportedReason::KernelFeatureMissing),
+                    "filesystem access could not be verified under macOS Seatbelt".to_string(),
+                ),
+                None => Unavailable(
+                    Some(SandboxUnsupportedReason::BackendMissing),
+                    "macOS Seatbelt is unavailable".to_string(),
+                ),
+            }
+        } else {
+            Unavailable(
+                Some(SandboxUnsupportedReason::PlatformUnsupported),
+                "no Sandbox backend exists for this platform".to_string(),
+            )
+        },
+    ));
+
+    let composition = if linux {
+        if capabilities.erofs {
+            Available
+        } else {
+            Unavailable(
+                Some(SandboxUnsupportedReason::KernelFeatureMissing),
+                "prepared EROFS composition requires erofsfuse, fusermount and a usable /dev/fuse"
+                    .to_string(),
+            )
+        }
+    } else if macos || backend_missing {
+        Unavailable(
+            Some(if macos {
+                SandboxUnsupportedReason::PlatformUnsupported
+            } else {
+                SandboxUnsupportedReason::BackendMissing
+            }),
+            "prepared EROFS composition is Linux-native".to_string(),
+        )
+    } else {
+        Unavailable(
+            Some(SandboxUnsupportedReason::PlatformUnsupported),
+            "no Sandbox backend exists for this platform".to_string(),
+        )
+    };
+    let mut composition_entry = implementation("filesystem.composition", composition);
+    if linux && capabilities.erofs {
+        composition_entry
+            .options
+            .push(if capabilities.erofs_overlay {
+                SandboxOptionSupport::available("workspace_image")
+            } else {
+                SandboxOptionSupport::unavailable(
+                    "workspace_image",
+                    SandboxUnsupportedReason::KernelFeatureMissing,
+                    "a Project source image requires the unprivileged fuse-overlayfs helper",
+                )
+            });
+    }
+    entries.push(composition_entry);
+
+    let network = |mode: &str, measured: bool, reason: &str| {
+        if backend_missing {
+            SandboxOptionSupport::unavailable(
+                mode,
+                SandboxUnsupportedReason::BackendMissing,
+                backend_reason.clone(),
+            )
+        } else if measured {
+            SandboxOptionSupport::available(mode)
+        } else {
+            SandboxOptionSupport::unavailable(
+                mode,
+                if macos {
+                    SandboxUnsupportedReason::PlatformUnsupported
+                } else {
+                    SandboxUnsupportedReason::KernelFeatureMissing
+                },
+                reason,
+            )
+        }
+    };
+    let allow = network(
+        "allow",
+        capabilities.network_allow || linux || macos,
+        "the host network is unavailable",
+    );
+    let deny = network(
+        "deny",
+        capabilities.network_deny,
+        "a working network namespace is required",
+    );
+    let restricted = network(
+        "restricted",
+        capabilities.network_restricted && capabilities.bridge,
+        "restricted network requires a working network namespace and the in-sandbox bridge",
+    );
+    entries.push(with_options(
+        "network",
+        vec![allow, deny, restricted],
+        Some(SandboxUnsupportedReason::BackendMissing),
+        backend_reason.clone(),
+    ));
+
+    let namespaces = [
+        (
+            "pid",
+            capabilities.namespaces.pid,
+            "the PID namespace is unavailable",
+        ),
+        (
+            "ipc",
+            capabilities.namespaces.ipc,
+            "the IPC namespace is unavailable",
+        ),
+        (
+            "user",
+            capabilities.namespaces.user,
+            "the user namespace is unavailable",
+        ),
+        (
+            "uts",
+            capabilities.namespaces.uts,
+            "the UTS namespace is unavailable",
+        ),
+        (
+            "cgroup",
+            capabilities.namespaces.cgroup,
+            "the cgroup namespace is unavailable",
+        ),
+    ];
+    let namespace_options = namespaces
+        .into_iter()
+        .map(|(id, measured, reason)| {
+            if !linux {
+                SandboxOptionSupport::unavailable(
+                    id,
+                    if backend_missing && !macos {
+                        SandboxUnsupportedReason::BackendMissing
+                    } else {
+                        SandboxUnsupportedReason::PlatformUnsupported
+                    },
+                    "process.linux_namespaces is Linux-native",
+                )
+            } else if measured {
+                SandboxOptionSupport::available(id)
+            } else {
+                SandboxOptionSupport::unavailable(
+                    id,
+                    SandboxUnsupportedReason::KernelFeatureMissing,
+                    reason,
+                )
+            }
+        })
+        .collect();
+    entries.push(if linux {
+        with_options(
+            "process.linux_namespaces",
+            namespace_options,
+            None,
+            String::new(),
+        )
+    } else {
+        let reason = if backend_missing && !macos {
+            SandboxUnsupportedReason::BackendMissing
+        } else {
+            SandboxUnsupportedReason::PlatformUnsupported
+        };
+        implementation(
+            "process.linux_namespaces",
+            Unavailable(
+                Some(reason),
+                "process.linux_namespaces is Linux-native".to_string(),
+            ),
+        )
+    });
+
+    let mut fields = Vec::new();
+    if linux {
+        for (key, value_format, example) in crate::draft::RESOURCE_FIELD_METADATA {
+            let field = capabilities
+                .cgroup_v2
+                .as_ref()
+                .and_then(|cgroup| cgroup.fields.get(key));
+            let available = field.map(|field| field.available).unwrap_or(false);
+            let reason_code = if available {
+                None
+            } else if capabilities.cgroup_v2.is_none() {
+                Some(SandboxUnsupportedReason::ControllerNotDelegated)
+            } else {
+                Some(SandboxUnsupportedReason::PermissionDenied)
+            };
+            let reason = if available {
+                None
+            } else if capabilities.cgroup_v2.is_none() {
+                Some("no writable delegated cgroup v2 subtree on this Agent".to_string())
+            } else {
+                Some(
+                    field
+                        .and_then(|field| field.reason.clone())
+                        .unwrap_or_else(|| "the kernel refused a probe write".to_string()),
+                )
+            };
+            fields.push(SandboxFieldEntry {
+                key: key.to_string(),
+                controller: Some(key.split('.').next().unwrap_or(key).to_string()),
+                value_format: value_format.to_string(),
+                example: example.to_string(),
+                available,
+                reason_code,
+                reason,
+            });
+        }
+    }
+    let cgroup_status = if !linux {
+        Unavailable(
+            Some(if backend_missing && !macos {
+                SandboxUnsupportedReason::BackendMissing
+            } else {
+                SandboxUnsupportedReason::PlatformUnsupported
+            }),
+            "resource.cgroup_v2 is Linux-native".to_string(),
+        )
+    } else if capabilities.cgroup_v2.is_none() {
+        Unavailable(
+            Some(SandboxUnsupportedReason::ControllerNotDelegated),
+            "no writable delegated cgroup v2 subtree on this Agent".to_string(),
+        )
+    } else if fields.iter().any(|field| field.available) {
+        Available
+    } else {
+        Unavailable(
+            Some(SandboxUnsupportedReason::PermissionDenied),
+            "the delegated cgroup subtree measured no installable control file".to_string(),
+        )
+    };
+    let mut cgroup_entry = implementation("resource.cgroup_v2", cgroup_status);
+    cgroup_entry.fields = fields;
+    entries.push(cgroup_entry);
+
+    let profile = crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1;
+    let mut seccomp = if !linux {
+        implementation(
+            "syscall.seccomp",
+            Unavailable(
+                Some(if backend_missing && !macos {
+                    SandboxUnsupportedReason::BackendMissing
+                } else {
+                    SandboxUnsupportedReason::PlatformUnsupported
+                }),
+                "syscall.seccomp is Linux-native".to_string(),
+            ),
+        )
+    } else if capabilities.seccomp {
+        with_options(
+            "syscall.seccomp",
+            vec![SandboxOptionSupport::available(profile)],
+            None,
+            String::new(),
+        )
+    } else {
+        implementation(
+            "syscall.seccomp",
+            Unavailable(
+                Some(SandboxUnsupportedReason::ProfileUnavailable),
+                "the pinned seccomp profile could not be loaded on this Agent".to_string(),
+            ),
+        )
+    };
+    seccomp.options = if linux {
+        vec![if capabilities.seccomp {
+            SandboxOptionSupport::available(profile)
+        } else {
+            SandboxOptionSupport::unavailable(
+                profile,
+                SandboxUnsupportedReason::ProfileUnavailable,
+                "the pinned seccomp profile could not be loaded on this Agent",
+            )
+        }]
+    } else {
+        vec![SandboxOptionSupport::unavailable(
+            profile,
+            if backend_missing && !macos {
+                SandboxUnsupportedReason::BackendMissing
+            } else {
+                SandboxUnsupportedReason::PlatformUnsupported
+            },
+            "seccomp profiles are Linux-native",
+        )]
+    };
+    entries.push(seccomp);
+
+    entries
+}
+
+enum SupportState {
+    Available,
+    Unavailable(Option<SandboxUnsupportedReason>, String),
+}
+
+use SupportState::{Available, Unavailable};
+
+fn implementation(path: &str, state: SupportState) -> SandboxImplementationSupport {
+    match state {
+        Available => SandboxImplementationSupport {
+            path: path.to_string(),
+            status: SandboxImplementationStatus::Available,
+            reason_code: None,
+            reason: None,
+            options: Vec::new(),
+            fields: Vec::new(),
+        },
+        Unavailable(code, reason) => SandboxImplementationSupport {
+            path: path.to_string(),
+            status: SandboxImplementationStatus::Unavailable,
+            reason_code: code,
+            reason: Some(reason),
+            options: Vec::new(),
+            fields: Vec::new(),
+        },
+    }
+}
+
+/// An implementation whose own availability derives from its measured options.
+fn with_options(
+    path: &str,
+    options: Vec<SandboxOptionSupport>,
+    missing_code: Option<SandboxUnsupportedReason>,
+    missing_reason: String,
+) -> SandboxImplementationSupport {
+    let usable = options
+        .iter()
+        .any(|option| option.status == SandboxImplementationStatus::Available);
+    if usable {
+        SandboxImplementationSupport {
+            path: path.to_string(),
+            status: SandboxImplementationStatus::Available,
+            reason_code: None,
+            reason: None,
+            options,
+            fields: Vec::new(),
+        }
+    } else {
+        let (code, reason) = options
+            .iter()
+            .find_map(|option| option.reason_code.map(|code| (code, option.reason.clone())))
+            .map(|(code, reason)| (Some(code), reason.unwrap_or_else(|| missing_reason.clone())))
+            .unwrap_or((missing_code, missing_reason));
+        SandboxImplementationSupport {
+            path: path.to_string(),
+            status: SandboxImplementationStatus::Unavailable,
+            reason_code: code,
+            reason: Some(reason),
+            options,
+            fields: Vec::new(),
+        }
     }
 }
 
@@ -272,8 +707,7 @@ pub fn catalog(capabilities: &Capabilities) -> SandboxCapabilityCatalog {
 /// measured capability changes.
 fn probe_generation(
     capabilities: &Capabilities,
-    resource_fields: &[SandboxFieldEntry],
-    syscall_fields: &[SandboxFieldEntry],
+    implementations: &[SandboxImplementationSupport],
 ) -> String {
     let mut facts = String::new();
     facts.push_str(capabilities.platform.as_str());
@@ -281,36 +715,59 @@ fn probe_generation(
     facts.push_str(capabilities.backend.unwrap_or("-"));
     facts.push('|');
     facts.push_str(capabilities.unavailable.as_deref().unwrap_or("-"));
-    facts.push('|');
-    facts.push_str(&format!(
-        "ns={:?};seccomp={};fs={};net={}{}{};bridge={}",
-        capabilities.namespaces,
-        capabilities.seccomp,
-        capabilities.filesystem,
-        capabilities.network_allow,
-        capabilities.network_deny,
-        capabilities.network_restricted,
-        capabilities.bridge
-    ));
-    for support in capabilities.cgroup_v2.iter() {
-        for controller in &support.controllers {
-            facts.push_str(";controller=");
-            facts.push_str(controller);
+    for implementation in implementations {
+        facts.push_str(";impl=");
+        facts.push_str(&implementation.path);
+        facts.push('=');
+        facts.push_str(status_key(implementation.status));
+        if let Some(code) = implementation.reason_code {
+            facts.push_str(" reason=");
+            facts.push_str(reason_key(code));
         }
-        for (key, field) in &support.fields {
+        for option in &implementation.options {
+            facts.push_str(";option=");
+            facts.push_str(&option.id);
+            facts.push('=');
+            facts.push_str(status_key(option.status));
+            if let Some(code) = option.reason_code {
+                facts.push_str(" reason=");
+                facts.push_str(reason_key(code));
+            }
+        }
+        for field in &implementation.fields {
             facts.push_str(";field=");
-            facts.push_str(key);
+            facts.push_str(&field.key);
             facts.push('=');
             facts.push_str(if field.available { "1" } else { "0" });
+            if let Some(code) = field.reason_code {
+                facts.push_str(" reason=");
+                facts.push_str(reason_key(code));
+            }
         }
     }
-    for field in resource_fields.iter().chain(syscall_fields.iter()) {
-        facts.push_str(";option=");
-        facts.push_str(&field.key);
-        facts.push('=');
-        facts.push_str(if field.available { "1" } else { "0" });
-    }
     crate::policy::hex_sha256(facts.as_bytes())
+}
+
+fn status_key(status: SandboxImplementationStatus) -> &'static str {
+    match status {
+        SandboxImplementationStatus::Available => "available",
+        SandboxImplementationStatus::Unavailable => "unavailable",
+        SandboxImplementationStatus::Unknown => "unknown",
+    }
+}
+
+fn reason_key(reason: SandboxUnsupportedReason) -> &'static str {
+    match reason {
+        SandboxUnsupportedReason::PlatformUnsupported => "platform_unsupported",
+        SandboxUnsupportedReason::BackendMissing => "backend_missing",
+        SandboxUnsupportedReason::KernelFeatureMissing => "kernel_feature_missing",
+        SandboxUnsupportedReason::ControllerNotDelegated => "controller_not_delegated",
+        SandboxUnsupportedReason::PermissionDenied => "permission_denied",
+        SandboxUnsupportedReason::ProfileUnavailable => "profile_unavailable",
+        SandboxUnsupportedReason::ImplementationNotBuilt => "implementation_not_built",
+        SandboxUnsupportedReason::NotProbed => "not_probed",
+        SandboxUnsupportedReason::Timeout => "timeout",
+    }
 }
 
 /// Reject a compiled policy this host cannot install.
@@ -457,6 +914,253 @@ fn validate_linux(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
     }
 
     Ok(())
+}
+
+/// Every explicitly requested implementation or option this host cannot
+/// install, as field-path errors (#3161).
+///
+/// This is the preflight/Enter-friendly projection of [`validate`]: the same
+/// measured facts, every failure instead of the first, and the canonical
+/// policy field path a client can point at. `validate` remains the
+/// fail-closed gate; this function must never report fewer failures.
+pub fn unsupported_requests(
+    policy: &SandboxPolicy,
+    capabilities: &Capabilities,
+) -> Vec<SandboxFieldError> {
+    let mut errors = Vec::new();
+    let push = |errors: &mut Vec<SandboxFieldError>, field: &str, message: String| {
+        errors.push(SandboxFieldError {
+            field: field.to_string(),
+            code: "unsupported".to_string(),
+            message,
+        });
+    };
+    if capabilities.backend.is_none() {
+        push(
+            &mut errors,
+            "policy",
+            capabilities
+                .unavailable
+                .clone()
+                .unwrap_or_else(|| "the Sandbox backend is unavailable".to_string()),
+        );
+        return errors;
+    }
+
+    match capabilities.platform {
+        Platform::Linux => {
+            if let Some(filesystem) = &policy.filesystem {
+                if !capabilities.filesystem {
+                    push(
+                        &mut errors,
+                        "filesystem.access",
+                        "filesystem.access requires a working Bubblewrap mount view".to_string(),
+                    );
+                }
+                if let Some(composition) = &filesystem.composition {
+                    if !capabilities.erofs {
+                        push(
+                            &mut errors,
+                            "filesystem.composition",
+                            "filesystem.composition requires an unprivileged EROFS mount"
+                                .to_string(),
+                        );
+                    }
+                    if composition
+                        .workspace
+                        .as_ref()
+                        .and_then(|workspace| workspace.image.as_ref())
+                        .is_some()
+                        && !capabilities.erofs_overlay
+                    {
+                        push(
+                            &mut errors,
+                            "filesystem.composition.workspace.image",
+                            "a Project source image requires the unprivileged fuse-overlayfs helper"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            if let Some(network) = &policy.network {
+                match network.mode {
+                    SandboxNetworkMode::Allow => {}
+                    SandboxNetworkMode::Deny if !capabilities.network_deny => push(
+                        &mut errors,
+                        "network.mode",
+                        "network.mode deny requires a working network namespace".to_string(),
+                    ),
+                    SandboxNetworkMode::Deny => {}
+                    SandboxNetworkMode::Restricted => {
+                        if !capabilities.network_deny {
+                            push(
+                                &mut errors,
+                                "network.mode",
+                                "network.mode restricted requires a working network namespace"
+                                    .to_string(),
+                            );
+                        } else if !capabilities.bridge {
+                            push(
+                                &mut errors,
+                                "network.mode",
+                                "network.mode restricted requires the in-sandbox bridge executable"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+            if let Some(namespaces) = policy
+                .process
+                .as_ref()
+                .and_then(|process| process.linux_namespaces.as_ref())
+            {
+                for (name, requested, supported) in [
+                    ("pid", namespaces.pid, capabilities.namespaces.pid),
+                    ("ipc", namespaces.ipc, capabilities.namespaces.ipc),
+                    ("user", namespaces.user, capabilities.namespaces.user),
+                    ("uts", namespaces.uts, capabilities.namespaces.uts),
+                    ("cgroup", namespaces.cgroup, capabilities.namespaces.cgroup),
+                ] {
+                    if requested && !supported {
+                        push(
+                            &mut errors,
+                            &format!("process.linux_namespaces.{name}"),
+                            format!("the {name} namespace cannot be created on this host"),
+                        );
+                    }
+                }
+            }
+            if let Some(cgroup) = policy.resource.as_ref().map(|resource| &resource.cgroup_v2) {
+                match capabilities.cgroup_v2.as_ref() {
+                    None => push(
+                        &mut errors,
+                        "resource.cgroup_v2",
+                        "resource.cgroup_v2 requires a writable delegated cgroup v2 subtree"
+                            .to_string(),
+                    ),
+                    Some(support) => {
+                        for (file, requested) in [
+                            ("memory.max", cgroup.memory_max.is_some()),
+                            ("cpu.max", cgroup.cpu_max.is_some()),
+                            ("pids.max", cgroup.pids_max.is_some()),
+                            ("memory.oom.group", cgroup.memory_oom_group.is_some()),
+                        ] {
+                            if requested
+                                && !support
+                                    .fields
+                                    .get(file)
+                                    .map(|field| field.available)
+                                    .unwrap_or(false)
+                            {
+                                push(
+                                    &mut errors,
+                                    &format!("resource.cgroup_v2.{file}"),
+                                    support
+                                        .fields
+                                        .get(file)
+                                        .and_then(|field| field.reason.clone())
+                                        .unwrap_or_else(|| {
+                                            format!("{file} is not installable on this host")
+                                        }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if policy.syscall.is_some() && !capabilities.seccomp {
+                push(
+                    &mut errors,
+                    "syscall.seccomp.profile",
+                    "the pinned seccomp profile could not be loaded on this host".to_string(),
+                );
+            }
+        }
+        Platform::Macos => {
+            let seatbelt = capabilities.seatbelt.as_ref();
+            if let Some(filesystem) = &policy.filesystem {
+                if filesystem.composition.is_some() {
+                    push(
+                        &mut errors,
+                        "filesystem.composition",
+                        "filesystem.composition (EROFS mounts) is unsupported on macOS".to_string(),
+                    );
+                }
+                if !seatbelt.is_some_and(|seatbelt| seatbelt.filesystem) {
+                    push(
+                        &mut errors,
+                        "filesystem.access",
+                        "filesystem.access could not be verified under macOS Seatbelt".to_string(),
+                    );
+                }
+            }
+            if let Some(namespaces) = policy
+                .process
+                .as_ref()
+                .and_then(|process| process.linux_namespaces.as_ref())
+            {
+                for (name, requested) in [
+                    ("pid", namespaces.pid),
+                    ("ipc", namespaces.ipc),
+                    ("user", namespaces.user),
+                    ("uts", namespaces.uts),
+                    ("cgroup", namespaces.cgroup),
+                ] {
+                    if requested {
+                        push(
+                            &mut errors,
+                            &format!("process.linux_namespaces.{name}"),
+                            "process.linux_namespaces is Linux-native and unsupported on macOS"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            if policy.resource.is_some() {
+                push(
+                    &mut errors,
+                    "resource.cgroup_v2",
+                    "resource.cgroup_v2 is Linux-native and unsupported on macOS".to_string(),
+                );
+            }
+            if policy.syscall.is_some() {
+                push(
+                    &mut errors,
+                    "syscall.seccomp",
+                    "syscall.seccomp is Linux-native and unsupported on macOS".to_string(),
+                );
+            }
+            if let Some(network) = &policy.network {
+                match network.mode {
+                    SandboxNetworkMode::Allow => {}
+                    SandboxNetworkMode::Deny
+                        if !seatbelt.is_some_and(|seatbelt| seatbelt.network_deny) =>
+                    {
+                        push(
+                            &mut errors,
+                            "network.mode",
+                            "network.mode deny could not be verified under macOS Seatbelt"
+                                .to_string(),
+                        )
+                    }
+                    SandboxNetworkMode::Deny => {}
+                    SandboxNetworkMode::Restricted => push(
+                        &mut errors,
+                        "network.mode",
+                        "network.mode restricted is not supported by the macOS backend in V1"
+                            .to_string(),
+                    ),
+                }
+            }
+        }
+        Platform::Unsupported => push(
+            &mut errors,
+            "policy",
+            "no Sandbox backend exists for this platform".to_string(),
+        ),
+    }
+    errors
 }
 
 fn namespace_supported(capabilities: &Capabilities, name: &str) -> bool {
@@ -854,5 +1558,252 @@ mod tests {
             ipc: true,
             ..Default::default()
         }));
+    }
+
+    fn policy(value: serde_json::Value) -> SandboxPolicy {
+        serde_json::from_value(value).expect("policy fixture")
+    }
+
+    fn implementation<'a>(
+        catalog: &'a SandboxCapabilityCatalog,
+        path: &str,
+    ) -> &'a SandboxImplementationSupport {
+        catalog
+            .implementation(path)
+            .unwrap_or_else(|| panic!("missing implementation {path}"))
+    }
+
+    #[test]
+    fn the_catalog_lists_each_registered_path_with_measured_options() {
+        let catalog = catalog(&linux_capabilities());
+        assert_eq!(catalog.catalog_version, SANDBOX_CATALOG_VERSION);
+        assert_eq!(catalog.implementations.len(), 6);
+        assert!(implementation(&catalog, "filesystem.access").is_editable());
+        assert!(implementation(&catalog, "filesystem.composition").is_editable());
+        let network = implementation(&catalog, "network");
+        assert!(network.is_editable());
+        assert_eq!(
+            network
+                .options
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["allow", "deny", "restricted"]
+        );
+        assert!(network
+            .options
+            .iter()
+            .all(|option| option.status == SandboxImplementationStatus::Available));
+        let namespaces = implementation(&catalog, "process.linux_namespaces");
+        assert!(namespaces.is_editable());
+        assert_eq!(namespaces.options.len(), 5);
+        assert!(namespaces
+            .options
+            .iter()
+            .all(|option| option.status == SandboxImplementationStatus::Available));
+        let cgroup = implementation(&catalog, "resource.cgroup_v2");
+        assert!(cgroup.is_editable());
+        assert_eq!(cgroup.fields.len(), 4);
+        assert!(cgroup.fields.iter().all(|field| field.available));
+        assert!(cgroup
+            .fields
+            .iter()
+            .any(|field| field.key == "cpu.max" && field.controller.as_deref() == Some("cpu")));
+        let seccomp = implementation(&catalog, "syscall.seccomp");
+        assert!(seccomp.is_editable());
+        assert_eq!(seccomp.options.len(), 1);
+        assert_eq!(
+            seccomp.options[0].id,
+            crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1
+        );
+    }
+
+    #[test]
+    fn a_partial_linux_host_only_offers_its_measured_options() {
+        let mut capabilities = linux_capabilities();
+        capabilities.namespaces.pid = false;
+        capabilities.network_restricted = false;
+        capabilities.seccomp = false;
+        capabilities.cgroup_v2.as_mut().unwrap().fields.insert(
+            "cpu.max".to_string(),
+            CgroupFieldSupport {
+                available: false,
+                reason: Some("controller not enabled".to_string()),
+            },
+        );
+        let catalog = catalog(&capabilities);
+        let namespaces = implementation(&catalog, "process.linux_namespaces");
+        let pid = namespaces
+            .options
+            .iter()
+            .find(|option| option.id == "pid")
+            .unwrap();
+        assert_eq!(pid.status, SandboxImplementationStatus::Unavailable);
+        assert_eq!(
+            pid.reason_code,
+            Some(SandboxUnsupportedReason::KernelFeatureMissing)
+        );
+        assert!(namespaces.is_editable(), "other namespaces remain usable");
+        let network = implementation(&catalog, "network");
+        let restricted = network
+            .options
+            .iter()
+            .find(|option| option.id == "restricted")
+            .unwrap();
+        assert_eq!(restricted.status, SandboxImplementationStatus::Unavailable);
+        assert!(network.is_editable(), "allow/deny remain usable");
+        let cpu = implementation(&catalog, "resource.cgroup_v2")
+            .fields
+            .iter()
+            .find(|field| field.key == "cpu.max")
+            .unwrap();
+        assert!(!cpu.available);
+        assert_eq!(
+            cpu.reason_code,
+            Some(SandboxUnsupportedReason::PermissionDenied)
+        );
+        let seccomp = implementation(&catalog, "syscall.seccomp");
+        assert_eq!(seccomp.status, SandboxImplementationStatus::Unavailable);
+        assert_eq!(
+            seccomp.options[0].reason_code,
+            Some(SandboxUnsupportedReason::ProfileUnavailable)
+        );
+    }
+
+    #[test]
+    fn macos_reports_native_paths_unsupported_and_its_measured_network() {
+        let catalog = catalog(&macos_capabilities());
+        for path in [
+            "process.linux_namespaces",
+            "resource.cgroup_v2",
+            "syscall.seccomp",
+        ] {
+            let entry = implementation(&catalog, path);
+            assert_eq!(entry.status, SandboxImplementationStatus::Unavailable);
+            assert_eq!(
+                entry.reason_code,
+                Some(SandboxUnsupportedReason::PlatformUnsupported)
+            );
+        }
+        let network = implementation(&catalog, "network");
+        let restricted = network
+            .options
+            .iter()
+            .find(|option| option.id == "restricted")
+            .unwrap();
+        assert_eq!(restricted.status, SandboxImplementationStatus::Unavailable);
+        assert_eq!(
+            restricted.reason_code,
+            Some(SandboxUnsupportedReason::PlatformUnsupported)
+        );
+        assert!(network
+            .options
+            .iter()
+            .find(|option| option.id == "deny")
+            .is_some_and(|option| option.status == SandboxImplementationStatus::Available));
+    }
+
+    #[test]
+    fn an_unavailable_backend_never_reports_a_usable_implementation() {
+        let mut capabilities = linux_capabilities();
+        capabilities.backend = None;
+        capabilities.unavailable = Some("sandbox disabled by Agent configuration".to_string());
+        let catalog = catalog(&capabilities);
+        assert_eq!(catalog.status, SandboxCatalogStatus::Unavailable);
+        assert!(catalog.implementations.iter().all(|entry| {
+            entry.status == SandboxImplementationStatus::Unavailable
+                && entry.reason_code == Some(SandboxUnsupportedReason::BackendMissing)
+        }));
+        assert!(catalog
+            .implementations
+            .iter()
+            .all(|entry| !entry.is_editable()));
+        // Registered options/fields stay discoverable, not silently empty.
+        let network = implementation(&catalog, "network");
+        assert_eq!(network.options.len(), 3);
+        assert!(network
+            .options
+            .iter()
+            .all(|option| option.status == SandboxImplementationStatus::Unavailable));
+        let namespaces = implementation(&catalog, "process.linux_namespaces");
+        assert_eq!(namespaces.options.len(), 5);
+        let cgroup = implementation(&catalog, "resource.cgroup_v2");
+        assert_eq!(cgroup.fields.len(), 4);
+        assert!(cgroup.fields.iter().all(|field| !field.available));
+        let seccomp = implementation(&catalog, "syscall.seccomp");
+        assert_eq!(seccomp.options.len(), 1);
+        assert_eq!(
+            seccomp.options[0].reason_code,
+            Some(SandboxUnsupportedReason::BackendMissing)
+        );
+    }
+
+    #[test]
+    fn the_probe_generation_changes_when_implementation_support_changes() {
+        let full = catalog(&linux_capabilities());
+        let mut partial = linux_capabilities();
+        partial.seccomp = false;
+        let partial = catalog(&partial);
+        assert_ne!(full.probe_generation, partial.probe_generation);
+        let again = catalog(&linux_capabilities());
+        assert_eq!(full.probe_generation, again.probe_generation);
+    }
+
+    #[test]
+    fn unsupported_requests_names_every_unavailable_field_path() {
+        let mut capabilities = linux_capabilities();
+        capabilities.namespaces.pid = false;
+        capabilities.seccomp = false;
+        capabilities.cgroup_v2.as_mut().unwrap().fields.insert(
+            "cpu.max".to_string(),
+            CgroupFieldSupport {
+                available: false,
+                reason: Some("controller not enabled".to_string()),
+            },
+        );
+        let requested = policy(serde_json::json!({
+            "enabled": true,
+            "process": { "linux_namespaces": { "pid": true, "ipc": true } },
+            "resource": { "cgroup_v2": { "cpu.max": "200000 100000", "memory.max": "1024" } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } }
+        }));
+        let errors = unsupported_requests(&requested, &capabilities);
+        let fields: Vec<&str> = errors.iter().map(|error| error.field.as_str()).collect();
+        assert!(fields.contains(&"process.linux_namespaces.pid"));
+        assert!(!fields.contains(&"process.linux_namespaces.ipc"));
+        assert!(fields.contains(&"resource.cgroup_v2.cpu.max"));
+        assert!(!fields.contains(&"resource.cgroup_v2.memory.max"));
+        assert!(fields.contains(&"syscall.seccomp.profile"));
+        assert!(errors.iter().all(|error| error.code == "unsupported"));
+
+        let macos = policy(serde_json::json!({
+            "enabled": true,
+            "network": { "mode": "restricted" },
+            "process": { "linux_namespaces": { "user": true } },
+            "resource": { "cgroup_v2": { "memory.max": "1024" } },
+            "syscall": { "seccomp": { "profile": "nession-interactive-v1" } }
+        }));
+        let fields: Vec<String> = unsupported_requests(&macos, &macos_capabilities())
+            .into_iter()
+            .map(|error| error.field)
+            .collect();
+        assert!(fields.contains(&"network.mode".to_string()));
+        assert!(fields.contains(&"process.linux_namespaces.user".to_string()));
+        assert!(fields.contains(&"resource.cgroup_v2".to_string()));
+        assert!(fields.contains(&"syscall.seccomp".to_string()));
+    }
+
+    #[test]
+    fn a_missing_backend_is_one_policy_error_not_a_partial_guess() {
+        let mut capabilities = linux_capabilities();
+        capabilities.backend = None;
+        capabilities.unavailable = Some("disabled".to_string());
+        let errors = unsupported_requests(
+            &policy(serde_json::json!({ "enabled": true, "network": { "mode": "deny" } })),
+            &capabilities,
+        );
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field, "policy");
+        assert_eq!(errors[0].code, "unsupported");
     }
 }
