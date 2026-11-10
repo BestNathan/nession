@@ -5,7 +5,7 @@ topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "security", "storage"]
 status: verified
 created_at: 2026-11-10T11:18:40Z
-updated_at: 2026-11-10T11:18:40Z
+updated_at: 2026-11-10T15:06:36Z
 sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs"]
 ---
 
@@ -86,8 +86,8 @@ that a later CLI `status`/`stop` reads. Existing supervision remains
 - This article covers process-lifecycle state only. Session Environment
   Bindings, Agent identity, databases and logs remain durable `$NESSION_HOME`
   state.
-- No cross-version lifecycle lock or multi-version installer is implemented; a
-  future `lifecycle.lock` may share the runtime root but is not defined here.
+- The cross-version lifecycle lock and the multi-version release archive are
+  owned by [Nession CLI release versioning and single-active daemons](nession-cli-release-versioning-and-single-active-daemons.md); this article owns only the runtime location and process identity themselves.
 - A systemd `RuntimeDirectory=nession` is deliberately not used by the user
   unit: the runtime root is shared by components, and a unit-scoped cleanup must
   not delete another component's state or a future shared lock.
@@ -96,4 +96,5 @@ that a later CLI `status`/`stop` reads. Existing supervision remains
 
 Related knowledge:
 
+- [Nession CLI release versioning and single-active daemons](nession-cli-release-versioning-and-single-active-daemons.md) — per-command release selection, the release archive and the cross-version lifecycle lock built on this runtime directory.
 - [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md) — Sandbox isolation controls what a Session process may access; this article owns only where daemon lifecycle state lives.

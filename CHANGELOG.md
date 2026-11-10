@@ -577,3 +577,17 @@
 - Categories: web, app, interaction, session, project, presentation, responsive
 - Reason: Record the resource-choice presentation of Agent/Existing Location choices, the unchanged action Selects, the shared ChoiceItemContent slots, and the #3184 Case/E2E/staging evidence
 - Source: https://github.com/BestNathan/nession/issues/3164
+
+## 2026-11-10T15:06:36Z | create | Nession CLI release versioning and single-active daemons
+- Path: topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, release, storage
+- Reason: Record #3173: Current/Selected/Running semantics, archived release homes with their own config and durable state, the install/archive transaction and live-process guard, per-command +<version>/NESSION_VERSION dispatch, version list, idempotent start, restart-only replacement, mixed-release refusal and the shared lifecycle lock
+- Source: https://github.com/BestNathan/nession/issues/3173
+
+## 2026-11-10T15:06:36Z | update | Nession runtime directories and daemon process state ownership
+- Path: topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, security, storage
+- Reason: Link the new release-versioning article and correct the now-implemented cross-version lifecycle lock and release archive (#3173)
+- Source: https://github.com/BestNathan/nession/issues/3173
