@@ -57,6 +57,7 @@ export function SandboxPolicyTabs({
       >
         <TabsList
           variant="line"
+          activateOnFocus
           aria-label="Sandbox policy sections"
           data-testid="sandbox-tabs"
           data-orientation={vertical ? 'vertical' : 'horizontal'}
