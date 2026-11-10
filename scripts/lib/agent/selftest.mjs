@@ -3,7 +3,7 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { issueBody as convergenceIssueBody } from '../../staging-convergence-batch.mjs';
 import { auditIssue } from '../../issue-contract.mjs';
@@ -202,6 +202,17 @@ await assert.rejects(applyIssueAuditProposal(issue,{result:'{}'},'example/repo')
   assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
   return true;
 });
+let emptyCorrectionCalls=0;
+await assert.rejects(applyIssueAuditWithContractRetry(issue,{result:'{}'},'example/repo',{
+  contractRepair:async()=>{
+    emptyCorrectionCalls++;
+    return {result:'{}'};
+  },
+}),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
+  return true;
+});
+assert.equal(emptyCorrectionCalls,1,'no-op repair has exactly one bounded continuation');
 const tierlessValid={...validBatch,labels:validBatch.labels.filter(x=>!x.name.startsWith('verification:'))};
 await assert.rejects(applyIssueAuditProposal(tierlessValid,{result:'{}'},'example/repo'),error=>{
   assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_TIER_PROPOSAL');
