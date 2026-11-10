@@ -235,7 +235,22 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   }
   const hasIssueRepair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
   const hasWrites = hasIssueRepair || proposal.verification_tier != null || proposal.comment != null;
-  if (!hasWrites) return;
+  // An empty, well-formed response is not a successful audit if its fixed
+  // source still fails Contract or lacks an explicit risk tier. Return a
+  // typed, pre-write finding so the one-shot correction can repair it.
+  // A no-op on an already valid, tiered Issue remains legitimate.
+  if (!hasWrites) {
+    const validation = auditIssue(issue);
+    if (!validation.ok) {
+      throw Object.assign(new Error('Issue Audit proposal left the invalid Issue Contract unrepaired: ' +
+        validation.errors.join('; ')),{code:'ISSUE_AUDIT_CONTRACT_REJECTED'});
+    }
+    if (!readVerificationTier(issue).explicit) {
+      throw Object.assign(new Error('Issue Audit proposal left verification tier unset'),
+        {code:'ISSUE_AUDIT_TIER_PROPOSAL'});
+    }
+    return;
+  }
   // Validate ALL proposed mutations before the first write, not just the
   // structural fields. Preserve the trusted tool's repeated pre-write checks.
   if (proposal.verification_tier != null &&
