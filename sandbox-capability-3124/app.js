@@ -443,16 +443,15 @@
   function moduleView(){
     var observed=settings().inside,id=state.openGroup,d=observed?actualPolicy():state.draft;
     var p=compositionState(d,id,observed),label=observed?"Observed / effective":"Draft / editable";
-    var head='<div class="module-head"><div><small>Sandbox / '+dimensionNames[id]+'</small><h3>'+dimensionNames[id]+'</h3>'+
-      '<p class="subline">'+moduleCopy[id]+'</p></div><span class="pill">'+label+'</span></div>'+
+    var head='<div class="module-head"><div><p class="subline">'+moduleCopy[id]+'</p></div><span class="pill">'+label+'</span></div>'+
       '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+(observed?"Sandbox Pane %8":"Native Pane %1")+
       ' · nession-dev · '+(observed?"生效只读":"草稿配置")+'</div>';
     var back=state.mode==="web"?'<button class="action module-back" data-action="module-back">← 返回 Sandbox 配置目录</button>':"";
     return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+
       (observed?observedModule():editor())+
       (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
-      '<button class="action" data-action="module-back">完成 · 返回 Sandbox</button></div>':
-      '<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>')+
+      (state.mode==="web"?'<button class="action" data-action="module-back">完成 · 返回 Sandbox</button>':'')+'</div>':
+      (state.mode==="web"?'<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>':'') )+
       '</section>';
   }
   function detail(){
