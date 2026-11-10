@@ -25,6 +25,7 @@ e2e-test-run-ingest-selftest
 e2e-run-ingest-negative-selftest
 repo-health-selftest
 repo-metrics-selftest
+runtime-image-tools
 protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
@@ -55,6 +56,7 @@ test-isolation-selftest
 tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
+runtime-image-tools-selftest
 agent-provider-contract
 e2e-failure-analysis-selftest
 agent-checkpoint-store
