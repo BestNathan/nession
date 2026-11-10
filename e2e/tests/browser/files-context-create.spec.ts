@@ -14,7 +14,7 @@ import {
   returnToTerminal as returnFromFiles,
   runLine as runFileLinkCommand,
   seedTerminalFiles,
-} from '../../acceptance/shared/terminal-file-links.cjs';
+} from '../../../e2e/acceptance/shared/terminal-file-links.cjs';
 
 declare global {
   interface Window {

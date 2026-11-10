@@ -46,7 +46,7 @@ import {
   returnToTerminal as returnFromFiles,
   runLine as runFileLinkCommand,
   seedTerminalFiles,
-} from '../../acceptance/shared/terminal-file-links.cjs';
+} from '../../../e2e/acceptance/shared/terminal-file-links.cjs';
 
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
