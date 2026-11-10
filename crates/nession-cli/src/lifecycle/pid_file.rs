@@ -4,6 +4,7 @@
 //! background processes like agents and servers.
 
 use anyhow::{Context, Result};
+use nession_common::paths;
 use std::fs;
 use std::path::Path;
 
@@ -119,7 +120,7 @@ pub enum Component {
 }
 
 impl Component {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Component::Agent => "agent",
             Component::Server => "server",
@@ -135,23 +136,72 @@ impl Component {
     }
 }
 
-/// Resolve a state-file path: the explicit value, else the component's
-/// documented default.
-pub fn resolve_path(explicit: Option<String>, component: Component) -> String {
-    if let Some(path) = explicit {
-        return path;
+/// The state-file locations a component's live process may be found at.
+///
+/// The runtime-directory file is authoritative. The legacy home-relative file
+/// is consulted only when the operator did not pass `--pid-file`: a daemon
+/// started by a pre-runtime binary must remain discoverable and manageable
+/// without letting a bare legacy pid stand in for ownership evidence.
+#[derive(Debug, Clone)]
+pub struct StateFiles {
+    /// The state file this invocation reads and writes.
+    pub current: String,
+    /// The pre-runtime-directory location, present only for default state
+    /// files. `None` for an explicit `--pid-file`, which stays authoritative
+    /// and is never migrated implicitly.
+    pub legacy: Option<String>,
+}
+
+impl StateFiles {
+    /// An operator-supplied `--pid-file`. It is the highest-priority override;
+    /// no legacy location is consulted.
+    pub fn explicit(path: String) -> Self {
+        Self {
+            current: path,
+            legacy: None,
+        }
     }
-    let (resolved, fallback) = match component {
-        Component::Agent => (
-            nession_common::paths::agent_pid_path(),
-            std::path::PathBuf::from("agent.pid"),
-        ),
-        Component::Server => (
-            nession_common::paths::server_pid_path(),
-            std::path::PathBuf::from("server.pid"),
-        ),
-    };
-    resolved.unwrap_or(fallback).to_string_lossy().into_owned()
+
+    /// Resolve the default runtime directory state file for `component`.
+    ///
+    /// Fails rather than falling back to `./agent.pid` / `./server.pid` or to a
+    /// durable home directory when the runtime root cannot be resolved.
+    pub fn from_cli(explicit: Option<String>, component: Component) -> Result<Self> {
+        if let Some(path) = explicit {
+            return Ok(Self::explicit(path));
+        }
+
+        let runtime_dir = paths::ensure_runtime_dir().with_context(|| {
+            format!(
+                "cannot resolve the default {} state file; set {} to an absolute, user-owned \
+                 directory or pass --pid-file",
+                component.as_str(),
+                paths::NESSION_RUNTIME_DIR_ENV
+            )
+        })?;
+        let (current, legacy) = match component {
+            Component::Agent => (paths::agent_pid_path(), paths::legacy_agent_pid_path()),
+            Component::Server => (paths::server_pid_path(), paths::legacy_server_pid_path()),
+        };
+        let current = current.with_context(|| {
+            format!(
+                "cannot resolve the default {} state file under {}",
+                component.as_str(),
+                runtime_dir.display()
+            )
+        })?;
+        let legacy = legacy.ok().map(|path| path.to_string_lossy().into_owned());
+        Ok(Self {
+            current: current.to_string_lossy().into_owned(),
+            legacy,
+        })
+    }
+
+    /// Whether this invocation uses the default runtime-directory location
+    /// (and therefore also watches the legacy location).
+    pub fn is_default_location(&self) -> bool {
+        self.legacy.is_some()
+    }
 }
 
 /// What a daemon state file records about the configuration it is running.
@@ -357,6 +407,189 @@ pub fn ownership(path: &str) -> Result<Ownership> {
         // purpose: `stop` must not signal a process whose ownership it cannot
         // establish (#1016), and "I cannot tell" is not "it is mine".
         _ => Ok(Ownership::Reused(recorded)),
+    }
+}
+
+/// Which location a record was read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The runtime-directory state file this invocation owns.
+    Runtime,
+    /// The pre-runtime home-relative file, read for migration only.
+    Legacy,
+}
+
+/// What a state file location says about the process it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordState {
+    /// No file at this location.
+    Missing,
+    /// The recorded instance is running: safe to signal.
+    Alive(ProcessIdentity),
+    /// The pid is alive but is a different instance — it was reused.
+    Reused(ProcessIdentity),
+    /// Nothing is running under that pid.
+    Stale(ProcessIdentity),
+    /// A file exists but does not hold a verifiable process identity (a bare
+    /// pid, a corrupt record, or an unreadable file).
+    Unprovable,
+}
+
+/// One inspected state-file location.
+#[derive(Debug, Clone)]
+pub struct StateRecord {
+    pub origin: Origin,
+    pub path: String,
+    pub state: RecordState,
+}
+
+/// All state-file locations consulted for one command.
+#[derive(Debug, Clone)]
+pub struct Inspection {
+    pub records: Vec<StateRecord>,
+}
+
+impl Inspection {
+    /// Inspect the runtime location first, then the optional legacy location.
+    pub fn of(files: &StateFiles) -> Self {
+        let mut records = vec![inspect_record(&files.current, Origin::Runtime)];
+        if let Some(legacy) = files.legacy.as_deref() {
+            records.push(inspect_record(legacy, Origin::Legacy));
+        }
+        Self { records }
+    }
+
+    /// Every verified live process, runtime location first.
+    pub fn live_records(&self) -> Vec<(&StateRecord, ProcessIdentity)> {
+        self.records
+            .iter()
+            .filter_map(|record| match &record.state {
+                RecordState::Alive(identity) => Some((record, identity.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The verified live process to report, if any.
+    pub fn live(&self) -> Option<(&StateRecord, ProcessIdentity)> {
+        self.live_records().into_iter().next()
+    }
+
+    /// Remove state records that provably do not name a live process.
+    ///
+    /// The runtime-directory record is always removed when it is not alive —
+    /// it is this process's own state and a dead record must not make the next
+    /// start believe otherwise. The legacy record is removed only when stale;
+    /// a reused or unprovable legacy record is migration evidence that a reader
+    /// unable to establish ownership must not discard.
+    pub fn clean_dead(&self) {
+        for record in &self.records {
+            let remove = match (&record.state, record.origin) {
+                (RecordState::Alive(_) | RecordState::Missing, _) => false,
+                (RecordState::Stale(_), _) => true,
+                (RecordState::Reused(_) | RecordState::Unprovable, Origin::Runtime) => true,
+                (RecordState::Reused(_) | RecordState::Unprovable, Origin::Legacy) => false,
+            };
+            if remove {
+                let _ = fs::remove_file(&record.path);
+            }
+        }
+    }
+
+    /// Diagnostics for records left in place because ownership could not be
+    /// established there: a reused pid or an unprovable legacy record.
+    pub fn unresolved_warnings(&self, component: &str) -> Vec<String> {
+        self.records
+            .iter()
+            .filter_map(|record| match (&record.state, record.origin) {
+                (RecordState::Reused(identity), _) => Some(format!(
+                    "the recorded pid {} at {} is running but is not this {component}; \
+                     not signalling it",
+                    identity.pid, record.path
+                )),
+                (RecordState::Unprovable, Origin::Legacy) => Some(format!(
+                    "legacy state at {} is not a verifiable {component} identity; \
+                     not treating it as running",
+                    record.path
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// Human report for a location that does not name a live process.
+pub fn report_not_live(record: &StateRecord, component: &str) {
+    match &record.state {
+        RecordState::Missing => {
+            if record.origin == Origin::Runtime {
+                println!("{component} is not running (no state file found)");
+            }
+        }
+        RecordState::Stale(identity) => {
+            println!("{component} process {} is not running", identity.pid);
+        }
+        RecordState::Reused(identity) => {
+            println!(
+                "Recorded pid {} at {} is running but is not this {component} — not signalling it.",
+                identity.pid, record.path
+            );
+        }
+        RecordState::Unprovable => {
+            println!(
+                "State file {} does not hold a verifiable {component} identity — \
+                 not signalling any process.",
+                record.path
+            );
+        }
+        RecordState::Alive(_) => {}
+    }
+}
+
+/// Human report for a location that does not name a live process, in `status`
+/// wording.
+pub fn report_not_live_status(record: &StateRecord, component: &str) {
+    match &record.state {
+        RecordState::Missing => {
+            if record.origin == Origin::Runtime {
+                println!("Status: stopped (no state file)");
+            }
+        }
+        RecordState::Stale(_) => {
+            println!("Status: stopped (process not running)");
+        }
+        RecordState::Reused(identity) => {
+            println!(
+                "Status: stopped (pid {} at {} is running but is not this {component})",
+                identity.pid, record.path
+            );
+        }
+        RecordState::Unprovable => {
+            println!(
+                "Status: stopped (state file {} is not a verifiable {component} identity)",
+                record.path
+            );
+        }
+        RecordState::Alive(_) => {}
+    }
+}
+
+fn inspect_record(path: &str, origin: Origin) -> StateRecord {
+    let state = match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RecordState::Missing,
+        // A file that exists but cannot be read is not evidence either way.
+        Err(_) => RecordState::Unprovable,
+        Ok(_) => match ownership(path) {
+            Ok(Ownership::Alive(identity)) => RecordState::Alive(identity),
+            Ok(Ownership::Reused(identity)) => RecordState::Reused(identity),
+            Ok(Ownership::Stale(identity)) => RecordState::Stale(identity),
+            Err(_) => RecordState::Unprovable,
+        },
+    };
+    StateRecord {
+        origin,
+        path: path.to_string(),
+        state,
     }
 }
 
@@ -579,5 +812,106 @@ mod tests {
             read_identity(path).is_err(),
             "a bare pid carries no ownership evidence and must not resolve"
         );
+    }
+
+    // --- Runtime/legacy location inspection (migration) ---
+
+    fn two_locations(dir: &TempDir) -> StateFiles {
+        StateFiles {
+            current: dir
+                .path()
+                .join("runtime")
+                .join("agent.pid")
+                .to_string_lossy()
+                .into_owned(),
+            legacy: Some(
+                dir.path()
+                    .join("home")
+                    .join("agent.pid")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        }
+    }
+
+    fn write_identity_at(path: &str) {
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
+    }
+
+    #[test]
+    fn an_explicit_state_file_has_no_legacy_location() {
+        let files = StateFiles::explicit("/tmp/custom.pid".to_string());
+        assert!(!files.is_default_location());
+        assert_eq!(files.legacy, None);
+    }
+
+    #[test]
+    fn a_live_legacy_daemon_is_discovered_when_the_runtime_file_is_absent() {
+        let dir = TempDir::new().unwrap();
+        let files = two_locations(&dir);
+        write_identity_at(files.legacy.as_deref().unwrap());
+
+        let inspection = Inspection::of(&files);
+        let (record, identity) = inspection.live().expect("the legacy daemon is live");
+
+        assert_eq!(record.origin, Origin::Legacy);
+        assert_eq!(identity.pid, std::process::id());
+    }
+
+    #[test]
+    fn runtime_state_wins_when_both_locations_record_a_live_process() {
+        let dir = TempDir::new().unwrap();
+        let files = two_locations(&dir);
+        write_identity_at(&files.current);
+        write_identity_at(files.legacy.as_deref().unwrap());
+
+        let inspection = Inspection::of(&files);
+        let (record, _) = inspection.live().expect("a live process");
+
+        assert_eq!(record.origin, Origin::Runtime);
+    }
+
+    #[test]
+    fn a_stale_legacy_record_is_not_live() {
+        let dir = TempDir::new().unwrap();
+        let files = two_locations(&dir);
+        let legacy = files.legacy.as_deref().unwrap();
+        std::fs::create_dir_all(std::path::Path::new(legacy).parent().unwrap()).unwrap();
+        record(legacy, 999_999_999, 1_700_000_000);
+
+        let state = Inspection::of(&files).records[1].state.clone();
+
+        assert!(matches!(state, RecordState::Stale(_)), "{state:?}");
+    }
+
+    #[test]
+    fn a_reused_legacy_pid_is_not_live() {
+        let dir = TempDir::new().unwrap();
+        let files = two_locations(&dir);
+        let legacy = files.legacy.as_deref().unwrap();
+        std::fs::create_dir_all(std::path::Path::new(legacy).parent().unwrap()).unwrap();
+        let real = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        record(legacy, real.pid, real.started_at + 60);
+
+        let state = Inspection::of(&files).records[1].state.clone();
+
+        assert!(matches!(state, RecordState::Reused(_)), "{state:?}");
+    }
+
+    #[test]
+    fn an_unprovable_legacy_record_is_not_live() {
+        let dir = TempDir::new().unwrap();
+        let files = two_locations(&dir);
+        let legacy = files.legacy.as_deref().unwrap();
+        std::fs::create_dir_all(std::path::Path::new(legacy).parent().unwrap()).unwrap();
+        std::fs::write(legacy, std::process::id().to_string()).unwrap();
+
+        let inspection = Inspection::of(&files);
+
+        assert_eq!(inspection.records[1].state, RecordState::Unprovable);
+        assert!(inspection.live().is_none());
     }
 }

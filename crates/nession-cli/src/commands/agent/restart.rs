@@ -16,19 +16,19 @@ pub async fn run(
     // daemon down on the way to being rejected (#2869 SC-01). The environment
     // overrides run here too, because they are part of the effective config
     // the runtime will validate.
-    let selection = ConfigSelection::resolve(ConfigTarget::Agent, config.clone())?;
+    let selection = ConfigSelection::resolve(ConfigTarget::Agent, config)?;
     let loaded = configuration::load_agent(&selection, &server_url_override, &auth_token_override)?;
     let mut candidate = loaded.config;
     candidate.apply_env_overrides()?;
     candidate.validate()?;
 
-    let pid_file = pid_file::resolve_path(pid_file_path, pid_file::Component::Agent);
+    let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
     println!("Restarting agent...");
-    super::stop::run(Some(pid_file.clone())).await?;
-    super::start::run(
-        config,
+    super::stop::run_with(state.clone()).await?;
+    super::start::run_with(
+        selection,
         foreground,
-        Some(pid_file),
+        state,
         server_url_override,
         auth_token_override,
         // `restart` is never the child of a handoff: a background restart

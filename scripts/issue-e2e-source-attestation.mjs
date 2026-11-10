@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
+import {isNativeConvergencePr,convergenceE2ESelection} from './staging-convergence-pr.mjs';
 import { summarize } from '../e2e/runner/selected-report.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
@@ -55,10 +56,16 @@ export function assertSourcePlanBase(pr,claimed) {
 }
 export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
   const effectiveBase=assertSourcePlanBase(pr,claimed);
-  const rebuilt = buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
+  const native=isNativeConvergencePr(pr);
+  if(native&&issues.length)throw Error('PR-native convergence has unexpected Issue contracts');
+  const rebuilt = native
+    ? convergenceE2ESelection(pr,sourceRoot,effectiveBase)
+    : buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
   assert.equal(claimed.mode,rebuilt.mode);
   assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
   assert.deepEqual(claimed.issues,rebuilt.issues,'Issue contract differs from captured plan');
+  if(native)assert.deepEqual(claimed.convergence,rebuilt.convergence,
+    'convergence source identity differs from authenticated Git');
   assert.deepEqual(claimed.selected,rebuilt.selected,'test selection differs from trusted source');
   return rebuilt;
 }
@@ -77,6 +84,12 @@ export function verifyReporterEvidence(plan,results,report,receipt) {
 }
 export function projectAuthenticated(issues,plan,results,authenticated) {
   if(plan.mode!=='selected')throw Error('Only selected plans have per-ID Issue reports');
+  // The immutable Run Store retains the source-bound E2E results; no Issue
+  // report can be modified or invented for a PR-native delivery batch.
+  if(plan.convergence){
+    if(issues.length||plan.issues?.length)throw Error('PR-native E2E has Issue owners');
+    return [];
+  }
   const projected=[];
   for(const info of plan.issues){
     const issue=issues.find(i=>i.number===info.issue);

@@ -90,21 +90,91 @@ test.describe('Web 1180', () => {
     );
   });
 
-  test('a measured missing CPU delegation removes the suggestion and blocks a typed key (#3124 SC-02)', async ({
+  test('a measured missing CPU delegation disables the field and blocks the draft (#3124 SC-02, #3161 SC-04)', async ({
     page,
   }) => {
     await openWebSandbox(page, '&sandbox=limited');
 
+    // The implementation itself remains available: memory/pids are usable.
+    await expect(page.getByTestId('sandbox-implementation-status-resource.cgroup_v2')).toHaveText(
+      'available',
+    );
     const cpuOption = page.locator('#sandbox-resource-key-options option[value="cpu.max"]');
     await expect(cpuOption).toHaveCount(1);
     await expect(cpuOption).toContainText('unavailable');
 
     await page.getByTestId('sandbox-resource-add').click();
     await page.getByTestId('sandbox-resource-key-0').fill('cpu.max');
-    await page.getByTestId('sandbox-resource-value-0').fill('200000 100000');
+    // A measured-unavailable native field cannot be given a value in the UI.
+    await expect(page.getByTestId('sandbox-resource-value-0')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-resource-value-unavailable-0')).toContainText(
+      'not delegated',
+    );
     await page.getByTestId('sandbox-preflight').click();
-    await expect(page.getByTestId('sandbox-preflight-error-0')).toContainText('not installable');
+    await expect(page.getByTestId('sandbox-preflight-errors')).toContainText('not installable');
     await expect(page.getByTestId('sandbox-enter')).toBeDisabled();
+  });
+
+  test('every registered implementation reports its measured status (#3161 SC-04)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page, '');
+    for (const path of [
+      'filesystem.access',
+      'filesystem.composition',
+      'network',
+      'process.linux_namespaces',
+      'resource.cgroup_v2',
+      'syscall.seccomp',
+    ]) {
+      await expect(page.getByTestId(`sandbox-implementation-status-${path}`)).toHaveText(
+        'available',
+      );
+    }
+    await expect(page.getByTestId('sandbox-fs-read')).toBeEnabled();
+    await expect(page.getByTestId('sandbox-network-mode')).toBeEnabled();
+    await expect(page.getByTestId('sandbox-namespace-pid')).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(page.getByTestId('sandbox-resource-add')).toBeEnabled();
+    await expect(page.getByTestId('sandbox-syscall-add')).toBeEnabled();
+  });
+
+  test('macOS disables Linux-native implementations and only unsupported network modes (#3161 SC-04)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page, '&sandbox=macos');
+
+    await expect(page.getByTestId('sandbox-implementation-status-filesystem.access')).toHaveText(
+      'unavailable',
+    );
+    await expect(page.getByTestId('sandbox-implementation-status-network')).toHaveText(
+      'available',
+    );
+    for (const path of ['process.linux_namespaces', 'resource.cgroup_v2', 'syscall.seccomp']) {
+      await expect(page.getByTestId(`sandbox-implementation-status-${path}`)).toHaveText(
+        'unavailable',
+      );
+    }
+    await expect(page.getByTestId('sandbox-fs-read')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-fs-write')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-resource-add')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-syscall-add')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-namespace-pid')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    // Network stays usable, but its restricted mode is measured unsupported.
+    await page.getByTestId('sandbox-network-mode').click();
+    await expect(page.getByTestId('sandbox-network-mode-deny')).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(page.getByTestId('sandbox-network-mode-restricted')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   });
 
   test('unknown/unsupported/offline never claim protection or offer Enter (#3124 SC-05)', async ({
@@ -181,6 +251,22 @@ test.describe('App 390', () => {
     await page.getByTestId('sandbox-confirm-enter').click();
     await expect(page.getByTestId('sandbox-inside')).toBeVisible();
     await expect(page.getByTestId('app-page-header')).toContainText('Sandbox');
+  });
+
+  test('App shows implementation status and disables unmeasured controls (#3161 SC-04)', async ({
+    page,
+  }) => {
+    await openAppSandbox(page, '?sandbox=macos');
+    await expect(
+      page.getByTestId('sandbox-implementation-status-filesystem.access'),
+    ).toHaveText('unavailable');
+    await expect(page.getByTestId('sandbox-fs-read')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-resource-add')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-syscall-add')).toBeDisabled();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 
   test('KV rows fit the phone pane and the scroller clears the capsule (#3124 SC-06)', async ({

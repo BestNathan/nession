@@ -4,7 +4,8 @@ import type { SandboxCurrentContext } from '@/generated/protocol/core/server-ses
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import type { SandboxDraftState } from '../hooks/useSandboxDraft';
-import { entriesToLines } from '../model';
+import { entriesToLines, filesystemDisabledReason, IMPLEMENTATION_PATHS } from '../model';
+import { SandboxImplementationStatus } from './SandboxImplementationStatus';
 
 export interface SandboxFilesystemFieldsProps {
   context: SandboxCurrentContext;
@@ -33,6 +34,8 @@ export function SandboxFilesystemFields({
   workingDirError,
   onWorkingDirChange,
 }: SandboxFilesystemFieldsProps) {
+  const disabledReason = filesystemDisabledReason(context.catalog);
+  const disabled = disabledReason !== null;
   return (
     <>
       <div className="flex min-w-0 flex-col gap-1">
@@ -61,6 +64,16 @@ export function SandboxFilesystemFields({
 
       <fieldset className="flex min-w-0 flex-col gap-3 rounded-[var(--nession-radius-surface)] border border-border/60 p-3">
         <legend className={cn(chromeSansRole('primary'), 'px-1')}>Filesystem access</legend>
+        <SandboxImplementationStatus
+          catalog={context.catalog}
+          path={IMPLEMENTATION_PATHS.filesystemAccess}
+          label="Filesystem access"
+        />
+        <SandboxImplementationStatus
+          catalog={context.catalog}
+          path={IMPLEMENTATION_PATHS.filesystemComposition}
+          label="Prepared root composition (Server/Agent input, not editable)"
+        />
         <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
           One absolute host path per line. Leave both empty for no explicit allow-list; the
           backend baseline still applies.
@@ -72,6 +85,7 @@ export function SandboxFilesystemFields({
               id="sandbox-fs-read"
               data-testid="sandbox-fs-read"
               rows={3}
+              disabled={disabled}
               value={entriesToLines(draft.draft.filesystem?.access.read ?? [])}
               onChange={(event) => draft.setFilesystemPaths('read', event.target.value)}
             />
@@ -82,6 +96,7 @@ export function SandboxFilesystemFields({
               id="sandbox-fs-write"
               data-testid="sandbox-fs-write"
               rows={3}
+              disabled={disabled}
               value={entriesToLines(draft.draft.filesystem?.access.write ?? [])}
               onChange={(event) => draft.setFilesystemPaths('write', event.target.value)}
             />

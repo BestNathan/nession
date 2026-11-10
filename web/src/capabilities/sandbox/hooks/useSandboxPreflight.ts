@@ -50,7 +50,13 @@ export function useSandboxPreflight(options: {
       setPreflightBusy(true);
       setPreflightError(null);
       sandboxApi
-        .preflight(sessionId, context.generation, draft, workingDir)
+        .preflight({
+          sessionId,
+          generation: context.generation,
+          probeGeneration: context.catalog.probe_generation,
+          policy: draft,
+          workingDir,
+        })
         .then((result) => setPreflight({ signature: draftSignature(draft), result }))
         .catch((failure: unknown) => {
           setPreflightError(

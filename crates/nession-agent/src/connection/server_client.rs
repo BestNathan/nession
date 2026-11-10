@@ -4619,6 +4619,7 @@ core_routes!(agent, msg, responses;
                         .sandbox_preflight(
                             &payload.session_name,
                             &payload.generation,
+                            &payload.probe_generation,
                             &payload.policy,
                             &payload.working_dir,
                         )
@@ -4663,6 +4664,7 @@ core_routes!(agent, msg, responses;
                         .sandbox_enter(
                             &payload.session_name,
                             &payload.generation,
+                            &payload.probe_generation,
                             &payload.enter_id,
                             &payload.policy,
                             &payload.working_dir,

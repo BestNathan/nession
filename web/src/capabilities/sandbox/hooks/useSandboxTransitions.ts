@@ -95,6 +95,7 @@ export function useSandboxTransitions(options: {
         .enter({
           sessionId,
           generation: preflight.result.generation,
+          probeGeneration: preflight.result.catalog.probe_generation,
           enterId: newEnterId(),
           policy: draft,
           workingDir,

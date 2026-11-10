@@ -18,21 +18,40 @@ pub async fn run(
     pid_file_path: Option<String>,
 ) -> Result<()> {
     let selection = ConfigSelection::resolve(ConfigTarget::Server, config)?;
-    let pid_file = pid_file::resolve_path(pid_file_path, pid_file::Component::Server);
+    let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Server)?;
+    run_with(selection, foreground, state).await
+}
 
-    // Ensure component directories exist before any file operations (PID file, DB)
+/// Start with an already-resolved configuration selection and state location.
+///
+/// `restart` uses this entry point so the replacement it validated is the same
+/// selection this start loads, and the state file it stopped is the one this
+/// start writes.
+pub(crate) async fn run_with(
+    selection: ConfigSelection,
+    foreground: bool,
+    state: pid_file::StateFiles,
+) -> Result<()> {
+    // Ensure durable component directories exist before file operations. The
+    // runtime state directory was already created by `StateFiles::from_cli`
+    // for the default location.
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
 
     // Already running, decided by ownership rather than by pid (#1016) — the
-    // same question the agent path asks, for the same reason.
-    match pid_file::ownership(&pid_file) {
-        Ok(pid_file::Ownership::Alive(identity)) => {
-            anyhow::bail!("Server is already running with PID {}", identity.pid);
-        }
-        Ok(_) | Err(_) => {
-            let _ = fs::remove_file(&pid_file);
-        }
+    // same question the agent path asks, for the same reason. Both locations
+    // are consulted so a live pre-runtime daemon is not duplicated.
+    let inspection = pid_file::Inspection::of(&state);
+    if let Some((record, identity)) = inspection.live() {
+        anyhow::bail!(
+            "Server is already running with PID {} (state file: {})",
+            identity.pid,
+            record.path
+        );
+    }
+    inspection.clean_dead();
+    for warning in inspection.unresolved_warnings("server") {
+        eprintln!("Warning: {warning}");
     }
 
     let loaded = configuration::load_server(&selection)?;
@@ -49,20 +68,20 @@ pub async fn run(
         println!("Press Ctrl+C to stop");
 
         pid_file::write_identity(
-            &pid_file,
+            &state.current,
             pid_file::Component::Server,
             pid_file::ConfigRecord::from_loaded(&selection.path, from_file),
         )?;
 
         let result = run_server_foreground(config).await;
 
-        let _ = fs::remove_file(&pid_file);
+        let _ = fs::remove_file(&state.current);
 
         result?;
     } else {
         info!("Starting server in background mode");
         let exe = std::env::current_exe()?;
-        let mut cmd = background_child_command(&exe, &selection, &pid_file);
+        let mut cmd = background_child_command(&exe, &selection, &state.current);
 
         #[cfg(unix)]
         {
@@ -75,20 +94,20 @@ pub async fn run(
             }
         }
 
-        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        let marker = startup::ReadyMarker::beside_state_file(&state.current);
         marker.arm(&mut cmd);
 
         let mut child = cmd.spawn().context("failed to spawn server process")?;
 
         match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
             startup::Startup::Serving => {
-                let pid = startup::announced_pid(&pid_file)?;
+                let pid = startup::announced_pid(&state.current)?;
                 println!("Server started in background with PID {pid}");
-                println!("PID file: {pid_file}");
+                println!("PID file: {}", state.current);
             }
             startup::Startup::Exited(status) => {
                 let detail = startup::child_stderr(&mut child);
-                let _ = fs::remove_file(&pid_file);
+                let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
                     "Server exited before it was serving ({status}){}",
                     if detail.is_empty() {
@@ -101,7 +120,7 @@ pub async fn run(
             startup::Startup::TimedOut => {
                 startup::terminate(&mut child);
                 let detail = startup::child_stderr(&mut child);
-                let _ = fs::remove_file(&pid_file);
+                let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
                     "Server did not report itself serving within {}s{}",
                     startup::STARTUP_TIMEOUT.as_secs(),

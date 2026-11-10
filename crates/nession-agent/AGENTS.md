@@ -57,6 +57,12 @@ Execution isolation belongs to `nession-sandbox`, not to this Agent:
 - `tmux/sandbox_context.rs` owns the context/preflight/Enter/Return/Focus
   transitions. Preflight is a hint: Enter re-probes through
   `nession-sandbox::prepare` and fails closed.
+- Preflight and Enter bind both the context generation and the catalog
+  `probe_generation`; a mismatch is a `stale-generation` field error before
+  any host resource exists. Explicitly unsupported implementations/options come
+  back as canonical field-path errors from
+  `nession-sandbox::unsupported_requests`, never a dropped-and-continue
+  policy.
 - Enter uses a detached `new-window` in the same logical Session, never
   `send-keys` into an existing shell. Focus moves only after the launch
   barrier verifies; a failure removes exactly the Window this attempt created.

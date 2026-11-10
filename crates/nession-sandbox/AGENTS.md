@@ -86,6 +86,17 @@ Do not add a second policy validator, a second bwrap argv builder, or a second
   unmounts in reverse order and only paths recorded beneath that execution;
   reconciliation never trusts an arbitrary record path.
 
+## Per-implementation discovery (#3161)
+
+`capabilities::catalog` reports one typed entry per canonical policy path
+(`filesystem.access`, `filesystem.composition`, `network`,
+`process.linux_namespaces`, `resource.cgroup_v2`, `syscall.seccomp`). Status
+and reason codes come from the same measured `Capabilities` `validate` uses;
+`probe_generation` hashes those facts. A missing backend marks every
+implementation unavailable; never advertise eligibility from a platform guess
+or an empty list. `capabilities::unsupported_requests` is the field-path
+projection for preflight/Enter; `validate` remains the single fail-closed gate.
+
 ## cgroup delegation
 
 The execution root needs a cgroup with delegated controllers and no processes

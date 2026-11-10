@@ -159,6 +159,7 @@ async fn preflight_relays_the_agent_field_errors() {
         json!({
             "session_id": "a1:s1",
             "generation": "gen-1",
+            "probe_generation": "probe-1",
             "policy": { "enabled": true, "resource": [{ "key": "cpu.max", "value": "1 1000" }] },
             "working_dir": "/workspace",
         }),
@@ -199,6 +200,7 @@ async fn preflight_relays_the_agent_field_errors() {
 
     assert_eq!(sent["payload"]["session_name"], "s1");
     assert_eq!(sent["payload"]["generation"], "gen-1");
+    assert_eq!(sent["payload"]["probe_generation"], "probe-1");
     assert_eq!(sent["payload"]["policy"]["resource"][0]["key"], "cpu.max");
     assert_eq!(reply["payload"]["ok"], false);
     assert_eq!(reply["payload"]["errors"][0]["field"], "resource[0].value");
@@ -216,6 +218,7 @@ async fn enter_forwards_the_generation_and_client_enter_id_and_relays_the_refusa
         json!({
             "session_id": "a1:s1",
             "generation": "gen-1",
+            "probe_generation": "probe-1",
             "enter_id": "enter-1",
             "policy": { "enabled": true },
             "working_dir": "",
@@ -242,6 +245,7 @@ async fn enter_forwards_the_generation_and_client_enter_id_and_relays_the_refusa
 
     assert_eq!(sent["payload"]["session_name"], "s1");
     assert_eq!(sent["payload"]["generation"], "gen-1");
+    assert_eq!(sent["payload"]["probe_generation"], "probe-1");
     assert_eq!(sent["payload"]["enter_id"], "enter-1");
     assert_ne!(
         sent["payload"]["request_id"], sent["payload"]["enter_id"],

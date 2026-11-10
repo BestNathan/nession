@@ -533,18 +533,175 @@ pub enum SandboxCatalogStatus {
     Unknown,
 }
 
+/// The catalog shape version this build produces (#3161).
+///
+/// Version 2 adds per-implementation and per-option support. A client that
+/// does not understand a newer version must not read an empty implementation
+/// list as "nothing is supported": `unknown` is the truthful fallback.
+pub const SANDBOX_CATALOG_VERSION: u32 = 2;
+
+/// Availability of one registered policy implementation or option.
+///
+/// `available` is eligibility to *compose* a draft, not a claim that the
+/// guarantee is installed in the selected Pane, nor that arbitrary values
+/// will be accepted at runtime.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxImplementationStatus {
+    Available,
+    Unavailable,
+    /// The implementation is registered in the schema, but this Agent could
+    /// not measure it (offline/stale/unprobed/timeout). Never editable.
+    Unknown,
+}
+
+/// A stable machine-readable reason why an implementation or option is not
+/// available. Free-form diagnostics stay in the sibling `reason` string.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxUnsupportedReason {
+    /// The schema path is native to another platform (for example Linux
+    /// namespaces on macOS).
+    PlatformUnsupported,
+    /// The Agent has no usable backend at all.
+    BackendMissing,
+    /// The platform has a backend, but the kernel feature it needs is absent.
+    KernelFeatureMissing,
+    /// A cgroup v2 subtree or controller was not delegated to the Agent.
+    ControllerNotDelegated,
+    /// The Agent could not write the native control file or load the profile.
+    PermissionDenied,
+    /// The implementation is registered, but no measured profile is loadable.
+    ProfileUnavailable,
+    /// This build does not compile the implementation for this platform.
+    ImplementationNotBuilt,
+    /// The host was not probed, so support cannot be claimed.
+    NotProbed,
+    /// The probe did not answer within its bound.
+    Timeout,
+}
+
+/// One typed, implementation-owned option (network mode, namespace, seccomp
+/// profile, ...). The meaning of `id` belongs to the implementation path.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxOptionSupport {
+    pub id: String,
+    pub status: SandboxImplementationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SandboxUnsupportedReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl SandboxOptionSupport {
+    /// An option this Agent measured as offered.
+    pub fn available(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            status: SandboxImplementationStatus::Available,
+            reason_code: None,
+            reason: None,
+        }
+    }
+
+    /// An option this Agent measured as unavailable, with its stable code.
+    pub fn unavailable(
+        id: impl Into<String>,
+        reason_code: SandboxUnsupportedReason,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            status: SandboxImplementationStatus::Unavailable,
+            reason_code: Some(reason_code),
+            reason: Some(reason.into()),
+        }
+    }
+
+    /// An option that was not measured at all.
+    pub fn unknown(id: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            status: SandboxImplementationStatus::Unknown,
+            reason_code: Some(SandboxUnsupportedReason::NotProbed),
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+/// Per-implementation support keyed by the canonical policy path.
+///
+/// Only schema-known implementations are listed. A backend must register its
+/// own versioned path before it can appear here; a frontend label can never
+/// authorize policy bytes.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxImplementationSupport {
+    /// Canonical policy path, for example `network` or `resource.cgroup_v2`.
+    pub path: String,
+    pub status: SandboxImplementationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SandboxUnsupportedReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Typed options owned by this implementation. Empty when the
+    /// implementation has no enumerated options (for example
+    /// `filesystem.access`, whose value is a path list).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<SandboxOptionSupport>,
+    /// Typed native fields owned by this implementation (cgroup v2 control
+    /// files). Empty for implementations without a field catalog.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<SandboxFieldEntry>,
+}
+
+impl SandboxImplementationSupport {
+    /// A registered implementation that was not measured. It never claims
+    /// support and is never editable.
+    pub fn unknown(path: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            status: SandboxImplementationStatus::Unknown,
+            reason_code: Some(SandboxUnsupportedReason::NotProbed),
+            reason: Some(reason.into()),
+            options: Vec::new(),
+            fields: Vec::new(),
+        }
+    }
+
+    /// Whether this implementation can be used to compose a draft at all.
+    pub fn is_editable(&self) -> bool {
+        self.status == SandboxImplementationStatus::Available
+    }
+}
+
 /// One selectable Key/Value key, as the Agent's own probe measured it.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxFieldEntry {
     pub key: String,
+    /// The native controller/file family this key belongs to, when typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller: Option<String>,
     /// Native value-format help, e.g. `quota period` or `uint64 or max`.
     pub value_format: String,
     pub example: String,
     /// Whether this Agent could actually install the key in a child cgroup /
     /// load the profile. Presence of a file is not installability.
     pub available: bool,
+    /// Stable reason code when `available` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<SandboxUnsupportedReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -557,6 +714,11 @@ pub struct SandboxFieldEntry {
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxCapabilityCatalog {
+    /// The shape version this catalog answers. Newer versions add fields;
+    /// an older client must treat unknown entries (and an empty
+    /// implementation list) as "not measured", never as "unsupported".
+    #[serde(default)]
+    pub catalog_version: u32,
     pub status: SandboxCatalogStatus,
     /// `linux`, `macos` or `unsupported`.
     pub platform: String,
@@ -570,31 +732,69 @@ pub struct SandboxCapabilityCatalog {
     pub detail: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Per canonical policy path support (#3161). Only schema-known
+    /// implementations are listed; an omitted path is not a support claim.
+    #[serde(default)]
+    pub implementations: Vec<SandboxImplementationSupport>,
     /// Linux cgroup v2 choices actually installable by this Agent.
+    ///
+    /// Kept as a flat compatibility projection of
+    /// `resource.cgroup_v2.fields` for clients built before catalog v2.
     #[serde(default)]
     pub resource_fields: Vec<SandboxFieldEntry>,
     /// Registered seccomp profile choices whose loading was probed.
+    ///
+    /// Kept as a flat compatibility projection of
+    /// `syscall.seccomp.options` for clients built before catalog v2.
     #[serde(default)]
     pub syscall_fields: Vec<SandboxFieldEntry>,
 }
 
 impl SandboxCapabilityCatalog {
     /// The truthful "not measured" catalog for an unreachable Agent. It is
-    /// never an empty kernel feature set: discovery status is unknown.
+    /// never an empty kernel feature set: discovery status is unknown and
+    /// every schema-registered implementation is listed as unknown.
     pub fn unknown(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
         Self {
+            catalog_version: SANDBOX_CATALOG_VERSION,
             status: SandboxCatalogStatus::Unknown,
             platform: "unknown".to_string(),
             backend: None,
             probe_generation: String::new(),
             source: "unavailable".to_string(),
             detail: Vec::new(),
-            reason: Some(reason.into()),
+            reason: Some(reason.clone()),
+            implementations: REGISTERED_IMPLEMENTATION_PATHS
+                .iter()
+                .map(|path| SandboxImplementationSupport::unknown(*path, reason.clone()))
+                .collect(),
             resource_fields: Vec::new(),
             syscall_fields: Vec::new(),
         }
     }
+
+    /// One implementation's support entry, if this catalog lists it.
+    pub fn implementation(&self, path: &str) -> Option<&SandboxImplementationSupport> {
+        self.implementations
+            .iter()
+            .find(|implementation| implementation.path == path)
+    }
 }
+
+/// The canonical policy paths the schema registers for discovery (#3161).
+///
+/// This is contract knowledge, not a UI allowlist: a backend may only report
+/// support for paths it actually implements. `filesystem.composition` is an
+/// Agent/Server-prepared input and is never Web-editable.
+pub const REGISTERED_IMPLEMENTATION_PATHS: [&str; 6] = [
+    "filesystem.access",
+    "filesystem.composition",
+    "network",
+    "process.linux_namespaces",
+    "resource.cgroup_v2",
+    "syscall.seccomp",
+];
 
 /// The active Pane's Sandbox context.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -868,6 +1068,7 @@ mod tests {
             enterable: true,
             sandbox_panes: Vec::new(),
             catalog: SandboxCapabilityCatalog {
+                catalog_version: SANDBOX_CATALOG_VERSION,
                 status: SandboxCatalogStatus::Available,
                 platform: "linux".to_string(),
                 backend: Some("linux-bwrap".to_string()),
@@ -875,11 +1076,29 @@ mod tests {
                 source: "agent-host-probe".to_string(),
                 detail: Vec::new(),
                 reason: None,
+                implementations: vec![SandboxImplementationSupport {
+                    path: "resource.cgroup_v2".to_string(),
+                    status: SandboxImplementationStatus::Available,
+                    reason_code: None,
+                    reason: None,
+                    options: Vec::new(),
+                    fields: vec![SandboxFieldEntry {
+                        key: "memory.max".to_string(),
+                        controller: Some("memory".to_string()),
+                        value_format: "uint64 or max".to_string(),
+                        example: "2147483648".to_string(),
+                        available: true,
+                        reason_code: None,
+                        reason: None,
+                    }],
+                }],
                 resource_fields: vec![SandboxFieldEntry {
                     key: "memory.max".to_string(),
+                    controller: Some("memory".to_string()),
                     value_format: "uint64 or max".to_string(),
                     example: "2147483648".to_string(),
                     available: true,
+                    reason_code: None,
                     reason: None,
                 }],
                 syscall_fields: Vec::new(),
@@ -890,5 +1109,89 @@ mod tests {
         assert!(value.get("execution").is_none(), "absent stays absent");
         let parsed: SandboxCurrentContext = serde_json::from_value(value).unwrap();
         assert_eq!(parsed, context);
+    }
+
+    #[test]
+    fn the_implementation_catalog_separates_paths_and_options() {
+        let implementation: SandboxImplementationSupport =
+            serde_json::from_value(serde_json::json!({
+                "path": "network",
+                "status": "available",
+                "options": [
+                    { "id": "allow", "status": "available" },
+                    { "id": "restricted", "status": "unavailable",
+                      "reason_code": "platform_unsupported", "reason": "no proxy" }
+                ]
+            }))
+            .expect("per-option support parses");
+        assert!(implementation.is_editable());
+        assert_eq!(
+            implementation.options[0].status,
+            SandboxImplementationStatus::Available
+        );
+        assert_eq!(
+            implementation.options[1].reason_code,
+            Some(SandboxUnsupportedReason::PlatformUnsupported)
+        );
+        let value = serde_json::to_value(&implementation).unwrap();
+        assert_eq!(value["options"][1]["status"], "unavailable");
+        assert_eq!(value["options"][1]["reason_code"], "platform_unsupported");
+        assert!(
+            value.get("fields").is_none(),
+            "empty typed groups stay absent"
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_catalog_lists_every_registered_path_as_unknown() {
+        let catalog = SandboxCapabilityCatalog::unknown("Agent unavailable");
+        assert_eq!(catalog.catalog_version, SANDBOX_CATALOG_VERSION);
+        assert_eq!(catalog.status, SandboxCatalogStatus::Unknown);
+        assert_eq!(
+            catalog.implementations.len(),
+            REGISTERED_IMPLEMENTATION_PATHS.len()
+        );
+        for implementation in &catalog.implementations {
+            assert_eq!(implementation.status, SandboxImplementationStatus::Unknown);
+            assert_eq!(
+                implementation.reason_code,
+                Some(SandboxUnsupportedReason::NotProbed)
+            );
+            assert!(!implementation.is_editable());
+        }
+        assert!(catalog.implementation("resource.cgroup_v2").is_some());
+        assert!(catalog.implementation("resource.macos_limits").is_none());
+    }
+
+    #[test]
+    fn an_old_catalog_projection_parses_as_unmeasured_not_unsupported() {
+        let catalog: SandboxCapabilityCatalog = serde_json::from_value(serde_json::json!({
+            "status": "available",
+            "platform": "linux",
+            "backend": "linux-bwrap",
+            "probe_generation": "p",
+            "source": "agent-host-probe",
+            "resource_fields": [],
+            "syscall_fields": []
+        }))
+        .expect("the v1 projection remains readable");
+        assert_eq!(catalog.catalog_version, 0);
+        assert!(catalog.implementations.is_empty());
+    }
+
+    #[test]
+    fn implementation_entries_refuse_unknown_fields_and_statuses() {
+        let unknown_field =
+            serde_json::from_value::<SandboxImplementationSupport>(serde_json::json!({
+                "path": "network", "status": "available", "editable": true
+            }))
+            .expect_err("the typed shape is closed");
+        assert!(unknown_field.to_string().contains("unknown field"));
+        let unknown_status =
+            serde_json::from_value::<SandboxImplementationSupport>(serde_json::json!({
+                "path": "network", "status": "maybe"
+            }))
+            .expect_err("status is a closed set");
+        assert!(unknown_status.to_string().contains("unknown variant"));
     }
 }
