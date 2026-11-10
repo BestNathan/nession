@@ -439,6 +439,53 @@ impl AgentRegistry {
         }
         Some(OfflineCleanupGuard { _gate: gate })
     }
+}
+
+/// Proof that an Agent deletion holds its liveness gate.
+///
+/// The gate is the same one [`AgentRegistry::register`] and heartbeat recovery
+/// take, so the Offline revalidation and every destructive write that follows
+/// are one ordered transition: a registration or heartbeat either lands before
+/// the check (and the claim returns [`AgentDeleteClaim::NotOffline`]) or waits
+/// until the Agent row is gone.
+pub struct AgentDeletionGuard {
+    _gate: OwnedMutexGuard<()>,
+}
+
+/// The result of claiming an Agent for deletion.
+pub enum AgentDeleteClaim {
+    /// The Agent is Offline and the caller may remove it while holding the
+    /// guard.
+    Claimed(AgentDeletionGuard),
+    NotFound,
+    /// The Agent exists but is not Offline; the carried status is the one
+    /// observed under the gate.
+    NotOffline(AgentStatus),
+}
+
+impl AgentRegistry {
+    /// Claim `agent_id` for deletion.
+    ///
+    /// The returned guard holds the Agent's liveness gate until dropped; the
+    /// caller must keep it alive across the database, registry, Session,
+    /// Environment and Broker removals. This is deliberately not a plain status
+    /// check: a check alone is a TOCTOU in which a registration can make the
+    /// Agent Online between the check and the first destructive write.
+    pub async fn begin_agent_deletion(&self, agent_id: &str) -> AgentDeleteClaim {
+        let gate = self.liveness_gate(agent_id).await;
+        let gate = gate.lock_owned().await;
+        let status = {
+            let agents = self.agents.read().await;
+            agents.get(agent_id).map(|agent| agent.status.clone())
+        };
+        match status {
+            None => AgentDeleteClaim::NotFound,
+            Some(AgentStatus::Offline) => {
+                AgentDeleteClaim::Claimed(AgentDeletionGuard { _gate: gate })
+            }
+            Some(status) => AgentDeleteClaim::NotOffline(status),
+        }
+    }
 
     /// The per-Agent gate ordering liveness transitions.
     ///
