@@ -218,13 +218,24 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   }
   // Reuse the canonical bounded task parser. Only an unparseable response may
   // invoke a single formatting-only retry; never send a truncated draft.
+  // The shared parser reports invalid JSON, but its format-repair wrapper
+  // also catches callback errors. Preserve a real provider/network failure
+  // rather than misclassifying it as a harmless rejected model proposal.
+  let repairFailure=null;
   const boundedRepair=typeof repair==='function' && Buffer.byteLength(raw,'utf8')<=16*1024
-    ? repair : null;
+    ? async bounded=>{
+        try { return await repair(bounded); }
+        catch (error) { repairFailure=error; throw error; }
+      }
+    : null;
   let proposal;
   try { proposal=await parseModelJsonWithRepair(raw,boundedRepair,'Issue Audit repair proposal'); }
-  catch { throw Object.assign(new Error('Issue Audit repair proposal is not valid JSON'+
-    (repair && !boundedRepair?' (oversized response; no formatting retry)':'')),
-    {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'}); }
+  catch {
+    if (repairFailure) throw repairFailure;
+    throw Object.assign(new Error('Issue Audit repair proposal is not valid JSON'+
+      (repair && !boundedRepair?' (oversized response; no formatting retry)':'')),
+      {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'});
+  }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) {
     throw Object.assign(new Error('Issue Audit repair proposal must be an object'),
       {code:'ISSUE_AUDIT_PROPOSAL_REJECTED'});
