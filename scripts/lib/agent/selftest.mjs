@@ -3,10 +3,11 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { issueBody as convergenceIssueBody } from '../../staging-convergence-batch.mjs';
 import { auditIssue } from '../../issue-contract.mjs';
+import { auditOutcomeAllowsAttestation } from '../../staging-convergence-audit-attest.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
 } from './tasks/e2e-failure-analysis.mjs';
@@ -34,6 +35,54 @@ const validBatch={number:3139,title:'Requirement: Staging integration staging aa
   labels:[{name:'requirement'},{name:'ci'},{name:'verification:integration'}],
   body:convergenceIssueBody(batchPlan)};
 assert.equal(auditIssue(validBatch).ok,true,'fixture must be a valid integration Issue');
+// #3191: Typed, trusted pre-write rejections become a durable needs-review
+// result, while text lookalikes and any infrastructure/post-write error remain
+// execution errors. Rejection diagnostics must not reproduce model content.
+for (const code of [
+  'ISSUE_AUDIT_LABEL_CONTRACT',
+  'ISSUE_AUDIT_E2E_PROTECTED',
+  'ISSUE_AUDIT_CONTRACT_REJECTED',
+  'ISSUE_AUDIT_TIER_PROPOSAL',
+  'ISSUE_AUDIT_TIER_DOWNGRADE',
+  'ISSUE_AUDIT_PROPOSAL_REJECTED',
+  'ISSUE_AUDIT_COMMENT_PROPOSAL',
+]) {
+  const classification=describeIssueAuditRejection(
+    Object.assign(new Error('untrusted model/Issue content'),{code}));
+  assert.equal(classification.code,code);
+  assert.ok(classification.reason.includes('before write') ||
+    classification.reason.includes('approval'));
+  assert.ok(!classification.reason.includes('untrusted'));
+}
+// A green needs-review Job cannot authorize the source-bound Staging audit
+// attestor. This test runs on every issue-audit-agent-selftest Gate.
+const approvedAuditRecord={
+  schema_version:1,issue:{number:3139},
+  trigger:'workflow_dispatch',result:'repaired',errors:[],
+};
+assert.equal(auditOutcomeAllowsAttestation(approvedAuditRecord,3139),true);
+assert.equal(auditOutcomeAllowsAttestation({...approvedAuditRecord,result:'contract-pass'},3139),true);
+for(const result of ['needs-review','agent-error','contract-fail','agent-not-authorized']){
+  assert.equal(auditOutcomeAllowsAttestation({...approvedAuditRecord,result},3139),false);
+}
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,review:{code:'ISSUE_AUDIT_E2E_PROTECTED'}},3139),false);
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,errors:['still invalid']},3139),false);
+assert.equal(auditOutcomeAllowsAttestation(approvedAuditRecord,3140),false);
+assert.equal(auditOutcomeAllowsAttestation({
+  ...approvedAuditRecord,trigger:'issues'},3139),false);
+for (const error of [
+  new Error('Unauthorized E2E Verification / Report mutation by Issue Agent'),
+  new Error('Issue Contract validation failed before write: still broken'),
+  new Error('GitHub API error 403'),
+  new Error('Provider HTTP 429'),
+  new Error('Issue was written but post-write contract failed'),
+  Object.assign(new Error('postwrite failure'),{code:'ISSUE_AUDIT_POSTWRITE_FAILED'}),
+]) {
+  assert.equal(describeIssueAuditRejection(error),null,'only typed pre-write faults are findings');
+}
+
 const narrowed=issueAuditProposalSchemaForIssue(validBatch);
 assert.deepEqual(Object.keys(narrowed.properties),['comment','verification_tier','tier_reason']);
 assert.equal(narrowed.additionalProperties,false);
@@ -166,17 +215,39 @@ await assert.rejects(
   /unauthorized fields/
 );
 await assert.rejects(applyIssueAuditProposal(issue, { result: 'not json' }, 'example/repo'), /not valid JSON/);
+// An empty proposal on an invalid Issue cannot silently produce a successful
+// audit record; after one correction, it must become a typed needs-review.
+await assert.rejects(applyIssueAuditProposal(issue,{result:'{}'},'example/repo'),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
+  return true;
+});
+let emptyCorrectionCalls=0;
+await assert.rejects(applyIssueAuditWithContractRetry(issue,{result:'{}'},'example/repo',{
+  contractRepair:async()=>{
+    emptyCorrectionCalls++;
+    return {result:'{}'};
+  },
+}),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
+  return true;
+});
+assert.equal(emptyCorrectionCalls,1,'no-op repair has exactly one bounded continuation');
+const tierlessValid={...validBatch,labels:validBatch.labels.filter(x=>!x.name.startsWith('verification:'))};
+await assert.rejects(applyIssueAuditProposal(tierlessValid,{result:'{}'},'example/repo'),error=>{
+  assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_TIER_PROPOSAL');
+  return true;
+});
 // Provider --output-format json only protects the outer envelope; model text
 // may include fences or a short preamble. Neither should require another call.
 for(const raw of ['{}','```json\n{}\n```','Here is the proposal:\n```json\n{}\n```']){
   let retries=0;
-  await applyIssueAuditProposal(issue,{result:raw},'example/repo',{
+  await applyIssueAuditProposal(validBatch,{result:raw},'example/repo',{
     repair:async()=>{retries++;return '{"unauthorized":true}';},
   });
   assert.equal(retries,0,'valid embedded/fenced JSON must not incur a retry');
 }
 let repairAttempts=0;
-await applyIssueAuditProposal(issue,{result:'not valid json'},'example/repo',{
+await applyIssueAuditProposal(validBatch,{result:'not valid json'},'example/repo',{
   repair:async bounded=>{
     repairAttempts++;
     assert.equal(bounded,'not valid json');
@@ -195,6 +266,15 @@ await assert.rejects(applyIssueAuditProposal(issue,{result:'x'.repeat(17*1024)},
   repair:async()=>{repairAttempts++;return '{}';},
 }),/oversized response/);
 assert.equal(repairAttempts,0,'oversized text must not be truncated into a repair');
+// A failed formatter/provider invocation is an infrastructure error even when
+// the original model output was malformed. It must never turn green as needs-review.
+await assert.rejects(applyIssueAuditProposal(validBatch,{result:'not valid json'},'example/repo',{
+  repair:async()=>{throw new Error('Provider HTTP 429 while formatting proposal');},
+}),error=>{
+  assert.match(error.message,/Provider HTTP 429/);
+  assert.equal(describeIssueAuditRejection(error),null);
+  return true;
+});
 assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/FORMAT-ONLY/);
 assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/no repository or Issue tools/);
 assert.throws(()=>renderIssueAuditFormatRepairPrompt('x'.repeat(17*1024)),/at most 16 KiB/);

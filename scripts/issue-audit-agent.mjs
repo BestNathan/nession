@@ -8,7 +8,7 @@ import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope } from './lib/agent/tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
@@ -120,6 +120,17 @@ function appendSummary(record) {
       `- Duration: ${record.agent.duration_ms == null ? 'N/A' : record.agent.duration_ms + ' ms'}`,
     );
   }
+  if (record.review) {
+    lines.push(
+      '',
+      '### Action required: Issue Audit needs review',
+      '',
+      '- Repair applied: **no** (the proposal was rejected before any write)',
+      `- Rejection code: \`${record.review.code}\``,
+      `- Reason: ${record.review.reason}`,
+      '- Next action: review the Issue Contract and re-author a safe proposal; no Acceptance evidence is implied.',
+    );
+  }
   if (record.errors?.length) lines.push('', '### Remaining contract findings', '', ...record.errors.map((e) => `- ${e}`));
   fs.appendFileSync(file, `${lines.join('\n')}\n`);
 }
@@ -174,7 +185,9 @@ function writeRecord(outDir, record) {
           finished_at: agent.finished_at ?? new Date().toISOString(),
           agent_duration_ms: agent.duration_ms ?? null,
         },
-        result: { status: record.result },
+        result: { status: record.result,
+          ...(record.review ? {rejection_code: record.review.code} : {}),
+        },
       }),
     );
   }
@@ -359,7 +372,8 @@ async function main() {
   } catch (error) {
     const afterIssue = fetchIssue(issueNumber);
     const after = auditIssue(afterIssue);
-    const message = error instanceof Error ? error.message : String(error);
+    const rejection = describeIssueAuditRejection(error);
+    const message = rejection?.reason ?? (error instanceof Error ? error.message : String(error));
     const failed = claude ?? (error && typeof error === 'object' ? error.claudeResult ?? null : null);
     const usage = failed ? extractUsage(failed,repairEnvelope,contractEnvelope) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     const estimated = estimateCost(usage);
@@ -367,7 +381,8 @@ async function main() {
       schema_version: 1,
       issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
       trigger,
-      result: 'agent-error',
+      result: rejection ? 'needs-review' : 'agent-error',
+      review: rejection,
       agent: {
         invoked: true,
         provider: telemetryProvider(),
@@ -388,10 +403,15 @@ async function main() {
         estimated_cost_usd: estimated.usd,
         pricing_usd_per_mtok: estimated.rates,
         terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
-        error: message,
+        error: rejection ? null : message,
+        rejection_code: rejection?.code ?? null,
       },
       errors: after.errors,
     });
+    if (rejection) {
+      console.warn(`::warning::Issue Audit needs review (${rejection.code}); no Issue mutation was applied`);
+      return;
+    }
     throw error;
   }
 

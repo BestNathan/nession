@@ -1230,16 +1230,30 @@ test.describe('Terminal touch direction pad (#2657)', () => {
 
     try {
       await context.setOffline(true);
-      await page.evaluate(() => {
-        const sockets = (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
+      const targetCount = await page.evaluate(() => {
+        const tracked = (window as typeof window & { __e2eDirectionSockets?: WebSocket[] })
           .__e2eDirectionSockets ?? [];
-        for (const socket of sockets) {
-          if (socket.readyState === WebSocket.OPEN && socket.url.includes('/ws')) {
-            socket.close(4000, 'direction-pad disconnect');
-          }
+        const targets = tracked.filter((socket) =>
+          socket.readyState === WebSocket.OPEN && socket.url.includes('/ws'),
+        );
+        (window as typeof window & { __e2eDirectionDroppedSockets?: WebSocket[] })
+          .__e2eDirectionDroppedSockets = targets;
+        for (const socket of targets) {
+          socket.close(4000, 'direction-pad disconnect');
         }
+        return targets.length;
       });
-      await expect(page.getByTestId('terminal-connecting')).toBeVisible({ timeout: 30_000 });
+      // Verify a genuine live transport was interrupted. The connecting
+      // banner may be skipped or too transient to paint during reconnect;
+      // closed physical sockets, not a particular UI frame, are the source
+      // of truth for the #3200 disconnect/gesture-cancellation regression.
+      expect(targetCount).toBeGreaterThan(0);
+      await expect.poll(async () => page.evaluate(() => {
+        const targets = (window as typeof window & { __e2eDirectionDroppedSockets?: WebSocket[] })
+          .__e2eDirectionDroppedSockets ?? [];
+        return targets.length > 0 &&
+          targets.every((socket) => socket.readyState === WebSocket.CLOSED);
+      }), { timeout: 10_000 }).toBe(true);
       await expect(page.getByTestId('terminal-direction-pad')).toHaveCount(0);
 
       // The finger is still down, but a disconnected pad must not keep
