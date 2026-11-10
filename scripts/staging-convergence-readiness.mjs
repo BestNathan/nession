@@ -317,6 +317,29 @@ function selfTest(){
     associations:[[{...forged,body:forged.body+'\n\nRefs #123'}]],
     issues:[{number:123,labels:[{name:'requirement'}],body:'Pending'}],
     deployRuns:[deployed],laneSha:b}).reason,'PENDING_ISSUE_ACCEPTANCE:123');
+  // Native generated PRs have no disposable Issue, but a marker cannot
+  // provide its own authorization. Only a complete separately certified
+  // immutable Git/Owner/CI proof may satisfy main promotion.
+  const native={...forged,body:forged.body+
+    '\n\n<!-- nession-convergence-pr:v1 source=fake -->'};
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],deployRuns:[deployed],laneSha:b}).reason,
+    'UNATTESTED_NATIVE_STAGING_SYNC:'+a);
+  const proven=evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],authenticatedNative:[a],
+    deployRuns:[deployed],laneSha:b});
+  assert.equal(proven.ready,true,'authenticated native source needs no fake Issue');
+  assert.deepEqual(proven.issueNumbers,[]);
+  assert.deepEqual(proven.nativeMergeShas,[a]);
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[native]],issues:[],authenticatedNative:[b],
+    deployRuns:[deployed],laneSha:b}).reason,'INVALID_NATIVE_PROMOTION_PROOF');
+  assert.equal(evaluatePromotion({firstParentCommits:[a],
+    associations:[[{...native,body:native.body+'\nRefs #123'}]],issues:[],
+    authenticatedNative:[a],deployRuns:[deployed],laneSha:b}).reason,
+    'NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+a);
+  assert.equal(certifyNativeMerge({pr:native,mergeSha:a}).ready,false,
+    'a forged PR marker must not be treated as authenticated CI');
   assert.equal(workflowRunsRoute('head_sha='+a+'&event=pull_request'),
     'actions/runs?head_sha='+a+'&event=pull_request&per_page=100');
   assert.equal(workflowRunsRoute('actions/workflows/release-staging.yml/runs?head_sha='+b),
