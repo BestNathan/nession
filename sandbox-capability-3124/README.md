@@ -67,6 +67,8 @@ The native policy is a map: `resource: { cgroup_v2: {"cpu.weight":"100", "memory
 
 **Fidelity:** synthetic in-page JavaScript fixtures; no network calls, backend writes, durable storage, active tmux PIDs, cgroup resources, Bubblewrap, Seatbelt, Socket proxy, native policy compiler or process reparenting. Clicking Enter only simulates a successful *future* backend command. Read-only effective policy is also synthetic and illustrates the **post-verification** display shape, not proof that a real Agent returned it.
 
+**Native cgroup KV regression (2026-11-10):** **23/23 V8 synthetic-DOM checks passed** for the new Resource prototype: discovered `cpu.weight`, `memory.high`, `io.max` and more-than-four candidates, empty-state policy omission, add/edit/Enter/effective readback, reduced delegation exclusion, lifecycle/read-only file rejection, kernel-native whitespace value preservation, simulated kernel `EINVAL` after preflight with unchanged Native Pane, macOS/offline status, Web/App switching, and issue/fixture links. This is deterministic mock behavior **only**, not Chromium, real cgroup2 native write tests, or Pages publication proof.
+
 **Historic prototype smoke:** The earlier 28-case / 12-case V8 synthetic-DOM tests targeted the prior **four-key whitelist** versions and are superseded for Resource semantics. The current revision uses an expanded synthetic native file catalog with kernel-write error fixture. New exact-revision checks should be recorded separately; no real browser/native runtime evidence is claimed.
 
 **Pages publication:** the direct HTML link above is a *candidate*, not proven live with the revised source. Verify `/nession/prototypes/manifest.json` equals exact source commit and read back the public HTML before calling it current.
