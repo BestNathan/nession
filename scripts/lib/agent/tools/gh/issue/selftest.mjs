@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createIssueUpdateTool, enforceE2EReadOnly, completeIssueUpdateProposal } from './update.mjs';
-import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, isIssueAuditRepairableRejection } from '../../../tasks/issue-audit.mjs';
+import { applyIssueAuditProposal, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, isIssueAuditRepairableRejection, describeIssueAuditRejection } from '../../../tasks/issue-audit.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
@@ -367,7 +367,11 @@ try {
     result:JSON.stringify({body:firstDraft}),
   },'example/repo',{
     contractRepair:async()=>{rejectedCalls++;return {result:JSON.stringify({body:firstDraft})};},
-  }),/Knowledge Impact missing decision/);
+  }),error=>{
+    assert.match(error.message,/Knowledge Impact missing decision/);
+    assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_CONTRACT_REJECTED');
+    return true;
+  });
   assert.equal(rejectedCalls,1);
   assert.equal(readFileSync(filename,'utf8'),originalSnapshot);
 
@@ -412,7 +416,11 @@ try {
       return {result:JSON.stringify({body:originalValid.body
         .replace('| Pending | - |','| Pass | forged |')})};
     },
-  }),/Unauthorized E2E/);
+  }),error=>{
+    assert.match(error.message,/Unauthorized E2E/);
+    assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_E2E_PROTECTED');
+    return true;
+  });
   assert.equal(unsafeCalls,1);
   assert.equal(readFileSync(filename,'utf8'),validSnapshot);
 
@@ -477,7 +485,11 @@ try {
       exhaustedTierCalls++;
       return {result:JSON.stringify({verification_tier:'verification:scoped',tier_reason:'still short'})};
     },
-  }),/invalid Issue verification-tier proposal/);
+  }),error=>{
+    assert.match(error.message,/invalid Issue verification-tier proposal/);
+    assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_TIER_PROPOSAL');
+    return true;
+  });
   assert.equal(exhaustedTierCalls,1);
   assert.equal(readFileSync(filename,'utf8'),preTierSnapshot);
 
@@ -494,7 +506,12 @@ try {
     }),
   },'example/repo',{
     contractRepair:async()=>{downgradeCalls++;return {result:'{}'};},
-  }),/downgrade requires separate trusted approval/);
+  }),error=>{
+    assert.match(error.message,/downgrade requires separate trusted approval/);
+    assert.equal(describeIssueAuditRejection(error)?.code,'ISSUE_AUDIT_TIER_DOWNGRADE');
+    assert.equal(isIssueAuditRepairableRejection(error),false);
+    return true;
+  });
   assert.equal(downgradeCalls,0);
   assert.equal(readFileSync(filename,'utf8'),downgradeSnapshot);
   writeFileSync(filename,preTierSnapshot);

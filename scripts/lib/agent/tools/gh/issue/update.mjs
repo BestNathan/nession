@@ -143,7 +143,8 @@ export function createIssueUpdateTool(issue, repository = process.env.GITHUB_REP
       const normalizedTitle = title.trim();
       const candidate = candidateIssue(current, normalizedTitle, body, labels);
       const before = auditIssue(candidate);
-      if (!before.ok) throw new Error('Issue Contract validation failed before write: ' + before.errors.join('; '));
+      if (!before.ok) throw rejectedAuditProposal('ISSUE_AUDIT_CONTRACT_REJECTED',
+      'Issue Contract validation failed before write: ' + before.errors.join('; '));
       const currentContract = issueLabelNames(current).filter((name) => CONTRACT_LABELS.has(name));
       const add = labels.filter((name) => !currentContract.includes(name));
       const remove = currentContract.filter((name) => !labels.includes(name));
