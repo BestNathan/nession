@@ -70,11 +70,10 @@ export function isNativePromotionPr(pr){
   const source=pr.body.match(/^- Planned main SHA: ([a-f0-9]{40})$/gm);
   const lane=pr.body.match(/^- Planned lane SHA: ([a-f0-9]{40})$/gm);
   if(source?.length!==1||lane?.length!==1)return false;
-  // The protected staging ref may advance after this bot-authored PR was
-  // opened. Keep its original pinned lane SHA as an immutable ancestry floor;
-  // the exact current head and all selected tests are re-attested below.
-  return source[0].endsWith(pr.base.sha)&&
-    pr.body.includes('- Direction: staging -> main');
+  // Both protected refs may advance after the bot opened this PR. The
+  // original Main/Lane SHAs are immutable provenance floors; their ancestry,
+  // the current exact PR refs and every test are independently reverified.
+  return pr.body.includes('- Direction: staging -> main');
 }
 
 // A promotion has no disposable Requirement Issue. Run a real, source-pinned
@@ -83,10 +82,12 @@ export function isNativePromotionPr(pr){
 // Main postmerge Full regression and promotion source/Issue/Deploy gates remain
 // mandatory. Never turn an unknown or missing test into Not Required.
 export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
+  const originallyPinnedMain=pr?.body?.match(/^- Planned main SHA: ([a-f0-9]{40})$/m)?.[1];
   const originallyPinnedLane=pr?.body?.match(/^- Planned lane SHA: ([a-f0-9]{40})$/m)?.[1];
   if(!isNativePromotionPr(pr)||baseSha!==pr.base.sha||
       targetSha!==pr.head.sha||git(repoRoot,'rev-parse','HEAD')!==targetSha||
       !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha||
+      !ancestors(repoRoot,originallyPinnedMain,baseSha)||
       !ancestors(repoRoot,originallyPinnedLane,targetSha))
     throw Error('untrusted or stale Staging promotion E2E source');
   const deleted=git(repoRoot,'diff','--name-only','--diff-filter=D',
@@ -435,7 +436,26 @@ export function selfTest(){
     const unrelatedPinned={...advancedPr,
       body:advancedPr.body.replace(promoteSha,later)};
     assert.throws(()=>promotionE2ESelection(unrelatedPinned,root,main),
-      /untrusted|stale/,'unrelated pinned source cannot authorize newer PR head');
+      /untrusted|stale/,'unrelated pinned Staging source cannot authorize newer PR head');
+    // Main's fast-track PRs can move its protected ref too. The new Main
+    // must first be incorporated into Staging: the original pinned Main is
+    // a verified ancestor floor, not a permanently frozen base SHA.
+    const promotedTree=run('merge-tree','--write-tree',advancedSha,later).split(/\s+/)[0];
+    const rebasedHead=run('commit-tree',promotedTree,
+      '-p',advancedSha,'-p',later,'-m','merge newer Main into Staging');
+    run('checkout','--detach',rebasedHead);
+    const nextPr={...advancedPr,
+      base:{...advancedPr.base,sha:later},
+      head:{...advancedPr.head,sha:rebasedHead}};
+    assert.ok(isNativePromotionPr(nextPr));
+    const next=promotionE2ESelection(nextPr,root,later);
+    assert.equal(next.base_sha,later);
+    assert.equal(next.target_sha,rebasedHead);
+    assert.notEqual(next.plan_digest,advanced.plan_digest);
+    const badMainFloor={...nextPr,
+      body:nextPr.body.replace(main,lane)};
+    assert.throws(()=>promotionE2ESelection(badMainFloor,root,later),
+      /untrusted|stale/,'unrelated pinned Main source must not authorize newer base');
     run('checkout','--detach',promoteSha);
     assert.throws(()=>promotionE2ESelection(promotion,root,lane),/untrusted/);
     assert.throws(()=>promotionE2ESelection(promotion,root,main,head),/untrusted/);
