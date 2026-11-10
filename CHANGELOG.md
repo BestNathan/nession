@@ -563,3 +563,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record the #3161 per-policy implementation support discovery: catalog v2 typed per-path/option/field statuses and stable reason codes measured from the same Capabilities validate consumes, backend-missing and unmeasured semantics, probe generation bound to preflight/Enter, unsupported field-path errors without partial fallback, and the discoverable-but-disabled Workspace states
 - Source: https://github.com/BestNathan/nession/issues/3161
+
+## 2026-11-10T12:12:00Z | update | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Record the #3164 action/resource item anatomies, the single choice-item recipe and 30rem choice-width role, the opt-in resource migration of Project/Session/Env pickers, the dialog-owned popup host that keeps App scope/focus/accessibility inside modals, and the PR/merge/Case/E2E/staging-deploy evidence
+- Source: https://github.com/BestNathan/nession/issues/3164
+
+## 2026-11-10T12:12:00Z | update | Session and Project operation surface presentation by Experience
+- Path: topics/web/session-and-project-operation-surface-presentation-by-experience.md
+- Topic: web
+- Categories: web, app, interaction, session, project, presentation, responsive
+- Reason: Record the resource-choice presentation of Agent/Existing Location choices, the unchanged action Selects, the shared ChoiceItemContent slots, and the #3184 Case/E2E/staging evidence
+- Source: https://github.com/BestNathan/nession/issues/3164

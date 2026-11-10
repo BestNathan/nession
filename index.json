@@ -204,7 +204,7 @@
       },
       {
         "title": "Session and Project operation surface presentation by Experience",
-        "description": "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records",
+        "description": "The Experience route selects Web's content-capable centered Attach/Session/Project dialogs versus App's quick Attach sheet and full-height operation depths, over one Attach, create-Session and Project-form owner; the Web Existing Location Select is content-sized for multi-line records, and Agent/Existing Location choices use the shared resource-choice anatomy",
         "path": "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
         "status": "verified",
         "categories": [
@@ -216,11 +216,11 @@
           "presentation",
           "responsive"
         ],
-        "updated_at": "2026-11-10T04:45:00Z"
+        "updated_at": "2026-11-10T12:12:00Z"
       },
       {
         "title": "Unified overlay and operation surface system",
-        "description": "One cross-family overlay contract: six roles, token-owned Web size roles and viewport clamp, one scrim/surface/title vocabulary, one scroll owner, explicit tooltip/anchored/dialog stacking, Experience-scoped popups, and first-innermost Escape/dismissal semantics",
+        "description": "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics",
         "path": "topics/web/unified-overlay-and-operation-surface-system.md",
         "status": "verified",
         "categories": [
@@ -232,7 +232,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-10T04:45:00Z"
+        "updated_at": "2026-11-10T12:12:00Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
