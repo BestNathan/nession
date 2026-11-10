@@ -12,6 +12,8 @@
  * An anchored choice opened from a dialog must therefore paint above it; a
  * tooltip may paint above that choice.
  */
+import { chromeSansRole } from '@/shared/typography/chromeRoles';
+
 export const overlayScrimClass = 'fixed inset-0 bg-overlay-scrim';
 
 export const overlayDialogZClass = 'z-[var(--nession-overlay-dialog-z)]';
@@ -21,7 +23,7 @@ export const overlayTooltipZClass = 'isolate z-[var(--nession-overlay-tooltip-z)
 export const overlaySurfaceClass =
   'rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 shadow-[var(--nession-elevation-floating)]';
 
-export const overlayTitleClass = 'font-heading text-base leading-none font-medium';
+export const overlayTitleClass = chromeSansRole('title');
 
 export const overlayViewportWidthClass =
   'max-w-[length:var(--nession-overlay-viewport-max-width)]';

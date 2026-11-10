@@ -77,6 +77,21 @@
         "maxWidthTokenPx": 480
       }
     },
+    "pattern.configuration-form": {
+      "id": "pattern.configuration-form",
+      "patternRef": "docs/design/design-system/patterns/configuration-form.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
     "pattern.context-capsule": {
       "id": "pattern.context-capsule",
       "patternRef": "docs/design/design-system/patterns/context-capsule.md",
@@ -116,6 +131,23 @@
         "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     },
+    "pattern.operation-surface": {
+      "id": "pattern.operation-surface",
+      "patternRef": "docs/design/design-system/patterns/operation-surface.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
     "pattern.overlay-surfaces": {
       "id": "pattern.overlay-surfaces",
       "patternRef": "docs/design/design-system/patterns/overlay-surfaces.md",
@@ -153,6 +185,21 @@
         "scrollOwner": true,
         "touchTargetToken": "experience.app.touchTarget.min",
         "heightTokenPx": 44,
+        "touchTargetTokenPx": 44
+      }
+    },
+    "pattern.resource-detail": {
+      "id": "pattern.resource-detail",
+      "patternRef": "docs/design/design-system/patterns/resource-detail.md",
+      "extends": [],
+      "web": {
+        "overflow": "wrap",
+        "wrap": true
+      },
+      "app": {
+        "overflow": "wrap",
+        "wrap": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
         "touchTargetTokenPx": 44
       }
     },

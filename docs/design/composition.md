@@ -196,11 +196,13 @@ Do not preserve a toolbar/sidebar at the cost of making the actual work unusable
 | Session list | Fill its opened navigation region |
 | Workspace resource lists | Fill local region, modest contextual inset as needed |
 | Editors / reading content | Inset; optional max width where readability benefits |
-| Forms / settings / details | Contained |
+| Forms / settings / details | Contained, using the shared [ConfigurationForm](design-system/patterns/configuration-form.md) / [ResourceDetail](design-system/patterns/resource-detail.md) grammar |
 | TerminalCapsule | Floating contained surface |
 | Capability overlay/sheet | Contained/elevated contextual layer |
 
 Containment is a content decision, not a default desire to put everything in cards.
+A detail or configuration region does not gain a second shell, header or scroll
+owner when it adopts a recipe; the host composition in §7/§8 still owns those.
 
 ## 11. Large-screen whitespace
 

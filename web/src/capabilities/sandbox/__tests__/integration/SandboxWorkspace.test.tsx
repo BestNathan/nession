@@ -501,6 +501,11 @@ describe('SandboxWorkspace (#3124)', () => {
       expect(screen.getByTestId(`sandbox-tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByTestId(panelContent[tab])).toBeInTheDocument();
     }
+    // Every panel consumes one of the shared content-region recipes (#3137).
+    await user.click(screen.getByTestId('sandbox-tab-filesystem'));
+    expect(document.querySelector('[data-recipe="configuration-form"]')).not.toBeNull();
+    await user.click(screen.getByTestId('sandbox-tab-overview'));
+    expect(document.querySelector('[data-recipe="resource-detail"]')).not.toBeNull();
 
     // The Overview summary is a second direct switch to the same peer tabs.
     await user.click(screen.getByTestId('sandbox-tab-overview'));
@@ -530,6 +535,7 @@ describe('SandboxWorkspace (#3124)', () => {
     await user.click(screen.getByTestId('sandbox-tab-resource'));
     expect(screen.getByTestId('sandbox-effective-resource-cpu.max')).toBeInTheDocument();
     expect(screen.queryByTestId('sandbox-resource-add')).toBeNull();
+    expect(document.querySelector('[data-recipe="resource-detail"]')).not.toBeNull();
 
     await user.click(screen.getByTestId('sandbox-tab-syscall'));
     expect(screen.getByTestId('sandbox-effective-syscall-seccomp.profile')).toBeInTheDocument();

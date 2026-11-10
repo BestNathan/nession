@@ -1,0 +1,14 @@
+{
+  "id": "pattern.configuration-form",
+  "$description": "The shared editable content grammar for resource configuration (#3137): named sections, a field label + control + help + field error, related fields and repeated dynamic rows. A field value may wrap or scroll intentionally but may not make the form overflow horizontally; the App keeps every interactive control at the touch floor.",
+  "patternRef": "docs/design/design-system/patterns/configuration-form.md",
+  "web": {
+    "wrap": true,
+    "overflow": "wrap"
+  },
+  "app": {
+    "wrap": true,
+    "overflow": "wrap",
+    "touchTargetToken": "experience.app.touchTarget.min"
+  }
+}

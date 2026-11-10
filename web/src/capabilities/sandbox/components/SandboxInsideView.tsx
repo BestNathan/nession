@@ -1,8 +1,17 @@
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DetailEmpty,
+  DetailGroup,
+  DetailHeader,
+  DetailSection,
+  DetailSurface,
+} from '@/components/ui/resource-detail';
+import { detailRowClass } from '@/components/ui/resource-detailStyles';
+import { OperationActions } from '@/components/ui/operation-surface';
 import type { SandboxCurrentContext } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import {
   SandboxEffectiveFilesystem,
@@ -30,9 +39,106 @@ export interface SandboxInsideViewProps {
 
 function MissingPolicy() {
   return (
-    <p data-testid="sandbox-inside-missing-policy" className={chromeSansRole('secondary')}>
+    <DetailEmpty data-testid="sandbox-inside-missing-policy">
       The Agent did not include the observed effective policy for this domain.
-    </p>
+    </DetailEmpty>
+  );
+}
+
+function InsideOverview({
+  context,
+  policy,
+  busy,
+  onReturnToNative,
+  onFocusPane,
+  onTabChange,
+}: {
+  context: SandboxCurrentContext;
+  policy: SandboxCurrentContext['effective_policy'];
+  busy: boolean;
+  onReturnToNative: () => void;
+  onFocusPane: (paneId: string) => void;
+  onTabChange: (tab: SandboxTabId) => void;
+}) {
+  const execution = context.execution;
+  if (!execution) {
+    return null;
+  }
+  const otherPanes = context.sandbox_panes.filter(
+    (pane) => pane.execution_id !== execution.execution_id,
+  );
+  return (
+    <DetailSurface>
+      <DetailHeader
+        level="h2"
+        title="Inside Sandbox"
+        badges={
+          <>
+            <Badge data-testid="sandbox-status" variant="secondary">
+              inside
+            </Badge>
+            <Badge variant="outline" data-testid="sandbox-backend">
+              {execution.backend}
+            </Badge>
+          </>
+        }
+        description={
+          <span data-testid="sandbox-scope-note">
+            Only the current Pane&apos;s execution is covered. The shared tmux server, the
+            original Native Pane and future Panes or Windows are not inside this Sandbox.
+          </span>
+        }
+      />
+
+      <SandboxExecutionDetails context={context} />
+      {policy ? <SandboxPolicySummary policy={policy} onSelectTab={onTabChange} /> : null}
+
+      <OperationActions>
+        {context.native_pane ? (
+          <Button
+            type="button"
+            data-testid="sandbox-return-native"
+            disabled={busy}
+            onClick={onReturnToNative}
+          >
+            Return to Native Pane
+          </Button>
+        ) : (
+          <DetailEmpty data-testid="sandbox-no-native-pane">
+            This Session was created inside the Sandbox; there is no preserved Native Pane.
+          </DetailEmpty>
+        )}
+      </OperationActions>
+
+      {otherPanes.length > 0 ? (
+        <DetailSection title="Other Sandbox Panes" level="h3">
+          <DetailGroup>
+            {otherPanes.map((pane) => (
+              <div
+                key={pane.pane_id}
+                data-testid={`sandbox-pane-${pane.pane_id}`}
+                data-recipe-part="detail-row"
+                className={detailRowClass}
+              >
+                <span className={cn(chromeMonoRole('code'), 'min-w-0 flex-1 break-all')}>
+                  {pane.pane_id} · {pane.backend}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid={`sandbox-focus-${pane.pane_id}`}
+                  disabled={busy}
+                  onClick={() => onFocusPane(pane.pane_id)}
+                >
+                  Focus
+                </Button>
+              </div>
+            ))}
+          </DetailGroup>
+        </DetailSection>
+      ) : null}
+    </DetailSurface>
   );
 }
 
@@ -57,99 +163,58 @@ export function SandboxInsideView({
   const policy = context.effective_policy;
   if (!execution) {
     return (
-      <p data-testid="sandbox-inside-missing-execution" className={chromeSansRole('secondary')}>
+      <DetailEmpty data-testid="sandbox-inside-missing-execution">
         The Agent reports this Pane as inside, but the execution evidence is missing.
-      </p>
+      </DetailEmpty>
     );
   }
-  const otherPanes = context.sandbox_panes.filter(
-    (pane) => pane.execution_id !== execution.execution_id,
-  );
 
   const panels: Record<SandboxTabId, ReactNode> = {
     overview: (
-      <div className="flex min-w-0 flex-col gap-5">
-        <header className="flex min-w-0 flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className={chromeSansRole('title')}>Inside Sandbox</h2>
-            <Badge data-testid="sandbox-status" variant="secondary">
-              inside
-            </Badge>
-            <Badge variant="outline" data-testid="sandbox-backend">
-              {execution.backend}
-            </Badge>
-          </div>
-          <p
-            data-testid="sandbox-scope-note"
-            className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-          >
-            Only the current Pane&apos;s execution is covered. The shared tmux server, the original
-            Native Pane and future Panes or Windows are not inside this Sandbox.
-          </p>
-        </header>
-
-        <SandboxExecutionDetails context={context} />
-        {policy ? <SandboxPolicySummary policy={policy} onSelectTab={onTabChange} /> : null}
-
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {context.native_pane ? (
-            <Button
-              type="button"
-              data-testid="sandbox-return-native"
-              disabled={busy}
-              onClick={onReturnToNative}
-            >
-              Return to Native Pane
-            </Button>
-          ) : (
-            <p
-              data-testid="sandbox-no-native-pane"
-              className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
-            >
-              This Session was created inside the Sandbox; there is no preserved Native Pane.
-            </p>
-          )}
-        </div>
-
-        {otherPanes.length > 0 ? (
-          <section className="flex min-w-0 flex-col gap-2" aria-label="Other Sandbox Panes">
-            <h3 className={chromeSansRole('primary')}>Other Sandbox Panes</h3>
-            <ul className="flex min-w-0 flex-col gap-2">
-              {otherPanes.map((pane) => (
-                <li
-                  key={pane.pane_id}
-                  data-testid={`sandbox-pane-${pane.pane_id}`}
-                  className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-[var(--nession-radius-surface)] bg-muted/30 px-2 py-1"
-                >
-                  <span className={cn(chromeMonoRole('code'), 'min-w-0 break-all')}>
-                    {pane.pane_id} · {pane.backend}
-                  </span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-testid={`sandbox-focus-${pane.pane_id}`}
-                    disabled={busy}
-                    onClick={() => onFocusPane(pane.pane_id)}
-                  >
-                    Focus
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-      </div>
+      <InsideOverview
+        context={context}
+        policy={policy}
+        busy={busy}
+        onReturnToNative={onReturnToNative}
+        onFocusPane={onFocusPane}
+        onTabChange={onTabChange}
+      />
     ),
     filesystem: policy ? (
-      <SandboxEffectiveFilesystem policy={policy} mechanisms={execution.mechanisms} />
+      <DetailSurface>
+        <SandboxEffectiveFilesystem policy={policy} mechanisms={execution.mechanisms} />
+      </DetailSurface>
     ) : (
       <MissingPolicy />
     ),
-    network: policy ? <SandboxEffectiveNetwork policy={policy} /> : <MissingPolicy />,
-    process: policy ? <SandboxEffectiveProcess policy={policy} /> : <MissingPolicy />,
-    resource: policy ? <SandboxEffectiveResource policy={policy} /> : <MissingPolicy />,
-    syscall: policy ? <SandboxEffectiveSyscall policy={policy} /> : <MissingPolicy />,
+    network: policy ? (
+      <DetailSurface>
+        <SandboxEffectiveNetwork policy={policy} />
+      </DetailSurface>
+    ) : (
+      <MissingPolicy />
+    ),
+    process: policy ? (
+      <DetailSurface>
+        <SandboxEffectiveProcess policy={policy} />
+      </DetailSurface>
+    ) : (
+      <MissingPolicy />
+    ),
+    resource: policy ? (
+      <DetailSurface>
+        <SandboxEffectiveResource policy={policy} />
+      </DetailSurface>
+    ) : (
+      <MissingPolicy />
+    ),
+    syscall: policy ? (
+      <DetailSurface>
+        <SandboxEffectiveSyscall policy={policy} />
+      </DetailSurface>
+    ) : (
+      <MissingPolicy />
+    ),
   };
 
   return (

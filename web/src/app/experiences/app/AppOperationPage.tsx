@@ -55,20 +55,26 @@ export function AppOperationPage({
           variant="fullscreen"
           showCloseButton={false}
           data-experience="app"
+          data-recipe="operation-surface"
           data-testid={testId}
         >
           <DialogTitle className="sr-only">{title}</DialogTitle>
-          <DialogHeader className="sticky top-0 z-10 gap-0 bg-background p-0">
+          <DialogHeader
+            data-recipe-part="operation-title"
+            className="sticky top-0 z-10 gap-0 bg-background p-0"
+          >
             <AppPageHeader backLabel={backLabel} onBack={onBack} title={title} />
           </DialogHeader>
           <div
             data-testid={`${testId}-body`}
+            data-recipe-part="operation-body"
             className="flex min-h-0 flex-1 flex-col gap-[var(--nession-shell-space-3)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]"
           >
             {children}
           </div>
           <footer
             data-testid={`${testId}-footer`}
+            data-recipe-part="operation-actions"
             className={cn(
               'sticky bottom-0 z-10 shrink-0 border-t bg-background px-[var(--nession-shell-space-3)] pt-[var(--nession-shell-space-2)]',
               'pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]',

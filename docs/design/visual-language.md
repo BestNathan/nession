@@ -204,6 +204,13 @@ Rules:
 - Do not stack background + border + shadow + accent for one selection.
 - Persistent healthy chrome should not use elevation.
 - Extension content may be visually distinct inside its own detail view, but global chrome remains coherent.
+- Content regions share one grammar above generic primitives: a resource or
+  capability detail, an editable configuration and an operation body consume
+  [ResourceDetail](design-system/patterns/resource-detail.md),
+  [ConfigurationForm](design-system/patterns/configuration-form.md) and
+  [OperationSurface](design-system/patterns/operation-surface.md) rather than
+  assembling a local hierarchy from valid primitives. The host owns its shell,
+  navigation and scroll; the recipe owns the content's internal hierarchy.
 
 ## Density hierarchy
 

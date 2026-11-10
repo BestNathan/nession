@@ -2,8 +2,14 @@ import { formatAbsoluteTime, formatRelativeTime } from '@/shared/lib/format';
 import { ConnectionStatus } from '@/product/session/patterns/ConnectionStatus';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Session } from '@/types';
-import { cn } from '@/shared/lib/utils';
-import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import {
+  DetailFact,
+  DetailFacts,
+  DetailHeader,
+  DetailSection,
+  DetailSurface,
+} from '@/components/ui/resource-detail';
+import { chromeMonoRole } from '@/shared/typography/chromeRoles';
 import { useSessionMetadata } from '@/product/session/hooks/useSessionMetadata';
 import { metadataDisplayTitle } from '@/product/session/model/sessionMetadata';
 import { SessionMetadataSection } from '@/product/session/components/SessionMetadataSection';
@@ -28,36 +34,31 @@ export function SessionDetails({ session, state, initialEditing = false }: Sessi
   const entry = useSessionMetadata(session.session_id);
 
   return (
-    <div data-testid="session-details" className="flex flex-col gap-4 p-4">
-      <div>
-        <h2 data-testid="session-title" className={chromeSansRole('primary')}>
-          {metadataDisplayTitle(entry.metadata, session.session_name)}
-        </h2>
-        <p className={cn('text-muted-foreground', chromeMonoRole('metadata'))}>
-          {session.session_id}
-        </p>
-      </div>
+    <DetailSurface data-testid="session-details" className="p-4">
+      <DetailHeader
+        level="h2"
+        title={metadataDisplayTitle(entry.metadata, session.session_name)}
+        titleTestId="session-title"
+        meta={<span className={chromeMonoRole('metadata')}>{session.session_id}</span>}
+      />
 
       <ConnectionStatus state={state} />
 
-      <dl className={cn('grid gap-2', chromeSansRole('body'))}>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Windows</dt>
-          <dd>{session.window_count}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Last activity</dt>
-          <dd>{formatRelativeTime(session.last_activity)}</dd>
-        </div>
-        {entry.metadata?.created_at ? (
-          // Only a recorded creation time is shown; last activity is never
-          // promoted into an invented creation time.
-          <div className="flex gap-2" data-testid="session-metadata-created">
-            <dt className="text-muted-foreground">Created</dt>
-            <dd>{formatAbsoluteTime(new Date(entry.metadata.created_at * 1000).toISOString())}</dd>
-          </div>
-        ) : null}
-      </dl>
+      <DetailSection title="Runtime" level="h3">
+        <DetailFacts className="gap-1.5">
+          <DetailFact label="Windows" inline>
+            {session.window_count}
+          </DetailFact>
+          <DetailFact label="Last activity" inline>
+            {formatRelativeTime(session.last_activity)}
+          </DetailFact>
+          {entry.metadata?.created_at ? (
+            <DetailFact label="Created" inline testId="session-metadata-created">
+              {formatAbsoluteTime(new Date(entry.metadata.created_at * 1000).toISOString())}
+            </DetailFact>
+          ) : null}
+        </DetailFacts>
+      </DetailSection>
 
       <SessionMetadataSection
         session={session}
@@ -65,6 +66,6 @@ export function SessionDetails({ session, state, initialEditing = false }: Sessi
         initialEditing={initialEditing}
         editingDisabled={state.agent.channel !== 'online'}
       />
-    </div>
+    </DetailSurface>
   );
 }

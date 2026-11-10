@@ -55,6 +55,17 @@ An optional `image_digest` is an immutable reference (`sha256:<64 hex>`) to an E
 
 There is no persistent `ProjectEnvironment` type. The Server stores the Project declaration and its Session defaults; materializing an environment is a Session-owned concern ([#170](https://github.com/BestNathan/nession/issues/170)) and a managed-location concern ([#3024](https://github.com/BestNathan/nession/issues/3024)).
 
+## Visual presentation
+
+This document owns the Project **semantics**. The page-level hierarchy is not a
+Project-specific invention: the standalone Project destination, its settings
+form and its create/settings/delete operations consume the shared
+[ResourceDetail](design-system/patterns/resource-detail.md),
+[ConfigurationForm](design-system/patterns/configuration-form.md) and
+[OperationSurface](design-system/patterns/operation-surface.md) recipes. The
+same detail/configuration grammar is used by a Session-context capability
+(Sandbox Inside/Outside), which keeps its own host and navigation owner (#3137).
+
 ## Relationship to Workspace and the existing inferred locations
 
 Workspace remains the **contextual** surface described in [workspace.md](workspace.md); it is not automatically duplicated into a persistent object per Project.

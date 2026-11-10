@@ -116,8 +116,10 @@ only the primary action commits.
 - One **scrim** (`semantic.overlay-scrim`) for both Dialog and AlertDialog.
 - One **surface** treatment: `popover` surface, `radius-surface`-family radius,
   `ring` border, `elevation-floating` shadow.
-- One **title** role (`overlayTitleClass`), one body text role, one action-band
-  rhythm. Warning/destructive meaning comes from the action variant and the
+- One **title** role — the shared surface `title` typography role
+  (`overlayTitleClass`) — one body text role, one action-band rhythm. The
+  operation body and action grammar inside the surface are owned by
+  [OperationSurface](operation-surface.md); they never fork the primitive. Warning/destructive meaning comes from the action variant and the
   message, never from an unrelated surface palette.
 - Dialog and AlertDialog may keep different primitives (Base UI vs Radix) for
   their semantics. They must not keep different values: the shared vocabulary

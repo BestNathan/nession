@@ -25,8 +25,7 @@ import { updatePayload, draftOf } from '@/product/project/model/projectDraft';
 import { useProjectDraftForm } from '@/product/project/hooks/useProjectDraftForm';
 import { ProjectFormFields } from './ProjectFormFields';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
-import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { OperationError } from '@/components/ui/operation-surface';
 import type { Agent } from '@/types';
 import type { Project } from '@/product/project/types';
 import type { ProjectDialogState } from '@/product/project/hooks/useProjectDialogs';
@@ -34,9 +33,7 @@ import type { ProjectDialogState } from '@/product/project/hooks/useProjectDialo
 
 function ErrorText({ error }: { error: string | null }) {
   return error ? (
-    <p className={cn('text-destructive', chromeSansRole('body'))} data-testid="project-dialog-error">
-      {error}
-    </p>
+    <OperationError testId="project-dialog-error">{error}</OperationError>
   ) : null;
 }
 
@@ -63,11 +60,12 @@ export function CreateProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent size="wide" data-testid="create-project-dialog">
+      <DialogContent size="wide" data-recipe="operation-surface" data-testid="create-project-dialog">
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
-          <DialogTitle>Create Project</DialogTitle>
+          <DialogTitle data-recipe-part="operation-title">Create Project</DialogTitle>
         </DialogHeader>
         <form
+          data-recipe-part="operation-body"
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -82,7 +80,7 @@ export function CreateProjectDialog({
             idPrefix="project-create"
           />
           <ErrorText error={form.error} />
-          <DialogFooter sticky>
+          <DialogFooter sticky data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
@@ -144,9 +142,10 @@ export function RenameProjectDialog({
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rename Project</DialogTitle>
+          <DialogTitle data-recipe-part="operation-title">Rename Project</DialogTitle>
         </DialogHeader>
         <form
+          data-recipe-part="operation-body"
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -165,7 +164,7 @@ export function RenameProjectDialog({
             />
           </div>
           <ErrorText error={error} />
-          <DialogFooter>
+          <DialogFooter data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={busy}>
               Cancel
             </Button>
@@ -205,11 +204,12 @@ export function ProjectSettingsDialog({
 
   return (
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent size="wide" data-testid="project-settings-dialog">
+      <DialogContent size="wide" data-recipe="operation-surface" data-testid="project-settings-dialog">
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
-          <DialogTitle>Project settings</DialogTitle>
+          <DialogTitle data-recipe-part="operation-title">Project settings</DialogTitle>
         </DialogHeader>
         <form
+          data-recipe-part="operation-body"
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -224,7 +224,7 @@ export function ProjectSettingsDialog({
             idPrefix="project-settings"
           />
           <ErrorText error={form.error} />
-          <DialogFooter sticky>
+          <DialogFooter sticky data-recipe-part="operation-actions">
             <Button type="button" variant="outline" onClick={() => onClose()} disabled={form.busy}>
               Cancel
             </Button>
@@ -279,16 +279,16 @@ export function ProjectDeleteDialog({
 
   return (
     <AlertDialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
-      <AlertDialogContent>
+      <AlertDialogContent data-recipe="operation-surface">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete Project “{project.name}”?</AlertDialogTitle>
+          <AlertDialogTitle data-recipe-part="operation-title">Delete Project “{project.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
             Only the Project declaration is removed. Sessions, user-owned Existing
             Location directories, and globally shared image content are not deleted.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <ErrorText error={error} />
-        <AlertDialogFooter>
+        <AlertDialogFooter data-recipe-part="operation-actions">
           <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => void remove()}
