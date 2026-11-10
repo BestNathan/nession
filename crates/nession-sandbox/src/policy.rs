@@ -6,7 +6,7 @@
 //! separate step in [`crate::prepare`], because that one has to inspect the
 //! host and must not be inferred from a schema.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use nession_protocol::contracts::sandbox::v1::{
@@ -33,7 +33,7 @@ pub struct CompiledSandboxPolicy {
     pub filesystem: Option<CompiledFilesystem>,
     pub network: Option<CompiledNetwork>,
     pub namespaces: NamespaceRequest,
-    pub cgroup: Option<CgroupLimits>,
+    pub cgroup: Option<CgroupWrites>,
     pub seccomp: Option<SeccompProfile>,
     pub enforcement: SandboxEnforcement,
 }
@@ -175,55 +175,39 @@ impl NamespaceRequest {
     }
 }
 
-/// Native cgroup v2 values, validated but not yet written.
+/// Validated native cgroup v2 control-file writes, not yet applied.
+///
+/// The map preserves the kernel's own file names and raw values; this type
+/// performs no unit conversion or per-file interpretation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CgroupLimits {
-    pub memory_max: Option<String>,
-    pub cpu_max: Option<String>,
-    pub pids_max: Option<String>,
-    pub memory_oom_group: Option<String>,
+pub struct CgroupWrites {
+    writes: BTreeMap<String, String>,
 }
 
-impl CgroupLimits {
-    /// The controllers the requested files require.
-    pub fn controllers(&self) -> BTreeSet<&'static str> {
-        let mut controllers = BTreeSet::new();
-        if self.memory_max.is_some() || self.memory_oom_group.is_some() {
-            controllers.insert("memory");
-        }
-        if self.cpu_max.is_some() {
-            controllers.insert("cpu");
-        }
-        if self.pids_max.is_some() {
-            controllers.insert("pids");
-        }
-        controllers
+impl CgroupWrites {
+    /// The controllers the requested files belong to.
+    pub fn controllers(&self) -> BTreeSet<String> {
+        self.writes
+            .keys()
+            .filter_map(|file| crate::cgroup_file::controller_of(file).map(str::to_string))
+            .collect()
     }
 
     /// `true` when no control file was requested.
     pub fn is_empty(&self) -> bool {
-        self.memory_max.is_none()
-            && self.cpu_max.is_none()
-            && self.pids_max.is_none()
-            && self.memory_oom_group.is_none()
+        self.writes.is_empty()
     }
 
-    /// The files and values to write, in a stable order.
-    pub fn files(&self) -> Vec<(&'static str, &str)> {
-        let mut files = Vec::new();
-        if let Some(value) = &self.memory_max {
-            files.push(("memory.max", value.as_str()));
-        }
-        if let Some(value) = &self.cpu_max {
-            files.push(("cpu.max", value.as_str()));
-        }
-        if let Some(value) = &self.pids_max {
-            files.push(("pids.max", value.as_str()));
-        }
-        if let Some(value) = &self.memory_oom_group {
-            files.push(("memory.oom.group", value.as_str()));
-        }
-        files
+    /// The files and values to write, in stable basename order.
+    pub fn files(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.writes
+            .iter()
+            .map(|(file, value)| (file.as_str(), value.as_str()))
+    }
+
+    /// One requested native value.
+    pub fn get(&self, file: &str) -> Option<&str> {
+        self.writes.get(file).map(String::as_str)
     }
 }
 
@@ -235,9 +219,10 @@ pub struct SeccompProfile {
 
 /// Compile and validate a policy schema.
 ///
-/// The function performs no host I/O. A policy that names an unknown key never
-/// reaches it (serde refuses it); a known key with an invalid value or a
-/// contradictory combination is refused here.
+/// The function performs no host I/O. The native cgroup map is checked at the
+/// generic basename boundary (no path traversal, lifecycle/status/command
+/// interfaces, empty values); the kernel remains authoritative for each
+/// value's format and range when the execution is created.
 pub fn compile(policy: &SandboxPolicy) -> Result<CompiledSandboxPolicy> {
     if policy.version != SANDBOX_POLICY_VERSION {
         return Err(SandboxError::UnsupportedPolicy(format!(
@@ -647,98 +632,19 @@ fn compile_namespaces(namespaces: &SandboxLinuxNamespaces) -> Result<NamespaceRe
     })
 }
 
-fn compile_cgroup(cgroup: &SandboxCgroupV2Policy) -> Result<CgroupLimits> {
-    let limits = CgroupLimits {
-        memory_max: cgroup
-            .memory_max
-            .as_deref()
-            .map(validate_memory_max)
-            .transpose()?,
-        cpu_max: cgroup
-            .cpu_max
-            .as_deref()
-            .map(validate_cpu_max)
-            .transpose()?,
-        pids_max: cgroup
-            .pids_max
-            .as_deref()
-            .map(validate_pids_max)
-            .transpose()?,
-        memory_oom_group: cgroup
-            .memory_oom_group
-            .as_deref()
-            .map(validate_oom_group)
-            .transpose()?,
-    };
-    if limits.is_empty() {
+fn compile_cgroup(cgroup: &SandboxCgroupV2Policy) -> Result<CgroupWrites> {
+    if cgroup.0.is_empty() {
         return Err(SandboxError::InvalidPolicy(
             "resource.cgroup_v2 requests no limit".to_string(),
         ));
     }
-    Ok(limits)
-}
-
-pub(crate) fn validate_memory_max(value: &str) -> Result<String> {
-    if value == "max" {
-        return Ok(value.to_string());
+    let mut writes = BTreeMap::new();
+    for (file, value) in &cgroup.0 {
+        crate::cgroup_file::validate_key(file).map_err(SandboxError::InvalidPolicy)?;
+        crate::cgroup_file::validate_value(value).map_err(SandboxError::InvalidPolicy)?;
+        writes.insert(file.clone(), value.clone());
     }
-    parse_native_u64("memory.max", value)?;
-    Ok(value.to_string())
-}
-
-pub(crate) fn validate_pids_max(value: &str) -> Result<String> {
-    if value == "max" {
-        return Ok(value.to_string());
-    }
-    parse_native_u64("pids.max", value)?;
-    Ok(value.to_string())
-}
-
-pub(crate) fn validate_cpu_max(value: &str) -> Result<String> {
-    let mut parts = value.split_whitespace();
-    let quota = parts.next().ok_or_else(|| {
-        SandboxError::InvalidPolicy("cpu.max needs `quota period` in native format".to_string())
-    })?;
-    let period = parts.next().ok_or_else(|| {
-        SandboxError::InvalidPolicy("cpu.max needs `quota period` in native format".to_string())
-    })?;
-    if parts.next().is_some() {
-        return Err(SandboxError::InvalidPolicy(
-            "cpu.max takes exactly two tokens".to_string(),
-        ));
-    }
-    if quota != "max" {
-        parse_native_u64("cpu.max quota", quota)?;
-    }
-    let period = parse_native_u64("cpu.max period", period)?;
-    // The kernel requires period in [1000, 1000000] microseconds.
-    if !(1_000..=1_000_000).contains(&period) {
-        return Err(SandboxError::InvalidPolicy(
-            "cpu.max period must be 1000..=1000000 microseconds".to_string(),
-        ));
-    }
-    Ok(value.to_string())
-}
-
-pub(crate) fn validate_oom_group(value: &str) -> Result<String> {
-    if value == "0" || value == "1" {
-        Ok(value.to_string())
-    } else {
-        Err(SandboxError::InvalidPolicy(
-            "memory.oom.group must be `0` or `1`".to_string(),
-        ))
-    }
-}
-
-fn parse_native_u64(field: &str, value: &str) -> Result<u64> {
-    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "{field} must be a decimal integer or `max`"
-        )));
-    }
-    value.parse::<u64>().map_err(|_| {
-        SandboxError::InvalidPolicy(format!("{field} value `{value}` is out of range"))
-    })
+    Ok(CgroupWrites { writes })
 }
 
 fn policy_digest(policy: &SandboxPolicy) -> Result<String> {
@@ -770,29 +676,54 @@ mod tests {
     }
 
     #[test]
-    fn native_cgroup_values_are_validated_in_their_own_units() {
-        assert!(compile(&policy(serde_json::json!({
+    fn native_cgroup_values_pass_through_without_application_parsers() {
+        let compiled = compile(&policy(serde_json::json!({
             "enabled": true,
-            "resource": { "cgroup_v2": { "cpu.max": "200000 100000" } }
+            "resource": { "cgroup_v2": {
+                "cpu.weight": "100",
+                "memory.high": "max",
+                "io.max": "8:16 rbps=2097152",
+                "cpuset.cpus": "0-3"
+            } }
         })))
-        .is_ok());
+        .expect("native controller files are not restricted to a four-key allowlist");
+        let cgroup = compiled.cgroup.expect("compiled cgroup writes");
+        assert_eq!(cgroup.get("cpu.weight"), Some("100"));
+        assert_eq!(cgroup.get("io.max"), Some("8:16 rbps=2097152"));
+        assert_eq!(
+            cgroup.controllers(),
+            ["cpu", "cpuset", "io", "memory"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        );
+
         for bad in [
-            "200000",
-            "200000 100 3",
-            "200000 999",
-            "abc 100000",
-            "200000 1000000 x",
+            "cgroup.procs",
+            "cgroup.threads",
+            "memory.stat",
+            "memory.reclaim",
+            "../memory.max",
+            "/sys/fs/cgroup/memory.max",
+            "a/b",
         ] {
             let error = compile(&policy(serde_json::json!({
                 "enabled": true,
-                "resource": { "cgroup_v2": { "cpu.max": bad } }
+                "resource": { "cgroup_v2": { bad: "1" } }
             })))
-            .expect_err("invalid native format must fail closed");
+            .expect_err("malformed/lifecycle keys must fail closed");
             assert!(
                 matches!(error, SandboxError::InvalidPolicy(_)),
                 "{bad}: {error}"
             );
         }
+
+        let error = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "resource": { "cgroup_v2": { "memory.max": "" } }
+        })))
+        .expect_err("an empty native value must fail closed");
+        assert!(matches!(error, SandboxError::InvalidPolicy(_)));
     }
 
     #[test]
