@@ -14,6 +14,7 @@ const {
   printReference,
   readEditor,
   readTerminalState,
+  referencePoint,
   returnToTerminal,
   seedTerminalFiles,
 } = require('../../../shared/terminal-file-links.cjs');
@@ -95,39 +96,52 @@ test('SC-06: an observer can open a permitted file without PTY input', async ({ 
   const controllerContext = await browser.newContext({ viewport: { width: 1180, height: 900 } });
   const observerContext = await browser.newContext({ viewport: { width: 1180, height: 900 } });
   const controller = await controllerContext.newPage();
-  const second = await observerContext.newPage();
+  const observer = await observerContext.newPage();
   try {
     const name = await openShell(controller, expect, runtime, 'sc06-observer');
-    await printReference(controller, expect, 'plain.py:2');
-    const before = await readTerminalState(controller);
 
-    await attachExisting(second, expect, runtime, name, 'P2P', null);
+    // The second client attaches first and defaults to controller in its own
+    // UI; a real terminal gesture on the first client claims the Agent's
+    // control lease and broadcasts the observer role to the second (#2286).
+    await attachExisting(observer, expect, runtime, name, 'P2P', null);
+    const gesture = await referencePoint(controller, 'printf');
+    await controller.mouse.click(gesture.x, gesture.y);
+
     // The observer state is an opt-in notice (#2658): open the capsule's
     // notices to see it, rather than expecting a permanent bar over the grid.
-    const notices = controller.getByTestId('terminal-notices-trigger');
+    const notices = observer.getByTestId('terminal-notices-trigger');
     await expect(notices).toBeVisible({ timeout: 30_000 });
     await notices.click();
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible();
-    await controller.keyboard.press('Escape');
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeHidden();
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
+    await observer.keyboard.press('Escape');
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeHidden();
 
-    await activateReference(controller, 'plain.py:2');
-    await expectFilesSurface(controller, expect, 'web');
-    const editor = await readEditor(controller);
+    // Live output from the controller reaches the observer. The observer
+    // cannot type, so the controller prints the reference it will open.
+    await printReference(controller, expect, 'plain.py:2');
+    await expect.poll(
+      async () => (await readTerminalState(observer)).text ?? '',
+      { timeout: 30_000 },
+    ).toContain('plain.py:2');
+    const before = await readTerminalState(observer);
+
+    await activateReference(observer, 'plain.py:2');
+    await expectFilesSurface(observer, expect, 'web');
+    const editor = await readEditor(observer);
     expect(editor.line, 'the observer reached the requested line').toBe(2);
     expect(editor.activeLineText).toBe('plain-line-2');
-    await returnToTerminal(controller, expect, 'web');
-    const after = await readTerminalState(controller);
+    await returnToTerminal(observer, expect, 'web');
+    const after = await readTerminalState(observer);
     // The observer did not send input; the buffer is byte-identical.
     expect(String(after.text).replace(/\s+$/, '')).toBe(String(before.text).replace(/\s+$/, ''));
     expect(after.xtermCount).toBe(1);
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible();
 
     test.info().annotations.push({
       type: 'evidence',
       description:
-        'exact SHA ' + sha + ': after a second P2P client took control, the observer ' +
-        'opened plain.py at line 2 while the terminal buffer stayed unchanged',
+        'exact SHA ' + sha + ': a second P2P client attached read-only, saw ' +
+        'plain.py:2 arrive from the controller, and opened plain.py at line 2 while its ' +
+        'terminal buffer stayed unchanged',
     });
   } finally {
     await observerContext.close();
