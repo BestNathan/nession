@@ -68,12 +68,20 @@ impl Readiness {
         // Staged and renamed, so a parent that sees the file sees a whole one.
         // The parent only tests for existence, so a partially written file
         // would still read as ready — this is what keeps the file's *content*
-        // meaningful for anyone reading it after the fact.
-        let staged = path.with_extension("tmp");
+        // meaningful for anyone reading it after the fact. The staging suffix
+        // is appended rather than replacing an extension: the marker path
+        // carries the parent's pid, and `with_extension` would discard it.
+        let mut staged_name = path.as_os_str().to_owned();
+        staged_name.push(".tmp");
+        let staged = std::path::PathBuf::from(staged_name);
         let body = format!("ready pid={}\n", std::process::id());
         if let Err(error) =
             std::fs::write(&staged, body).and_then(|()| std::fs::rename(&staged, path))
         {
+            // A failed announcement must not leave staging debris in the
+            // runtime directory; the parent is the only reader and it will
+            // time out either way.
+            let _ = std::fs::remove_file(&staged);
             // Not fatal to *this* process — it is serving either way — but a
             // waiting parent is now waiting on something that will not arrive,
             // so say so where the logs are.
@@ -102,6 +110,24 @@ mod tests {
         assert!(
             body.contains(&format!("pid={}", std::process::id())),
             "the marker must name the process that wrote it: {body:?}"
+        );
+    }
+
+    /// A failed announcement must not leave a staging file in the runtime
+    /// directory, where it would be mistaken for lifecycle state.
+    #[test]
+    fn a_failed_announcement_removes_its_staging_file() {
+        let dir = TempDir::new().unwrap();
+        let marker = dir.path().join("ready");
+        // Renaming a file over a directory fails, which exercises the error
+        // path without relying on filesystem permissions.
+        std::fs::create_dir(&marker).unwrap();
+
+        Readiness::Announced(marker).announce();
+
+        assert!(
+            !dir.path().join("ready.tmp").exists(),
+            "staging debris survived a failed announcement"
         );
     }
 

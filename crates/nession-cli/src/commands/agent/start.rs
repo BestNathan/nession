@@ -24,8 +24,31 @@ pub async fn run(
     auth_token_stdin: bool,
 ) -> Result<()> {
     let selection = ConfigSelection::resolve(ConfigTarget::Agent, config)?;
-    let pid_file = pid_file::resolve_path(pid_file_path, pid_file::Component::Agent);
+    let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    run_with(
+        selection,
+        foreground,
+        state,
+        server_url_override,
+        auth_token_override,
+        auth_token_stdin,
+    )
+    .await
+}
 
+/// Start with an already-resolved configuration selection and state location.
+///
+/// `restart` uses this entry point so the replacement it validated is the same
+/// selection this start loads, and the state file it stopped is the one this
+/// start writes.
+pub(crate) async fn run_with(
+    selection: ConfigSelection,
+    foreground: bool,
+    state: pid_file::StateFiles,
+    server_url_override: Option<String>,
+    auth_token_override: Option<String>,
+    auth_token_stdin: bool,
+) -> Result<()> {
     // Child half of the background credential handoff (#2269). The parent that
     // re-executed us resolved the effective token and wrote it to our stdin;
     // its value wins over whatever this process parsed for itself, because the
@@ -44,21 +67,27 @@ pub async fn run(
         auth_token_override
     };
 
-    // Ensure component directories exist before any file operations (PID file)
+    // Ensure durable component directories exist before file operations. The
+    // runtime state directory was already created by `StateFiles::from_cli`
+    // for the default location; an explicit `--pid-file` keeps its historical
+    // behaviour of not creating its parent.
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
 
-    // Already running, decided by ownership rather than by pid (#1016). A stale
-    // file whose pid was reused must not read as "already running" — and must
-    // not survive to make the *next* start think so.
-    match pid_file::ownership(&pid_file) {
-        Ok(pid_file::Ownership::Alive(identity)) => {
-            anyhow::bail!("Agent is already running with PID {}", identity.pid);
-        }
-        // Stale, reused, or no record at all: nothing of ours is running.
-        Ok(_) | Err(_) => {
-            let _ = fs::remove_file(&pid_file);
-        }
+    // Already running, decided by ownership rather than by pid (#1016) — and
+    // over both locations, so a still-live daemon from a pre-runtime binary
+    // cannot be duplicated merely because the new runtime file is absent.
+    let inspection = pid_file::Inspection::of(&state);
+    if let Some((record, identity)) = inspection.live() {
+        anyhow::bail!(
+            "Agent is already running with PID {} (state file: {})",
+            identity.pid,
+            record.path
+        );
+    }
+    inspection.clean_dead();
+    for warning in inspection.unresolved_warnings("agent") {
+        eprintln!("Warning: {warning}");
     }
 
     let loaded = configuration::load_agent(&selection, &server_url_override, &auth_token_override)?;
@@ -77,14 +106,14 @@ pub async fn run(
         // actually loaded, so `status` can report a verified source instead of
         // presenting a default file as live state.
         pid_file::write_identity(
-            &pid_file,
+            &state.current,
             pid_file::Component::Agent,
             pid_file::ConfigRecord::from_loaded(&selection.path, from_file),
         )?;
 
         let result = run_agent_foreground(config).await;
 
-        let _ = fs::remove_file(&pid_file);
+        let _ = fs::remove_file(&state.current);
 
         result?;
     } else {
@@ -96,7 +125,7 @@ pub async fn run(
         let mut cmd = background_child_command(
             &exe,
             &selection,
-            &pid_file,
+            &state.current,
             server_url_override.as_deref(),
             auth_token_override.as_deref(),
         );
@@ -114,7 +143,7 @@ pub async fn run(
 
         // A path only this start knows, so a marker left by an earlier run
         // cannot be mistaken for this child's announcement.
-        let marker = startup::ReadyMarker::beside_state_file(&pid_file);
+        let marker = startup::ReadyMarker::beside_state_file(&state.current);
         marker.arm(&mut cmd);
 
         let mut child = cmd.spawn().context("failed to spawn agent process")?;
@@ -133,13 +162,13 @@ pub async fn run(
 
         match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
             startup::Startup::Serving => {
-                let pid = startup::announced_pid(&pid_file)?;
+                let pid = startup::announced_pid(&state.current)?;
                 println!("Agent started in background with PID {pid}");
-                println!("PID file: {pid_file}");
+                println!("PID file: {}", state.current);
             }
             startup::Startup::Exited(status) => {
                 let detail = startup::child_stderr(&mut child);
-                let _ = fs::remove_file(&pid_file);
+                let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
                     "Agent exited before it was serving ({status}){}",
                     if detail.is_empty() {
@@ -152,7 +181,7 @@ pub async fn run(
             startup::Startup::TimedOut => {
                 startup::terminate(&mut child);
                 let detail = startup::child_stderr(&mut child);
-                let _ = fs::remove_file(&pid_file);
+                let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
                     "Agent did not report itself serving within {}s{}",
                     startup::STARTUP_TIMEOUT.as_secs(),
