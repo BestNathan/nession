@@ -26,7 +26,7 @@
       {target:"/opt/rust",source:"Rust toolchain EROFS",mode:"ro"}
     ]
   }));
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,tab:"overview",openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
   var execution="sbx-70df40f4";
@@ -224,23 +224,36 @@
     resource:"Agent 发现的原生 cgroup v2 文件和写入值",
     syscall:"Agent 注册的 seccomp Profile"
   };
+
+  var sandboxTabs=["overview","filesystem","network","process","resource","syscall"];
+  function tabLabel(id){return id==="overview"?"Overview":dimensionNames[id]}
+  function tabNav(){
+    var observed=settings().inside,d=observed?actualPolicy():state.draft;
+    return '<nav role="tablist" aria-label="Sandbox policy sections" aria-orientation="'+(state.mode==="web"?"vertical":"horizontal")+
+      '" data-testid="sandbox-tab-nav" class="sandbox-tab-nav">'+
+      sandboxTabs.map(function(id){
+        var active=state.tab===id,info=id==="overview"?null:compositionState(d,id,observed);
+        var status=info?({unavailable:"不可用",unknown:"未知",observed:"已观测",requested:"已配置","not-requested":"未配置"})[info.kind]:"";
+        return '<button type="button" role="tab" id="sandbox-tab-'+id+'" data-action="select-tab:'+id+
+          '" data-sandbox-tab="'+id+'" data-testid="sandbox-tab-'+id+
+          '" aria-controls="sandbox-tab-panel" aria-selected="'+active+'" tabindex="'+(active?"0":"-1")+
+          '" class="sandbox-tab'+(active?" selected":"")+'"><span>'+tabLabel(id)+'</span>'+
+          (status?'<small>'+status+'</small>':'')+'</button>';
+      }).join('')+'</nav>';
+  }
   function compositionOverview(d,observed){
     var labels=["filesystem","network","process","resource","syscall"];
-    return '<section class="config-index" data-testid="sandbox-config-index" aria-label="Sandbox configuration destinations">'+
-      '<div class="composition-header"><div><h3>配置与检查</h3><p class="subline">'+(observed?
-      '逐项查看当前执行的实际生效配置；不能直接修改正在运行的隔离环境。':
-      '每类配置都有自己的管理页面。修改会保存在同一份 Sandbox Policy 草稿中。')+
+    return '<section class="config-index" data-testid="sandbox-config-index" aria-label="Sandbox policy summary">'+
+      '<div class="composition-header"><div><h3>策略摘要</h3><p class="subline">'+(observed?
+        '当前 Pane 的生效配置概况；逐项使用策略 Tab 查看实际证据。':
+        '所有策略在左侧或顶部 Tab 直接切换；配置共同组成一份 Policy 草稿。')+
       '</p></div><span class="pill">'+(observed?'Inside · observed':'Outside · draft')+'</span></div>'+
-      '<nav class="config-destinations" aria-label="Sandbox configuration sections">'+
-      labels.map(function(id){
+      '<div class="config-summary">'+labels.map(function(id){
         var p=compositionState(d,id,observed),
           status=({unavailable:"不可用",unknown:"状态未知",observed:"已观测",requested:"已配置","not-requested":"未配置"})[p.kind];
-        return '<button type="button" class="config-destination" data-action="open-module:'+id+'" data-testid="sandbox-nav-'+id+'" aria-label="Open '+dimensionNames[id]+'">'+
-          '<span class="config-destination-copy"><strong>'+dimensionNames[id]+'</strong>'+
-          '<span>'+moduleCopy[id]+'</span><small>'+escapeHtml(p.summary)+'</small></span>'+
-          '<span class="config-destination-state '+p.kind+'">'+status+'</span>'+
-          '<span class="config-destination-chevron" aria-hidden="true">›</span></button>';
-      }).join('')+'</nav></section>';
+        return '<div class="config-summary-row" data-summary-dimension="'+id+'"><span><strong>'+dimensionNames[id]+
+          '</strong><small>'+escapeHtml(p.summary)+'</small></span><span class="config-destination-state '+p.kind+'">'+status+'</span></div>';
+      }).join('')+'</div></section>';
   }
   function policyJson(d,title,always){
     var view=always||state.showPolicyJson;
@@ -441,22 +454,17 @@
     return html+'</section>';
   }
   function moduleView(){
-    var observed=settings().inside,id=state.openGroup;
+    var observed=settings().inside,id=state.tab;
     var label=observed?"Observed / effective":settings().supported?"Draft / editable":"Agent unknown";
-    var head='<div class="module-head"><div><p class="subline">'+moduleCopy[id]+'</p></div><span class="pill">'+label+'</span></div>'+
+    var head='<div class="module-head"><div><h3>'+dimensionNames[id]+'</h3><p class="subline">'+moduleCopy[id]+
+      '</p></div><span class="pill">'+label+'</span></div>'+
       '<div class="module-scope">当前 Session '+escapeHtml(state.session)+' · '+
       (observed?"Sandbox Pane %8":settings().supported?"Native Pane %1":"当前 Pane 状态未知")+
       ' · nession-dev · '+(observed?"生效只读":settings().supported?"草稿配置":"Agent 未验证")+'</div>';
-    var back=state.mode==="web"?'<button class="action module-back" data-action="module-back">← 返回 Sandbox 配置目录</button>':"";
-    var availability=!settings().supported?'<div class="notice warning">当前 Agent/Session 状态无法确认；此处仅供查看草稿，不可预检或 Enter。</div>':"";
-    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+back+head+availability+
-      (observed?observedModule():editor())+
-      (state.mode==="web"?
-        (!observed?'<div class="module-footer"><span class="subtxt">当前 '+dimensionNames[id]+' 修改属于同一份未执行的 Policy Draft</span>'+
-          '<button class="action" data-action="module-back">完成 · 返回 Sandbox</button></div>':
-          '<div class="module-footer"><button class="action" data-action="module-back">返回配置目录</button></div>'):
-        '')+
-      '</section>';
+    var availability=!settings().supported?'<div class="notice warning">当前 Agent/Session 状态无法确认；此处仅供查看草稿，不能预检或 Enter。</div>':"";
+    state.openGroup=id;
+    return '<section data-testid="sandbox-module-'+id+'" class="sandbox-module">'+head+availability+
+      (observed?observedModule():editor())+'</section>';
   }
   function detail(){
     if(!settings().inside)return '<div class="notice danger">当前 Pane 没有可验证的 SandboxExecution。</div>';
@@ -465,14 +473,20 @@
       '<div class="actionline"><button class="action" data-action="detail-back">← 返回 Sandbox 首页</button></div>';
   }
   function sandbox(){
-    var s=settings(),detailMode=state.depth==='detail',confirmMode=state.depth==='confirm';
-    var moduleMode=state.depth==="module";var title=detailMode?'Execution details':confirmMode?'Confirm Enter':moduleMode?dimensionNames[state.openGroup]:'Sandbox';
-    var intro=detailMode?'当前 Pane 隔离执行的实际生效配置与证据。':confirmMode?'确认并进入新的 Sandbox Pane。':moduleMode?'当前配置项自己的列表、操作和生效信息。':'按配置类型进入独立管理页面。';
-    var first='<section class="workspace" data-testid="sandbox-view"><div class="workspace-inner">'+
-      (state.mode==='web'?'<div class="crumb">Workspace / '+state.session+' / Sandbox'+(moduleMode?' / '+title:'')+'</div>':'')+
+    var s=settings(),detailMode=state.depth==="detail",confirmMode=state.depth==="confirm";
+    var title=detailMode?"Execution details":confirmMode?"Confirm Enter":"Sandbox";
+    var intro=detailMode?"当前 Pane 的实际执行证据。":confirmMode?"确认进入新的隔离 Pane。":
+      "五类独立配置面板，通过策略 Tab 直接切换；不增加子页面或返回层级。";
+    var root=!(detailMode||confirmMode);
+    var first='<section class="workspace'+(root?' sandbox-tab-workspace':'')+
+      '" data-testid="sandbox-view"><div class="workspace-inner'+(root?' sandbox-tab-inner':'')+'">'+
+      (state.mode==="web"?'<div class="crumb">Workspace / '+state.session+' / '+title+'</div>':'')+
       '<div class="titlebar"><div><h2>'+title+'</h2><p class="subline">'+intro+'</p></div></div>';
-    var content=detailMode?detail():confirmMode?confirmation():moduleMode?moduleView():s.inside?insideView():draftView();
-    return first+content+'</div></section>';
+    if(!root)return first+(detailMode?detail():confirmation())+'</div></section>';
+    var panel=state.tab==="overview"?(s.inside?insideView():draftView()):moduleView();
+    return first+'<div class="sandbox-tab-layout">'+tabNav()+
+      '<div role="tabpanel" id="sandbox-tab-panel" aria-labelledby="sandbox-tab-'+state.tab+
+      '" data-testid="sandbox-tab-panel" class="sandbox-tab-main">'+panel+'</div></div></div></section>';
   }
   function otherCapability(){
     var t=titles[state.cap]||"Workspace";
@@ -481,8 +495,8 @@
   function workspace(){
     var current=(state.cap==="sandbox"?sandbox():otherCapability());
     if(state.mode==="app"){
-      var title=state.depth==="detail"?"Execution details":state.depth==="confirm"?"Confirm Enter":state.depth==="module"?dimensionNames[state.openGroup]:titles[state.cap];
-      return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="'+(state.depth==="detail"?'detail-back':state.depth==="confirm"?'cancel-enter':state.depth==="module"?'module-back':'terminal')+'" aria-label="Back">←</button><span class="app-title">'+title+'</span><span style="width:40px"></span></header><main class="app-body">'+current+'</main>'+zone()+'</div>';
+      var title=state.depth==="detail"?"Execution details":state.depth==="confirm"?"Confirm Enter":titles[state.cap];
+      return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="'+(state.depth==="detail"?'detail-back':state.depth==="confirm"?'cancel-enter':'terminal')+'" aria-label="Back">←</button><span class="app-title">'+title+'</span><span style="width:40px"></span></header><main class="app-body">'+current+'</main>'+zone()+'</div>';
     }
     return '<div class="main-content">'+current+'</div>'+zone();
   }
@@ -501,7 +515,7 @@
     var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
     mock.setAttribute("data-mode",state.mode);
     mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
-    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),selected_policy_group:state.openGroup,show_policy_json:state.showPolicyJson,composition:compositionClusters.map(function(cluster){return {cluster:cluster.label,dimensions:cluster.groups.map(function(key){return compositionState(settings().inside?actualPolicy():state.draft,key,settings().inside)})}}),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
+    if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),selected_policy_group:state.tab,tab_navigation_depth:"root; no history push",show_policy_json:state.showPolicyJson,composition:compositionClusters.map(function(cluster){return {cluster:cluster.label,dimensions:cluster.groups.map(function(key){return compositionState(settings().inside?actualPolicy():state.draft,key,settings().inside)})}}),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
     var target=mock.querySelector('.cap-item[aria-current="page"]');
     if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
@@ -514,7 +528,7 @@
     state.preflight="none";
     state.preflightError="";
     state.error="";
-    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.openGroup="filesystem";state.showPolicyJson=false;
+    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.tab="overview";state.openGroup="filesystem";state.showPolicyJson=false;
     state.entered=false;
     state.pane=(value==="active"||value==="prepared")?"sandbox":"native";
     state.effective=value==="prepared"?cloneDraft(preparedEffective):value==="active"?cloneDraft(activeEffective):null;
@@ -572,11 +586,10 @@
     else if(action==="toggle-peek"){state.peek=!state.peek;}
     else if(action==="detail"){state.depth="detail";}
     else if(action==="detail-back"){state.depth="root";}
-    else if(action.indexOf("open-module:")===0){
-      var group=action.slice("open-module:".length);
-      if(Object.prototype.hasOwnProperty.call(dimensionNames,group)){state.openGroup=group;state.depth="module";state.showPolicyJson=false;}
+    else if(action.indexOf("select-tab:")===0){
+      var group=action.slice("select-tab:".length);
+      if(sandboxTabs.includes(group)){state.tab=group;if(group!=="overview")state.openGroup=group;}
     }
-    else if(action==="module-back"){state.depth="root";state.showPolicyJson=false;}
     else if(action.indexOf("add-path:")===0){
       var key=action.slice(9);
       if((key==="readOnly"||key==="write")&&settings().supported&&!settings().macos){
@@ -654,6 +667,23 @@
       setFixture(name==="native-debug"?"native":"active");return;
     }
     render();
+  });
+  // Accessible tab keyboard behavior: arrows move across peers, Home/End jump.
+  // No browser-history change and no App depth pushed by a Tab selection.
+  mock.addEventListener("keydown",function(e){
+    var target=e.target?.closest?.("[data-sandbox-tab]");
+    if(!target)return;
+    var index=sandboxTabs.indexOf(target.getAttribute("data-sandbox-tab"));
+    if(index<0)return;
+    var next=e.key==="Home"?0:e.key==="End"?sandboxTabs.length-1:
+      (e.key==="ArrowRight"||e.key==="ArrowDown")?(index+1)%sandboxTabs.length:
+      (e.key==="ArrowLeft"||e.key==="ArrowUp")?(index-1+sandboxTabs.length)%sandboxTabs.length:-1;
+    if(next<0)return;
+    e.preventDefault?.();
+    state.tab=sandboxTabs[next];
+    if(state.tab!=="overview")state.openGroup=state.tab;
+    render();
+    mock.querySelector('[data-sandbox-tab="'+state.tab+'"]')?.focus?.();
   });
   root.querySelectorAll("[data-fixture]").forEach(function(button){
     button.addEventListener("click",function(){setFixture(button.getAttribute("data-fixture"));});
