@@ -35,7 +35,7 @@ function publish(dir,expected,fixture=false){
       // receipt is generated inside the trusted, isolated RUNNER_TEMP; never
       // read an untrusted proposal artifact as authorization.
       let approvedAdmission=false;
-      if(['repository_dispatch','workflow_run'].includes(process.env.GITHUB_EVENT_NAME) &&
+      if(['repository_dispatch','workflow_run','issue_comment'].includes(process.env.GITHUB_EVENT_NAME) &&
          process.env.GITHUB_RUN_ATTEMPT==='1' &&
          process.env.RUNNER_TEMP && process.env.GITHUB_EVENT_PATH){
         try{
@@ -46,6 +46,12 @@ function publish(dir,expected,fixture=false){
           const correctSource=eventType==='repository_dispatch'
             ? (process.env.GITHUB_ACTOR==='BestNathan' &&
               event.action==='knowledge-publish-v1' && event.sender?.login==='BestNathan')
+            : eventType==='issue_comment'
+            ? (process.env.GITHUB_ACTOR==='BestNathan' &&
+              event.action==='created' && event.sender?.login==='BestNathan' &&
+              event.comment?.user?.login==='BestNathan' &&
+              event.comment?.author_association==='OWNER' &&
+              event.issue?.pull_request==null)
             : (event.action==='completed' &&
               event.workflow_run?.event==='create' &&
               event.workflow_run?.name==='Store / Knowledge Proposal Signal' &&
@@ -58,6 +64,7 @@ function publish(dir,expected,fixture=false){
             receipt.schema_version===1 &&
             receipt.event===eventType &&
             receipt.source_run_id===(eventType==='workflow_run'?event.workflow_run.id:null) &&
+            receipt.source_comment_id===(eventType==='issue_comment'?event.comment.id:null) &&
             receipt.trusted_main_sha===process.env.GITHUB_SHA &&
             receipt.run_id===process.env.GITHUB_RUN_ID &&
             receipt.run_attempt===process.env.GITHUB_RUN_ATTEMPT &&
