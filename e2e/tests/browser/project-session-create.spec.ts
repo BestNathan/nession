@@ -128,7 +128,7 @@ test.describe('Project Existing-location Session creation', () => {
       expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
       const openTriggerBox = await trigger.boundingBox();
       expect(openTriggerBox).not.toBeNull();
-      // #3164 resource choices may grow wider than the narrow anchor to
+      // #3164 / #3199 resource choices may grow wider than the narrow anchor to
       // reveal metadata/long paths. They must still contain the anchor width
       // and fit inside the viewport; exact equality is the old action-list
       // contract, not the current rich-choice contract.
