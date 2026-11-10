@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import type {
   SandboxCurrentContext,
@@ -16,9 +17,21 @@ import {
 import { SandboxComposerActions } from './SandboxComposerActions';
 import { SandboxConfirmView } from './SandboxConfirmView';
 import { SandboxExistingPanes } from './SandboxExistingPanes';
+import { SandboxSyscallProfile } from './SandboxSyscallProfile';
 import { SandboxFilesystemFields } from './SandboxFilesystemFields';
 import { SandboxKvEditor } from './SandboxKvEditor';
-import { SandboxNetworkProcessFields } from './SandboxNetworkProcessFields';
+import {
+  SandboxNetworkFields,
+  SandboxProcessFields,
+} from './SandboxNetworkProcessFields';
+import {
+  SandboxPolicyPreview,
+  SandboxPolicySummary,
+} from './SandboxPolicySummary';
+import {
+  SandboxPolicyTabs,
+  type SandboxTabId,
+} from './SandboxPolicyTabs';
 
 export type { SandboxActionError } from '../model';
 
@@ -37,59 +50,34 @@ export interface SandboxComposerProps {
   confirming: boolean;
   onConfirm: () => void;
   onCancelConfirm: () => void;
+  experience: 'web' | 'app';
+  activeTab: SandboxTabId;
+  onTabChange: (tab: SandboxTabId) => void;
 }
 
-/**
- * The outside composer (#3124).
- *
- * The draft is explicit: no path, namespace, Resource key, Syscall key or
- * profile is preselected. Editing any control invalidates the preflight, so
- * Enter is only reachable through a fresh validation of the exact draft on
- * screen.
- */
-export function SandboxComposer({
-  context,
-  draft,
-  preflight,
-  preflightBusy,
-  busy,
-  actionError,
-  workingDir,
-  onWorkingDirChange,
-  onPreflight,
-  onRequestEnter,
-  onFocusPane,
-  confirming,
-  onConfirm,
-  onCancelConfirm,
-}: SandboxComposerProps) {
-  const signature = draftSignature(draft.draft);
-  const preflightValid = preflightIsValid(
+function ComposerOverview({
+  props,
+  signature,
+  preflightValid,
+}: {
+  props: SandboxComposerProps;
+  signature: string;
+  preflightValid: boolean;
+}) {
+  const {
+    context,
+    draft,
     preflight,
-    signature,
-    context.generation,
-    context.catalog.probe_generation,
-  );
-  const fieldErrors = {
-    ...fieldErrorsByField(preflight?.result.errors),
-    ...(actionError?.fieldErrors ?? {}),
-  };
-
-  if (confirming) {
-    return (
-      <SandboxConfirmView
-        draft={draft.draft}
-        busy={busy}
-        preflightValid={preflightValid}
-        actionError={actionError}
-        onConfirm={onConfirm}
-        onCancel={onCancelConfirm}
-      />
-    );
-  }
-
+    preflightBusy,
+    busy,
+    actionError,
+    onPreflight,
+    onRequestEnter,
+    onFocusPane,
+    onTabChange,
+  } = props;
   return (
-    <div data-testid="sandbox-composer" className="flex min-w-0 flex-col gap-5">
+    <div className="flex min-w-0 flex-col gap-5">
       <header className="flex min-w-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className={chromeSansRole('title')}>Outside Sandbox</h2>
@@ -102,47 +90,17 @@ export function SandboxComposer({
           optional groups stay empty until you add them, and the backend baseline still applies.
         </p>
         {context.reason ? (
-          <p data-testid="sandbox-reason" className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
+          <p
+            data-testid="sandbox-reason"
+            className={cn(chromeSansRole('caption'), 'text-muted-foreground')}
+          >
             {context.reason}
           </p>
         ) : null}
       </header>
 
-      <SandboxFilesystemFields
-        context={context}
-        draft={draft}
-        workingDir={workingDir}
-        workingDirError={fieldErrors['working_dir']}
-        onWorkingDirChange={onWorkingDirChange}
-      />
-
-      <SandboxNetworkProcessFields draft={draft} catalog={context.catalog} />
-
-      <SandboxKvEditor
-        group="resource"
-        title="Resource controls"
-        description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
-        rows={draft.draft.resource}
-        catalog={context.catalog}
-        implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
-        errors={fieldErrors}
-        onAdd={() => draft.addRow('resource')}
-        onChange={(index, patch) => draft.updateRow('resource', index, patch)}
-        onRemove={(index) => draft.removeRow('resource', index)}
-      />
-
-      <SandboxKvEditor
-        group="syscall"
-        title="Syscall controls"
-        description="Only the Agent's registered seccomp profiles are accepted. Empty omits the Syscall group."
-        rows={draft.draft.syscall}
-        catalog={context.catalog}
-        implementationPath={IMPLEMENTATION_PATHS.seccomp}
-        errors={fieldErrors}
-        onAdd={() => draft.addRow('syscall')}
-        onChange={(index, patch) => draft.updateRow('syscall', index, patch)}
-        onRemove={(index) => draft.removeRow('syscall', index)}
-      />
+      <SandboxPolicySummary policy={draft.draft} onSelectTab={onTabChange} />
+      <SandboxPolicyPreview policy={draft.draft} />
 
       <SandboxComposerActions
         preflight={preflight}
@@ -158,6 +116,131 @@ export function SandboxComposer({
       />
 
       <SandboxExistingPanes panes={context.sandbox_panes} busy={busy} onFocus={onFocusPane} />
+    </div>
+  );
+}
+
+function KvPanel({
+  props,
+  group,
+  title,
+  description,
+  implementationPath,
+  fieldErrors,
+}: {
+  props: SandboxComposerProps;
+  group: 'resource' | 'syscall';
+  title: string;
+  description: string;
+  implementationPath: string;
+  fieldErrors: Record<string, string>;
+}) {
+  const { context, draft } = props;
+  return (
+    <SandboxKvEditor
+      group={group}
+      title={title}
+      description={description}
+      rows={draft.draft[group]}
+      catalog={context.catalog}
+      implementationPath={implementationPath}
+      errors={fieldErrors}
+      onAdd={() => draft.addRow(group)}
+      onChange={(index, patch) => draft.updateRow(group, index, patch)}
+      onRemove={(index) => draft.removeRow(group, index)}
+    />
+  );
+}
+
+/**
+ * The outside composer (#3124, #3143).
+ *
+ * The draft is explicit and shared across the six peer tabs. Tab switching is
+ * local UI navigation: it preserves the draft and a fresh preflight, while any
+ * actual edit invalidates the preflight. Enter is only reachable from the
+ * Overview through a validation of the exact assembled payload.
+ */
+export function SandboxComposer(props: SandboxComposerProps) {
+  const {
+    context,
+    draft,
+    preflight,
+    workingDir,
+    onWorkingDirChange,
+    confirming,
+    onConfirm,
+    onCancelConfirm,
+    experience,
+    activeTab,
+    onTabChange,
+  } = props;
+  const signature = draftSignature(draft.draft);
+  const preflightValid = preflightIsValid(
+    preflight,
+    signature,
+    context.generation,
+    context.catalog.probe_generation,
+  );
+  const fieldErrors = {
+    ...fieldErrorsByField(preflight?.result.errors),
+    ...(props.actionError?.fieldErrors ?? {}),
+  };
+
+  if (confirming) {
+    return (
+      <SandboxConfirmView
+        draft={draft.draft}
+        busy={props.busy}
+        preflightValid={preflightValid}
+        actionError={props.actionError}
+        onConfirm={onConfirm}
+        onCancel={onCancelConfirm}
+      />
+    );
+  }
+
+  const panels: Record<SandboxTabId, ReactNode> = {
+    overview: (
+      <ComposerOverview props={props} signature={signature} preflightValid={preflightValid} />
+    ),
+    filesystem: (
+      <SandboxFilesystemFields
+        context={context}
+        draft={draft}
+        workingDir={workingDir}
+        workingDirError={fieldErrors['working_dir']}
+        onWorkingDirChange={onWorkingDirChange}
+      />
+    ),
+    network: <SandboxNetworkFields draft={draft} catalog={context.catalog} />,
+    process: <SandboxProcessFields draft={draft} catalog={context.catalog} />,
+    resource: (
+      <KvPanel
+        props={props}
+        group="resource"
+        title="Resource controls"
+        description="Optional cgroup v2 control files, in their native kernel format. Empty omits the Resource group."
+        implementationPath={IMPLEMENTATION_PATHS.cgroupV2}
+        fieldErrors={fieldErrors}
+      />
+    ),
+    syscall: <SandboxSyscallProfile draft={draft} catalog={context.catalog} />,
+  };
+
+  return (
+    <div
+      data-testid="sandbox-composer"
+      className={cn(
+        'flex min-w-0 flex-col',
+        experience === 'web' && 'min-h-0 flex-1',
+      )}
+    >
+      <SandboxPolicyTabs
+        experience={experience}
+        value={activeTab}
+        onValueChange={onTabChange}
+        renderPanel={(tab) => panels[tab]}
+      />
     </div>
   );
 }

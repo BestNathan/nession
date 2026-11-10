@@ -75,104 +75,127 @@ function KvRows({
   );
 }
 
-/**
- * The Agent-observed effective policy (#3124), rendered read-only.
- *
- * This is the normalized policy the execution was verified against, not the
- * draft the user last edited and not a reconstruction from a digest.
- */
-export function SandboxEffectivePolicy({ policy }: { policy: SandboxPolicyDraft }) {
+function enabledNamespaces(policy: SandboxPolicyDraft): string[] {
   const namespaces = policy.process?.linux_namespaces;
-  const enabledNamespaces = namespaces
-    ? (['pid', 'ipc', 'user', 'uts', 'cgroup'] as const).filter(
-        (namespace) => namespaces[namespace],
-      )
-    : [];
+  if (!namespaces) {
+    return [];
+  }
+  return (['pid', 'ipc', 'user', 'uts', 'cgroup'] as const).filter(
+    (namespace) => namespaces[namespace],
+  );
+}
+
+/** Observed filesystem policy plus the read-only prepared-composition fact. */
+export function SandboxEffectiveFilesystem({
+  policy,
+  mechanisms,
+}: {
+  policy: SandboxPolicyDraft;
+  mechanisms: string[];
+}) {
+  const erofs = mechanisms.includes('filesystem.erofs');
+  return (
+    <section aria-label="Effective filesystem" className="flex min-w-0 flex-col gap-4">
+      {erofs ? (
+        <div
+          data-testid="sandbox-effective-erofs"
+          className="flex min-w-0 flex-col gap-1 rounded-[var(--nession-radius-surface)] bg-muted/30 p-2"
+        >
+          <span className={chromeSansRole('secondary')}>Prepared root composition</span>
+          <p className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
+            This execution used an Agent-prepared EROFS root: Base Runtime at /, workspace at
+            /workspace and read-only toolchains under /opt/&lt;name&gt;. Image sources and digests
+            are Server/Agent execution inputs and are not exposed to Web.
+          </p>
+        </div>
+      ) : null}
+      <dl className="flex min-w-0 flex-col gap-3">
+        <ListSection
+          title="Read-only paths"
+          entries={policy.filesystem?.access.read ?? []}
+          empty="No explicit read-only allow-list; the backend baseline applies."
+          testId="sandbox-effective-file-read"
+        />
+        <ListSection
+          title="Read-write paths"
+          entries={policy.filesystem?.access.write ?? []}
+          empty="No explicit read-write allow-list."
+          testId="sandbox-effective-file-write"
+        />
+      </dl>
+    </section>
+  );
+}
+
+/** Observed network mode and applied egress rule sets. */
+export function SandboxEffectiveNetwork({ policy }: { policy: SandboxPolicyDraft }) {
   const network = policy.network;
   return (
-    <section className="flex min-w-0 flex-col gap-4" aria-label="Effective policy">
-      <h3 className={chromeSansRole('primary')}>Effective policy</h3>
-      <dl className="flex min-w-0 flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-            Filesystem access
-          </dt>
-          <dd className="flex flex-col gap-2">
-            <ListSection
-              title="Read-only paths"
-              entries={policy.filesystem?.access.read ?? []}
-              empty="No explicit read-only allow-list; the backend baseline applies."
-              testId="sandbox-effective-file-read"
-            />
-            <ListSection
-              title="Read-write paths"
-              entries={policy.filesystem?.access.write ?? []}
-              empty="No explicit read-write allow-list."
-              testId="sandbox-effective-file-write"
-            />
-          </dd>
-        </div>
-        <div className="flex flex-col gap-1">
-          <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-            Network
-          </dt>
-          <dd>
-            <span data-testid="sandbox-effective-network-mode" className={chromeSansRole('code')}>
-              {network?.mode ?? 'allow'}
-            </span>
-            {network?.egress ? (
-              <div className="mt-2 flex flex-col gap-2">
-                <ListSection
-                  title="Allowed destinations"
-                  entries={network.egress.allow}
-                  empty="No destinations are allowed."
-                  testId="sandbox-effective-egress-allow"
-                />
-                <ListSection
-                  title="Denied destinations"
-                  entries={network.egress.deny}
-                  empty="No extra destinations are denied."
-                  testId="sandbox-effective-egress-deny"
-                />
-              </div>
-            ) : null}
-          </dd>
-        </div>
-        <div className="flex flex-col gap-1">
-          <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-            Process namespaces
-          </dt>
-          <dd data-testid="sandbox-effective-namespaces" className={chromeSansRole('secondary')}>
-            {enabledNamespaces.length === 0
-              ? 'No explicit Linux namespace request; the backend baseline applies.'
-              : enabledNamespaces.join(', ')}
-          </dd>
-        </div>
-        <div className="flex flex-col gap-2">
-          <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-            Resource
-          </dt>
-          <dd>
-            <KvRows
-              group="resource"
-              rows={policy.resource}
-              testIdPrefix="sandbox-effective-resource"
-            />
-          </dd>
-        </div>
-        <div className="flex flex-col gap-2">
-          <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>
-            Syscall
-          </dt>
-          <dd>
-            <KvRows
-              group="syscall"
-              rows={policy.syscall}
-              testIdPrefix="sandbox-effective-syscall"
-            />
-          </dd>
-        </div>
+    <section aria-label="Effective network" className="flex min-w-0 flex-col gap-3">
+      <dl className="flex min-w-0 flex-col gap-1">
+        <dt className={cn(chromeSansRole('caption'), 'text-muted-foreground')}>Mode</dt>
+        <dd>
+          <span data-testid="sandbox-effective-network-mode" className={chromeSansRole('code')}>
+            {network?.mode ?? 'allow'}
+          </span>
+        </dd>
       </dl>
+      {network?.egress ? (
+        <dl className="flex min-w-0 flex-col gap-3">
+          <ListSection
+            title="Allowed destinations"
+            entries={network.egress.allow}
+            empty="No destinations are allowed."
+            testId="sandbox-effective-egress-allow"
+          />
+          <ListSection
+            title="Denied destinations"
+            entries={network.egress.deny}
+            empty="No extra destinations are denied."
+            testId="sandbox-effective-egress-deny"
+          />
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
+/** Observed installed Linux namespace requests. */
+export function SandboxEffectiveProcess({ policy }: { policy: SandboxPolicyDraft }) {
+  const namespaces = enabledNamespaces(policy);
+  return (
+    <section aria-label="Effective process">
+      <p data-testid="sandbox-effective-namespaces" className={chromeSansRole('secondary')}>
+        {namespaces.length === 0
+          ? 'No explicit Linux namespace request; the backend baseline applies.'
+          : namespaces.join(', ')}
+      </p>
+    </section>
+  );
+}
+
+/** Observed resource-control rows. */
+export function SandboxEffectiveResource({ policy }: { policy: SandboxPolicyDraft }) {
+  return (
+    <section aria-label="Effective resource">
+      <KvRows
+        group="resource"
+        rows={policy.resource}
+        testIdPrefix="sandbox-effective-resource"
+      />
+    </section>
+  );
+}
+
+/** Observed seccomp profile rows. */
+export function SandboxEffectiveSyscall({ policy }: { policy: SandboxPolicyDraft }) {
+  return (
+    <section aria-label="Effective syscall">
+      <KvRows
+        group="syscall"
+        rows={policy.syscall}
+        testIdPrefix="sandbox-effective-syscall"
+      />
     </section>
   );
 }

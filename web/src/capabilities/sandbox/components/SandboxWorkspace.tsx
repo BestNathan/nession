@@ -7,7 +7,6 @@ import type {
   WorkspaceViewProps,
 } from '@/app/workspace/workspaceContext';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { cn } from '@/shared/lib/utils';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
@@ -21,6 +20,7 @@ import {
 } from '../hooks/useSandboxTransitions';
 import type { SandboxActionError } from '../model';
 import { SandboxComposer } from './SandboxComposer';
+import type { SandboxTabId } from './SandboxPolicyTabs';
 import { SandboxInsideView } from './SandboxInsideView';
 import { SandboxUnavailableView } from './SandboxUnavailableView';
 
@@ -51,6 +51,9 @@ interface SandboxBodyProps {
   actionError: SandboxActionError | null;
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
+  experience: 'web' | 'app';
+  activeTab: SandboxTabId;
+  onTabChange: (tab: SandboxTabId) => void;
 }
 
 /** The four truthful states; a pure render of what the Agent answered. */
@@ -62,6 +65,9 @@ function SandboxBody({
   actionError,
   workingDir,
   onWorkingDirChange,
+  experience,
+  activeTab,
+  onTabChange,
 }: SandboxBodyProps) {
   const retry = () => {
     transitions.reset();
@@ -113,6 +119,9 @@ function SandboxBody({
           busy={transitions.busy}
           onReturnToNative={transitions.returnToNative}
           onFocusPane={transitions.focusPane}
+          experience={experience}
+          activeTab={activeTab}
+          onTabChange={onTabChange}
         />
       </>
     );
@@ -140,6 +149,9 @@ function SandboxBody({
         }
       }}
       onCancelConfirm={transitions.cancelConfirm}
+      experience={experience}
+      activeTab={activeTab}
+      onTabChange={onTabChange}
     />
   );
 }
@@ -161,6 +173,7 @@ export function SandboxWorkspace({
   depth?: WorkspaceDepthControl;
 }) {
   const sessionId = ctx.session?.session_id ?? null;
+  const [activeTab, setActiveTab] = useState<SandboxTabId>('overview');
   const sandbox = useSandboxContext(sessionId);
   const draft = useSandboxDraft(sandbox.context);
   const [workingDir, setWorkingDir] = useState('');
@@ -185,10 +198,10 @@ export function SandboxWorkspace({
     <div
       data-testid="sandbox-workspace"
       className={cn(
-        'flex min-w-0 flex-col gap-4',
+        'flex min-w-0 flex-col gap-3',
         ctx.experience === 'app'
           ? 'p-3'
-          : cn('h-full min-h-0 overflow-y-auto p-4', workspaceScrollClearanceClass),
+          : 'h-full min-h-0 p-4',
       )}
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
@@ -209,15 +222,25 @@ export function SandboxWorkspace({
           <RefreshCw aria-hidden="true" />
         </Button>
       </div>
-      <SandboxBody
-        sandbox={sandbox}
-        draft={draft}
-        preflightState={preflightState}
-        transitions={transitions}
-        actionError={actionError}
-        workingDir={workingDir}
-        onWorkingDirChange={setWorkingDir}
-      />
+      <div
+        className={cn(
+          'flex min-w-0 flex-col',
+          ctx.experience === 'web' && 'min-h-0 flex-1',
+        )}
+      >
+        <SandboxBody
+          sandbox={sandbox}
+          draft={draft}
+          preflightState={preflightState}
+          transitions={transitions}
+          actionError={actionError}
+          workingDir={workingDir}
+          onWorkingDirChange={setWorkingDir}
+          experience={ctx.experience}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
+      </div>
     </div>
   );
 }
