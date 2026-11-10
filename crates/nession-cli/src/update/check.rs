@@ -9,7 +9,9 @@ pub async fn background_check() -> Option<String> {
     let current_version = env!("CARGO_PKG_VERSION");
 
     if let Some(cached) = cache::read_cache() {
-        if is_cache_fresh(&cached.checked_at) {
+        // A cache written by another installed release must never be read as
+        // this release's answer (#3173).
+        if cached.current_version == current_version && is_cache_fresh(&cached.checked_at) {
             return if cached.update_available {
                 Some(format!(
                     "⚠ Update available: {} → {}. Run `nession update` to upgrade.",
@@ -21,11 +23,7 @@ pub async fn background_check() -> Option<String> {
         }
     }
 
-    let client = if let Ok(api_url) = std::env::var("NESSION_UPDATE_API_URL") {
-        GitHubReleaseClient::with_base_url(api_url).ok()?
-    } else {
-        GitHubReleaseClient::new().ok()?
-    };
+    let client = GitHubReleaseClient::from_env().ok()?;
 
     let release = match tokio::time::timeout(
         std::time::Duration::from_secs(5),

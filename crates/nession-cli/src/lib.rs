@@ -6,3 +6,4 @@ pub mod lifecycle;
 pub mod service;
 pub mod terminal;
 pub mod update;
+pub mod versions;

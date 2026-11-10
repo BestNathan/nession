@@ -49,6 +49,15 @@ impl GitHubReleaseClient {
         Self::with_base_url("https://api.github.com".to_string())
     }
 
+    /// The client the CLI uses: `NESSION_UPDATE_API_URL` lets an isolated
+    /// install/Case point release discovery at a local fixture server.
+    pub fn from_env() -> Result<Self, reqwest::Error> {
+        match std::env::var("NESSION_UPDATE_API_URL") {
+            Ok(url) if !url.trim().is_empty() => Self::with_base_url(url),
+            _ => Self::new(),
+        }
+    }
+
     /// Create a client with a custom base URL (e.g. for testing with a mock server).
     pub fn with_base_url(base_url: String) -> Result<Self, reqwest::Error> {
         let mut headers = HeaderMap::new();

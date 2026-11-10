@@ -7,7 +7,8 @@
 //! (#2269).
 
 use crate::configuration::{self, ConfigSelection, ConfigTarget};
-use crate::lifecycle::{pid_file, secret_handoff, startup};
+use crate::lifecycle::lock::LifecycleLock;
+use crate::lifecycle::{pid_file, release, secret_handoff, startup};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -25,6 +26,17 @@ pub async fn run(
 ) -> Result<()> {
     let selection = ConfigSelection::resolve(ConfigTarget::Agent, config)?;
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
+    // One lifecycle command at a time across every installed release. The
+    // runtime identity is shared, so the lock must be too. The foreground child
+    // of a background start inherits the parent's lock through its marker; it
+    // must not take the same lock again.
+    let lock = if foreground
+        && std::env::var_os(crate::lifecycle::lock::LOCK_HELD_BY_PARENT_ENV).is_some()
+    {
+        None
+    } else {
+        Some(LifecycleLock::acquire()?)
+    };
     run_with(
         selection,
         foreground,
@@ -32,11 +44,13 @@ pub async fn run(
         server_url_override,
         auth_token_override,
         auth_token_stdin,
+        lock,
     )
     .await
 }
 
-/// Start with an already-resolved configuration selection and state location.
+/// Start with an already-resolved configuration selection and state location,
+/// holding the lifecycle lock.
 ///
 /// `restart` uses this entry point so the replacement it validated is the same
 /// selection this start loads, and the state file it stopped is the one this
@@ -48,6 +62,7 @@ pub(crate) async fn run_with(
     server_url_override: Option<String>,
     auth_token_override: Option<String>,
     auth_token_stdin: bool,
+    lock: Option<LifecycleLock>,
 ) -> Result<()> {
     // Child half of the background credential handoff (#2269). The parent that
     // re-executed us resolved the effective token and wrote it to our stdin;
@@ -77,14 +92,23 @@ pub(crate) async fn run_with(
     // Already running, decided by ownership rather than by pid (#1016) — and
     // over both locations, so a still-live daemon from a pre-runtime binary
     // cannot be duplicated merely because the new runtime file is absent.
+    //
+    // Start is idempotent by requirement: a live Agent is reported and left
+    // alone, even when the selected release differs from the running one. Only
+    // `restart` replaces a running process.
     let inspection = pid_file::Inspection::of(&state);
     if let Some((record, identity)) = inspection.live() {
-        anyhow::bail!(
-            "Agent is already running with PID {} (state file: {})",
+        println!(
+            "Agent is already running with PID {} (release {}, state file {}); start is idempotent.",
             identity.pid,
+            identity.release_version.as_deref().unwrap_or("unknown"),
             record.path
         );
+        return Ok(());
     }
+    // A live Server from another release is a conflict, not something this
+    // command may fix by restarting it.
+    release::ensure_no_mixed_release(pid_file::Component::Server, pid_file::Component::Agent)?;
     inspection.clean_dead();
     for warning in inspection.unresolved_warnings("agent") {
         eprintln!("Warning: {warning}");
@@ -111,6 +135,10 @@ pub(crate) async fn run_with(
             pid_file::ConfigRecord::from_loaded(&selection.path, from_file),
         )?;
 
+        // A foreground daemon owns the terminal for its whole lifetime. Holding
+        // the lifecycle lock here would block every later stop/restart/install,
+        // so release it once this process has recorded its identity.
+        drop(lock);
         let result = run_agent_foreground(config).await;
 
         let _ = fs::remove_file(&state.current);
@@ -193,6 +221,7 @@ pub(crate) async fn run_with(
                 );
             }
         }
+        drop(lock);
         if from_file {
             println!("Config: {config_path}");
         } else {
@@ -243,6 +272,7 @@ pub(crate) fn background_child_command(
         child_args.push(secret_handoff::AUTH_TOKEN_STDIN_ARG.to_string());
     }
     cmd.args(&child_args)
+        .env(crate::lifecycle::lock::LOCK_HELD_BY_PARENT_ENV, "1")
         .stdin(if hands_off_token {
             Stdio::piped()
         } else {

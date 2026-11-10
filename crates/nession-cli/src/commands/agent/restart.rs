@@ -1,7 +1,8 @@
 //! `nession agent restart` — validate the replacement, stop, then start.
 
 use crate::configuration::{self, ConfigSelection, ConfigTarget};
-use crate::lifecycle::pid_file;
+use crate::lifecycle::lock::LifecycleLock;
+use crate::lifecycle::{pid_file, release};
 use anyhow::Result;
 
 pub async fn run(
@@ -23,8 +24,11 @@ pub async fn run(
     candidate.validate()?;
 
     let state = pid_file::StateFiles::from_cli(pid_file_path, pid_file::Component::Agent)?;
-    println!("Restarting agent...");
-    super::stop::run_with(state.clone()).await?;
+    let lock = LifecycleLock::acquire()?;
+    // Refuse before stopping anything if the Server is running another release.
+    release::ensure_no_mixed_release(pid_file::Component::Server, pid_file::Component::Agent)?;
+    println!("Restarting agent (release {})...", release::this_release());
+    super::stop::run_with(state.clone(), &lock).await?;
     super::start::run_with(
         selection,
         foreground,
@@ -34,6 +38,7 @@ pub async fn run(
         // `restart` is never the child of a handoff: a background restart
         // re-executes `agent start`, which is the path that reads the pipe.
         false,
+        Some(lock),
     )
     .await
 }

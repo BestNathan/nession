@@ -8,15 +8,17 @@
 pub mod agent;
 pub mod agents;
 pub mod config;
+pub mod install;
 pub mod server;
 pub mod sessions;
 pub mod update;
+pub mod version;
 
 use anyhow::{Context, Result};
 
 use crate::args::{
     AgentAction, AgentsAction, Cli, Commands, ConfigAction, ConfigSubAction, ServerAction,
-    SessionsAction,
+    SessionsAction, VersionAction,
 };
 use crate::connection;
 
@@ -35,7 +37,11 @@ fn consumes_global_target_flags(command: &Commands) -> bool {
             )
         }
         Commands::Agents { .. } | Commands::Sessions { .. } => true,
-        Commands::Server { .. } | Commands::Config { .. } | Commands::Update { .. } => false,
+        Commands::Server { .. }
+        | Commands::Config { .. }
+        | Commands::Install { .. }
+        | Commands::Version { .. }
+        | Commands::Update { .. } => false,
     }
 }
 
@@ -74,6 +80,10 @@ fn command_path(command: &Commands) -> &'static str {
                 ConfigSubAction::Show { .. } => "config server show",
                 ConfigSubAction::Set { .. } => "config server set",
             },
+        },
+        Commands::Install { .. } => "install",
+        Commands::Version { action } => match action {
+            VersionAction::List => "version list",
         },
         Commands::Update { .. } => "update",
     }
@@ -237,6 +247,14 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 }
             },
         },
+        Commands::Install {
+            version,
+            dry_run,
+            yes,
+        } => install::run(version, dry_run, yes).await?,
+        Commands::Version { action } => match action {
+            VersionAction::List => version::run().await?,
+        },
         Commands::Update {
             check,
             version,
@@ -273,6 +291,7 @@ mod tests {
         "config/server/init.rs",
         "config/server/set.rs",
         "config/server/show.rs",
+        "install.rs",
         "server/restart.rs",
         "server/start.rs",
         "server/status.rs",
@@ -282,6 +301,7 @@ mod tests {
         "sessions/kill.rs",
         "sessions/list.rs",
         "update.rs",
+        "version.rs",
     ];
 
     fn collect_rust_files(dir: &Path, root: &Path, out: &mut BTreeSet<String>) {
@@ -388,6 +408,8 @@ mod tests {
             &["config", "server", "init"],
             &["config", "server", "show"],
             &["config", "server", "set", "terminal_cols", "96"],
+            &["install", "0.35.0"],
+            &["version", "list"],
             &["update"],
         ];
         for argv in rejected {
