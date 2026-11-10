@@ -598,3 +598,10 @@
 - Categories: web, app, interaction, session, project, presentation, responsive
 - Reason: Record the #3136 compact form-field row rule: top-aligned 32px Web / 44px App Agent/Directory controls, opt-in SelectTrigger field and growing Textarea field variants, Remove in the label slot, dialog as the single scroll owner, App stacked 44px composition, and the in-place #3089 prototype publication plus Case/E2E receipts
 - Source: https://github.com/BestNathan/nession/issues/3136
+
+## 2026-11-10T16:18:55Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Record the merged #3220 single-direct-child admission fix across all owner publisher triggers, retaining the real #3156 owner-comment and Pages evidence and exact-main-SHA source
+- Source: https://github.com/BestNathan/nession/issues/3156
