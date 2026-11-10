@@ -34,7 +34,7 @@ export function documentsRoute(hash){
     invalid:!validId||!validVersion};
 }
 export function validDocumentsSnapshot(data){
-  if(data?.schema_version!==3||!['available','unavailable'].includes(data.status)||
+  if(data?.schema_version!==4||!['available','unavailable'].includes(data.status)||
     !Array.isArray(data.protocols)||data.protocols.length>400||
     !data.definitions||typeof data.definitions!=='object'||!Array.isArray(data.releases)||
     data.releases.length>30)return false;
@@ -48,7 +48,7 @@ export function validDocumentsSnapshot(data){
     if(!ID.test(p?.id||'')||ids.has(p.id)||typeof p.owner!=='string'||
        !Array.isArray(p.versions)||!p.versions.length||p.versions.length>25||
        !Array.isArray(p.wires)||!p.wires.every(x=>typeof x==='string')||
-       !p.support||!Array.isArray(p.support.request)||!Array.isArray(p.support.response))return false;
+       false)return false;
     ids.add(p.id);
     const versions=new Set();
     return p.versions.every(v=>{
@@ -69,49 +69,34 @@ export function filterDocuments(items,{query='',owner='All'}={}){
         ...v.response?.fields?.map(f=>f.path)||[]])]
       .join(' ').toLocaleLowerCase().includes(term)));
 }
-function supportTable(data,selected,direction){
+function fieldTable(fields){
   const table=el('table','documents-field-table');
-  const head=el('thead'),hdr=el('tr');
-  for(const text of ['Field path','Response variant','Type','Required','First observed',
-      data.source.source_version?'Main · '+data.source.source_version+' (dev)':'Main',
-      ...data.releases.map(r=>r.version)]){
-    hdr.append(el('th','',text));
+  const head=el('thead'),header=el('tr');
+  for(const text of ['Field','Type','Required','Since Nession','Description']){
+    header.append(el('th','',text));
   }
-  head.append(hdr);table.append(head);
+  head.append(header);table.append(head);
   const body=el('tbody');
-  for(const f of selected[direction]?.fields||[]){
-    const row=el('tr',f.historical?'documents-absent':'');
-    row.append(el('td','documents-field-path',f.path),
-      el('td','documents-field-variant',f.variant||'—'),
-      el('td','',f.type),
-      el('td','',f.required?'Yes':'No'),
-      el('td','',f.firstObserved||'Unknown'));
-    const present=!f.historical;
-    row.append(el('td','documents-version-cell '+(present?'present':'absent'),
-      present?'✓':'—'));
-    for(const status of f.releases||[]){
-      const labels={
-        supported:'✓', 'not-supported':'—',
-        'contract-not-declared':'N/A', unknown:'?'
-      };
-      const cell=el('td','documents-version-cell '+status.status,
-        labels[status.status]||'?');
-      const explanation={
-        supported:'Declared in Nession '+status.version,
-        'not-supported':'Field absent in verified Nession '+status.version,
-        'contract-not-declared':'Protocol/contract not declared in Nession '+status.version,
-        unknown:'No verified protocol snapshot for Nession '+status.version
-      };
-      cell.setAttribute('aria-label',explanation[status.status]);
-      cell.title=explanation[status.status];
-      row.append(cell);
-    }
+  for(const f of fields){
+    const row=el('tr');
+    const label=f.variant?f.path+' ('+f.variant+')':f.path;
+    const since=f.since_status==='verified'&&f.since?
+      '0'===f.since?'Unknown':f.since:
+      f.since_status==='unreleased'?'Unreleased':'Unknown';
+    const sinceCell=el('td','documents-since '+(f.since_status||'unknown'),since);
+    sinceCell.title=f.since_status==='verified'?
+      'First verified as introduced in Nession '+f.since:
+      f.since_status==='unreleased'?
+      'Not present in the latest verified release; only present in main':
+      'Historical Nession releases cannot establish the first supported version';
+    add(row,el('td','documents-field-path',label),el('td','',f.type),
+      el('td','',f.required?'Yes':'No'),sinceCell,
+      el('td','documents-field-description',f.description||'—'));
     body.append(row);
   }
-  table.append(body);
-  return table;
+  table.append(body);return table;
 }
-function contractSection(data,group,selected,direction){
+function contractSection(selected,direction){
   const half=selected[direction];
   const section=el('section','documents-contract-section');
   const head=el('div','documents-contract-head');
@@ -123,18 +108,16 @@ function contractSection(data,group,selected,direction){
       'This contract has no response payload. A one-way operation is explicitly represented by null.'));
     return section;
   }
-  const fields=half.fields;
-  if(!fields.length){
+  if(!half.fields.length){
     section.append(el('p','documents-no-response',
       'No named fields in this schema. The raw schema below remains authoritative.'));
     return section;
   }
   const summary=el('p','documents-field-summary',
-    fields.length+' field paths · ✓ declared · — absent · ? unverified release · N/A contract not declared.');
+    half.fields.length+' fields · Since Nession: earliest verified release, Unreleased or Unknown.');
   const scroll=el('div','documents-table-scroll');
-  scroll.append(supportTable(data,selected,direction));
-  add(section,summary,scroll);
-  return section;
+  scroll.append(fieldTable(half.fields));
+  add(section,summary,scroll);return section;
 }
 function reader(data,group,selected){
   const article=el('article','documents-reader knowledge-reader');
@@ -154,17 +137,17 @@ function reader(data,group,selected){
     versionBar.append(a);
   }
   const note=el('p','documents-note',
-    'Protocol v1/v2 selects the wire contract. Version columns such as 0.35.0 represent Nession releases verified from tag snapshots. A missing release snapshot is unknown, never unsupported.');
+    'Contract v1/v2 selects the protocol definition. Since Nession refers to the release version that first supports each field, where verified. Missing historical evidence is Unknown.');
   add(article,versionBar,note,
-    contractSection(data,group,selected,'request'),
-    contractSection(data,group,selected,'response'));
+    contractSection(selected,'request'),
+    contractSection(selected,'response'));
   const raw=el('details','documents-raw');
   const summary=el('summary','','Full JSON Schema for v'+selected.version+' (including $defs)');
   raw.append(summary);
   raw.addEventListener('toggle',()=>{
     if(!raw.open||raw.querySelector('pre'))return;
     const document={
-      $schema:'https://json-schema.org/draft/2020-12',
+      $schema:'https://json-schema.org/draft/2020-12/schema',
       protocol:group.id,version:selected.version,owner:group.owner,wires:group.wires,
       request:selected.request?{alias:selected.request.alias,shape:selected.request.shape}:null,
       response:selected.response?{alias:selected.response.alias,shape:selected.response.shape}:null,
@@ -181,7 +164,7 @@ export function renderDocuments(root,data,hash){
   add(root,el('div','eyebrow documents-kicker','NESSION / OPEN ENGINEERING / DOCUMENTS'),
     el('h1','documents-heading','Protocol reference'),
     el('p','documents-lede',
-      'Rust-generated Protocol Units, request/response schemas, and field support across Nession releases.'));
+      'Rust-generated Protocol Units, complete request/response fields, and the Nession version each field first supports.'));
   if(!validDocumentsSnapshot(data)||data.status!=='available'){
     const box=el('div','panel documents-unavailable');
     add(box,el('h3','','Protocol catalog unavailable'),
@@ -200,15 +183,13 @@ export function renderDocuments(root,data,hash){
   const snapshot=el('div','documents-snapshot mono');
   add(snapshot,el('span','','RUST CONTRACTS / MAIN'),
     el('strong','',data.source.sha.slice(0,12)),
-    el('span','',data.protocols.length+' protocol units · '+data.releases.length+' tagged releases'),
+    el('span','',data.protocols.length+' protocol units'),
     external('Architecture ↗',REPO+'/blob/'+data.source.sha+'/docs/architecture/protocol.md'));
   root.append(snapshot);
-  const info=el('p','documents-release-note',
-    data.releases.length
-      ? 'Release tags: '+data.releases.map(r=>r.version+(r.status==='available'?' ✓':' ?')).join(' · ')+
-        '. A question mark means no verified release protocol snapshot was published.'
-      : 'No tagged protocol snapshots available. Current main is a development source, not evidence that a given Nession release supports its fields.');
-  root.append(info);
+  const observed=data.releases.filter(r=>r.status==='available').length;
+  root.append(el('p','documents-release-note',
+    observed?observed+' verified release snapshots inform field Since Nession values. Unknown means earlier history cannot establish the introduction boundary.':
+      'Historical release schemas are not yet available; Since Nession is Unknown until the introduction can be verified. Current main is a development source.'));
   const layout=el('div','documents-layout'+(exact?' reading':''));
   const sidebar=el('aside','documents-side');
   const filters=el('div','documents-filters');
