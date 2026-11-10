@@ -39,7 +39,7 @@
         "ref": "primitive.light.neutral.text-muted"
       },
       "disabled-foreground": {
-        "$description": "Text on a control the user cannot currently act with. Deliberately below AA: WCAG 1.4.3 exempts inactive controls, and `neutral.text-disabled` owes only the 3:1 that keeps it from disappearing. It is NOT for de-emphasised but actionable text — that is `muted-foreground`, which must stay readable.",
+        "$description": "Text on a control the user cannot currently act with. Deliberately below AA: WCAG 1.4.3 exempts inactive controls, and `neutral.text-disabled` owes only the 3:1 that keeps it from disappearing. It is NOT for de-emphasised but actionable text \u2014 that is `muted-foreground`, which must stay readable.",
         "ref": "primitive.light.neutral.text-disabled"
       },
       "text-secondary": {
@@ -139,6 +139,9 @@
       },
       "inverse": {
         "ref": "primitive.black"
+      },
+      "overlay-scrim": {
+        "value": "oklch(0 0 0 / 0.4)"
       }
     },
     "dark": {
@@ -179,7 +182,7 @@
         "ref": "primitive.dark.neutral.text-muted"
       },
       "disabled-foreground": {
-        "$description": "Text on a control the user cannot currently act with. Deliberately below AA: WCAG 1.4.3 exempts inactive controls, and `neutral.text-disabled` owes only the 3:1 that keeps it from disappearing. It is NOT for de-emphasised but actionable text — that is `muted-foreground`, which must stay readable.",
+        "$description": "Text on a control the user cannot currently act with. Deliberately below AA: WCAG 1.4.3 exempts inactive controls, and `neutral.text-disabled` owes only the 3:1 that keeps it from disappearing. It is NOT for de-emphasised but actionable text \u2014 that is `muted-foreground`, which must stay readable.",
         "ref": "primitive.dark.neutral.text-disabled"
       },
       "text-secondary": {
@@ -279,6 +282,9 @@
       },
       "inverse": {
         "ref": "primitive.black"
+      },
+      "overlay-scrim": {
+        "value": "oklch(0 0 0 / 0.4)"
       }
     }
   }

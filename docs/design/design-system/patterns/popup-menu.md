@@ -6,6 +6,11 @@ The list a control collapses into — what `DropdownMenu` and `Popover` open, an
 what `category.control` names when it says a control that cannot fit its content
 "collapses into a menu (web) or sheet (app)".
 
+This pattern is one member of the [OverlaySurfaces](overlay-surfaces.md) family;
+that document owns the cross-family choice of Tooltip/anchored/Popover/Confirm/
+Dialog/Operation, the shared layer order and the Experience-scoped portal rule.
+This page owns the anchored list's own anatomy and row band.
+
 **This is not a Nession product concept.** It has no Session, Agent or capability
 semantics, and it would make sense unchanged in another product; by the pattern
 catalog's own test it is a generic primitive, and it lives in

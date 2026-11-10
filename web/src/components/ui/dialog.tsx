@@ -3,6 +3,16 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/shared/lib/utils"
 import { Button } from "@/components/ui/button"
+import {
+  overlayDialogZClass,
+  overlayScrimClass,
+  overlaySizeClass,
+  overlaySurfaceClass,
+  overlayTitleClass,
+  overlayViewportHeightClass,
+  overlayViewportWidthClass,
+  type OverlaySize,
+} from "@/components/ui/overlayStyles"
 import { XIcon } from "lucide-react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -29,7 +39,9 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-overlay/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "isolate duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        overlayScrimClass,
+        overlayDialogZClass,
         className
       )}
       {...props}
@@ -42,6 +54,7 @@ function DialogContent({
   children,
   showCloseButton = true,
   variant = "centered",
+  size = "compact",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
@@ -53,18 +66,31 @@ function DialogContent({
    * dismissal stay owned here rather than in a second overlay.
    */
   variant?: "centered" | "fullscreen" | "sheet"
+  /**
+   * The semantic width role of a centered overlay (issue 3142). Consumers pick the
+   * role; the token decides the pixels. `fullscreen` and `sheet` ignore it.
+   */
+  size?: OverlaySize
 }) {
   const arrangement =
     variant === "centered"
-      ? "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+      ? cn(
+          "fixed top-1/2 left-1/2 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto p-4 text-sm duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          overlayDialogZClass,
+          overlayViewportWidthClass,
+          overlayViewportHeightClass,
+          overlaySurfaceClass,
+          overlaySizeClass(size)
+        )
       : variant === "fullscreen"
-        ? "fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 overflow-y-auto rounded-none bg-background p-0 text-sm text-foreground outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
-        : "fixed bottom-0 left-0 top-auto z-50 flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-4 overflow-y-auto rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 bg-popover p-4 text-sm text-popover-foreground outline-none data-open:animate-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:slide-out-to-bottom-4";
+        ? "fixed inset-0 z-[var(--nession-overlay-dialog-z)] flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 overflow-y-auto rounded-none bg-background p-0 text-sm text-foreground outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        : "fixed bottom-0 left-0 top-auto z-[var(--nession-overlay-dialog-z)] flex max-h-[85dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-4 overflow-y-auto rounded-b-none rounded-t-[var(--nession-radius-surface)] border-b-0 bg-popover p-4 text-sm text-popover-foreground outline-none data-open:animate-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:slide-out-to-bottom-4";
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
+        data-size={size}
         className={cn(arrangement, className)}
         {...props}
       >
@@ -141,10 +167,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn(
-        "font-heading text-base leading-none font-medium",
-        className
-      )}
+      className={cn(overlayTitleClass, className)}
       {...props}
     />
   )

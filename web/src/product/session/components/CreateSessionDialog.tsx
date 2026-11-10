@@ -222,7 +222,7 @@ export function CreateSessionDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[40rem]" data-testid="create-session-dialog">
+      <DialogContent size="standard" data-testid="create-session-dialog">
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>
             {project ? `Create Session in “${project.name}”` : 'Create Session'}

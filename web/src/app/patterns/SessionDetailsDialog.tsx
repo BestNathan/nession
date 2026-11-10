@@ -34,7 +34,7 @@ export function SessionDetailsDialog({
   }
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="session-details-dialog" className="sm:max-w-lg">
+      <DialogContent data-testid="session-details-dialog">
         <DialogHeader>
           <DialogTitle>{editing ? 'Edit Session details' : 'Session details'}</DialogTitle>
           <DialogDescription>

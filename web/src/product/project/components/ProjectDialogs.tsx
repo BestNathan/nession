@@ -63,7 +63,7 @@ export function CreateProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[45rem]" data-testid="create-project-dialog">
+      <DialogContent size="wide" data-testid="create-project-dialog">
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>Create Project</DialogTitle>
         </DialogHeader>
@@ -142,7 +142,7 @@ export function RenameProjectDialog({
 
   return (
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Rename Project</DialogTitle>
         </DialogHeader>
@@ -205,7 +205,7 @@ export function ProjectSettingsDialog({
 
   return (
     <Dialog open={Boolean(project)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[45rem]" data-testid="project-settings-dialog">
+      <DialogContent size="wide" data-testid="project-settings-dialog">
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">
           <DialogTitle>Project settings</DialogTitle>
         </DialogHeader>

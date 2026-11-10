@@ -57,7 +57,6 @@ export function SessionProjectDialog({
     <Dialog open={session !== null} onOpenChange={(next) => !next && onClose()}>
       <DialogContent
         data-testid="session-project-dialog"
-        className="sm:max-w-md"
         aria-describedby={undefined}
       >
         <DialogHeader>
