@@ -442,6 +442,31 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_mkfs_helper_fails_explicitly() {
+        // A packaging regression must surface as a failed build, never as a
+        // healthy image manager with a silently absent tool (#3178).
+        let root = tempfile::tempdir().unwrap();
+        let source = local_source(root.path());
+        let builder = ErofsBuilder::new(
+            Arc::new(crate::git::ProcessGitRunner::default()),
+            Arc::new(ProcessMkfsRunner {
+                binary: root.path().join("missing-mkfs.erofs"),
+            }),
+            BlobStore::new(root.path().join("blobs")).unwrap(),
+            root.path().join("work"),
+        )
+        .unwrap();
+        let error = builder
+            .build_local(&source, &ImagePackaging::default())
+            .unwrap_err();
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("failed to execute") && text.contains("missing-mkfs.erofs"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn an_absolute_or_escaping_symlink_is_refused() {
         let root = tempfile::tempdir().unwrap();
         let source = local_source(root.path());

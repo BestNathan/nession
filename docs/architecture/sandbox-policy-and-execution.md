@@ -182,9 +182,13 @@ A host that serves `filesystem.composition` additionally needs unprivileged
 FUSE: a working `/dev/fuse` (0666 or the Agent user's access), the
 `erofsfuse`, `fuse-overlayfs` and `fusermount3` executables (resolved on
 `PATH` unless configured), and an Agent-authorized EROFS image root from
-`[erofs] storage_dir` (#3023). The current Agent base image does not package
-these helpers; the managed Session lane (#3062) owns supplying them without
-making the Pod privileged. A host without them refuses the composition.
+`[erofs] storage_dir` (#3023). Both Agent images
+(`Dockerfile.agent`/`Dockerfile.agent.prebuilt`) package those helpers:
+`fuse3` provides `fusermount3`, `fuse-overlayfs` provides the overlay helper,
+and `erofsfuse` is built from the pinned erofs-utils release in
+`deploy/build-erofs-utils.sh`. The `/dev/fuse` device and the surrounding
+namespace/cgroup policy remain deployment facts; the image itself is not
+privileged (#3178, #3062). A host without them refuses the composition.
 
 The container entrypoint projects operator configuration into `[sandbox]`:
 `AGENT_SANDBOX_ENABLED` (master switch; when false, every explicit policy

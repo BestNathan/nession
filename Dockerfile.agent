@@ -50,7 +50,37 @@ COPY crates/ crates/
 COPY . .
 RUN cargo build --release --bin nession-agent
 
-# Stage 5: Agent runtime (includes tmux — agent manages tmux sessions)
+# Stage 5: Build the pinned EROFS helper tools (#3178)
+#
+# Debian bookworm's erofs-utils 1.5 packages no erofsfuse at all, so the FUSE
+# mount helper is built from one pinned upstream release in
+# `deploy/build-erofs-utils.sh`. It is linked against this bookworm base, which
+# the runtime stages below also use.
+FROM debian:bookworm-slim AS erofs-utils-builder
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential autoconf automake libtool pkg-config libfuse3-dev \
+        ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+COPY deploy/build-erofs-utils.sh /usr/local/bin/build-erofs-utils.sh
+RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
+    /usr/local/bin/build-erofs-utils.sh
+
+# Stage 6: Agent runtime base (#3178)
+#
+# Both Agent image paths (`Dockerfile.agent` and `Dockerfile.agent.prebuilt`)
+# extend this stage, so the Linux Sandbox FUSE helpers have one packaging
+# definition. `git` backs `GitAgentExtension` (`main.rs`); `bubblewrap` is the
+# Linux Sandbox launcher. Namespace creation and delegated cgroup v2 remain
+# deployment/host facts, not image contents, and a policy request fails closed
+# when they are absent. `erofsfuse` (pinned source build), `fusermount3`
+# (`fuse3`) and `fuse-overlayfs` back `crates/nession-sandbox/src/linux/erofs.rs`;
+# the probe below fails the image build if any executable is absent.
+#
+# No `openssh-client` alongside git: the `git.*` units are all **local** reads
+# (`status`, `diff`, `log`, `branches`, `worktrees`, `root`), so nothing fetches
+# or pushes. Add it when write operations (#845) reach the point of talking to a
+# remote, rather than pre-emptively.
 #
 # bookworm, not bullseye: Debian 11 reached end of LTS on 2026-08-31 and
 # `deb.debian.org/debian-security` stopped carrying bullseye packages, so every
@@ -59,29 +89,23 @@ RUN cargo build --release --bin nession-agent
 # three were affected. The builder stages above stay on `rust:1.96-bullseye` on
 # purpose: they install nothing, and a binary linked against glibc 2.31 runs
 # fine on bookworm's 2.36.
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime-tools
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        nginx ca-certificates curl gettext-base git bubblewrap fuse3 fuse-overlayfs && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /etc/nginx/sites-enabled/default
+COPY --from=erofs-utils-builder /usr/local/bin/erofsfuse /usr/local/bin/erofsfuse
+RUN command -v git erofsfuse fusermount3 fuse-overlayfs
+
+# Stage 7: Agent runtime (tmux, Node/Claude Code and the binary)
+FROM runtime-tools AS runtime
+ARG DEBIAN_FRONTEND=noninteractive
 # The release-selected fixed terminal width (#2487), carried to the Agent's
 # process environment and written into agent-config.toml by the entrypoint.
 ARG NESSION_TERMINAL_COLS=96
 ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
-# `git` is here because the agent composes `GitAgentExtension` (`main.rs`) and
-# this image carried no git binary — the capability was live and its tool was
-# missing, so every `git.*` unit failed at the point of running git.
-#
-# `bubblewrap` is the Linux Sandbox backend's launcher. The binary alone does
-# not make a host sandbox-capable: the runtime must also allow unprivileged
-# user namespaces and delegate a writable cgroup v2 subtree. Those are
-# deployment/host facts, not image contents, and a policy request fails closed
-# when they are absent.
-#
-# No `openssh-client` alongside it: the `git.*` units are all **local** reads
-# (`status`, `diff`, `log`, `branches`, `worktrees`, `root`), so nothing fetches
-# or pushes. Add it when write operations (#845) reach the point of talking to a
-# remote, rather than pre-emptively.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        nginx ca-certificates curl gettext-base git bubblewrap && \
-    rm -rf /var/lib/apt/lists/*
 
 # Install tmux from static builds (https://github.com/tmux/tmux-builds)
 # Uses multi-arch binaries: v3.6b, linux-amd64 / linux-arm64.
@@ -136,7 +160,6 @@ RUN chmod +x /entrypoint.sh
 # NOT a PVC: without an explicitly mounted durable volume, /data (and therefore
 # this cache) belongs to the container writable layer and disappears with it.
 RUN mkdir -p /data /data/erofs /etc/nession
-RUN rm -f /etc/nginx/sites-enabled/default
 
 WORKDIR /etc/nession
 
