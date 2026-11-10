@@ -138,12 +138,19 @@ export function fullRegressionTitle(batch){
   return 'Convergence Full '+integrationBranch(batch.branch,
     batch.main_sha,batch.lane_sha)+'@'+batch.integration_head;
 }
+// GitHub REST Workflow Runs may expose the workflow's dynamic run-name in
+// both `name` and `display_title` (as observed for #3176), rather than the
+// static YAML `name:`. Keep the exact batch title + workflow path/source
+// checks below: a matching human-readable name alone is never evidence.
+function matchingFullRunName(run,title){
+  return run.name===title||run.name==='E2E / Full Regression';
+}
 export function latestConvergenceFull(batch,runs=[]){
   if(!Array.isArray(runs)||runs.length>=100)
     throw Error('unbounded exact-source Full E2E run inventory');
   const title=fullRegressionTitle(batch);
   return runs.filter(run=>run.display_title===title&&
-    run.name==='E2E / Full Regression'&&
+    matchingFullRunName(run,title)&&
     run.event==='workflow_dispatch'&&run.head_branch==='main'&&
     run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
     run.path?.split('@')[0]==='.github/workflows/e2e-full-regression.yml')
@@ -153,7 +160,7 @@ export function latestConvergenceFull(batch,runs=[]){
 
 export function attestConvergenceFull(batch,run,jobs=[]){
   const title=fullRegressionTitle(batch);
-  if(!run||run.name!=='E2E / Full Regression'||
+  if(!run||!matchingFullRunName(run,title)||
     run.path?.split('@')[0]!=='.github/workflows/e2e-full-regression.yml'||
     run.display_title!==title||run.event!=='workflow_dispatch'||
     run.head_branch!=='main'||run.repository?.full_name!==REPO||
@@ -217,7 +224,7 @@ export function selfTest(){
     'REMOVED_E2E_TESTS_REQUIRE_SOURCE_REPAIR');
   const fullTitle=fullRegressionTitle(batch);
   assert.match(fullTitle,/^Convergence Full chore\/staging-sync-/);
-  const run={id:777,run_attempt:2,name:'E2E / Full Regression',
+  const run={id:777,run_attempt:2,name:fullTitle,
     path:'.github/workflows/e2e-full-regression.yml@refs/heads/main',
     display_title:fullTitle,event:'workflow_dispatch',
     head_branch:'main',repository:{full_name:REPO},
@@ -228,11 +235,23 @@ export function selfTest(){
       'Run full canonical Playwright suite at pinned SHA',
       'Verify complete per-ID assertions'].map(name=>({
         name,status:'completed',conclusion:'success'}))};
-  assert.equal(latestConvergenceFull(batch,[run])?.id,777);
+  assert.equal(latestConvergenceFull(batch,[run])?.id,777,
+    'live GitHub API puts dynamic run-name in both name and display_title');
+  const legacyNameRun={...run,name:'E2E / Full Regression'};
+  assert.equal(latestConvergenceFull(batch,[legacyNameRun])?.id,777,
+    'static workflow-name still accepted with exact path and batch identity');
+  assert.equal(latestConvergenceFull(batch,[{...run,name:'unrelated'}]),null);
   assert.equal(latestConvergenceFull(batch,[{...run,display_title:'unrelated'}]),null);
+  assert.equal(latestConvergenceFull(batch,[{...run,path:'.github/workflows/foreign.yml'}]),null);
+  assert.equal(latestConvergenceFull(batch,[{...run,head_branch:'staging'}]),null);
+  assert.equal(latestConvergenceFull(batch,[{...run,event:'push'}]),null);
+  assert.equal(latestConvergenceFull(batch,[{...run,head_repository:{full_name:'other/repo'}}]),null);
   assert.throws(()=>latestConvergenceFull(batch,Array(100).fill(run)),/unbounded/);
   const fullReceipt=attestConvergenceFull(batch,run,[fullJob]);
   assert.ok(fullReceipt?.verified);
+  assert.ok(attestConvergenceFull(batch,legacyNameRun,[fullJob])?.verified);
+  assert.equal(attestConvergenceFull(batch,{...run,name:'unrelated'},[fullJob]),null);
+  assert.equal(attestConvergenceFull(batch,{...run,path:'.github/workflows/foreign.yml'},[fullJob]),null);
   assert.equal(convergenceApproval(batch,fullReceipt).approved,true);
   assert.equal(attestConvergenceFull(batch,{...run,conclusion:'failure'},[fullJob]),null);
   assert.equal(attestConvergenceFull(batch,{...run,display_title:'other'},[fullJob]),null);
