@@ -126,8 +126,11 @@ runSandboxCase(async ({ evidence }) => {
         },
         {
           type: 'runtime',
-          value:
-            'every unavailable implementation carried a stable reason_code; a backend-missing host advertised no available implementation',
+          value: catalog.backend
+            ? 'every unavailable implementation carried a stable reason_code on the measured ' +
+              catalog.backend +
+              ' backend'
+            : 'a backend-missing host advertised no available implementation',
         },
         {
           type: 'protocol',

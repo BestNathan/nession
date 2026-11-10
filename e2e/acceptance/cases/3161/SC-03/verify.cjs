@@ -180,7 +180,8 @@ runSandboxCase(async ({ evidence }) => {
       // unavailable element; the refusal must still be typed and create
       // nothing, never silently drop the request.
       const requested = active.catalog.backend ? unsupportedRequest(active.catalog) : null;
-      let unsupportedField = 'policy';
+      let unsupportedEvidence =
+        'this host measured every registered implementation as available, so no unsupported draft could be constructed; the exact unsupported-request projection test still passed';
       if (!active.catalog.backend) {
         const result = await preflight(
           client,
@@ -211,7 +212,8 @@ runSandboxCase(async ({ evidence }) => {
           'a backend-missing Enter must be refused',
         );
         assert.ok(refused.error, 'the refusal must explain the unavailable backend');
-        unsupportedField = 'policy (no Sandbox backend)';
+        unsupportedEvidence =
+          'a backend-missing host refused the whole policy as a typed field error, with no partial guarantee and no execution';
       } else if (requested) {
         const result = await preflight(
           client,
@@ -233,7 +235,10 @@ runSandboxCase(async ({ evidence }) => {
             JSON.stringify(result.errors),
         );
         assert.equal(result.mechanisms.length, 0, 'no partial guarantee may be reported');
-        unsupportedField = requested.field;
+        unsupportedEvidence =
+          'an explicit unsupported request (' +
+          requested.field +
+          ') returned field errors with no mechanisms, and Enter refused before launch';
 
         const refused = await enter(
           client,
@@ -279,10 +284,7 @@ runSandboxCase(async ({ evidence }) => {
         },
         {
           type: 'protocol',
-          value:
-            'an explicit unsupported request (' +
-            unsupportedField +
-            ') returned field errors with no mechanisms, and Enter refused before launch',
+          value: unsupportedEvidence,
         },
         {
           type: 'runtime',
