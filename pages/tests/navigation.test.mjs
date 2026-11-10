@@ -33,7 +33,7 @@ test('both entrypoints use exactly one canonical navigation inventory',()=>{
   assert.match(build,/'navigation\.js'/);
   assert.deepEqual(NAV_ITEMS.map(x=>x.label),[
     'Overview','AI Agents','Collaboration','Workflows',
-    'Knowledge','Prototypes','Repository','Evidence'
+    'Knowledge','Documents','Prototypes','Repository','Evidence'
   ]);
   assert.equal(new Set(NAV_ITEMS.map(x=>x.route)).size,NAV_ITEMS.length);
 });
@@ -42,15 +42,16 @@ test('home and workflow page share the menu, but use correct cross-page hrefs',(
   const home=harness('/nession/','#/prototypes');
   const standalone=harness('/nession/workflows.html');
   assert.deepEqual(home.nav.children.map(x=>x.textContent),standalone.nav.children.map(x=>x.textContent));
-  assert.equal(home.nav.children.length,8);
+  assert.equal(home.nav.children.length,9);
   for(const [i,item] of NAV_ITEMS.entries()){
     assert.equal(home.nav.children[i].href,item.file||'#'+item.route);
     assert.equal(standalone.nav.children[i].href,item.file||'index.html#'+item.route);
   }
-  assert.equal(home.nav.children[5].attrs['aria-current'],'page');
+  assert.equal(home.nav.children[6].attrs['aria-current'],'page');
   assert.equal(standalone.nav.children[3].attrs['aria-current'],'page');
   assert.equal(standalone.nav.children[4].href,'index.html#/knowledge');
-  assert.equal(standalone.nav.children[5].href,'index.html#/prototypes');
+  assert.equal(standalone.nav.children[5].href,'index.html#/documents');
+  assert.equal(standalone.nav.children[6].href,'index.html#/prototypes');
 });
 
 test('active route stays correct across nested and hash routes',()=>{
@@ -58,6 +59,7 @@ test('active route stays correct across nested and hash routes',()=>{
   assert.equal(currentNavRoute('/nession/','#/agents/developer/dev-qwen-01?window=30d'),'/agents');
   assert.equal(currentNavRoute('/nession/','#/agents?window=30d'),'/agents');
   assert.equal(currentNavRoute('/nession/','#/knowledge?article=topic'),'/knowledge');
+  assert.equal(currentNavRoute('/nession/','#/documents?doc=docs%2Farchitecture%2Fmcp.md'),'/documents');
   assert.equal(currentNavRoute('/nession/workflows.html','#/prototypes'),'/workflows');
   const h=harness('/nession/','#/agents');
   assert.equal(h.nav.children[1].attrs['aria-current'],'page');
