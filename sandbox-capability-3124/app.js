@@ -9,6 +9,16 @@
   var defaultDraft={workingDir:"/workspace/nession",readOnly:"/usr",write:"/workspace/nession",network:"restricted",egress:"github.com:443,api.anthropic.com:443",pid:true,ipc:true,user:true,resourceRows:[],syscallRows:[]};
   function cloneDraft(d){return Object.assign({},d,{resourceRows:(d.resourceRows||[]).map(function(r){return Object.assign({},r)}),syscallRows:(d.syscallRows||[]).map(function(r){return Object.assign({},r)})});}
   var activeEffective=cloneDraft(Object.assign({},defaultDraft,{resourceRows:[{id:101,key:"memory.max",value:"2147483648"}],syscallRows:[{id:102,key:"seccomp.profile",value:"nession-interactive-v1"}]}));
+  // Effective-only prepared filesystem readback fixture: safe mount targets,
+  // not editable EROFS image sources, host paths or digests.
+  var preparedEffective=cloneDraft(Object.assign({},activeEffective,{
+    readOnly:"",write:"",
+    preparedMounts:[
+      {target:"/",source:"Base Runtime EROFS",mode:"ro"},
+      {target:"/workspace",source:"Project source + writable workspace",mode:"mixed"},
+      {target:"/opt/rust",source:"Rust toolchain EROFS",mode:"ro"}
+    ]
+  }));
   var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,draft:cloneDraft(defaultDraft),nextRowId:1,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
@@ -17,7 +27,7 @@
   function settings(){
     var s=state.fixture;
     var offline=s==="offline",unsupported=s==="unsupported",stale=s==="recreated";
-    var inside=!offline&&!unsupported&&!stale&&(s==="active"||state.entered&&state.pane==="sandbox");
+    var inside=!offline&&!unsupported&&!stale&&(s==="active"||s==="prepared"||state.entered&&state.pane==="sandbox");
     return {scenario:s,online:!offline,supported:!unsupported&&!offline&&!stale,verified:inside,inside:inside,native:!inside&&!offline&&!unsupported&&!stale,offline:offline,unsupported:unsupported,recreated:stale,macos:s==="macos",preflightFail:s==="preflight-fail",enterFail:s==="enter-fail"};
   }
   function escapeHtml(x){return String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -176,7 +186,10 @@
   function compositionState(d,id,observed){
     var s=settings(),unavailable=s.macos&&(id==="resource"||id==="syscall"||id==="process");
     var entries=[],active=false,description="";
-    if(id==="filesystem"){
+    if(id==="filesystem"&&d.preparedMounts&&observed){
+      active=true;
+      description="Agent 预制 EROFS root · "+d.preparedMounts.length+" 个挂载目标（只读执行输入）";
+    }else if(id==="filesystem"){
       var reads=(d.readOnly||"").split(",").filter(function(x){return !!x.trim()});
       var writes=(d.write||"").split(",").filter(function(x){return !!x.trim()});
       active=reads.length+writes.length>0;
@@ -221,7 +234,8 @@
     return '<section class="policy-json-section">'+
       (always?'<div class="policy-json-heading"><h3>'+title+'</h3><span class="subtxt">只读 · 合成协议视图</span></div>':
         '<button type="button" class="action policy-json-trigger" data-action="toggle-policy-json" aria-expanded="'+state.showPolicyJson+'">'+(view?"收起组合 Policy JSON":"查看组合 Policy JSON")+'</button>')+
-      (view?'<pre data-testid="sandbox-composed-json" class="policy-json" aria-label="'+title+'">'+escapeHtml(JSON.stringify(policyProjection(d),null,2))+'</pre>':'')+
+      (view?(d.preparedMounts?'<div data-testid="sandbox-prepared-policy-notice" class="notice warning">Agent-prepared EROFS 的底层镜像 source/digest 不由这个客户端草稿编辑器暴露。此处只展示 Agent 返回的安全挂载目标，不伪造完整原生执行 JSON。</div>':
+        '<pre data-testid="sandbox-composed-json" class="policy-json" aria-label="'+title+'">'+escapeHtml(JSON.stringify(policyProjection(d),null,2))+'</pre>'):'')+
       '</section>';
   }
   function editor(){
@@ -252,7 +266,9 @@
   }
   function policyDescription(d){
     return '<div class="dimlist">'+
-      '<div class="dimension"><div class="dimlabel">Filesystem</div><div class="dimval">'+escapeHtml(d.readOnly||'no explicit read')+' · read-only<span class="dimmer">'+escapeHtml(d.write||'none')+' · writable</span></div></div>'+
+      '<div class="dimension"><div class="dimlabel">Filesystem</div><div class="dimval">'+(d.preparedMounts?
+        d.preparedMounts.map(function(m){return '<div class="mono">'+escapeHtml(m.target)+' · '+escapeHtml(m.source)+' · '+escapeHtml(m.mode)+'</div>';}).join(''):
+        escapeHtml(d.readOnly||'no explicit read')+' · read-only<span class="dimmer">'+escapeHtml(d.write||'none')+' · writable</span>')+'</div></div>'+
       '<div class="dimension"><div class="dimlabel">Network</div><div class="dimval">'+escapeHtml(d.network)+'<span class="dimmer">'+(d.network==='restricted'?'Allowed: '+escapeHtml(d.egress):'Ingress denied by V1 policy')+'</span></div></div>'+
       '<div class="dimension"><div class="dimlabel">Process</div><div class="dimval">'+(['pid','ipc','user'].filter(function(k){return d[k]}).join(' / ')||'no explicitly requested Linux namespaces')+'<span class="dimmer">当前执行上下文的实际机制，不是整个 Session</span></div></div>'+
       '<div class="dimension"><div class="dimlabel">Resource</div><div class="dimval">'+(d.resourceRows.length?d.resourceRows.map(function(row){return '<div class="mono">'+escapeHtml(row.key)+' = '+escapeHtml(row.value)+'</div>'}).join(''):'未请求额外 cgroup v2 限制')+'</div></div>'+
@@ -380,8 +396,8 @@
     state.error="";
     state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.openGroup="filesystem";state.showPolicyJson=false;
     state.entered=false;
-    state.pane=value==="active"?"sandbox":"native";
-    state.effective=value==="active"?cloneDraft(activeEffective):null;
+    state.pane=(value==="active"||value==="prepared")?"sandbox":"native";
+    state.effective=value==="prepared"?cloneDraft(preparedEffective):value==="active"?cloneDraft(activeEffective):null;
     if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.resourceRows=[];state.draft.syscallRows=[];}
     document.querySelectorAll("[data-fixture]").forEach(function(button){button.setAttribute("aria-pressed",String(button.getAttribute("data-fixture")===value));});
     render();
