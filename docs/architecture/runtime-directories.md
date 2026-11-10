@@ -70,6 +70,10 @@ daemon there, using the same `pid + started_at + kind` ownership identity
    not signal or discard what it cannot prove.
 4. The diagnostic action is explicit: if no daemon is running, remove the named
    legacy file manually. Never delete a record merely to silence a warning.
+5. A unit/plist installed by a pre-runtime binary passes the old path as an
+   explicit `--pid-file`, which remains authoritative. Re-run
+   `nession agent install-service` after upgrading so the managed start uses the
+   runtime state file; until then the legacy path stays in effect by design.
 
 ## Autostart
 
