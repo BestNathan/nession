@@ -11,7 +11,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {verifyReporterEvidence} from './issue-e2e-source-attestation.mjs';
-import {verifyArchivedProjectionReceipt} from './issue-e2e-projection-receipt.mjs';
+import {verifyArchivedProjectionReceipt,createProjectionReceipt} from './issue-e2e-projection-receipt.mjs';
+import {summarize} from '../e2e/runner/selected-report.mjs';
 import {parseIssueE2E,parseE2EEvidence} from './issue-e2e-contract.mjs';
 
 const REPO='BestNathan/nession';
@@ -275,6 +276,76 @@ export async function collect({root,token,issueNumber,stage}){
     pagesRun,pagesJobs,day
   },sha);
 }
+function selfTestFixture(){
+  const sha='a'.repeat(40),main='b'.repeat(40),base='d'.repeat(40);
+  const ids=['pages-documents','pages-overview'];
+  const initial=['## E2E Verification','### New','- pages-documents',
+    '### Regression','- pages-overview','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|---|',
+    '| pages-documents | New | Pending | - |',
+    '| pages-overview | Regression | Pending | - |'].join('\n');
+  const declaration=parseIssueE2E(initial,{requireDeclaration:true});
+  assert.deepEqual(declaration.errors,[]);
+  const plan={schema_version:1,kind:'issue_e2e_selection',
+    mode:'selected',pr_number:PR,base_sha:base,target_sha:sha,
+    plan_digest:'c'.repeat(64),
+    issues:[{issue:ISSUE,declaration_digest:declaration.digest,
+      new_ids:['pages-documents'],regression_ids:['pages-overview']}],
+    selected:ids.map((id,i)=>({id,owners:[{issue:ISSUE,
+      type:i===0?'New':'Regression'}]}))};
+  const playwright={stats:{},suites:ids.map(id=>({file:id+'.spec.ts',
+    specs:[{file:id+'.spec.ts',title:id,line:7,
+      tests:[{status:'expected',results:[{retry:0,status:'passed'}]}]}]}))};
+  const assertions={schema_version:1,kind:'playwright_assertion_steps',
+    tests:ids.map(id=>({id,title:id,line:7,retry:0,status:'passed',
+      assertions:5}))};
+  const results={...summarize(plan,playwright,assertions),
+    run_id:101,run_attempt:1};
+  const zipBytes=Buffer.from('fake ZIP bytes; integrity is still checked');
+  const artifactDigest='sha256:'+hash(zipBytes);
+  const evidence=id=>'run 101/1, SHA '+sha+', contract '+declaration.digest+
+    ', plan '+plan.plan_digest+', tests 1/1 (https://github.com/'+REPO+
+    '/actions/runs/101)';
+  const body=initial.replace('| pages-documents | New | Pending | - |',
+      '| pages-documents | New | Pass | '+evidence('pages-documents')+' |')
+    .replace('| pages-overview | Regression | Pending | - |',
+      '| pages-overview | Regression | Pass | '+evidence('pages-overview')+' |');
+  const record={schema_version:1,kind:'issue_e2e_run',run_id:101,
+    run_attempt:1,target_sha:sha,plan_digest:plan.plan_digest,
+    artifact_digest:artifactDigest,results:results.results};
+  const receipt=createProjectionReceipt({
+    record,plan,issue:ISSUE,projected:{body},
+    before:{number:ISSUE,body:initial},
+    patch:{number:ISSUE,body,updated_at:'2026-11-10T13:00:00Z'},
+    readback:{number:ISSUE,body,updated_at:'2026-11-10T13:01:00Z'},
+    outcome:'applied',ingestRunId:201,ingestAttempt:1});
+  const run=(id,name,path,event,head)=>({id,name,path,event,head_sha:head,
+    run_attempt:1,status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    pull_requests:id===201?[]:[{number:PR}]});
+  const job=(run,name,names)=>({id:run.id*10,run_id:run.id,
+    run_attempt:1,head_sha:run.head_sha,name,status:'completed',
+    conclusion:'success',steps:names.map(name=>({name,status:'completed',
+      conclusion:'success'}))});
+  const e2eRun=run(101,'E2E / Tests','.github/workflows/e2e-tests.yml',
+    'pull_request',sha);
+  const ingestRun=run(201,'E2E / Test Ingest',
+    '.github/workflows/e2e-test-ingest.yml','workflow_run',main);
+  const pagesRun=run(301,'CI / Pages','.github/workflows/ci-pages.yml',
+    'pull_request',sha);
+  const data={
+    issue:{number:ISSUE,state:'open',body},pr:{number:PR,state:'open',
+      head:{sha,repo:{full_name:REPO}},base:{sha:base,repo:{full_name:REPO}}},
+    e2eRun,e2eJobs:{jobs:[job(e2eRun,'e2e',requiredE2e)]},
+    artifact:{id:777,name:'issue-e2e-verification',expired:false,
+      digest:artifactDigest,workflow_run:{id:e2eRun.id,head_sha:sha}},
+    zipBytes,plan,results,playwright,assertions,record,receipt,
+    ingestRun,ingestJobs:{jobs:[job(ingestRun,'ingest-pr',requiredIngest)]},
+    pagesRun,pagesJobs:{jobs:requiredPages.map(([name,steps])=>
+      job(pagesRun,name,steps))},day:'2026-11-10'
+  };
+  return {data,sha};
+}
 function test(){
   assert.throws(()=>verifyProtocolPagesEvidence({},'invalid'),/regular expression/);
   assert.throws(()=>verifyProtocolPagesEvidence({issue:{number:ISSUE}},'a'.repeat(40)),
@@ -292,7 +363,28 @@ function test(){
   ])assert.throws(()=>jobPass({jobs:[bad]},'e2e',requiredE2e,run));
   assert.throws(()=>pick([], 'CI / Pages','.github/workflows/ci-pages.yml',
     'a'.repeat(40)),/missing/);
-  console.log('PR Pages acceptance: fail-closed SHA, jobs, steps and scope self-tests passed');
+  const {data,sha}=selfTestFixture();
+  const verified=verifyProtocolPagesEvidence(data,sha);
+  assert.equal(verified.verified_pr_pages_protocol_reference.verdict,'Verified');
+  assert.deepEqual(verified.verified_pr_pages_protocol_reference.e2e.selected
+    .map(r=>r.id),['pages-documents','pages-overview']);
+  const deny=edit=>assert.throws(()=>verifyProtocolPagesEvidence(edit(data),sha));
+  deny(x=>({...x,pr:{...x.pr,head:{...x.pr.head,sha:'f'.repeat(40)}}}));
+  deny(x=>({...x,pr:{...x.pr,base:{...x.pr.base,sha:'f'.repeat(40)}}}));
+  deny(x=>({...x,zipBytes:Buffer.from('tampered ZIP')}));
+  deny(x=>({...x,artifact:{...x.artifact,digest:'sha256:'+'f'.repeat(64)}}));
+  deny(x=>({...x,e2eRun:{...x.e2eRun,head_sha:'f'.repeat(40)}}));
+  deny(x=>({...x,e2eJobs:{jobs:[{...x.e2eJobs.jobs[0],steps:
+    x.e2eJobs.jobs[0].steps.slice(0,-1)}]}}));
+  deny(x=>({...x,pagesJobs:{jobs:x.pagesJobs.jobs.slice(0,1)}}));
+  deny(x=>({...x,results:{...x.results,results:
+    [{...x.results.results[0],assertions:0},x.results.results[1]]}}));
+  deny(x=>({...x,receipt:{...x.receipt,outcome:'recovered'}}));
+  deny(x=>({...x,record:{...x.record,run_attempt:2}}));
+  deny(x=>({...x,ingestRun:{...x.ingestRun,conclusion:'failure'}}));
+  deny(x=>({...x,ingestJobs:{jobs:[{...x.ingestJobs.jobs[0],
+    steps:x.ingestJobs.jobs[0].steps.slice(0,1)}]}}));
+  console.log('PR Pages acceptance: authenticated fixture and 12 fail-closed negatives passed');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===new URL(import.meta.url).pathname){
   const [mode,root,out]=process.argv.slice(2);
