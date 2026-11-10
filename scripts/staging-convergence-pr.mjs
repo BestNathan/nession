@@ -9,6 +9,8 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
+import {catalogFromPaths} from './issue-e2e-plan.mjs';
+import {BROWSER_DESIGN_IDS} from '../design/scripts/browser-design-catalog.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
@@ -53,6 +55,65 @@ export function convergencePrMarker(batch){
     ' lane='+batch.lane_sha+' head='+batch.integration_head+
     ' digest='+convergenceBatchDigest(batch)+' -->';
 }
+// #3211: promotion is a separate PR-native batch. Its exact source
+// identity comes from GitHub's bot-authored PR, pinned main/lane declarations
+// and current Git ancestry; a title or human-authored body alone is insufficient.
+export function isNativePromotionPr(pr){
+  if(pr?.title!=='release: promote staging to main' ||
+      pr.user?.login!=='nession-publisher[bot]' ||
+      pr.base?.ref!=='main'||pr.head?.ref!=='staging'||
+      pr.base?.repo?.full_name!==REPO||pr.head?.repo?.full_name!==REPO||
+      !SHA.test(pr.base?.sha??'')||!SHA.test(pr.head?.sha??'')||
+      typeof pr.body!=='string'||
+      !pr.body.startsWith('Staging Convergence automated proposal (source: Release / Staging Convergence).'))
+    return false;
+  const source=pr.body.match(/^- Planned main SHA: ([a-f0-9]{40})$/gm);
+  const lane=pr.body.match(/^- Planned lane SHA: ([a-f0-9]{40})$/gm);
+  if(source?.length!==1||lane?.length!==1)return false;
+  // Both protected refs may advance after the bot opened this PR. The
+  // original Main/Lane SHAs are immutable provenance floors; their ancestry,
+  // the current exact PR refs and every test are independently reverified.
+  return pr.body.includes('- Direction: staging -> main');
+}
+
+// A promotion has no disposable Requirement Issue. Run a real, source-pinned
+// scoped browser plan: the canonical Browser Design contract plus runnable
+// browser IDs changed between the exact main/lane commits. The independent
+// Main postmerge Full regression and promotion source/Issue/Deploy gates remain
+// mandatory. Never turn an unknown or missing test into Not Required.
+export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
+  const originallyPinnedMain=pr?.body?.match(/^- Planned main SHA: ([a-f0-9]{40})$/m)?.[1];
+  const originallyPinnedLane=pr?.body?.match(/^- Planned lane SHA: ([a-f0-9]{40})$/m)?.[1];
+  if(!isNativePromotionPr(pr)||baseSha!==pr.base.sha||
+      targetSha!==pr.head.sha||git(repoRoot,'rev-parse','HEAD')!==targetSha||
+      !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha||
+      !ancestors(repoRoot,originallyPinnedMain,baseSha)||
+      !ancestors(repoRoot,originallyPinnedLane,targetSha))
+    throw Error('untrusted or stale Staging promotion E2E source');
+  const deleted=git(repoRoot,'diff','--name-only','--diff-filter=D',
+    baseSha,targetSha,'--','e2e/tests').split('\n').filter(Boolean);
+  if(deleted.some(file=>/\.spec\.ts$/.test(file)))
+    throw Error('removed runnable E2E IDs require source repair before promotion');
+  const touched=git(repoRoot,'diff','--name-only','--diff-filter=AMRC',
+    baseSha,targetSha,'--','e2e/tests').split('\n').filter(Boolean);
+  const current=git(repoRoot,'ls-tree','-r','--name-only',targetSha,'--','e2e/tests')
+    .split('\n').filter(Boolean);
+  const liveIds=new Set(catalogFromPaths(current));
+  const ids=[...new Set([...BROWSER_DESIGN_IDS,...catalogFromPaths(touched)])].sort();
+  if(ids.length===0||ids.some(id=>!liveIds.has(id)))
+    throw Error('promotion Browser Design or touched E2E ID absent from exact target');
+  const identity={
+    type:'promotion',source_head_sha:targetSha,main_sha:baseSha,
+    lane_sha:targetSha,risk:'staging-to-main',
+    selection_digest:sha256({baseSha,targetSha,ids}),
+  };
+  const plan={schema_version:1,kind:'issue_e2e_selection',
+    base_sha:baseSha,target_sha:targetSha,issues:[],
+    selected:ids.map(id=>({id,owners:[]})),mode:'selected',
+    convergence:identity};
+  return {...plan,plan_digest:sha256(plan)};
+}
+
 export function isNativeConvergencePr(pr){
   return typeof pr?.body==='string'&&
     pr.body.startsWith('Staging Convergence automated proposal')&&
@@ -325,6 +386,94 @@ export function selfTest(){
       /metadata|parents|source/);
     run('update-ref','refs/remotes/origin/main',lane);
     assert.throws(()=>verifiedConvergenceBatch(pr,root,lane,merged),/ancestry/);
+    // #3211: a trusted Publisher promotion is not a source-sync PR and
+    // carries no disposable Requirement Issue, yet it MUST execute actual
+    // selected browser assertions, not report Not Required or unresolved.
+    for(const id of BROWSER_DESIGN_IDS)
+      fs.writeFileSync(path.join(root,'e2e/tests/browser',id+'.spec.ts'),
+        '// canonical browser-design fixture\n');
+    // Unlike login/new-browser (which already exist at the exact Main base),
+    // this is a genuinely added Staging-only runnable ID. Its delta MUST be selected.
+    fs.writeFileSync(path.join(root,'e2e/tests/browser/promotion-delta.spec.ts'),
+      '// new promotion-only browser case\n');
+    run('add','.');run('commit','-qm','staging design catalog and promotion delta');
+    const promoteSha=run('rev-parse','HEAD');
+    const promotion={
+      number:19,title:'release: promote staging to main',
+      user:{login:'nession-publisher[bot]'},
+      body:'Staging Convergence automated proposal (source: Release / Staging Convergence).'+
+        '\n\n- Direction: staging -> main\n- Planned main SHA: '+main+
+        '\n- Planned lane SHA: '+promoteSha+'\n',
+      base:{ref:'main',sha:main,repo:{full_name:REPO}},
+      head:{ref:'staging',sha:promoteSha,repo:{full_name:REPO}},
+    };
+    assert.equal(isNativePromotionPr(promotion),true);
+    assert.equal(isNativePromotionPr({...promotion,user:{login:'attacker'}}),false);
+    assert.equal(isNativePromotionPr({...promotion,head:{...promotion.head,ref:'feature'}}),false);
+    // Shape-only identity accepts valid looking historical pins; actual
+    // Git ancestry is the trusted reject point for a forged source.
+    const forgedMain={...promotion,body:promotion.body.replace(main,later)};
+    assert.equal(isNativePromotionPr(forgedMain),true);
+    assert.throws(()=>promotionE2ESelection(forgedMain,root,main),
+      /untrusted|stale/,'future Main pin cannot authorize current base');
+    const promoter=promotionE2ESelection(promotion,root,main);
+    assert.equal(promoter.mode,'selected');
+    assert.deepEqual(promoter.issues,[]);
+    assert.ok(BROWSER_DESIGN_IDS.every(id=>promoter.selected.some(x=>x.id===id)));
+    assert.ok(promoter.selected.some(x=>x.id==='promotion-delta'),
+      'changed browser ID from exact Main..Staging source must be selected');
+    assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
+      'unchanged Main-owned browser IDs must not be over-selected');
+    assert.deepEqual(promotionE2ESelection(promotion,root,main),promoter);
+    // The real #3208 kept its bot-authored creation SHA while protected
+    // Staging advanced. New PR head is permitted ONLY as a descendant of
+    // that pinned lane, and receives a new exact-head plan and digest.
+    fs.writeFileSync(path.join(root,'PROMOTION_NEXT.md'),'new staging head\n');
+    run('add','.');run('commit','-qm','advance staging while promotion is open');
+    const advancedSha=run('rev-parse','HEAD');
+    const advancedPr={...promotion,head:{...promotion.head,sha:advancedSha}};
+    assert.ok(isNativePromotionPr(advancedPr));
+    const advanced=promotionE2ESelection(advancedPr,root,main);
+    assert.equal(advanced.target_sha,advancedSha);
+    assert.notEqual(advanced.plan_digest,promoter.plan_digest);
+    assert.deepEqual(advanced.selected,promoter.selected,
+      'unchanged executable IDs remain selected at new source revision');
+    const unrelatedPinned={...advancedPr,
+      body:advancedPr.body.replace(promoteSha,later)};
+    assert.throws(()=>promotionE2ESelection(unrelatedPinned,root,main),
+      /untrusted|stale/,'unrelated pinned Staging source cannot authorize newer PR head');
+    // Main's fast-track PRs can move its protected ref too. The new Main
+    // must first be incorporated into Staging: the original pinned Main is
+    // a verified ancestor floor, not a permanently frozen base SHA.
+    const promotedTree=run('merge-tree','--write-tree',advancedSha,later).split(/\s+/)[0];
+    const rebasedHead=run('commit-tree',promotedTree,
+      '-p',advancedSha,'-p',later,'-m','merge newer Main into Staging');
+    run('checkout','--detach',rebasedHead);
+    const nextPr={...advancedPr,
+      base:{...advancedPr.base,sha:later},
+      head:{...advancedPr.head,sha:rebasedHead}};
+    assert.ok(isNativePromotionPr(nextPr));
+    const next=promotionE2ESelection(nextPr,root,later);
+    assert.equal(next.base_sha,later);
+    assert.equal(next.target_sha,rebasedHead);
+    assert.notEqual(next.plan_digest,advanced.plan_digest);
+    const badMainFloor={...nextPr,
+      body:nextPr.body.replace(main,lane)};
+    assert.throws(()=>promotionE2ESelection(badMainFloor,root,later),
+      /untrusted|stale/,'unrelated pinned Main source must not authorize newer base');
+    run('checkout','--detach',promoteSha);
+    assert.throws(()=>promotionE2ESelection(promotion,root,lane),/untrusted/);
+    assert.throws(()=>promotionE2ESelection(promotion,root,main,head),/untrusted/);
+    assert.throws(()=>promotionE2ESelection({...promotion,
+      base:{...promotion.base,sha:lane}},root,lane),/untrusted|stale/);
+    // Delete an original runnable ID: it must never silently become a
+    // Not Required receipt or a synthesized passing test result.
+    run('rm','e2e/tests/browser/login.spec.ts');
+    run('commit','-qm','remove original browser ID');
+    const removedSha=run('rev-parse','HEAD');
+    const removedPr={...promotion,head:{...promotion.head,sha:removedSha},
+      body:promotion.body.replace(promoteSha,removedSha)};
+    assert.throws(()=>promotionE2ESelection(removedPr,root,main),/removed runnable/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
   console.log('PR-native convergence: immutable Git source, historical E2E, approval PASS');
 }

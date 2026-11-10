@@ -28,6 +28,9 @@ on:
     types: [created]
   # A completed Full may use its dynamic run-name as the REST name; accept
   # that shape without changing any trusted source or Full attestation gate (#3205).
+  # #3211: PR-native staging -> main promotion has native exact-head PR
+  # checks too. Wake on those completed source checks; the controller still
+  # revalidates the bot PR, exact SHA, deployment and Issue evidence.
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
@@ -81,7 +84,14 @@ jobs:
           (
             (
               github.event.workflow_run.event == 'pull_request' &&
-              startsWith(github.event.workflow_run.head_branch, 'chore/staging-sync-')
+              (
+                startsWith(github.event.workflow_run.head_branch, 'chore/staging-sync-') ||
+                (
+                  github.event.workflow_run.head_branch == 'staging' &&
+                  github.event.workflow_run.pull_requests[0].head.ref == 'staging' &&
+                  github.event.workflow_run.pull_requests[0].base.ref == 'main'
+                )
+              )
             ) ||
             (
               (
