@@ -37,6 +37,10 @@ pub async fn run(pid_file_path: Option<String>) -> Result<()> {
 
     println!("Status: running");
     println!("PID: {}", identity.pid);
+    println!(
+        "Release: {}",
+        identity.release_version.as_deref().unwrap_or("unknown")
+    );
     if record.origin == pid_file::Origin::Legacy {
         println!(
             "State file: {} (legacy location; run `nession server restart` to migrate)",
