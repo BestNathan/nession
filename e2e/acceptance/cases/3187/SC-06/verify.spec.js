@@ -99,7 +99,7 @@ test('SC-06: an observer can open a permitted file without PTY input', async ({ 
     await printReference(controller, expect, 'plain.py:2');
     const before = await readTerminalState(controller);
 
-    await attachExisting(second, expect, runtime, name, 'P2P');
+    await attachExisting(second, expect, runtime, name, 'P2P', null);
     await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({
       timeout: 30_000,
     });

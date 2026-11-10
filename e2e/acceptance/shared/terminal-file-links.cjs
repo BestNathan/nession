@@ -51,7 +51,9 @@ function seedTerminalFiles(home) {
 }
 
 async function openShell(page, expect, runtime, prefix, mode = 'P2P') {
-  const { name } = await createAndAttach(page, expect, runtime, prefix, mode, SHELL_READY);
+  // No prompt pattern: the local acceptance runner uses the host's shell, whose
+  // prompt is not the CI runner's. The sentinel below proves the PTY is live.
+  const { name } = await createAndAttach(page, expect, runtime, prefix, mode, null);
   await command(page, "printf '%s\\n' '__3187_SHELL_READY__'");
   await expect.poll(
     async () => (await readBuffer(page)).includes('__3187_SHELL_READY__'),

@@ -9,7 +9,7 @@ import type { TerminalLinkMatcher } from '@/platform/terminal-runtime/emulator';
  * token because the leading boundary never consumes a second slash. A path
  * may be absolute; the resolver keeps that meaning rather than stripping it.
  */
-const PATH_BODY = String.raw`[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]+`;
+const PATH_BODY = String.raw`[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z][A-Za-z0-9_+-]*`;
 const PATH_PREFIX = String.raw`(?:\.{0,2}\/|\/)?`;
 const FILE_REFERENCE_PATTERN = new RegExp(
   String.raw`(?:^|[\s('"\`\[<])(` +

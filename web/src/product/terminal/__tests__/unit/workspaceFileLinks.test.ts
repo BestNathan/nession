@@ -53,10 +53,12 @@ describe('findWorkspaceFileLinks', () => {
     });
   });
 
-  it('rejects URL schemes, timestamps and extensionless tokens', () => {
+  it('rejects URL schemes, timestamps, version numbers, IPs and extensionless tokens', () => {
     expect(findWorkspaceFileLinks('open https://example.com/a.py now')).toEqual([]);
     expect(findWorkspaceFileLinks('file:///tmp/a.py')).toEqual([]);
     expect(findWorkspaceFileLinks('at 12:34:56 today')).toEqual([]);
+    expect(findWorkspaceFileLinks('release 1.2.3 shipped')).toEqual([]);
+    expect(findWorkspaceFileLinks('connected to 10.0.2.100 now')).toEqual([]);
     expect(findWorkspaceFileLinks('run make install')).toEqual([]);
   });
 
