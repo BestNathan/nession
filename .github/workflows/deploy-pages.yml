@@ -110,6 +110,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Prepare Rust toolchain for canonical Protocol codegen
+        if: steps.detect.outputs.active == 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+      - name: Restore SHA-keyed historical Protocol schemas
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/cache@v4
+        with:
+          # Persist only source-pinned derived JSON, never a transient worktree
+          # or executable output from a historical Cargo build.
+          path: ${{ runner.temp }}/nession-protocol-schemas/schema-*.json
+          key: pages-protocol-schemas-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            pages-protocol-schemas-v1-
+      - name: Reconstruct missing historical Protocol schemas without credentials
+        if: steps.detect.outputs.active == 'true'
+        env:
+          PAGES_PROTOCOL_CACHE_DIR: ${{ runner.temp }}/nession-protocol-schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Feature rollout: this workflow may land before the Pages code.
+          # Never pass github.token to an older source-code compiler.
+          if [[ -f pages/scripts/generate-protocol-history.mjs ]]; then
+            node pages/scripts/generate-protocol-history.mjs
+          else
+            echo 'Protocol history producer is not on main yet.'
+          fi
       - name: Validate Knowledge ledger at pinned checkout
         if: steps.detect.outputs.active == 'true'
         run: node scripts/knowledge-ledger-contract.mjs check knowledge-store
@@ -124,6 +153,7 @@ jobs:
           METRICS_DIR: ${{ github.workspace }}/metrics-store
           ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
           KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge-store
+          PAGES_PROTOCOL_CACHE_DIR: ${{ runner.temp }}/nession-protocol-schemas
         shell: bash
         run: |
           set -euo pipefail
