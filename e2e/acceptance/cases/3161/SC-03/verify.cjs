@@ -175,10 +175,44 @@ runSandboxCase(async ({ evidence }) => {
       );
 
       // An explicit unsupported implementation/option must return field
-      // errors and must not be dropped to produce a "valid" remainder.
-      const requested = unsupportedRequest(active.catalog);
+      // errors and must not be dropped to produce a "valid" remainder. On a
+      // runner with no Sandbox backend at all, the whole policy is the
+      // unavailable element; the refusal must still be typed and create
+      // nothing, never silently drop the request.
+      const requested = active.catalog.backend ? unsupportedRequest(active.catalog) : null;
       let unsupportedField = 'policy';
-      if (requested) {
+      if (!active.catalog.backend) {
+        const result = await preflight(
+          client,
+          sessionId,
+          active.generation,
+          isolationPolicy(),
+          runtime.home,
+          probe,
+        );
+        assert.equal(result.ok, false, 'a backend-missing host cannot validate Enter');
+        assert.ok(
+          result.errors.some((error) => ['context', 'policy'].includes(error.field)),
+          'the refusal must be a typed field error: ' + JSON.stringify(result.errors),
+        );
+        assert.equal(result.mechanisms.length, 0, 'no partial guarantee may be reported');
+        const refused = await enter(
+          client,
+          sessionId,
+          active.generation,
+          'sc03-no-backend-' + process.pid,
+          isolationPolicy(),
+          runtime.home,
+          probe,
+        );
+        assert.equal(refused.success, false);
+        assert.ok(
+          ['unavailable', 'invalid'].includes(refused.error_kind),
+          'a backend-missing Enter must be refused',
+        );
+        assert.ok(refused.error, 'the refusal must explain the unavailable backend');
+        unsupportedField = 'policy (no Sandbox backend)';
+      } else if (requested) {
         const result = await preflight(
           client,
           sessionId,

@@ -282,7 +282,48 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
                 } else {
                     SandboxUnsupportedReason::BackendMissing
                 };
-                implementation(path, Unavailable(Some(code), backend_reason.clone()))
+                let reason = backend_reason.clone();
+                let mut entry = implementation(path, Unavailable(Some(code), reason.clone()));
+                // Registered options stay discoverable even when no backend
+                // exists; they are all measured unavailable with the same
+                // stable reason. No unregistered future path is invented.
+                match *path {
+                    "network" => {
+                        entry.options = ["allow", "deny", "restricted"]
+                            .into_iter()
+                            .map(|id| SandboxOptionSupport::unavailable(id, code, reason.clone()))
+                            .collect();
+                    }
+                    "process.linux_namespaces" => {
+                        entry.options = ["pid", "ipc", "user", "uts", "cgroup"]
+                            .into_iter()
+                            .map(|id| SandboxOptionSupport::unavailable(id, code, reason.clone()))
+                            .collect();
+                    }
+                    "resource.cgroup_v2" => {
+                        entry.fields = crate::draft::RESOURCE_FIELD_METADATA
+                            .into_iter()
+                            .map(|(key, value_format, example)| SandboxFieldEntry {
+                                key: key.to_string(),
+                                controller: Some(key.split('.').next().unwrap_or(key).to_string()),
+                                value_format: value_format.to_string(),
+                                example: example.to_string(),
+                                available: false,
+                                reason_code: Some(code),
+                                reason: Some(reason.clone()),
+                            })
+                            .collect();
+                    }
+                    "syscall.seccomp" => {
+                        entry.options = vec![SandboxOptionSupport::unavailable(
+                            crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1,
+                            code,
+                            reason.clone(),
+                        )];
+                    }
+                    _ => {}
+                }
+                entry
             })
             .collect();
     }
@@ -1677,6 +1718,24 @@ mod tests {
             .implementations
             .iter()
             .all(|entry| !entry.is_editable()));
+        // Registered options/fields stay discoverable, not silently empty.
+        let network = implementation(&catalog, "network");
+        assert_eq!(network.options.len(), 3);
+        assert!(network
+            .options
+            .iter()
+            .all(|option| option.status == SandboxImplementationStatus::Unavailable));
+        let namespaces = implementation(&catalog, "process.linux_namespaces");
+        assert_eq!(namespaces.options.len(), 5);
+        let cgroup = implementation(&catalog, "resource.cgroup_v2");
+        assert_eq!(cgroup.fields.len(), 4);
+        assert!(cgroup.fields.iter().all(|field| !field.available));
+        let seccomp = implementation(&catalog, "syscall.seccomp");
+        assert_eq!(seccomp.options.len(), 1);
+        assert_eq!(
+            seccomp.options[0].reason_code,
+            Some(SandboxUnsupportedReason::BackendMissing)
+        );
     }
 
     #[test]
