@@ -157,6 +157,31 @@ function gh(args) {
   return JSON.parse(shell('gh', ['api', ...args]));
 }
 
+// The existing Publisher App identity only has Contents/PR write, not Issue
+// write. Legacy Issue cleanup uses the separate GitHub Actions issues:write
+// token, narrowly scoped to the trusted cleanup calls below.
+function ghIssueWrite(args) {
+  const token=process.env.ISSUE_GITHUB_TOKEN;
+  if(!token)reject('trusted Issue cleanup token unavailable');
+  return JSON.parse(shell('gh',['api',...args],{
+    env:{...process.env,GH_TOKEN:token}
+  }));
+}
+export function legacyIssueArchiveRequests(repo,number,prNumber,headSha) {
+  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)||
+      !Number.isSafeInteger(number)||number<=0||
+      !Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(headSha))
+    reject('invalid legacy Issue archive provenance');
+  const resource='repos/'+repo+'/issues/'+number;
+  return [
+    ['--method','POST',resource+'/comments','-f',
+      'body=Superseded by PR-native Staging integration #'+prNumber+
+      ' (checked head '+headSha+'). This historical per-SHA batch '+
+      'is not an open product Requirement; no evidence or old approval was reused.'],
+    ['--method','PATCH',resource,'-f','state=closed','-f','state_reason=not_planned'],
+  ];
+}
+
 function validatePlan(plan) {
   if (plan.schema_version !== 1 || !SHA.test(plan.main_sha) || !Array.isArray(plan.branches)) {
     reject('invalid or unsupported plan');
@@ -530,13 +555,9 @@ function reconcile(plan) {
       const receipt=ensurePr(repo,owner,head,base,plan,batchIssueNumber,batch);
       if(legacyRetirement?.issue&&superseded.includes(
         legacyRetirement.pinned.pr.number)){
-        const oldNumber=legacyRetirement.issue.number;
-        gh(['--method','POST','repos/'+repo+'/issues/'+oldNumber+'/comments',
-          '-f','body=Superseded by PR-native Staging integration #'+receipt.number+
-          ' (checked head '+integration.sha+'). This historical per-SHA batch '+
-          'is not an open product Requirement; no evidence or old approval was reused.']);
-        gh(['--method','PATCH','repos/'+repo+'/issues/'+oldNumber,
-          '-f','state=closed','-f','state_reason=not_planned']);
+        for(const request of legacyIssueArchiveRequests(repo,
+          legacyRetirement.issue.number,receipt.number,integration.sha))
+          ghIssueWrite(request);
       }
       const record={branch:lane.branch,direction:action,...receipt,
         ...(sync?{integration_head:integration.sha,
@@ -700,6 +721,15 @@ function selfTest() {
     'existing owner-approved PR must not be discarded');
   assert.equal(shouldMigrateLegacy({native:true},{approved:false}),false,
     'native PR cannot be treated as legacy');
+  const archive=legacyIssueArchiveRequests('BestNathan/nession',3159,3168,
+    'a'.repeat(40));
+  assert.equal(archive.length,2);
+  assert.deepEqual(archive[0].slice(0,3),
+    ['--method','POST','repos/BestNathan/nession/issues/3159/comments']);
+  assert.deepEqual(archive[1].slice(0,3),
+    ['--method','PATCH','repos/BestNathan/nession/issues/3159']);
+  assert.throws(()=>legacyIssueArchiveRequests('attacker/repo',0,3168,
+    'a'.repeat(40)),/invalid legacy Issue archive provenance/);
     assert.throws(() => deriveActions(-1, 0), /invalid/);
   process.stdout.write('staging convergence self-test: PASS\n');
 }
