@@ -57,6 +57,7 @@ function publish(dir,expected,fixture=false){
           approvedAdmission=correctSource &&
             receipt.schema_version===1 &&
             receipt.event===eventType &&
+            receipt.source_run_id===(eventType==='workflow_run'?event.workflow_run.id:null) &&
             receipt.trusted_main_sha===process.env.GITHUB_SHA &&
             receipt.run_id===process.env.GITHUB_RUN_ID &&
             receipt.run_attempt===process.env.GITHUB_RUN_ATTEMPT &&
