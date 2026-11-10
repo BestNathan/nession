@@ -266,6 +266,44 @@
 .nession-ui .app .module-start-dir{max-width:100%}
 .nession-ui .app .namespace-item{min-height:56px}
 .nession-ui .app .module-footer{display:none}
+
+/* #3143 corrected routing: one Sandbox page, six peer Tabs, full-size domain panels */
+.nession-ui .sandbox-tab-workspace{height:100%;min-height:0;overflow:hidden;padding-bottom:16px}
+.nession-ui .sandbox-tab-inner{height:100%;max-width:1080px;min-height:0;display:flex;flex-direction:column}
+.nession-ui .sandbox-tab-inner>.crumb{flex:none;margin-bottom:14px}
+.nession-ui .sandbox-tab-inner>.titlebar{flex:none;margin-bottom:20px}
+.nession-ui .sandbox-tab-layout{display:grid;grid-template-columns:178px minmax(0,1fr);gap:24px;flex:1;min-height:0;min-width:0}
+.nession-ui .sandbox-tab-nav{display:flex;flex-direction:column;gap:2px;min-width:0;align-self:stretch;max-height:100%;overflow-y:auto;overflow-x:hidden;padding:4px 9px 10px 0;border-right:1px solid var(--nession-border)}
+.nession-ui .sandbox-tab{appearance:none;flex:none;min-width:0;width:100%;min-height:45px;text-align:left;background:transparent;border:0;border-radius:8px;color:var(--nession-muted-foreground);padding:9px 11px;display:flex;justify-content:space-between;gap:8px;align-items:center;font:inherit;font-size:12px;cursor:pointer}
+.nession-ui .sandbox-tab span{font-weight:550;overflow-wrap:anywhere}
+.nession-ui .sandbox-tab small{font-size:10px;color:var(--nession-muted-foreground);white-space:nowrap}
+.nession-ui .sandbox-tab:hover{background:var(--nession-surface);color:var(--nession-foreground)}
+.nession-ui .sandbox-tab.selected{background:var(--nession-muted);color:var(--nession-foreground)}
+.nession-ui .sandbox-tab.selected span{font-weight:680}
+.nession-ui .sandbox-tab:focus-visible{outline:2px solid var(--nession-foreground);outline-offset:-2px}
+.nession-ui .sandbox-tab-main{min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:3px 14px 110px 1px;scrollbar-gutter:stable}
+.nession-ui .sandbox-tab-main:focus-visible{outline:2px solid var(--nession-foreground)}
+.nession-ui .config-summary{display:flex;flex-direction:column;border-top:1px solid var(--nession-border)}
+.nession-ui .config-summary-row{border-bottom:1px solid var(--nession-border);padding:14px 4px;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.nession-ui .config-summary-row>span:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.nession-ui .config-summary-row strong{font-size:12px}
+.nession-ui .config-summary-row small{font-size:11px;color:var(--nession-muted-foreground);overflow-wrap:anywhere;line-height:1.45}
+.nession-ui .sandbox-tab-main .config-index{margin-top:0}
+.nession-ui .sandbox-tab-main .home-operations{margin-top:22px}
+.nession-ui .sandbox-tab-main .module-head{margin-top:0}
+.nession-ui .sandbox-tab-main .module-list{max-width:100%}
+.nession-ui .sandbox-tab-main .kv-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
+.nession-ui .app .sandbox-tab-workspace{height:auto;min-height:0;overflow:visible;padding:0}
+.nession-ui .app .sandbox-tab-inner{height:auto;min-height:0;display:block;max-width:100%;overflow:visible}
+.nession-ui .app .sandbox-tab-inner>.titlebar{margin-bottom:12px}
+.nession-ui .app .sandbox-tab-layout{display:flex;flex-direction:column;min-height:0;gap:0}
+.nession-ui .app .sandbox-tab-nav{flex-direction:row;align-items:stretch;gap:2px;position:sticky;top:0;z-index:4;overflow-x:auto;overflow-y:hidden;max-height:none;width:100%;border-right:0;border-bottom:1px solid var(--nession-border);background:var(--nession-background);padding:0 0 4px;scroll-snap-type:x proximity;scrollbar-width:thin}
+.nession-ui .app .sandbox-tab{width:auto;min-width:max-content;min-height:44px;padding:10px 11px;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:7px;scroll-snap-align:start}
+.nession-ui .app .sandbox-tab small{font-size:9px}
+.nession-ui .app .sandbox-tab.selected{background:transparent;box-shadow:inset 0 -2px 0 var(--nession-foreground);border-radius:0}
+.nession-ui .app .sandbox-tab-main{min-height:0;max-height:none;overflow:visible;padding:18px 0 28px;scrollbar-gutter:auto}
+.nession-ui .app .sandbox-tab-main .kv-row{grid-template-columns:minmax(0,1fr);gap:8px}
+.nession-ui .app .sandbox-tab-main .kv-remove{grid-column:1}
 </style>
 </head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
@@ -273,7 +311,7 @@
 <nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">← Nession / Prototypes</a><span>·</span><span>Sandbox Capability</span></nav>
 <span class="np-eyebrow">WORKSPACE · AGENT / LOCATION CAPABILITY · SESSION EXECUTION</span>
 <div class="np-header-main">
-<div><h1 class="np-title">Sandbox · 配置分类 / 独立管理 / 生效检查</h1><p class="np-subtitle">Sandbox 首页是信息导航：Filesystem、Network、Process、Resource、Syscall 五类配置分别进入自己的管理页面；Native 编辑同一份草稿，Inside 进入各自的实际生效详情。Web/App 使用原有 Shell 与 Back。</p></div>
+<div><h1 class="np-title">Sandbox · 策略 Tab / 独立配置 / 生效检查</h1><p class="np-subtitle">五类策略保留各自完整配置面板；Web 左侧固定策略 Tab，App 顶部横向滑动 Tab，内容区域可大面积纵向滚动。切换策略不推入新路由或 Back；Overview 统一预检和 Enter。</p></div>
 <div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3143">Composition #3143</a><a href="https://github.com/BestNathan/nession/issues/3141">Native Resource #3141</a><a href="https://github.com/BestNathan/nession/issues/3124">Workspace #3124</a><a href="https://github.com/BestNathan/nession/issues/2681">Sandbox V1 #2681</a><a href="https://github.com/BestNathan/nession/issues/3062">Managed #3062</a><a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype" target="_blank" rel="noopener noreferrer">View source</a></div>
 </div>
 <div class="np-meta"><span>Product: <strong>Terminal → Workspace → Sandbox → Enter</strong></span><span>Widths: <strong>Web 1180/1024 · App 390/375</strong></span><span>Execution: <strong>Interactive mock · no real OS writes</strong></span></div>
@@ -287,7 +325,7 @@
 </section>
 <section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
 <div class="np-detail-grid">
-<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox 首页，点击 Filesystem 管理路径、Network 管理模式及规则、Process 管理命名空间、Resource 选择原生 cgroup 文件并填写 Value、Syscall 选择 Agent 注册的 Profile。各项都是独立内容页，返回 Sandbox 首页后统一预检、查看 JSON 和 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
+<article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox。Web 左侧或 App 顶部直接在 Overview / Filesystem / Network / Process / Resource / Syscall 六个同级 Tab 间切换。每个策略各有完整的配置区；无需返回 Sandbox 首页。在 Overview 统一预检、查看 JSON 与 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
 <article class="np-detail"><h3>核心对象和状态</h3><p>宿主能支持 Sandbox ≠ 当前 Pane 位于 Sandbox。状态由 Agent 对 <strong>active Pane + Session instance + execution id</strong> 的观测决定，外部启动的非托管 Sandbox 不能推测为 Nession 已验证。</p><p><strong>Policy Draft</strong> 在提交前可编辑；<strong>Effective Policy</strong> 是成功执行后、Agent 验证并持续可查询的只读配置。预检与 Enter 是两个不同动作。</p></article>
 <article class="np-detail"><h3>运行时设计约束</h3><p>现有 #2681 仅在创建 Session 时提供启动屏障。新的 Enter 需要 Agent 创建 <strong>同一个逻辑 Session 的隔离 Pane</strong>，验证 Linux Bubblewrap / macOS Seatbelt 后切换焦点。原 Native Pane 保留，失败时不影响原 shell，不向已有 Pane 注入文本。</p><p>Return to Native 只是切换焦点，不代表 Sandbox 的进程已经终止。完整的结束/清理与重连需在后端代码及独立 Case 中实现、验收。</p></article>
 <article class="np-detail"><h3>信息架构和证据边界</h3><p>Web：WebLayout → Sidebar + ShellMain → WorkspacePanel → WorkspaceShell → Sandbox 能力本地视图。App：AppLayers → WorkspacePanel 唯一 AppPageHeader/Back → WorkspaceShell → Sandbox 配置/确认/详情。没有新的永久 Sandbox 页面。</p><p>字体、终端渲染和样式为 Nession token 快照基础上的近似，非真实 React / xterm 画面。静态校验与合成 DOM 测试不等于 Chromium 或真实原生隔离验证。</p><details class="np-inspector"><summary>当前模拟状态</summary><pre id="sandbox-inspector">fixture=native; surface=terminal</pre></details></article>
