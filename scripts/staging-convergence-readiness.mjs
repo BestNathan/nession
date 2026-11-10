@@ -152,6 +152,35 @@ function git(args){
   return execFileSync('git',args,{encoding:'utf8',maxBuffer:4_000_000}).trim();
 }
 
+// Only Main's trusted controller can supply this proof; an arbitrary PR
+// marker, Issue label or model verdict is never enough to promote a native
+// Staging integration. Reconstruct Git bytes, current Owner approval and
+// independent source PR Runs for EVERY merged sync commit.
+export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
+  comments=[],sourceRuns=[]}){
+  if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
+     pr.merge_commit_sha!==mergeSha||pr.base?.ref!=='staging'||
+     pr.base?.repo?.full_name!==REPO)
+    return fail('INVALID_NATIVE_MERGE_PR');
+  const parents=git(['rev-list','--parents','-n','1',mergeSha]).split(/\\s+/);
+  if(parents.length!==3||parents[0]!==mergeSha||
+     parents[2]!==pr.head?.sha)
+    return fail('NATIVE_MERGE_PARENTS_MISMATCH');
+  let batch;
+  try{
+    batch=verifiedConvergenceBatch(pr,repoRoot,parents[1],mergeSha,
+      {requireCheckout:false});
+  }catch(error){
+    return fail('NATIVE_GIT_SOURCE_NOT_ATTESTED:'+error.message);
+  }
+  const approval=convergenceApproval(batch,comments);
+  if(!approval.approved)return fail('NATIVE_OWNER_APPROVAL_REQUIRED:'+batch.integration_head);
+  const source=requiredSourceRuns(pr.number,batch.integration_head,sourceRuns);
+  if(!source.ready)return source;
+  return okay({integrationHead:batch.integration_head,
+    sourceBatchDigest:approval.approval_command});
+}
+
 export function qualify({action,prNumber,mainSha,laneSha,branch,
     syncRef=null,syncHeadSha=null,deployment_workflows=[]}) {
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(mainSha)||
@@ -201,8 +230,22 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
     }
   }
   const issues=[...numberSet].map(n=>read('issues/'+n));
+  const authenticatedNative=[];
+  for(let i=0;i<commits.length;i++){
+    const matches=associations[i].filter(pr=>pr.merge_commit_sha===commits[i]&&
+      pr.merged_at&&pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
+    if(matches.length!==1||!isNativeConvergencePr(matches[0]))continue;
+    const nativePr=matches[0];
+    const comments=read('issues/'+nativePr.number+'/comments?per_page=100');
+    const runs=getRuns('head_sha='+nativePr.head.sha+'&event=pull_request');
+    const proof=certifyNativeMerge({pr:nativePr,mergeSha:commits[i],
+      comments,sourceRuns:runs});
+    if(!proof.ready)return proof;
+    authenticatedNative.push(commits[i]);
+  }
   const deployRuns=deployment_workflows.flatMap(file=>getRuns('actions/workflows/'+encodeURIComponent(file)+'/runs?head_sha='+laneSha));
-  return evaluatePromotion({firstParentCommits:commits,associations,issues,deployRuns,laneSha,branch,deployment_workflows});
+  return evaluatePromotion({firstParentCommits:commits,associations,issues,
+    authenticatedNative,deployRuns,laneSha,branch,deployment_workflows});
 }
 
 function selfTest(){
