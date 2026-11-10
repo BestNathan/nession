@@ -106,6 +106,11 @@ function parseRequest(event, context) {
   }
   fail('unsupported publisher invocation; owner dispatch or authenticated proposal signal only');
 }
+function assertSingleCommitProposal(parentsText, proposalSha, expectedHead) {
+  const parents=parentsText.split(/\\s+/);
+  if (parents.length !== 2 || parents[0] !== proposalSha || parents[1] !== expectedHead)
+    fail('proposal must be exactly one direct child of current Knowledge head');
+}
 function remoteSha(root, ref) {
   const lines = git(root, 'ls-remote', '--heads', 'origin', ref).split('\n').filter(Boolean);
   if (lines.length !== 1) fail('ref missing or ambiguous: ' + ref);
@@ -178,9 +183,7 @@ function prepare(eventPath, destination) {
   // All admission paths (owner comment, recovery dispatch and legacy create
   // signal) authorize exactly one new data-only commit. An ancestor-only check
   // would allow a comment or dispatch to publish an unreviewed commit chain.
-  const parents=git(root, 'rev-list', '--parents', '-n', '1', proposal_sha).split(/\s+/);
-  if (parents.length !== 2 || parents[0] !== proposal_sha || parents[1] !== expected_head)
-    fail('proposal must be exactly one direct child of current Knowledge head');
+  assertSingleCommitProposal(git(root, 'rev-list', '--parents', '-n', '1', proposal_sha), proposal_sha, expected_head);
   const localBranch = 'knowledge-publisher-' + process.env.GITHUB_RUN_ID + '-' + process.env.GITHUB_RUN_ATTEMPT;
   git(root, 'worktree', 'add', '-b', localBranch, destination, proposal_sha);
   if (git(destination, 'status', '--porcelain')) fail('candidate must be clean');
@@ -204,6 +207,11 @@ function prepare(eventPath, destination) {
   console.log(JSON.stringify(receipt));
 }
 function selfTest() {
+  const base='a'.repeat(40), proposal='b'.repeat(40), intermediate='c'.repeat(40);
+  assert.doesNotThrow(()=>assertSingleCommitProposal(proposal+' '+base,proposal,base));
+  for(const invalid of [proposal+' '+intermediate,proposal+' '+base+' '+intermediate,
+    proposal,intermediate+' '+base,proposal+' '+base+' '+base])
+    assert.throws(()=>assertSingleCommitProposal(invalid,proposal,base));
   const context = { repository: REPO, eventName: 'repository_dispatch', ref: 'refs/heads/main',
     actor: 'BestNathan', runAttempt: '1', sha: 'a'.repeat(40) };
   const payload = { proposal_ref: 'refs/heads/knowledge-proposals/issue-2358',
