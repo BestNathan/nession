@@ -464,7 +464,7 @@
   function insideView(){
     return '<h3>Inside Sandbox</h3><div class="statusline">'+summary()+'</div><div class="notice warning">'+message()+'</div>'+
        compositionOverview(actualPolicy(),true)+
-       '<div class="actionline"><button class="action primary" data-action="detail">执行验证信息 →</button><button class="action" data-action="return-native">← 返回 Native Pane</button></div>'+
+       '<div class="actionline"><button class="action" data-action="return-native">← 返回 Native Pane</button><button class="action primary" data-action="detail">执行验证信息 →</button></div>'+
        '<p class="extra-dim">各配置项打开独立的生效详情页（只读）；范围只包含当前 Pane。Return to Native 不会终止 Sandbox Pane。</p>';
   }
   function preflight(){
