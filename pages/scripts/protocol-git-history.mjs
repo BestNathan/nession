@@ -94,9 +94,14 @@ export async function taggedProtocolSchema({tag,sha,repoRoot,cacheDir,command=sh
     const schema=JSON.parse(raw);
     if(!schemaOk(schema))throw Error('invalid tagged Rust codegen schema');
     await mkdir(cache,{recursive:true});
-    const tmp=join(worktree,'schema-cache.json');
-    await writeFile(tmp,JSON.stringify({source:{tag,sha},schema})+'\n',{mode:0o600});
-    await rename(tmp,cacheFile);
+    // Stage inside the destination filesystem: cache may be on a separate
+    // volume from the ephemeral checkout (otherwise rename returns EXDEV).
+    const tmp=join(cache,'schema-'+sha+'.tmp-'+process.pid);
+    try{
+      await writeFile(tmp,JSON.stringify({source:{tag,sha},schema})+'\n',
+        {mode:0o600});
+      await rename(tmp,cacheFile);
+    }finally{await rm(tmp,{force:true});}
     return schema;
   }catch(error){
     console.warn('Historical Rust Protocol schema unavailable:',tag,error.message);
