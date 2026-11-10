@@ -1,0 +1,97 @@
+/* #3164 Select comparison. Review controls outside .np-device; product CSS inside .nession-product. */
+.review-compare{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:0 0 14px;padding:12px 14px;border-radius:13px;border:1px solid #e1e5e7;background:#fff;font:12px/1.4 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#414953}
+.review-compare strong{font-size:11px;font-weight:650;white-space:nowrap;margin-right:3px}
+.review-compare button{border:1px solid #d9dee2;color:#4b545d;border-radius:8px;background:#fff;padding:8px 10px;min-height:35px;cursor:pointer;font:inherit}
+.review-compare button[aria-pressed=true]{background:#212529;color:#fff;border-color:#212529}
+.review-compare button:focus-visible{outline:2px solid #456a8c;outline-offset:1px}
+.review-split{width:1px;height:20px;margin:0 5px;background:#e5e8ec}
+.nession-product{--c-bg:#fff;--c-ink:#26282b;--c-paper:#fff;--c-sidebar:#f5f6f7;--c-soft:#f5f6f7;--c-hover:#eef1f3;--c-line:#e3e5e7;--c-border:#d8dcdf;--c-muted:#71767d;--c-deep:#43494f;--c-selected:#edf2f2;--c-error:#b83237;--c-good:#4e8570;--c-shadow:0 14px 46px #2228311a,0 2px 8px #22283112;
+font:14px/1.48 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-sizing:border-box;width:100%;height:100%;position:relative;display:flex;overflow:hidden;color:var(--c-ink);background:var(--c-bg);isolation:isolate}
+.nession-product[data-theme=dark]{--c-bg:#131619;--c-ink:#e9ebec;--c-paper:#202428;--c-sidebar:#1a1d20;--c-soft:#272d31;--c-hover:#30393e;--c-line:#30363c;--c-border:#40464b;--c-muted:#a1a8ac;--c-deep:#d6dadd;--c-selected:#2d383a;--c-error:#f19595;--c-good:#84bda6;--c-shadow:0 18px 45px #0008,0 4px 12px #0005}
+.nession-product *,.nession-product *::before,.nession-product *::after{box-sizing:border-box}
+.nession-product button,.nession-product input{font:inherit;color:inherit}
+.nession-product button{cursor:pointer}
+.nession-product button:disabled{cursor:not-allowed;opacity:.52}
+.nession-product button:focus-visible,.nession-product input:focus-visible{outline:2px solid var(--c-deep);outline-offset:2px}
+.nession-product .muted{color:var(--c-muted)}.nession-product .small{font-size:12px}.nession-product .caption{font-size:11px}.nession-product .mono{font:11px/1.55 ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.nession-product .side{width:224px;flex:0 0 224px;background:var(--c-sidebar);border-right:1px solid var(--c-line);display:flex;flex-direction:column;gap:5px;padding:20px 14px}
+.nession-product .brand{font-size:18px;font-weight:700;letter-spacing:-.05em;margin-bottom:21px}.nession-product .side-label{font-size:11px;color:var(--c-muted);font-weight:650;margin:13px 9px 6px}.nession-product .side-entry{font-size:13px;padding:9px 10px;border-radius:9px}.nession-product .side-entry.active{background:var(--c-selected);font-weight:550}.nession-product .side-foot{margin-top:auto;font-size:12px;color:var(--c-muted);padding:9px 10px}
+.nession-product .main{flex:1;min-width:0;display:flex;flex-direction:column}.nession-product .main-head{height:61px;flex-shrink:0;border-bottom:1px solid var(--c-line);display:flex;align-items:center;justify-content:space-between;padding:0 26px}.nession-product .main-title{font-size:14px;font-weight:650}.nession-product .workbody{flex:1;padding:44px;overflow:auto;display:flex;flex-direction:column;gap:14px;min-width:0}.nession-product .workbody h1{font-size:22px;font-weight:650;letter-spacing:-.03em;margin:0}.nession-product .workbody p{font-size:13px;margin:0;color:var(--c-muted);max-width:580px}
+.nession-product .btn{min-height:36px;border:1px solid var(--c-border);background:var(--c-paper);border-radius:9px;padding:8px 13px;font-weight:570;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.nession-product .btn:hover:not(:disabled){background:var(--c-soft)}
+.nession-product .btn.primary{background:var(--c-ink);border-color:var(--c-ink);color:var(--c-bg)}
+.nession-product .btn.quiet{border:0;background:transparent}
+.nession-product .btn.small{min-height:30px;padding:4px 9px}
+.nession-product .pill{font-size:11px;border-radius:20px;border:1px solid var(--c-line);background:var(--c-soft);padding:3px 8px;color:var(--c-muted)}
+.nession-product .operation-layer{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center}
+.nession-product .scrim{position:absolute;inset:0;background:#1d202333;backdrop-filter:blur(1.2px)}
+.nession-product .operation{position:relative;z-index:2;width:min(640px,calc(100% - 40px));max-height:calc(100% - 48px);min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--c-paper);color:var(--c-ink);border-radius:15px;border:1px solid var(--c-line);box-shadow:var(--c-shadow)}
+.nession-product .op-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:22px 26px 17px;background:var(--c-paper);border-bottom:1px solid var(--c-line);flex:0 0 auto}
+.nession-product .op-head h2{font-weight:650;font-size:17px;letter-spacing:-.025em;margin:0 0 4px}.nession-product .op-head p{font-size:12px;color:var(--c-muted);margin:0}
+.nession-product .op-body{flex:1;min-height:0;overflow-y:auto;padding:23px 26px 24px;display:flex;flex-direction:column;gap:19px}
+.nession-product .op-foot{flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px;padding:13px 26px;border-top:1px solid var(--c-line);background:var(--c-sidebar)}
+.nession-product .field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.nession-product .field>label{font-size:12px;font-weight:620;color:var(--c-deep)}
+.nession-product .field>p{font-size:11px;color:var(--c-muted);margin:0}
+.nession-product .field input{width:100%;max-width:100%;min-width:0;background:var(--c-paper);border:1px solid var(--c-border);border-radius:9px;height:40px;padding:8px 12px;outline:none}
+.nession-product .field input:focus-visible{border-color:var(--c-deep)}
+.nession-product .choice-trigger{width:100%;min-height:42px;border:1px solid var(--c-border);background:var(--c-paper);border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;text-align:left}
+.nession-product .choice-trigger:hover{border-color:var(--c-muted);background:var(--c-bg)}
+.nession-product .choice-trigger[aria-expanded=true]{border-color:var(--c-deep);box-shadow:0 0 0 1px var(--c-deep)}
+.nession-product .trigger-label{min-width:0;display:flex;flex-direction:column;gap:3px}.nession-product .trigger-value{font-size:13px;font-weight:560;overflow-wrap:anywhere}.nession-product .trigger-meta{font-size:11px;color:var(--c-muted);overflow-wrap:anywhere}.nession-product .chevron{font-size:15px;color:var(--c-muted);flex:0 0 16px;text-align:center}
+.nession-product .form-columns{display:grid;grid-template-columns:1fr 1fr;gap:15px;min-width:0}
+.nession-product .sub-info{font-size:11px;color:var(--c-muted);line-height:1.6}
+.nession-product .status-error{color:var(--c-error);font-size:11px;line-height:1.5}
+.nession-product .choice-popup{position:absolute;z-index:60;background:var(--c-paper);color:var(--c-ink);border-radius:11px;border:1px solid var(--c-border);box-shadow:var(--c-shadow);padding:5px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;max-height:330px;min-width:100px}
+.nession-product .choice-popup .group-title{padding:9px 10px 6px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;font-weight:650;color:var(--c-muted);letter-spacing:.012em}
+.nession-product .choice-popup .group-note{font-size:10px;font-weight:500;color:var(--c-muted)}
+.nession-product .choice-row{position:relative;display:flex;align-items:center;gap:9px;width:100%;min-width:0;border:1px solid transparent;border-radius:8px;background:transparent;text-align:left;min-height:28px;padding:5px 8px;font-size:13px;color:var(--c-ink)}
+.nession-product .choice-row[aria-selected=true]{color:var(--c-ink)}
+.nession-product .choice-row[data-active=true]{background:var(--c-hover)}
+.nession-product .choice-row[data-disabled=true]{cursor:not-allowed}
+.nession-product .choice-row .row-icon{height:27px;width:27px;flex:0 0 27px;border:1px solid var(--c-line);background:var(--c-bg);border-radius:8px;display:grid;place-items:center;color:var(--c-deep);font-size:12px}
+.nession-product .choice-row .copy{display:flex;flex:1;flex-direction:column;min-width:0;gap:2px}
+.nession-product .choice-row .primary-text{font-weight:570;font-size:13px;line-height:1.3}
+.nession-product .choice-row .sub-text{font-size:11px;line-height:1.45;color:var(--c-muted);overflow-wrap:anywhere}
+.nession-product .choice-row .path{font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere;word-break:break-word;color:var(--c-muted)}
+.nession-product .choice-row .end-check{flex:0 0 20px;align-self:center;margin-left:auto;text-align:center;font-weight:700;color:var(--c-deep)}
+.nession-product .choice-row .status{font-size:10px;color:var(--c-muted);margin-left:7px}
+.nession-product .choice-row .status.offline{color:var(--c-error)}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row.rich{min-height:57px;padding:9px 10px;gap:11px}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row.rich .row-icon{align-self:flex-start;margin-top:2px}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row.rich[aria-selected=true]{background:var(--c-selected)}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row[data-active=true]{background:var(--c-hover)}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row.simple{min-height:28px;padding:5px 9px}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row.simple[aria-selected=true]{background:var(--c-selected)}
+.nession-product .choice-popup[data-recipe=candidate] .choice-row[data-disabled=true]{opacity:.6}
+.nession-product .choice-popup[data-recipe=current]{border-radius:9px;box-shadow:0 10px 26px #16191e2b;padding:4px;overflow-x:hidden}
+.nession-product .choice-popup[data-recipe=current] .group-title{font-size:12px;padding:5px 7px;letter-spacing:0}
+.nession-product .choice-popup[data-recipe=current] .choice-row{padding:4px 7px;gap:6px;min-height:28px;border-radius:5px}
+.nession-product .choice-popup[data-recipe=current] .choice-row.rich{min-height:30px}
+.nession-product .choice-popup[data-recipe=current] .choice-row .row-icon{display:none}
+.nession-product .choice-popup[data-recipe=current] .choice-row .sub-text,.nession-product .choice-popup[data-recipe=current] .choice-row .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nession-product .choice-popup[data-recipe=current] .choice-row .primary-text{font-weight:400}
+.nession-product .choice-popup[data-recipe=current] .choice-row .copy{gap:0}
+.nession-product .choice-popup[data-recipe=current] .choice-row .end-check{font-weight:600}
+.nession-product .popup-void{padding:22px 13px;text-align:center;color:var(--c-muted);font-size:12px}
+.nession-product .note{background:var(--c-soft);border:1px solid var(--c-line);border-radius:9px;padding:12px 14px;font-size:11px;color:var(--c-muted)}
+.nession-product .toast{position:absolute;z-index:90;bottom:22px;left:50%;transform:translateX(-50%);padding:10px 15px;border-radius:9px;background:var(--c-ink);color:var(--c-bg);font-size:12px;max-width:calc(100% - 24px);text-align:center}
+.nession-product[data-experience=app] .side{display:none}
+.nession-product[data-experience=app] .main-head{height:58px;padding:0 15px}
+.nession-product[data-experience=app] .workbody{padding:22px 18px}
+.nession-product[data-experience=app] .operation-layer{align-items:stretch}
+.nession-product[data-experience=app] .scrim{display:none}
+.nession-product[data-experience=app] .operation{width:100%;height:100%;max-height:100%;border:0;border-radius:0;box-shadow:none}
+.nession-product[data-experience=app] .op-head{padding:17px 16px 15px}
+.nession-product[data-experience=app] .op-body{padding:19px 16px 28px;gap:18px}
+.nession-product[data-experience=app] .op-foot{padding:12px 16px 24px}
+.nession-product[data-experience=app] .op-foot .btn.primary{flex:1}
+.nession-product[data-experience=app] .form-columns{grid-template-columns:1fr}
+.nession-product[data-experience=app] .choice-row{min-height:44px}
+.nession-product[data-experience=app] .choice-popup[data-recipe=current] .choice-row{min-height:44px}
+.nession-product[data-experience=app] .choice-popup[data-recipe=candidate] .choice-row.simple{min-height:44px}
+.nession-product[data-experience=app] .choice-popup[data-recipe=candidate] .choice-row.rich{min-height:62px}
+.nession-product[data-experience=app] .btn{min-height:44px}
+.nession-product[data-experience=app] .choice-trigger{min-height:44px}
+@media(max-width:780px){.review-compare{margin-top:6px}.review-split{display:none}}
+@media(prefers-reduced-motion:reduce){.nession-product *{scroll-behavior:auto;transition:none!important}}
