@@ -150,6 +150,24 @@ describe('terminalFileReference', () => {
     expect(resolution.ok && resolution.target.path).toBe('src/deep/target.py');
   });
 
+  it('matches the exact child when the source spells the parent differently', async () => {
+    // macOS reports /tmp as /private/tmp; the listing is of the referenced
+    // parent, so the one child with that name is still the exact target.
+    const fileOps = makeFileOps({
+      cwd: '',
+      entries: [{
+        ...entry('src/deep/target.py'),
+        full_path: '/private/tmp/work/src/deep/target.py',
+      }],
+    });
+
+    const resolution = await resolveTerminalFileReference(fileOps, 'sess', {
+      path: '/tmp/work/src/deep/target.py',
+    });
+
+    expect(resolution.ok && resolution.target.path).toBe('src/deep/target.py');
+  });
+
   it('treats a not-found parent listing as a missing file', async () => {
     const fileOps = makeFileOps({
       cwd: '',

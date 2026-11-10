@@ -108,9 +108,19 @@ export async function resolveTerminalFileReference(
     };
   }
 
-  const matches = entries.filter(
+  const exact = entries.filter(
     (entry) => entry.path === candidate || entry.full_path === candidate,
   );
+  let matches = exact;
+  if (matches.length === 0 && candidate.startsWith('/')) {
+    // The exact parent was listed, but the source reported the entry under
+    // another spelling of the same directory (macOS `/tmp` is `/private/tmp`,
+    // and a symlinked CWD does the same). The referenced parent is already
+    // fixed, so the one child with the referenced name is that exact target —
+    // this is not a workspace-wide basename search.
+    const name = candidate.slice(candidate.lastIndexOf('/') + 1);
+    matches = entries.filter((entry) => entry.name === name);
+  }
   if (matches.length === 0) {
     return { ok: false, reason: missingReason(candidate) };
   }
