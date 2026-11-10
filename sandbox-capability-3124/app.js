@@ -368,6 +368,11 @@
       var syscallError=validateRows(d.syscallRows,'syscall');if(syscallError)return syscallError;
     }
     if(d.network==='restricted'&&!d.egress.trim())return 'restricted 模式必须提供至少一个允许目标';
+    if(d.cgroup&&!d.user)return 'CGROUP Namespace 需要同时启用 USER Namespace';
+    var badPath=["readOnly","write"].some(function(name){return state.draft.pathItems[name].some(function(p){return !p.trim()||!p.startsWith("/")||p.includes("..")})});
+    if(badPath)return 'Filesystem 列表不能包含空路径，且必须使用规范化绝对路径';
+    var badRule=["allow","deny"].some(function(name){return state.draft.networkRules[name].some(function(x){return !x.trim()})});
+    if(d.network==='restricted'&&badRule)return 'Network 规则目标不能为空';
     if(s.preflightFail)return '当前 Agent cgroup v2 controllers 未委派；拒绝创建 Sandbox';
     return '';
   }
@@ -390,8 +395,8 @@
   function confirmation(){
     return '<div class="statusline"><span class="pill strong">Ready to Enter · explicit confirmation</span></div>'+
        '<div class="notice warning"><strong>确认进入隔离执行环境：</strong>将在当前 tmux Session 中新建 Sandbox Pane；Agent 必须在启动 shell 前验证请求的全部机制。原 Native Pane 保留。失败不会向原 Pane 发送命令，也不会声称已受保护。</div>'+
-       '<section class="info-section">'+compositionOverview(state.draft,false,false)+
-       policyJson(state.draft,"确认提交 · 完整 Policy JSON",true)+
+       '<section class="info-section"><h3>配置汇总 · 最终预检范围</h3>'+
+       policyDescription(state.draft)+policyJson(state.draft,"确认提交 · 完整 Policy JSON",true)+
        '<p class="subline">Target: nession-dev · Native Pane %1 → 新隔离 Pane · policy revision v1 · Mock Agent generation '+escapeHtml(agentFieldCatalog().generation)+'</p></section>'+
        '<div class="actionline"><button class="action" data-action="cancel-enter">返回修改</button><button class="action primary" data-action="confirm-enter">确认 Enter Sandbox</button></div>';
   }
@@ -509,43 +514,49 @@
     state.entered=false;
     state.pane=(value==="active"||value==="prepared")?"sandbox":"native";
     state.effective=value==="prepared"?cloneDraft(preparedEffective):value==="active"?cloneDraft(activeEffective):null;
-    if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.resourceRows=[];state.draft.syscallRows=[];}
+    if(value==="macos"){state.draft.network="deny";state.draft.readOnly="";state.draft.write="";state.draft.pathItems={readOnly:[],write:[]};state.draft.pid=false;state.draft.ipc=false;state.draft.user=false;state.draft.uts=false;state.draft.cgroup=false;state.draft.resourceRows=[];state.draft.syscallRows=[];}
     document.querySelectorAll("[data-fixture]").forEach(function(button){button.setAttribute("aria-pressed",String(button.getAttribute("data-fixture")===value));});
     render();
   }
-  mock.addEventListener("input",function(e){
-    var t=e.target;
-    if(!t||!t.hasAttribute||!(t.hasAttribute("data-draft")||t.hasAttribute("data-kv-kind")))return;
+  function updateModuleControl(t){
+    if(!t||!t.hasAttribute)return false;
     var kind=t.getAttribute("data-kv-kind");
     if(kind==="resource"||kind==="syscall"){
-      var entry=state.draft[kind+"Rows"].find(function(row){return String(row.id)===t.getAttribute("data-kv-id")});
+      var row=state.draft[kind+"Rows"].find(function(r){return String(r.id)===t.getAttribute("data-kv-id")});
       var prop=t.getAttribute("data-kv-field");
-      if(!entry||(prop!=="key"&&prop!=="value"))return;
-      entry[prop]=t.value;
-    }else{
-      var field=t.getAttribute("data-draft");
-      if(!Object.prototype.hasOwnProperty.call(state.draft,field))return;
-      state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
+      if(!row||(prop!=="key"&&prop!=="value"))return false;
+      row[prop]=t.value;return true;
     }
+    var list=t.getAttribute("data-collection");
+    if(list==="path"||list==="network"){
+      var field=t.getAttribute("data-list-name"),idx=Number(t.getAttribute("data-list-index"));
+      var rows=list==="path"?state.draft.pathItems:state.draft.networkRules;
+      if(!rows[field]||idx<0||idx>=rows[field].length)return false;
+      rows[field][idx]=t.value;
+      if(list==="path")state.draft[field]=rows[field].join(",");
+      else state.draft[field==="allow"?"egress":"denyEgress"]=rows[field].join(",");
+      return true;
+    }
+    if(t.hasAttribute("data-sandbox-profile")){
+      state.draft.syscallRows=t.value?[{id:state.nextRowId++,key:"seccomp.profile",value:t.value}]:[];
+      return true;
+    }
+    var field=t.getAttribute("data-draft");
+    if(Object.prototype.hasOwnProperty.call(state.draft,field)){
+      state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;return true;
+    }
+    return false;
+  }
+  mock.addEventListener("input",function(e){
+    if(!updateModuleControl(e.target))return;
     state.preflight="none";state.preflightError="";state.error="";
     var proof=mock.querySelector('[data-preflight-status]');if(proof)proof.hidden=true;
     var enter=mock.querySelector('[data-action="enter"]');if(enter)enter.disabled=true;
   });
   mock.addEventListener("change",function(e){
-    var t=e.target;
-    if(t&&t.hasAttribute&&(t.hasAttribute("data-draft")||t.hasAttribute("data-kv-kind"))){
-      var kind=t.getAttribute("data-kv-kind");
-      if(kind==="resource"||kind==="syscall"){
-        var row=state.draft[kind+"Rows"].find(function(r){return String(r.id)===t.getAttribute("data-kv-id")});
-        var prop=t.getAttribute("data-kv-field");
-        if(row&&(prop==="key"||prop==="value"))row[prop]=t.value;
-      }else{
-        var field=t.getAttribute("data-draft");
-        if(Object.prototype.hasOwnProperty.call(state.draft,field))state.draft[field]=t.type==="checkbox"?!!t.checked:t.value;
-      }
-      state.preflight="none";state.preflightError="";state.error="";
-      render();
-    }
+    if(!updateModuleControl(e.target))return;
+    state.preflight="none";state.preflightError="";state.error="";
+    render();
   });
   mock.addEventListener("click",function(e){
     var button=e.target.closest("[data-action]");
@@ -557,9 +568,47 @@
     else if(action==="toggle-peek"){state.peek=!state.peek;}
     else if(action==="detail"){state.depth="detail";}
     else if(action==="detail-back"){state.depth="root";}
-    else if(action.indexOf("select-policy:")===0){
-      var group=action.slice("select-policy:".length);
-      if(Object.prototype.hasOwnProperty.call(dimensionNames,group))state.openGroup=group;
+    else if(action.indexOf("open-module:")===0){
+      var group=action.slice("open-module:".length);
+      if(Object.prototype.hasOwnProperty.call(dimensionNames,group)){state.openGroup=group;state.depth="module";state.showPolicyJson=false;}
+    }
+    else if(action==="module-back"){state.depth="root";state.showPolicyJson=false;}
+    else if(action.indexOf("add-path:")===0){
+      var key=action.slice(9);
+      if((key==="readOnly"||key==="write")&&settings().supported&&!settings().macos){
+        state.draft.pathItems[key].push("");
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
+    else if(action.indexOf("remove-path:")===0){
+      var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
+      if((key==="readOnly"||key==="write")&&settings().supported&&!settings().macos){
+        state.draft.pathItems[key].splice(at,1);
+        state.draft[key]=state.draft.pathItems[key].join(",");
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
+    else if(action.indexOf("add-network:")===0){
+      var key=action.slice(12);
+      if((key==="allow"||key==="deny")&&settings().supported){
+        state.draft.networkRules[key].push("");
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
+    else if(action.indexOf("remove-network:")===0){
+      var parts=action.split(":"),key=parts[1],at=Number(parts[2]);
+      if((key==="allow"||key==="deny")&&settings().supported){
+        state.draft.networkRules[key].splice(at,1);
+        state.draft[key==="allow"?"egress":"denyEgress"]=state.draft.networkRules[key].join(",");
+        state.preflight="none";state.preflightError="";state.error="";
+      }
+    }
+    else if(action.indexOf("resource-add:")===0){
+      var key=action.slice("resource-add:".length);
+      if(settings().supported&&!settings().macos&&agentFieldCatalog().resource.some(function(x){return x.key===key})&&!state.draft.resourceRows.some(function(x){return x.key===key})){
+        state.draft.resourceRows.push({id:state.nextRowId++,key:key,value:""});
+        state.preflight="none";state.preflightError="";state.error="";
+      }
     }
     else if(action==="toggle-policy-json"){state.showPolicyJson=!state.showPolicyJson;}
     else if(action.indexOf("add-kv:")===0){
