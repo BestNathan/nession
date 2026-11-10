@@ -719,6 +719,12 @@ function selfTest() {
     /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(jobIf[1],
     /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  // #3211: an authenticated completion for the native Staging -> Main PR
+  // must wake the same trusted controller (not require owner/schedule).
+  assert.match(jobIf[1],/github\.event\.workflow_run\.head_branch == 'staging'/);
+  assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.head\.ref == 'staging'/);
+  assert.match(jobIf[1],/github\.event\.workflow_run\.pull_requests\[0\]\.base\.ref == 'main'/);
+  assert.match(jobIf[1],/github\.event\.workflow_run\.event == 'pull_request'/);
   const deploy = [
     'name: Release / Staging Artifacts', 'on:', '  push:',
     "    branches: ['staging']", '  workflow_dispatch:',
