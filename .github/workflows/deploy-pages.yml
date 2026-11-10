@@ -53,6 +53,8 @@ jobs:
       workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
       public_agent_source: ${{ steps.public_data.outputs.source }}
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
+      documents_json_sha256: ${{ steps.public_data.outputs.documents_json_sha256 }}
+      documents_protocols: ${{ steps.public_data.outputs.documents_protocols }}
       knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
       knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
       knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
@@ -171,6 +173,7 @@ jobs:
           test -s pages/dist/workflows.html
           test -s pages/dist/data/workflows.json
           test -s pages/dist/data/knowledge.json
+          test -s pages/dist/data/documents.json
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
@@ -182,6 +185,7 @@ jobs:
           workflow_json=pages/dist/data/workflows.json
           workflow_html=pages/dist/workflows.html
           knowledge_json=pages/dist/data/knowledge.json
+          documents_json=pages/dist/data/documents.json
           prototype_manifest=pages/dist/prototypes/manifest.json
           prototype_gallery=pages/dist/prototypes/index.html
           jq -e --arg sha "$(git -C prototype-store rev-parse HEAD)" '
@@ -194,6 +198,16 @@ jobs:
             .source.branch == "knowledge" and .source.sha == $sha and
             (.articles | type == "array") and (.changes | type == "array")
           ' "$knowledge_json" >/dev/null
+          # Publication contract only: protocol semantics remain owned by
+          # canonical Rust codegen and pages/scripts/documents-project.mjs.
+          jq -e --arg sha "$GITHUB_SHA" '
+            .schema_version == 4 and .status == "available" and
+            .source.repository == "BestNathan/nession" and
+            .source.branch == "main" and .source.sha == $sha and
+            (.protocols | type) == "array" and (.protocols | length) > 0
+          ' "$documents_json" >/dev/null
+          echo "documents_json_sha256=$(sha256sum "$documents_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "documents_protocols=$(jq -r '.protocols | length' "$documents_json")" >> "$GITHUB_OUTPUT"
           echo "knowledge_sha=$(jq -r .source.sha "$knowledge_json")" >> "$GITHUB_OUTPUT"
           echo "knowledge_json_sha256=$(sha256sum "$knowledge_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "knowledge_articles=$(jq '.articles | length' "$knowledge_json")" >> "$GITHUB_OUTPUT"
@@ -271,6 +285,8 @@ jobs:
           EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
           EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
+          EXPECTED_DOCUMENTS_JSON_SHA256: ${{ needs.build.outputs.documents_json_sha256 }}
+          EXPECTED_DOCUMENTS_PROTOCOLS: ${{ needs.build.outputs.documents_protocols }}
           EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
           EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
           EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
@@ -402,6 +418,33 @@ jobs:
             exit 1
           }
           echo "Public Knowledge verified: source=$EXPECTED_KNOWLEDGE_SHA articles=$EXPECTED_KNOWLEDGE_ARTICLES digest=$EXPECTED_KNOWLEDGE_JSON_SHA256"
+          # The Documents endpoint needs its own anonymous HTTPS byte proof.
+          # A valid site.json or the right main SHA alone cannot prove it.
+          [[ "$EXPECTED_DOCUMENTS_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_DOCUMENTS_PROTOCOLS" =~ ^[1-9][0-9]*$ ]] || exit 1
+          documents_json="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html" "$prototype_manifest" "$prototype_gallery" "$prototype_detail" "$knowledge_json" "$documents_json"' EXIT
+          documents_ready=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/documents.json?revision=$EXPECTED_SHA" -o "$documents_json" \
+              && jq -e --arg sha "$EXPECTED_SHA" --argjson count "$EXPECTED_DOCUMENTS_PROTOCOLS" '
+                .schema_version == 4 and .status == "available" and
+                .source.repository == "BestNathan/nession" and
+                .source.branch == "main" and .source.sha == $sha and
+                (.protocols | type) == "array" and (.protocols | length) == $count
+              ' "$documents_json" >/dev/null \
+              && [[ "$(sha256sum "$documents_json" | cut -d ' ' -f1)" == "$EXPECTED_DOCUMENTS_JSON_SHA256" ]]; then
+              documents_ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$documents_ready" == true ]] || {
+            echo "::error::Public Protocol Documents does not match exact built JSON SHA-256, protocol count and pinned main"
+            exit 1
+          }
+          echo "Public Protocol Documents verified: main_sha=$EXPECTED_SHA protocols=$EXPECTED_DOCUMENTS_PROTOCOLS json_sha256=$EXPECTED_DOCUMENTS_JSON_SHA256"
           # This is only source observation; never infer SC acceptance or PR
           # lineage from matching bytes. The existing trusted attester rechecks
           # the published SHA-256 against the exact GitHub Run/Attempt.
@@ -422,6 +465,8 @@ jobs:
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
             echo "- Public Knowledge: $url/#/knowledge · source $EXPECTED_KNOWLEDGE_SHA · $EXPECTED_KNOWLEDGE_ARTICLES articles"
+            echo "- Public Protocol Documents: $url/#/documents · source $EXPECTED_SHA · $EXPECTED_DOCUMENTS_PROTOCOLS Protocol Units"
+            echo "- Documents JSON SHA-256: $EXPECTED_DOCUMENTS_JSON_SHA256 (exact anonymous HTTPS bytes)"
             echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
             echo "- Direct HTML example: $url/prototypes/terminal-fixed-cols-2487/index.html (source link visible)"
