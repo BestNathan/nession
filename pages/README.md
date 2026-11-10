@@ -56,14 +56,25 @@ in current main, the value is `Unreleased`; this is not a claim that main
 is a published release. Never infer the introduction date from the latest
 Cargo workspace version or assume all prior Releases lacked the field.
 
-`pages/scripts/protocol-release-history.mjs` reads official public GitHub
-Releases. Each version may publish `nession-protocol-schema.json`, an envelope
-with `schema_version: 1`, `source: {repository, tag, sha, version}`, and
-`schema` set to the *actual* Rust codegen JSON Schema at the tagged commit.
-The build verifies tag provenance and checks an asset digest when GitHub
-supplies it. Older Releases including v0.35.0 lack this generator, and
-historical assets have not yet been backfilled; their introduction values
-remain `Unknown`. A release-asset producer is a separate delivery task.
+`pages/scripts/protocol-release-history.mjs` lists official stable GitHub
+Releases, resolves every `vX.Y.Z` Git Tag to its **commit SHA**, and prefers
+a verified immutable `nession-protocol-schema.json` Release asset (envelope
+`schema_version: 1`, `source: {repository, tag, sha, version}`, `schema`
+containing that tag's Rust-generated JSON Schema). Without an asset,
+`pages/scripts/protocol-git-history.mjs` can fetch the exact tag, compare its
+commit SHA to GitHub's resolved tag SHA, create an isolated temporary Git
+worktree, and run the **tag's own** Rust codegen with a credential-free
+environment. The result is cached under its commit SHA. Only the latest eight
+asset-less Releases are auto-reconstructed per build, with missing older
+snapshots shown as `Unknown`, not assumed absent.
+
+Historical Rust codegen runs without inherited GitHub tokens or the runner's
+HOME/CARGO_HOME, and their compilation is bounded. It executes only repository
+Release-tagged sources; for stricter isolation, history artifacts can be
+produced in a separate read-only job. Older Releases such as v0.35.0 predate
+the generator and therefore remain `Unknown` until a verifiable historical
+schema is available. A future release-asset producer can eliminate repeated
+historical compilation without any manually maintained `since` metadata.
 
 The Pages static artifact carries exact main SHA and observed release
 provenance. The Rust generator runs at the pinned main checkout; failure
@@ -71,8 +82,11 @@ blocks a trusted public build. The current main source Cargo version is
 development metadata, never a statement of released availability.
 
 The base Pages build requires Node 24 with no npm dependencies. Trusted
-Protocol projection additionally needs Rust/Cargo. Deterministic fixtures
-may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo.
+Protocol projection additionally needs Rust/Cargo and Git (for historical
+tag reconstruction). Set `PAGES_PROTOCOL_CACHE_DIR` to a persistent,
+trusted build cache to reuse previously compiled tag snapshots. Deterministic
+fixtures may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo
+for the current main revision; `PAGES_OFFLINE=1` disables GitHub history reads.
 
 ## Knowledge Explorer / public reading surface (#2664)
 
