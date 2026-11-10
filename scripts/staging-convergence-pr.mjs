@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {planBatch} from './staging-convergence-batch.mjs';
 
 const REPO='BestNathan/nession';
@@ -160,4 +161,5 @@ export function selfTest(){
   assert.throws(()=>convergenceBatchDigest({...batch,branch:'bad..branch'}),/invalid/);
   console.log('PR-native convergence: immutable digest, risk and Owner approval PASS');
 }
-if(process.argv[2]==='self-test')selfTest();
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href&&
+   process.argv[2]==='self-test')selfTest();
