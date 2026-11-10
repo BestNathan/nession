@@ -4,7 +4,7 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-import {describeFields,projectProtocolSchema,loadDocuments,
+import {describeFields,fieldSince,projectProtocolSchema,loadDocuments,
   validPublicDocuments,unavailableDocuments} from '../scripts/documents-project.mjs';
 import {releaseProtocolHistory,sortedReleases}
   from '../scripts/protocol-release-history.mjs';
@@ -52,7 +52,7 @@ const release=(version,schema,status='available')=>({
 });
 test('Rust generated JSON Schema projects every protocol/contract and both halves',()=>{
   const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT});
-  assert.equal(doc.schema_version,3);
+  assert.equal(doc.schema_version,4);
   assert.equal(doc.status,'available');
   assert.equal(doc.protocols.length,2);
   const status=doc.protocols.find(p=>p.id==='git.status');
@@ -72,7 +72,7 @@ test('a nested referenced response field preserves its response variant',()=>{
   assert.equal(rows.some(f=>f.path==='status.branch'&&f.variant.includes('state=error')),false);
   assert.deepEqual(describeFields(null,{}),[]);
 });
-test('Nession release semver is the only historic field support axis',()=>{
+test('a single Since Nession value has a verified introduction boundary',()=>{
   const current=fixture({snapshot:true});
   const old=fixture({legacy:true});
   const newer=fixture();
@@ -82,31 +82,41 @@ test('Nession release semver is the only historic field support axis',()=>{
       {version:'0.37.0',tag:'v0.37.0',sha:null,status:'unavailable',schema:null}
     ]});
   const git=doc.protocols.find(p=>p.id==='git.status');
-  const fields=git.versions[0].response.fields;
-  const branch=fields.find(f=>f.path==='status.branch');
-  const latest=fields.find(f=>f.path==='status.latest');
+  const branch=git.versions[0].response.fields.find(f=>f.path==='status.branch');
+  const latest=git.versions[0].response.fields.find(f=>f.path==='status.latest');
   const snapshot=git.versions[1].response.fields.find(f=>f.path==='snapshot');
-  assert.deepEqual(branch.releases.map(r=>r.status),
-    ['supported','supported','unknown']);
-  assert.deepEqual(latest.releases.map(r=>r.status),
-    ['not-supported','not-supported','unknown']);
-  assert.deepEqual(snapshot.releases.map(r=>r.status),
-    ['contract-not-declared','supported','unknown']);
-  assert.equal(snapshot.firstObserved,'0.36.0');
-  assert.equal(latest.firstObserved,null);
+  assert.deepEqual({since:branch.since,status:branch.since_status},
+    {since:null,status:'unknown'});
+  assert.deepEqual({since:latest.since,status:latest.since_status},
+    {since:null,status:'unknown'});
+  assert.deepEqual({since:snapshot.since,status:snapshot.since_status},
+    {since:null,status:'unknown'}); // latest v0.37 has no trusted snapshot
+  assert.equal(snapshot.releases,undefined); // no per-release matrix
+  assert.equal(git.support,undefined);
   assert.equal(validPublicDocuments(doc),true);
   assert.equal(validDocumentsSnapshot(doc),true);
   assert.equal(doc.source.source_version,'0.35.0');
 });
-test('old version only fields remain visible as historical, not current',()=>{
+test('release introduction is verified only with immediately preceding absence',()=>{
+  assert.deepEqual(fieldSince(['absent','supported','supported'],
+    ['0.35.0','0.36.0','0.37.0']),{since:'0.36.0',since_status:'verified'});
+  assert.deepEqual(fieldSince(['unknown','supported','supported'],
+    ['0.35.0','0.36.0','0.37.0']),{since:null,since_status:'unknown'});
+  assert.deepEqual(fieldSince(['supported','supported'],
+    ['0.35.0','0.36.0']),{since:null,since_status:'unknown'});
+  assert.deepEqual(fieldSince(['absent','unknown','supported'],
+    ['0.35.0','0.36.0','0.37.0']),{since:null,since_status:'unknown'});
+  assert.deepEqual(fieldSince(['absent','absent'],
+    ['0.35.0','0.36.0']),{since:null,since_status:'unreleased'});
+});
+test('the main Protocol Reference excludes fields only found in old releases',()=>{
   const old=fixture({snapshot:true});
   const main=fixture();
   const doc=projectProtocolSchema(main,{sha:SHA,generatedAt:AT,
     releases:[release('0.36.0',old)]});
   const field=doc.protocols.find(p=>p.id==='git.status')
     .versions[0].response.fields.find(f=>f.path==='status.latest');
-  assert.equal(field.historical,true);
-  assert.equal(field.releases[0].status,'supported');
+  assert.equal(field,undefined);
 });
 test('unknown version and malformed catalog reject instead of fabricating data',()=>{
   assert.throws(()=>projectProtocolSchema({$schema:draft,protocols:{},$defs:{}},
@@ -182,7 +192,7 @@ class Element{
   querySelector(tag){return descendants(this).find(x=>x.tagName===tag.toUpperCase())||null;}
 }
 function descendants(node){return [node,...(node.nodes||[]).flatMap(descendants)];}
-test('Protocol reference renders inert DOM, release semvers and unknowns',()=>{
+test('Protocol reference renders one since-version column, not a matrix',()=>{
   const original=globalThis.document;
   globalThis.document={createElement:t=>new Element(t),
     createTextNode:s=>({textContent:s})};
@@ -193,8 +203,10 @@ test('Protocol reference renders inert DOM, release semvers and unknowns',()=>{
     renderDocuments(ui,data,documentsHref('git.status',1));
     const elements=descendants(ui);
     assert.ok(elements.some(x=>x.tagName==='TABLE'));
-    assert.ok(elements.some(x=>x.textContent?.includes('0.35.0')));
-    assert.ok(elements.some(x=>x.tagName==='TD'&&x.textContent==='?'));
+    assert.ok(elements.some(x=>x.tagName==='TH'&&x.textContent==='Since Nession'));
+    assert.equal(elements.filter(x=>x.tagName==='TH'&&x.textContent==='0.35.0').length,0);
+    assert.ok(elements.some(x=>x.tagName==='TD'&&x.textContent==='Unknown'));
+    assert.equal(elements.some(x=>x.tagName==='TD'&&x.textContent==='?'),false);
     assert.ok(elements.some(x=>x.tagName==='DETAILS'));
     assert.equal(elements.some(x=>x.tagName==='SCRIPT'),false);
   }finally{globalThis.document=original;}
