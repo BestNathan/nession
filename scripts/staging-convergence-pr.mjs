@@ -410,7 +410,12 @@ export function selfTest(){
     assert.equal(isNativePromotionPr(promotion),true);
     assert.equal(isNativePromotionPr({...promotion,user:{login:'attacker'}}),false);
     assert.equal(isNativePromotionPr({...promotion,head:{...promotion.head,ref:'feature'}}),false);
-    assert.equal(isNativePromotionPr({...promotion,body:promotion.body.replace(main,'f'.repeat(40))}),false);
+    // Shape-only identity accepts valid looking historical pins; actual
+    // Git ancestry is the trusted reject point for a forged source.
+    const forgedMain={...promotion,body:promotion.body.replace(main,later)};
+    assert.equal(isNativePromotionPr(forgedMain),true);
+    assert.throws(()=>promotionE2ESelection(forgedMain,root,main),
+      /untrusted|stale/,'future Main pin cannot authorize current base');
     const promoter=promotionE2ESelection(promotion,root,main);
     assert.equal(promoter.mode,'selected');
     assert.deepEqual(promoter.issues,[]);
