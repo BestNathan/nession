@@ -84,6 +84,36 @@ function remoteSha(root, ref) {
   if (!SHA.test(sha) || observed !== ref) fail('unexpected remote ref readback');
   return sha;
 }
+// A completed workflow with all jobs skipped can report overall success.
+// Require the exact read-only signal job and step to have *actually run*
+// at the same upstream Run ID and proposal SHA before granting authority.
+function verifySignalJobReceipt(response,sourceRunId,proposalSha) {
+  if (!response || !Array.isArray(response.jobs) || response.jobs.length !== 1 ||
+      response.total_count !== 1)
+    fail('proposal signal must have exactly one completed source job');
+  const job=response.jobs[0];
+  if (job.run_id !== sourceRunId || job.head_sha !== proposalSha ||
+      job.name !== 'Emit approved owner proposal creation signal' ||
+      job.status !== 'completed' || job.conclusion !== 'success' ||
+      !Array.isArray(job.steps) ||
+      !job.steps.some(step=>step.name==='Record nonprivileged proposal event provenance' &&
+        step.status==='completed' && step.conclusion==='success'))
+    fail('proposal signal job/step was skipped, failed, or does not match pinned run/SHA');
+}
+function validateSignalJobRemotely(runId,proposalSha) {
+  const token=process.env.GH_TOKEN;
+  if (!token || typeof token !== 'string') fail('read-only Actions token required for signal proof');
+  const path='repos/'+REPO+'/actions/runs/'+runId+'/jobs?per_page=100';
+  const result=spawnSync('gh',['api',path],{
+    encoding:'utf8',timeout:30000,maxBuffer:2*1024*1024,
+    env:{...process.env,GH_TOKEN:token},
+  });
+  if(result.error || result.status!==0)
+    fail('source signal job readback failed: '+(result.error?.message||result.stderr||'unknown').trim());
+  let response;
+  try{response=JSON.parse(result.stdout);}catch{fail('invalid original source signal job JSON');}
+  verifySignalJobReceipt(response,runId,proposalSha);
+}
 function prepare(eventPath, destination) {
   if (typeof eventPath !== 'string' || !eventPath ||
       !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 8192)
@@ -95,6 +125,7 @@ function prepare(eventPath, destination) {
       runAttempt: process.env.GITHUB_RUN_ATTEMPT, sha: process.env.GITHUB_SHA },
   );
   const {proposal_ref, proposal_sha} = request;
+  if(request.source_run_id)validateSignalJobRemotely(request.source_run_id,proposal_sha);
   const root = process.cwd();
   if (git(root, 'rev-parse', 'HEAD') !== process.env.GITHUB_SHA ||
       !/^https:\/\/github\.com\/BestNathan\/nession(?:\.git)?$/.test(git(root, 'remote', 'get-url', 'origin')))
@@ -192,6 +223,21 @@ function selfTest() {
   assert.throws(()=>parseRequest(signalEvent,{...autoContext,ref:'refs/heads/knowledge-proposals/test'}));
   assert.throws(()=>parseRequest(signalEvent,{...autoContext,runAttempt:'2'}));
   assert.throws(()=>parseRequest(signalEvent,{...autoContext,eventName:'push'}));
+  const validJob={run_id:12345,head_sha:'b'.repeat(40),
+    name:'Emit approved owner proposal creation signal',
+    status:'completed',conclusion:'success',
+    steps:[{name:'Record nonprivileged proposal event provenance',
+      status:'completed',conclusion:'success'}]};
+  verifySignalJobReceipt({total_count:1,jobs:[validJob]},12345,'b'.repeat(40));
+  for(const malformed of [
+    {total_count:0,jobs:[]},
+    {total_count:2,jobs:[validJob,validJob]},
+    {total_count:1,jobs:[{...validJob,conclusion:'skipped'}]},
+    {total_count:1,jobs:[{...validJob,run_id:12346}]},
+    {total_count:1,jobs:[{...validJob,head_sha:'c'.repeat(40)}]},
+    {total_count:1,jobs:[{...validJob,steps:[{...validJob.steps[0],conclusion:'skipped'}]}]},
+    {total_count:1,jobs:[{...validJob,steps:[]}]},
+  ])assert.throws(()=>verifySignalJobReceipt(malformed,12345,'b'.repeat(40)));
   console.log('knowledge-publisher-request: owner dispatch and owner create→workflow_run deny-by-default positive/negative fixtures passed');
 }
 try {
