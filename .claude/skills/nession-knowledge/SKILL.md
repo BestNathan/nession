@@ -153,7 +153,18 @@ git worktree add -b kb-<issue>-<subject> .claude/worktrees/kb-<issue>-<subject> 
 - Source: https://github.com/BestNathan/nession/issues/2325
 ```
 5. From trusted main tooling regenerate `index.json` with `node scripts/knowledge-ledger-contract.mjs index <knowledge-worktree>`, then commit article + index + changelog **together**. Run `node scripts/knowledge-ledger-contract.mjs check <knowledge-worktree> <previous-knowledge-SHA>` and `./gates/run knowledge-ledger-contract`.
-6. In a trusted operator environment use `node scripts/knowledge-ledger-publish.mjs publish <knowledge-worktree> <expected-remote-knowledge-SHA>`. The publisher checks exact remote head, rejects stale concurrent writers, pushes without force and re-reads the result. Attach the resulting commit URL to the Issue. Never grant GitHub write credentials to untrusted PR-head or Agent code.
+6. **Auto-submit the protected publication request as part of the same Knowledge Ingest action**, without asking the user to run `gh api` or invoking a generic Git writer on `knowledge`. Construct a **single-commit** data-only proposal from the exact observed `knowledge` head, create `refs/heads/knowledge-proposals/<slug>` pointing at that committed SHA, then immediately create a GitHub **Issue comment authored through the authenticated `BestNathan` owner connection** on the owning Issue using precisely this four-line body (substitute exact observed values, never placeholders):
+
+   ```text
+   /knowledge-publish v1
+   proposal_ref=refs/heads/knowledge-proposals/<slug>
+   proposal_sha=<exact-40-hex-proposal-commit>
+   expected_head=<exact-40-hex-current-knowledge-head>
+   ```
+
+   The `issue_comment.created` event executes the **main-owned** `Store / Knowledge Publisher`, which checks owner actor/comment author, issue identity, exact command schema, source SHA/head CAS, complete Ledger and exact Pages-public-projection Gate. The reviewed Environment gives a **separate dedicated Knowledge App** the only allowed non-force protected ref write. After publication, `Knowledge / Change Signal` triggers `Deploy / Public Pages`, which performs anonymous HTTPS artifact readback. Observe actual Publisher Run/Attempt, protected `knowledge` SHA and Pages publication before marking complete. The older owner `repository_dispatch` remains a recovery path, not a manual step in normal Ingest.
+
+   **Trust rule:** a generic `GITHUB_TOKEN` Issue comment does not trigger downstream workflows. If there is no authenticated `BestNathan` Issue-comment writer, or required Knowledge App/Environment/rulesets are missing, **do not** attempt a direct push or impersonation. Leave publication Pending with the exact blocked prerequisite. A proposal branch by itself is not an approved publication request; owner-authored source-pinned Issue comment is the explicit authorization event (Issue #3156).
 
 On conflicts, fetch and reconcile **both current knowledge and global log**. Do not silently rebase away someone else's change. Do not delete/recreate the orphan branch, overwrite the changelog or present cached content as verified after a fetch failure. Public knowledge cannot contain secrets, credentials, sessions, private prompts or tenant material.
 

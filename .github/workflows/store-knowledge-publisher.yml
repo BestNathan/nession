@@ -1,13 +1,18 @@
 name: Store / Knowledge Publisher
 
-# #2358: A distinct App identity publishes a precommitted, data-only Knowledge
-# proposal. repository_dispatch always executes the default-branch workflow;
-# unlike workflow_dispatch it does NOT accept an attacker-selected source ref.
-# The non-privileged job authenticates the request before the protected job
-# can access knowledge-publish Environment secrets.
+# #2358/#3156: A distinct App identity publishes an owner-authorized,
+# precommitted data-only Knowledge proposal. Trusted default-branch entrypoints: owner repository_dispatch, owner-authored
+# Issue comment containing an exact pinned proposal request, and the optional
+# completed owner-created Proposal Signal workflow_run. Neither accepts an attacker-selected checkout.
+# Unprivileged source verification must pass before the protected App job.
 on:
   repository_dispatch:
     types: [knowledge-publish-v1]
+  issue_comment:
+    types: [created]
+  workflow_run:
+    workflows: ['Store / Knowledge Proposal Signal']
+    types: [completed]
 
 permissions:
   contents: read
@@ -21,13 +26,37 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.sender.login == 'BestNathan' &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan' &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.author_association == 'OWNER' &&
+         github.event.issue.pull_request == null &&
+         startsWith(github.event.comment.body, '/knowledge-publish v1')) ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'create' &&
+         github.event.workflow_run.status == 'completed' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.name == 'Store / Knowledge Proposal Signal' &&
+         github.event.workflow_run.path == '.github/workflows/store-knowledge-proposal-signal.yml' &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         github.event.workflow_run.repository.full_name == github.repository &&
+         github.event.workflow_run.actor.login == 'BestNathan' &&
+         github.event.workflow_run.triggering_actor.login == 'BestNathan' &&
+         startsWith(github.event.workflow_run.head_branch, 'knowledge-proposals/'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
       contents: read
+      actions: read # Exact upstream signal Job/Step readback; never write
     steps:
       - name: Checkout exact trusted main request verifier
         uses: actions/checkout@v4
@@ -40,6 +69,8 @@ jobs:
           node-version: '24'
       - name: Verify only authenticated owner/main requests and valid inert data
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node scripts/knowledge-publisher-request.mjs self-test
@@ -54,13 +85,37 @@ jobs:
       needs.verify.result == 'success' &&
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.sender.login == 'BestNathan' &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'repository_dispatch' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan' &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.author_association == 'OWNER' &&
+         github.event.issue.pull_request == null &&
+         startsWith(github.event.comment.body, '/knowledge-publish v1')) ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'create' &&
+         github.event.workflow_run.status == 'completed' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.run_attempt == 1 &&
+         github.event.workflow_run.name == 'Store / Knowledge Proposal Signal' &&
+         github.event.workflow_run.path == '.github/workflows/store-knowledge-proposal-signal.yml' &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         github.event.workflow_run.repository.full_name == github.repository &&
+         github.event.workflow_run.actor.login == 'BestNathan' &&
+         github.event.workflow_run.triggering_actor.login == 'BestNathan' &&
+         startsWith(github.event.workflow_run.head_branch, 'knowledge-proposals/'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read # Revalidate source Job/Step with the same no-write policy
     # Environment MUST be precreated by admin: selected deployment branch main,
     # authorized reviewer, and only the dedicated Knowledge App private key.
     # A missing/unreviewed Environment is not a substitute for protection.

@@ -3,8 +3,10 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
+import { issueBody as convergenceIssueBody } from '../../staging-convergence-batch.mjs';
+import { auditIssue } from '../../issue-contract.mjs';
 import {
   renderE2eFailureAnalysisPrompt, e2eFailureAnalysisResult,
 } from './tasks/e2e-failure-analysis.mjs';
@@ -21,6 +23,26 @@ const issue = {
   labels: [{ name: 'bug' }, { name: 'web' }, { name: 'in-progress' }],
   body: 'Reporter data: {{not_a_template_variable}}',
 };
+// The source-bound convergence batch (#3139) already has a complete Issue
+// Contract. Its Audit must never ask Qwen to rewrite authenticated E2E rows.
+const batchPlan={branch:'staging',main_sha:'a'.repeat(40),lane_sha:'b'.repeat(40),
+  integration_head:'c'.repeat(40),identity:'nession-convergence-batch:v1 branch=staging',
+  impact:{category:'e2e-runner'},changedPaths:['scripts/e2e-runner.mjs'],
+  newIds:[],regressionIds:[],removed:[]};
+const validBatch={number:3139,title:'Requirement: Staging integration staging aaaaaaaaaaaa',
+  url:'https://github.com/BestNathan/nession/issues/3139',
+  labels:[{name:'requirement'},{name:'ci'},{name:'verification:integration'}],
+  body:convergenceIssueBody(batchPlan)};
+assert.equal(auditIssue(validBatch).ok,true,'fixture must be a valid integration Issue');
+const narrowed=issueAuditProposalSchemaForIssue(validBatch);
+assert.deepEqual(Object.keys(narrowed.properties),['comment','verification_tier','tier_reason']);
+assert.equal(narrowed.additionalProperties,false);
+assert.equal(issueAuditProposalSchemaForIssue({...validBatch,body:'invalid'}),
+  ISSUE_AUDIT_PROPOSAL_SCHEMA,'malformed source still permits bounded contract repair');
+const validPrompt=renderIssueAuditPrompt(validBatch,{errors:[]},'deepseek','BestNathan/nession');
+assert.match(validPrompt.text,/Allowed top-level JSON keys only: comment, verification_tier, tier_reason/);
+assert.match(validPrompt.text,/valid E2E declaration and report are immutable/);
+
 const audit = { errors: ['missing Location'] };
 const cursor = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo');
 const claude = renderIssueAuditPrompt(issue, audit, 'deepseek', 'example/repo');
