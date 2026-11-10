@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "efa71314b5a397d8098e98fd3a53c9b3c532cb4a",
+  "run_id": 42841534945,
+  "run_attempt": 1,
+  "plan_digest": "276e8d5af86c56a1d5b390a3a2a5c9c41dd33092708a71db641b966c894b8009",
+  "artifact_digest": "sha256:e6608769b835829b647d705a5b845164c33619ae7b7c17036272c990487e7029",
+  "results": [
+    {
+      "id": "app-session-operations",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "project-management",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 29
+    },
+    {
+      "id": "project-session-create",
+      "result": "Pass",
+      "discovered": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 163
+    }
+  ]
+}
