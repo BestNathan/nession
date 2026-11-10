@@ -171,7 +171,7 @@ const generatedAt=new Date().toISOString();
 const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
   sha:process.env.KNOWLEDGE_SHA,generatedAt});
 if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
-const documents=await loadDocuments({directory:resolve(root,'..'),
+const documents=await loadDocuments({schemaPath:process.env.PAGES_PROTOCOL_SCHEMA_FILE,
   sha:process.env.SOURCE_MAIN_SHA,generatedAt});
 if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
 const selectedIssueNumbers=Array.isArray(issues)?issues
@@ -299,5 +299,5 @@ console.log(JSON.stringify({
   agent_result_count:result.work.agent_result_observations.records.length,
   stores:result.evidence.stores.map(x=>[x.name,x.state]),
   knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null},
-  documents:{status:documents.status,count:documents.documents.length,sha:documents.source?.sha||null}
+  documents:{status:documents.status,protocols:documents.protocols.length,sha:documents.source?.sha||null}
 }));
