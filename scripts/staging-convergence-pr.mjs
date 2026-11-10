@@ -37,7 +37,7 @@ export function convergenceBatchDigest(batch){
   if(!safeBranch(batch?.branch)||![batch?.main_sha,batch?.lane_sha,
     batch?.integration_head].every(x=>SHA.test(x??''))||
     !Array.isArray(batch.changedPaths)||!batch.changedPaths.length||
-    !['tooling','e2e-runner','app-runtime','e2e-fixture-catalog','mixed','unknown']
+    !['tooling-only','e2e-runner','app-runtime','e2e-fixture-catalog','mixed','unknown']
       .includes(batch.impact?.category)||
     !['newIds','regressionIds','removed'].every(k=>Array.isArray(batch[k])))
     throw Error('invalid source-bound convergence digest input');
@@ -205,7 +205,8 @@ export function selfTest(){
   assert.match(digest,DIGEST);
   assert.match(convergencePrMarker(batch),/nession-convergence-pr:v1/);
   assert.notEqual(convergenceBatchDigest({...batch,changedPaths:['scripts/b.mjs']}),digest);
-  assert.notEqual(convergenceBatchDigest({...batch,impact:{category:'tooling'}}),digest);
+  assert.notEqual(convergenceBatchDigest({...batch,impact:{category:'tooling-only'}}),digest);
+  assert.throws(()=>convergenceBatchDigest({...batch,impact:{category:'tooling'}}),/invalid/);
   assert.equal(convergenceApproval(batch).reason,'AWAITING_EXACT_HEAD_FULL_E2E');
   assert.equal(convergenceApproval(batch,{verified:true,source_head_sha:c,
     batch_digest:digest,run_id:777}).approved,true);
