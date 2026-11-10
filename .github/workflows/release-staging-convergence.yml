@@ -29,13 +29,13 @@ on:
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
-    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests']
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'E2E / Full Regression']
     types: [completed]
 
 permissions:
   contents: read
   actions: write
-  issues: write # exact, main-owned batch Requirement creation (#2953)
+  issues: write # legacy cleanup only; new batches are PR-native
   pull-requests: read
 
 concurrency:
@@ -75,9 +75,19 @@ jobs:
         github.event_name != 'workflow_run' ||
         (
           github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'pull_request' &&
           github.event.workflow_run.head_repository.full_name == github.repository &&
-          startsWith(github.event.workflow_run.head_branch, 'chore/staging-sync-')
+          (
+            (
+              github.event.workflow_run.event == 'pull_request' &&
+              startsWith(github.event.workflow_run.head_branch, 'chore/staging-sync-')
+            ) ||
+            (
+              github.event.workflow_run.name == 'E2E / Full Regression' &&
+              github.event.workflow_run.event == 'workflow_dispatch' &&
+              github.event.workflow_run.head_branch == 'main' &&
+              startsWith(github.event.workflow_run.display_title, 'Convergence Full chore/staging-sync-')
+            )
+          )
         )
       )
     runs-on: ubuntu-24.04
