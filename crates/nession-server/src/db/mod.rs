@@ -20,7 +20,7 @@ use entities::{
     agents, env_files, projects, quick_commands, session_env_bindings, session_project_bindings,
     sessions,
 };
-pub use images::{ImageGrantRow, ImageLeaseRow, ImageRow};
+pub use images::{ImageGrantRow, ImageLeaseRow, ImageRow, ImageStatusCounts};
 use migration::Migrator;
 use nession_protocol::contracts::project::v1::{
     ProjectLocation, ProjectSessionDefaults, ProjectSource,

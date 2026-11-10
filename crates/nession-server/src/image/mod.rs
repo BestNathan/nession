@@ -100,12 +100,52 @@ pub struct ImageAccessGrant {
     pub path: String,
 }
 
-/// The outcome of one GC sweep.
+/// The outcome of one GC sweep (#3180 SC-02).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GcReport {
+    /// Candidates the query returned (before any bound).
+    pub candidates: u64,
+    /// Candidates actually examined in this sweep.
+    pub examined_images: u64,
     pub removed_images: u64,
     pub removed_blobs: u64,
+    pub reclaimed_bytes: u64,
     pub skipped_active_transfers: u64,
+    /// Candidates left for a later sweep by `max_candidates` or
+    /// `max_deleted_bytes`. A bounded sweep is resumable: the next call
+    /// re-evaluates these from the database, not from in-memory state.
+    pub deferred_by_limit: u64,
+}
+
+/// Bounds for one GC sweep. Deletion is bounded so a scheduled sweep can never
+/// become an unbounded delete loop over a large registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GcLimits {
+    pub max_candidates: usize,
+    pub max_deleted_bytes: u64,
+}
+
+impl Default for GcLimits {
+    fn default() -> Self {
+        Self {
+            max_candidates: 64,
+            max_deleted_bytes: 512 * 1024 * 1024,
+        }
+    }
+}
+
+/// Server image storage as operators need to see it: metadata rows by status,
+/// ready blob bytes, and unpublished temporary files (#3180 SC-05).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageStorageDiagnostics {
+    pub blob_dir: std::path::PathBuf,
+    pub ready_images: u64,
+    pub failed_images: u64,
+    pub building_images: u64,
+    pub blobs: u64,
+    pub blob_bytes: u64,
+    pub temp_files: u64,
+    pub temp_bytes: u64,
 }
 
 /// Server-owned image manager.
@@ -425,10 +465,23 @@ impl ImageManager {
         }
     }
 
-    /// Remove unreferenced artifacts. A failed or stale build row is removed;
-    /// a ready row is removed only with its blob and only when no Project,
-    /// alias, active lease or in-process transfer protects it.
+    /// Remove unreferenced artifacts with the default per-sweep bounds.
+    ///
+    /// A failed or stale build row is removed; a ready row is removed only with
+    /// its blob and only when no Project, alias, active lease or in-process
+    /// transfer protects it.
     pub async fn gc(&self) -> Result<GcReport> {
+        self.gc_bounded(GcLimits::default()).await
+    }
+
+    /// Remove at most `limits.max_candidates` candidates and at most
+    /// `limits.max_deleted_bytes` of blob bytes in one sweep.
+    ///
+    /// The sweep owns no in-memory cursor: `deferred_by_limit` rows remain in
+    /// the database and a follow-up call (or the next scheduled tick) selects
+    /// them again. An interrupted sweep therefore resumes by re-querying, and a
+    /// failed unlink leaves the row for the next attempt.
+    pub async fn gc_bounded(&self, limits: GcLimits) -> Result<GcReport> {
         let now = now_i64();
         let _ = self.db.delete_expired_image_access_grants(now).await;
         let _ = self.db.delete_expired_image_leases(now).await;
@@ -436,8 +489,16 @@ impl ImageManager {
             .db
             .gc_image_candidates(now, now.saturating_sub(3600))
             .await?;
-        let mut report = GcReport::default();
-        for row in candidates {
+        let mut report = GcReport {
+            candidates: candidates.len() as u64,
+            ..GcReport::default()
+        };
+        for (index, row) in candidates.into_iter().enumerate() {
+            if index >= limits.max_candidates.max(1) {
+                report.deferred_by_limit += 1;
+                continue;
+            }
+            report.examined_images += 1;
             if let Some(digest) = &row.digest {
                 let active = self
                     .transfers
@@ -448,12 +509,16 @@ impl ImageManager {
                     report.skipped_active_transfers += 1;
                     continue;
                 }
-                if self.blobs.contains(digest).unwrap_or(false)
-                    && self.blobs.path_for(digest).is_ok()
-                {
+                if self.blobs.contains(digest).unwrap_or(false) {
+                    let size = self.blobs.size(digest).unwrap_or(0);
+                    if report.reclaimed_bytes.saturating_add(size) > limits.max_deleted_bytes {
+                        report.deferred_by_limit += 1;
+                        continue;
+                    }
                     if let Ok(path) = self.blobs.path_for(digest) {
                         if std::fs::remove_file(&path).is_ok() {
                             report.removed_blobs += 1;
+                            report.reclaimed_bytes += size;
                         }
                     }
                 }
@@ -463,6 +528,22 @@ impl ImageManager {
             }
         }
         Ok(report)
+    }
+
+    /// Measure persisted image metadata and blob usage (#3180 SC-05).
+    pub async fn diagnostics(&self) -> Result<ImageStorageDiagnostics> {
+        let counts = self.db.image_status_counts().await?;
+        let usage = self.blobs.usage()?;
+        Ok(ImageStorageDiagnostics {
+            blob_dir: self.blobs.root().to_path_buf(),
+            ready_images: counts.ready,
+            failed_images: counts.failed,
+            building_images: counts.building,
+            blobs: usage.blobs,
+            blob_bytes: usage.blob_bytes,
+            temp_files: usage.temp_files,
+            temp_bytes: usage.temp_bytes,
+        })
     }
 
     pub fn blob_store(&self) -> &BlobStore {
@@ -859,6 +940,113 @@ mod tests {
         drop(guard);
         let report = manager.gc().await.unwrap();
         assert_eq!(report.removed_images, 1);
+    }
+
+    /// #3180 SC-02: one sweep deletes at most the configured candidate count;
+    /// the deferred candidates stay in the database and a follow-up sweep
+    /// resumes them. The report is the observable result of the operation.
+    #[tokio::test]
+    async fn a_bounded_gc_defers_work_and_a_follow_up_sweep_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, _db) = manager(dir.path()).await;
+        for name in ["a", "b", "c"] {
+            backend.set(&format!("/source/{name}"), name.as_bytes());
+            manager
+                .build(&local(&format!("/source/{name}")), None)
+                .await
+                .unwrap();
+        }
+        let first = manager
+            .gc_bounded(GcLimits {
+                max_candidates: 1,
+                max_deleted_bytes: u64::MAX,
+            })
+            .await
+            .unwrap();
+        assert_eq!(first.candidates, 3);
+        assert_eq!(first.examined_images, 1);
+        assert_eq!(first.removed_images, 1);
+        assert_eq!(first.removed_blobs, 1);
+        assert_eq!(first.reclaimed_bytes, 1);
+        assert_eq!(first.deferred_by_limit, 2);
+        assert_eq!(manager.list(10).await.unwrap().len(), 2);
+
+        // The next sweep re-selects the deferred rows from the database.
+        let second = manager
+            .gc_bounded(GcLimits {
+                max_candidates: 10,
+                max_deleted_bytes: u64::MAX,
+            })
+            .await
+            .unwrap();
+        assert_eq!(second.candidates, 2);
+        assert_eq!(second.removed_images, 2);
+        assert_eq!(second.deferred_by_limit, 0);
+        assert!(manager.list(10).await.unwrap().is_empty());
+    }
+
+    /// #3180 SC-02: a byte budget leaves a ready row and its bytes untouched
+    /// for a later sweep instead of deleting the row while keeping the blob.
+    #[tokio::test]
+    async fn a_byte_budget_defers_a_ready_image_instead_of_leaking_its_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, _db) = manager(dir.path()).await;
+        backend.set("/source/bound", b"eightbyte");
+        let image = manager.build(&local("/source/bound"), None).await.unwrap();
+        let digest = image.digest.as_deref().unwrap();
+        let report = manager
+            .gc_bounded(GcLimits {
+                max_candidates: 10,
+                max_deleted_bytes: 0,
+            })
+            .await
+            .unwrap();
+        assert_eq!(report.removed_images, 0);
+        assert_eq!(report.removed_blobs, 0);
+        assert_eq!(report.deferred_by_limit, 1);
+        assert!(manager.get(Some(digest), None).await.is_ok());
+        assert!(manager.blob_store().contains(digest).unwrap());
+
+        let resumed = manager
+            .gc_bounded(GcLimits {
+                max_candidates: 10,
+                max_deleted_bytes: u64::MAX,
+            })
+            .await
+            .unwrap();
+        assert_eq!(resumed.removed_images, 1);
+        assert_eq!(resumed.reclaimed_bytes, b"eightbyte".len() as u64);
+        assert!(manager.get(Some(digest), None).await.is_err());
+    }
+
+    /// #3180 SC-05: diagnostics distinguish ready image bytes, failed rows and
+    /// unpublished temporary files, and count them within the same manager
+    /// that owns the registry.
+    #[tokio::test]
+    async fn diagnostics_separate_ready_bytes_failed_rows_and_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, _db) = manager(dir.path()).await;
+        backend.set("/source/ready", b"ready-bytes");
+        manager.build(&local("/source/ready"), None).await.unwrap();
+        backend.fail_next("fixture failure");
+        manager
+            .build(&local("/source/failed"), None)
+            .await
+            .unwrap_err();
+        std::fs::write(
+            dir.path().join("blobs/.tmp/interrupted.part"),
+            b"unpublished",
+        )
+        .unwrap();
+
+        let diagnostics = manager.diagnostics().await.unwrap();
+        assert_eq!(diagnostics.ready_images, 1);
+        assert_eq!(diagnostics.failed_images, 1);
+        assert_eq!(diagnostics.building_images, 0);
+        assert_eq!(diagnostics.blobs, 1);
+        assert_eq!(diagnostics.blob_bytes, b"ready-bytes".len() as u64);
+        assert_eq!(diagnostics.temp_files, 1);
+        assert_eq!(diagnostics.temp_bytes, b"unpublished".len() as u64);
     }
 
     async fn http_request(

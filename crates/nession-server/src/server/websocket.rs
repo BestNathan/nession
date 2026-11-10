@@ -182,6 +182,39 @@ impl WebSocketServer {
         // which cannot fail.
         ready.announce();
 
+        // Background sweep: bounded image GC (#3180). The interval and the
+        // per-sweep candidate/byte bounds are configuration; a sweep that hits
+        // its bound leaves the remainder in the database for the next tick.
+        // `0` disables the schedule — an explicit operator sweep still works.
+        if self.config.image_gc_interval_secs > 0 {
+            let image_manager = Arc::clone(&self.image_manager);
+            let interval = std::time::Duration::from_secs(self.config.image_gc_interval_secs);
+            let limits = crate::image::GcLimits {
+                max_candidates: self.config.image_gc_max_candidates,
+                ..Default::default()
+            };
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(interval);
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    match image_manager.gc_bounded(limits).await {
+                        Ok(report) => info!(
+                            removed_images = report.removed_images,
+                            removed_blobs = report.removed_blobs,
+                            reclaimed_bytes = report.reclaimed_bytes,
+                            deferred_by_limit = report.deferred_by_limit,
+                            skipped_active_transfers = report.skipped_active_transfers,
+                            "bounded image GC sweep completed"
+                        ),
+                        Err(error) => {
+                            warn!("bounded image GC sweep failed and will retry: {error:#}")
+                        }
+                    }
+                }
+            });
+        }
+
         let heartbeat_interval_secs = self.config.heartbeat_interval_secs;
 
         // Background sweeper: periodically mark agents that have missed their

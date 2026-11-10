@@ -12,6 +12,14 @@ use sea_orm::{
     QuerySelect, Set,
 };
 
+/// Image rows by lifecycle status (#3180 SC-05 diagnostics).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImageStatusCounts {
+    pub ready: u64,
+    pub failed: u64,
+    pub building: u64,
+}
+
 /// One image build attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRow {
@@ -168,6 +176,24 @@ impl Database {
             .await
             .context("failed to list images")?;
         Ok(rows.into_iter().map(row_from_model).collect())
+    }
+
+    /// Count image rows by lifecycle status without materializing every row
+    /// (#3180 SC-05 diagnostics).
+    pub async fn image_status_counts(&self) -> Result<ImageStatusCounts> {
+        let mut counts = ImageStatusCounts::default();
+        for (status, slot) in [
+            ("ready", &mut counts.ready),
+            ("failed", &mut counts.failed),
+            ("building", &mut counts.building),
+        ] {
+            *slot = images::Entity::find()
+                .filter(images::Column::Status.eq(status))
+                .count(&self.conn)
+                .await
+                .with_context(|| format!("failed to count {status} images"))?;
+        }
+        Ok(counts)
     }
 
     /// Point an alias at an immutable digest. A different revision changes the

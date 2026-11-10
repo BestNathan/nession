@@ -200,7 +200,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         // Sandbox host configuration and the execution reaper (#2681). The
         // runtime is always present; `sandbox.enabled = false` makes every
         // explicit policy fail closed with a backend-unavailable reason.
-        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(&config);
+        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(&config, &agent_id);
         mgr = mgr.with_sandbox(Arc::clone(&sandbox));
         Arc::new(mgr)
     };

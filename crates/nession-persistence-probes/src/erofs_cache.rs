@@ -7,7 +7,7 @@
 //! environment before/after container recreation.
 //!
 //! Usage: nession-erofs-cache-probe --cache-root DIR --digest sha256:<hex>
-//!        --url http://host:port/blob --token TOKEN
+//!        --url http://host:port/blob --token TOKEN [--identity ID]
 
 use anyhow::{Context, Result};
 use nession_agent::config::ResolvedErofsStorage;
@@ -22,6 +22,7 @@ async fn main() -> Result<()> {
     let mut digest: Option<String> = None;
     let mut url: Option<String> = None;
     let mut token: Option<String> = None;
+    let mut identity = "probe-agent".to_string();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -33,6 +34,7 @@ async fn main() -> Result<()> {
             "--digest" => digest = Some(value),
             "--url" => url = Some(value),
             "--token" => token = Some(value),
+            "--identity" => identity = value,
             other => anyhow::bail!("unknown argument: {other}"),
         }
     }
@@ -47,7 +49,7 @@ async fn main() -> Result<()> {
         token: token.context("--token is required")?,
     };
 
-    let cache = ErofsCache::open_resolved(&storage)
+    let cache = ErofsCache::open_resolved(&storage, &identity)
         .await
         .context("failed to open the EROFS cache at the declared durable root")?;
     let image = cache.get_or_fetch(&digest, &grant).await?;
@@ -62,6 +64,8 @@ async fn main() -> Result<()> {
             "blob_path": image.path,
             "blob_sha256": sha256_file(&image.path)?,
             "cache_root": storage.path,
+            "identity": cache.identity(),
+            "namespace_root": cache.root(),
         })
     );
     Ok(())
