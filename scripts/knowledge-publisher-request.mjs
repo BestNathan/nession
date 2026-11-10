@@ -50,6 +50,35 @@ function parseRequest(event, context) {
     return { proposal_ref, proposal_sha, expected_head };
   }
 
+  if (context.eventName === 'issue_comment') {
+    // An authenticated owner comment is an exact source-pinned handoff.
+    // GitHub emits issue_comment on trusted main; ordinary GITHUB_TOKEN
+    // comments cannot self-trigger arbitrary credentialed workflows.
+    if (context.actor !== 'BestNathan' || event?.action !== 'created' ||
+        event.repository?.full_name !== REPO ||
+        event.sender?.login !== 'BestNathan' ||
+        event.comment?.user?.login !== 'BestNathan' ||
+        event.comment?.author_association !== 'OWNER' ||
+        !Number.isSafeInteger(event.comment?.id) || event.comment.id <= 0 ||
+        !Number.isSafeInteger(event.issue?.number) || event.issue.number <= 0 ||
+        event.issue?.pull_request != null ||
+        event.issue?.repository_url !== 'https://api.github.com/repos/' + REPO)
+      fail('an authenticated owner Issue comment is required');
+    const lines=String(event.comment.body||'').replace(/\r\n?/g,'\n').trimEnd().split('\n');
+    if (lines.length !== 4 || lines[0] !== '/knowledge-publish v1' ||
+        !lines[1].startsWith('proposal_ref=') ||
+        !lines[2].startsWith('proposal_sha=') ||
+        !lines[3].startsWith('expected_head='))
+      fail('Issue comment must contain exactly four typed publication lines');
+    const proposal_ref=lines[1].slice('proposal_ref='.length);
+    const proposal_sha=lines[2].slice('proposal_sha='.length);
+    const expected_head=lines[3].slice('expected_head='.length);
+    if (!PROPOSAL_REF.test(proposal_ref) || !SHA.test(proposal_sha) ||
+        !SHA.test(expected_head) || proposal_sha===expected_head)
+      fail('invalid owner-approved proposal/expected-head identity');
+    return {proposal_ref,proposal_sha,expected_head,source_comment_id:event.comment.id};
+  }
+
   if (context.eventName === 'workflow_run') {
     // A trusted default-branch workflow_run webhook is the bridge from
     // *owner-created* proposal refs. Never trust a proposed branch's code,
@@ -114,9 +143,12 @@ function validateSignalJobRemotely(runId,proposalSha) {
   try{response=JSON.parse(result.stdout);}catch{fail('invalid original source signal job JSON');}
   verifySignalJobReceipt(response,runId,proposalSha);
 }
+// GitHub issue_comment events include the full public Issue/Repo envelopes,
+// not just the four-line owner command. Keep a strict bounded event size;
+// 8 KiB was sufficient only for repository_dispatch, not for real comments.
 function prepare(eventPath, destination) {
   if (typeof eventPath !== 'string' || !eventPath ||
-      !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 8192)
+      !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 256 * 1024)
     fail('missing or oversized GitHub event');
   const request = parseRequest(
     JSON.parse(fs.readFileSync(eventPath, 'utf8')),
@@ -162,7 +194,8 @@ function prepare(eventPath, destination) {
     fail('canonical Knowledge contract denied candidate: ' + (result.stderr || result.error?.message || '').trim());
   const receipt = {
     schema_version: 1, event: process.env.GITHUB_EVENT_NAME,
-    source_run_id: request.source_run_id ?? null, source_ref: proposal_ref,
+    source_run_id: request.source_run_id ?? null,
+    source_comment_id: request.source_comment_id ?? null, source_ref: proposal_ref,
     source_sha: proposal_sha, expected_head,
     trusted_main_sha: process.env.GITHUB_SHA,
     run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -191,6 +224,37 @@ function selfTest() {
     { client_payload: { ...payload, proposal_sha: payload.expected_head } },
     { client_payload: { ...payload, expected_head: 'not-a-sha' } },
   ]) assert.throws(() => parseRequest({ ...event, ...changed }, context));
+  const issueContext={...context,eventName:'issue_comment'};
+  const issueEvent={
+    action:'created',repository:{full_name:REPO},sender:{login:'BestNathan'},
+    issue:{number:3156,repository_url:'https://api.github.com/repos/'+REPO},
+    comment:{id:98765,user:{login:'BestNathan'},author_association:'OWNER',
+      body:'/knowledge-publish v1\n'+
+        'proposal_ref='+payload.proposal_ref+'\n'+
+        'proposal_sha='+payload.proposal_sha+'\n'+
+        'expected_head='+payload.expected_head},
+  };
+  assert.deepEqual(parseRequest(issueEvent,issueContext),{
+    ...payload,source_comment_id:98765,
+  });
+  for(const [field,value] of [
+    ['id',0],['author_association','CONTRIBUTOR'],
+    ['user',{login:'attacker'}],
+    ['body',issueEvent.comment.body+'\nignored=yes'],
+    ['body',issueEvent.comment.body.replace('proposal_ref=refs/heads','proposal_ref=refs/pull')],
+    ['body',issueEvent.comment.body.replace(payload.proposal_sha,'not-a-sha')],
+    ['body',issueEvent.comment.body.replace('expected_head=','bad_key=')],
+  ])assert.throws(()=>parseRequest({
+    ...issueEvent,comment:{...issueEvent.comment,[field]:value},
+  },issueContext));
+  for(const changed of [
+    {sender:{login:'attacker'}},
+    {issue:{...issueEvent.issue,pull_request:{url:'fake'}}},
+    {repository:{full_name:'attacker/repo'}},
+    {action:'edited'},
+  ])assert.throws(()=>parseRequest({...issueEvent,...changed},issueContext));
+  assert.throws(()=>parseRequest(issueEvent,{...issueContext,actor:'github-actions[bot]'}));
+  assert.throws(()=>parseRequest(issueEvent,{...issueContext,ref:'refs/heads/proposal'}));
   const autoContext={...context,actor:'github-actions[bot]',eventName:'workflow_run'};
   const signalRun={
     id:12345,name:SIGNAL_NAME,path:SIGNAL_PATH,event:'create',

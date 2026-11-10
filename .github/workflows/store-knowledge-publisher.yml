@@ -1,13 +1,15 @@
 name: Store / Knowledge Publisher
 
 # #2358/#3156: A distinct App identity publishes an owner-authorized,
-# precommitted data-only Knowledge proposal. Two trusted default-branch
-# entrypoints: explicit owner repository_dispatch, and completed owner-created
-# Proposal Signal workflow_run. Neither accepts an attacker-selected checkout.
+# precommitted data-only Knowledge proposal. Trusted default-branch entrypoints: owner repository_dispatch, owner-authored
+# Issue comment containing an exact pinned proposal request, and the optional
+# completed owner-created Proposal Signal workflow_run. Neither accepts an attacker-selected checkout.
 # Unprivileged source verification must pass before the protected App job.
 on:
   repository_dispatch:
     types: [knowledge-publish-v1]
+  issue_comment:
+    types: [created]
   workflow_run:
     workflows: ['Store / Knowledge Proposal Signal']
     types: [completed]
@@ -29,6 +31,14 @@ jobs:
         (github.event_name == 'repository_dispatch' &&
          github.actor == 'BestNathan' &&
          github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan' &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.author_association == 'OWNER' &&
+         github.event.issue.pull_request == null &&
+         startsWith(github.event.comment.body, '/knowledge-publish v1')) ||
         (github.event_name == 'workflow_run' &&
          github.event.workflow_run.event == 'create' &&
          github.event.workflow_run.status == 'completed' &&
@@ -80,6 +90,14 @@ jobs:
         (github.event_name == 'repository_dispatch' &&
          github.actor == 'BestNathan' &&
          github.event.sender.login == 'BestNathan') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.actor == 'BestNathan' &&
+         github.event.sender.login == 'BestNathan' &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.author_association == 'OWNER' &&
+         github.event.issue.pull_request == null &&
+         startsWith(github.event.comment.body, '/knowledge-publish v1')) ||
         (github.event_name == 'workflow_run' &&
          github.event.workflow_run.event == 'create' &&
          github.event.workflow_run.status == 'completed' &&
