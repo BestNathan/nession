@@ -107,6 +107,11 @@ Rules:
 - Activation is not terminal input: it sends no PTY bytes and adds no terminal
   stream message. It remains available to an observer/read-only client whenever
   the Files capability is available.
+- The mouse linkifier is xterm's; a touch tap has no mouse hover to ask the
+  provider. The engine therefore resolves a short, stationary tap to the drawn
+  logical-line character (walking wrapped continuations back to their start) and
+  runs the same Product matcher activation. Taps that move beyond the gesture
+  slop or last longer belong to scroll/selection/direction-pad owners.
 - A location makes the viewer open source/raw at that line/column (a rendered
   preview has no source position). Re-activating the same file at another
   location repositions the mounted viewer rather than remounting it.
@@ -165,12 +170,14 @@ capacity, detach semantics, or any terminal interaction behavior.
 
 - `xterm/__tests__/unit/XtermMetrics.test.ts` — measured cell, fallback, hostile `_core`.
 - `xterm/__tests__/integration/XtermMetricsLines.test.ts` — logical lines: trim, wide,
-  combining, wrap join, continuation refusal.
+  combining, wrap join, continuation refusal; cell/point → UTF-16 offset for
+  touch activation.
 - `xterm/__tests__/unit/LineLinks.test.ts` — offset → cell mapping for ASCII,
   wide, combining, wrapped and out-of-range matches.
 - `xterm/__tests__/integration/XtermEmulator.test.ts` — mount/unmount preserves
   scrollback; the host debug reference is set/cleared by identity across
-  detach, reparent and disposal.
+  detach, reparent and disposal; a short tap activates a Product link while a
+  moved tap or an empty cell does not.
 - `capsule/__tests__/unit/occlusionScroll.test.ts` — deterministic
   `AnimationFrameScheduler` proves follow-bottom coalescing, dispose
   cancellation and late-callback no-ops.
