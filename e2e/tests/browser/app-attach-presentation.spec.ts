@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
 
 // App Attach presentation (#3089). Real tmux/agent stack — CI only.
@@ -6,6 +6,37 @@ const APP_URL =
   '/?token=e2e-test-token&server_url=' +
   encodeURIComponent('ws://localhost:19090/ws') +
   '&experience=app';
+
+/**
+ * The selected-regression plan may run this spec without another spec that
+ * creates a Session first. A row-action attach test cannot depend on shared
+ * suite order: create one through the App's own New Session depth when the
+ * runtime starts empty, close the resulting attach sheet, and return to the
+ * Sessions surface.
+ */
+async function ensureSessionRow(page: Page): Promise<void> {
+  const actions = page.locator('[data-testid^="session-actions-"]');
+  if ((await actions.count()) > 0) return;
+
+  await page.getByTestId('create-session').click();
+  const createPage = page.getByTestId('app-create-session-page');
+  await expect(createPage).toBeVisible();
+  await createPage.locator('#name').fill(`e2e-attach-${Date.now()}`);
+  const submit = createPage.getByTestId('create-session-submit');
+  await expect(submit).toBeEnabled({ timeout: 20_000 });
+  await submit.click();
+
+  const sheet = page.getByTestId('app-attach-sheet');
+  await expect(sheet).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+
+  await page.goto(APP_URL);
+  await waitForShell(page);
+  await page.getByTestId('app-home-browse-sessions').click();
+  await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+  await expect(actions.first()).toBeVisible({ timeout: 20_000 });
+}
 
 /**
  * The same attach owner as Web, composed as the App quick sheet and a
@@ -24,6 +55,7 @@ test.describe('App Attach presentation (#3089)', () => {
 
     await page.getByTestId('app-home-browse-sessions').click();
     await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+    await ensureSessionRow(page);
     await page.locator('button[data-testid^="session-item-"]').first().click();
 
     const sheet = page.getByTestId('app-attach-sheet');
@@ -55,6 +87,7 @@ test.describe('App Attach presentation (#3089)', () => {
 
     await page.getByTestId('app-home-browse-sessions').click();
     await expect(page.getByTestId('app-sessions-surface')).toBeVisible();
+    await ensureSessionRow(page);
     await page.locator('[data-testid^="session-actions-"]').first().click();
     await page.locator('[data-testid^="session-actions-settings-"]').first().click();
 

@@ -9,7 +9,8 @@ what `category.control` names when it says a control that cannot fit its content
 This pattern is one member of the [OverlaySurfaces](overlay-surfaces.md) family;
 that document owns the cross-family choice of Tooltip/anchored/Popover/Confirm/
 Dialog/Operation, the shared layer order and the Experience-scoped portal rule.
-This page owns the anchored list's own anatomy and row band.
+This page owns the anchored list's own anatomy and row band, and the two item
+anatomies — **action** and **resource** — that can appear inside it (#3164).
 
 **This is not a Nession product concept.** It has no Session, Agent or capability
 semantics, and it would make sense unchanged in another product; by the pattern
@@ -67,12 +68,62 @@ whose *whole row* is the hit target.
   App experience mounts into a container that states `data-experience="app"`; one
   opened from the Web shell mounts on `body`, as it always has. Which experience
   a popup belongs to is decided by where its trigger is — not by the primitive,
-  and not by each menu restating a size.
+  and not by each menu restating a size. Inside a modal, the dialog content
+  supplies the popup host, so the list stays within the dialog's focus trap,
+  accessible subtree and Experience scope instead of becoming a body-level
+  sibling the modal hides from assistive tech.
 - **The list scrolls rather than clipping.** A long list is bounded by the
   available height and scrolls its own overflow; it must not push past the
   viewport edge or hide rows without a scroll owner.
-- **Rows stay single-line.** An item that wraps is a layout bug, not a second
-  line of information — the same rule the row patterns state.
+- **Action rows stay single-line.** An item that wraps is a layout bug, not a
+  second line of information — the same rule the row patterns state. This rule
+  governs the action anatomy; the resource anatomy below is its documented
+  exception and is contracted separately.
+
+## Two item anatomies
+
+The list has one interaction engine (Base UI) and two visual jobs. Choose the
+anatomy from the data, not from the surface's importance.
+
+| Anatomy | Job | Height | Content |
+|---|---|---|---|
+| **Action** | Run a command or choose one short label | Exactly the Experience control band: 28px Web, 44px App | Single line; icon/shortcut/check slots |
+| **Resource** | Choose among resources that have an identity plus source, status or path | At least the control band; grows with content; App keeps the whole row at/above 44px | Wraps; title, optional status, optional metadata, optional technical detail |
+
+**Action rows are unchanged.** They keep `popupMenuItemBandClass`, the 28/44
+band, one-line content and the trailing check. An ordinary menu of commands uses
+this anatomy for every row.
+
+**Resource rows are a contracted exception.** `SelectItem`, `DropdownMenuItem`
+and `ContextMenuItem` accept `anatomy="resource"`; the slot grammar is
+`ChoiceItemContent` in `web/src/components/ui/choice-item.tsx`. A resource row:
+
+- leads with a primary title in the body role; a quiet status follows it inline
+  in the caption role (destructive color only for unavailable, never as
+  decoration);
+- may add a source/type line in the metadata role and a technical path/address
+  in the mono caption role; the detail wraps anywhere, so a long value is never
+  hidden behind a horizontal clip;
+- shows selection as a quiet neutral row surface plus the stable trailing check
+  — not a brand color block, border and check together;
+- keeps the same single accent surface for hover/keyboard focus as an action row;
+- marks an unavailable resource with explicit status text and disabled
+  semantics; reduced opacity is secondary, never the only signal;
+- uses the Experience control band as its **minimum**, so Web can stay dense and
+  App can never fall below `touchTarget.min`; the row's content decides the rest
+  of its height.
+
+**Choice width.** A resource list is never narrower than its trigger. When the
+trigger is narrow and the content needs room, it may grow to
+`experience.*.overlay.choiceMaxWidth`; the primitive's available width remains
+the final viewport clamp. Long values wrap inside that role rather than
+introducing horizontal scrolling. The simple/anchor-width list keeps
+`w-(--anchor-width)` and does not grow.
+
+Pilot consumers are the Project Existing Location and Agent choices, Create
+Session Agent/Existing Location, and the Env import/editor Agent choices. The
+anatomy is opt-in: a future consumer adopts it because its options carry a
+resource identity, not because it is a Select.
 
 ## States
 
@@ -94,11 +145,13 @@ whose *whole row* is the hit target.
 ## Contracts and visual baselines
 
 `design/contracts/patterns/popup-menu.json` pins, per experience: single-line
-rows, the row height token, the App touch floor, and that the list owns its
-scroll. Asserted by `e2e/specs/ui-contract-matrix.spec.ts` at every canonical
-viewport — the Web rows pin 28px so an App fix cannot move Web silently, and the
-App rows pin 44px plus the enumeration that a *control inside* the row meets the
-floor.
+action rows, the row height token, the App touch floor, and that the list owns
+its scroll. `design/contracts/patterns/choice-item.json` pins the resource
+anatomy's wrap, minimum row band, choice width and touch floor as the separate
+member. The action row is asserted by `e2e/specs/ui-contract-matrix.spec.ts` at
+every canonical viewport — the Web rows pin 28px so an App fix cannot move Web
+silently, and the App rows pin 44px plus the enumeration that a *control inside*
+the row meets the floor.
 
 The App baseline `app-capability-entry.png` draws the capability menu open and
 moves with any change to this pattern; it is the only baseline that does.
@@ -107,6 +160,17 @@ moves with any change to this pattern; it is the only baseline that does.
 
 - A menu row sized by a local metric (`h-8`, `py-1`) instead of the experience's
   control band.
+- A resource row for a plain command, or an action row for a record that has an
+  identity, source, status or path.
+- A consumer imitating the resource anatomy with its own `py-1`, `text-sm` or
+  `max-w-*` overrides instead of `anatomy="resource"` and `ChoiceItemContent`.
+- A selected resource painted as a brand-color block, border and check together
+  instead of one quiet surface plus the stable check.
+- Clipping a path, address or source with ellipsis or horizontal overflow inside
+  the list; the value wraps within the choice width role or has an inspect/copy
+  affordance.
+- Changing the 28/44 action band to fit a resource row, or letting a rich row
+  drop below the App touch floor.
 - Fixing the App by giving each menu its own `min-h-11`, leaving the next menu
   wrong.
 - Raising Web's rows to the App's floor because the token made it one edit.

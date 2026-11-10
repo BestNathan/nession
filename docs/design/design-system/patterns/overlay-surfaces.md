@@ -37,6 +37,13 @@ Rules that follow from the table:
 - Destructive actions use the confirmation role; they never sit as an
   undisclosed side effect of another action.
 
+The rows inside an anchored list are owned by [PopupMenu](popup-menu.md): an
+**action** row keeps the 28px Web / 44px App single-line band, while a
+**resource** row may wrap and grow with its identity/metadata. A resource list
+may widen beyond a narrow trigger up to `experience.*.overlay.choiceMaxWidth`;
+that growth does not change this document's portal, stacking or dismissal
+contract.
+
 ## Web composition
 
 ```text
@@ -128,6 +135,13 @@ only the primary action commits.
   menus, Selects, context menus, popovers and tooltips mount into the App popup
   container (`data-experience="app"`) so their rows resolve the App control band
   (44px touch floor). Web popups keep the default body mount.
+- **A popup opened inside a modal mounts into that modal's own popup host.** The
+  dialog content provides a host inside its floating tree (`dialog-popup-portal`),
+  so the anchored layer inherits the dialog's Experience scope and remains inside
+  the modal's focus trap and accessible subtree. A body-level container would be
+  hidden by the modal's outside-content protection and sit outside the trap.
+  This changes where the popup mounts, not its portal/stack owner: the same
+  anchored layer still renders above the dialog.
 - **Focus**: modal surfaces trap focus; anchored nonmodal surfaces do not.
   Escape closes the innermost owned layer first (tooltip → anchored choice →
   dialog), then the dialog; outside click dismisses dismissible layers but never

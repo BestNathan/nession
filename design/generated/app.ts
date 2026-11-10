@@ -157,6 +157,7 @@ export const workspace = {
 export const overlay = {
   viewportMaxWidth: "calc(100% - 2rem)",
   viewportMaxHeight: "calc(100dvh - 2rem)",
+  choiceMaxWidth: "30rem",
   dialogZ: 50,
   anchoredZ: 100,
   tooltipZ: 110,
