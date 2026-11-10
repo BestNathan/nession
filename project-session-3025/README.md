@@ -60,3 +60,13 @@ Projects in the Web Sidebar and App Sessions are direct maintenance entry points
 ## 2026-11-09 · Web/App operation presentation superseded by #3089
 
 **Status: partially superseded (dialog layout only).** The Project declaration, EROFS/Existing paths, Project navigation and Session→Project interaction explored here remain in their existing #3025 / #3082 ownership. The narrow centered Project→Create Session dialog and same-content mobile presentation in this historical mock are **NOT the current approved visual candidate**. The new experience-specific design — wide readable Web dialogs; App quick Attach sheet plus pushed full-height Create/Settings views — is owned by [#3089](https://github.com/BestNathan/nession/issues/3089), with a separate [interactive Web/App presentation prototype](../session-operation-surfaces-3089/index.html). Do not reuse this older mock's form geometry as a design reference. This annotation does not change or retroactively invalidate prior mock verification, domain behavior or #3082 context/association acceptance. Production/browser proof of #3089 is independent and pending.
+
+## 2026-11-11 · #3137 content-region recipe revision
+
+This mock is revised in place for [#3137](https://github.com/BestNathan/nession/issues/3137). The visible Project hierarchy now consumes the same recipes as the shipping React surfaces:
+
+- **ResourceDetail** — Project Detail is whitespace-first: one `title`-role Project name, quiet `secondary` section headings, read-only `label/value` facts for Git source, Session defaults and Image, and plain resource rows for Existing Locations. The repeated bordered cards/`boxClass` pattern is removed; long repository paths and digests wrap with `break-anywhere`.
+- **ConfigurationForm** — Project Create/Settings use named Identity / Git source / Existing Locations / Image sections, one 13px field-label style with 11px help, and the Web 32px / App 44px control band (#3136 compact rows preserved).
+- **OperationSurface** — Project Settings/Create use one action line with secondary actions before the primary Save/Create; the delete confirmation keeps its destructive action separated.
+
+The mock reflects the production `web/src/components/ui/{resource-detail,configuration-form,operation-surface}.tsx` owners; React remains authoritative. Browser walkthrough and Pages publication must be renewed for this SHA before this revision is described as live.

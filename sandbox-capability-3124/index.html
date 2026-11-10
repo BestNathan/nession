@@ -330,6 +330,44 @@
 .nession-ui .app .policy-option-list{flex-direction:column}
 .nession-ui .app .policy-option-state{width:100%}
 .nession-ui .app .policy-impl-status{margin-left:auto}
+/* #3137 — shared ResourceDetail / ConfigurationForm / OperationSurface grammar.
+   Titles, section headings, labels and control bands resolve one Web/App
+   relationship; read-only facts lose input/fieldset chrome; one action line
+   follows a secondary → primary order. */
+.nession-ui h2{font-size:16px;font-weight:600;line-height:1.25;letter-spacing:0}
+.nession-ui h3{font-size:12.5px;font-weight:500;line-height:1.3;letter-spacing:0}
+.nession-ui .app h2{font-size:17px;line-height:1.2}
+.nession-ui label{font-size:13px;font-weight:500;line-height:1.35;color:var(--nession-foreground)}
+.nession-ui .field{gap:6px}
+.nession-ui .field input,.nession-ui .field select{min-height:32px;padding:4px 10px;border-radius:8px;font-size:13px}
+.nession-ui .app .field input,.nession-ui .app .field select{min-height:44px;font-size:14px}
+.nession-ui .action{min-height:32px;padding:4px 10px;border-radius:8px;font-size:13px}
+.nession-ui .app .action{min-height:44px;font-size:14px}
+.nession-ui .info-section{border-top:0;padding-top:0;margin-top:24px}
+.nession-ui .fact{border-bottom:0;padding:6px 0}
+.nession-ui .dimension{border-bottom:0;padding:8px 0}
+.nession-ui .notice{border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.5;margin-bottom:16px}
+.nession-ui .kv-empty{border:0;border-radius:0;padding:0;background:transparent;font-size:12.5px;color:var(--nession-muted-foreground)}
+.nession-ui .policy-group{border-top:0;padding:10px 0;grid-template-columns:150px minmax(0,1fr);column-gap:18px}
+.nession-ui .app .policy-group{grid-template-columns:1fr;row-gap:8px}
+.nession-ui .composition-cluster{border-top:0;padding:8px 0 2px}
+.nession-ui .config-destination{border-bottom:0;min-height:44px;padding:10px 8px;border-radius:8px}
+.nession-ui .config-destination:hover{background:var(--nession-muted)}
+.nession-ui .config-destinations{border-top:0;gap:2px}
+.nession-ui .policy-json{border:0;background:var(--nession-muted);border-radius:8px;padding:10px}
+.nession-ui .module-readonly-item{border-bottom:0;padding:6px 0}
+.nession-ui .config-summary{border-top:0}
+.nession-ui .config-summary-row{border-bottom:0;padding:8px 4px;border-radius:8px}
+.nession-ui .config-summary-row:hover{background:var(--nession-muted)}
+.nession-ui .sandbox-tab-nav{border-right-color:transparent}
+.nession-ui .app .sandbox-tab-nav{border-bottom-color:var(--nession-border)}
+.nession-ui .module-footer{border-top:0}
+.nession-ui .app-header .app-title{font-size:17px;font-weight:600}
+.nession-ui .subline{font-size:12.5px}
+.nession-ui .policy-implementation{border:0;border-radius:0;background:transparent;overflow:visible;margin:12px 0 18px}
+.nession-ui .policy-impl-header{background:transparent;border-bottom:0;padding:0 0 8px}
+.nession-ui .policy-implementation>.module-domain,.nession-ui .policy-implementation>.policy-support-reason{padding:0 0 8px}
+.nession-ui .policy-implementation.is-disabled{background:transparent}
 </style>
 </head>
 <body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
@@ -349,7 +387,7 @@
 <p class="np-stage-label" data-np-current-size>1180 CSS px · 1:1</p>
 <div class="fixtures" aria-label="外部模拟观测条件"><b>模拟当前执行环境：</b><button type="button" data-fixture="native" aria-pressed="true">Native / 可进入</button><button type="button" data-fixture="active">已在 Sandbox</button><button type="button" data-fixture="prepared">EROFS 已组合</button><button type="button" data-fixture="limited">仅 Memory/PIDs 委派</button><button type="button" data-fixture="no-cgroup">cgroup v2 不可用</button><button type="button" data-fixture="no-seccomp">seccomp 不可用</button><button type="button" data-fixture="preflight-fail">预检失败</button><button type="button" data-fixture="enter-fail">启动失败</button><button type="button" data-fixture="kernel-reject">内核写入失败</button><button type="button" data-fixture="offline">Agent 离线</button><button type="button" data-fixture="unsupported">宿主不支持</button><button type="button" data-fixture="macos">macOS Seatbelt</button><button type="button" data-fixture="recreated">旧实例记录</button></div>
 </section>
-<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede">Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
+<section class="np-details"><h2>Functional design &amp; verification</h2><p class="np-details-lede"><strong>#3137 presentation revision:</strong> this mock now consumes the shared Sandbox Outside/Inside resource-detail and configuration-form grammar: one title role, quiet named sections, read-only label/value facts with no input chrome, Web 32px / App 44px control bands, and one secondary→primary action line. Production React remains authoritative. Agent、Session、tmux Pane、Policy、执行结果都为合成 Mock 数据；构建配置、预检与 Enter 操作绝不调用真实主机或修改实际进程。</p>
 <div class="np-detail-grid">
 <article class="np-detail"><h3>关键路径 · 可完整点击</h3><ol class="np-steps"><li>默认 Native：Terminal → Workspace → Sandbox。六个同级 Tab 直接切换；进入 Resource 查看 cgroup_v2 条目的实测支持状态，支持才开放 controller 与 Key/Value；进入 Syscall 查看 seccomp 状态和 Agent 注册 Profile。切到「cgroup v2 不可用」「seccomp 不可用」「macOS Seatbelt」「Agent 离线」验证禁用原因。Overview 统一预检、查看 JSON 与 Enter。</li><li>点击「校验配置」运行 Mock Schema 与当前 Agent 能力预检；修改策略会清除之前的预检通过状态。</li><li>点击「Enter Sandbox」进入确认页，明确原 Native Pane 保留、启动隔离 Pane 的范围；确认后模拟启动与验证，再切换当前 Pane。</li><li>进入后显示 <strong>Inside Sandbox</strong> 及已生效配置（不是草稿），可查看执行详情或「返回 Native Pane」；原 Sandbox Pane 仍保留。</li><li>切换「仅 Memory/PIDs 委派」测试 Agent 返回的候选 Key 不包含 cpu.max；测试预检失败、启动失败、macOS、不支持和 Agent 离线，失败保留 Native/草稿。</li><li>Web ↔ App，检查 App 一个 Back、Capsule 永远在其底部、配置表单独立纵向滚动。</li></ol></article>
 <article class="np-detail"><h3>核心对象和状态</h3><p>宿主能支持 Sandbox ≠ 当前 Pane 位于 Sandbox。状态由 Agent 对 <strong>active Pane + Session instance + execution id</strong> 的观测决定，外部启动的非托管 Sandbox 不能推测为 Nession 已验证。</p><p><strong>Policy Draft</strong> 在提交前可编辑；<strong>Effective Policy</strong> 是成功执行后、Agent 验证并持续可查询的只读配置。预检与 Enter 是两个不同动作。</p></article>

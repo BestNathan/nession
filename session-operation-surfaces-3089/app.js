@@ -30,6 +30,8 @@
   const addr = idx => s.scenario === 'long' ? longAddress : paths[idx];
   const button = (label, action, variant = '', extra = '') => '<button type="button" class="btn '+variant+'" data-act="'+action+'" '+extra+'>'+label+'</button>';
   const region = (title, body) => '<div class="stack"><div class="section-label">'+title+'</div>'+body+'</div>';
+  /* #3137 ConfigurationForm: named sections own the form rhythm. */
+  const formSection = (title, body, help, action) => '<section class="form-section"><div class="form-section-head"><h3>'+title+'</h3>'+(help?'<p class="form-help">'+help+'</p>':'')+'</div>'+(action?'<div class="form-section-action">'+action+'</div>':'')+body+'</section>';
   const envFiles = [
     {name:'.env.development', source:'server', count:14},
     {name:'.env.local', source:'agent:build-agent', count:7},
@@ -128,14 +130,17 @@
       '</div>').join('')+'</div>' :
       '<p class="form-empty">No Existing Locations. You can create a Project now and add one later.</p>';
     return '<div class="dialog-form" data-form="new-project">'+
-      '<label class="field"><span class="label">Name</span><input name="projectName" maxlength="72" value="'+esc(s.editedProjectName)+'" placeholder="Nession" autocomplete="off"></label>'+
-      '<label class="field"><span class="label">Description (optional)</span><textarea name="projectDescription" rows="2" placeholder="What is this Project for?">'+esc(s.draftDescription)+'</textarea></label>'+
-      '<div class="source-fields">'+
-        '<label class="field"><span class="label">Git repository URL (optional)</span><input name="repositoryUrl" value="'+esc(s.draftSourceUrl)+'" placeholder="https://github.com/owner/repo.git" autocomplete="off"></label>'+
-        '<label class="field"><span class="label">Branch or full commit SHA</span><input name="repositoryRef" value="'+esc(s.draftSourceRef)+'" placeholder="main" '+(!s.draftSourceUrl.trim()?'disabled':'')+' autocomplete="off"></label>'+
-      '</div>'+
-      '<div class="field"><div class="section-heading"><span class="label">Existing Locations (optional)</span>'+button('＋ Add Location','add-location','ghost')+'</div>'+rows+'</div>'+
-      '<label class="field"><span class="label">Image digest reference (optional)</span><input name="imageDigest" value="'+esc(s.draftImageDigest)+'" placeholder="sha256:…"><span class="form-help">A reference only. The Project never owns image bytes.</span></label>'+
+      formSection('Identity',
+        '<label class="field"><span class="label">Name</span><input name="projectName" maxlength="72" value="'+esc(s.editedProjectName)+'" placeholder="Nession" autocomplete="off"></label>'+
+        '<label class="field"><span class="label">Description (optional)</span><textarea name="projectDescription" rows="2" placeholder="What is this Project for?">'+esc(s.draftDescription)+'</textarea></label>')+
+      formSection('Git source',
+        '<div class="source-fields">'+
+          '<label class="field"><span class="label">Git repository URL (optional)</span><input name="repositoryUrl" value="'+esc(s.draftSourceUrl)+'" placeholder="https://github.com/owner/repo.git" autocomplete="off"></label>'+
+          '<label class="field"><span class="label">Branch or full commit SHA</span><input name="repositoryRef" value="'+esc(s.draftSourceRef)+'" placeholder="main" '+(!s.draftSourceUrl.trim()?'disabled':'')+' autocomplete="off"></label>'+
+        '</div>','Optional. The Project declares the source; the Session checks it out.')+
+      formSection('Existing Locations', rows, 'Optional. Agent directories this Project can start Sessions from.', button('＋ Add Location','add-location','ghost'))+
+      formSection('Image',
+        '<label class="field"><span class="label">Image digest reference (optional)</span><input name="imageDigest" value="'+esc(s.draftImageDigest)+'" placeholder="sha256:…"><span class="form-help">A reference only. The Project never owns image bytes.</span></label>')+
       (s.error?'<p class="error" role="alert">'+esc(s.error)+'</p>':'')+'</div>';
   }
   function terminal() {

@@ -92,3 +92,13 @@ The UI mirrors native OS semantics without inventing a general policy language. 
 - Real browser, keyboard/focus and responsive overflow evidence is required by #3143/#3138; synthetic DOM assertions do not prove real Chromium or true kernel enforcement. Pages `manifest.json` SHA and the public HTML deployment are not verified at this revision.
 - **Corrected Tab navigation synthetic regression (2026-11-10): 31/31 V8 synthetic-DOM assertions passed** against the current app.js/index.html revision: six tabs with no module depth; independent Filesystem/Network/Process/Resource/Syscall management; one shared Policy; preflight preservation on Tab changes/invalidation on edits; confirm/Enter/Inside readonly; EROFS, macOS, offline; Web left/independent scroll, App horizontal Tab CSS, keyboard Home/End. Source parsed without syntax errors. **Not** real Chromium, accessibility, kernel, server or Pages deployment evidence.
 - Historical prototype assertions for other navigation schemes (separate module route or one-inline-editor composition) do **not** validate this current Tab design.
+
+## 2026-11-11 · #3137 content-region recipe revision
+
+Revised in place for [#3137](https://github.com/BestNathan/nession/issues/3137):
+
+- **Inside (read-only)** now reads as a ResourceDetail: one `title`-role surface name, quiet `secondary` section headings, label/value facts with no input/fieldset chrome, and the effective-policy domains as plain observed facts.
+- **Outside (editable)** now reads as a ConfigurationForm: named sections, a 13px field label with 11px help, the Web 32px / App 44px control band, empty-first KV rows with one quiet row surface, and one secondary → primary action line (Validate → Enter).
+- **OperationSurface** — the explicit Enter confirmation keeps one title, one lead, one summary fact list and one action line (return first, confirm last).
+
+The mock mirrors `web/src/components/ui/{resource-detail,configuration-form,operation-surface}.tsx`; production React remains authoritative. Renew the Chromium walkthrough and Pages manifest SHA for this revision.
