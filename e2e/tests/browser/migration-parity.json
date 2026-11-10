@@ -64,7 +64,7 @@
     "__snapshots__/fixture-visual.spec.ts/web-compact-workspace-linux.png": "d6cdc88abeed05de3bab1aa595565f65705a35da",
     "__snapshots__/fixture-visual.spec.ts/web-env-edit-dirty-linux.png": "f6103d894cb8b4fd22efbe1652d8ddb33fddd714",
     "__snapshots__/fixture-visual.spec.ts/web-env-profile-linux.png": "7162aee689e410de30216275dfd43a9435140bce",
-    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "cb0f5e46371c5b8967157032d876a00ce0933f0e",
+    "__snapshots__/fixture-visual.spec.ts/web-env-save-impact-linux.png": "5f3c475a7cad1dfb71b92448d15f5c0c4b055eef",
     "__snapshots__/fixture-visual.spec.ts/web-git-peek-linux.png": "c1a92d134ab250927f39d7e9077a10ed58e0eb6f",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-linux.png": "31e9b920243a2a57f42013e7b48c2b54276a916c",
     "__snapshots__/fixture-visual.spec.ts/web-workspace-unopened-linux.png": "d3da4db5b5b50603ad9a5680db139e48654b4ab4",
@@ -73,8 +73,8 @@
     "__snapshots__/fixture-visual.spec.ts/web-sidebar-collapsed-linux.png": "f4f61f5702d231d2022baee7c3c246712891665f"
   },
   "baseline_set_updated": {
-    "requirement": 3124,
-    "reason": "existing-Session Sandbox capability adds one Workspace capsule entry; canonical --update-snapshots=all run 42657668098",
-    "date": "2026-11-09"
+    "requirement": 3146,
+    "reason": "approved #3142 unified Dialog/AlertDialog 40% scrim; exact 1440x900 Chromium actual from Full E2E run 42793707966 artifact 13751874935 (402 passed, one stale visual baseline)",
+    "date": "2026-11-10"
   }
 }
