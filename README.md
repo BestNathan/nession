@@ -17,7 +17,7 @@
 
 | Unified Overlay & Operation Surfaces (Dialog / Alert / anchored choices / Web-App depth, interaction & visual system) | [#3142](https://github.com/BestNathan/nession/issues/3142) | [Interactive HTML](overlay-system-3142/index.html) · [Scenario & fidelity](overlay-system-3142/README.md) |
 
-| Sandbox Workspace / current Pane effective policy or editable config → preflight → Enter / Return Native | [#3124](https://github.com/BestNathan/nession/issues/3124) | [Interactive HTML](sandbox-capability-3124/index.html) · [Scenario & fidelity](sandbox-capability-3124/README.md) |
+| Sandbox Policy Composition / 3 clusters and 5 dimensions → focused editing → composed JSON preview → Enter → current Pane effective readback (including EROFS) | [#3143](https://github.com/BestNathan/nession/issues/3143), [#3141](https://github.com/BestNathan/nession/issues/3141), [#3124](https://github.com/BestNathan/nession/issues/3124) | [Interactive HTML](sandbox-capability-3124/index.html) · [Scenario & fidelity](sandbox-capability-3124/README.md) |
 
 
 | Web/App Attach and Session operations — responsive Web Dialog, App operation depths; Project Location Select now content-height and wrap-safe (#3089 reopened) | [#3089](https://github.com/BestNathan/nession/issues/3089) | [Interactive HTML](session-operation-surfaces-3089/index.html) · [Scenario & fidelity](session-operation-surfaces-3089/README.md) |
