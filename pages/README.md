@@ -38,6 +38,12 @@ The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct de
 
 ## Documents / Protocol Reference
 
+Requirement owner: [#3195](https://github.com/BestNathan/nession/issues/3195).
+The E2E declaration there explicitly owns the new `pages-documents` browser spec
+and existing `pages-overview` regression at the exact PR head; publish only
+after the trusted Issue-selected E2E evidence is verified.
+
+
 The first version of `#/documents` is a **Protocol Reference**. It projects
 the compile-checked Protocol Unit catalog from canonical Rust contracts via
 `cargo run --quiet -p nession-protocol-codegen -- --schema`. Each protocol shows
