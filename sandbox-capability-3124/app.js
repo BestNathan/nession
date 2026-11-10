@@ -26,7 +26,8 @@
       {target:"/opt/rust",source:"Rust toolchain EROFS",mode:"ro"}
     ]
   }));
-  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,tab:"overview",openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var state={mode:"web",surface:"terminal",cap:"sandbox",depth:"root",fixture:"native",session:"sandbox-review",peek:false,nativeFixture:"native",draft:cloneDraft(defaultDraft),nextRowId:1,tab:"overview",tabNeedsReveal:false,openGroup:"filesystem",showPolicyJson:false,preflight:"none",preflightError:"",entered:false,pane:"native",effective:null,error:""};
+  var lastRenderedTab="overview",lastRenderedMode="web",tabScrollPositions={};
   var titles={files:"Files",git:"Git",session:"Session",agent:"Agent",env:"Env",sandbox:"Sandbox"};
   var icons={files:"▤",git:"⑂",session:"▣",agent:"◉",env:"⌘",sandbox:"⬡"};
   var execution="sbx-70df40f4";
@@ -512,10 +513,25 @@
     return '<div class="app"><header class="app-header"><button type="button" class="arrow" data-action="terminal" aria-label="Back to Terminal">←</button><span class="app-title">Sessions</span><span style="width:40px"></span></header><main class="app-body"><h2>Sessions</h2><p class="subline">Today</p><div class="info-section"><button class="navrow" data-action="session:sandbox-review"><span>▣</span><span>sandbox-review · nession-dev</span></button><button class="navrow" data-action="session:native-debug"><span>▣</span><span>native-debug · nession-dev</span></button></div></main></div>';
   }
   function render(){
+    // Full-rebuild mock: retain each strategy Tab's vertical scroll position
+    // and the App horizontal strip's scroll offset across value edits.
+    var prevScroller=mock.querySelector('.sandbox-tab-main')||mock.querySelector('.app-body');
+    if(prevScroller)tabScrollPositions[lastRenderedTab]=prevScroller.scrollTop;
+    var oldNav=mock.querySelector('.sandbox-tab-nav'),navLeft=oldNav?oldNav.scrollLeft:0;
     var content=state.surface==="workspace"?workspace():state.surface==="sessions"?sessions():terminal();
     mock.setAttribute("data-mode",state.mode);
     mock.innerHTML=state.mode==="web"?'<div class="shell">'+side()+'<main class="main">'+content+'</main></div>':content;
     if(output)output.textContent=JSON.stringify({mode:state.mode,surface:state.surface,capability:state.cap,depth:state.depth,fixture:state.fixture,session:state.session,current_pane:state.pane,inside_sandbox:settings().inside,preflight:state.preflight,draft:state.draft,policy:policyProjection(state.draft),catalog:agentFieldCatalog(),selected_policy_group:state.tab,tab_navigation_depth:"root; no history push",show_policy_json:state.showPolicyJson,composition:compositionClusters.map(function(cluster){return {cluster:cluster.label,dimensions:cluster.groups.map(function(key){return compositionState(settings().inside?actualPolicy():state.draft,key,settings().inside)})}}),execution_scope:"current managed Pane only; native and future Panes remain independent"},null,2);
+    var nextScroller=mock.querySelector('.sandbox-tab-main')||mock.querySelector('.app-body');
+    if(nextScroller)nextScroller.scrollTop=tabScrollPositions[state.tab]||0;
+    var nextNav=mock.querySelector('.sandbox-tab-nav');
+    if(nextNav)nextNav.scrollLeft=navLeft;
+    if(state.tabNeedsReveal&&nextNav){
+      var active=nextNav.querySelector('.sandbox-tab[aria-selected="true"]');
+      active?.scrollIntoView?.({block:"nearest",inline:"nearest"});
+    }
+    state.tabNeedsReveal=false;
+    lastRenderedTab=state.tab;lastRenderedMode=state.mode;
     var target=mock.querySelector('.cap-item[aria-current="page"]');
     if(target&&typeof target.scrollIntoView==="function")target.scrollIntoView({inline:"nearest",block:"nearest"});
   }
@@ -528,7 +544,7 @@
     state.preflight="none";
     state.preflightError="";
     state.error="";
-    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.tab="overview";state.openGroup="filesystem";state.showPolicyJson=false;
+    state.draft=cloneDraft(defaultDraft);state.nextRowId=1;state.tab="overview";state.tabNeedsReveal=true;tabScrollPositions={};state.openGroup="filesystem";state.showPolicyJson=false;
     state.entered=false;
     state.pane=(value==="active"||value==="prepared")?"sandbox":"native";
     state.effective=value==="prepared"?cloneDraft(preparedEffective):value==="active"?cloneDraft(activeEffective):null;
@@ -588,7 +604,7 @@
     else if(action==="detail-back"){state.depth="root";}
     else if(action.indexOf("select-tab:")===0){
       var group=action.slice("select-tab:".length);
-      if(sandboxTabs.includes(group)){state.tab=group;if(group!=="overview")state.openGroup=group;}
+      if(sandboxTabs.includes(group)){state.tab=group;state.tabNeedsReveal=true;if(group!=="overview")state.openGroup=group;}
     }
     else if(action.indexOf("add-path:")===0){
       var key=action.slice(9);
@@ -680,7 +696,7 @@
       (e.key==="ArrowLeft"||e.key==="ArrowUp")?(index-1+sandboxTabs.length)%sandboxTabs.length:-1;
     if(next<0)return;
     e.preventDefault?.();
-    state.tab=sandboxTabs[next];
+    state.tab=sandboxTabs[next];state.tabNeedsReveal=true;
     if(state.tab!=="overview")state.openGroup=state.tab;
     render();
     mock.querySelector('[data-sandbox-tab="'+state.tab+'"]')?.focus?.();
@@ -690,6 +706,7 @@
   });
   function resize(width){
     state.mode=width>=600?"web":"app";
+    if(state.mode!==lastRenderedMode)state.tabNeedsReveal=true;
     device.style.setProperty("--np-device-height",state.mode==="web"?"760px":"844px");
     if(state.mode==="app"&&state.surface==="sessions")state.surface="terminal";
     render();
