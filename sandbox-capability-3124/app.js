@@ -100,13 +100,15 @@
   // by Agent/Location and verified by nession-sandbox. This is NOT shipped V1.
   function agentFieldCatalog(){
     var s=settings(),scoped="mock-agent:nession-dev:"+state.fixture;
-    var unknown=!s.online||s.unsupported||s.recreated;
+    var unknown=!s.online||s.recreated,unavailableHost=s.unsupported;
     var mac=s.macos, noCgroup=state.fixture==="no-cgroup", noSeccomp=state.fixture==="no-seccomp";
-    var status=unknown?"unknown":"available";
+    var status=unknown?"unknown":unavailableHost?"unavailable":"available";
     var pstatus=function(available,code,reason){
-      return available?{status:"available"}:unknown?
-        {status:"unknown",reason_code:"unprobed",reason:"Agent 离线或 Session 身份无法验证；不是不支持"}:
-        {status:"unavailable",reason_code:code,reason:reason};
+      return unknown?{status:"unknown",reason_code:"unprobed",
+          reason:"Agent 离线或 Session 身份无法验证；不是不支持"}:
+        unavailableHost?{status:"unavailable",reason_code:"backend_missing",
+          reason:"Agent 已探测到无可用 Sandbox backend"}:
+        available?{status:"available"}:{status:"unavailable",reason_code:code,reason:reason};
     };
     var platformReason="当前 macOS Seatbelt backend 不提供该 Linux 原生机制";
     var entries=[
@@ -126,8 +128,9 @@
     ];
     // Parent unavailability is conclusive only for a completed probe;
     // unknown can never be derived from empty field/profile arrays.
-    if(unknown)entries.forEach(function(x){
-      x.status="unknown";x.reason_code="unprobed";x.reason="Agent 或 Session 观测不可用";
+    if(unknown||unavailableHost)entries.forEach(function(x){
+      x.status=status;x.reason_code=unknown?"unprobed":"backend_missing";
+      x.reason=unknown?"Agent 或 Session 观测不可用":"当前 Agent 已确认无可用 Sandbox backend";
     });
     // Native cgroup file names are examples of a child-cgroup discovery
     // fixture, not an application whitelist or unit conversion.
@@ -153,11 +156,11 @@
     entries.find(function(x){return x.path==="syscall.seccomp"}).options=syscall.flatMap(function(x){
       return x.values.map(function(v){return {id:v,status:"available"};});
     });
-    return {catalog_version:2,status:status,platform:unknown?"unknown":mac?"macos":"linux",
-      backend:unknown?null:mac?"macos-seatbelt":"linux-bwrap",
+    return {catalog_version:2,status:status,platform:unknown?"unknown":unavailableHost?"unsupported":mac?"macos":"linux",
+      backend:unknown||unavailableHost?null:mac?"macos-seatbelt":"linux-bwrap",
       source:scoped,generation:unknown?"unavailable":"mock-"+state.fixture+"-generation",
       implementations:entries,resource:resource,syscall:syscall,
-      reason:unknown?"Agent/Session 观测不可用":mac?"macOS Seatbelt · 仅实测能力可选":
+      reason:unknown?"Agent/Session 观测不可用":unavailableHost?"已确认无可用 Sandbox backend":mac?"macOS Seatbelt · 仅实测能力可选":
         "Agent 已按实现路径探测；cgroup 文件仍需另行发现"};
   }
   function implementation(path){
