@@ -567,7 +567,11 @@ function reconcile(plan) {
         if(!approval.approved){
           record.outcome='BLOCKED';
           record.reason=approval.reason;
-          record.issue_approval_command=approval.approval_command;
+          if(legacy)record.issue_approval_command=approval.approval_command;
+          else{
+            record.pr_approval_command=approval.approval_command;
+            record.approval_pr_url=receipt.url;
+          }
           results.push(record);
           continue;
         }
