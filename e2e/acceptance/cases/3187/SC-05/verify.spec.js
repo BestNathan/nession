@@ -28,10 +28,12 @@ test('SC-05 Web: click, selection and scroll keep the same Terminal', async ({ b
   try {
     await openShell(page, expect, runtime, 'sc05-web');
     await runLine(page, expect, 'seq 1 60');
-    await printReference(page, expect, 'NOT_A_FILE_MARKER');
     for (let index = 0; index < 10; index += 1) {
       await printReference(page, expect, 'plain.py:5');
     }
+    // Last, so the plain-text probe is the visible bottom line rather than an
+    // older row that scrolling could have moved.
+    await printReference(page, expect, 'NOT_A_FILE_MARKER');
     await markTerminal(page);
     const base = await readTerminalState(page);
     expect(base.xtermCount).toBe(1);
@@ -44,9 +46,10 @@ test('SC-05 Web: click, selection and scroll keep the same Terminal', async ({ b
     await expect(page.getByTestId('terminal-surface')).toBeVisible();
 
     // A selection drag that crosses a valid reference selects text, it does
-    // not open: the press starts on ordinary text, not on the link.
-    const start = await referencePoint(page, 'printf');
+    // not open: the press starts at the row's left edge (plain/empty), not on
+    // the link, and sweeps across it.
     const link = await referencePoint(page, 'plain.py:5');
+    const start = { x: link.left + 2, y: link.y };
     await page.mouse.click(start.x, start.y);
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();

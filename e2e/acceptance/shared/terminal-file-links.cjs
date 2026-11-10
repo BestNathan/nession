@@ -253,6 +253,8 @@ async function referencePoint(page, needle) {
         return {
           x: rect.left + (remaining + 0.5) * cellWidth,
           y: rect.top + (row + 0.5) * cellHeight,
+          left: rect.left,
+          cellWidth,
           text: entry.text,
         };
       }
