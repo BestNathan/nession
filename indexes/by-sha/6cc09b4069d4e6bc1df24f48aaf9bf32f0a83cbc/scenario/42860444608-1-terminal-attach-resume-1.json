@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42860444608,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3141-agent-cgroup-root",
+    "target_sha": "6cc09b4069d4e6bc1df24f48aaf9bf32f0a83cbc",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42860444608",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0a7ecb50b43fdecafd7af4d16b862aa7da81b23c707c5da89cef2ac6be5c5e80"
+  },
+  "record": "runs/2026-11-10/42860444608-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "2b34f82dfaa8be1f1c577d05e0357410507da75b3e3e7a9b9cb003e69c236c48"
+}
