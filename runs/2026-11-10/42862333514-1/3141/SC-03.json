@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "24f185b21a003de7875ae2b2896679d6e338256a65f8aa779a5e866bf5605fb3",
+  "run_id": 42862333514,
+  "run_attempt": 1,
+  "issue": 3141,
+  "criterion": "SC-03",
+  "criterion_text": "(native execution): Approved Linux runner applies a real beyond-V1 key (e.g. `cpu.weight`), verifies readback, and rejects unsupported/invalid kernel-native values by exact OS error while cleaning up the owned cgroup and preserving Native Pane. Test absent controller and read-only/lifecycle keys.",
+  "stage": "staging",
+  "target_sha": "28070e76d3ebaf40c0d9dd1e1db53de38c7af463",
+  "contract_sha256": "202a0131adc0af7be44656ccf59294fbff1e08d918c808eb7615a467d124de2c",
+  "case_revision": "28070e76d3ebaf40c0d9dd1e1db53de38c7af463",
+  "case_tree_sha": "277c58d86972cab7621d6342e4d245caf70393c7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T17:14:06.304Z",
+  "finished_at": "2026-11-10T17:14:13.471Z",
+  "duration_ms": 7167,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A real delegated execution installed a beyond-V1 native control, observed the kernel readback, and failed closed with exact OS errors and cleanup",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the execution cgroup read back cpu.weight=100 and memory.high=max after prelaunch writes"
+        },
+        {
+          "type": "runtime",
+          "value": "the recorded effective policy used those kernel readbacks instead of the requested draft"
+        },
+        {
+          "type": "runtime",
+          "value": "an invalid cpu.max was refused by the kernel with its OS error; the partial child cgroup was removed and no execution was claimed"
+        },
+        {
+          "type": "runtime",
+          "value": "an undiscovered controller file was refused before any write, without a Native fallback"
+        }
+      ],
+      "duration_ms": 1258,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42862333514,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "28070e76d3ebaf40c0d9dd1e1db53de38c7af463",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42862333514",
+    "record_path": "runs/2026-11-10/42862333514-1/3141/SC-03.json",
+    "source_result_sha256": "7118f63db7e92e063bada2d6fd148dddc69f1f49b86002eb9b231432b3df1ce6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42862333514-1",
+    "sha256": "7118f63db7e92e063bada2d6fd148dddc69f1f49b86002eb9b231432b3df1ce6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42862333514",
+    "durability": "time-limited; object archival not configured"
+  }
+}
