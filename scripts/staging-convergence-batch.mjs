@@ -6,6 +6,7 @@ import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {catalogFromPaths} from './issue-e2e-plan.mjs';
 import {parseIssueE2E,verifyIssueE2EAgainstCatalog} from './issue-e2e-contract.mjs';
 import {auditIssue} from './issue-contract.mjs';
@@ -313,4 +314,5 @@ function selfTest(){
   }
   console.log('Staging convergence batch E2E contract: historical source + approval negatives PASS');
 }
-if(process.argv[2]==='self-test')selfTest();
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href&&
+   process.argv[2]==='self-test')selfTest();
