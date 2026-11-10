@@ -318,7 +318,7 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
                         entry.options = vec![SandboxOptionSupport::unavailable(
                             crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1,
                             code,
-                            reason.clone(),
+                            reason,
                         )];
                     }
                     _ => {}
