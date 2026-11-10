@@ -155,8 +155,8 @@ function git(args){
 
 // Only Main's trusted controller can supply this proof; an arbitrary PR
 // marker, Issue label or model verdict is never enough to promote a native
-// Staging integration. Reconstruct Git bytes, current Owner approval and
-// independent source PR Runs for EVERY merged sync commit.
+// Staging integration. Reconstruct Git bytes, verified Full proof and
+// independent exact-source PR Runs for EVERY merged sync commit.
 export function certifyNativeMerge({pr,mergeSha,repoRoot=process.cwd(),
   branch='staging',sourceRuns=[],fullReceipt=null}){
   if(!isNativeConvergencePr(pr)||!SHA.test(mergeSha)||!pr?.merged_at||
@@ -267,7 +267,6 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
       pr.merged_at&&pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1||!isNativeConvergencePr(matches[0]))continue;
     const nativePr=matches[0];
-    const comments=read('issues/'+nativePr.number+'/comments?per_page=100');
     const runs=getRuns('head_sha='+nativePr.head.sha+'&event=pull_request');
     const sourceBatchSha=nativePr.head.sha;
     let fullReceipt=null;
