@@ -2148,6 +2148,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nession-persistence-probes"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "nession-agent",
+ "nession-common",
+ "nession-erofs",
+ "nession-protocol",
+ "nession-server",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "nession-protocol"
 version = "0.35.0"
 dependencies = [
