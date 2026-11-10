@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nession · Unified overlays · #3142</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<link rel="stylesheet" href="./styles.css"></head>
+<body data-nession-prototype-frame="v1"><div class="np-page" data-np-root>
+<header class="np-overview">
+<nav class="np-breadcrumb"><a data-nession-gallery-link href="../../#/prototypes">Back to Nession prototype gallery</a><span>/</span><span>Overlay system</span></nav>
+<span class="np-eyebrow">Nession / Design System / Interactive Study</span>
+<div class="np-header-main"><div><h1 class="np-title">One language for every overlay</h1>
+<p class="np-subtitle">A working Web/App design comparison for confirmation, contextual choices, simple dialogs, and multi-step operation surfaces. Inspect long paths, stacking, scroll ownership, Back/Cancel and constrained layouts. Only the product viewport contains product controls.</p></div>
+<div class="np-links"><a href="https://github.com/BestNathan/nession/issues/3142">Issue #3142</a>
+<a href="https://github.com/BestNathan/nession/issues/3089">Session baseline #3089</a>
+<a data-nession-source-link href="https://github.com/BestNathan/nession/tree/prototype">View source</a></div></div>
+<div class="np-meta"><span>Web: <strong>anchored + compact / standard / wide dialog</strong></span><span>App: <strong>bottom sheet / pushed operation</strong></span><span>Scope: <strong>presentation mock, no live API</strong></span></div>
+</header>
+<main><section class="np-preview" aria-label="Interactive overlay design preview">
+<div class="np-section-heading"><div><h2>Product viewport · 1:1 CSS pixels</h2><p>Open actions inside the Workspace. All viewport and fixture controls are outside the product.</p></div>
+<div class="np-preview-toolbar" role="group" aria-label="Preview size">
+<button type="button" data-np-size="1440" data-np-experience="web" aria-pressed="true">Web 1440</button>
+<button type="button" data-np-size="1180" data-np-experience="web">Web 1180</button>
+<button type="button" data-np-size="1024" data-np-experience="web">Web 1024</button>
+<button type="button" data-np-size="390" data-np-experience="app">App 390</button>
+<button type="button" data-np-size="375" data-np-experience="app">App 375</button>
+<button type="button" data-np-size="430" data-np-experience="app">App 430</button>
+<button type="button" data-np-size="844" data-np-experience="app">App landscape</button>
+<button type="button" data-np-reset>Reset</button></div></div>
+<div class="np-stage"><div class="np-device" data-np-device style="--np-device-width:1440px;--np-device-height:900px">
+<div id="nession-product" class="nession-product" data-experience="web" aria-label="Mock Nession Session workspace"></div></div></div>
+<p class="np-stage-label" data-np-current-size>1440 CSS px · 1:1</p>
+<div class="fixture-bar" aria-label="Review-only fixtures"><strong>Review fixture</strong>
+<button type="button" data-fixture="normal" aria-pressed="true">Normal</button>
+<button type="button" data-fixture="long">Long path / many rows</button>
+<button type="button" data-fixture="offline">Agent offline</button>
+<button type="button" data-fixture="invalid">Invalid form</button>
+<span>Mock controls · outside product surface</span></div>
+</section>
+<section class="np-details"><h2>Design decisions &amp; validation</h2>
+<p class="np-details-lede">This is a candidate for #3142, not deployed Nession. Try each operation from the Session/Project area and compare Web and App without refreshing.</p>
+<div class="np-detail-grid">
+<article class="np-detail"><h3>Overlay families</h3><ol class="np-steps"><li><strong>Anchored:</strong> menu, Select, Popover stay close to the trigger and remain usable over a parent dialog.</li><li><strong>Compact:</strong> rename and destructive confirmation ask only one focused question.</li><li><strong>Standard/Wide:</strong> New Session and New Project have explicit form groupings; only the body scrolls.</li></ol></article>
+<article class="np-detail"><h3>Experience ownership</h3><ol class="np-steps"><li>Web keeps the current shell visible behind a restrained scrim and centered dialog.</li><li>App uses a short Attach sheet, full-height New Session / Project configuration, and one Back owner.</li><li>Switch Web → App → Web; the selected experience (not browser window size) changes the actual composition.</li></ol></article>
+<article class="np-detail"><h3>Negative/edge paths</h3><ol class="np-steps"><li>Enable Long path, then New Project; add many locations and inspect body-only scrolling / opaque footer.</li><li>Open New Session → Location to inspect anchored child choice, full path wrapping and Escape priority.</li><li>Enable Offline/Invalid, attempt submit, Cancel, reopen and inspect state. Destructive operation requires explicit confirmation.</li></ol></article>
+<article class="np-detail"><h3>Fidelity &amp; evidence</h3><p>Layout/terminology follow #3089's shipped intent and current Nession design documents. This mock intentionally does not reproduce every React control implementation or server state. Portal, focus, touch and layout must be proven in production by source-aligned Chromium Cases. Browser/publication proof for this artifact is tracked separately.</p><details class="np-inspector"><summary>Mock state</summary><pre id="mock-state">Ready</pre></details></article>
+</div></section></main><footer class="np-footer">Nession prototype • sanitized deterministic fixtures • no backend requests • production Acceptance not implied</footer>
+</div><script src="./app.js"></script><script src="../prototype-frame-2758/frame.js"></script></body></html>
