@@ -233,8 +233,9 @@ test.describe('Web 1180', () => {
     await expect(page.getByTestId('sandbox-implementation-status-filesystem.access')).toHaveText(
       'unavailable',
     );
-    await expect(page.getByTestId('sandbox-fs-read')).toBeDisabled();
-    await expect(page.getByTestId('sandbox-fs-write')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-fs-read-add')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-fs-write-add')).toBeDisabled();
+    await expect(page.getByTestId('sandbox-fs-read-disabled')).toBeVisible();
 
     await selectTab(page, 'network');
     await expect(page.getByTestId('sandbox-implementation-status-network')).toHaveText(
@@ -493,6 +494,7 @@ test.describe('App 375', () => {
   }) => {
     await openAppSandbox(page, '?sandbox=inside');
     await expect(page.getByTestId('sandbox-inside')).toBeVisible();
+    await expect(page.getByTestId('sandbox-scope-note')).toBeVisible();
     await selectTab(page, 'resource');
     await expect(page.getByTestId('sandbox-effective-resource-cpu.max')).toBeVisible();
     await expect(page.getByTestId('sandbox-resource-add')).toHaveCount(0);
@@ -502,6 +504,5 @@ test.describe('App 375', () => {
       () => document.documentElement.scrollWidth - window.innerWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
-    await expect(page.getByTestId('sandbox-scope-note')).toBeVisible();
   });
 });
