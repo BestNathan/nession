@@ -11,27 +11,9 @@ env:
 on:
   pull_request:
     branches: [staging, main]
-    # Scope PR execution to changes that can affect this validator.
-    # Keep push / manual triggers unchanged for exact-SHA evidence.
-    paths:
-      - '.github/workflows/**'
-      - '.claude/skills/**'
-      - '.agents/skills/**'
-      - '**/AGENTS.md'
-      - '**/CLAUDE.md'
-      - 'crates/**'
-      - 'web/**'
-      - 'design/**'
-      - 'e2e/**'
-      - 'gates/**'
-      - 'scripts/**'
-      - 'automation/**'
-      - '.cargo/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'clippy.toml'
-      - 'justfile'
+    # Do not filter the PR event by changed paths: an exact two-parent
+    # convergence integration can have an empty net diff but still requires
+    # authenticated exact-HEAD checks. Trusted selectors scope actual work.
   # Keep exact main SHA evidence but select impacted gates; the remaining
   # module checks are inapplicable rather than silently green.
   push:

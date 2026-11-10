@@ -30,22 +30,51 @@ function publish(dir,expected,fixture=false){
     if(process.env.GITHUB_ACTIONS==='true'){
       const trustedMain=process.env.GITHUB_REF==='refs/heads/main';
       const standard=['workflow_dispatch','schedule','push'].includes(process.env.GITHUB_EVENT_NAME);
-      // repository_dispatch runs the default-branch workflow definition, unlike
-      // workflow_dispatch on an attacker-selected ref. Gate its exact owner/event
-      // identity as defense in depth; request and content checks belong to the
-      // main-owned knowledge-publisher-request entrypoint.
-      let approvedDispatch=false;
-      if(process.env.GITHUB_EVENT_NAME==='repository_dispatch' &&
-         process.env.GITHUB_ACTOR==='BestNathan' &&
-         process.env.GITHUB_RUN_ATTEMPT==='1' && process.env.GITHUB_EVENT_PATH){
-        try {
+      // The protected App receives authorization ONLY after this exact
+      // main-owned Publisher re-runs the canonical request admission. The
+      // receipt is generated inside the trusted, isolated RUNNER_TEMP; never
+      // read an untrusted proposal artifact as authorization.
+      let approvedAdmission=false;
+      if(['repository_dispatch','workflow_run','issue_comment'].includes(process.env.GITHUB_EVENT_NAME) &&
+         process.env.GITHUB_RUN_ATTEMPT==='1' &&
+         process.env.RUNNER_TEMP && process.env.GITHUB_EVENT_PATH){
+        try{
+          const receipt=JSON.parse(fs.readFileSync(
+            path.join(process.env.RUNNER_TEMP,'knowledge-publisher-admission.json'),'utf8'));
           const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
-          approvedDispatch=event.action==='knowledge-publish-v1' &&
-            event.sender?.login==='BestNathan';
-        }catch{ approvedDispatch=false; }
+          const eventType=process.env.GITHUB_EVENT_NAME;
+          const correctSource=eventType==='repository_dispatch'
+            ? (process.env.GITHUB_ACTOR==='BestNathan' &&
+              event.action==='knowledge-publish-v1' && event.sender?.login==='BestNathan')
+            : eventType==='issue_comment'
+            ? (process.env.GITHUB_ACTOR==='BestNathan' &&
+              event.action==='created' && event.sender?.login==='BestNathan' &&
+              event.comment?.user?.login==='BestNathan' &&
+              event.comment?.author_association==='OWNER' &&
+              event.issue?.pull_request==null)
+            : (event.action==='completed' &&
+              event.workflow_run?.event==='create' &&
+              event.workflow_run?.name==='Store / Knowledge Proposal Signal' &&
+              event.workflow_run?.path==='.github/workflows/store-knowledge-proposal-signal.yml' &&
+              event.workflow_run?.actor?.login==='BestNathan' &&
+              event.workflow_run?.triggering_actor?.login==='BestNathan' &&
+              event.workflow_run?.run_attempt===1 &&
+              event.workflow_run?.conclusion==='success');
+          approvedAdmission=correctSource &&
+            receipt.schema_version===1 &&
+            receipt.event===eventType &&
+            receipt.source_run_id===(eventType==='workflow_run'?event.workflow_run.id:null) &&
+            receipt.source_comment_id===(eventType==='issue_comment'?event.comment.id:null) &&
+            receipt.trusted_main_sha===process.env.GITHUB_SHA &&
+            receipt.run_id===process.env.GITHUB_RUN_ID &&
+            receipt.run_attempt===process.env.GITHUB_RUN_ATTEMPT &&
+            receipt.expected_head===expected &&
+            receipt.source_sha===git(dir,'rev-parse','HEAD') &&
+            /^refs\/heads\/knowledge-proposals\/[a-z0-9-]+$/.test(receipt.source_ref||'');
+        }catch{ approvedAdmission=false; }
       }
-      if(!trustedMain||(!standard&&!approvedDispatch))
-        throw Error('untrusted Actions job cannot publish');
+      if(!trustedMain||(!standard&&!approvedAdmission))
+        throw Error('untrusted or unauthenticated Actions job cannot publish');
     }
   }
   if(git(dir,'status','--porcelain'))throw Error('commit all changes before publishing');
