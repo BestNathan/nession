@@ -5,7 +5,7 @@ topic: web
 categories: ["design", "interaction", "overlay", "dialog", "ownership", "web", "app"]
 status: verified
 created_at: 2026-11-10T04:45:00Z
-updated_at: 2026-11-10T12:12:00Z
+updated_at: 2026-11-10T17:52:00Z
 sources: ["https://github.com/BestNathan/nession/issues/3142", "https://github.com/BestNathan/nession/pull/3144", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/web.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/app.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/semantic.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/overlayStyles.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/alert-dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/design/contracts/patterns/choice-item.json", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-item.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-itemStyles.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-04/verify.spec.ts"]
 ---
 
@@ -268,6 +268,9 @@ changing the action-row contract:
   owns the modality-aware focus recipe used inside these surfaces.
 - [Web Session-first navigation, reserved rail and explicit experience mode](web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md)
   owns the Experience route and navigation shell the App compositions live in.
+- [Shared content-region visual recipes](shared-content-region-visual-recipes.md)
+  owns the body/action grammar inside a detail, configuration or operation
+  region; it composes these overlay roles rather than forking them.
 
 ## Limits / when to revisit
 

@@ -612,3 +612,17 @@
 - Categories: agent, architecture, sandbox, security
 - Reason: Record #3141 native cgroup v2 KV passthrough: Agent-discovered declarative controller files, one basename/lifecycle/status/command naming owner, kernel-authoritative raw values, prelaunch O_NOFOLLOW writes with readback, and the independent seccomp registry; cite the merged staging SHA and Case receipts
 - Source: https://github.com/BestNathan/nession/issues/3141
+
+## 2026-11-10T17:51:00Z | create | Shared content-region visual recipes
+- Path: topics/web/shared-content-region-visual-recipes.md
+- Topic: web
+- Categories: design, ui, patterns, ownership, web, app
+- Reason: Record the #3137 domain-agnostic content-region family (ResourceDetail, ConfigurationForm, OperationSurface), its shared typography/material/action relationships, the Project/Sandbox/Session consumer migration, the one-scroll/one-action operation grammar, the two refreshed dialog baselines, and the in-place prototype + Web/App Case evidence
+- Source: https://github.com/BestNathan/nession/issues/3137
+
+## 2026-11-10T17:52:00Z | update | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Link the new #3137 content-region recipe family; OperationSurface owns the body/action grammar inside these overlay roles and does not fork the primitive
+- Source: https://github.com/BestNathan/nession/issues/3137

@@ -234,6 +234,21 @@
         "updated_at": "2026-11-10T15:20:00Z"
       },
       {
+        "title": "Shared content-region visual recipes",
+        "description": "Resource detail, configuration form and operation surface as one domain-agnostic Nession product grammar shared by Project, Sandbox, Session and Environment surfaces",
+        "path": "topics/web/shared-content-region-visual-recipes.md",
+        "status": "verified",
+        "categories": [
+          "design",
+          "ui",
+          "patterns",
+          "ownership",
+          "web",
+          "app"
+        ],
+        "updated_at": "2026-11-10T17:51:00Z"
+      },
+      {
         "title": "Unified overlay and operation surface system",
         "description": "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics",
         "path": "topics/web/unified-overlay-and-operation-surface-system.md",
@@ -247,7 +262,7 @@
           "web",
           "app"
         ],
-        "updated_at": "2026-11-10T12:12:00Z"
+        "updated_at": "2026-11-10T17:52:00Z"
       },
       {
         "title": "Web primitive focus treatment and visual vocabulary ownership",
@@ -341,6 +356,7 @@
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
+      "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md"
     ],
     "architecture": [
@@ -370,6 +386,7 @@
     ],
     "design": [
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
+      "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md"
     ],
@@ -437,12 +454,16 @@
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
+      "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
     "pages": [
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
+    ],
+    "patterns": [
+      "topics/web/shared-content-region-visual-recipes.md"
     ],
     "presentation": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
@@ -527,6 +548,9 @@
     "touch": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
+    "ui": [
+      "topics/web/shared-content-region-visual-recipes.md"
+    ],
     "web": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
@@ -534,6 +558,7 @@
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
+      "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
