@@ -4,7 +4,8 @@
 // Never execute files from the integration head or let a model issue a Gate Pass.
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {planBatch,verifyBatchIssue,AUDIT_APPROVAL} from './staging-convergence-batch.mjs';
 
@@ -91,6 +92,10 @@ function selfTest(){
   assert.equal(auditOutcomeAllowsAttestation(clean,3140),false);
   console.log('Source-bound Staging Issue Audit attestor: identity fixtures PASS');
 }
-if(process.argv[2]==='self-test')selfTest();
-else if(process.argv[2]==='attest')
-  console.log(JSON.stringify(attest(Number(process.argv[3]),Number(process.argv[4]))));
+// Safe to import the pure approval predicate in the existing Issue Audit
+// Gate; CLI commands execute only when this file is the entrypoint.
+if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+  if(process.argv[2]==='self-test')selfTest();
+  else if(process.argv[2]==='attest')
+    console.log(JSON.stringify(attest(Number(process.argv[3]),Number(process.argv[4]))));
+}
