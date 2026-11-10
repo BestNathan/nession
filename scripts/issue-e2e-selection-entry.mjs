@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
-import {isNativeConvergencePr,convergenceE2ESelection} from './staging-convergence-pr.mjs';
+import {isNativeConvergencePr,convergenceE2ESelection,isNativePromotionPr,promotionE2ESelection} from './staging-convergence-pr.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -128,6 +128,10 @@ export function prepare(event, issues, repoRoot) {
   if(isNativeConvergencePr(pr)){
     if(issues.length)throw Error('PR-native convergence must not depend on Issue contracts');
     return {...convergenceE2ESelection(pr,repoRoot,baseSha),pr_number:pr.number};
+  }
+  if(isNativePromotionPr(pr)){
+    if(issues.length)throw Error('PR-native promotion must not depend on Issue contracts');
+    return {...promotionE2ESelection(pr,repoRoot,baseSha),pr_number:pr.number};
   }
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
     const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, pr.head.sha);
