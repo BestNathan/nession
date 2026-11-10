@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a3d66d6127ef63b49a4465fdda9feea73ec5aa7569ce4618b05746c250db6439",
+  "run_id": 42735635683,
+  "run_attempt": 1,
+  "issue": 3024,
+  "criterion": "SC-02",
+  "criterion_text": "On a probed capable Linux host, a minimal Base Runtime EROFS + Project source EROFS launch an interactive shell with usable Git, writable workspace, expected mountinfo, and no unintended host path exposure.",
+  "stage": "staging",
+  "target_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "contract_sha256": "7bb0b03e4b321b65ad95019d070e934fb931751c2d9ba837eb2233ccde85afcf",
+  "case_revision": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "case_tree_sha": "1f5efc1770487b7f4aab0a926b5ae46887ad9d5f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T01:27:59.103Z",
+  "finished_at": "2026-11-10T01:28:22.629Z",
+  "duration_ms": 23526,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A minimal Base Runtime EROFS plus a Project source EROFS launched an interactive shell with usable Git, a writable overlay workspace, expected mountinfo and no host /etc exposure",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "execution 8a057233-ee13-47c4-ba3d-3bab312a7bb7 on Linux kernel 7.0.0-1017-azure"
+        },
+        {
+          "type": "runtime",
+          "value": "the shell ran with Git and a writable /workspace over the Project EROFS lower"
+        },
+        {
+          "type": "runtime",
+          "value": "mountinfo showed fuse.erofsfuse and fuse.fuse-overlayfs; /etc/shadow from the host was absent"
+        },
+        {
+          "type": "runtime",
+          "value": "cleanup unmounted 4 owned mounts and removed the execution record"
+        }
+      ],
+      "duration_ms": 17580,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42735635683,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "record_path": "runs/2026-11-10/42735635683-1/3024/SC-02.json",
+    "source_result_sha256": "f20f1dc27ecfc76d03f3e52aeb28bf677546a1ee72203f7b3fa88e7f08ad1a3a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42735635683-1",
+    "sha256": "f20f1dc27ecfc76d03f3e52aeb28bf677546a1ee72203f7b3fa88e7f08ad1a3a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "durability": "time-limited; object archival not configured"
+  }
+}

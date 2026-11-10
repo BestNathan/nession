@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a58fcba26eeef8a8bd3b59efa5b768807bbeca6162f867ef9ade11485d446c1e",
+  "run_id": 42735635683,
+  "run_attempt": 1,
+  "issue": 3024,
+  "criterion": "SC-04",
+  "criterion_text": "Nested mount/Overlay lifecycle survives tmux detach/reconnect without re-launching; on exit/failure resources are reaped only if owned and read-only image refs remain available to other Sessions.",
+  "stage": "staging",
+  "target_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "contract_sha256": "7bb0b03e4b321b65ad95019d070e934fb931751c2d9ba837eb2233ccde85afcf",
+  "case_revision": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "case_tree_sha": "9650f75000044a03918ca31b4fb02288d594550a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T01:28:31.105Z",
+  "finished_at": "2026-11-10T01:28:41.602Z",
+  "duration_ms": 10497,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Nested mount/Overlay lifecycle survives client detach and cleanup reaps only owned resources, while read-only image refs remain available to the other Session",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "executions 5ea47194-88a4-4adf-b799-bbe387073947 and cbfe6962-43ae-4edf-935c-ac09ad3f0d24 shared the same Base/Project/toolchain images"
+        },
+        {
+          "type": "runtime",
+          "value": "client detach left the first Pane and all of its mounts alive"
+        },
+        {
+          "type": "runtime",
+          "value": "cleaning the first execution unmounted only its 4 mounts; the second stayed mounted"
+        },
+        {
+          "type": "runtime",
+          "value": "the second execution released its 4 mounts and record on exit"
+        }
+      ],
+      "duration_ms": 4614,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42735635683,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "record_path": "runs/2026-11-10/42735635683-1/3024/SC-04.json",
+    "source_result_sha256": "1a8febdf75e0d35847c180721db7779375b218e0d70808b48cef578f8efb23c5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42735635683-1",
+    "sha256": "1a8febdf75e0d35847c180721db7779375b218e0d70808b48cef578f8efb23c5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "durability": "time-limited; object archival not configured"
+  }
+}

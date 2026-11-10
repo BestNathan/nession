@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "16731605cccf0956d64541d9a1ab59a764be186d3b3a850f7650ecb464aa0dcd",
+  "run_id": 42735635683,
+  "run_attempt": 1,
+  "issue": 3024,
+  "criterion": "SC-03",
+  "criterion_text": "With compatible Node and Rust EROFS bundles, an on-demand Sandbox can execute node --version and compile/run a minimal Rust program with the declared linker/sysroot; missing ABI or toolchain dependencies fail explicitly.",
+  "stage": "staging",
+  "target_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "contract_sha256": "7bb0b03e4b321b65ad95019d070e934fb931751c2d9ba837eb2233ccde85afcf",
+  "case_revision": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+  "case_tree_sha": "0c10c341f07a152084e27c548aa8fe813035f853",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T01:28:22.629Z",
+  "finished_at": "2026-11-10T01:28:31.104Z",
+  "duration_ms": 8475,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "The exact Node/Rust EROFS bundle Case is not executable in this lane: no bounded bundle packager (rustc + linker + sysroot, node + runtime libs) exists yet",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "platform=linux backend=linux-bwrap namespaces={\"cgroup\":true,\"ipc\":true,\"net\":true,\"pid\":true,\"user\":true,\"uts\":true} seccomp=true filesystem=true erofs=true erofs_overlay=true network_deny=true network_restricted=true cgroup_v2=[\"cpu\",\"cpuset\",\"io\",\"memory\",\"pids\"]; toolchain bundle packaging remains a staging-lane prerequisite, not an Agent Pass"
+        }
+      ],
+      "duration_ms": 2596,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42735635683,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "27c200961bb3a95aed9cd7368062a099a633e2d4",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "record_path": "runs/2026-11-10/42735635683-1/3024/SC-03.json",
+    "source_result_sha256": "c10e8d9d1bccb70cad3f22661048cec73ad841386566fcd241c5bfb80f0747ad"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42735635683-1",
+    "sha256": "c10e8d9d1bccb70cad3f22661048cec73ad841386566fcd241c5bfb80f0747ad",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42735635683",
+    "durability": "time-limited; object archival not configured"
+  }
+}
