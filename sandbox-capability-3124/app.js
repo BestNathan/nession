@@ -144,10 +144,23 @@
     return "";
   }
   function policyProjection(d){
-    var policy={version:1,enabled:true,enforcement:"required",filesystem:{access:{read:d.readOnly.split(",").map(function(x){return x.trim()}).filter(Boolean),write:d.write.split(",").map(function(x){return x.trim()}).filter(Boolean)}},network:{mode:d.network,ingress:"deny"},process:{linux_namespaces:{pid:!!d.pid,ipc:!!d.ipc,user:!!d.user}}};
-    if(d.network==="restricted")policy.network.egress={allow:d.egress.split(",").map(function(x){return x.trim()}).filter(Boolean),deny:[],private_network:"deny"};
-    if(d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value]}))};
-    if(d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
+    var policy={version:1,enabled:true,enforcement:"required"};
+    var reads=(d.readOnly||"").split(",").map(function(x){return x.trim()}).filter(Boolean);
+    var writes=(d.write||"").split(",").map(function(x){return x.trim()}).filter(Boolean);
+    // Optional groups absent in the draft are *omitted*, never silently
+    // converted into claims about an installed OS-level restriction.
+    if(reads.length||writes.length)policy.filesystem={access:{read:reads,write:writes}};
+    if(d.network){
+      policy.network={mode:d.network,ingress:"deny"};
+      if(d.network==="restricted")policy.network.egress={
+        allow:(d.egress||"").split(",").map(function(x){return x.trim()}).filter(Boolean),
+        deny:[],private_network:"deny"};
+    }
+    var namespaces={};
+    ["pid","ipc","user"].forEach(function(k){if(d[k])namespaces[k]=true});
+    if(Object.keys(namespaces).length)policy.process={linux_namespaces:namespaces};
+    if(d.resourceRows&&d.resourceRows.length)policy.resource={cgroup_v2:Object.fromEntries(d.resourceRows.map(function(x){return [x.key.trim(),x.value] }))};
+    if(d.syscallRows&&d.syscallRows.length)policy.syscall={seccomp:{profile:d.syscallRows[0].value.trim()}};
     return policy;
   }
   function toggler(id,label,checked,disabled){
