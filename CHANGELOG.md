@@ -535,3 +535,10 @@
 - Reason: Keep the Sandbox isolation proof while replacing one harmless standard host pathname that the strict public Knowledge screener rejected, blocking unrelated Prototype Pages; see incident reproduction and release checks in Issue #3145
 - Source: https://github.com/BestNathan/nession/issues/3145
 
+## 2026-11-10T07:20:19Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Document the real orphan-create trigger failure and its corrected owner Issue-comment handoff to the protected Knowledge Publisher without lowering CAS or security gates (Issue #3156)
+- Source: https://github.com/BestNathan/nession/issues/3156
+
