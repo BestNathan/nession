@@ -19,6 +19,7 @@
 
 pub mod bridge;
 pub mod capabilities;
+mod cgroup_file;
 pub mod draft;
 pub mod error;
 pub mod exec;

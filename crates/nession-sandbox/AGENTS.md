@@ -97,6 +97,12 @@ implementation unavailable; never advertise eligibility from a platform guess
 or an empty list. `capabilities::unsupported_requests` is the field-path
 projection for preflight/Enter; `validate` remains the single fail-closed gate.
 
+`resource.cgroup_v2` fields are discovered, not allowlisted (#3141): the probe
+enumerates the declarative controller files its delegated child exposes, and
+`cgroup_file.rs` is the one owner of the basename/lifecycle/status/command
+rules. A policy key the child did not expose fails closed; the kernel remains
+the authority for each raw value at write time.
+
 ## cgroup delegation
 
 The execution root needs a cgroup with delegated controllers and no processes

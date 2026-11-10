@@ -60,15 +60,16 @@ impl NamespaceSupport {
     }
 }
 
-/// Whether one allowlisted cgroup control file can actually be installed.
+/// One declarative controller file discovered on the delegated child cgroup.
 ///
-/// File presence alone is not installability: the probe writes a harmless
-/// native value into an Agent-owned child cgroup and records the kernel's
-/// answer, which is what the UI catalog and the policy validator consume.
+/// Discovery proves exposure and controller delegation, not that a particular
+/// value will install. The kernel write at Enter is the final authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CgroupFieldSupport {
     pub available: bool,
     pub reason: Option<String>,
+    /// The value the probe child currently reports, offered as a UI hint.
+    pub current_value: Option<String>,
 }
 
 /// Delegated cgroup v2 support under one writable execution root.
@@ -301,18 +302,10 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
                             .collect();
                     }
                     "resource.cgroup_v2" => {
-                        entry.fields = crate::draft::RESOURCE_FIELD_METADATA
-                            .into_iter()
-                            .map(|(key, value_format, example)| SandboxFieldEntry {
-                                key: key.to_string(),
-                                controller: Some(key.split('.').next().unwrap_or(key).to_string()),
-                                value_format: value_format.to_string(),
-                                example: example.to_string(),
-                                available: false,
-                                reason_code: Some(code),
-                                reason: Some(reason.clone()),
-                            })
-                            .collect();
+                        // Discovery is delegated to the backend: without a
+                        // measurable child cgroup there is no honest file
+                        // list. Never fabricate the retired four-key
+                        // allowlist here (#3141).
                     }
                     "syscall.seccomp" => {
                         entry.options = vec![SandboxOptionSupport::unavailable(
@@ -521,43 +514,37 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
         )
     });
 
-    let mut fields = Vec::new();
-    if linux {
-        for (key, value_format, example) in crate::draft::RESOURCE_FIELD_METADATA {
-            let field = capabilities
-                .cgroup_v2
-                .as_ref()
-                .and_then(|cgroup| cgroup.fields.get(key));
-            let available = field.map(|field| field.available).unwrap_or(false);
-            let reason_code = if available {
-                None
-            } else if capabilities.cgroup_v2.is_none() {
-                Some(SandboxUnsupportedReason::ControllerNotDelegated)
-            } else {
-                Some(SandboxUnsupportedReason::PermissionDenied)
-            };
-            let reason = if available {
-                None
-            } else if capabilities.cgroup_v2.is_none() {
-                Some("no writable delegated cgroup v2 subtree on this Agent".to_string())
-            } else {
-                Some(
-                    field
-                        .and_then(|field| field.reason.clone())
-                        .unwrap_or_else(|| "the kernel refused a probe write".to_string()),
-                )
-            };
-            fields.push(SandboxFieldEntry {
-                key: key.to_string(),
-                controller: Some(key.split('.').next().unwrap_or(key).to_string()),
-                value_format: value_format.to_string(),
-                example: example.to_string(),
-                available,
-                reason_code,
-                reason,
-            });
-        }
-    }
+    // Discovery, not an application allowlist (#3141): the backend reports the
+    // declarative controller files its delegated child actually exposes. An
+    // absent file is not offered; hierarchy/lifecycle/status/command
+    // interfaces never appear because the shared naming owner excluded them.
+    let fields = if linux {
+        capabilities
+            .cgroup_v2
+            .as_ref()
+            .map(|cgroup| {
+                cgroup
+                    .fields
+                    .iter()
+                    .map(|(key, field)| SandboxFieldEntry {
+                        key: key.clone(),
+                        controller: crate::cgroup_file::controller_of(key).map(str::to_string),
+                        value_format: "native cgroup v2 control-file text".to_string(),
+                        example: field.current_value.clone().unwrap_or_default(),
+                        available: field.available,
+                        reason_code: if field.available {
+                            None
+                        } else {
+                            Some(SandboxUnsupportedReason::PermissionDenied)
+                        },
+                        reason: field.reason.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let cgroup_status = if !linux {
         Unavailable(
             Some(if backend_missing && !macos {
@@ -577,7 +564,8 @@ pub fn implementations(capabilities: &Capabilities) -> Vec<SandboxImplementation
     } else {
         Unavailable(
             Some(SandboxUnsupportedReason::PermissionDenied),
-            "the delegated cgroup subtree measured no installable control file".to_string(),
+            "the delegated cgroup subtree exposed no configurable resource-controller file"
+                .to_string(),
         )
     };
     let mut cgroup_entry = implementation("resource.cgroup_v2", cgroup_status);
@@ -879,7 +867,7 @@ fn validate_linux(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
         let missing = cgroup
             .controllers()
             .into_iter()
-            .filter(|controller| !support.controllers.contains(*controller))
+            .filter(|controller| !support.controllers.contains(controller))
             .collect::<Vec<_>>();
         if !missing.is_empty() {
             return Err(SandboxError::UnsupportedPolicy(format!(
@@ -887,19 +875,25 @@ fn validate_linux(compiled: &CompiledSandboxPolicy, capabilities: &Capabilities)
                 missing.join(", ")
             )));
         }
-        // A delegated controller is not proof that its control file can be
-        // written. The child-cgroup probe measured each allowlisted file, and
-        // a key that was probed unavailable fails here even when the
-        // controller is delegated.
+        // A delegated controller is not proof that a particular file is
+        // exposed on the child. Discovery is the measured file list; a
+        // requested key absent from it fails closed, exactly like a measured
+        // unavailable one. The kernel still validates the value at write time.
         for (file, _) in cgroup.files() {
-            if let Some(field) = support.fields.get(file) {
-                if !field.available {
+            match support.fields.get(file) {
+                Some(field) if field.available => {}
+                Some(field) => {
                     return Err(SandboxError::UnsupportedPolicy(format!(
                         "resource.cgroup_v2 {file} is not installable on this host: {}",
                         field
                             .reason
                             .as_deref()
-                            .unwrap_or("the child cgroup refused a probe write")
+                            .unwrap_or("the child cgroup did not offer it")
+                    )));
+                }
+                None => {
+                    return Err(SandboxError::UnsupportedPolicy(format!(
+                        "resource.cgroup_v2 {file} is not a configurable control file exposed by the delegated child cgroup"
                     )));
                 }
             }
@@ -1040,30 +1034,23 @@ pub fn unsupported_requests(
                             .to_string(),
                     ),
                     Some(support) => {
-                        for (file, requested) in [
-                            ("memory.max", cgroup.memory_max.is_some()),
-                            ("cpu.max", cgroup.cpu_max.is_some()),
-                            ("pids.max", cgroup.pids_max.is_some()),
-                            ("memory.oom.group", cgroup.memory_oom_group.is_some()),
-                        ] {
-                            if requested
-                                && !support
-                                    .fields
-                                    .get(file)
-                                    .map(|field| field.available)
-                                    .unwrap_or(false)
-                            {
-                                push(
+                        for file in cgroup.0.keys() {
+                            match support.fields.get(file) {
+                                Some(field) if field.available => {}
+                                Some(field) => push(
                                     &mut errors,
                                     &format!("resource.cgroup_v2.{file}"),
-                                    support
-                                        .fields
-                                        .get(file)
-                                        .and_then(|field| field.reason.clone())
-                                        .unwrap_or_else(|| {
-                                            format!("{file} is not installable on this host")
-                                        }),
-                                );
+                                    field.reason.clone().unwrap_or_else(|| {
+                                        format!("{file} is not installable on this host")
+                                    }),
+                                ),
+                                None => push(
+                                    &mut errors,
+                                    &format!("resource.cgroup_v2.{file}"),
+                                    format!(
+                                        "{file} is not a configurable control file exposed by the delegated child cgroup"
+                                    ),
+                                ),
                             }
                         }
                     }
@@ -1262,18 +1249,26 @@ mod tests {
                     .into_iter()
                     .map(str::to_string)
                     .collect(),
-                fields: ["memory.max", "cpu.max", "pids.max", "memory.oom.group"]
-                    .into_iter()
-                    .map(|key| {
-                        (
-                            key.to_string(),
-                            CgroupFieldSupport {
-                                available: true,
-                                reason: None,
-                            },
-                        )
-                    })
-                    .collect(),
+                fields: [
+                    ("memory.max", "max"),
+                    ("memory.high", "max"),
+                    ("cpu.max", "max 100000"),
+                    ("cpu.weight", "100"),
+                    ("pids.max", "max"),
+                    ("memory.oom.group", "0"),
+                ]
+                .into_iter()
+                .map(|(key, current)| {
+                    (
+                        key.to_string(),
+                        CgroupFieldSupport {
+                            available: true,
+                            reason: None,
+                            current_value: Some(current.to_string()),
+                        },
+                    )
+                })
+                .collect(),
                 detail: "delegated".to_string(),
             }),
             seccomp: true,
@@ -1399,7 +1394,7 @@ mod tests {
     }
 
     #[test]
-    fn a_probed_unavailable_control_file_is_refused_even_when_delegated() {
+    fn a_discovered_unavailable_control_file_is_refused_even_when_delegated() {
         let mut capabilities = linux_capabilities();
         if let Some(support) = capabilities.cgroup_v2.as_mut() {
             support.controllers.insert("cpu".to_string());
@@ -1407,7 +1402,8 @@ mod tests {
                 "cpu.max".to_string(),
                 CgroupFieldSupport {
                     available: false,
-                    reason: Some("the kernel refused a probe write".to_string()),
+                    reason: Some("the child cgroup did not offer it".to_string()),
+                    current_value: None,
                 },
             );
         }
@@ -1420,7 +1416,7 @@ mod tests {
         )
         .expect_err("an uninstallable field must fail closed");
         assert!(error.to_string().contains("cpu.max"));
-        assert!(error.to_string().contains("probe write"));
+        assert!(error.to_string().contains("did not offer"));
     }
 
     #[test]
@@ -1429,8 +1425,15 @@ mod tests {
         let measured = catalog(&capabilities);
         assert_eq!(measured.status, SandboxCatalogStatus::Available);
         assert_eq!(measured.backend.as_deref(), Some("linux-bwrap"));
-        assert_eq!(measured.resource_fields.len(), 4);
+        assert_eq!(measured.resource_fields.len(), 6);
         assert!(measured.resource_fields.iter().all(|field| field.available));
+        let weight = measured
+            .resource_fields
+            .iter()
+            .find(|field| field.key == "cpu.weight")
+            .expect("a beyond-V1 discovered file is offered");
+        assert_eq!(weight.example, "100");
+        assert_eq!(weight.controller.as_deref(), Some("cpu"));
         assert_eq!(measured.syscall_fields.len(), 1);
         assert_eq!(measured.syscall_fields[0].key, "seccomp.profile");
         assert_eq!(measured.probe_generation.len(), 64);
@@ -1442,6 +1445,7 @@ mod tests {
                 CgroupFieldSupport {
                     available: false,
                     reason: Some("not installable".to_string()),
+                    current_value: None,
                 },
             );
         }
@@ -1603,12 +1607,12 @@ mod tests {
             .all(|option| option.status == SandboxImplementationStatus::Available));
         let cgroup = implementation(&catalog, "resource.cgroup_v2");
         assert!(cgroup.is_editable());
-        assert_eq!(cgroup.fields.len(), 4);
+        assert_eq!(cgroup.fields.len(), 6);
         assert!(cgroup.fields.iter().all(|field| field.available));
         assert!(cgroup
             .fields
             .iter()
-            .any(|field| field.key == "cpu.max" && field.controller.as_deref() == Some("cpu")));
+            .any(|field| field.key == "cpu.weight" && field.controller.as_deref() == Some("cpu")));
         let seccomp = implementation(&catalog, "syscall.seccomp");
         assert!(seccomp.is_editable());
         assert_eq!(seccomp.options.len(), 1);
@@ -1629,6 +1633,7 @@ mod tests {
             CgroupFieldSupport {
                 available: false,
                 reason: Some("controller not enabled".to_string()),
+                current_value: None,
             },
         );
         let catalog = catalog(&capabilities);
@@ -1728,8 +1733,9 @@ mod tests {
         let namespaces = implementation(&catalog, "process.linux_namespaces");
         assert_eq!(namespaces.options.len(), 5);
         let cgroup = implementation(&catalog, "resource.cgroup_v2");
-        assert_eq!(cgroup.fields.len(), 4);
-        assert!(cgroup.fields.iter().all(|field| !field.available));
+        // Discovery is measured, not fabricated: without a child cgroup the
+        // retired four-key allowlist must not reappear as pretend options.
+        assert!(cgroup.fields.is_empty());
         let seccomp = implementation(&catalog, "syscall.seccomp");
         assert_eq!(seccomp.options.len(), 1);
         assert_eq!(
@@ -1759,6 +1765,7 @@ mod tests {
             CgroupFieldSupport {
                 available: false,
                 reason: Some("controller not enabled".to_string()),
+                current_value: None,
             },
         );
         let requested = policy(serde_json::json!({
