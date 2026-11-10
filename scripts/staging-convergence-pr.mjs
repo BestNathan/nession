@@ -386,7 +386,11 @@ export function selfTest(){
     for(const id of BROWSER_DESIGN_IDS)
       fs.writeFileSync(path.join(root,'e2e/tests/browser',id+'.spec.ts'),
         '// canonical browser-design fixture\n');
-    run('add','.');run('commit','-qm','staging design catalog');
+    // Unlike login/new-browser (which already exist at the exact Main base),
+    // this is a genuinely added Staging-only runnable ID. Its delta MUST be selected.
+    fs.writeFileSync(path.join(root,'e2e/tests/browser/promotion-delta.spec.ts'),
+      '// new promotion-only browser case\n');
+    run('add','.');run('commit','-qm','staging design catalog and promotion delta');
     const promoteSha=run('rev-parse','HEAD');
     const promotion={
       number:19,title:'release: promote staging to main',
@@ -405,8 +409,10 @@ export function selfTest(){
     assert.equal(promoter.mode,'selected');
     assert.deepEqual(promoter.issues,[]);
     assert.ok(BROWSER_DESIGN_IDS.every(id=>promoter.selected.some(x=>x.id===id)));
-    assert.ok(promoter.selected.some(x=>x.id==='login'));
-    assert.ok(promoter.selected.some(x=>x.id==='new-browser'));
+    assert.ok(promoter.selected.some(x=>x.id==='promotion-delta'),
+      'changed browser ID from exact Main..Staging source must be selected');
+    assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
+      'unchanged Main-owned browser IDs must not be over-selected');
     assert.deepEqual(promotionE2ESelection(promotion,root,main),promoter);
     assert.throws(()=>promotionE2ESelection(promotion,root,lane),/untrusted/);
     assert.throws(()=>promotionE2ESelection(promotion,root,main,head),/untrusted/);
