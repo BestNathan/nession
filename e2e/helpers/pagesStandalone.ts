@@ -80,24 +80,35 @@ const knowledge={
  ],
 };
 
-// Browser fixture for the pinned public technical Documents catalog.
+// Browser fixture uses Nession release semver support (not contract v1/v2
+// as the release axis). No untrusted Rust/Provider contents reach the DOM.
+const request={alias:'StatusRequest',shape:{type:'object',properties:{
+  session:{type:'string'}}},fields:[{path:'session',variant:'',type:'string',required:true,
+    releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'supported'}],
+    firstObserved:'0.36.0'}]};
+const response={alias:'StatusResponse',shape:{type:'object',properties:{
+  status:{type:'string'},snapshot:{type:'string'}}},fields:[
+   {path:'status',variant:'state=ok',type:'string',required:true,
+     releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'supported'}],
+     firstObserved:'0.36.0'},
+   {path:'snapshot',variant:'state=ok',type:'string',required:true,
+     releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'not-supported'}],
+     firstObserved:null}
+  ]};
 const documents={
- schema_version:1,status:'available',generated_at:'2026-11-10T10:00:00Z',
- source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40)},
- documents:[
-  {path:'docs/architecture/protocol.md',title:'Protocol Architecture',category:'Protocols',
-   description:'Protocol Units and wire contracts.',
-   source:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/docs/architecture/protocol.md',
-   body:'# Protocol Architecture\n\nA source-backed protocol reference.\n\n'+
-      '| Field | Role |\n| --- | --- |\n| wire | locate unit |\n\n'+
-      '\x60\x60\x60rust\nstruct ProtocolUnit;\n\x60\x60\x60\n\n'+
-      '[MCP reference](mcp.md)'},
-  {path:'docs/architecture/mcp.md',title:'MCP Access Layer',category:'Interfaces',
-   description:'MCP tools, hosting, and authentication.',
-   source:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/docs/architecture/mcp.md',
-   body:'# MCP Access Layer\n\nServer and Agent tools.\n\n'+
-      '<img src=x onerror=alert(1)>\n\n'+
-      '[Protocol Architecture](protocol.md)'}
+ schema_version:3,status:'available',generated_at:'2026-11-10T10:00:00Z',
+ source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40),
+   source_version:'0.35.0'},
+ definitions:{},
+ releases:[{version:'0.35.0',tag:'v0.35.0',sha:null,status:'unavailable'},
+  {version:'0.36.0',tag:'v0.36.0',sha:'b'.repeat(40),status:'available'}],
+ protocols:[
+  {id:'git.status',owner:'git',wires:['git.status'],
+    versions:[{version:1,request,response},{version:2,request,response}],
+    support:{request:[],response:[]}},
+  {id:'server.session.create',owner:'core',wires:['server.session.create'],
+    versions:[{version:1,request:{...request,alias:'SessionCreateRequest'},response:null}],
+    support:{request:[],response:[]}}
  ]
 };
 
