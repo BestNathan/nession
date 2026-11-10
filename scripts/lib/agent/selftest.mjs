@@ -3,7 +3,7 @@ import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, renderIssueAuditFormatRepairPrompt, issueAuditTools, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope, describeIssueAuditRejection } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { issueBody as convergenceIssueBody } from '../../staging-convergence-batch.mjs';
 import { auditIssue } from '../../issue-contract.mjs';
@@ -34,6 +34,36 @@ const validBatch={number:3139,title:'Requirement: Staging integration staging aa
   labels:[{name:'requirement'},{name:'ci'},{name:'verification:integration'}],
   body:convergenceIssueBody(batchPlan)};
 assert.equal(auditIssue(validBatch).ok,true,'fixture must be a valid integration Issue');
+// #3191: Typed, trusted pre-write rejections become a durable needs-review
+// result, while text lookalikes and any infrastructure/post-write error remain
+// execution errors. Rejection diagnostics must not reproduce model content.
+for (const code of [
+  'ISSUE_AUDIT_LABEL_CONTRACT',
+  'ISSUE_AUDIT_E2E_PROTECTED',
+  'ISSUE_AUDIT_CONTRACT_REJECTED',
+  'ISSUE_AUDIT_TIER_PROPOSAL',
+  'ISSUE_AUDIT_TIER_DOWNGRADE',
+  'ISSUE_AUDIT_PROPOSAL_REJECTED',
+  'ISSUE_AUDIT_COMMENT_PROPOSAL',
+]) {
+  const classification=describeIssueAuditRejection(
+    Object.assign(new Error('untrusted model/Issue content'),{code}));
+  assert.equal(classification.code,code);
+  assert.ok(classification.reason.includes('before write') ||
+    classification.reason.includes('approval'));
+  assert.ok(!classification.reason.includes('untrusted'));
+}
+for (const error of [
+  new Error('Unauthorized E2E Verification / Report mutation by Issue Agent'),
+  new Error('Issue Contract validation failed before write: still broken'),
+  new Error('GitHub API error 403'),
+  new Error('Provider HTTP 429'),
+  new Error('Issue was written but post-write contract failed'),
+  Object.assign(new Error('postwrite failure'),{code:'ISSUE_AUDIT_POSTWRITE_FAILED'}),
+]) {
+  assert.equal(describeIssueAuditRejection(error),null,'only typed pre-write faults are findings');
+}
+
 const narrowed=issueAuditProposalSchemaForIssue(validBatch);
 assert.deepEqual(Object.keys(narrowed.properties),['comment','verification_tier','tier_reason']);
 assert.equal(narrowed.additionalProperties,false);
