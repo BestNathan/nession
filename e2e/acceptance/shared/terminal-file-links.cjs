@@ -174,13 +174,20 @@ async function runLine(page, expect, text) {
 /** Print a reference and wait until its output line exists (not just echo). */
 async function printReference(page, expect, reference) {
   await waitForQuiet(page, expect);
+  commandCounter += 1;
+  const marker = '__3187_REF_' + commandCounter + '__';
   // The leading space is deliberate: a shell that emits an SCO `ESC k` title
   // leaks its payload as visible text, and without a separator the command's
   // first word would fuse with the reference (e.g. `printftarget.py`). The
   // product's matcher already accepts a whitespace boundary.
+  //
+  // Completion is proven by a short marker command, not by counting the
+  // reference: a long absolute path makes the typed echo wrap, so only the
+  // produced output line contains the token contiguously.
   await command(page, "printf ' %s\\n' '" + reference + "'");
+  await command(page, "printf '%s\\n' '" + marker + "'");
   await expect.poll(
-    async () => countInBuffer(page, reference),
+    async () => countInBuffer(page, marker),
     { timeout: 30_000 },
   ).toBeGreaterThanOrEqual(2);
   await waitForQuiet(page, expect);
