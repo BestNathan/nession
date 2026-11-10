@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 42850632412,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3179-compose-persistence",
+    "target_sha": "bb5e92229e93d346477dd37f41e5198e8cd4a3dc",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/42850632412",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "649b5f60cffd2439e91020f447e7797e14bf92a4b79b7a7d629b78654071d61a"
+  },
+  "record": "runs/2026-11-10/42850632412-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "8889a8a5c145f81f5b2d5ad2fdf68b95c46465b914fe0e255a0e30714bb9245d"
+}
