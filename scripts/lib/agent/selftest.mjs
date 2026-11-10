@@ -247,6 +247,15 @@ await assert.rejects(applyIssueAuditProposal(issue,{result:'x'.repeat(17*1024)},
   repair:async()=>{repairAttempts++;return '{}';},
 }),/oversized response/);
 assert.equal(repairAttempts,0,'oversized text must not be truncated into a repair');
+// A failed formatter/provider invocation is an infrastructure error even when
+// the original model output was malformed. It must never turn green as needs-review.
+await assert.rejects(applyIssueAuditProposal(validBatch,{result:'not valid json'},'example/repo',{
+  repair:async()=>{throw new Error('Provider HTTP 429 while formatting proposal');},
+}),error=>{
+  assert.match(error.message,/Provider HTTP 429/);
+  assert.equal(describeIssueAuditRejection(error),null);
+  return true;
+});
 assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/FORMAT-ONLY/);
 assert.match(renderIssueAuditFormatRepairPrompt('malformed response'),/no repository or Issue tools/);
 assert.throws(()=>renderIssueAuditFormatRepairPrompt('x'.repeat(17*1024)),/at most 16 KiB/);
