@@ -34,26 +34,35 @@ export function batchIdentity({branch,main_sha,lane_sha,integration_head}){
     throw Error('invalid exact batch SHAs');
   return MARKER+' branch='+branch+' main='+main_sha+' lane='+lane_sha+' head='+integration_head;
 }
-export function planBatch({branch,main_sha,lane_sha,integration_head}){
+export function planBatch({branch,main_sha,lane_sha,integration_head,repoRoot=process.cwd()}) {
+  // Source-attestation executes in a separate trusted checkout. Use one
+  // explicit Git root for EVERY query, never the caller's incidental cwd.
+  const localGit=(...args)=>execFileSync('git',args,{
+    cwd:repoRoot,encoding:'utf8',maxBuffer:8_000_000
+  }).trim();
+  const localDiff=(a,b)=>list(localGit('diff','--no-renames','--name-only',a,b));
+  const localCatalog=sha=>catalogFromPaths(list(
+    localGit('ls-tree','-r','--name-only',sha,'--','e2e/tests')));
+
   const identity=batchIdentity({branch,main_sha,lane_sha,integration_head});
-  const parents=git('rev-list','--parents','-n','1',integration_head).split(/\s+/);
+  const parents=localGit('rev-list','--parents','-n','1',integration_head).split(/\s+/);
   if(parents.length!==3||parents[0]!==integration_head||parents[1]!==lane_sha||
     parents[2]!==main_sha)throw Error('unexpected integration commit parent identity');
-  const history=list(git('rev-list','--first-parent','--reverse',main_sha,'^'+lane_sha));
+  const history=list(localGit('rev-list','--first-parent','--reverse',main_sha,'^'+lane_sha));
   if(history.length>400)throw Error('unbounded main history for E2E audit');
-  const changed=new Set(diff(lane_sha,integration_head)),touched=new Set();
+  const changed=new Set(localDiff(lane_sha,integration_head)),touched=new Set();
   for(const sha of history){
-    const refs=git('rev-list','--parents','-n','1',sha).split(/\s+/);
+    const refs=localGit('rev-list','--parents','-n','1',sha).split(/\s+/);
     if(refs.length<2)throw Error('unattributable root commit in main history');
-    for(const file of diff(refs[1],sha)){
+    for(const file of localDiff(refs[1],sha)){
       changed.add(file);
       if(file.startsWith('e2e/tests/')&&file.endsWith('.spec.ts'))touched.add(file);
     }
   }
-  for(const file of diff(lane_sha,integration_head)){
+  for(const file of localDiff(lane_sha,integration_head)){
     if(file.startsWith('e2e/tests/')&&file.endsWith('.spec.ts'))touched.add(file);
   }
-  const headIds=catalog(integration_head),baseIds=catalog(lane_sha);
+  const headIds=localCatalog(integration_head),baseIds=localCatalog(lane_sha);
   const head=new Set(headIds),base=new Set(baseIds);
   const ids=catalogFromPaths([...touched]);
   const removed=ids.filter(id=>!head.has(id));
