@@ -175,9 +175,7 @@ test.describe('Web 1180', () => {
     await page.getByTestId('sandbox-confirm-enter').click();
     await expect(page.getByTestId('sandbox-inside')).toBeVisible();
     await selectTab(page, 'resource');
-    await expect(page.getByTestId('sandbox-effective-resource-cpu.max')).toContainText(
-      '200000 100000',
-    );
+    await expect(page.getByTestId('sandbox-effective-resource-cpu.weight')).toContainText('100');
     await selectTab(page, 'overview');
     await expect(page.getByTestId('sandbox-scope-note')).toContainText(
       'future Panes or Windows are not inside this Sandbox',
@@ -299,6 +297,66 @@ test.describe('Web 1180', () => {
     await expect(page.getByTestId('sandbox-enter')).toBeDisabled();
   });
 
+  test('native cgroup files are discovered, raw text passes through and lifecycle keys fail (#3141 SC-04)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page);
+    await selectTab(page, 'resource');
+
+    // Discovery, not the retired four-key allowlist.
+    for (const key of ['cpu.weight', 'memory.high', 'io.max']) {
+      await expect(
+        page.locator(`#sandbox-resource-key-options option[value="${key}"]`),
+      ).toHaveCount(1);
+    }
+
+    await page.getByTestId('sandbox-resource-add').click();
+    await page.getByTestId('sandbox-resource-key-0').fill('cpu.weight');
+    await page.getByTestId('sandbox-resource-value-0').fill('100');
+    await page.getByTestId('sandbox-resource-add').click();
+    await page.getByTestId('sandbox-resource-key-1').fill('cpu.max');
+    await page.getByTestId('sandbox-resource-value-1').fill('200000 100000');
+    await page.getByTestId('sandbox-resource-add').click();
+    await page.getByTestId('sandbox-resource-key-2').fill('cgroup.procs');
+    await page.getByTestId('sandbox-resource-value-2').fill('4242');
+
+    await selectTab(page, 'overview');
+    await page.getByTestId('sandbox-preflight').click();
+    await expect(page.getByTestId('sandbox-preflight-errors')).toContainText('lifecycle');
+    await expect(page.getByTestId('sandbox-enter')).toBeDisabled();
+
+    await selectTab(page, 'resource');
+    await page.getByTestId('sandbox-resource-remove-2').click();
+    await selectTab(page, 'overview');
+    await page.getByTestId('sandbox-preflight').click();
+    await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
+    await page.getByTestId('sandbox-enter').click();
+    await page.getByTestId('sandbox-confirm-enter').click();
+    await expect(page.getByTestId('sandbox-inside')).toBeVisible();
+    await selectTab(page, 'resource');
+    await expect(page.getByTestId('sandbox-effective-resource-cpu.weight')).toContainText('100');
+    await expect(page.getByTestId('sandbox-effective-resource-memory.high')).toBeVisible();
+  });
+
+  test('a kernel-native value failure leaves the Native Pane intact (#3141 SC-04)', async ({
+    page,
+  }) => {
+    await openWebSandbox(page, '&sandbox=enter-fail');
+    await selectTab(page, 'resource');
+    await page.getByTestId('sandbox-resource-add').click();
+    await page.getByTestId('sandbox-resource-key-0').fill('cpu.weight');
+    await page.getByTestId('sandbox-resource-value-0').fill('100');
+    await selectTab(page, 'overview');
+    await page.getByTestId('sandbox-preflight').click();
+    await expect(page.getByTestId('sandbox-preflight-ok')).toBeVisible();
+    await page.getByTestId('sandbox-enter').click();
+    await page.getByTestId('sandbox-confirm-enter').click();
+    await expect(page.getByTestId('sandbox-enter-error')).toContainText('os error 22');
+    await page.getByTestId('sandbox-cancel-confirm').click();
+    await expect(page.getByTestId('sandbox-composer')).toBeVisible();
+    await expect(page.getByTestId('sandbox-inside')).toHaveCount(0);
+  });
+
   test('inside keeps the same read-only tabs and the EROFS evidence (#3143 SC-04, SC-06)', async ({
     page,
   }) => {
@@ -321,7 +379,8 @@ test.describe('Web 1180', () => {
     await expect(page.getByTestId('sandbox-effective-namespaces')).toContainText('pid');
 
     await selectTab(page, 'resource');
-    await expect(page.getByTestId('sandbox-effective-resource-cpu.max')).toBeVisible();
+    await expect(page.getByTestId('sandbox-effective-resource-cpu.weight')).toBeVisible();
+    await expect(page.getByTestId('sandbox-effective-resource-memory.high')).toBeVisible();
     await expect(page.getByTestId('sandbox-resource-add')).toHaveCount(0);
 
     await selectTab(page, 'syscall');
@@ -496,7 +555,7 @@ test.describe('App 375', () => {
     await expect(page.getByTestId('sandbox-inside')).toBeVisible();
     await expect(page.getByTestId('sandbox-scope-note')).toBeVisible();
     await selectTab(page, 'resource');
-    await expect(page.getByTestId('sandbox-effective-resource-cpu.max')).toBeVisible();
+    await expect(page.getByTestId('sandbox-effective-resource-cpu.weight')).toBeVisible();
     await expect(page.getByTestId('sandbox-resource-add')).toHaveCount(0);
     await selectTab(page, 'syscall');
     await expect(page.getByTestId('sandbox-effective-syscall-seccomp.profile')).toBeVisible();

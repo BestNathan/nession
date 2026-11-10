@@ -207,7 +207,14 @@ mod helpers {
 
     pub(super) fn read_cgroup_limits(relative: &str) -> serde_json::Value {
         let mut limits = serde_json::Map::new();
-        for file in ["pids.max", "memory.max", "cpu.max", "memory.oom.group"] {
+        for file in [
+            "pids.max",
+            "memory.max",
+            "memory.high",
+            "cpu.max",
+            "cpu.weight",
+            "memory.oom.group",
+        ] {
             if let Ok(value) = std::fs::read_to_string(cgroup_mount(relative).join(file)) {
                 limits.insert(
                     file.to_string(),
@@ -602,6 +609,168 @@ fn an_execution_verifies_its_controls_and_releases_owned_resources() {
         "unshare_denied": unshare_status == 1,
         "fork_ok": fork_status == 0,
     }));
+}
+
+#[test]
+fn native_beyond_v1_controls_apply_readback_and_fail_closed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("workspace");
+    let workspace = std::fs::canonicalize(&workspace).expect("canonical workspace");
+    let base_settings = settings(dir.path());
+    let capabilities = probe(&base_settings);
+    if capabilities.backend.is_none() {
+        eprintln!("sandbox backend unavailable on this host; native cgroup proof skipped");
+        return;
+    }
+    let Some(parent_support) = capabilities.cgroup_v2.as_ref() else {
+        eprintln!("no delegated cgroup v2 root on this host; native cgroup proof skipped");
+        return;
+    };
+    if !parent_support.controllers.contains("cpu") || !parent_support.controllers.contains("memory")
+    {
+        eprintln!("cpu/memory controllers are not delegated; native cgroup proof skipped");
+        return;
+    }
+
+    // A private subtree keeps this proof isolated from any concurrent cgroup
+    // test and lets the test assert its own cleanup exactly.
+    let relative = parent_support
+        .relative_root
+        .join(format!("native-cgroup-proof-{}", std::process::id()));
+    let root_mount = cgroup_mount(relative.to_str().expect("utf-8 cgroup path"));
+    let mut settings = settings(dir.path());
+    settings.cgroup_root = Some(relative.clone());
+    let private = probe(&settings);
+    assert!(
+        private.cgroup_v2.is_some(),
+        "the private delegated subtree must be measurable"
+    );
+
+    let request = LaunchRequest {
+        policy: serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "enabled": true,
+            "resource": { "cgroup_v2": {
+                "cpu.weight": "100",
+                "memory.high": "max",
+                "pids.max": "64"
+            } },
+            "enforcement": "required"
+        }))
+        .expect("native policy fixture"),
+        session_name: "native-cgroup-proof".to_string(),
+        instance_id: "instance".to_string(),
+        working_dir: workspace.to_string_lossy().into_owned(),
+        inner_command: vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sleep 1".to_string(),
+        ],
+        tmux_socket: None,
+    };
+    let prepared = prepare(&request, &settings).expect("prepare native beyond-V1 writes");
+    let record = prepared.record().clone();
+    let cgroup_path = record.cgroup_path.clone().expect("execution cgroup");
+    let child = cgroup_mount(&cgroup_path);
+    let read = |file: &str| {
+        std::fs::read_to_string(child.join(file))
+            .expect("read effective control file")
+            .trim()
+            .to_string()
+    };
+    let cpu_weight = read("cpu.weight");
+    let memory_high = read("memory.high");
+    assert_eq!(cpu_weight, "100");
+    assert_eq!(memory_high, "max");
+    let effective = record
+        .effective_policy
+        .as_ref()
+        .and_then(|policy| policy.resource.as_ref())
+        .expect("resource policy");
+    assert_eq!(
+        effective.cgroup_v2.0.get("cpu.weight").map(String::as_str),
+        Some(cpu_weight.as_str()),
+        "inside reports the kernel readback, not the draft"
+    );
+
+    let handle = prepared.into_handle();
+    let cleanup = handle.cleanup().expect("cleanup owned resources");
+    assert!(cleanup.removed);
+    assert!(
+        child_names(&root_mount).is_empty(),
+        "a successful execution leaves no child cgroup"
+    );
+
+    // The kernel is authoritative for values: an invalid cpu.max must fail
+    // after the write attempt with the OS error, remove the owned child, and
+    // never fall back to Native.
+    let mut bad = request.clone();
+    bad.policy = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "enabled": true,
+        "resource": { "cgroup_v2": { "cpu.max": "not-a-native-value" } },
+        "enforcement": "required"
+    }))
+    .expect("invalid native policy fixture");
+    let error = prepare(&bad, &settings)
+        .err()
+        .expect("the kernel must reject the value");
+    let text = error.to_string();
+    assert!(text.contains("cpu.max"), "{text}");
+    assert!(
+        text.contains("os error 22") || text.contains("Invalid argument"),
+        "the exact kernel error must be reported: {text}"
+    );
+    let remaining = child_names(&root_mount);
+    assert!(
+        remaining.is_empty(),
+        "a failed prepare removed its owned child: {remaining:?}"
+    );
+
+    // Discovery is the measured file list: a key the child never exposed must
+    // fail closed rather than being written on faith.
+    let mut absent = request;
+    absent.policy = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "enabled": true,
+        "resource": { "cgroup_v2": { "futuristic.max": "1" } },
+        "enforcement": "required"
+    }))
+    .expect("absent controller fixture");
+    let error = prepare(&absent, &settings)
+        .err()
+        .expect("undiscovered keys must fail closed");
+    assert!(
+        error.to_string().contains("futuristic.max"),
+        "the refusal names the key: {error}"
+    );
+    assert!(child_names(&root_mount).is_empty());
+
+    let _ = std::fs::remove_dir(&root_mount);
+    print_evidence(&serde_json::json!({
+        "cgroup_root": relative.display().to_string(),
+        "cpu_weight_readback": cpu_weight,
+        "memory_high_readback": memory_high,
+        "effective_policy_matches_readback": true,
+        "invalid_value_error": text,
+        "failed_child_removed": remaining,
+        "absent_key_refused": true,
+        "cgroup_removed": true,
+    }));
+}
+
+fn child_names(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
 }
 
 #[test]

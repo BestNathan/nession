@@ -253,18 +253,42 @@ function offlineCatalog(): SandboxCapabilityCatalog {
 }
 
 function linuxCatalog(limited: boolean): SandboxCapabilityCatalog {
+  // Discovery-shaped catalog (#3141): actual delegated controller files with
+  // their currently read values as hints. This is not a four-key allowlist;
+  // `cpu.weight`, `memory.high` and `io.max` are beyond the retired V1 set.
   const resourceFields = [
     fieldEntry({
       key: 'memory.max',
       controller: 'memory',
-      valueFormat: 'uint64 bytes or `max`',
-      example: '2147483648',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: 'max',
+    }),
+    fieldEntry({
+      key: 'memory.high',
+      controller: 'memory',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: 'max',
+    }),
+    fieldEntry({
+      key: 'memory.oom.group',
+      controller: 'memory',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: '0',
     }),
     fieldEntry({
       key: 'cpu.max',
       controller: 'cpu',
-      valueFormat: '`quota period` (quota microseconds or `max`; period 1000..=1000000)',
-      example: '200000 100000',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: 'max 100000',
+      available: !limited,
+      reasonCode: 'controller_not_delegated',
+      reason: 'the cpu controller is not delegated to this Agent’s execution root',
+    }),
+    fieldEntry({
+      key: 'cpu.weight',
+      controller: 'cpu',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: '100',
       available: !limited,
       reasonCode: 'controller_not_delegated',
       reason: 'the cpu controller is not delegated to this Agent’s execution root',
@@ -272,15 +296,19 @@ function linuxCatalog(limited: boolean): SandboxCapabilityCatalog {
     fieldEntry({
       key: 'pids.max',
       controller: 'pids',
-      valueFormat: 'uint64 tasks or `max`',
-      example: '256',
+      valueFormat: 'native cgroup v2 control-file text',
+      example: 'max',
     }),
-    fieldEntry({
-      key: 'memory.oom.group',
-      controller: 'memory',
-      valueFormat: '`0` or `1`',
-      example: '0',
-    }),
+    ...(limited
+      ? []
+      : [
+          fieldEntry({
+            key: 'io.max',
+            controller: 'io',
+            valueFormat: 'native cgroup v2 control-file text',
+            example: '8:16 rbps=max',
+          }),
+        ]),
   ];
   return {
     catalog_version: 2,
@@ -343,7 +371,8 @@ function effectivePolicy(): SandboxPolicyDraft {
     },
     resource: [
       { key: 'memory.max', value: '2147483648' },
-      { key: 'cpu.max', value: '200000 100000' },
+      { key: 'cpu.weight', value: '100' },
+      { key: 'memory.high', value: '1073741824' },
     ],
     syscall: [{ key: 'seccomp.profile', value: 'nession-interactive-v1' }],
     enforcement: 'required',
@@ -424,33 +453,47 @@ function insideContext(scenario: Scenario, revision: number): SandboxCurrentCont
   };
 }
 
-const RESOURCE_KEYS = new Set([
-  'memory.max',
-  'cpu.max',
-  'pids.max',
-  'memory.oom.group',
-]);
+// Fixture mirror of the Agent's generic native cgroup basename rule (#3141).
+// It is deliberately not a resource allowlist and never validates a value's
+// kernel format; the real sandbox owner remains authoritative.
+const RESOURCE_READ_ONLY_SUFFIXES = [
+  '.stat',
+  '.stat.local',
+  '.events',
+  '.events.local',
+  '.current',
+  '.peak',
+  '.pressure',
+  '.numa_stat',
+  '.effective',
+];
 
-function valueValid(key: string, value: string): boolean {
-  if (key === 'memory.max' || key === 'pids.max') {
-    return value === 'max' || /^\d+$/.test(value);
+function resourceKeyError(key: string): string | null {
+  if (!key) {
+    return 'a native cgroup control-file name is required';
   }
-  if (key === 'memory.oom.group') {
-    return value === '0' || value === '1';
+  if (key.trim() !== key) {
+    return `\`${key}\` must not have surrounding whitespace`;
   }
-  if (key === 'cpu.max') {
-    const parts = value.trim().split(/\s+/);
-    if (parts.length !== 2) {
-      return false;
-    }
-    const [quota, period] = parts;
-    if (quota !== 'max' && !/^\d+$/.test(quota)) {
-      return false;
-    }
-    const parsed = Number(period);
-    return /^\d+$/.test(period) && parsed >= 1_000 && parsed <= 1_000_000;
+  if (key.includes('/') || key.includes('\\') || key.includes('\u0000')) {
+    return `\`${key}\` must be one control-file basename with no path separators`;
   }
-  return false;
+  if (key === '.' || key === '..' || key.includes('..')) {
+    return `\`${key}\` must be a plain control-file basename`;
+  }
+  if (key.startsWith('cgroup.')) {
+    return `\`${key}\` is a cgroup hierarchy/lifecycle interface, not a declarative resource control`;
+  }
+  if (RESOURCE_READ_ONLY_SUFFIXES.some((suffix) => key.endsWith(suffix))) {
+    return `\`${key}\` is a read-only cgroup status/interface file`;
+  }
+  if (key === 'memory.reclaim') {
+    return `\`${key}\` is a command-style cgroup interface, not declarative configuration`;
+  }
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+$/.test(key)) {
+    return `\`${key}\` is not a native resource-controller control-file basename`;
+  }
+  return null;
 }
 
 function validateRows(rows: SandboxKvEntry[], group: 'resource' | 'syscall'): SandboxFieldError[] {
@@ -467,13 +510,16 @@ function validateRows(rows: SandboxKvEntry[], group: 'resource' | 'syscall'): Sa
       });
       return;
     }
-    if (group === 'resource' && !RESOURCE_KEYS.has(key)) {
-      errors.push({
-        field: `${group}[${index}].key`,
-        code: 'unknown-key',
-        message: `\`${key}\` is not a V1 cgroup v2 control file`,
-      });
-      return;
+    if (group === 'resource') {
+      const keyError = resourceKeyError(key);
+      if (keyError) {
+        errors.push({
+          field: `${group}[${index}].key`,
+          code: 'invalid-key',
+          message: keyError,
+        });
+        return;
+      }
     }
     if (group === 'syscall' && key !== 'seccomp.profile') {
       errors.push({
@@ -508,13 +554,8 @@ function validateRows(rows: SandboxKvEntry[], group: 'resource' | 'syscall'): Sa
       });
       return;
     }
-    if (group === 'resource' && !valueValid(key, value)) {
-      errors.push({
-        field: `${group}[${index}].value`,
-        code: 'invalid-value',
-        message: `\`${value}\` is not a valid native value for ${key}`,
-      });
-    }
+    // Resource values are native kernel text: the Agent writes them verbatim
+    // and the kernel is the only format/range authority (#3141).
   });
   return errors;
 }
@@ -542,12 +583,12 @@ function preflight(
     }
   }
   if (scenario === 'limited') {
-    const cpu = (policy.resource ?? []).find((row) => row.key.trim() === 'cpu.max');
+    const cpu = (policy.resource ?? []).find((row) => row.key.trim().startsWith('cpu.'));
     if (cpu) {
       errors.push({
-        field: 'resource[0].value',
+        field: 'resource[0].key',
         code: 'unsupported',
-        message: 'resource.cgroup_v2 cpu.max is not installable: the cpu controller is not delegated',
+        message: `resource.cgroup_v2 ${cpu.key.trim()} is not installable: the cpu controller is not delegated`,
       });
     }
   }
@@ -656,7 +697,7 @@ function answerSandbox(
         success: false,
         error_kind: 'failed',
         error:
-          'sandbox launch verification failed: the barrier did not observe the requested controls',
+          'sandbox launch failed: write cpu.weight in the execution cgroup: Invalid argument (os error 22)',
         context,
       } satisfies SandboxActionResult);
     }

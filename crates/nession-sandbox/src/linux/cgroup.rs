@@ -16,13 +16,14 @@
 //! Confusing the two makes membership verification compare unequal strings and
 //! makes restart cleanup re-derive a root the recorded path can never match.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::capabilities::{CgroupFieldSupport, CgroupSupport};
 use crate::error::{Result, SandboxError};
-use crate::policy::CgroupLimits;
+use crate::policy::CgroupWrites;
 use crate::util::{read_trimmed, wait_until};
 
 /// The cgroup v2 mount point.
@@ -34,7 +35,7 @@ pub struct ExecutionCgroup {
     root_mount: PathBuf,
     relative_path: PathBuf,
     mount_path: PathBuf,
-    limits: CgroupLimits,
+    readback: BTreeMap<String, String>,
 }
 
 impl ExecutionCgroup {
@@ -53,6 +54,11 @@ impl ExecutionCgroup {
         &self.mount_path
     }
 
+    /// Values the kernel reported after the requested writes installed.
+    pub fn readback(&self) -> &BTreeMap<String, String> {
+        &self.readback
+    }
+
     /// PIDs currently in the domain.
     pub fn members(&self) -> Result<Vec<u32>> {
         let text = read_trimmed(&self.mount_path.join("cgroup.procs")).map_err(|error| {
@@ -64,36 +70,15 @@ impl ExecutionCgroup {
             .collect())
     }
 
-    /// Read back the effective values and compare with what was written.
-    pub fn verify_limits(&self) -> Result<()> {
-        for (file, expected) in self.limits.files() {
-            let actual = read_trimmed(&self.mount_path.join(file)).map_err(|error| {
-                SandboxError::Prepare(format!(
-                    "read effective {file} in {}: {error}",
-                    self.mount_path.display()
-                ))
-            })?;
-            if actual != expected {
-                return Err(SandboxError::Prepare(format!(
-                    "kernel reports {file}={actual}, requested {expected}"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    /// Observed counters, captured as evidence rather than inferred.
+    /// Observed counters and actual control values, captured as evidence
+    /// rather than inferred from the requested draft.
     pub fn evidence(&self) -> Vec<(String, String)> {
-        let mut rows = Vec::new();
-        for file in [
-            "memory.max",
-            "cpu.max",
-            "pids.max",
-            "memory.oom.group",
-            "memory.events",
-            "pids.events",
-            "cpu.stat",
-        ] {
+        let mut rows: Vec<(String, String)> = self
+            .readback
+            .iter()
+            .map(|(file, value)| (file.clone(), value.clone()))
+            .collect();
+        for file in ["memory.events", "pids.events", "cpu.stat"] {
             if let Ok(value) = read_trimmed(&self.mount_path.join(file)) {
                 rows.push((file.to_string(), value));
             }
@@ -215,38 +200,40 @@ impl CgroupManager {
             // execution can still be limited by whatever the policy requests.
             writable = true;
         }
-        // Per-field installability (#3124): file presence is not writability,
-        // so write a harmless native value for every allowlisted control file
-        // into this Agent-owned child cgroup. The probe group has no
-        // processes, so these writes cannot affect any workload.
+        // Discover the declarative resource controls the delegated child
+        // actually exposes (#3141). Presence plus controller delegation forms
+        // the suggestion list; the kernel write at Enter is the final check.
+        // Hierarchy/lifecycle/status/command interfaces are excluded by the
+        // shared naming owner, so this is not a resource allowlist.
         let mut fields = std::collections::BTreeMap::new();
-        for (key, probe_value) in [
-            ("memory.max", "max"),
-            ("cpu.max", "max 100000"),
-            ("pids.max", "max"),
-            ("memory.oom.group", "0"),
-        ] {
-            let path = probe_path.join(key);
-            let support = if !path.exists() {
-                CgroupFieldSupport {
-                    available: false,
-                    reason: Some(
-                        "the delegated child cgroup does not expose this control file".to_string(),
-                    ),
+        if let Ok(entries) = std::fs::read_dir(&probe_path) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !crate::cgroup_file::is_configurable_control_file(&name) {
+                    continue;
                 }
-            } else {
-                match std::fs::write(&path, probe_value) {
-                    Ok(()) => CgroupFieldSupport {
+                let Some(controller) = crate::cgroup_file::controller_of(&name) else {
+                    continue;
+                };
+                if !delegated.contains(controller) {
+                    continue;
+                }
+                if !entry
+                    .file_type()
+                    .map(|kind| kind.is_file())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                fields.insert(
+                    name.clone(),
+                    CgroupFieldSupport {
                         available: true,
                         reason: None,
+                        current_value: read_trimmed(&probe_path.join(&name)).ok(),
                     },
-                    Err(error) => CgroupFieldSupport {
-                        available: false,
-                        reason: Some(format!("the kernel refused a probe write: {error}")),
-                    },
-                }
-            };
-            fields.insert(key.to_string(), support);
+                );
+            }
         }
         let created = probe_path.exists();
         // A cgroup directory is removed with rmdir. `remove_dir_all` walks the
@@ -282,28 +269,35 @@ impl CgroupManager {
     pub fn create_execution(
         &self,
         execution_id: &str,
-        limits: &CgroupLimits,
+        writes: &CgroupWrites,
     ) -> Result<ExecutionCgroup> {
         let mount_path = self.root_mount.join(execution_id);
         std::fs::create_dir(&mount_path).map_err(|error| {
             SandboxError::Prepare(format!("create cgroup {}: {error}", mount_path.display()))
         })?;
-        let group = ExecutionCgroup {
+        let mut group = ExecutionCgroup {
             root_mount: self.root_mount.clone(),
             relative_path: self.relative_root.join(execution_id),
             mount_path,
-            limits: limits.clone(),
+            readback: BTreeMap::new(),
         };
         let result = (|| {
-            for (file, value) in limits.files() {
-                std::fs::write(group.mount_path.join(file), value).map_err(|error| {
+            for (file, value) in writes.files() {
+                write_control(&group.mount_path, file, value)?;
+            }
+            // Read back every actual value before the launcher enrolls any
+            // process. The kernel may normalize a native value; the observed
+            // result, not the requested string, is what the Pane reports.
+            for (file, _) in writes.files() {
+                let actual = read_trimmed(&group.mount_path.join(file)).map_err(|error| {
                     SandboxError::Prepare(format!(
-                        "write {file} in {}: {error}",
+                        "read effective {file} in {}: {error}",
                         group.mount_path.display()
                     ))
                 })?;
+                group.readback.insert(file.to_string(), actual);
             }
-            group.verify_limits()
+            Ok(())
         })();
         if let Err(error) = result {
             let _ = group.remove();
@@ -311,6 +305,29 @@ impl CgroupManager {
         }
         Ok(group)
     }
+}
+
+/// Write one native value into an owned child cgroup.
+///
+/// The file is resolved as one basename under the execution directory, the
+/// generic naming rule is re-checked at the write boundary, and `O_NOFOLLOW`
+/// prevents a symlink from redirecting the write outside the child.
+fn write_control(dir: &Path, file: &str, value: &str) -> Result<()> {
+    crate::cgroup_file::validate_key(file).map_err(SandboxError::InvalidPolicy)?;
+    crate::cgroup_file::validate_value(value).map_err(SandboxError::InvalidPolicy)?;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = dir.join(file);
+    let mut handle = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)
+        .map_err(|error| {
+            SandboxError::Prepare(format!("write {file} in {}: {error}", dir.display()))
+        })?;
+    handle.write_all(value.as_bytes()).map_err(|error| {
+        SandboxError::Prepare(format!("write {file} in {}: {error}", dir.display()))
+    })
 }
 
 fn mount_join(relative: &Path) -> Option<PathBuf> {
@@ -347,7 +364,7 @@ pub fn remove_execution(root_relative: &Path, recorded_relative: &Path) -> Resul
         root_mount,
         relative_path: recorded_relative.to_path_buf(),
         mount_path,
-        limits: CgroupLimits::default(),
+        readback: BTreeMap::new(),
     };
     group.remove()
 }
@@ -391,5 +408,36 @@ mod tests {
         assert!(remove_execution(Path::new("/nession"), Path::new("/other/abc")).is_err());
         assert!(remove_execution(Path::new("/nession"), Path::new("/nession/a/b")).is_err());
         assert!(remove_execution(Path::new("nession"), Path::new("/nession/abc")).is_err());
+    }
+
+    #[test]
+    fn native_writes_refuse_traversal_lifecycle_names_and_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "unchanged").expect("outside file");
+        let child = dir.path().join("child");
+        std::fs::create_dir(&child).expect("child dir");
+        symlink(&outside, child.join("memory.max")).expect("symlink");
+
+        let error = write_control(&child, "memory.max", "1")
+            .expect_err("a symlinked control file must not be followed");
+        assert!(matches!(error, SandboxError::Prepare(_)), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside read"),
+            "unchanged",
+            "the write must not escape the owned child"
+        );
+
+        for key in ["../outside", "/etc/passwd", "cgroup.procs", "memory.stat"] {
+            assert!(
+                write_control(&child, key, "1").is_err(),
+                "{key} must be refused"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside read"),
+            "unchanged"
+        );
     }
 }

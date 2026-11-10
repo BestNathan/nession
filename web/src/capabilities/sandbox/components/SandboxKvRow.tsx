@@ -43,11 +43,12 @@ export function SandboxKvRow({
 }: SandboxKvRowProps) {
   const optionUnavailable = option !== undefined && !option.available;
   const valueDisabled = disabled || optionUnavailable;
+  const exampleHint = option?.example ? ` — current: ${option.example}` : '';
   const hint = option
     ? optionUnavailable
       ? `${option.value_format} — unavailable: ${option.reason ?? 'not measured on this Agent'}`
-      : `${option.value_format} — e.g. ${option.example}`
-    : 'Known keys and their native value formats appear here.';
+      : `${option.value_format}${exampleHint}`
+    : 'Discovered native keys and their current values appear here; a key without a hint can still be configured.';
   return (
     <FormRow data-testid={`sandbox-${group}-row-${index}`}>
       <FormGrid>
