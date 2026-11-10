@@ -70,7 +70,10 @@ export function isNativePromotionPr(pr){
   const source=pr.body.match(/^- Planned main SHA: ([a-f0-9]{40})$/gm);
   const lane=pr.body.match(/^- Planned lane SHA: ([a-f0-9]{40})$/gm);
   if(source?.length!==1||lane?.length!==1)return false;
-  return source[0].endsWith(pr.base.sha)&&lane[0].endsWith(pr.head.sha)&&
+  // The protected staging ref may advance after this bot-authored PR was
+  // opened. Keep its original pinned lane SHA as an immutable ancestry floor;
+  // the exact current head and all selected tests are re-attested below.
+  return source[0].endsWith(pr.base.sha)&&
     pr.body.includes('- Direction: staging -> main');
 }
 
@@ -80,9 +83,11 @@ export function isNativePromotionPr(pr){
 // Main postmerge Full regression and promotion source/Issue/Deploy gates remain
 // mandatory. Never turn an unknown or missing test into Not Required.
 export function promotionE2ESelection(pr,repoRoot,baseSha,targetSha=pr?.head?.sha){
+  const originallyPinnedLane=pr?.body?.match(/^- Planned lane SHA: ([a-f0-9]{40})$/m)?.[1];
   if(!isNativePromotionPr(pr)||baseSha!==pr.base.sha||
       targetSha!==pr.head.sha||git(repoRoot,'rev-parse','HEAD')!==targetSha||
-      !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha)
+      !ancestors(repoRoot,baseSha,targetSha)||baseSha===targetSha||
+      !ancestors(repoRoot,originallyPinnedLane,targetSha))
     throw Error('untrusted or stale Staging promotion E2E source');
   const deleted=git(repoRoot,'diff','--name-only','--diff-filter=D',
     baseSha,targetSha,'--','e2e/tests').split('\n').filter(Boolean);
@@ -414,6 +419,24 @@ export function selfTest(){
     assert.ok(!promoter.selected.some(x=>['login','new-browser'].includes(x.id)),
       'unchanged Main-owned browser IDs must not be over-selected');
     assert.deepEqual(promotionE2ESelection(promotion,root,main),promoter);
+    // The real #3208 kept its bot-authored creation SHA while protected
+    // Staging advanced. New PR head is permitted ONLY as a descendant of
+    // that pinned lane, and receives a new exact-head plan and digest.
+    fs.writeFileSync(path.join(root,'PROMOTION_NEXT.md'),'new staging head\n');
+    run('add','.');run('commit','-qm','advance staging while promotion is open');
+    const advancedSha=run('rev-parse','HEAD');
+    const advancedPr={...promotion,head:{...promotion.head,sha:advancedSha}};
+    assert.ok(isNativePromotionPr(advancedPr));
+    const advanced=promotionE2ESelection(advancedPr,root,main);
+    assert.equal(advanced.target_sha,advancedSha);
+    assert.notEqual(advanced.plan_digest,promoter.plan_digest);
+    assert.deepEqual(advanced.selected,promoter.selected,
+      'unchanged executable IDs remain selected at new source revision');
+    const unrelatedPinned={...advancedPr,
+      body:advancedPr.body.replace(promoteSha,later)};
+    assert.throws(()=>promotionE2ESelection(unrelatedPinned,root,main),
+      /untrusted|stale/,'unrelated pinned source cannot authorize newer PR head');
+    run('checkout','--detach',promoteSha);
     assert.throws(()=>promotionE2ESelection(promotion,root,lane),/untrusted/);
     assert.throws(()=>promotionE2ESelection(promotion,root,main,head),/untrusted/);
     assert.throws(()=>promotionE2ESelection({...promotion,
