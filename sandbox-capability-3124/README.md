@@ -1,9 +1,10 @@
-# Sandbox capability — inspect current context, or configure and Enter (#3124)
+# Sandbox capability — compose draft, Enter, inspect effective execution (#3143 / #3124)
 
-**Owner:** https://github.com/BestNathan/nession/issues/3124  
+**Current composition design:** https://github.com/BestNathan/nession/issues/3143  
+**Base execution behavior:** https://github.com/BestNathan/nession/issues/3124  
 **Candidate HTML preview (public Pages revision NOT VERIFIED):** https://bestnathan.github.io/nession/prototypes/sandbox-capability-3124/index.html  
 **Source directory:** https://github.com/BestNathan/nession/tree/prototype/sandbox-capability-3124  
-**Related:** #3141 (new native cgroup v2 Resource KV scope), #3124 (closed Workspace capability baseline), #2681 (native Sandbox backend), #1347 / #1455 (Workspace Capsule), #3062 (Managed EROFS Session creation).
+**Related:** #3141 (native cgroup v2 Resource KV), #3137/#3138 (shared capability visual grammar and design gate), #3024/#3062 (prepared EROFS composition), #2681 (native Sandbox backend), #1347 / #1455 (Workspace Capsule).
 
 ## Corrected product contract — 2026-11-09
 
@@ -63,9 +64,39 @@ The native policy is a map: `resource: { cgroup_v2: {"cpu.weight":"100", "memory
 - **Syscall distinction:** same empty-first KV row interaction, but `syscall.seccomp.profile` is a pinned Agent-registered seccomp profile, **not** a file in cgroup v2. This ticket does not introduce arbitrary seccomp filtering.
 - **Mock limitation:** `agentFieldCatalog()` returns synthetic child-scan data; no real Agent, kernel scan, write or runtime isolation occurs when using this HTML.
 
+## Policy Composition — five dimensions, three clusters (#3143)
+
+**Goal:** the Sandbox Workspace is one coherent composition of the execution environment, isolation boundary, and execution controls, not five disconnected forms. This UI is a projection of **one canonical policy**, not a second schema or config engine.
+
+| Visual group | Member | Draft/Inside interpretation |
+|---|---|---|
+| 执行环境 | Filesystem | host-path access OR Agent-prepared EROFS root; distinguish access vs composition |
+| 隔离边界 | Network | allow / deny / restricted, explicit mode and egress |
+| 隔离边界 | Process | native namespace requests vs actually installed namespaces |
+| 执行约束 | Resource | Agent-discovered cgroup v2 native Key/Value, unchanged by Nession |
+| 执行约束 | Syscall | independent Agent-registered seccomp profile |
+
+### Outside Sandbox (editable)
+
+1. Open `Workspace → Sandbox`: the first section shows three groups and five **request-state** rows (`已申请`, `未申请`, `当前不可用`). No host capability alone is labeled "already inside".
+2. Click a row: a **single focused group editor** appears, preserving all five groups' shared draft. Defaults to Filesystem. Resource and Syscall retain empty-first add/edit/remove; Resource Value stays kernel-native.
+3. Expand `查看组合 Policy JSON` to inspect the read-only assembled versioned policy. Optional empty groups are **omitted** (including empty Filesystem/Process), not fabricated into Linux restrictions. The JSON derives from the draft projection used for preflight, not an independently editable source.
+4. Switching among groups changes only focus; **editing values** invalidates preflight. Confirm Enter shows the full composite Policy JSON plus target Native Pane/Agent and mock capability generation. No silent drop of an unavailable group.
+
+### Inside Sandbox (observed, not editable)
+
+1. Reuse the same three-cluster composition overview, but statuses and details are sourced from **simulated Agent-observed effective policy**, not draft changes. The mock says `示例已生效`, not generic "protected."
+2. Preserve the active Pane-only scope: Native Pane, shared tmux server and future panes remain outside this execution. `Execution details` holds backend/identity/evidence. Return to Native is a focus switch only.
+3. The **`EROFS 已组合` fixture** illustrates the alternative filesystem input: a read-only Base Runtime at `/`, Project/workspace view at `/workspace`, and toolchain image at `/opt/rust`. The UI displays only sanitized mount targets. It does **not** offer editable EROFS image source paths/digests or fake a complete raw policy JSON; prepared EROFS is Agent/Server-owned and mutually exclusive in effect with regular filesystem.access.
+4. Other fixtures: native full controller discovery, limited Memory/PIDs delegation, macOS unsupported native Resource/Syscall, offline/unknown, kernel reject after preflight. Group status never substitutes for Agent runtime proof.
+
+**Layout:** Web 1180/1024 uses whitespace-first grouped summaries with one focused edit area. App 390/375 stacks rows and fields, keeps a single App Back and the Workspace Capsule, and uses the same state semantics. Follow the shared detail/form visual recipe in #3137; #3138 owns real browser gate evidence.
+
+**Verification (2026-11-10):** **32/32 V8 synthetic-DOM assertions passed** against the composition + prepared EROFS prototype revision: all five dimensions/three clusters, focused editing, KV persistence across groups, preview/optional omission, no preflight reset on focus alone, preflight reset on edit, confirmation canonical JSON, Inside read-only representation, Native return, prepared EROFS mount view with no fake raw JSON, limited delegation, macOS/offline and Web/App shell transitions. **Synthetic checks are not Chromium screenshots, real Agent capability reads, cgroup writes, EROFS mounts, or published Pages verification.**
+
 ## Verified and unverified
 
-**Fidelity:** synthetic in-page JavaScript fixtures; no network calls, backend writes, durable storage, active tmux PIDs, cgroup resources, Bubblewrap, Seatbelt, Socket proxy, native policy compiler or process reparenting. Clicking Enter only simulates a successful *future* backend command. Read-only effective policy is also synthetic and illustrates the **post-verification** display shape, not proof that a real Agent returned it.
+**Fidelity:** synthetic in-page JavaScript fixtures; no network calls, backend writes, durable storage, active tmux PIDs, cgroup resources, Bubblewrap, Seatbelt, Socket proxy, native policy compiler or process reparenting. Clicking Enter only simulates a backend command; this standalone mock never invokes the current production Agent. Read-only effective policy is also synthetic and illustrates the **post-verification** display shape, not proof that a real Agent returned it.
 
 **Native cgroup KV regression (2026-11-10):** **23/23 V8 synthetic-DOM checks passed** for the new Resource prototype: discovered `cpu.weight`, `memory.high`, `io.max` and more-than-four candidates, empty-state policy omission, add/edit/Enter/effective readback, reduced delegation exclusion, lifecycle/read-only file rejection, kernel-native whitespace value preservation, simulated kernel `EINVAL` after preflight with unchanged Native Pane, macOS/offline status, Web/App switching, and issue/fixture links. This is deterministic mock behavior **only**, not Chromium, real cgroup2 native write tests, or Pages publication proof.
 
