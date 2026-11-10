@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "29d44783bcaaf2638b4ccfe4e6485cfc24e440561cc3cf9b0464daf5af53e360",
+  "run_id": 42869448018,
+  "run_attempt": 1,
+  "issue": 3180,
+  "criterion": "SC-04",
+  "criterion_text": "In an approved isolated Kubernetes fixture reusing an existing RWX PVC, deleting and recreating disposable test Pods preserves Server Blob and Agent-specific Cache without rebuilding or re-downloading a valid warm Digest; record before/after Pod UID, PVC/PV identity, exact SHA-256 and transferred bytes. A separate corruption fixture fails closed and re-fetches safely.",
+  "stage": "staging",
+  "target_sha": "cecc9904e82ebe84851bc35c5806252abd55426c",
+  "contract_sha256": "ea48c7e2b5b00b308563c38c09f3cdb269f498e2f67e51c145b06a3afe4ab70c",
+  "case_revision": "cecc9904e82ebe84851bc35c5806252abd55426c",
+  "case_tree_sha": "07b2d2d549ed5811b81b07807433c164d0567cde",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-10T17:56:36.235Z",
+  "finished_at": "2026-11-10T17:56:42.225Z",
+  "duration_ms": 5989,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "SC-04 requires an isolated Kubernetes Pod delete/recreate fixture on an existing RWX PVC, but no trusted K8s Case lane exists and kind/PVC provisioning exceeds the 120-second verifier budget; the Issue keeps this criterion Pending instead of claiming live proof",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "exact staging SHA cecc9904e82ebe84851bc35c5806252abd55426c: no Kubernetes runner in the trusted Case lanes; kind/PVC provisioning cannot complete within the canonical 120s verifier cap; the rendered NFS PVC/PV/subPath contract is verified by the gitops-storage-contract Gate and SC-03, but this Case did not observe live Pod UID/PVC identity or byte survival"
+        }
+      ],
+      "duration_ms": 41,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42869448018,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cecc9904e82ebe84851bc35c5806252abd55426c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42869448018",
+    "record_path": "runs/2026-11-10/42869448018-1/3180/SC-04.json",
+    "source_result_sha256": "bffdda2220d113ea20579f71275144ceb5889253ed562137c940d6891db31ed0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42869448018-1",
+    "sha256": "bffdda2220d113ea20579f71275144ceb5889253ed562137c940d6891db31ed0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42869448018",
+    "durability": "time-limited; object archival not configured"
+  }
+}
