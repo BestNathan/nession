@@ -18,22 +18,8 @@ use nession_protocol::contracts::sandbox::v1::{
     SandboxResourcePolicy, SandboxSeccompPolicy, SandboxSyscallPolicy,
 };
 
-use crate::policy::{
-    validate_cpu_max, validate_memory_max, validate_oom_group, validate_pids_max,
-    SECCOMP_PROFILE_INTERACTIVE_V1,
-};
-
-/// One Resource key's UI metadata, in the fixed canonical order.
-pub const RESOURCE_FIELD_METADATA: [(&str, &str, &str); 4] = [
-    ("memory.max", "uint64 bytes or `max`", "2147483648"),
-    (
-        "cpu.max",
-        "`quota period` (quota microseconds or `max`; period 1000..=1000000)",
-        "200000 100000",
-    ),
-    ("pids.max", "uint64 tasks or `max`", "256"),
-    ("memory.oom.group", "`0` or `1`", "0"),
-];
+use crate::cgroup_file::{validate_key, validate_value};
+use crate::policy::SECCOMP_PROFILE_INTERACTIVE_V1;
 
 /// The one Syscall key this contract accepts.
 pub const SYSCALL_PROFILE_KEY: &str = "seccomp.profile";
@@ -85,18 +71,11 @@ pub fn materialize(
 pub fn draft_from_policy(policy: &SandboxPolicy) -> SandboxPolicyDraft {
     let mut resource = Vec::new();
     if let Some(cgroup) = policy.resource.as_ref().map(|resource| &resource.cgroup_v2) {
-        for (key, value) in [
-            ("memory.max", &cgroup.memory_max),
-            ("cpu.max", &cgroup.cpu_max),
-            ("pids.max", &cgroup.pids_max),
-            ("memory.oom.group", &cgroup.memory_oom_group),
-        ] {
-            if let Some(value) = value {
-                resource.push(SandboxKvEntry {
-                    key: key.to_string(),
-                    value: value.clone(),
-                });
-            }
+        for (key, value) in &cgroup.0 {
+            resource.push(SandboxKvEntry {
+                key: key.clone(),
+                value: value.clone(),
+            });
         }
     }
     let mut syscall = Vec::new();
@@ -125,31 +104,15 @@ fn materialize_resource(
     if rows.is_empty() {
         return None;
     }
-    let allowed: BTreeSet<&str> = RESOURCE_FIELD_METADATA.iter().map(|row| row.0).collect();
     let mut seen = BTreeSet::new();
     let mut cgroup = SandboxCgroupV2Policy::default();
     for (index, row) in rows.iter().enumerate() {
         let key = row.key.trim();
-        if key.is_empty() {
+        if let Err(message) = validate_key(key) {
             errors.push(field_error(
                 format!("resource[{index}].key"),
-                "blank-key",
-                "a Resource key is required",
-            ));
-            continue;
-        }
-        if !allowed.contains(key) {
-            errors.push(field_error(
-                format!("resource[{index}].key"),
-                "unknown-key",
-                format!(
-                    "`{key}` is not a V1 cgroup v2 control file; use one of {}",
-                    RESOURCE_FIELD_METADATA
-                        .iter()
-                        .map(|row| row.0)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+                "invalid-key",
+                message,
             ));
             continue;
         }
@@ -161,36 +124,15 @@ fn materialize_resource(
             ));
             continue;
         }
-        let value = row.value.trim();
-        if value.is_empty() {
+        if let Err(message) = validate_value(&row.value) {
             errors.push(field_error(
                 format!("resource[{index}].value"),
-                "blank-value",
-                "a native control-file value is required",
+                "invalid-value",
+                message,
             ));
             continue;
         }
-        let validated = match key {
-            "memory.max" => validate_memory_max(value),
-            "cpu.max" => validate_cpu_max(value),
-            "pids.max" => validate_pids_max(value),
-            "memory.oom.group" => validate_oom_group(value),
-            _ => unreachable!("the key allowlist was checked above"),
-        };
-        match validated {
-            Ok(value) => match key {
-                "memory.max" => cgroup.memory_max = Some(value),
-                "cpu.max" => cgroup.cpu_max = Some(value),
-                "pids.max" => cgroup.pids_max = Some(value),
-                "memory.oom.group" => cgroup.memory_oom_group = Some(value),
-                _ => unreachable!("the key allowlist was checked above"),
-            },
-            Err(error) => errors.push(field_error(
-                format!("resource[{index}].value"),
-                "invalid-value",
-                error.to_string(),
-            )),
-        }
+        cgroup.0.insert(key.to_string(), row.value.clone());
     }
     Some(cgroup)
 }
@@ -315,14 +257,16 @@ mod tests {
     }
 
     #[test]
-    fn unknown_duplicate_blank_and_malformed_rows_fail_with_field_errors() {
+    fn duplicate_blank_lifecycle_and_empty_value_rows_fail_with_field_errors() {
         let errors = materialize(&draft(serde_json::json!({
             "enabled": true,
             "resource": [
                 { "key": "memory.swap.max", "value": "1" },
+                { "key": "cpu.weight", "value": "100" },
                 { "key": "pids.max", "value": "64" },
                 { "key": "pids.max", "value": "32" },
                 { "key": "", "value": "1" },
+                { "key": "cgroup.procs", "value": "4242" },
                 { "key": "cpu.max", "value": "200000 999" },
                 { "key": "memory.max", "value": "" }
             ],
@@ -333,14 +277,22 @@ mod tests {
         })))
         .expect_err("invalid rows must not reach compile");
         let codes: Vec<&str> = errors.iter().map(|error| error.code.as_str()).collect();
-        assert!(codes.contains(&"unknown-key"));
+        assert!(codes.contains(&"invalid-key"));
         assert!(codes.contains(&"duplicate-key"));
-        assert!(codes.contains(&"blank-key"));
         assert!(codes.contains(&"invalid-value"));
-        assert!(codes.contains(&"blank-value"));
-        assert!(errors
+        assert!(!errors
             .iter()
-            .any(|error| error.field == "resource[4].value"));
+            .any(|error| error.field.starts_with("resource[") && error.code == "unknown-key"));
+        // Arbitrary discovered controller files are accepted; only the Syscall
+        // registry remains a pinned single-key contract.
+        assert!(!errors.iter().any(|error| error.field == "resource[0].key"));
+        assert!(!errors.iter().any(|error| error.field == "resource[1].key"));
+        // No per-resource value parser: the kernel, not the draft layer,
+        // decides that `200000 999` is an invalid cpu.max value.
+        assert!(!errors
+            .iter()
+            .any(|error| error.field == "resource[6].value"));
+        assert!(errors.iter().any(|error| error.field == "resource[5].key"));
         assert!(errors.iter().any(|error| error.field == "syscall[0].value"));
     }
 

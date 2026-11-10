@@ -11,10 +11,13 @@
 //! claim. Only genuinely shared contracts — `filesystem.access` and the
 //! target-oriented `network` policy — are expressed portably.
 //!
-//! Every struct denies unknown fields. A policy the schema does not know is
-//! refused when it is parsed, before any host resource is created; the
-//! validator additionally rejects known-but-unsupported combinations (for
-//! example `cgroup_v2` on macOS) rather than silently dropping them.
+//! Every named-field struct denies unknown fields. A policy the schema does not
+//! know is refused when it is parsed, before any host resource is created. The
+//! native cgroup map is the deliberate exception: its keys are kernel control
+//! file basenames, so `nession-sandbox` applies the generic basename rule and
+//! lets the kernel validate values. The validator additionally rejects
+//! known-but-unsupported combinations (for example `cgroup_v2` on macOS)
+//! rather than silently dropping them.
 
 use serde::{Deserialize, Serialize};
 
@@ -289,34 +292,19 @@ pub struct SandboxResourcePolicy {
     pub cgroup_v2: SandboxCgroupV2Policy,
 }
 
-/// Allowlisted cgroup v2 control files, using their native names and value
-/// formats. No unit or CPU-core reinterpretation is applied.
+/// Native cgroup v2 resource policy: control-file basename -> native text
+/// value (#3141).
+///
+/// This is intentionally not a resource allowlist: the Agent discovers which
+/// controller files its delegated child cgroup actually exposes, excludes
+/// hierarchy/lifecycle/status/command interfaces, and the kernel remains the
+/// authority on each value's format and range. The JSON shape
+/// `resource.cgroup_v2: { "cpu.weight": "100" }` is the V1 native boundary.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SandboxCgroupV2Policy {
-    /// Byte count or `max`.
-    #[serde(
-        default,
-        rename = "memory.max",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub memory_max: Option<String>,
-    /// Native `quota period` format, for example `200000 100000`.
-    #[serde(default, rename = "cpu.max", skip_serializing_if = "Option::is_none")]
-    pub cpu_max: Option<String>,
-    /// Maximum kernel tasks (threads included) or `max`.
-    #[serde(default, rename = "pids.max", skip_serializing_if = "Option::is_none")]
-    pub pids_max: Option<String>,
-    /// `0` or `1`, when the kernel supports group OOM handling.
-    #[serde(
-        default,
-        rename = "memory.oom.group",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub memory_oom_group: Option<String>,
-}
+#[serde(transparent)]
+pub struct SandboxCgroupV2Policy(pub std::collections::BTreeMap<String, String>);
 
 /// Linux seccomp policy.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -990,12 +978,30 @@ mod tests {
     }
 
     #[test]
-    fn unknown_cgroup_keys_are_refused_rather_than_written() {
+    fn native_cgroup_keys_round_trip_without_an_allowlist() {
+        let policy: SandboxPolicy = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "resource": { "cgroup_v2": {
+                "memory.swap.max": "1",
+                "cpu.weight": "100",
+                "io.max": "8:16 rbps=2097152"
+            } }
+        }))
+        .expect("native controller basenames are schema-valid");
+        let value = serde_json::to_value(&policy).expect("serializes");
+        assert_eq!(value["resource"]["cgroup_v2"]["cpu.weight"], "100");
+        assert_eq!(
+            value["resource"]["cgroup_v2"]["io.max"],
+            "8:16 rbps=2097152"
+        );
+
+        // The map does not relax the resource group itself: only the native
+        // cgroup_v2 map is open-keyed.
         let error = serde_json::from_value::<SandboxPolicy>(serde_json::json!({
             "enabled": true,
-            "resource": { "cgroup_v2": { "memory.swap.max": "1" } }
+            "resource": { "cgroup_v2": { "cpu.weight": "100" }, "other": {} }
         }))
-        .expect_err("only allowlisted control files exist");
+        .expect_err("the resource group still denies unknown fields");
         assert!(error.to_string().contains("unknown field"));
     }
 
