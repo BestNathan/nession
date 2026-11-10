@@ -138,6 +138,19 @@ export function fullRegressionTitle(batch){
   return 'Convergence Full '+integrationBranch(batch.branch,
     batch.main_sha,batch.lane_sha)+'@'+batch.integration_head;
 }
+export function latestConvergenceFull(batch,runs=[]){
+  if(!Array.isArray(runs)||runs.length>=100)
+    throw Error('unbounded exact-source Full E2E run inventory');
+  const title=fullRegressionTitle(batch);
+  return runs.filter(run=>run.display_title===title&&
+    run.name==='E2E / Full Regression'&&
+    run.event==='workflow_dispatch'&&run.head_branch==='main'&&
+    run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
+    run.path?.split('@')[0]==='.github/workflows/e2e-full-regression.yml')
+    .sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
+      (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0]??null;
+}
+
 export function attestConvergenceFull(batch,run,jobs=[]){
   const title=fullRegressionTitle(batch);
   if(!run||run.name!=='E2E / Full Regression'||
@@ -150,7 +163,8 @@ export function attestConvergenceFull(batch,run,jobs=[]){
     !Number.isSafeInteger(run.run_attempt)||run.run_attempt<=0||
     !Array.isArray(jobs)||jobs.length>100)return null;
   const full=jobs.filter(j=>j.name==='full'&&
-    j.run_id===run.id&&j.run_attempt===run.run_attempt);
+    j.run_id===run.id&&
+    (j.run_attempt==null||j.run_attempt===run.run_attempt));
   if(full.length!==1||full[0].status!=='completed'||
       full[0].conclusion!=='success')return null;
   const completed=new Set((full[0].steps??[])
@@ -213,6 +227,9 @@ export function selfTest(){
       'Run full canonical Playwright suite at pinned SHA',
       'Verify complete per-ID assertions'].map(name=>({
         name,status:'completed',conclusion:'success'}))};
+  assert.equal(latestConvergenceFull(batch,[run])?.id,777);
+  assert.equal(latestConvergenceFull(batch,[{...run,display_title:'unrelated'}]),null);
+  assert.throws(()=>latestConvergenceFull(batch,Array(100).fill(run)),/unbounded/);
   const fullReceipt=attestConvergenceFull(batch,run,[fullJob]);
   assert.ok(fullReceipt?.verified);
   assert.equal(convergenceApproval(batch,fullReceipt).approved,true);
