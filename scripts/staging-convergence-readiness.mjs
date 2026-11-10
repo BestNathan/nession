@@ -70,7 +70,9 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   return okay({expectedHead,expectedBase});
 }
 
-export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],deployRuns=[],laneSha,branch='staging',deployment_workflows=['release-staging.yml']}) {
+export function evaluatePromotion({firstParentCommits=[],associations=[],issues=[],
+  authenticatedNative=[],deployRuns=[],laneSha,branch='staging',
+  deployment_workflows=['release-staging.yml']}) {
   if(!SHA.test(laneSha)||!Array.isArray(firstParentCommits)||
       firstParentCommits.length===0||firstParentCommits.length>PROMOTION_LIMIT)
     return fail('UNBOUNDED_OR_EMPTY_PROMOTION');
@@ -85,7 +87,11 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     return fail('STAGING_RELEASE_NOT_PROVEN');
   if(!Array.isArray(associations)||associations.length!==firstParentCommits.length)
     return fail('INCOMPLETE_PR_PROVENANCE');
-  const referenced=new Set();
+  if(!Array.isArray(authenticatedNative)||authenticatedNative.length>PROMOTION_LIMIT||
+     authenticatedNative.some(x=>!SHA.test(x)||!firstParentCommits.includes(x))||
+     new Set(authenticatedNative).size!==authenticatedNative.length)
+    return fail('INVALID_NATIVE_PROMOTION_PROOF');
+  const native=new Set(authenticatedNative),referenced=new Set();
   for(let n=0;n<firstParentCommits.length;n++){
     const item=firstParentCommits[n],pairs=associations[n];
     if(!SHA.test(item)||!Array.isArray(pairs))return fail('INVALID_PR_PROVENANCE');
@@ -93,14 +99,22 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
       pr.base?.ref===branch&&pr.base?.repo?.full_name===REPO);
     if(matches.length!==1)return fail('MISSING_STAGING_MERGE_PR:'+item);
     const pr=matches[0];
-    // A generated sync PR still has an Issue-owned acceptance contract.
-    // Never infer authorization from a forgeable head prefix/body marker:
-    // it must carry source-bound Issue provenance like any other Staging PR.
+    // Native PRs have no disposable Issue. Their digest, immutable two-parent
+    // Git source, Owner approval and exact PR checks have been independently
+    // re-attested in the trusted Main promoter; never trust this marker alone.
+    if(isNativeConvergencePr(pr)){
+      if(!native.has(item))return fail('UNATTESTED_NATIVE_STAGING_SYNC:'+item);
+      if(parsePreMergeIssueNumbers(pr.body,'BestNathan','nession',pr.title).length)
+        return fail('NATIVE_STAGING_SYNC_HAS_ISSUE_ASSOCIATION:'+item);
+      continue;
+    }
+    // Ordinary feature/legacy sync Issues still require their exact source
+    // acceptance. No source PR may inherit a newer unrelated Issue result.
     const numbers=parsePreMergeIssueNumbers(pr.body, 'BestNathan','nession',pr.title);
     if(numbers.length===0)return fail('UNASSOCIATED_STAGING_CHANGE:'+item);
     for(const number of numbers)referenced.add(number);
   }
-  if(referenced.size===0)return fail('NO_ACCEPTANCE_ISSUES');
+  if(referenced.size===0&&native.size===0)return fail('NO_ACCEPTANCE_ISSUES');
   for(const n of referenced){
     const issue=issues.find(x=>x.number===n);
     if(!issue||!isAcceptanceIssue(issue)||issue.state_reason==='not_planned')
@@ -108,7 +122,8 @@ export function evaluatePromotion({firstParentCommits=[],associations=[],issues=
     const report=validateRequirementBody(issue.body,{mode:'merge',targetBranch:'main'});
     if(!report.ok)return fail('PENDING_ISSUE_ACCEPTANCE:'+n);
   }
-  return okay({issueNumbers:[...referenced].sort((a,b)=>a-b)});
+  return okay({issueNumbers:[...referenced].sort((a,b)=>a-b),
+    nativeMergeShas:[...native].sort()});
 }
 
 function read(route){
