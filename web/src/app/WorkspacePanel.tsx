@@ -11,6 +11,7 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
+import { useWorkspaceFocusLifecycle } from '@/app/workspace/useWorkspaceFocusLifecycle';
 import type {
   CapabilityFocus,
   Experience,
@@ -125,9 +126,7 @@ export function WorkspacePanel({
     );
   }, [tool]);
 
-  useEffect(() => {
-    return () => onDepthChange?.(false);
-  }, [onDepthChange]);
+  useWorkspaceFocusLifecycle(focus, fileOps, onFocusConsumed, onDepthChange);
 
   const ctx: WorkspaceContext = useMemo(
     () => ({

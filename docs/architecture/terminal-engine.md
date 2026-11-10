@@ -26,6 +26,7 @@ never imports xterm, the raw adapter module, or xterm's private `_core`.
 | Fixed-column geometry, font fit, rows, content-width value, PTY resize report/debounce | `view/TerminalGeometry.ts` | `TerminalController` (writes the viewport CSS property) |
 | PTY-bound input semantics (keyboard, semantic keys, paste, IME text) | `interaction/TerminalInteractionController.ts` | input handlers, capsule, mobile IME |
 | Workspace file-link recognition and navigation action | `product/terminal/workspaceFileLinks.ts` | `TerminalViewport` → emulator matcher |
+| File-reference CWD/source resolution | `app/workspace/terminalFileReference.ts` (Files' bound `FileOps`) | both experience layouts' `CapabilityFocus` handoff |
 | Link cell mapping, buffer-line wrap joining | `xterm/LineLinks.ts` + `XtermMetrics.ts` | the engine |
 | OSC 52 / OSC 5522 parser registration and private mode 5522 | `xterm/XtermEmulator.registerClipboardHost` (parser only) | `clipboard/ClipboardProtocol` |
 | Clipboard protocol state, bounds, PTY replies, one-time paste offer | `clipboard/ClipboardProtocol.ts` | `TerminalController` (binds the effect port and authority) |
@@ -78,6 +79,42 @@ enabled in `web/eslint.config.js`) rejects:
 Its negative fixtures (`web/eslint-plugin-nession/__tests__/no-direct-xterm.test.js`)
 prove each rejected shape, and the positive fixtures prove the engine owner and
 the metrics adapter still pass. Test files are exempt, as they are not shipped.
+
+## Terminal file references (#3187)
+
+Recognition, resolution and navigation are deliberately separate owners:
+
+| Step | Owner |
+|---|---|
+| Recognize `path[:line[:column]]` in a logical line and expose UTF-16 text offsets | `product/terminal/workspaceFileLinks.ts` |
+| Map those offsets to the cells xterm drew, joining wrapped lines | the engine (`LineLinks.ts` + `XtermMetrics.ts`) |
+| Resolve the reference against the active Session's path convention and authorize the read | `app/workspace/terminalFileReference.ts` + the Files capability's bound `FileOps` |
+| Open the file at the requested location | the experience layout's existing `CapabilityFocus` handoff (`AppLayout` / `WebLayout`) → Files |
+
+Rules:
+
+- A relative reference resolves against `file.cwd` (the active Pane's current
+  working directory) **at activation time**, with `.`/`..` normalized. `file.cwd`
+  already returns the source's own path convention, so the joined path is used
+  directly. This is truthful v1 best-effort: the CWD at which an old scrollback
+  line was produced is not recoverable from the buffer and is not claimed.
+- An absolute reference keeps its absolute meaning and is resolved on the same
+  bound FileOps source. It is never stripped and reinterpreted under the
+  workspace root.
+- The resolver lists the target's parent and requires one exact entry match by
+  `path` or `full_path`. There is no basename scan, fuzzy search or silent
+  first-match fallback; missing, directory and ambiguous targets are failures.
+- Activation is not terminal input: it sends no PTY bytes and adds no terminal
+  stream message. It remains available to an observer/read-only client whenever
+  the Files capability is available.
+- The mouse linkifier is xterm's; a touch tap has no mouse hover to ask the
+  provider. The engine therefore resolves a short, stationary tap to the drawn
+  logical-line character (walking wrapped continuations back to their start) and
+  runs the same Product matcher activation. Taps that move beyond the gesture
+  slop or last longer belong to scroll/selection/direction-pad owners.
+- A location makes the viewer open source/raw at that line/column (a rendered
+  preview has no source position). Re-activating the same file at another
+  location repositions the mounted viewer rather than remounting it.
 
 ## Preserved invariants
 
@@ -133,12 +170,14 @@ capacity, detach semantics, or any terminal interaction behavior.
 
 - `xterm/__tests__/unit/XtermMetrics.test.ts` — measured cell, fallback, hostile `_core`.
 - `xterm/__tests__/integration/XtermMetricsLines.test.ts` — logical lines: trim, wide,
-  combining, wrap join, continuation refusal.
+  combining, wrap join, continuation refusal; cell/point → UTF-16 offset for
+  touch activation.
 - `xterm/__tests__/unit/LineLinks.test.ts` — offset → cell mapping for ASCII,
   wide, combining, wrapped and out-of-range matches.
 - `xterm/__tests__/integration/XtermEmulator.test.ts` — mount/unmount preserves
   scrollback; the host debug reference is set/cleared by identity across
-  detach, reparent and disposal.
+  detach, reparent and disposal; a short tap activates a Product link while a
+  moved tap or an empty cell does not.
 - `capsule/__tests__/unit/occlusionScroll.test.ts` — deterministic
   `AnimationFrameScheduler` proves follow-bottom coalescing, dispose
   cancellation and late-callback no-ops.
@@ -153,7 +192,11 @@ capacity, detach semantics, or any terminal interaction behavior.
 - `view/__tests__/unit/TerminalGeometry.test.ts` — width-only font fit,
   height-only rows, unchanged-grid report dedupe.
 - `product/terminal/__tests__/unit/workspaceFileLinks.test.ts` — recognition,
-  offsets, matcher activation.
+  offsets, quoted/absolute/`..` forms, URL/timestamp rejection, matcher
+  activation with line and column.
+- `app/workspace/__tests__/unit/terminalFileReference.test.ts` — CWD join
+  normalization, absolute preservation, exact-entry verification, missing /
+  directory / ambiguous / unavailable reasons.
 - Template/behavioral regressions continue to run under `web-test-unit`,
   `web-test-integration`, `web-typecheck`, `web-eslint` and the existing
   terminal browser suites.

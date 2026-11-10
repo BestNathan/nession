@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
@@ -18,7 +18,31 @@ export interface CodeMirrorEditorProps {
   filename?: string;
   /** 1-based line to scroll to after content loads (#1175). */
   initialLine?: number;
+  /** 1-based column within `initialLine` when the reference carried one (#3187). */
+  initialColumn?: number;
 }
+
+/**
+ * The editor's visible source position, as an observable contract.
+ *
+ * `data-selection-line` / `data-selection-column` are 1-based and track the
+ * cursor's real EditorState selection. E2E and Acceptance Cases need to assert
+ * the visible line/column the user was taken to, and CodeMirror keeps that
+ * state behind its own module instance — a host attribute is the only stable
+ * read that does not reimplement the editor.
+ */
+function publishSelection(view: EditorView): void {
+  const head = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(head);
+  view.dom.setAttribute('data-selection-line', String(line.number));
+  view.dom.setAttribute('data-selection-column', String(head - line.from + 1));
+}
+
+const SELECTION_REPORTER = EditorView.updateListener.of((update) => {
+  if (update.selectionSet || update.docChanged) {
+    publishSelection(update.view);
+  }
+});
 
 /**
  * The code surface.
@@ -37,23 +61,43 @@ export function CodeMirrorEditor({
   language,
   filename,
   initialLine,
+  initialColumn,
 }: CodeMirrorEditorProps) {
   const [langExtensions, setLangExtensions] = useState<Extension[]>([]);
   const path = filename ?? '';
   const viewRef = useRef<EditorView | null>(null);
-  const scrolledToLine = useRef<number | null>(null);
+  const appliedPosition = useRef<string | null>(null);
+  const positionKey = initialLine === undefined
+    ? null
+    : `${initialLine}:${initialColumn ?? ''}`;
+  const extensions = useMemo(
+    () => [...langExtensions, SELECTION_REPORTER],
+    [langExtensions],
+  );
 
-  const scrollToInitialLine = (view: EditorView, lineNumber: number) => {
+  const scrollToInitialPosition = (
+    view: EditorView,
+    lineNumber: number,
+    column: number | undefined,
+    key: string,
+  ) => {
     if (view.state.doc.length === 0) {
       return;
     }
     const line = Math.min(Math.max(1, lineNumber), view.state.doc.lines);
     const lineObj = view.state.doc.line(line);
+    // The reference is 1-based; an out-of-range column clamps to the line's
+    // end rather than refusing the navigation.
+    const offset = column === undefined
+      ? 0
+      : Math.min(Math.max(0, column - 1), lineObj.length);
+    const position = lineObj.from + offset;
     view.dispatch({
-      selection: EditorSelection.cursor(lineObj.from),
-      effects: EditorView.scrollIntoView(lineObj.from, { y: 'center' }),
+      selection: EditorSelection.cursor(position),
+      effects: EditorView.scrollIntoView(position, { y: 'center' }),
     });
-    scrolledToLine.current = lineNumber;
+    publishSelection(view);
+    appliedPosition.current = key;
   };
 
   useEffect(() => {
@@ -70,14 +114,14 @@ export function CodeMirrorEditor({
   }, [path, language]);
 
   useEffect(() => {
-    if (!initialLine || !value || !viewRef.current) {
+    if (positionKey === null || !value || !viewRef.current) {
       return;
     }
-    if (scrolledToLine.current === initialLine) {
+    if (appliedPosition.current === positionKey) {
       return;
     }
-    scrollToInitialLine(viewRef.current, initialLine);
-  }, [initialLine, value]);
+    scrollToInitialPosition(viewRef.current, initialLine!, initialColumn, positionKey);
+  }, [positionKey, initialLine, initialColumn, value]);
 
   return (
     <div
@@ -101,12 +145,18 @@ export function CodeMirrorEditor({
         editable={!readOnly}
         basicSetup={{ tabSize: 2 }}
         indentWithTab
-        extensions={langExtensions}
+        extensions={extensions}
         onChange={(next) => onChange(next)}
         onCreateEditor={(view) => {
           viewRef.current = view;
-          if (initialLine && value) {
-            scrollToInitialLine(view, initialLine);
+          publishSelection(view);
+          if (initialLine !== undefined && value) {
+            scrollToInitialPosition(
+              view,
+              initialLine,
+              initialColumn,
+              positionKey ?? `${initialLine}:${initialColumn ?? ''}`,
+            );
           }
         }}
         className="h-full"

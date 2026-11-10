@@ -53,7 +53,7 @@ export function TerminalViewport({
   touchEdgeReservation,
 }: {
   controller: TerminalController | null;
-  onOpenWorkspaceFile?: (path: string, line?: number) => void;
+  onOpenWorkspaceFile?: (path: string, line?: number, column?: number) => void;
   /** False while this client may not send input (observer/reconnect/switch). */
   inputDisabled?: boolean;
   /** The App shell's reserved edge band, supplied by the App layer. */
@@ -79,8 +79,8 @@ export function TerminalViewport({
     // owns recognition and navigation, the engine owns buffer lines and cell
     // coordinates, and the viewport never reaches into xterm.
     const linkDisposable = linkHandlerRef.current
-      ? controller.registerLinkMatcher(workspaceFileLinkMatcher((path, line) => {
-          linkHandlerRef.current?.(path, line);
+      ? controller.registerLinkMatcher(workspaceFileLinkMatcher((path, line, column) => {
+          linkHandlerRef.current?.(path, line, column);
         }))
       : null;
     return () => {

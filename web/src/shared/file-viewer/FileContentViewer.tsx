@@ -9,7 +9,7 @@ import { AudioViewer } from './components/AudioViewer';
 import { PdfViewer } from './components/PdfViewer';
 import { StructuredPreview } from './components/StructuredTextPreview';
 import { resolveFilePresentation } from './presentation';
-import type { FileContentViewerProps, FileViewMode } from './types';
+import type { FileContentViewerProps, FilePresentation, FileViewMode } from './types';
 
 const noop = () => {};
 
@@ -48,6 +48,37 @@ function ModeToggle({
   );
 }
 
+function MediaPresentation({
+  kind,
+  blobUrl,
+  filename,
+}: {
+  kind: FilePresentation['kind'];
+  blobUrl: string;
+  filename: string;
+}) {
+  switch (kind) {
+    case 'image':
+      return <ImageViewer blobUrl={blobUrl} filename={filename} />;
+    case 'video':
+      return <VideoViewer blobUrl={blobUrl} filename={filename} />;
+    case 'audio':
+      return <AudioViewer blobUrl={blobUrl} filename={filename} />;
+    case 'pdf':
+      return <PdfViewer blobUrl={blobUrl} filename={filename} />;
+    default:
+      return (
+        <div
+          data-testid="file-view-unavailable"
+          data-presentation="unavailable"
+          className={cn('flex h-full items-center justify-center p-4 text-muted-foreground', chromeSansRole('secondary'))}
+        >
+          This media type cannot be displayed.
+        </div>
+      );
+  }
+}
+
 /**
  * The one read-only file presentation owner (#2876).
  *
@@ -65,6 +96,7 @@ export function FileContentViewer({
   readOnly = true,
   onTextChange,
   initialLine,
+  initialColumn,
 }: FileContentViewerProps) {
   const Source = sourceEditor;
   const presentation = resolveFilePresentation(file, data);
@@ -96,36 +128,17 @@ export function FileContentViewer({
   }
 
   if (data.kind === 'media') {
-    const media = (() => {
-      switch (presentation.kind) {
-        case 'image':
-          return <ImageViewer blobUrl={data.url} filename={file.path} />;
-        case 'video':
-          return <VideoViewer blobUrl={data.url} filename={file.path} />;
-        case 'audio':
-          return <AudioViewer blobUrl={data.url} filename={file.path} />;
-        case 'pdf':
-          return <PdfViewer blobUrl={data.url} filename={file.path} />;
-        default:
-          return (
-            <div
-              data-testid="file-view-unavailable"
-              data-presentation="unavailable"
-              className={cn('flex h-full items-center justify-center p-4 text-muted-foreground', chromeSansRole('secondary'))}
-            >
-              This media type cannot be displayed.
-            </div>
-          );
-      }
-    })();
-
     return (
       <div
         data-testid="file-content-viewer"
         data-presentation={presentation.kind}
         className="flex h-full min-h-0 flex-col"
       >
-        {media}
+        <MediaPresentation
+          kind={presentation.kind}
+          blobUrl={data.url}
+          filename={file.path}
+        />
       </div>
     );
   }
@@ -178,6 +191,7 @@ export function FileContentViewer({
             readOnly={readOnly}
             filename={file.path}
             initialLine={initialLine}
+            initialColumn={initialColumn}
           />
         </div>
       )}

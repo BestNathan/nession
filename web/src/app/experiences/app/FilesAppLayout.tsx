@@ -44,12 +44,13 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
   );
 
   const search = useAppFilesSearch(source.fileOps, nav.searchOpen);
-  const handoffError = useAppFilesFocusHandoff(
-    ctx.focus,
-    source.fileOps,
-    ctx.onFocusConsumed,
+  const handoffError = useAppFilesFocusHandoff({
+    focus: ctx.focus,
+    fileOps: source.fileOps,
+    sessionId: ctx.session?.session_id,
+    onFocusConsumed: ctx.onFocusConsumed,
     nav,
-  );
+  });
 
   const bulk = useAppFilesBulkActions(
     source.fileOps,
@@ -81,6 +82,7 @@ export function FilesAppLayout({ ctx, depth }: WorkspaceAppViewProps) {
         filename={nav.selected.filename}
         size={nav.selected.size}
         initialLine={nav.selected.initialLine}
+        initialColumn={nav.selected.initialColumn}
         onDirtyChange={nav.setDirty}
         showDiscardDialog={nav.showDiscardDialog}
         onDiscardDialogChange={nav.setShowDiscardDialog}

@@ -42,6 +42,23 @@ revision) are the authority for conflict semantics. `ExplorerStore` is still
 created per provider. Sandbox policy/enforcement remains #2681's; this
 capability consumes an authorized provider and has no host fallback.
 
+## Terminal file-reference resolution (#3187)
+
+The Terminal product recognizes `path[:line[:column]]` in output; Files owns
+resolving and reading it. A relative reference is joined to the Session's
+current CWD from `file.cwd` at activation time (`.`/`..` normalized). `file.cwd`
+already returns this source's path convention, so the joined path is used
+directly. An absolute path stays absolute on the same bound `FileOps` source and
+is never stripped under the workspace root.
+
+Resolution lists the target's parent and matches exactly one entry by `path` or
+`full_path`. There is no basename scan, fuzzy search or first-match selection;
+missing, directory, unavailable-source and ambiguous targets surface a
+recoverable message instead of opening a different file. The opened target
+carries `line`/`column`; the viewer renders source/raw at that position and
+re-activating the same file elsewhere repositions the mounted viewer rather
+than remounting it or discarding edits.
+
 ## DocumentStore / EditorStore — boundary, not yet entities
 
 The Phase-4 target model names `DocumentStore` (file content + edit state)

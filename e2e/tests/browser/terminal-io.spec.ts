@@ -37,6 +37,16 @@ import {
   moveTerminalTouch,
   startTerminalTouch,
 } from '../../helpers/terminalTouch';
+import {
+  activateReference as activateFileReference,
+  expectEditorAt as expectFileEditorAt,
+  expectFilesSurface as expectFilesAt,
+  openShell as openFileLinkShell,
+  printReference as printFileReference,
+  returnToTerminal as returnFromFiles,
+  runLine as runFileLinkCommand,
+  seedTerminalFiles,
+} from '../../../e2e/acceptance/shared/terminal-file-links.cjs';
 
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
@@ -1267,5 +1277,25 @@ test.describe('Terminal touch direction pad (#2657)', () => {
     await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
     await endTerminalTouch(page, { x: center.x, y: center.y - 40 });
     await stopPtyProbe(page);
+  });
+});
+
+// #3187: a file reference printed by the live shell opens the same Session's
+// Files capability at the referenced source position.
+test.describe('Terminal file references', () => {
+  test('Web: clicking path:line:column opens Files at that position', async ({ page }) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+    seedTerminalFiles(runtime.home);
+    await openFileLinkShell(page, expect, runtime, 'e2e-3187-web');
+    await runFileLinkCommand(page, expect, 'cd src/deep');
+    await printFileReference(page, expect, 'target.py:7:3');
+    await activateFileReference(page, 'target.py:7:3');
+    await expectFilesAt(page, expect, 'web');
+    await expectFileEditorAt(page, expect, {
+      count: 1, line: 7, column: 3, activeLineText: 'target-line-7',
+    });
+    await returnFromFiles(page, expect, 'web');
+    await expect(page.getByTestId('terminal-surface')).toBeVisible();
   });
 });
