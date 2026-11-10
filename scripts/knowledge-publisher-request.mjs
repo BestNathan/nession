@@ -24,25 +24,58 @@ function git(root, ...args) {
     fail('git ' + args[0] + ' failed: ' + (result.stderr || result.error?.message || 'unknown').trim());
   return result.stdout.trim();
 }
+const SIGNAL_NAME = 'Store / Knowledge Proposal Signal';
+const SIGNAL_PATH = '.github/workflows/store-knowledge-proposal-signal.yml';
 function parseRequest(event, context) {
-  if (!context || context.repository !== REPO || context.eventName !== 'repository_dispatch' ||
-      context.ref !== 'refs/heads/main' || context.actor !== 'BestNathan' ||
-      context.runAttempt !== '1' || !SHA.test(context.sha || ''))
-    fail('only exact first-attempt owner dispatch on trusted main is admitted');
-  if (!event || event.action !== EVENT || event.sender?.login !== 'BestNathan')
-    fail('wrong event type or authenticated sender');
-  const payload = event.client_payload;
-  if (!payload || Array.isArray(payload) || typeof payload !== 'object' ||
-      Object.keys(payload).sort().join(',') !== 'expected_head,proposal_ref,proposal_sha')
-    fail('expected exactly proposal_ref, proposal_sha and expected_head');
-  const { proposal_ref, proposal_sha, expected_head } = payload;
-  if (typeof proposal_ref !== 'string' || !PROPOSAL_REF.test(proposal_ref))
-    fail('proposal_ref must be a bounded knowledge-proposals branch');
-  if (typeof proposal_sha !== 'string' || !SHA.test(proposal_sha) ||
-      typeof expected_head !== 'string' || !SHA.test(expected_head) ||
-      proposal_sha === expected_head)
-    fail('two distinct exact 40-character SHA values are required');
-  return { proposal_ref, proposal_sha, expected_head };
+  if (!context || context.repository !== REPO ||
+      context.ref !== 'refs/heads/main' || context.runAttempt !== '1' ||
+      !SHA.test(context.sha || ''))
+    fail('only exact first-attempt trusted main requests are admitted');
+
+  if (context.eventName === 'repository_dispatch') {
+    // Retain the explicitly authorized external owner API for recovery.
+    if (context.actor !== 'BestNathan' || event?.action !== EVENT ||
+        event.sender?.login !== 'BestNathan') fail('owner dispatch required');
+    const payload = event.client_payload;
+    if (!payload || Array.isArray(payload) || typeof payload !== 'object' ||
+        Object.keys(payload).sort().join(',') !== 'expected_head,proposal_ref,proposal_sha')
+      fail('expected exactly proposal_ref, proposal_sha and expected_head');
+    const { proposal_ref, proposal_sha, expected_head } = payload;
+    if (typeof proposal_ref !== 'string' || !PROPOSAL_REF.test(proposal_ref))
+      fail('proposal_ref must be a bounded knowledge-proposals branch');
+    if (typeof proposal_sha !== 'string' || !SHA.test(proposal_sha) ||
+        typeof expected_head !== 'string' || !SHA.test(expected_head) ||
+        proposal_sha === expected_head)
+      fail('two distinct exact 40-character SHA values are required');
+    return { proposal_ref, proposal_sha, expected_head };
+  }
+
+  if (context.eventName === 'workflow_run') {
+    // A trusted default-branch workflow_run webhook is the bridge from
+    // *owner-created* proposal refs. Never trust a proposed branch's code,
+    // artifact, a PR-controlled script, or a metadata-only "success" label.
+    const run = event?.workflow_run;
+    if (event?.action !== 'completed' || event.repository?.full_name !== REPO ||
+        !run || !Number.isSafeInteger(run.id) || run.id <= 0 ||
+        run.name !== SIGNAL_NAME || run.path !== SIGNAL_PATH ||
+        run.event !== 'create' || run.status !== 'completed' ||
+        run.conclusion !== 'success' || run.run_attempt !== 1 ||
+        run.head_repository?.full_name !== REPO ||
+        run.repository?.full_name !== REPO ||
+        run.actor?.login !== 'BestNathan' ||
+        run.triggering_actor?.login !== 'BestNathan' ||
+        typeof run.head_branch !== 'string' ||
+        !PROPOSAL_REF.test('refs/heads/' + run.head_branch) ||
+        !SHA.test(run.head_sha || ''))
+      fail('untrusted or mismatched owner-created Knowledge proposal signal');
+    return {
+      proposal_ref:'refs/heads/' + run.head_branch,
+      proposal_sha:run.head_sha,
+      expected_head:null, // resolve live Knowledge SHA, then require exactly one direct child
+      source_run_id:run.id,
+    };
+  }
+  fail('unsupported publisher invocation; owner dispatch or authenticated proposal signal only');
 }
 function remoteSha(root, ref) {
   const lines = git(root, 'ls-remote', '--heads', 'origin', ref).split('\n').filter(Boolean);
@@ -51,23 +84,57 @@ function remoteSha(root, ref) {
   if (!SHA.test(sha) || observed !== ref) fail('unexpected remote ref readback');
   return sha;
 }
+// A completed workflow with all jobs skipped can report overall success.
+// Require the exact read-only signal job and step to have *actually run*
+// at the same upstream Run ID and proposal SHA before granting authority.
+function verifySignalJobReceipt(response,sourceRunId,proposalSha) {
+  if (!response || !Array.isArray(response.jobs) || response.jobs.length !== 1 ||
+      response.total_count !== 1)
+    fail('proposal signal must have exactly one completed source job');
+  const job=response.jobs[0];
+  if (job.run_id !== sourceRunId || job.head_sha !== proposalSha ||
+      job.name !== 'Emit approved owner proposal creation signal' ||
+      job.status !== 'completed' || job.conclusion !== 'success' ||
+      !Array.isArray(job.steps) ||
+      !job.steps.some(step=>step.name==='Record nonprivileged proposal event provenance' &&
+        step.status==='completed' && step.conclusion==='success'))
+    fail('proposal signal job/step was skipped, failed, or does not match pinned run/SHA');
+}
+function validateSignalJobRemotely(runId,proposalSha) {
+  const token=process.env.GH_TOKEN;
+  if (!token || typeof token !== 'string') fail('read-only Actions token required for signal proof');
+  const path='repos/'+REPO+'/actions/runs/'+runId+'/jobs?per_page=100';
+  const result=spawnSync('gh',['api',path],{
+    encoding:'utf8',timeout:30000,maxBuffer:2*1024*1024,
+    env:{...process.env,GH_TOKEN:token},
+  });
+  if(result.error || result.status!==0)
+    fail('source signal job readback failed: '+(result.error?.message||result.stderr||'unknown').trim());
+  let response;
+  try{response=JSON.parse(result.stdout);}catch{fail('invalid original source signal job JSON');}
+  verifySignalJobReceipt(response,runId,proposalSha);
+}
 function prepare(eventPath, destination) {
   if (typeof eventPath !== 'string' || !eventPath ||
       !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 8192)
     fail('missing or oversized GitHub event');
-  const { proposal_ref, proposal_sha, expected_head } = parseRequest(
+  const request = parseRequest(
     JSON.parse(fs.readFileSync(eventPath, 'utf8')),
     { repository: process.env.GITHUB_REPOSITORY, eventName: process.env.GITHUB_EVENT_NAME,
       ref: process.env.GITHUB_REF, actor: process.env.GITHUB_ACTOR,
       runAttempt: process.env.GITHUB_RUN_ATTEMPT, sha: process.env.GITHUB_SHA },
   );
+  const {proposal_ref, proposal_sha} = request;
+  if(request.source_run_id)validateSignalJobRemotely(request.source_run_id,proposal_sha);
   const root = process.cwd();
   if (git(root, 'rev-parse', 'HEAD') !== process.env.GITHUB_SHA ||
       !/^https:\/\/github\.com\/BestNathan\/nession(?:\.git)?$/.test(git(root, 'remote', 'get-url', 'origin')))
     fail('checkout is not the exact trusted main-owned source');
   if (!destination.startsWith(process.env.RUNNER_TEMP + path.sep) ||
       fs.existsSync(destination)) fail('destination must be fresh under RUNNER_TEMP');
-  if (remoteSha(root, 'refs/heads/knowledge') !== expected_head)
+  const observedHead=remoteSha(root, 'refs/heads/knowledge');
+  const expected_head=request.expected_head ?? observedHead;
+  if (observedHead !== expected_head)
     fail('STALE_HEAD: live Knowledge head differs from expected');
   if (remoteSha(root, proposal_ref) !== proposal_sha)
     fail('proposal ref moved or does not match requested SHA');
@@ -76,6 +143,14 @@ function prepare(eventPath, destination) {
   if (git(root, 'rev-parse', 'FETCH_HEAD') !== proposal_sha)
     fail('fetched proposal is not the pinned commit');
   git(root, 'merge-base', '--is-ancestor', expected_head, proposal_sha);
+  if (request.expected_head === null) {
+    // Authorizing a create event never grants permission to publish an
+    // arbitrary history. It must be one single fresh commit on the *current*
+    // governed Knowledge head. Any concurrent publication is STALE_HEAD.
+    const parents=git(root, 'rev-list', '--parents', '-n', '1', proposal_sha).split(/\s+/);
+    if (parents.length !== 2 || parents[0] !== proposal_sha || parents[1] !== expected_head)
+      fail('owner-created proposal must be one direct child of current Knowledge head');
+  }
   const localBranch = 'knowledge-publisher-' + process.env.GITHUB_RUN_ID + '-' + process.env.GITHUB_RUN_ATTEMPT;
   git(root, 'worktree', 'add', '-b', localBranch, destination, proposal_sha);
   if (git(destination, 'status', '--porcelain')) fail('candidate must be clean');
@@ -86,7 +161,8 @@ function prepare(eventPath, destination) {
   if (result.error || result.status !== 0)
     fail('canonical Knowledge contract denied candidate: ' + (result.stderr || result.error?.message || '').trim());
   const receipt = {
-    schema_version: 1, event: EVENT, source_ref: proposal_ref,
+    schema_version: 1, event: process.env.GITHUB_EVENT_NAME,
+    source_run_id: request.source_run_id ?? null, source_ref: proposal_ref,
     source_sha: proposal_sha, expected_head,
     trusted_main_sha: process.env.GITHUB_SHA,
     run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -115,7 +191,54 @@ function selfTest() {
     { client_payload: { ...payload, proposal_sha: payload.expected_head } },
     { client_payload: { ...payload, expected_head: 'not-a-sha' } },
   ]) assert.throws(() => parseRequest({ ...event, ...changed }, context));
-  console.log('knowledge-publisher-request: exact owner/main dispatch and payload negative fixtures passed');
+  const autoContext={...context,actor:'github-actions[bot]',eventName:'workflow_run'};
+  const signalRun={
+    id:12345,name:SIGNAL_NAME,path:SIGNAL_PATH,event:'create',
+    status:'completed',conclusion:'success',run_attempt:1,
+    head_branch:'knowledge-proposals/issue-3156',
+    head_sha:'b'.repeat(40),
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    actor:{login:'BestNathan'},triggering_actor:{login:'BestNathan'},
+  };
+  const signalEvent={action:'completed',repository:{full_name:REPO},workflow_run:signalRun};
+  assert.deepEqual(parseRequest(signalEvent,autoContext),{
+    proposal_ref:'refs/heads/knowledge-proposals/issue-3156',
+    proposal_sha:'b'.repeat(40),expected_head:null,source_run_id:12345,
+  });
+  for (const [field,value] of [
+    ['name','Other / Signal'],['path','.github/workflows/evil.yml'],
+    ['event','push'],['status','in_progress'],['conclusion','failure'],
+    ['run_attempt',2],['head_branch','main'],
+    ['head_branch','knowledge-proposals/../../main'],
+    ['head_sha','not-a-sha'],['actor',{login:'attacker'}],
+    ['triggering_actor',{login:'attacker'}],
+    ['repository',{full_name:'attacker/repo'}],
+    ['head_repository',{full_name:'attacker/repo'}],
+  ]) assert.throws(()=>parseRequest({
+    ...signalEvent,workflow_run:{...signalRun,[field]:value},
+  },autoContext),/untrusted or mismatched/);
+  for (const [field,value] of [
+    ['action','requested'],['repository',{full_name:'other/repo'}],
+  ]) assert.throws(()=>parseRequest({...signalEvent,[field]:value},autoContext));
+  assert.throws(()=>parseRequest(signalEvent,{...autoContext,ref:'refs/heads/knowledge-proposals/test'}));
+  assert.throws(()=>parseRequest(signalEvent,{...autoContext,runAttempt:'2'}));
+  assert.throws(()=>parseRequest(signalEvent,{...autoContext,eventName:'push'}));
+  const validJob={run_id:12345,head_sha:'b'.repeat(40),
+    name:'Emit approved owner proposal creation signal',
+    status:'completed',conclusion:'success',
+    steps:[{name:'Record nonprivileged proposal event provenance',
+      status:'completed',conclusion:'success'}]};
+  verifySignalJobReceipt({total_count:1,jobs:[validJob]},12345,'b'.repeat(40));
+  for(const malformed of [
+    {total_count:0,jobs:[]},
+    {total_count:2,jobs:[validJob,validJob]},
+    {total_count:1,jobs:[{...validJob,conclusion:'skipped'}]},
+    {total_count:1,jobs:[{...validJob,run_id:12346}]},
+    {total_count:1,jobs:[{...validJob,head_sha:'c'.repeat(40)}]},
+    {total_count:1,jobs:[{...validJob,steps:[{...validJob.steps[0],conclusion:'skipped'}]}]},
+    {total_count:1,jobs:[{...validJob,steps:[]}]},
+  ])assert.throws(()=>verifySignalJobReceipt(malformed,12345,'b'.repeat(40)));
+  console.log('knowledge-publisher-request: owner dispatch and owner create→workflow_run deny-by-default positive/negative fixtures passed');
 }
 try {
   const [command, eventPath, destination] = process.argv.slice(2);
