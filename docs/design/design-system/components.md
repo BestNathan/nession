@@ -103,6 +103,28 @@ nothing objected — the scanner only saw brackets holding nothing but a number.
 `calc()` is exempt: `h-[calc(100%-1px)]` is arithmetic against an
 already-resolved dimension, not a design choice.
 
+### Compact form-field rows
+
+A row that puts several configuration fields side by side follows one rule
+(#3136). The rule keeps the controls readable as peers even when one of them is
+multiline:
+
+- Labels share one line and one gap; field **tops** align. Never bottom-align
+  mixed controls with `items-end` — a taller field must not drag its neighbour
+  down.
+- Single-line fields use the Experience control band: `Input` already does, and
+  `SelectTrigger size="field"` resolves `control.md` (32px Web, 44px App) with
+  the same padding band. Do not give one consumer a local `h-8` or pixel height.
+- A growing field uses `Textarea variant="field"`: it starts at the same
+  control band and grows downward with `field-sizing-content`. A long path
+  wraps inside the field; the row grows but the neighbouring single-line
+  control keeps its top edge.
+- A trailing row action (for example Remove) occupies the same label slot above
+  the control band, so it aligns with the fields rather than the bottom of a
+  grown textarea.
+- The default `SelectTrigger`/`Textarea` sizes remain for their existing uses;
+  `field` is an opt-in semantic variant, not a global restyle.
+
 ### A tap target has two geometries, and the band owns only one
 
 The band above is the control's **hit target** — the box that receives the tap.

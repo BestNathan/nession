@@ -40,7 +40,11 @@ function AgentField({
         onValueChange={(value) => value && onChange({ agent_id: value })}
         disabled={disabled}
       >
-        <SelectTrigger id={`${idPrefix}-location-agent-${index}`} className="w-full">
+        <SelectTrigger
+          id={`${idPrefix}-location-agent-${index}`}
+          size="field"
+          className="w-full"
+        >
           <span className="truncate">
             {agentDisplayName(
               agents.find((agent) => agent.agent_id === location.agent_id) ?? {
@@ -82,14 +86,12 @@ function PathField({
   index,
   disabled,
   idPrefix,
-  rows,
   onChange,
 }: {
   location: Location;
   index: number;
   disabled: boolean;
   idPrefix: string;
-  rows: number;
   onChange: (patch: Partial<Location>) => void;
 }) {
   return (
@@ -102,8 +104,9 @@ function PathField({
         placeholder="/Users/you/code/project"
         disabled={disabled}
         autoComplete="off"
-        rows={rows}
-        className="min-h-11 break-all"
+        rows={1}
+        variant="field"
+        className="break-all"
       />
     </div>
   );
@@ -138,18 +141,24 @@ function RemoveButton({
     );
   }
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="Remove Existing Location"
-      data-testid={`project-location-remove-${index}`}
-      onClick={onRemove}
-      disabled={disabled}
-      className="sm:mb-0.5"
-    >
-      <Trash2 className="size-4" aria-hidden />
-    </Button>
+    <div className="flex flex-col gap-2 self-start">
+      {/* The action sits in the same label slot as the field labels, so it
+          aligns with the control band rather than the bottom of a grown
+          Directory field. */}
+      <span aria-hidden className="hidden h-3.5 sm:block" />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Remove Existing Location"
+        data-testid={`project-location-remove-${index}`}
+        onClick={onRemove}
+        disabled={disabled}
+        className="self-start"
+      >
+        <Trash2 className="size-4" aria-hidden />
+      </Button>
+    </div>
   );
 }
 
@@ -203,14 +212,13 @@ function LocationRows({
               index={index}
               disabled={disabled}
               idPrefix={idPrefix}
-              rows={3}
               onChange={(patch) => onChange(index, patch)}
             />
           </div>
         ) : (
           <div
             key={index}
-            className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end"
+            className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start"
             data-testid="project-location-editor"
           >
             <AgentField
@@ -226,7 +234,6 @@ function LocationRows({
               index={index}
               disabled={disabled}
               idPrefix={idPrefix}
-              rows={2}
               onChange={(patch) => onChange(index, patch)}
             />
             <RemoveButton
@@ -248,8 +255,11 @@ function LocationRows({
  * `layout` names the composition, not the data: Web keeps an Agent/Directory
  * row that reflows to stacked controls when the dialog is constrained; App
  * always stacks, with touch-sized fields and a full-width Remove action
- * (#3089). The directory is a two-row textarea in both, because a long path
- * in a single-line input hides its own beginning.
+ * (#3089). Agent and Directory are top-aligned peers on the Experience control
+ * band; Directory starts compact and grows downward with a wrapped path, so a
+ * long value never drags the Agent field or the Remove action down (#3136). The
+ * directory is still a textarea rather than a single-line input, because a long
+ * path in a single-line control hides its own beginning.
  */
 export function ProjectLocationsEditor({
   draft,
