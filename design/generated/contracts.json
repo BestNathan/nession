@@ -91,6 +91,25 @@
         "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     },
+    "pattern.overlay-surfaces": {
+      "id": "pattern.overlay-surfaces",
+      "patternRef": "docs/design/design-system/patterns/overlay-surfaces.md",
+      "extends": [],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true,
+        "maxWidthToken": "experience.web.overlay.standardMaxWidth",
+        "maxWidthTokenPx": 640
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "scrollOwner": true,
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "touchTargetTokenPx": 44
+      }
+    },
     "pattern.popup-menu": {
       "id": "pattern.popup-menu",
       "patternRef": "docs/design/design-system/patterns/popup-menu.md",

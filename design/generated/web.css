@@ -46,6 +46,7 @@
   --nession-sidebar-ring: oklch(0.553 0.0118 261.773);
   --nession-overlay: oklch(0 0 0);
   --nession-inverse: oklch(0 0 0);
+  --nession-overlay-scrim: oklch(0 0 0 / 0.4);
   --nession-agent-online: var(--nession-muted-foreground);
   --nession-agent-connecting: var(--nession-muted-foreground);
   --nession-agent-reconnecting: var(--nession-muted-foreground);
@@ -243,6 +244,14 @@
   --nession-workspace-list-row-title-font-size: 14px;
   --nession-workspace-editor-action-font-size: 13px;
   --nession-workspace-editor-head-pad-x: 18px;
+  --nession-overlay-compact-max-width: 30rem;
+  --nession-overlay-standard-max-width: 40rem;
+  --nession-overlay-wide-max-width: 45rem;
+  --nession-overlay-viewport-max-width: calc(100% - 2rem);
+  --nession-overlay-viewport-max-height: calc(100dvh - 2rem);
+  --nession-overlay-dialog-z: 50;
+  --nession-overlay-anchored-z: 100;
+  --nession-overlay-tooltip-z: 110;
 }
 
 .dark {
@@ -291,6 +300,7 @@
   --nession-sidebar-ring: oklch(0.625 0.015 265);
   --nession-overlay: oklch(0 0 0);
   --nession-inverse: oklch(0 0 0);
+  --nession-overlay-scrim: oklch(0 0 0 / 0.4);
   --nession-agent-online: var(--nession-muted-foreground);
   --nession-agent-connecting: var(--nession-muted-foreground);
   --nession-agent-reconnecting: var(--nession-muted-foreground);
@@ -384,6 +394,7 @@
   --color-sidebar-ring: var(--nession-sidebar-ring);
   --color-overlay: var(--nession-overlay);
   --color-inverse: var(--nession-inverse);
+  --color-overlay-scrim: var(--nession-overlay-scrim);
   --color-agent-online: var(--nession-agent-online);
   --color-agent-connecting: var(--nession-agent-connecting);
   --color-agent-reconnecting: var(--nession-agent-reconnecting);
@@ -625,4 +636,9 @@
   --nession-workspace-list-row-title-font-size: 16px;
   --nession-workspace-editor-head-font-size: 13px;
   --nession-workspace-editor-action-font-size: 14px;
+  --nession-overlay-viewport-max-width: calc(100% - 2rem);
+  --nession-overlay-viewport-max-height: calc(100dvh - 2rem);
+  --nession-overlay-dialog-z: 50;
+  --nession-overlay-anchored-z: 100;
+  --nession-overlay-tooltip-z: 110;
 }

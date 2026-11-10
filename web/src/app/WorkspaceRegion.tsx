@@ -197,6 +197,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
           mainShared={mainShared}
           workspaceAvailable={workspaceAvailable}
           projectDetail={appProjectDetail}
+          terminal={terminal}
         />
         {sessionProjectDialog}
       </>

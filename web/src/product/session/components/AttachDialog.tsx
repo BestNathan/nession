@@ -52,7 +52,7 @@ export function AttachDialog({ isOpen, intent = 'attach', onClose, session, onCo
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="sm:max-w-[45rem]"
+        size="wide"
         data-testid="attach-dialog"
       >
         <DialogHeader className="sticky top-0 z-10 -mx-4 bg-popover px-4 pb-2">

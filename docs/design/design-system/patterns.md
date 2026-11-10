@@ -39,6 +39,7 @@ Patterns that display capabilities must respect that lifecycle and progressive d
 | [ContextCapsule](patterns/context-capsule.md) | contextual interaction | Nession-owned upper Capsule list; deepens in-place into Peek |
 | [TerminalSurface](patterns/terminal-surface.md) | work surface | xterm well, focus, scroll, clearance, attachment lifecycle |
 | [PopupMenu](patterns/popup-menu.md) | primitive-backed surface | The list a control collapses into; contracted here because a popup is not a DOM descendant of its trigger (#1066) |
+| [OverlaySurfaces](patterns/overlay-surfaces.md) | cross-family overlay contract | Which surface role presents an action/operation, and its shared anatomy, stacking, dismissal, focus and portal rules across Dialog/Alert/menus/Select/Popover/Tooltip (#3142) |
 
 The catalog is not a mandatory shell anatomy. Each pattern is used only when the current product context justifies it.
 

@@ -292,7 +292,7 @@ function ImageSection({ project }: { project: Project }) {
 function ManagedUnavailableDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent data-testid="project-managed-unavailable" className="sm:max-w-md">
+      <DialogContent data-testid="project-managed-unavailable">
         <DialogHeader>
           <DialogTitle>Managed Session is not available yet</DialogTitle>
         </DialogHeader>
