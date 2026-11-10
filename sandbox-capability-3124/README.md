@@ -59,7 +59,7 @@ The generic sections must also probe the exact implementable guarantee; filesyst
 - Choose **已在 Sandbox**: tabs show read-only observed values and no editable policy item controls.
 - Web/App navigation remains one Sandbox route with six peer Tabs; no new route or Back is created by this implementation model.
 
-**Synthetic verification:** The update passed **43/43** V8 mock assertions against the Tabbed design and status fixtures (before adding the generic unknown-implementation read-only fallback). Covers every policy type, cgroup/delegation/profile/macos/offline cases, preflight-on-navigation, and App sizing. This verifies the mock's rendering/fixtures, **not** real browser geometry, Backend, Policy Schema vNext, or a Pages deployment.
+**Synthetic verification:** The revised update passed **45/45** V8 synthetic-DOM checks against the Tabbed design, native implementation registration and status fixtures. Covers every policy type, cgroup/delegation/profile/macos/offline cases, preflight-on-navigation, and App sizing. This verifies the mock's rendering/fixtures, **not** real browser geometry, Backend, Policy Schema vNext, or a Pages deployment.
 
 ## Each policy Tab has its own content, actions and inspection
 
