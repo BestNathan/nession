@@ -1,116 +1,201 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join,dirname} from 'node:path';
-import {DOCUMENT_CATALOG,loadDocuments,validPublicDocuments,unavailableDocuments}
-  from '../scripts/documents-project.mjs';
-import {documentsHref,documentsRoute,validDocumentsSnapshot,filterDocuments,renderDocuments}
-  from '../documents.js';
+import {join} from 'node:path';
+import {createHash} from 'node:crypto';
+import {describeFields,projectProtocolSchema,loadDocuments,
+  validPublicDocuments,unavailableDocuments} from '../scripts/documents-project.mjs';
+import {releaseProtocolHistory,sortedReleases}
+  from '../scripts/protocol-release-history.mjs';
+import {documentsHref,documentsRoute,validDocumentsSnapshot,
+  filterDocuments,renderDocuments} from '../documents.js';
 import {NAV_ITEMS} from '../navigation.js';
 
-const SHA='a'.repeat(40);
+const SHA='a'.repeat(40), OLD_SHA='b'.repeat(40);
 const AT='2026-11-10T10:00:00.000Z';
-async function fixture(){
-  const root=await mkdtemp(join(tmpdir(),'nession-pages-documents-'));
-  for(const doc of DOCUMENT_CATALOG){
-    const path=join(root,doc.path);
-    await mkdir(dirname(path),{recursive:true});
-    await writeFile(path,'# '+doc.title+'\n\nA **canonical** reference.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n');
-  }
-  return root;
+const draft='https://json-schema.org/draft/2020-12/schema';
+const primitive={type:'string'};
+function fixture({snapshot=false,legacy=false}={}){
+  const success={type:'object',required:['state','status'],properties:{
+    state:{const:'ok'},status:{$ref:'#/$defs/RepoStatus'},
+    ...(!legacy?{snapshot:{type:'string'}}:{})
+  }};
+  const root={type:'object',properties:{data:{$ref:'#/$defs/RepoStatus'}}};
+  return {$schema:draft,
+    protocols:{
+      'git.status@v1':{owner:'git',version:1,wires:['git.status'],
+        request:{alias:'StatusRequest',shape:root},
+        response:{alias:'StatusResponse',shape:{
+          oneOf:[{$ref:'#/$defs/StatusOk'},{
+            type:'object',required:['state','message'],properties:{
+              state:{const:'error'},message:primitive
+            }}]
+        }}},
+      ...(!legacy?{'git.status@v2':{owner:'git',version:2,wires:['git.status'],
+        request:{alias:'StatusRequestV2',shape:root},
+        response:{alias:'StatusResponseV2',shape:success}}}:{}),
+      'server.agent.announce@v1':{owner:'core',version:1,
+        wires:['server.agent.announce'],request:{
+          alias:'Announce',shape:{type:'object',properties:{agentId:primitive}}},
+        response:null}
+    },$defs:{
+      RepoStatus:{type:'object',properties:{
+        branch:primitive,
+        ...(snapshot?{latest:primitive}:{})
+      }},
+      StatusOk:success
+    }};
 }
-test('curated technical Documents project exact main source and reject missing provenance',async()=>{
-  const root=await fixture();
-  try{
-    assert.deepEqual(DOCUMENT_CATALOG.map(x=>x.path).slice(0,3),[
-      'docs/architecture/protocol.md','docs/architecture/protocol-identity.md',
-      'docs/architecture/mcp.md']);
-    const projected=await loadDocuments({directory:root,sha:SHA,generatedAt:AT});
-    assert.equal(projected.status,'available');
-    assert.equal(projected.source.sha,SHA);
-    assert.equal(projected.documents.length,DOCUMENT_CATALOG.length);
-    assert.ok(projected.documents.every(x=>x.source===
-      'https://github.com/BestNathan/nession/blob/'+SHA+'/'+x.path));
-    assert.equal(validPublicDocuments(projected),true);
-    assert.equal(validDocumentsSnapshot(projected),true);
-    const unknown=await loadDocuments({directory:root,generatedAt:AT});
-    assert.deepEqual(unknown,unavailableDocuments(AT));
-    assert.equal(validDocumentsSnapshot(unknown),true);
-    const poisoned=structuredClone(projected);
-    poisoned.documents[0].path='../.env';
-    assert.equal(validDocumentsSnapshot(poisoned),false);
-    assert.equal(validPublicDocuments(poisoned),false);
-    const spoofed=structuredClone(projected);
-    spoofed.documents[0].source='https://evil.example/file.md';
-    assert.equal(validDocumentsSnapshot(spoofed),false);
-  }finally{await rm(root,{recursive:true,force:true});}
+const release=(version,schema,status='available')=>({
+  version,tag:'v'+version,sha:OLD_SHA,status,schema
 });
-test('Documents build fails closed for missing, symlinked or oversized curated sources',async()=>{
-  const root=await fixture();
-  try{
-    await rm(join(root,DOCUMENT_CATALOG[0].path));
-    await assert.rejects(loadDocuments({directory:root,sha:SHA,generatedAt:AT}));
-    await writeFile(join(root,DOCUMENT_CATALOG[0].path),'x'.repeat(160001));
-    await assert.rejects(loadDocuments({directory:root,sha:SHA,generatedAt:AT}));
-  }finally{await rm(root,{recursive:true,force:true});}
+test('Rust generated JSON Schema projects every protocol/contract and both halves',()=>{
+  const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT});
+  assert.equal(doc.schema_version,3);
+  assert.equal(doc.status,'available');
+  assert.equal(doc.protocols.length,2);
+  const status=doc.protocols.find(p=>p.id==='git.status');
+  assert.deepEqual(status.versions.map(v=>v.version),[1,2]);
+  assert.equal(status.versions[0].response.fields.some(f=>f.path==='status.branch'),true);
+  assert.equal(doc.protocols.find(p=>p.id==='server.agent.announce').versions[0].response,null);
+  assert.equal(validPublicDocuments(doc),true);
+  assert.equal(validDocumentsSnapshot(doc),true);
+  assert.deepEqual(projectProtocolSchema(fixture(),{sha:null,generatedAt:AT}),
+    unavailableDocuments(AT));
 });
-test('deep links, catalog filtering and app integration use canonical Documents route',async()=>{
-  const doc=DOCUMENT_CATALOG[2];
-  assert.equal(documentsHref(doc.path),'#/documents?doc='+encodeURIComponent(doc.path));
+test('a nested referenced response field preserves its response variant',()=>{
+  const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT});
+  const rows=doc.protocols.find(p=>p.id==='git.status').versions[0].response.fields;
+  assert.ok(rows.some(f=>f.path==='status.branch'&&f.variant.includes('state=ok')));
+  assert.ok(rows.some(f=>f.path==='message'&&f.variant.includes('state=error')));
+  assert.equal(rows.some(f=>f.path==='status.branch'&&f.variant.includes('state=error')),false);
+  assert.deepEqual(describeFields(null,{}),[]);
+});
+test('Nession release semver is the only historic field support axis',()=>{
+  const current=fixture({snapshot:true});
+  const old=fixture({legacy:true});
+  const newer=fixture();
+  const doc=projectProtocolSchema(current,{sha:SHA,generatedAt:AT,
+    sourceVersion:'0.35.0',releases:[
+      release('0.35.0',old),release('0.36.0',newer),
+      {version:'0.37.0',tag:'v0.37.0',sha:null,status:'unavailable',schema:null}
+    ]});
+  const git=doc.protocols.find(p=>p.id==='git.status');
+  const fields=git.versions[0].response.fields;
+  const branch=fields.find(f=>f.path==='status.branch');
+  const latest=fields.find(f=>f.path==='status.latest');
+  const snapshot=git.versions[1].response.fields.find(f=>f.path==='snapshot');
+  assert.deepEqual(branch.releases.map(r=>r.status),
+    ['supported','supported','unknown']);
+  assert.deepEqual(latest.releases.map(r=>r.status),
+    ['not-supported','not-supported','unknown']);
+  assert.deepEqual(snapshot.releases.map(r=>r.status),
+    ['contract-not-declared','supported','unknown']);
+  assert.equal(snapshot.firstObserved,'0.36.0');
+  assert.equal(latest.firstObserved,null);
+  assert.equal(validPublicDocuments(doc),true);
+  assert.equal(validDocumentsSnapshot(doc),true);
+  assert.equal(doc.source.source_version,'0.35.0');
+});
+test('old version only fields remain visible as historical, not current',()=>{
+  const old=fixture({snapshot:true});
+  const main=fixture();
+  const doc=projectProtocolSchema(main,{sha:SHA,generatedAt:AT,
+    releases:[release('0.36.0',old)]});
+  const field=doc.protocols.find(p=>p.id==='git.status')
+    .versions[0].response.fields.find(f=>f.path==='status.latest');
+  assert.equal(field.historical,true);
+  assert.equal(field.releases[0].status,'supported');
+});
+test('unknown version and malformed catalog reject instead of fabricating data',()=>{
+  assert.throws(()=>projectProtocolSchema({$schema:draft,protocols:{},$defs:{}},
+    {sha:SHA,generatedAt:AT}),/Empty/);
+  const malformed=fixture();
+  malformed.protocols['git.status@v1'].version=9;
+  assert.throws(()=>projectProtocolSchema(malformed,{sha:SHA,generatedAt:AT}),
+    /Invalid canonical protocol entry/);
+  const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT});
+  doc.protocols[0].id='../../secret';
+  assert.equal(validPublicDocuments(doc),false);
+  assert.equal(validDocumentsSnapshot(doc),false);
+});
+test('only explicitly valid pinned source files become public Protocol catalogs',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'nession-protocol-pages-'));
+  const path=join(dir,'schema.json');
+  try{
+    await writeFile(path,JSON.stringify(fixture()));
+    const result=await loadDocuments({schemaPath:path,sha:SHA,generatedAt:AT});
+    assert.equal(result.protocols.length,2);
+    const unavailable=await loadDocuments({schemaPath:path,generatedAt:AT});
+    assert.equal(unavailable.status,'unavailable');
+    await writeFile(path,'not JSON');
+    await assert.rejects(loadDocuments({schemaPath:path,sha:SHA,generatedAt:AT}));
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('tagged release assets must be source pinned and cannot be inferred from main',async()=>{
+  const history=sortedReleases([
+    {tag_name:'v0.36.0',assets:[]},{tag_name:'v0.35.0',assets:[]},
+    {tag_name:'v0.34.3',draft:true,assets:[]}]);
+  assert.deepEqual(history.map(r=>r.version),['0.35.0','0.36.0']);
+  const missing=await releaseProtocolHistory({releases:[
+    {tag_name:'v0.35.0',assets:[]}
+  ],api:async()=>{throw Error('tag lookup is unnecessary');}});
+  assert.equal(missing[0].status,'unavailable');
+  const raw=JSON.stringify({schema_version:1,source:{repository:'BestNathan/nession',
+    tag:'v0.36.0',sha:OLD_SHA,version:'0.36.0'},schema:fixture()});
+  const url='https://github.com/BestNathan/nession/releases/download/v0.36.0/nession-protocol-schema.json';
+  const assets=[{name:'nession-protocol-schema.json',browser_download_url:url,
+    digest:'sha256:'+createHash('sha256').update(raw).digest('hex')}];
+  const result=await releaseProtocolHistory({releases:[
+    {tag_name:'v0.36.0',assets}],
+    api:async()=>({object:{type:'commit',sha:OLD_SHA}}),
+    fetcher:async()=>({ok:true,arrayBuffer:async()=>Buffer.from(raw)})});
+  assert.equal(result[0].status,'available');
+  const poisoned=raw.replace('"sha":"'+OLD_SHA+'"','"sha":"'+SHA+'"');
+  const bad=await releaseProtocolHistory({releases:[
+    {tag_name:'v0.36.0',assets}],
+    api:async()=>({object:{type:'commit',sha:OLD_SHA}}),
+    fetcher:async()=>({ok:true,arrayBuffer:async()=>Buffer.from(poisoned)})});
+  assert.equal(bad[0].status,'unavailable');
+});
+test('deep links and search work with contract versions and paths',()=>{
+  assert.equal(documentsHref('git.status',2),'#/documents?protocol=git.status&v=2');
   assert.equal(documentsHref('../../secret'),'#/documents');
-  assert.equal(documentsRoute('#/documents?doc='+encodeURIComponent(doc.path)).doc,doc.path);
-  assert.equal(documentsRoute('#/documents?doc=../../secret').invalid,true);
-  const docs=DOCUMENT_CATALOG.map(x=>({...x,body:'# '+x.title}));
-  assert.equal(filterDocuments(docs,{query:'MCP'}).length,1);
-  assert.equal(filterDocuments(docs,{category:'Protocols'}).length,2);
-  assert.ok(NAV_ITEMS.some(x=>x.route==='/documents'&&x.label==='Documents'));
-  const app=await readFile(new URL('../app.js',import.meta.url),'utf8');
-  const build=await readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8');
-  assert.match(app,/renderDocuments\(root,documentsSnapshot,location\.hash\)/);
-  assert.match(app,/loadDocumentsCatalog/);
-  assert.match(build,/data\/documents\.json/);
-  assert.match(build,/'documents\.js'/);
+  assert.deepEqual(documentsRoute('#/documents?protocol=git.status&v=2'),
+    {id:'git.status',version:2,invalid:false});
+  assert.equal(documentsRoute('#/documents?protocol=../../secret').invalid,true);
+  const doc=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT});
+  assert.equal(filterDocuments(doc.protocols,{query:'branch'}).length,1);
+  assert.equal(filterDocuments(doc.protocols,{owner:'git'}).length,1);
+  assert.ok(NAV_ITEMS.some(x=>x.route==='/documents'));
 });
-
-class Element {
+class Element{
   constructor(tag){this.tagName=tag.toUpperCase();this.nodes=[];this.attrs={};this.text='';}
   set textContent(value){this.text=String(value);this.nodes=[];}
   get textContent(){return this.text+this.nodes.map(x=>x.textContent||'').join('');}
   set className(value){this.classes=value;}
-  setAttribute(name,value){this.attrs[name]=value;}
+  setAttribute(k,v){this.attrs[k]=v;}
   addEventListener(){}
   append(...nodes){this.nodes.push(...nodes);}
   replaceChildren(...nodes){this.text='';this.nodes=nodes;}
-  get lastChild(){return this.nodes.at(-1);}
+  querySelector(tag){return descendants(this).find(x=>x.tagName===tag.toUpperCase())||null;}
 }
-function descendants(node){
-  return [node,...(node.nodes||[]).flatMap(descendants)];
-}
-test('Documents reader renders Markdown as inert text, with tables and safe links',async()=>{
-  const root=await fixture();
+function descendants(node){return [node,...(node.nodes||[]).flatMap(descendants)];}
+test('Protocol reference renders inert DOM, release semvers and unknowns',()=>{
   const original=globalThis.document;
   globalThis.document={createElement:t=>new Element(t),
     createTextNode:s=>({textContent:s})};
   try{
-    const data=await loadDocuments({directory:root,sha:SHA,generatedAt:AT});
-    const target=data.documents[0];
-    target.body='# Protocol\n\n<script>alert(1)</script>\n\n'+
-      '| Heading | Value |\n| --- | --- |\n| A | B |\n\n'+
-      '[unsafe](javascript:alert(1)) [MCP](mcp.md)\n\n'+
-      '\x60\x60\x60js\nconsole.log(1)\n\x60\x60\x60';
+    const data=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
+      releases:[{version:'0.35.0',tag:'v0.35.0',sha:null,status:'unavailable',schema:null}]});
     const ui=new Element('main');
-    renderDocuments(ui,data,documentsHref(target.path));
+    renderDocuments(ui,data,documentsHref('git.status',1));
     const elements=descendants(ui);
     assert.ok(elements.some(x=>x.tagName==='TABLE'));
-    assert.ok(elements.some(x=>x.tagName==='PRE'));
-    assert.ok(elements.some(x=>x.textContent?.includes('<script>alert(1)</script>')));
+    assert.ok(elements.some(x=>x.textContent?.includes('0.35.0')));
+    assert.ok(elements.some(x=>x.tagName==='TD'&&x.textContent==='?'));
+    assert.ok(elements.some(x=>x.tagName==='DETAILS'));
     assert.equal(elements.some(x=>x.tagName==='SCRIPT'),false);
-    const anchors=elements.filter(x=>x.tagName==='A');
-    assert.ok(anchors.some(x=>x.href===documentsHref('docs/architecture/mcp.md')));
-    assert.equal(anchors.some(x=>x.href?.startsWith('javascript:')),false);
-  }finally{
-    globalThis.document=original;
-    await rm(root,{recursive:true,force:true});
-  }
+  }finally{globalThis.document=original;}
 });
