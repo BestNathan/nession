@@ -45,6 +45,9 @@ function buildErofsUtilsBuilder(file, tag, timeout = 100000) {
 function createFixture(builderTag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-3178-fixture-'));
   const script = `set -euo pipefail
+# The container runs as root while the host created this directory; keep the
+# created tree writable by the runner user so post-proof cleanup can unlink it.
+umask 000
 mkdir -p /fixture/source
 printf 'packaged-fixture\\n' > /fixture/source/hello.txt
 mkfs.erofs -T 0 -U ${FIXED_UUID} -b 4096 /fixture/fixture.erofs /fixture/source
@@ -65,7 +68,15 @@ od -An -tx1 -j1024 -N4 /fixture/fixture.erofs | tr -d ' \\n' > /fixture/magic
 }
 
 function removeFixture(fixture) {
-  if (fixture) fs.rmSync(fixture.dir, { recursive: true, force: true });
+  if (!fixture) return;
+  try {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  } catch (error) {
+    // A root-owned fixture entry can still be unlinkable by the runner user on
+    // some container runtimes. Cleanup is not the criterion: never turn an
+    // already-proven mount/unmount result into a Case failure.
+    console.warn('could not remove EROFS fixture ' + fixture.dir + ': ' + error.message);
+  }
 }
 
 /** Run a bash script inside an already-built stage image. */
