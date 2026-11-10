@@ -1,4 +1,4 @@
-// #3145: bounded, immutable-source attestation of the repaired Knowledge
+// #3145/#3235: bounded, immutable-source attestation of the repaired Knowledge
 // proposal reaching a protected HEAD and the exact Sandbox HTML public Pages
 // deployment. This collector is READ ONLY; only the canonical SC updater may
 // produce a verdict. The successor Publisher does NOT retroactively prove
@@ -29,7 +29,7 @@ const positive=n=>Number.isSafeInteger(n)&&n>0;
 const deny=(ok,why)=>{if(!ok)throw Error('knowledge sandbox #3145: '+why);};
 
 export function shouldCollectSandbox3145(stage,issue){
-  return stage==='post-merge' && String(issue)==='3145';
+  return stage==='post-merge' && ['3145','3235'].includes(String(issue));
 }
 function marker(log,pattern,why){
   deny(typeof log==='string'&&log.length<1024*1024,'unbounded '+why+' log');
@@ -214,6 +214,8 @@ export async function collectSandbox3145({repo,targetSha,stage,issue,get,getLog,
 }
 export function selfTestSandbox3145(){
   assert.equal(shouldCollectSandbox3145('post-merge',3145),true);
+  assert.equal(shouldCollectSandbox3145('post-merge',3235),true);
+  assert.equal(shouldCollectSandbox3145('pre-merge',3235),false);
   assert.equal(shouldCollectSandbox3145('pre-merge',3145),false);
   assert.equal(shouldCollectSandbox3145('post-merge',3156),false);
   const target='a'.repeat(40);
