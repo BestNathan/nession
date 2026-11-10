@@ -107,7 +107,7 @@ function parseRequest(event, context) {
   fail('unsupported publisher invocation; owner dispatch or authenticated proposal signal only');
 }
 function assertSingleCommitProposal(parentsText, proposalSha, expectedHead) {
-  const parents=parentsText.split(/\\s+/);
+  const parents=parentsText.split(/\s+/);
   if (parents.length !== 2 || parents[0] !== proposalSha || parents[1] !== expectedHead)
     fail('proposal must be exactly one direct child of current Knowledge head');
 }
