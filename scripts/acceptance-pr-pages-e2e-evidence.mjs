@@ -420,6 +420,7 @@ async function test(){
   }
   const signedRedirect={status:302,headers:headerMap({location:signed})};
   await rejects(signedRedirect,{...goodZip,status:301},/signed artifact HTTP/);
+  await rejects(signedRedirect,{...goodZip,status:404},/signed artifact HTTP 404/);
   await rejects(signedRedirect,{...goodZip,body:null},/no ZIP body/);
   await rejects(signedRedirect,{...goodZip,headers:
     headerMap({'content-length':String(MAX_ZIP+1)})},/oversized/);
