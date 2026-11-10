@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm,mkdir,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -8,7 +8,8 @@ import {describeFields,fieldSince,projectProtocolSchema,loadDocuments,
   validPublicDocuments,unavailableDocuments} from '../scripts/documents-project.mjs';
 import {releaseProtocolHistory,sortedReleases}
   from '../scripts/protocol-release-history.mjs';
-import {taggedProtocolSchema} from '../scripts/protocol-git-history.mjs';
+import {taggedProtocolSchema,cachedTaggedProtocolSchema}
+  from '../scripts/protocol-git-history.mjs';
 import {documentsHref,documentsRoute,validDocumentsSnapshot,
   filterDocuments,renderDocuments} from '../documents.js';
 import {NAV_ITEMS} from '../navigation.js';
@@ -236,6 +237,7 @@ test('Git Tag codegen uses a SHA-verified isolated worktree and a SHA cache',asy
     assert.deepEqual(await taggedProtocolSchema({...input,command:async()=>{
       throw Error('cache should avoid git/cargo work');
     }}),fixture());
+    assert.deepEqual(await cachedTaggedProtocolSchema(input),fixture());
     assert.equal(compiles,1);
     assert.equal(await taggedProtocolSchema({...input,tag:'../../evil'}),null);
     assert.equal(await taggedProtocolSchema({
@@ -265,6 +267,15 @@ test('missing historical codegen does not fabricate a field introduction',async(
       .response.fields.find(row=>row.path==='snapshot');
     assert.equal(field.since_status,'unknown');
   }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('credentialed Pages publisher never runs historical Rust codegen',async()=>{
+  const source=await readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8');
+  assert.match(source,/cachedTaggedProtocolSchema/);
+  assert.doesNotMatch(source,/(?:^|[^a-zA-Z])taggedProtocolSchema\(/);
+  const producer=await readFile(
+    new URL('../scripts/generate-protocol-history.mjs',import.meta.url),'utf8');
+  assert.match(producer,/GITHUB_TOKEN/);
+  assert.match(producer,/taggedProtocolSchema/);
 });
 test('deep links and search work with contract versions and paths',()=>{
   assert.equal(documentsHref('git.status',2),'#/documents?protocol=git.status&v=2');
