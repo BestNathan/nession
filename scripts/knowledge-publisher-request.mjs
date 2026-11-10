@@ -242,7 +242,7 @@ function selfTest() {
     ['user',{login:'attacker'}],
     ['body',issueEvent.comment.body+'\nignored=yes'],
     ['body',issueEvent.comment.body.replace('proposal_ref=refs/heads','proposal_ref=refs/pull')],
-    ['body',issueEvent.comment.body.replace(payload.proposal_sha,'a'.repeat(40))],
+    ['body',issueEvent.comment.body.replace(payload.proposal_sha,'not-a-sha')],
     ['body',issueEvent.comment.body.replace('expected_head=','bad_key=')],
   ])assert.throws(()=>parseRequest({
     ...issueEvent,comment:{...issueEvent.comment,[field]:value},
