@@ -80,23 +80,20 @@ const knowledge={
  ],
 };
 
-// Browser fixture uses Nession release semver support (not contract v1/v2
-// as the release axis). No untrusted Rust/Provider contents reach the DOM.
+// Browser fixtures show one source-backed release introduction per field.
+// Contract v1/v2 remains a separate typed protocol selector.
 const request={alias:'StatusRequest',shape:{type:'object',properties:{
   session:{type:'string'}}},fields:[{path:'session',variant:'',type:'string',required:true,
-    releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'supported'}],
-    firstObserved:'0.36.0'}]};
+    description:'Session identity',since:null,since_status:'unknown'}]};
 const response={alias:'StatusResponse',shape:{type:'object',properties:{
   status:{type:'string'},snapshot:{type:'string'}}},fields:[
    {path:'status',variant:'state=ok',type:'string',required:true,
-     releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'supported'}],
-     firstObserved:'0.36.0'},
+     description:'Repository status',since:'0.36.0',since_status:'verified'},
    {path:'snapshot',variant:'state=ok',type:'string',required:true,
-     releases:[{version:'0.35.0',status:'unknown'},{version:'0.36.0',status:'not-supported'}],
-     firstObserved:null}
+     description:'Snapshot token',since:null,since_status:'unreleased'}
   ]};
 const documents={
- schema_version:3,status:'available',generated_at:'2026-11-10T10:00:00Z',
+ schema_version:4,status:'available',generated_at:'2026-11-10T10:00:00Z',
  source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40),
    source_version:'0.35.0'},
  definitions:{},
@@ -104,11 +101,9 @@ const documents={
   {version:'0.36.0',tag:'v0.36.0',sha:'b'.repeat(40),status:'available'}],
  protocols:[
   {id:'git.status',owner:'git',wires:['git.status'],
-    versions:[{version:1,request,response},{version:2,request,response}],
-    support:{request:[],response:[]}},
+    versions:[{version:1,request,response},{version:2,request,response}]},
   {id:'server.session.create',owner:'core',wires:['server.session.create'],
-    versions:[{version:1,request:{...request,alias:'SessionCreateRequest'},response:null}],
-    support:{request:[],response:[]}}
+    versions:[{version:1,request:{...request,alias:'SessionCreateRequest'},response:null}]}
  ]
 };
 
