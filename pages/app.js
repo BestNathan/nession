@@ -1,8 +1,9 @@
 import { renderKnowledge, validKnowledgeSnapshot } from './knowledge.js';
+import { renderDocuments, validDocumentsSnapshot } from './documents.js';
 // Pages deliberately has no dependency on nession/web, runtime APIs, or UI packages.
 const root = document.getElementById('main');
 const freshness = document.getElementById('freshness');
-const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence', '/prototypes', '/knowledge']);
+const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence', '/prototypes', '/knowledge', '/documents']);
 const PROTOTYPE_INFO = {
   'terminal-fixed-cols-2487': {
     title: 'Fixed-column Terminal Lab',
@@ -30,6 +31,8 @@ let snapshot = null;
 let siteSnapshotStatus = 'loading';
 let knowledgeSnapshot = null;
 let knowledgeSnapshotStatus = 'loading';
+let documentsSnapshot = null;
+let documentsSnapshotStatus = 'loading';
 
 function node(tag, className, content) {
   const item = document.createElement(tag);
@@ -720,11 +723,12 @@ function render(){
   const agentMatch=raw.match(/^\/agents\/(developer|reviewer|acceptor|auditor)\/([a-z][a-z0-9-]{0,62})(?:\?(?:window=(?:7d|30d)|outcome=[a-z_]+|[a-z_]+=[a-z0-9_-]+)(?:&[a-z_]+=[a-z0-9_-]+)*)?$/);
   const agentPath=raw.startsWith('/agents/')||raw.startsWith('/agents?');
   const detail=raw.startsWith('/work/')&&!routes.has(raw);
-  const route=agentPath?'/agents':match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':routes.has(raw)?raw:detail?'/work':raw==='/'
+  const route=agentPath?'/agents':match?'/work':(raw==='/knowledge'||raw.startsWith('/knowledge?'))?'/knowledge':
+    (raw==='/documents'||raw.startsWith('/documents?'))?'/documents':routes.has(raw)?raw:detail?'/work':raw==='/'
     ?'/':'/missing';
   root.replaceChildren();
   // A hashchange may arrive while the independent site.json request is still
-  // pending. Only these routes need that snapshot; Prototypes and Knowledge
+  // pending. Only these routes need that snapshot; Prototypes, Knowledge and Documents
   // have their own read-only manifests and remain independently navigable.
   const needsSite=!!match||['/','/agents','/work','/repository','/evidence'].includes(route);
   if(needsSite&&!snapshot){
@@ -750,6 +754,9 @@ function render(){
     }else if(route==='/knowledge'){
       if(knowledgeSnapshotStatus==='loading')root.append(node('p','loading','Loading public Knowledge snapshot…'));
       else renderKnowledge(root,knowledgeSnapshot,location.hash);
+    }else if(route==='/documents'){
+      if(documentsSnapshotStatus==='loading')root.append(node('p','loading','Loading technical Documents…'));
+      else renderDocuments(root,documentsSnapshot,location.hash);
     }
     else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
     else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
@@ -804,12 +811,32 @@ async function loadKnowledgeCatalog(){
   }
   if(location.hash.startsWith('#/knowledge'))render();
 }
+// Technical Documents project versioned Protocol contracts from the pinned Rust schema.
+// Their independent loader cannot block Repository, Knowledge or other routes.
+async function loadDocumentsCatalog(){
+  try{
+    const response=await fetch(new URL('data/documents.json',document.baseURI),
+      {cache:'no-cache',signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw new Error('Documents snapshot unavailable');
+    const result=await response.json();
+    if(!validDocumentsSnapshot(result))throw new Error('Invalid public Documents snapshot');
+    documentsSnapshot=result;
+    documentsSnapshotStatus=result.status==='available'?'available':'unavailable';
+  }catch(error){
+    console.warn('Pages Documents snapshot unavailable',error);
+    documentsSnapshot=null;
+    documentsSnapshotStatus='unavailable';
+  }
+  if(location.hash.startsWith('#/documents'))render();
+}
 async function init(){
   window.addEventListener('hashchange',render);
   void loadPrototypeCatalog();
   void loadKnowledgeCatalog();
+  void loadDocumentsCatalog();
   // Keep deep links correct even if a user navigates before site.json resolves.
-  if(!location.hash.startsWith('#/knowledge')&&!location.hash.startsWith('#/prototypes'))render();
+  if(!location.hash.startsWith('#/knowledge')&&!location.hash.startsWith('#/prototypes')&&
+    !location.hash.startsWith('#/documents'))render();
   try{
     const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache',signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error('snapshot unavailable');
