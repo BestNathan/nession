@@ -46,8 +46,8 @@ const globs=Object.fromEntries(Object.entries(sources)
 for(const key of ['quality','e2e','cases']){
   assert.deepEqual(globs[key],['**'],'zero-net-diff PR must trigger '+key);
   assert.throws(()=>prPaths(sources[key],'untrusted-workflow.yml'),/paths missing/);
-  assert.throws(()=>prPaths(sources[key].replace('branches: [staging, main]',
-    'branches: [main]'),sourceFiles[key]),/branch\/scope guard/);
+  assert.throws(()=>prPaths(sources[key].replace('  pull_request:\n    branches: [staging, main]',
+    '  pull_request:\n    branches: [main]'),sourceFiles[key]),/branch\/scope guard/);
 }
 const script=classifier();
 const cases=[
