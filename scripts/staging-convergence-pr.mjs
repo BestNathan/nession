@@ -380,6 +380,46 @@ export function selfTest(){
       /metadata|parents|source/);
     run('update-ref','refs/remotes/origin/main',lane);
     assert.throws(()=>verifiedConvergenceBatch(pr,root,lane,merged),/ancestry/);
+    // #3211: a trusted Publisher promotion is not a source-sync PR and
+    // carries no disposable Requirement Issue, yet it MUST execute actual
+    // selected browser assertions, not report Not Required or unresolved.
+    for(const id of BROWSER_DESIGN_IDS)
+      fs.writeFileSync(path.join(root,'e2e/tests/browser',id+'.spec.ts'),
+        '// canonical browser-design fixture\n');
+    run('add','.');run('commit','-qm','staging design catalog');
+    const promoteSha=run('rev-parse','HEAD');
+    const promotion={
+      number:19,title:'release: promote staging to main',
+      user:{login:'nession-publisher[bot]'},
+      body:'Staging Convergence automated proposal (source: Release / Staging Convergence).'+
+        '\n\n- Direction: staging -> main\n- Planned main SHA: '+main+
+        '\n- Planned lane SHA: '+promoteSha+'\n',
+      base:{ref:'main',sha:main,repo:{full_name:REPO}},
+      head:{ref:'staging',sha:promoteSha,repo:{full_name:REPO}},
+    };
+    assert.equal(isNativePromotionPr(promotion),true);
+    assert.equal(isNativePromotionPr({...promotion,user:{login:'attacker'}}),false);
+    assert.equal(isNativePromotionPr({...promotion,head:{...promotion.head,ref:'feature'}}),false);
+    assert.equal(isNativePromotionPr({...promotion,body:promotion.body.replace(main,'f'.repeat(40))}),false);
+    const promoter=promotionE2ESelection(promotion,root,main);
+    assert.equal(promoter.mode,'selected');
+    assert.deepEqual(promoter.issues,[]);
+    assert.ok(BROWSER_DESIGN_IDS.every(id=>promoter.selected.some(x=>x.id===id)));
+    assert.ok(promoter.selected.some(x=>x.id==='login'));
+    assert.ok(promoter.selected.some(x=>x.id==='new-browser'));
+    assert.deepEqual(promotionE2ESelection(promotion,root,main),promoter);
+    assert.throws(()=>promotionE2ESelection(promotion,root,lane),/untrusted/);
+    assert.throws(()=>promotionE2ESelection(promotion,root,main,head),/untrusted/);
+    assert.throws(()=>promotionE2ESelection({...promotion,
+      base:{...promotion.base,sha:lane}},root,lane),/untrusted|stale/);
+    // Delete an original runnable ID: it must never silently become a
+    // Not Required receipt or a synthesized passing test result.
+    run('rm','e2e/tests/browser/login.spec.ts');
+    run('commit','-qm','remove original browser ID');
+    const removedSha=run('rev-parse','HEAD');
+    const removedPr={...promotion,head:{...promotion.head,sha:removedSha},
+      body:promotion.body.replace(promoteSha,removedSha)};
+    assert.throws(()=>promotionE2ESelection(removedPr,root,main),/removed runnable/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
   console.log('PR-native convergence: immutable Git source, historical E2E, approval PASS');
 }
