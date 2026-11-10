@@ -175,14 +175,12 @@ function prepare(eventPath, destination) {
   if (git(root, 'rev-parse', 'FETCH_HEAD') !== proposal_sha)
     fail('fetched proposal is not the pinned commit');
   git(root, 'merge-base', '--is-ancestor', expected_head, proposal_sha);
-  if (request.expected_head === null) {
-    // Authorizing a create event never grants permission to publish an
-    // arbitrary history. It must be one single fresh commit on the *current*
-    // governed Knowledge head. Any concurrent publication is STALE_HEAD.
-    const parents=git(root, 'rev-list', '--parents', '-n', '1', proposal_sha).split(/\s+/);
-    if (parents.length !== 2 || parents[0] !== proposal_sha || parents[1] !== expected_head)
-      fail('owner-created proposal must be one direct child of current Knowledge head');
-  }
+  // All admission paths (owner comment, recovery dispatch and legacy create
+  // signal) authorize exactly one new data-only commit. An ancestor-only check
+  // would allow a comment or dispatch to publish an unreviewed commit chain.
+  const parents=git(root, 'rev-list', '--parents', '-n', '1', proposal_sha).split(/\s+/);
+  if (parents.length !== 2 || parents[0] !== proposal_sha || parents[1] !== expected_head)
+    fail('proposal must be exactly one direct child of current Knowledge head');
   const localBranch = 'knowledge-publisher-' + process.env.GITHUB_RUN_ID + '-' + process.env.GITHUB_RUN_ATTEMPT;
   git(root, 'worktree', 'add', '-b', localBranch, destination, proposal_sha);
   if (git(destination, 'status', '--porcelain')) fail('candidate must be clean');
