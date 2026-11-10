@@ -143,9 +143,12 @@ function validateSignalJobRemotely(runId,proposalSha) {
   try{response=JSON.parse(result.stdout);}catch{fail('invalid original source signal job JSON');}
   verifySignalJobReceipt(response,runId,proposalSha);
 }
+// GitHub issue_comment events include the full public Issue/Repo envelopes,
+// not just the four-line owner command. Keep a strict bounded event size;
+// 8 KiB was sufficient only for repository_dispatch, not for real comments.
 function prepare(eventPath, destination) {
   if (typeof eventPath !== 'string' || !eventPath ||
-      !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 8192)
+      !fs.statSync(eventPath).isFile() || fs.statSync(eventPath).size > 256 * 1024)
     fail('missing or oversized GitHub event');
   const request = parseRequest(
     JSON.parse(fs.readFileSync(eventPath, 'utf8')),
