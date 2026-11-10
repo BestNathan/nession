@@ -387,7 +387,9 @@ async function test(){
   const bytes=Buffer.from([0x50,0x4b,0x03,0x04,0x61]);
   const headerMap=o=>({get:key=>o[key]??null});
   const goodZip={status:200,headers:headerMap({'content-length':String(bytes.length)}),
-    body:(async function*(){yield bytes.slice(0,4);yield bytes.slice(4);})()};
+    // A Response body stream is single-use: give each negative case a fresh
+    // iterator rather than reusing the already consumed success fixture.
+    get body(){return (async function*(){yield bytes.slice(0,4);yield bytes.slice(4);})();}};
   const calls=[];
   const signed='https://productionresultssa1.blob.core.windows.net/artifacts/zip?sig=signed';
   const fetcher=async(url,options)=>{
