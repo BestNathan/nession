@@ -8,7 +8,7 @@ import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditStructuredEnvelope } from './lib/agent/tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditWithContractRetry, renderIssueAuditContractRepairPrompt, renderIssueAuditFormatRepairPrompt, ISSUE_AUDIT_PROPOSAL_SCHEMA, issueAuditProposalSchemaForIssue, issueAuditStructuredEnvelope } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
@@ -197,7 +197,7 @@ function runContractRepair(issue, previous, error) {
     model: claudeRequestModel(), maxTurns: 1,
     allowedTools: '',
     disallowedTools: 'Read,Glob,Grep,Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
-    tools: '', jsonSchema: ISSUE_AUDIT_PROPOSAL_SCHEMA,
+    tools: '', jsonSchema: issueAuditProposalSchemaForIssue(issue),
   });
   if (proc.error) throw proc.error;
   if (proc.status !== 0 || !parsed) {
@@ -234,7 +234,7 @@ function runAgent(issue) {
     prompt: promptFor(issue, audit), model: requestModel,
     maxTurns: process.env.ISSUE_AUDIT_MAX_TURNS || '20',
     allowedTools: allowed, disallowedTools: disallowed,
-    jsonSchema: ISSUE_AUDIT_PROPOSAL_SCHEMA,
+    jsonSchema: issueAuditProposalSchemaForIssue(issue),
   });
   if (result.error) throw result.error;
   const parsed = envelope;
