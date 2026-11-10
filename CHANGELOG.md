@@ -605,3 +605,10 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Record the merged #3220 single-direct-child admission fix across all owner publisher triggers, retaining the real #3156 owner-comment and Pages evidence and exact-main-SHA source
 - Source: https://github.com/BestNathan/nession/issues/3156
+
+## 2026-11-10T17:19:07Z | update | Nession Sandbox policy and execution isolation architecture
+- Path: topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md
+- Topic: engineering
+- Categories: agent, architecture, sandbox, security
+- Reason: Record #3141 native cgroup v2 KV passthrough: Agent-discovered declarative controller files, one basename/lifecycle/status/command naming owner, kernel-authoritative raw values, prelaunch O_NOFOLLOW writes with readback, and the independent seccomp registry; cite the merged staging SHA and Case receipts
+- Source: https://github.com/BestNathan/nession/issues/3141
