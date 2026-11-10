@@ -730,7 +730,7 @@ fn native_beyond_v1_controls_apply_readback_and_fail_closed() {
 
     // Discovery is the measured file list: a key the child never exposed must
     // fail closed rather than being written on faith.
-    let mut absent = request.clone();
+    let mut absent = request;
     absent.policy = serde_json::from_value(serde_json::json!({
         "version": 1,
         "enabled": true,
