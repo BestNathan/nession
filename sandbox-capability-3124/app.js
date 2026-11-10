@@ -183,6 +183,21 @@
         '</p><p>此策略不可编辑/添加；已保存的草稿不会被自动删除，预检仍须逐项拒绝不支持的请求。</p></div>')+
       '</section>';
   }
+  // Render *registered* native policy implementations for this domain.
+  // An Agent advertising a new policy path alone does not make an older
+  // client understand its versioned schema or own an editor for it.
+  function domainImplementationPanels(domain,renderers){
+    var entries=agentFieldCatalog().implementations.filter(function(x){return x.path.startsWith(domain+".")});
+    if(!entries.length)return '<p class="module-empty">当前协议/Agent 未注册此类策略实现；没有可配置项。</p>';
+    return entries.map(function(entry){
+      if(Object.prototype.hasOwnProperty.call(renderers,entry.path))return renderers[entry.path];
+      return '<section class="policy-implementation is-disabled" data-policy-implementation="'+
+        escapeHtml(entry.path)+'" data-policy-status="client-unsupported"><div class="policy-impl-header">'+
+        '<div><h4>'+escapeHtml(entry.path)+'</h4><p class="subline">Agent 报告了此策略，但当前前端没有对应的版本化配置组件。</p></div>'+
+        '<span class="policy-impl-status unknown">客户端未支持</span></div>'+
+        '<div class="policy-support-reason">必须同时发布 Policy Schema、Agent 实现与前端配置组件；不能将未知策略作为任意 JSON 编辑器或默认为可用。</div></section>';
+    }).join("");
+  }
   function kvRows(kind,unavailable){
     var rows=state.draft[kind+"Rows"],resource=kind==="resource";
     var suggestionId=resource?"resource-key-suggestions":"syscall-key-suggestions";
@@ -399,8 +414,8 @@
       '<div class="module-list"><div class="module-list-head"><h4>待写入的 cgroup v2 配置</h4>'+
       '<span class="subtxt">'+state.draft.resourceRows.length+' 条原生 KV</span></div>'+
       kvRows("resource",false)+'</div></div>';
-    return implementationPanel("resource.cgroup_v2","cgroup v2 · 原生资源控制",
-      "只有 Agent 实测 Linux cgroup v2 和当前受管子控制器可用时才启用",contents);
+    return domainImplementationPanels("resource",{"resource.cgroup_v2":implementationPanel("resource.cgroup_v2","cgroup v2 · 原生资源控制",
+      "只有 Agent 实测 Linux cgroup v2 和当前受管子控制器可用时才启用",contents)});
   }
   function syscallEditor(){
     var values=agentFieldCatalog().syscall.find(function(x){return x.key==="seccomp.profile"});
@@ -414,8 +429,8 @@
         '<div class="module-empty">Agent 未注册可用 Profile。</div>')+
       (picked?'<div class="module-detail-note"><strong>已选 Profile</strong><code>'+escapeHtml(picked)+
         '</code><p>Profile 来源为 Agent Registry，不接受任意上传过滤程序。</p></div>':'')+'</div>';
-    return implementationPanel("syscall.seccomp","seccomp · 系统调用过滤",
-      "依赖实际加载能力和当前 Agent 注册的 Profile",contents);
+    return domainImplementationPanels("syscall",{"syscall.seccomp":implementationPanel("syscall.seccomp","seccomp · 系统调用过滤",
+      "依赖实际加载能力和当前 Agent 注册的 Profile",contents)});
   }
   function editor(){
     var id=state.openGroup;
