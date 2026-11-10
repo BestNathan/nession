@@ -31,8 +31,64 @@ async fn main() -> anyhow::Result<()> {
                 "db_path": config.db_path,
                 "image_blob_dir": config.image_blob_dir,
                 "image_build_dir": config.image_build_dir,
+                "image_gc_interval_secs": config.image_gc_interval_secs,
+                "image_gc_max_candidates": config.image_gc_max_candidates,
                 "terminal_cols": config.terminal_cols,
                 "terminal_web_font_size": config.terminal_web_font_size,
+            })
+        );
+        return Ok(());
+    }
+
+    // `--print-image-diagnostics [path]` reports the Server's image registry
+    // storage without starting a listener (#3180 SC-05): metadata rows by
+    // status, ready blob bytes and unpublished temporary files. It opens the
+    // same DB and blob store the runtime would use.
+    if let Some(index) = args
+        .iter()
+        .position(|arg| arg == "--print-image-diagnostics")
+    {
+        let config_path = args
+            .get(index + 1)
+            .map_or_else(|| "config.toml".to_string(), Clone::clone);
+        let config = effective_config(&config_path)?;
+        // A diagnostics read may be the first start against a fresh home. The
+        // runtime creates its component directories before opening the DB
+        // (#3179); mirror that here so a custom db_path's parent exists.
+        if let Some(parent) = Path::new(&config.db_path).parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let db = std::sync::Arc::new(nession_server::db::Database::new(&config.db_path).await?);
+        let blobs = nession_erofs::BlobStore::new(&config.image_blob_dir)
+            .context("failed to open the image blob store")?;
+        let backend: std::sync::Arc<dyn nession_server::image::ImageBuildBackend> =
+            std::sync::Arc::new(nession_server::image::UnavailableBackend);
+        let manager = nession_server::image::ImageManager::new(
+            db,
+            backend,
+            blobs,
+            1,
+            config.image_access_token_expiry_secs,
+        );
+        let diagnostics = manager
+            .diagnostics()
+            .await
+            .context("failed to read image storage diagnostics")?;
+        println!(
+            "{}",
+            serde_json::json!({
+                "db_path": config.db_path,
+                "blob_dir": diagnostics.blob_dir,
+                "ready_images": diagnostics.ready_images,
+                "failed_images": diagnostics.failed_images,
+                "building_images": diagnostics.building_images,
+                "blobs": diagnostics.blobs,
+                "blob_bytes": diagnostics.blob_bytes,
+                "temp_files": diagnostics.temp_files,
+                "temp_bytes": diagnostics.temp_bytes,
+                "image_gc_interval_secs": config.image_gc_interval_secs,
+                "image_gc_max_candidates": config.image_gc_max_candidates,
             })
         );
         return Ok(());

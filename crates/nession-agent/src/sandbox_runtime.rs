@@ -91,7 +91,12 @@ impl SandboxRuntime {
     }
 
     /// Build the host settings from the Agent configuration.
-    pub fn from_config(config: &crate::config::AgentConfig) -> Arc<Self> {
+    ///
+    /// `identity` is this Agent's stable identity. The verified EROFS cache is
+    /// namespaced per identity (#3180), so the sandbox mounts only the images
+    /// this Agent owns; another identity's blobs are not reachable through the
+    /// composition root.
+    pub fn from_config(config: &crate::config::AgentConfig, identity: &str) -> Arc<Self> {
         let agent_dir = nession_common::paths::agent_dir().ok();
         let state_dir = config
             .sandbox
@@ -125,8 +130,12 @@ impl SandboxRuntime {
         // The verified EROFS cache is the only root a composition may mount
         // files from (#3023). Resolution failure leaves it unset, so a
         // composition request fails closed instead of trusting an arbitrary path.
+        // The root is this identity's namespace, never the shared volume root
+        // (#3180): another Agent's mutable cache must not be mountable.
         if let Ok(resolved) = config.effective_erofs_storage_dir() {
-            settings.erofs_image_root = Some(resolved.path);
+            if let Ok(namespace) = crate::erofs_cache::identity_root(&resolved.path, identity) {
+                settings.erofs_image_root = Some(namespace);
+            }
         }
         if let Some(seconds) = config.sandbox.launch_timeout_secs {
             settings.launch_timeout = Duration::from_secs(seconds);

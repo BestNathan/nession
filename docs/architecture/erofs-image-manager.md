@@ -147,6 +147,41 @@ Expired access grants and leases are pruned on GC. Restarting the Server keeps
 image metadata, aliases and Project references because all of it is in SQLite;
 blob bytes are already on disk under their digest.
 
+### Bounded, scheduled sweeps (#3180)
+
+The GC operation is bounded per sweep by `image_gc_max_candidates` and a
+deletion byte budget; `GcReport` reports `candidates`, `examined_images`,
+`removed_images`, `removed_blobs`, `reclaimed_bytes`, `skipped_active_transfers`
+and `deferred_by_limit`. A candidate deferred by either bound is **not**
+deleted at all (a ready row is never removed while its blob is kept), and the
+next sweep re-selects it from the database. The sweep owns no in-memory cursor,
+so an interrupted or restarted sweep is retryable by construction: a failed
+unlink leaves the row for the next attempt.
+
+The Server runtime (not a test or request path) schedules the sweep every
+`image_gc_interval_secs` (default 6 hours; `0` disables the schedule and an
+operator can still run one sweep). Each completed tick logs one structured
+receipt: removed images/blobs, reclaimed bytes, deferred candidates and skipped
+active transfers. There is no unbounded delete loop and no per-request GC.
+
+### GC and diagnostics
+
+`ImageManager::diagnostics()` reports metadata rows by status
+(`ready_images`, `failed_images`, `building_images`) separately from storage
+usage: `blobs`/`blob_bytes` are ready content-addressed bytes under
+`sha256/`, while `temp_files`/`temp_bytes` are unpublished `.tmp` artifacts of
+a failed or interrupted publication. The same values are available without a
+listener:
+
+```bash
+nession-server --print-image-diagnostics [config.toml]
+```
+
+Agent cache bytes are deliberately a different owner and are reported by
+`ErofsCache::diagnostics` (see [agent EROFS cache](agent-erofs-cache.md)); the
+two counters are what distinguish Server registry consumption from per-Agent
+cache consumption.
+
 ## Configuration
 
 ```toml
@@ -154,11 +189,16 @@ image_blob_dir = "~/.nession/server/images/blobs"
 image_build_dir = "~/.nession/server/images/build"
 image_max_concurrent_builds = 2
 image_access_token_expiry_secs = 300
+image_gc_interval_secs = 21600   # 0 disables scheduled GC
+image_gc_max_candidates = 64
 ```
 
 Bounds: `image_max_concurrent_builds` in `[1, 8]`, grant expiry in
-`[30, 3600]` seconds. The build workspace must be private to the Server; never
-point it at a repository or a user directory.
+`[30, 3600]` seconds, `image_gc_interval_secs` either `0` or in `[60, 604800]`,
+and `image_gc_max_candidates` in `[1, 1024]`. The build workspace must be
+private to the Server; never point it at a repository or a user directory.
+The byte budget for one sweep is fixed at 512 MiB, in addition to the
+candidate bound.
 
 ## Runtime prerequisites
 
@@ -192,6 +232,11 @@ only; Project authorization is always checked independently.
   deterministic fake builds, atomic/deduplicating store.
 - `cargo test -p nession-server --lib image` — dedupe, alias revision, failed
   build state, Project/digest grant isolation, GC refs/leases/transfers,
-  restart persistence, HTTP 200/206/403/404/416.
+  bounded/resumable GC with a byte budget, storage diagnostics, restart
+  persistence, HTTP 200/206/403/404/416.
+- `scripts/gitops-storage-contract.mjs` (Gate `gitops-storage-contract`)
+  renders every managed GitOps environment and proves the Server registry,
+  blobs and build workspace resolve under the environment's persisted NFS
+  PV/PVC/subPath, with distinct effective roots per environment (#3180 SC-03).
 - The `#3022` acceptance Cases run the real `mkfs.erofs` build and the exact
   command/store/HTTP assertions at the PR head.

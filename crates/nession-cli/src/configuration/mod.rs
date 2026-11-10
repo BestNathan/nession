@@ -496,6 +496,14 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::U64,
     },
     FieldSpec {
+        key: "image_gc_interval_secs",
+        kind: FieldKind::U64,
+    },
+    FieldSpec {
+        key: "image_gc_max_candidates",
+        kind: FieldKind::UsizeNonZero,
+    },
+    FieldSpec {
         key: "terminal_stall_grace_secs",
         kind: FieldKind::U64,
     },

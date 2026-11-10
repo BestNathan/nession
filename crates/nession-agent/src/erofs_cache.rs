@@ -28,6 +28,35 @@ pub const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 /// A partial download older than this is reconciled; a newer one is resumed.
 pub const PARTIAL_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// The directory below the configured cache root that holds one namespace per
+/// Agent identity (#3180).
+///
+/// Several Agents may share one durable (RWX) volume. Ready bytes are
+/// immutable and content-addressed, but `tmp` partials and eviction are
+/// mutable state: two processes racing on `<tmp>/<hex>.part`, or one Agent
+/// evicting a blob another process is reading, is exactly what a per-identity
+/// namespace prevents. A shared identity deliberately shares one namespace —
+/// it is the same logical Agent.
+pub const IDENTITY_NAMESPACE_DIR: &str = "agents";
+
+/// One Agent identity's verified bytes and in-flight partials, for operator
+/// diagnostics (#3180 SC-05).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheDiagnostics {
+    pub identity: String,
+    /// This Agent identity's namespace root.
+    pub root: PathBuf,
+    pub ready_blobs: u64,
+    pub ready_bytes: u64,
+    /// Every file under this identity's `tmp` directory.
+    pub temp_artifacts: u64,
+    pub temp_bytes: u64,
+    /// `tmp` partials older than [`PARTIAL_RETENTION`].
+    pub stale_partials: u64,
+    pub evicted_blobs: u64,
+    pub reconciled_partials: u64,
+}
+
 /// A scoped, single-digest bearer grant minted by `server.image.access`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadGrant {
@@ -123,9 +152,13 @@ fn is_ephemeral_mount(fs_type: &str) -> bool {
     )
 }
 
-/// A persistent, content-addressed image cache.
+/// A persistent, content-addressed image cache owned by one Agent identity.
 pub struct ErofsCache {
+    /// The configured durable root (shared by every identity on the volume).
+    configured_root: PathBuf,
+    /// `<configured_root>/agents/<identity>` — this Agent's mutable namespace.
     root: PathBuf,
+    identity: String,
     client: reqwest::Client,
     /// One fetch per digest. The map entry is removed when no waiter remains.
     locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
@@ -133,6 +166,8 @@ pub struct ErofsCache {
     pinned: Mutex<HashMap<String, u32>>,
     bytes_transferred: AtomicU64,
     fetch_count: AtomicU64,
+    evicted_blobs: AtomicU64,
+    reconciled_partials: AtomicU64,
 }
 
 impl ErofsCache {
@@ -140,47 +175,71 @@ impl ErofsCache {
     ///
     /// `ResolvedErofsStorage` comes only from
     /// [`crate::config::AgentConfig::effective_erofs_storage_dir`], which owns
-    /// the TOML > environment > native-default precedence.
-    pub async fn open_resolved(resolved: &ResolvedErofsStorage) -> Result<Self> {
-        Self::open_with_probe(resolved, &ProcMountsProbe).await
+    /// the TOML > environment > native-default precedence. `identity` is the
+    /// stable Agent identity (see [`crate::identity::resolve_agent_id`]); two
+    /// Agent processes with different identities on one volume never share
+    /// ready or partial files.
+    pub async fn open_resolved(resolved: &ResolvedErofsStorage, identity: &str) -> Result<Self> {
+        Self::open_with_probe(resolved, identity, &ProcMountsProbe).await
     }
 
     /// Open with an injected mount probe (tests and non-Linux hosts).
     pub async fn open_with_probe(
         resolved: &ResolvedErofsStorage,
+        identity: &str,
         probe: &dyn StorageProbe,
     ) -> Result<Self> {
-        let root = resolved.path.clone();
-        std::fs::create_dir_all(root.join("sha256")).with_context(|| {
+        validate_identity(identity)?;
+        let configured_root = resolved.path.clone();
+        std::fs::create_dir_all(&configured_root).with_context(|| {
             format!(
-                "cannot create EROFS blob directory under {}",
-                root.display()
+                "cannot create EROFS cache root {}",
+                configured_root.display()
             )
         })?;
-        std::fs::create_dir_all(root.join("tmp")).with_context(|| {
-            format!(
-                "cannot create EROFS temp directory under {}",
-                root.display()
-            )
-        })?;
-        validate_storage(&root, resolved.explicit, probe)?;
+        validate_storage(&configured_root, resolved.explicit, probe)?;
+        let root = identity_root(&configured_root, identity)?;
+        for subdir in ["sha256", "tmp"] {
+            std::fs::create_dir_all(root.join(subdir)).with_context(|| {
+                format!(
+                    "cannot create EROFS {} directory under {}",
+                    subdir,
+                    root.display()
+                )
+            })?;
+        }
+        refuse_symlinked_identity_root(&root)?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(30 * 60))
             .build()
             .context("cannot build the EROFS download client")?;
         Ok(Self {
+            configured_root,
             root,
+            identity: identity.to_string(),
             client,
             locks: Mutex::new(HashMap::new()),
             pinned: Mutex::new(HashMap::new()),
             bytes_transferred: AtomicU64::new(0),
             fetch_count: AtomicU64::new(0),
+            evicted_blobs: AtomicU64::new(0),
+            reconciled_partials: AtomicU64::new(0),
         })
     }
 
+    /// This Agent identity's namespace root.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The configured durable root shared by every identity on the volume.
+    pub fn configured_root(&self) -> &Path {
+        &self.configured_root
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.identity
     }
 
     /// Total image-body bytes downloaded by this cache instance.
@@ -191,6 +250,58 @@ impl ErofsCache {
     /// Total cold fetches performed by this cache instance.
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
+    }
+
+    /// Verified blobs removed by [`Self::evict`] since this instance opened.
+    pub fn evicted_blobs(&self) -> u64 {
+        self.evicted_blobs.load(Ordering::Relaxed)
+    }
+
+    /// Stale partials removed by [`Self::reconcile_stale_partials`] since this
+    /// instance opened.
+    pub fn reconciled_partials(&self) -> u64 {
+        self.reconciled_partials.load(Ordering::Relaxed)
+    }
+
+    /// Measure this identity's durable blob bytes, temporary artifacts, stale
+    /// partials and retention outcomes (#3180 SC-05).
+    ///
+    /// The scan is read-only and bounded by the identity namespace, so it can
+    /// never report another Agent's bytes as this Agent's cache.
+    pub fn diagnostics(&self, now: SystemTime) -> Result<CacheDiagnostics> {
+        let (ready_blobs, ready_bytes) = scan_directory(&self.root.join("sha256"))?;
+        let mut diagnostics = CacheDiagnostics {
+            identity: self.identity.clone(),
+            root: self.root.clone(),
+            ready_blobs,
+            ready_bytes,
+            temp_artifacts: 0,
+            temp_bytes: 0,
+            stale_partials: 0,
+            evicted_blobs: self.evicted_blobs(),
+            reconciled_partials: self.reconciled_partials(),
+        };
+        for entry in std::fs::read_dir(self.root.join("tmp")).with_context(|| {
+            format!(
+                "cannot read EROFS temp directory under {}",
+                self.root.display()
+            )
+        })? {
+            let entry = entry?;
+            let metadata = entry.metadata()?;
+            if !metadata.is_file() {
+                continue;
+            }
+            diagnostics.temp_artifacts += 1;
+            diagnostics.temp_bytes += metadata.len();
+            if entry.file_name().to_string_lossy().ends_with(".part") {
+                let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                if now.duration_since(modified).unwrap_or_default() > PARTIAL_RETENTION {
+                    diagnostics.stale_partials += 1;
+                }
+            }
+        }
+        Ok(diagnostics)
     }
 
     /// Pin a digest for an active consumer. Eviction refuses a pinned digest.
@@ -290,6 +401,7 @@ impl ErofsCache {
         if path.exists() {
             std::fs::remove_file(&path)
                 .with_context(|| format!("cannot evict {}", path.display()))?;
+            self.evicted_blobs.fetch_add(1, Ordering::Relaxed);
             return Ok(true);
         }
         Ok(false)
@@ -313,6 +425,8 @@ impl ErofsCache {
                 removed += 1;
             }
         }
+        self.reconciled_partials
+            .fetch_add(removed, Ordering::Relaxed);
         Ok(removed)
     }
 
@@ -449,6 +563,66 @@ fn validate_digest(digest: &str) -> Result<()> {
     Ok(())
 }
 
+/// The one owner of the on-volume layout: an identity's namespace root is
+/// `<configured root>/agents/<identity>`.
+pub fn identity_root(configured_root: &Path, identity: &str) -> Result<PathBuf> {
+    validate_identity(identity)?;
+    Ok(configured_root.join(IDENTITY_NAMESPACE_DIR).join(identity))
+}
+
+/// An Agent identity must be one safe path segment. The identity is the
+/// namespace name, so a slash, `.` or `..` would escape or alias another
+/// Agent's cache.
+fn validate_identity(identity: &str) -> Result<()> {
+    let valid = !identity.is_empty()
+        && identity.len() <= 128
+        && identity
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && identity
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+    if !valid {
+        anyhow::bail!(
+            "invalid Agent identity for the EROFS cache namespace: use 1-128 ASCII letters, digits, '.', '_' or '-'"
+        );
+    }
+    Ok(())
+}
+
+/// A pre-existing symlink at `<root>/agents/<identity>` would silently redirect
+/// this Agent's writes into another directory. Refuse it instead of following.
+fn refuse_symlinked_identity_root(root: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(root)
+        .with_context(|| format!("cannot inspect EROFS cache namespace {}", root.display()))?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "EROFS cache namespace {} must not be a symlink",
+            root.display()
+        );
+    }
+    Ok(())
+}
+
+/// Count regular files and their bytes in one directory. A missing directory
+/// is an error: the owner created it when the cache opened.
+fn scan_directory(path: &Path) -> Result<(u64, u64)> {
+    let mut files = 0;
+    let mut bytes = 0;
+    for entry in
+        std::fs::read_dir(path).with_context(|| format!("cannot read {}", path.display()))?
+    {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            files += 1;
+            bytes += metadata.len();
+        }
+    }
+    Ok((files, bytes))
+}
+
 fn validate_storage(root: &Path, explicit: bool, probe: &dyn StorageProbe) -> Result<()> {
     let metadata = std::fs::symlink_metadata(root)
         .with_context(|| format!("EROFS cache is not readable: {}", root.display()))?;
@@ -517,6 +691,7 @@ mod tests {
                 path: root.to_path_buf(),
                 explicit,
             },
+            "agent-test",
             &DurableProbe(fs_type),
         )
         .await
@@ -673,6 +848,7 @@ mod tests {
                 path: dir.path().join("explicit"),
                 explicit: true,
             },
+            "agent-test",
             &DurableProbe("tmpfs"),
         )
         .await;
@@ -682,6 +858,7 @@ mod tests {
                 path: dir.path().join("implicit"),
                 explicit: false,
             },
+            "agent-test",
             &DurableProbe("tmpfs"),
         )
         .await;
@@ -706,6 +883,7 @@ mod tests {
                 path: root.clone(),
                 explicit: false,
             },
+            "agent-test",
             &DurableProbe("ext4"),
         )
         .await;
@@ -788,5 +966,169 @@ mod tests {
             1
         );
         assert!(!stale.exists());
+        assert_eq!(cache.evicted_blobs(), 1);
+        assert_eq!(cache.reconciled_partials(), 1);
+    }
+
+    /// #3180 SC-01: two independent Agent identities on one durable volume
+    /// fetch the same digest concurrently. They must not share a partial or a
+    /// ready file, both must publish checksum-valid bytes, and one identity's
+    /// eviction must not remove the other's ready blob.
+    #[tokio::test]
+    async fn two_identities_on_one_volume_never_share_ready_or_partial_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = vec![9_u8; 32 * 1024];
+        let digest = digest_for(&bytes);
+        let server = Server::run();
+        // Each identity cold-fetches independently; there is no cross-process
+        // fetch coalescing to lean on.
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/blobs/{digest}")))
+                .times(2)
+                .respond_with(Response::builder().status(200).body(bytes.clone()).unwrap()),
+        );
+        let storage = ResolvedErofsStorage {
+            path: dir.path().to_path_buf(),
+            explicit: true,
+        };
+        let agent_a = Arc::new(
+            ErofsCache::open_with_probe(&storage, "agent-a", &DurableProbe("nfs"))
+                .await
+                .unwrap(),
+        );
+        let agent_b = Arc::new(
+            ErofsCache::open_with_probe(&storage, "agent-b", &DurableProbe("nfs"))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(agent_a.identity(), "agent-a");
+        assert_ne!(agent_a.root(), agent_b.root());
+        assert!(agent_a
+            .root()
+            .starts_with(dir.path().join(IDENTITY_NAMESPACE_DIR)));
+
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "t".to_string(),
+        };
+        let (left, right) = tokio::join!(
+            {
+                let cache = Arc::clone(&agent_a);
+                let grant = grant.clone();
+                let digest = digest.clone();
+                async move { cache.get_or_fetch(&digest, &grant).await.unwrap() }
+            },
+            {
+                let cache = Arc::clone(&agent_b);
+                let grant = grant.clone();
+                let digest = digest.clone();
+                async move { cache.get_or_fetch(&digest, &grant).await.unwrap() }
+            }
+        );
+        assert!(!left.from_cache);
+        assert!(!right.from_cache);
+        assert_ne!(left.path, right.path);
+        assert_eq!(tokio::fs::read(&left.path).await.unwrap(), bytes);
+        assert_eq!(tokio::fs::read(&right.path).await.unwrap(), bytes);
+        assert_eq!(agent_a.bytes_transferred(), bytes.len() as u64);
+        assert_eq!(agent_b.bytes_transferred(), bytes.len() as u64);
+
+        // A's eviction is confined to A's namespace.
+        assert!(agent_a.evict(&digest).unwrap());
+        assert!(!left.path.exists());
+        assert!(right.path.exists());
+        let warm = agent_b.get_or_fetch(&digest, &grant).await.unwrap();
+        assert!(warm.from_cache);
+        assert_eq!(agent_b.bytes_transferred(), bytes.len() as u64);
+    }
+
+    /// #3180 SC-01: the identity names the namespace directory, so it must be
+    /// one safe path segment.
+    #[tokio::test]
+    async fn an_identity_must_be_one_safe_path_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        for identity in ["", ".", "..", "a/b", "../escape", ".hidden", "agent a"] {
+            let result = ErofsCache::open_with_probe(
+                &ResolvedErofsStorage {
+                    path: dir.path().join("root"),
+                    explicit: false,
+                },
+                identity,
+                &DurableProbe("ext4"),
+            )
+            .await;
+            assert!(result.is_err(), "identity {identity:?} must be refused");
+            assert!(
+                !dir.path()
+                    .join("root")
+                    .join(IDENTITY_NAMESPACE_DIR)
+                    .exists(),
+                "a refused identity must not create a namespace"
+            );
+        }
+        let accepted = ErofsCache::open_with_probe(
+            &ResolvedErofsStorage {
+                path: dir.path().join("root"),
+                explicit: false,
+            },
+            "agent-9f2c_1.0",
+            &DurableProbe("ext4"),
+        )
+        .await;
+        assert!(accepted.is_ok());
+    }
+
+    /// #3180 SC-05: diagnostics separate durable ready bytes from temporary
+    /// artifacts and stale partials, and report retention outcomes.
+    #[tokio::test]
+    async fn diagnostics_separate_ready_bytes_from_temporary_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"measured image".to_vec();
+        let digest = digest_for(&bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/blobs/{digest}")))
+                .times(1)
+                .respond_with(Response::builder().status(200).body(bytes.clone()).unwrap()),
+        );
+        let cache = cache(dir.path(), true, "nfs").await;
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "t".to_string(),
+        };
+        let cached = cache.get_or_fetch(&digest, &grant).await.unwrap();
+        let empty = cache.diagnostics(SystemTime::now()).unwrap();
+        assert_eq!(empty.identity, "agent-test");
+        assert_eq!(empty.ready_blobs, 1);
+        assert_eq!(empty.ready_bytes, bytes.len() as u64);
+        assert_eq!(empty.temp_artifacts, 0);
+        assert_eq!(empty.temp_bytes, 0);
+        assert_eq!(empty.stale_partials, 0);
+
+        let stale = cache.partial_path(&digest).unwrap();
+        tokio::fs::write(&stale, b"stale-partial").await.unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        let with_partial = cache.diagnostics(SystemTime::now()).unwrap();
+        assert_eq!(with_partial.ready_bytes, bytes.len() as u64);
+        assert_eq!(with_partial.temp_artifacts, 1);
+        assert_eq!(with_partial.temp_bytes, b"stale-partial".len() as u64);
+        assert_eq!(with_partial.stale_partials, 1);
+
+        // The stale artifact is reclaimable without touching the ready bytes.
+        assert_eq!(
+            cache.reconcile_stale_partials(SystemTime::now()).unwrap(),
+            1
+        );
+        assert!(cached.path.exists());
+        let after = cache.diagnostics(SystemTime::now()).unwrap();
+        assert_eq!(after.ready_bytes, bytes.len() as u64);
+        assert_eq!(after.temp_artifacts, 0);
+        assert_eq!(after.stale_partials, 0);
+        assert_eq!(after.reconciled_partials, 1);
     }
 }

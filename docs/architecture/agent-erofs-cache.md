@@ -47,10 +47,22 @@ development convenience and does not claim a PVC.
 
 ## Cache layout and lifecycle
 
+Several Agent identities may share one durable (RWX) volume. The configured
+`storage_dir` is therefore the **volume root**, and each Agent owns a namespace
+below it (#3180):
+
 ```text
-<storage_dir>/sha256/<64-hex>      verified immutable blob
-<storage_dir>/tmp/<64-hex>.part    in-progress download (resumable)
+<storage_dir>/agents/<agent identity>/sha256/<64-hex>      verified immutable blob
+<storage_dir>/agents/<agent identity>/tmp/<64-hex>.part    in-progress download (resumable)
 ```
+
+The identity is the Agent's stable resolved `agent_id` (configured override or
+the persisted `~/.nession/agent/identity`). It must be one safe path segment:
+an empty id, `.`, `..`, a slash, or a leading non-alphanumeric character is
+refused before any directory is created. Two processes with **different**
+identities never share a ready blob, a partial file, an eviction scope or the
+sandbox composition root; two processes with the **same** identity are the same
+logical Agent and deliberately share one namespace.
 
 - **Cold fetch.** The Agent sends `GET` with the bearer grant and
   `Accept-Encoding: identity`, streams the body in 64 KiB chunks to the `.part`
@@ -61,18 +73,26 @@ development convenience and does not claim a PVC.
   performs **zero image-body transfers**; a corrupted file is removed and
   fetched again.
 - **Concurrency.** One in-process lock per digest means N concurrent callers
-  share one fetch; callers that waited re-check the published blob.
+  share one fetch; callers that waited re-check the published blob. Isolation
+  across processes comes from the identity namespace, not from a lock (there is
+  no inter-process lock and none is required).
 - **Resume.** An existing `.part` is sent as `Range: bytes=<len>-`; `206`
   appends, `200` restarts from zero, `416` discards the partial and asks the
   caller to retry. A failed/interrupted download leaves a `.part` that a later
   call can resume.
 - **Restart.** The cache is a directory, not memory: a new Agent process with
-  the same storage directory re-reads `sha256/<hex>`, verifies it, and reuses
-  it. Partial files older than 24 hours are reconciled (deleted); newer ones
-  are resumable.
+  the same storage directory and identity re-reads `sha256/<hex>`, verifies it,
+  and reuses it. Partial files older than 24 hours are reconciled (deleted);
+  newer ones are resumable.
 - **Pinning/eviction.** A consumer pins a digest for the duration of its use;
-  eviction refuses a pinned digest. No mounted resource is deleted by the cache
-  (mounting is #3024).
+  eviction refuses a pinned digest. Eviction is scoped to the identity
+  namespace, so it cannot remove another Agent's ready bytes. No mounted
+  resource is deleted by the cache (mounting is #3024).
+- **Diagnostics.** `ErofsCache::diagnostics(now)` reports this identity's
+  `ready_blobs`/`ready_bytes`, `temp_artifacts`/`temp_bytes`, `stale_partials`,
+  and the `evicted_blobs`/`reconciled_partials` retention counters. Server blob
+  bytes are reported separately by the Server (see
+  [image manager diagnostics](erofs-image-manager.md#gc-and-diagnostics)).
 - **Bounds.** One chunk is buffered at a time; there is no whole-image memory
   buffer. The HTTP client has a 15 s connect and 30 min total timeout.
 
@@ -100,6 +120,11 @@ development convenience and does not claim a PVC.
 - A Kubernetes NFS PVC is suitable for immutable EROFS **bytes**. It is not
   automatically suitable for OverlayFS upper/work or an EROFS kernel mount;
   that decision belongs to Sandbox/managed-location work (#3024).
+- `scripts/gitops-storage-contract.mjs` renders every managed GitOps
+  environment and proves `AGENT_EROFS_STORAGE_DIR=/data/erofs` is under the
+  environment's persisted NFS volume, with a per-environment effective root
+  (`<nfs path>[/subPath]/erofs`). The `gitops-storage-contract` Gate runs it in
+  the unconditional PR tooling suite (#3180).
 
 ## Failure semantics
 
@@ -118,8 +143,9 @@ development convenience and does not claim a PVC.
 - `cargo test -p nession-agent --lib config::erofs_tests` — precedence,
   absolute/parent rejection, NESSION_HOME default.
 - `cargo test -p nession-agent --lib erofs_cache` — cold/warm, concurrent
-  single fetch, resume, corruption/mismatch, pin/eviction, stale partial, and
-  fail-closed explicit tmpfs/unwritable storage.
+  single fetch, resume, corruption/mismatch, pin/eviction, stale partial,
+  fail-closed explicit tmpfs/unwritable storage, per-identity isolation, and
+  diagnostics/retention counters.
 - `e2e/acceptance/cases/3023/SC-01`, `SC-03` and `SC-04` run those exact tests
   at the PR head; SC-02's trusted agent reads this document, the Dockerfiles and
   the GitOps snapshot.

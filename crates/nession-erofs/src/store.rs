@@ -22,6 +22,17 @@ pub struct BlobDigest {
     pub path: PathBuf,
 }
 
+/// One blob store's on-disk usage, owned by the layout owner (#3180 SC-05).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StoreUsage {
+    /// Verified ready blobs under `sha256/`.
+    pub blobs: u64,
+    pub blob_bytes: u64,
+    /// Unpublished temporary files under `.tmp/`.
+    pub temp_files: u64,
+    pub temp_bytes: u64,
+}
+
 /// A filesystem-backed content-addressed store.
 #[derive(Debug, Clone)]
 pub struct BlobStore {
@@ -163,6 +174,38 @@ impl BlobStore {
         }
         Ok(())
     }
+
+    /// Measure ready blob bytes separately from unpublished temporary files.
+    ///
+    /// Temporary files are failed or interrupted publications; they are not
+    /// image content and must be reported separately from retained blobs.
+    pub fn usage(&self) -> Result<StoreUsage> {
+        let (blobs, blob_bytes) = directory_usage(&self.root.join("sha256"))?;
+        let (temp_files, temp_bytes) = directory_usage(&self.root.join(".tmp"))?;
+        Ok(StoreUsage {
+            blobs,
+            blob_bytes,
+            temp_files,
+            temp_bytes,
+        })
+    }
+}
+
+/// Count regular files and bytes in a directory this store owns.
+fn directory_usage(path: &Path) -> Result<(u64, u64)> {
+    let mut files = 0;
+    let mut bytes = 0;
+    for entry in fs::read_dir(path).with_context(|| format!("failed to read {}", path.display()))? {
+        let entry = entry?;
+        let metadata = entry
+            .metadata()
+            .with_context(|| format!("failed to stat {}", entry.path().display()))?;
+        if metadata.is_file() {
+            files += 1;
+            bytes += metadata.len();
+        }
+    }
+    Ok((files, bytes))
 }
 
 #[cfg(test)]
@@ -216,5 +259,22 @@ mod tests {
         let stored = store.put_file(&input).unwrap();
         fs::write(&stored.path, b"tampered").unwrap();
         assert!(store.verify(&stored.digest).is_err());
+    }
+
+    /// #3180 SC-05: ready blob bytes and unpublished temporary files are
+    /// reported as separate quantities.
+    #[test]
+    fn usage_separates_ready_blob_bytes_from_unpublished_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let input = file_with(dir.path(), "image.bin", b"ready bytes");
+        let stored = store.put_file(&input).unwrap();
+        fs::write(dir.path().join("store/.tmp/interrupted.part"), b"temporary").unwrap();
+
+        let usage = store.usage().unwrap();
+        assert_eq!(usage.blobs, 1);
+        assert_eq!(usage.blob_bytes, stored.size_bytes);
+        assert_eq!(usage.temp_files, 1);
+        assert_eq!(usage.temp_bytes, b"temporary".len() as u64);
     }
 }

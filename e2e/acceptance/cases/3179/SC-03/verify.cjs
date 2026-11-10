@@ -53,9 +53,12 @@ runAsync(async ({ evidence }) => {
       assert.deepEqual(blob.stats(), beforeWarm, 'a warm hit must not transfer body bytes');
 
       const digestHex = blob.digest.slice('sha256:'.length);
+      // The probe reports the exact namespaced blob path; corrupt that file
+      // rather than reconstructing the cache layout here.
+      assert.match(cold.blob_path, new RegExp(`/sha256/${digestHex}$`));
       await composeRun(
         project, override, profile, service,
-        ['sh', '-c', `printf corrupt > /data/erofs/sha256/${digestHex}`],
+        ['sh', '-c', `printf corrupt > ${cold.blob_path}`],
       );
       const repaired = lastJson((await composeRun(
         project, override, profile, service, PROBE_COMMAND(blob),
