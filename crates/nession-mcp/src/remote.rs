@@ -1,17 +1,26 @@
-//! Backends for hosts that are not the Server or Agent themselves.
+//! Backends for hosts that are not the Server or Agent themselves (`#3264`).
 //!
 //! Two consumers exist:
 //!
 //! * the standalone `nession-mcp` binary, which has no local Server or Agent;
-//! * an Agent-embedded host, whose cluster tools reuse the Server it already
-//!   reports to.
+//! * an Agent-embedded host, whose Server-owned discovery reuses the Server it
+//!   already reports to.
 //!
 //! Both go through [`nession_client`], the canonical consumer boundary. A
 //! connection is opened for **one tool call** and closed with it. That is a
-//! deliberate simplification: it makes concurrent calls independent (no reply
-//! can be correlated against another call's request), costs one WebSocket
+//! deliberate simplification: concurrent calls are independent (no reply can
+//! be correlated against another call's request), costs one WebSocket
 //! handshake per call, and keeps a failed call from poisoning a long-lived
-//! socket. A future higher-traffic host can add pooling behind the same trait.
+//! socket.
+//!
+//! ## Routing rule
+//!
+//! Agent-owned Session tools reached from a standalone host go **through the
+//! Server's canonical Agent route** ([`ServerRoutedNodeBackend`]) by default:
+//! the Server authenticates, authorizes, resolves and routes to the named
+//! Agent, and Nession has exactly one management path. An operator may instead
+//! configure an explicit direct-Agent backend; there is no implicit fallback
+//! between the two.
 
 use async_trait::async_trait;
 use nession_client::{AgentConnection, ClientConfig, ClientConnection, ClientError};
@@ -51,22 +60,11 @@ impl RemoteClusterBackend {
     }
 
     async fn connect(&self) -> Result<ClientConnection, ToolError> {
-        let config = ClientConfig {
-            server_url: self.endpoint.clone(),
-            auth_token: self.auth_token.clone(),
-            request_timeout: self.request_timeout,
-        };
-        let connection = tokio::time::timeout(CONNECT_TIMEOUT, ClientConnection::connect(config))
-            .await
-            .map_err(|_| ToolError::unavailable("the Nession Server did not answer the handshake"))?
-            .map_err(map_client_error)?;
-        Ok(connection)
+        connect_server(&self.endpoint, &self.auth_token, self.request_timeout).await
     }
 
     async fn close(connection: ClientConnection) {
-        if let Err(error) = connection.close().await {
-            debug!(%error, "closing an MCP backend connection failed");
-        }
+        close_server(connection).await;
     }
 }
 
@@ -76,169 +74,168 @@ impl ClusterBackend for RemoteClusterBackend {
         let mut connection = self.connect().await?;
         let reply = connection.list_agents().await.map_err(map_client_error)?;
         Self::close(connection).await;
-        Ok(match reply {
-            AgentListReply::Listed(listed) => serde_json::to_value(listed)
-                .map_err(|error| ToolError::backend(error.to_string()))?,
+        match reply {
+            AgentListReply::Listed(listed) => {
+                serde_json::to_value(listed).map_err(|error| ToolError::backend(error.to_string()))
+            }
             AgentListReply::Refused(AgentRefusal { status, message }) => {
-                json!({ "status": status, "message": message })
+                Err(refusal_error(status, message))
             }
-        })
+        }
+    }
+}
+
+async fn connect_server(
+    endpoint: &str,
+    auth_token: &str,
+    request_timeout: Duration,
+) -> Result<ClientConnection, ToolError> {
+    let config = ClientConfig {
+        server_url: endpoint.to_string(),
+        auth_token: auth_token.to_string(),
+        request_timeout,
+    };
+    tokio::time::timeout(CONNECT_TIMEOUT, ClientConnection::connect(config))
+        .await
+        .map_err(|_| ToolError::unavailable("the Nession Server did not answer the handshake"))?
+        .map_err(map_client_error)
+}
+
+async fn close_server(connection: ClientConnection) {
+    if let Err(error) = connection.close().await {
+        debug!(%error, "closing an MCP backend connection failed");
+    }
+}
+
+fn refusal_error(status: String, message: String) -> ToolError {
+    ToolError::backend(format!("{status}: {message}"))
+}
+
+/// Agent-owned Session tools routed through the Server's canonical Agent path.
+///
+/// This is the standalone default. The Server owns authentication,
+/// authorization and routing to the explicitly named Agent; the caller never
+/// needs an independently configured direct Agent endpoint, and no request can
+/// bypass the Server's policy.
+pub struct ServerRoutedNodeBackend {
+    endpoint: String,
+    auth_token: String,
+    request_timeout: Duration,
+}
+
+impl ServerRoutedNodeBackend {
+    /// Build a Server-routed node backend.
+    pub fn new(endpoint: impl Into<String>, auth_token: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            auth_token: auth_token.into(),
+            request_timeout: nession_client::DEFAULT_REQUEST_TIMEOUT,
+        }
     }
 
-    async fn list_sessions(&self, agent_id: Option<&str>, force: bool) -> Result<Value, ToolError> {
+    /// Override the per-call request deadline.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
+    async fn connect(&self) -> Result<ClientConnection, ToolError> {
+        connect_server(&self.endpoint, &self.auth_token, self.request_timeout).await
+    }
+
+    /// Open a Server connection whose registry contains this online Agent.
+    ///
+    /// The Server is the routing authority, so an unknown or offline target is
+    /// refused here rather than turned into an empty registry answer. That is
+    /// the same refusal Server-embedded and Agent-embedded give.
+    async fn connect_to_agent(&self, agent_id: &str) -> Result<ClientConnection, ToolError> {
         let mut connection = self.connect().await?;
-        let reply = connection
-            .list_sessions_with_force(agent_id, force)
-            .await
-            .map_err(map_client_error)?;
-        Self::close(connection).await;
-        Ok(match reply {
-            ServerSessionListReply::Listed(listed) => serde_json::to_value(listed)
-                .map_err(|error| ToolError::backend(error.to_string()))?,
-            ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
-                json!({ "status": status, "message": message })
+        match connection.list_agents().await.map_err(map_client_error)? {
+            AgentListReply::Listed(listed) => {
+                let Some(agent) = listed
+                    .agents
+                    .iter()
+                    .find(|agent| agent.agent_id == agent_id)
+                else {
+                    return Err(ToolError::not_found(format!(
+                        "Agent '{agent_id}' is not in the Server registry"
+                    )));
+                };
+                if agent.status != "online" {
+                    return Err(ToolError::unavailable(format!(
+                        "Agent '{agent_id}' is {}",
+                        agent.status
+                    )));
+                }
+                Ok(connection)
             }
-        })
-    }
-
-    async fn get_info(&self) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
-        let reply = connection
-            .get_server_info()
-            .await
-            .map_err(map_client_error)?;
-        Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
-    }
-
-    async fn capture_session_preview(
-        &self,
-        session_id: &str,
-        lines: u32,
-    ) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
-        let reply = connection
-            .capture_session_preview(session_id, lines)
-            .await
-            .map_err(map_client_error)?;
-        Self::close(connection).await;
-        Ok(reply)
-    }
-
-    async fn get_session_attach_info(&self, session_id: &str) -> Result<Value, ToolError> {
-        // Deliberately not `server.session.attach`: that call **mints** a P2P
-        // credential. This tool is a read; deriving the same non-secret facts
-        // from the session list and the agent list means there is no credential
-        // to redact, rather than a redaction a later change could miss.
-        let mut connection = self.connect().await?;
-        let sessions = connection
-            .list_sessions(None)
-            .await
-            .map_err(map_client_error)?;
-        let session = match sessions {
-            ServerSessionListReply::Listed(listed) => listed
-                .sessions
-                .into_iter()
-                .find(|session| session.session_id == session_id)
-                .ok_or_else(|| {
-                    ToolError::not_found(format!("Session '{session_id}' is not in the registry"))
-                })?,
-            ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
-                return Err(ToolError::backend(format!("{status}: {message}")))
-            }
-        };
-        Self::close(connection).await;
-
-        let mut connection = self.connect().await?;
-        let agents = connection.list_agents().await.map_err(map_client_error)?;
-        let agent = match agents {
-            AgentListReply::Listed(listed) => listed
-                .agents
-                .into_iter()
-                .find(|agent| agent.agent_id == session.agent_id)
-                .ok_or_else(|| {
-                    ToolError::not_found(format!(
-                        "Agent '{}' is not in the registry",
-                        session.agent_id
-                    ))
-                })?,
             AgentListReply::Refused(AgentRefusal { status, message }) => {
-                return Err(ToolError::backend(format!("{status}: {message}")))
+                Err(refusal_error(status, message))
             }
-        };
-        Self::close(connection).await;
-
-        let legacy_address = agent
-            .addresses
-            .iter()
-            .find(|address| {
-                address.status == nession_protocol::contracts::agent::v1::AddressStatus::Reachable
-            })
-            .map(|address| address.address.url.clone())
-            .or_else(|| {
-                agent
-                    .addresses
-                    .first()
-                    .map(|address| address.address.url.clone())
-            })
-            .unwrap_or_else(|| format!("ws://{}:{}/ws", agent.ip_address, agent.port));
-
-        Ok(json!({
-            "session_id": session.session_id,
-            "agent_id": session.agent_id,
-            "session_name": session.session_name,
-            "session_status": session.status,
-            "agent_status": agent.status,
-            "agent_address": legacy_address,
-            "addresses": agent.addresses,
-            // Explicit and stable: this projection never carries credential
-            // material, so a model can rely on the field set.
-            "credential": null,
-        }))
+        }
     }
+}
 
-    async fn create_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
+#[async_trait]
+impl NodeBackend for ServerRoutedNodeBackend {
+    async fn list_sessions(&self, agent_id: &str) -> Result<Value, ToolError> {
+        let mut connection = self.connect_to_agent(agent_id).await?;
+        // `force: true` asks the target Agent for its live tmux state; the
+        // registry's cached view is not "Agent truth" and the Tool promises it.
         let reply = connection
-            .create_session(agent_id, name)
+            .list_sessions_with_force(Some(agent_id), true)
             .await
             .map_err(map_client_error)?;
-        Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        close_server(connection).await;
+        match reply {
+            ServerSessionListReply::Listed(listed) => {
+                serde_json::to_value(listed).map_err(|error| ToolError::backend(error.to_string()))
+            }
+            ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
+                Err(refusal_error(status, message))
+            }
+        }
     }
 
-    async fn kill_session(&self, session_id: &str) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
-        let reply = connection
-            .kill_session(session_id)
-            .await
-            .map_err(map_client_error)?;
-        Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
-    }
-
-    async fn rename_agent(
+    async fn create_session(
         &self,
         agent_id: &str,
-        display_name: Option<&str>,
+        name: &str,
+        working_dir: Option<&str>,
     ) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
+        let mut connection = self.connect_to_agent(agent_id).await?;
         let reply = connection
-            .rename_agent(agent_id, display_name)
+            .create_session_in(agent_id, name, working_dir)
             .await
             .map_err(map_client_error)?;
-        Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        close_server(connection).await;
+        if !reply.success {
+            return Err(ToolError::backend(
+                reply
+                    .error
+                    .unwrap_or_else(|| "the Server refused the create".to_string()),
+            ));
+        }
+        // The same business payload the Server-embedded and Agent-embedded
+        // adapters return for this Tool.
+        Ok(json!({ "name": name, "warnings": reply.warnings }))
     }
 
-    async fn delete_agent(&self, agent_id: &str) -> Result<Value, ToolError> {
-        let mut connection = self.connect().await?;
+    async fn kill_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError> {
+        let mut connection = self.connect_to_agent(agent_id).await?;
         let reply = connection
-            .delete_agent(agent_id)
+            .kill_session(&format!("{agent_id}:{name}"))
             .await
             .map_err(map_client_error)?;
-        Self::close(connection).await;
-        serde_json::to_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        close_server(connection).await;
+        if !reply.success {
+            return Err(ToolError::backend(
+                reply
+                    .error
+                    .unwrap_or_else(|| "the Server refused the kill".to_string()),
+            ));
+        }
+        Ok(json!({ "name": name }))
     }
 }
 

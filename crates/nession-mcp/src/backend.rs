@@ -1,76 +1,42 @@
-//! The only two seams a hosting mode fills in.
+//! The two semantic backend seams (`#3264`).
 //!
-//! A backend answers one semantic-owner family. It does **not** decide the tool
-//! name, schema, validation or result shape — those live in [`crate::tools`] —
-//! and it never sees the inbound MCP token.
+//! A Tool's semantic owner decides which seam it uses — never where the MCP
+//! endpoint happens to run:
 //!
-//! Every method returns the business reply as it is produced by the existing
-//! owner (a Server contract reply, an Agent session reply, or an equivalent
-//! projection). [`crate::service`] is what turns a reply into an MCP result,
-//! including the `isError` bit for a delivered refusal.
+//! * [`ClusterBackend`] answers **Server-owned discovery**: which Agents the
+//!   Server registry knows about.
+//! * [`NodeBackend`] answers **Agent-owned Session state**: the real tmux
+//!   Sessions of one explicitly named Agent.
+//!
+//! A backend does not decide a Tool name, schema, validation or result shape —
+//! those live with the Tool module — and it never sees the inbound MCP token.
 
 use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::error::ToolError;
 
-/// The Server-owned cluster view and mutations.
+/// The Server-owned cluster view.
 ///
-/// These tools answer from the **Server's registry** and route through the
-/// Server's existing paths. A cluster tool that happens to carry an `agent_id`
-/// filter is still a Server query; it is never an Agent-local read in disguise.
+/// The only Server-owned Tool is Agent discovery; Session lifecycle and live
+/// state belong to the Agent even when the caller reaches them through the
+/// Server's routing.
 #[async_trait]
 pub trait ClusterBackend: Send + Sync {
-    /// `nession_server_list_agents`.
+    /// `nession_server_list_agents` — the Server registry's Agent view.
     async fn list_agents(&self) -> Result<Value, ToolError>;
-
-    /// `nession_server_list_sessions`, with the existing `server.session.list`
-    /// `agent_id`/`force` semantics.
-    async fn list_sessions(&self, agent_id: Option<&str>, force: bool) -> Result<Value, ToolError>;
-
-    /// `nession_server_get_info`.
-    async fn get_info(&self) -> Result<Value, ToolError>;
-
-    /// `nession_server_capture_session_preview`.
-    async fn capture_session_preview(
-        &self,
-        session_id: &str,
-        lines: u32,
-    ) -> Result<Value, ToolError>;
-
-    /// `nession_server_get_session_attach_info`.
-    ///
-    /// Implementations must return **only** non-secret fields. A Server P2P
-    /// credential (or any other authentication material) must never appear in
-    /// the returned value.
-    async fn get_session_attach_info(&self, session_id: &str) -> Result<Value, ToolError>;
-
-    /// `nession_server_create_session`.
-    async fn create_session(&self, agent_id: &str, name: &str) -> Result<Value, ToolError>;
-
-    /// `nession_server_kill_session`.
-    async fn kill_session(&self, session_id: &str) -> Result<Value, ToolError>;
-
-    /// `nession_server_rename_agent`.
-    async fn rename_agent(
-        &self,
-        agent_id: &str,
-        display_name: Option<&str>,
-    ) -> Result<Value, ToolError>;
-
-    /// `nession_server_delete_agent`.
-    async fn delete_agent(&self, agent_id: &str) -> Result<Value, ToolError>;
 }
 
-/// One explicitly named Agent node's real session state.
+/// One explicitly named Agent node's real Session state.
 ///
-/// `agent_id` is always present by the time a backend sees it: the tool schema
-/// requires it, and [`crate::service`] rejects an empty value before dispatch.
-/// The backend is responsible for the remaining target check:
+/// `agent_id` is always present by the time a backend sees it: the Tool schema
+/// requires it and the registry rejects an empty value before dispatch. The
+/// backend owns the remaining target check:
 ///
 /// * Agent embedded accepts only its own id;
-/// * Server embedded routes to that id;
-/// * Standalone checks the configured target.
+/// * Server embedded routes to that id through the canonical broker;
+/// * Standalone routes through the configured Server, or through the explicit
+///   direct-Agent backend when an operator configured one.
 #[async_trait]
 pub trait NodeBackend: Send + Sync {
     /// `nession_agent_list_sessions`.
@@ -90,10 +56,9 @@ pub trait NodeBackend: Send + Sync {
 
 /// The cluster backend of a host that has no Server configured.
 ///
-/// It exists so the tool catalog does **not** shrink when a backend is
-/// temporarily absent: the requirement is that a configured catalog stays
-/// stable and an offline backend answers with a structured error. The most
-/// common case is an Agent running in standalone mode.
+/// It exists so the Tool catalog does not shrink when a backend is temporarily
+/// absent: a configured catalog stays stable and an offline backend answers
+/// with a structured error. The common case is a standalone Agent.
 pub struct UnavailableClusterBackend {
     reason: String,
 }
@@ -112,58 +77,14 @@ impl ClusterBackend for UnavailableClusterBackend {
     async fn list_agents(&self) -> Result<Value, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
-
-    async fn list_sessions(
-        &self,
-        _agent_id: Option<&str>,
-        _force: bool,
-    ) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn get_info(&self) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn capture_session_preview(
-        &self,
-        _session_id: &str,
-        _lines: u32,
-    ) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn get_session_attach_info(&self, _session_id: &str) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn create_session(&self, _agent_id: &str, _name: &str) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn kill_session(&self, _session_id: &str) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn rename_agent(
-        &self,
-        _agent_id: &str,
-        _display_name: Option<&str>,
-    ) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
-
-    async fn delete_agent(&self, _agent_id: &str) -> Result<Value, ToolError> {
-        Err(ToolError::unavailable(self.reason.clone()))
-    }
 }
 
-/// The node backend of a deployment with no configured Agent target.
+/// The node backend of a deployment with no reachable Agent target.
 ///
-/// Used by the standalone binary when `[backend.agent]` is absent. The Agent
-/// tools remain in the catalog and each call names what is missing rather than
-/// silently choosing the MCP host — which is the one thing the requirement
-/// forbids.
+/// Used by a standalone host that has neither a direct `[backend.agent]` nor a
+/// Server to route through. The Agent tools remain in the catalog and each call
+/// names what is missing rather than silently choosing the MCP host — which is
+/// the one thing the requirement forbids.
 pub struct UnavailableNodeBackend {
     reason: String,
 }

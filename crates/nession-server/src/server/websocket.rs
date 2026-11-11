@@ -397,8 +397,8 @@ where
 
     match nession_mcp::http::sniff(stream, std::time::Duration::from_secs(10)).await {
         Ok(Sniffed::WebSocket { stream }) => handle_ws_stream(stream, ctx).await,
-        Ok(Sniffed::Http { head, body }) => mcp
-            .serve(head, body)
+        Ok(Sniffed::Http { stream, .. }) => mcp
+            .serve(stream)
             .await
             .map_err(|error| anyhow::anyhow!("MCP response failed: {error}")),
         Err(error) => {

@@ -43,8 +43,52 @@ impl HttpResponse {
             .map(|(_, value)| value.as_str())
     }
 
+    fn decoded_body(&self) -> String {
+        let chunked = self
+            .header("transfer-encoding")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"));
+        if !chunked {
+            return self.body.clone();
+        }
+        let mut decoded = String::new();
+        let mut rest = self.body.as_str();
+        while let Some((size_line, tail)) = rest.split_once("\r\n") {
+            let size = usize::from_str_radix(size_line.trim(), 16).unwrap_or(0);
+            if size == 0 {
+                break;
+            }
+            let Some(chunk) = tail.get(..size) else {
+                break;
+            };
+            decoded.push_str(chunk);
+            let Some(next) = tail.get(size + 2..) else {
+                break;
+            };
+            rest = next;
+        }
+        decoded
+    }
+
     fn json(&self) -> Value {
-        serde_json::from_str(&self.body).expect("a JSON body")
+        let body = self.decoded_body();
+        if let Ok(value) = serde_json::from_str::<Value>(&body) {
+            return value;
+        }
+        for event in body.split("\n\n") {
+            let mut data = String::new();
+            for line in event.lines() {
+                if let Some(rest) = line.strip_prefix("data:") {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(rest.trim_start());
+                }
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                return value;
+            }
+        }
+        panic!("no JSON payload in response: {}", self.body)
     }
 }
 
@@ -101,7 +145,9 @@ async fn send(
 ) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} /mcp HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+         text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+         Connection: close\r\n",
         body.len()
     );
     if let Some(token) = token {
@@ -224,8 +270,9 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     .await;
     assert_eq!(wrong_target["isError"], true);
 
-    // Cluster tools remain listed but report the missing Server explicitly.
-    let cluster = call_tool(addr, &session, "nession_server_get_info", json!({})).await;
+    // The Server-owned Tool remains listed but reports the missing Server
+    // explicitly instead of inventing a local registry view.
+    let cluster = call_tool(addr, &session, "nession_server_list_agents", json!({})).await;
     assert_eq!(cluster["isError"], true, "{cluster}");
     let text = cluster["content"][0]["text"]
         .as_str()
