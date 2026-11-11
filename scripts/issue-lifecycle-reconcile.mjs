@@ -38,7 +38,7 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   if (labels.includes('status:blocked') || labels.includes('status:on-hold')) {
     return { action: 'pending', reason: 'explicit blocking status' };
   }
-  if (options.manualReopened && !options.explicitAccept) {
+  if (options.manualReopened) {
     return { action: 'pending', reason: 'human-reopened Issue needs explicit /accept' };
   }
   const accepted = completedIssueAcceptanceDecision(issue);
@@ -157,7 +157,7 @@ async function humanReopened(repository, issueNumber, token, request = githubReq
   return hasUnrecoveredHumanReopen(events, comments);
 }
 
-async function reconcileIssue(repository, number, token, { explicitAccept = false, includePr = null,
+async function reconcileIssue(repository, number, token, { includePr = null,
   request = githubRequest } = {}) {
   const { prefix } = repoParts(repository);
   const issue = await request(prefix + '/issues/' + number, { token });
@@ -167,7 +167,7 @@ async function reconcileIssue(repository, number, token, { explicitAccept = fals
   }
   const prs = await relatedPulls(repository, number, token, includePr, request);
   const manualReopened = await humanReopened(repository, number, token, request);
-  const decision = decideIssueClosure(issue, prs, { manualReopened, explicitAccept });
+  const decision = decideIssueClosure(issue, prs, { manualReopened });
   if (decision.action !== 'close') return { ...decision, prs: prs.map(pr => pr.number) };
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
@@ -188,9 +188,14 @@ async function handleManual(event, repository, actor, token, request = githubReq
     return { action: 'skip', reason: 'manual dispatch is first-attempt only' };
   }
   const { prefix } = repoParts(repository);
+  // The fresh /accept must be newer than the latest human reopen; a delayed
+  // workflow for an older comment cannot override a later user hold.
   const result = await reconcileIssue(repository, command.issueNumber, token,
-    { explicitAccept: true, request });
+    { request });
   if (result.action !== 'pending') return result;
+  if (await humanReopened(repository, command.issueNumber, token, request)) {
+    return { action: 'pending', reason: 'later human reopen supersedes this /accept' };
+  }
   const issue = await request(prefix + '/issues/' + command.issueNumber, { token });
   const labels = (issue.labels || []).map(x => typeof x === 'string' ? x : x.name);
   if (labels.includes('status:blocked') || labels.includes('status:on-hold')) {
@@ -225,7 +230,7 @@ async function selfTest() {
   assert.equal(decideIssueClosure(issue, [pr], { manualReopened: true }).action, 'pending');
   assert.equal(decideIssueClosure(issue, [pr], {
     manualReopened: true, explicitAccept: true,
-  }).action, 'close');
+  }).action, 'pending', 'stale /accept cannot bypass human-reopen hold');
   assert.equal(decideIssueClosure(issue, []).action, 'pending');
   assert.equal(decideIssueClosure(issue, [{ ...pr, merged_at: null }]).action, 'pending');
   assert.equal(decideIssueClosure({ ...issue, body: body.replace('| Pass |', '| Pending |') },
