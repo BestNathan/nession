@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "32e2999bd7586097190ba26eea3bddbd44ec27c3d9facaad1c6a57b18ec57c5c",
+  "run_id": 43067588823,
+  "run_attempt": 1,
+  "issue": 3311,
+  "criterion": "SC-02",
+  "criterion_text": "The trusted post-merge scope verifier accepts a convergence plan carrying `convergence`/`source_event`/`merge_sha`/`source_pr`/`reason` with a correct digest, and still fails closed for a tampered digest or a selected plan with no digest.",
+  "stage": "staging",
+  "target_sha": "80fdfca2be3177d11a510bbebed7694c03d6686f",
+  "contract_sha256": "707388d778546737b99651806fb55a60593a77069144a0cba9305732475c547d",
+  "case_revision": "80fdfca2be3177d11a510bbebed7694c03d6686f",
+  "case_tree_sha": "8f89f35bcd2158a642277281b78aa10dc224bf23",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T17:25:26.691Z",
+  "finished_at": "2026-11-11T17:25:32.544Z",
+  "duration_ms": 5852,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the trusted post-merge verifier accepts a correctly digested convergence plan and still fails closed on a tampered or missing digest",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 80fdfca2be3177d11a510bbebed7694c03d6686f: the push-scope and Acceptance-lineage selftests pass, and both verifiers import the canonical planDigest owner instead of re-deriving the seven-field object"
+        },
+        {
+          "type": "runtime",
+          "value": "a convergence plan carrying convergence/source_event/merge_sha/source_pr/reason with its canonical digest is accepted by the trusted post-merge verifier; a tampered digest and a selected plan with no digest are rejected"
+        }
+      ],
+      "duration_ms": 159,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43067588823,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "80fdfca2be3177d11a510bbebed7694c03d6686f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43067588823",
+    "record_path": "runs/2026-11-11/43067588823-1/3311/SC-02.json",
+    "source_result_sha256": "0f1bad59bdf17c11bddea878503ae36f271733c919099c053379dfd16f4c5dc5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43067588823-1",
+    "sha256": "0f1bad59bdf17c11bddea878503ae36f271733c919099c053379dfd16f4c5dc5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43067588823",
+    "durability": "time-limited; object archival not configured"
+  }
+}
