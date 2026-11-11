@@ -14,7 +14,9 @@
 #   ./scripts/check-design-tokens.sh
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
+# Script-relative, not `git rev-parse`: pre-commit content gates run against a
+# staged snapshot without a .git directory.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/web"
 
 CAPSULE_DIR="src/product/terminal/capsule"

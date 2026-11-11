@@ -89,35 +89,6 @@ test.describe('Web 1440×900', () => {
     });
   });
 
-  // #1102's second item — `#1046`'s second depth on the Web experience — and
-  // with its App counterpart above, criterion 13's "Web/App share capability
-  // semantics while geometry differs". That claim is a pair of images: the
-  // sequence is identical, the surfaces they land in are not.
-  test('Git Peek on the Terminal', async ({ page }) => {
-    await gotoFixtureShell(page);
-    await waitForFixtureTerminal(page);
-
-    await page.getByTestId('capsule-capability-more').click();
-    await page.getByTestId('capsule-capability-picker-git').click();
-    // The row is already the step to the detail — picking a capability opens
-    // it, so there is no title click here any more. Visibility is the whole
-    // assertion now: the attribute that used to witness the step
-    // (`data-depth`) went with the depth axis, and `git-peek-body` below is
-    // what says the open surface is Git's own body rather than the frame.
-    await expect(page.getByTestId('capsule-capability-projection')).toBeVisible();
-
-    await expect(page.getByTestId('git-peek-body')).toBeVisible();
-    // The capability's own Workspace action, which the Host no longer draws
-    // (#1046) — the same assertion the App case makes, because it is the same
-    // plugin rendering it.
-    await expect(page.getByTestId('capsule-capability-open-workspace')).toBeVisible();
-
-    await expect(page).toHaveScreenshot('web-git-peek.png', {
-      fullPage: true,
-      ...FIXTURE_SCREENSHOT,
-    });
-  });
-
   // #1120 item 12's conversation surfaces, and the first images of any of this:
   // until #1131 served `claude-code.conversation` from the fixture, no route
   // could render a conversation at all, so #1125's readable title and the

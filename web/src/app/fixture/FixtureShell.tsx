@@ -7,10 +7,11 @@ import {
   FIXTURE_SELECTED_ID,
   FIXTURE_SESSIONS,
 } from '@/app/fixture/fixtureData';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureGithubSurface } from './fixtureGithub';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 import { fixturePaneCommand } from './fixturePaneCommand';
 
@@ -51,6 +52,7 @@ export function FixtureShell() {
   // this install equivalent to the fixture App's when it is the one that
   // remains bound (#2787).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
+  useEffect(() => githubApi.install(fixtureGithubSurface(search)), [search]);
 
   const selectedId = FIXTURE_SELECTED_ID;
   const paneCommand = fixturePaneCommand(search);

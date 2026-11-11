@@ -9,9 +9,7 @@
 import { GitBranch } from 'lucide-react';
 import type { CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
-import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
 import { GitWorkspace } from './components/GitWorkspace';
-import { GitProjection } from './components/GitProjection';
 
 export const GIT_ID = 'git';
 export const GIT_TITLE = 'Git';
@@ -54,31 +52,4 @@ export const gitView: WorkspaceViewBinding = {
   id: GIT_ID,
   icon: GitBranch,
   layout: { web: GitWorkspace, app: GitWorkspace },
-};
-
-/**
- * How Git says something in the Terminal.
- *
- * Declared here rather than in the app layer for the same reason `gitView` is:
- * what Git can say is Git's, and the app layer only decides whether it gets to
- * say it. The binding type is imported **type-only** — it belongs to the app
- * layer's registry, which sits above this one.
- */
-export const gitProjection: CapsuleProjectionBinding = {
-  id: GIT_ID,
-  // The Terminal row's glyph, taken from the view's own icon rather than
-  // restated: it is one value, so the two surfaces cannot drift into two
-  // pictures of the same capability. The binding is still where this surface
-  // declares its glyph — Terminal Keys is the case that declares its own,
-  // having no view to reference.
-  icon: gitView.icon,
-  // A changed-file summary is what sits between "3 changed" and a full diff,
-  // so Git has a Peek of its own.
-  body: ({ agentId, sessionId, onFocusChange }) => (
-    <GitProjection
-      agentId={agentId}
-      sessionId={sessionId}
-      onFocusChange={onFocusChange}
-    />
-  ),
 };

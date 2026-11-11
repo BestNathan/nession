@@ -70,17 +70,28 @@ describe('capsule emergence', () => {
   it('shows the capability the user chose', () => {
     const { result, choose } = setup();
 
+    choose('terminal-keys');
+
+    expect(result.current.projection?.id).toBe('terminal-keys');
+  });
+
+  it('does not offer Git as a Terminal projection (#1290)', () => {
+    // Selecting Git through the Workspace capsule opens the Git Workspace
+    // directly; the legacy Git Peek is gone, so choosing the id from the
+    // Terminal entry must not open anything.
+    const { result, choose } = setup();
+
     choose('git');
 
-    expect(result.current.projection?.id).toBe('git');
+    expect(result.current.projection).toBeUndefined();
   });
 
   it('titles the projection from the capability, not from the view', () => {
     const { result, choose } = setup();
 
-    choose('git');
+    choose('terminal-keys');
 
-    expect(result.current.projection?.title).toBe('Git');
+    expect(result.current.projection?.title).toBe('Terminal Keys');
   });
 
   it('dismissing closes the projection', () => {
@@ -89,8 +100,8 @@ describe('capsule emergence', () => {
     // user never asked for.
     const { result, choose, dismiss } = setup();
 
-    choose('git');
-    expect(result.current.projection?.id).toBe('git');
+    choose('terminal-keys');
+    expect(result.current.projection?.id).toBe('terminal-keys');
 
     dismiss();
     expect(result.current.projection).toBeUndefined();
@@ -182,9 +193,9 @@ describe('capsule emergence', () => {
 
   it('carries the capability’s own answer about the soft keyboard', () => {
     // #1034 §5. Terminal Keys and an IME want the same vertical space, so that
-    // projection claims input focus while it is up; Git's projection is read
-    // *while* typing (`git commit`), so taking the keyboard from it would be
-    // the regression, not the fix.
+    // projection claims input focus while it is up; a conversation projection
+    // read while typing does not, so taking the keyboard from it would be the
+    // regression, not the fix.
     //
     // This asymmetry is the design, and the capsule has no capability ids — so
     // this flag is the entire mechanism by which the two are told apart, and it
@@ -195,8 +206,8 @@ describe('capsule emergence', () => {
     expect(result.current.projection?.id).toBe('terminal-keys');
     expect(result.current.projection?.ownsInputFocus).toBe(true);
 
-    choose('git');
-    expect(result.current.projection?.id).toBe('git');
+    choose('claude-code');
+    expect(result.current.projection?.id).toBe('claude-code');
     expect(result.current.projection?.ownsInputFocus).toBeFalsy();
   });
 
@@ -224,10 +235,10 @@ describe('capsule emergence', () => {
 
     // A listed one, so the assertions above are not passing because `choose`
     // does nothing at all.
-    choose('git');
+    choose('terminal-keys');
     expect(onToolChange).not.toHaveBeenCalled();
     expect(onSurfaceChange).not.toHaveBeenCalled();
-    expect(result.current.projection?.id).toBe('git');
+    expect(result.current.projection?.id).toBe('terminal-keys');
   });
 
   it('does not re-show what was dismissed', () => {
@@ -237,7 +248,7 @@ describe('capsule emergence', () => {
     // Mutation: leave `chosen` set in `onDismiss` — this must fail.
     const { result, choose, dismiss } = setup();
 
-    choose('git');
+    choose('terminal-keys');
     dismiss();
 
     expect(result.current.projection).toBeUndefined();
@@ -246,14 +257,14 @@ describe('capsule emergence', () => {
   it('carries the focused item into the Workspace', () => {
     const { result, choose, onOpenWorkspace } = setup();
 
-    choose('git');
-    // Git has a Workspace view, so the destination exists — a projection with
-    // no Workspace view would carry nothing, and this is where that would show.
+    choose('claude-code');
+    // Claude Code has a Workspace view, so the destination exists — a projection
+    // with no Workspace view would carry nothing, and this is where that shows.
     expect(result.current.projection?.onOpenWorkspace).toBeTypeOf('function');
-    act(() => result.current.projection?.onOpenWorkspace?.('src/a.ts'));
+    act(() => result.current.projection?.onOpenWorkspace?.('conversation/1'));
 
     // #826: entering from a projection lands on the item, not on a landing page.
-    expect(onOpenWorkspace).toHaveBeenCalledWith('git', 'src/a.ts');
+    expect(onOpenWorkspace).toHaveBeenCalledWith('claude-code', 'conversation/1');
   });
 
   it('supplies no Workspace destination for a capability with no Workspace view', () => {
@@ -273,7 +284,7 @@ describe('capsule emergence', () => {
     // to the Session that produced it.
     const { result, choose, rerender, initialProps } = setup();
 
-    choose('git');
+    choose('terminal-keys');
     expect(result.current.projection).toBeDefined();
 
     rerender({ ...initialProps, session: session('s2') });

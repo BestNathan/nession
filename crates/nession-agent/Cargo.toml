@@ -23,6 +23,7 @@ nession-tmux = { path = "../nession-tmux" }
 nession-runtime = { path = "../nession-runtime" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
+nession-github = { path = "../nession-github" }
 # The shared MCP access layer (#565). The Agent supplies the node backend and
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }

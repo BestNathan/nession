@@ -25,6 +25,7 @@ use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
 use nession_common::system;
 use nession_git::GitAgentExtension;
+use nession_github::{GithubAgentExtension, GithubClient};
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -480,6 +481,11 @@ pub fn compose_providers(
     agent_id: &str,
     tmux: Arc<SessionManager>,
 ) -> Result<Arc<ExtensionRegistry>> {
+    // #750/#1290. The resolver is what keeps Git and GitHub inside the
+    // Session's own working directory: the client names a session, never a
+    // path. Both providers share the one injected resolver.
+    let workdir: Arc<dyn nession_git::WorkdirResolver> =
+        Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux)));
     let extensions: Vec<Box<dyn AgentExtension>> = vec![
         // #1005. The context is what lets this provider resolve a Session's cwd
         // and whether Claude is running in it — the agent owns session
@@ -488,11 +494,15 @@ pub fn compose_providers(
         Box::new(ClaudeCodeAgentExtension::new(Arc::new(
             TmuxSessionContext::new(Arc::clone(&tmux)),
         ))),
-        // #750. The resolver is what keeps git inside the Session's own working
-        // directory: the client names a session, never a path.
-        Box::new(GitAgentExtension::new(
+        Box::new(GitAgentExtension::new("git", Arc::clone(&workdir))),
+        // #1290. One Git capability, two providers: local Git and the
+        // read-only GitHub hosting context. The client reads its token from
+        // the Agent's environment; an absent token is an honest unavailable
+        // state, not a startup failure.
+        Box::new(GithubAgentExtension::new(
             "git",
-            Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux))),
+            workdir,
+            Arc::new(GithubClient::from_env()),
         )),
     ];
     // The third argument is the other half of what this runtime serves: the

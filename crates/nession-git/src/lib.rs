@@ -51,11 +51,12 @@ pub mod runtime;
 // implementation. A re-export is a path, not a second definition; there is
 // still one file behind each of these.
 pub use runtime::{
-    branches, cmd, diff, log, mutate, preview, security, snapshot, status, worktrees,
+    branches, cmd, context, diff, log, mutate, preview, security, snapshot, status, worktrees,
 };
 
 pub use agent::{GitAgentExtension, WorkdirResolver};
 pub use cmd::{GitCmd, GitOutput};
+pub use context::{GitRemote, RepositoryContext};
 
 // The wire shapes come from `protocol/`, not from the module of the same name
 // under `runtime/`. Those modules now hold only what *does* something with

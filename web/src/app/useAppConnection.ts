@@ -10,7 +10,7 @@ import { serverApi } from '@/platform/server';
 import { envApi } from '@/capabilities/env';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
@@ -34,6 +34,7 @@ const SERVER_PLUGINS = [
   envApi,
   claudeCodeApi,
   gitApi,
+  githubApi,
   commandsApi,
   terminalServerApi,
 ];
