@@ -100,6 +100,26 @@ A failure after Development Complete opens a Main/integration incident and block
 
 Executable consequence: `scripts/requirement-acceptance.mjs` requires `Pass`/`N/A` at closure only for `pr` and `merged/staging` criteria. A `merged/main` or `deployed` criterion is release qualification — its truthful `Pending`/`Fail` row blocks release, but it does not reopen or block the Issue at Development Complete. `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`) owns the state ordering. Test and docs-only promotions that cannot affect runtime use an explicit authenticated `Not Required`, never a fabricated Full Pass.
 
+### Event-driven Issue close and explicit recovery
+
+Once an Issue's applicable SCs are accepted, an associated implementation PR
+has merged to `staging` or `main`, and no explicit blocker/manual-reopen hold
+remains, `scripts/issue-lifecycle-reconcile.mjs` may close the Issue. This
+reconciliation is invoked from trusted Agent Acceptance and Case Ingest
+projection paths as well as PR merge events; it is not a new SC evaluator.
+The existing Issue-close guard remains authoritative and reopens invalid
+closures. A closed PR or a GitHub `Fixes #N` keyword is never an Acceptance
+Pass. Bug and Requirement use the same decision. Duplicate events are no-ops.
+
+An exact `/accept` comment on an open native Issue from an authorized GitHub
+user is an optional recovery trigger, not part of the normal required path.
+It rechecks the fresh Issue and linked PRs; for outstanding Agent-method
+criteria it may dispatch the existing stage-specific trusted evaluator against
+the authenticated PR head/merge SHA. Case/deployed criteria still need their
+independent runner or deployment evidence. The comment does not write SC
+results, override unresolved blockers, or authorize a closure without an
+associated merge. A human-reopened Issue is not silently re-closed by stale
+automatic events; an authorized `/accept` is an explicit re-evaluation request.
 ## Minimize proof latency without weakening trust
 
 **Pick the earliest safe proof boundary per SC; runtime topology is not a
