@@ -28,7 +28,7 @@ export function selectTrustedCases({
     .filter((item) => item.stage === stage)
     .filter((item) => !requested || item.criterion === requested)
     .filter((item) => !runtime || item.runtime === runtime)
-    .filter((item) => !platform || item.platform === platform)
+    .filter((item) => !platform || item.platform === platform || item.platform === 'both')
     .map(({ issue, criterion, platform: platformName, runtime: runtimeName, verifiers }) => ({
       issue, criterion, platform: platformName, runtime: runtimeName,
       needs_browser: verifiers.some((item) => item.type === 'browser'),
@@ -60,7 +60,7 @@ export function selectTrustedCases({
       // platform covers only its own Cases. A genuinely missing Case is still
       // expected on both platforms and fails closed there.
       const manifest = manifestByKey.get(key);
-      if (platform && manifest && manifest.platform !== platform) continue;
+      if (platform && manifest && manifest.platform !== platform && manifest.platform !== 'both') continue;
       // Explicit Case-method obligations must be present. Historical issues
       // without a declared Method retain only their existing source Cases:
       // forcing a Case for all legacy Agent-validated SCs would break them.
