@@ -274,11 +274,6 @@ async function selfTest() {
     'X/y', 'owner', 'fixture-token', mock)).action, 'skip');
   assert.equal(dispatches, 1, 'untrusted comments cannot dispatch');
   live = { ...issue, body, updated_at: '2026-11-11T01:02:00Z' };
-  const stale = async (path, options = {}) => {
-    if (path.endsWith('/issues/19') && options.method !== 'PATCH')
-      return { ...live, updated_at: new Date().toISOString() };
-    return mock(path, options);
-  };
   // Distinct timestamps across successive reads force no mutation.
   let reads = 0;
   const race = async (path, options = {}) => {
