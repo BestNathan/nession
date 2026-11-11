@@ -4,7 +4,7 @@ import type { CapabilityId, CapabilityState } from '@/product/capability';
 import type { CapsuleDetail } from '@/product/terminal/capsule/types';
 import type { SessionProjectContext } from '@/product/project/types';
 import { CLAUDE_CODE_ID, claudeCodeProjection } from '@/capabilities/claude-code';
-import { GIT_ID, gitProjection } from '@/capabilities/git';
+import { GIT_ID } from '@/capabilities/git';
 import {
   TERMINAL_KEYS_ID,
   terminalKeysProjection,
@@ -162,7 +162,6 @@ export interface CapsuleProjectionBinding {
  */
 const CAPSULE_PROJECTIONS: readonly CapsuleProjectionBinding[] = [
   claudeCodeProjection,
-  gitProjection,
   terminalKeysProjection,
   projectProjection,
   quickCommandsProjection,

@@ -11,7 +11,7 @@ import { envApi } from '@/capabilities/env';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
 import { sandboxApi } from '@/capabilities/sandbox';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { projectsApi } from '@/product/project';
 import { imagesApi } from '@/capabilities/images';
 import { terminalServerApi } from '@/product/terminal';
@@ -38,6 +38,7 @@ const SERVER_PLUGINS = [
   envApi,
   claudeCodeApi,
   gitApi,
+  githubApi,
   commandsApi,
   projectsApi,
   imagesApi,

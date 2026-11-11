@@ -13,7 +13,7 @@ import { mapDomainState } from '@/product/session/model/domainState';
 import type { CapabilityId } from '@/product/capability';
 import { claudeCodeApi } from '@/capabilities/claude-code';
 import { envApi } from '@/capabilities/env';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { sandboxApi } from '@/capabilities/sandbox';
 import { imagesApi } from '@/capabilities/images';
 import { fixtureImagesSurface } from './fixtureImages';
@@ -22,6 +22,7 @@ import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureGithubSurface } from './fixtureGithub';
 import {
   FIXTURE_AGENT_PROCESS_SESSIONS,
   fixtureAgentProcessSessionId,
@@ -62,6 +63,7 @@ export function FixtureWorkspace() {
   const gitSessionIdRef = useRef(FIXTURE_SELECTED_ID);
   const fileOps = new URLSearchParams(search).get('files') === 'unavailable' ? null : fixtureOps;
   const gitReady = useFixtureSurface(capability === 'git', search, installGitSurface);
+  const githubReady = useFixtureSurface(capability === 'git', search, installGithubSurface);
   const conversationReady = useFixtureSurface(
     capability === 'claude-code',
     search,
@@ -144,7 +146,7 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady || !imagesReady) {
+  if (!gitReady || !githubReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady || !imagesReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -214,6 +216,11 @@ function openedCapability(search: string): CapabilityId {
 /** Bind the Git stub to the shared singleton. */
 function installGitSurface(search: string): () => void {
   return gitApi.install(fixtureGitSurface(search));
+}
+
+/** Bind the GitHub hosting stub beside the Git stub. */
+function installGithubSurface(search: string): () => void {
+  return githubApi.install(fixtureGithubSurface(search));
 }
 
 /**

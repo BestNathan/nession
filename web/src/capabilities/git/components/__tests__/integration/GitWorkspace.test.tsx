@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';import use
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorkspace } from '../../GitWorkspace';
 import { gitApi } from '../../../GitPlugin';
+import { githubApi } from '../../../GithubPlugin';
 import type {
   GitDiffResponse,
   GitFilePreview,
@@ -11,6 +12,10 @@ import type {
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
+
+vi.mock('../../../GithubPlugin', () => ({
+  githubApi: { repository: vi.fn() },
+}));
 
 vi.mock('../../../GitPlugin', () => ({
   gitApi: {
@@ -26,6 +31,7 @@ vi.mock('../../../GitPlugin', () => ({
 }));
 
 const mockedStatus = vi.mocked(gitApi.gitStatus);
+const mockedRepository = vi.mocked(githubApi.repository);
 const mockedDiff = vi.mocked(gitApi.gitDiff);
 const mockedPreview = vi.mocked(gitApi.gitPreview);
 const mockedStage = vi.mocked(gitApi.gitStage);
@@ -120,6 +126,53 @@ describe('GitWorkspace', () => {
     vi.clearAllMocks();
     mockedStatus.mockResolvedValue(statusResponse());
     mockedDiff.mockResolvedValue(diffResponse(''));
+    mockedRepository.mockResolvedValue({
+      state: 'ok',
+      resolution: 'resolved',
+      repository: {
+        host: 'github.com',
+        owner: 'acme',
+        repo: 'repo',
+        remoteName: 'origin',
+        sourceUrl: 'https://github.com/acme/repo',
+      },
+      branch: 'main',
+      choices: [],
+      authenticated: true,
+    });
+  });
+
+  it('keeps local Git functional when the GitHub provider is unavailable (#1290 SC-13)', async () => {
+    mockedRepository.mockResolvedValueOnce({
+      state: 'error',
+      code: 'not_authenticated',
+      message: 'no token',
+    });
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-workspace');
+    await userEvent.click(screen.getByTestId('git-surface-github'));
+    expect(await screen.findByTestId('github-repository-error')).toHaveTextContent(
+      'GITHUB_TOKEN',
+    );
+    await userEvent.click(screen.getByTestId('git-surface-repository'));
+    expect(screen.getByTestId('git-workspace')).toBeVisible();
+    expect(screen.getByTestId('git-refresh')).toBeInTheDocument();
+  });
+
+  it('groups Repository and GitHub without flattening seven peer tabs (#1290)', async () => {
+    render(<GitWorkspace ctx={context()} />);
+    await screen.findByTestId('git-branch');
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-surface-github'));
+
+    await waitFor(() => expect(mockedRepository).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('github-hosting')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Changes' })).toBeNull();
+
+    await userEvent.click(screen.getByTestId('git-surface-repository'));
+    expect(screen.getByRole('tab', { name: 'Changes' })).toBeInTheDocument();
+    expect(screen.queryByTestId('github-hosting')).toBeNull();
   });
 
   it('asks for the state of the Session’s repository, naming the agent to route to', async () => {

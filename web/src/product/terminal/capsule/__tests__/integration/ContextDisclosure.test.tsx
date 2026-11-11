@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Bot, GitBranch, Keyboard } from 'lucide-react';
+import { Bot, Keyboard, Terminal } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
   CapsuleCapabilityDisclosure,
@@ -32,7 +32,7 @@ function disclosure(overrides: Partial<CapsuleCapabilityDisclosure> = {}): Capsu
     // hand-built entry without one would be a state the product cannot reach.
     entries: [
       { id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot },
-      { id: 'git', title: 'Git', state: 'available', icon: GitBranch },
+      { id: 'quick-commands', title: 'Quick Commands', state: 'available', icon: Terminal },
     ],
     onSelect: vi.fn(),
     ...overrides,
@@ -83,7 +83,7 @@ describe('Context Disclosure', () => {
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
 
     const sensed = await screen.findByTestId('capsule-context-item-claude-code');
-    const ordinary = screen.getByTestId('capsule-capability-picker-git');
+    const ordinary = screen.getByTestId('capsule-capability-picker-quick-commands');
     expect(screen.queryByTestId('capsule-context-all')).not.toBeInTheDocument();
 
     // Document order is what "first" means to a reader and to a screen reader
@@ -132,7 +132,7 @@ describe('Context Disclosure', () => {
 
     const [sensedGlyph, ordinaryGlyph] = [
       await screen.findByTestId('capsule-context-item-claude-code'),
-      screen.getByTestId('capsule-capability-picker-git'),
+      screen.getByTestId('capsule-capability-picker-quick-commands'),
     ].map((row) => row.querySelector('svg'));
     // Every row draws one — the column was reserved and filled by nothing.
     expect(sensedGlyph).not.toBeNull();
@@ -173,7 +173,7 @@ describe('Context Disclosure', () => {
     // ordinary `available` one — so a green run is not one where the list
     // happened to hold nothing the conditional reaches.
     expect(rows.map((row) => row.dataset.contextRow).sort()).toEqual(['ordinary', 'work']);
-    expect(screen.getByTestId('capsule-capability-picker-git')).toHaveAttribute(
+    expect(screen.getByTestId('capsule-capability-picker-quick-commands')).toHaveAttribute(
       'data-capability-state',
       'available',
     );
@@ -186,7 +186,7 @@ describe('Context Disclosure', () => {
     // (observed while checking this test's mutation: it failed at the locator,
     // `expected null not to be null`, instead of at the assertion). `getByText`
     // throws when the pairing is wrong, so a reorder cannot pass vacuously.
-    const expectedTitles = ['Claude Code', 'Git'];
+    const expectedTitles = ['Claude Code', 'Quick Commands'];
     expect(rows).toHaveLength(expectedTitles.length);
     for (const [index, row] of rows.entries()) {
       const title = within(row).getByText(expectedTitles[index]);
@@ -241,9 +241,9 @@ describe('Context Disclosure', () => {
     render(<TerminalCapsule experience="web" sendText={vi.fn()} capabilityDisclosure={caps} />);
 
     await userEvent.click(screen.getByTestId('capsule-capability-more'));
-    const git = await screen.findByTestId('capsule-capability-picker-git');
+    const git = await screen.findByTestId('capsule-capability-picker-quick-commands');
     await userEvent.click(git);
-    expect(caps.onSelect).toHaveBeenCalledWith('git');
+    expect(caps.onSelect).toHaveBeenCalledWith('quick-commands');
   });
 
   it('keeps an explicitly opened Peek when the sense disappears (SC-36)', async () => {
@@ -408,7 +408,7 @@ describe('Context Disclosure', () => {
     const ordinaryClaude = screen.getByTestId('capsule-capability-picker-claude-code');
     expect(ordinaryClaude).toBe(sensed);
     expect(ordinaryClaude).toHaveFocus();
-    expect(screen.getByTestId('capsule-capability-picker-git')).toBeInTheDocument();
+    expect(screen.getByTestId('capsule-capability-picker-quick-commands')).toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -458,8 +458,8 @@ describe('Context Disclosure', () => {
   it('moves focus into Peek when a row deepens the upper layer (SC-45)', async () => {
     const caps = disclosure();
     const projection: CapsuleCapabilityProjection = {
-      id: 'git',
-      title: 'Git',
+      id: 'quick-commands',
+      title: 'Quick Commands',
       body: () => <p data-testid="projection-body">peek</p>,
       onDismiss: vi.fn(),
     };
@@ -474,7 +474,7 @@ describe('Context Disclosure', () => {
 
     const trigger = screen.getByTestId('capsule-capability-more');
     await userEvent.click(trigger);
-    await userEvent.click(await screen.findByTestId('capsule-capability-picker-git'));
+    await userEvent.click(await screen.findByTestId('capsule-capability-picker-quick-commands'));
 
     expect(screen.queryByTestId('capsule-context-disclosure')).not.toBeInTheDocument();
 

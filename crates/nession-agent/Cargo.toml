@@ -23,6 +23,7 @@ nession-tmux = { path = "../nession-tmux" }
 nession-runtime = { path = "../nession-runtime" }
 nession-claude-code = { path = "../nession-claude-code" }
 nession-git = { path = "../nession-git" }
+nession-github = { path = "../nession-github" }
 nession-sandbox = { path = "../nession-sandbox" }
 # The reusable EROFS cache mechanics (#3303). The Agent adapter supplies the
 # configured root and identity; the crate owns download/verify/publish/pin.

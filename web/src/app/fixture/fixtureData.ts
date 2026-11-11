@@ -50,6 +50,15 @@ const FIXTURE_MANIFEST: ProtocolManifest = {
     // against the manifest before the surface is consulted.
     'claude-code.memory': { versions: [1], wire: ['claude-code.memory'] },
     'claude-code.memory-read': { versions: [1], wire: ['claude-code.memory-read'] },
+    // #1290: the GitHub hosting context. Advertised here for the same reason
+    // as every other fixture unit: address resolution reads the manifest
+    // before the surface is consulted.
+    'github.repository': { versions: [1], wire: ['github.repository'] },
+    'github.issues': { versions: [1], wire: ['github.issues'] },
+    'github.issue-detail': { versions: [1], wire: ['github.issue-detail'] },
+    'github.pull-requests': { versions: [1], wire: ['github.pull-requests'] },
+    'github.pull-request-detail': { versions: [1], wire: ['github.pull-request-detail'] },
+    'github.workflows': { versions: [1], wire: ['github.workflows'] },
   },
 };
 

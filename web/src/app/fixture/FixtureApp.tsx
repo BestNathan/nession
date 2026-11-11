@@ -24,7 +24,7 @@ import { claudeCodeApi } from '@/capabilities/claude-code';
 import { commandsApi } from '@/capabilities/commands';
 import { sandboxApi } from '@/capabilities/sandbox';
 import { envApi } from '@/capabilities/env';
-import { gitApi } from '@/capabilities/git';
+import { gitApi, githubApi } from '@/capabilities/git';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureCommandsSurface } from './fixtureCommands';
 import { fixtureConnection } from './fixtureConnection';
@@ -33,6 +33,7 @@ import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixtureGithubSurface } from './fixtureGithub';
 import { useFixtureImages } from './fixtureImages';
 import { fixtureInputDrop } from './fixtureInputDrop';
 import { fixtureStatusInputs } from './fixtureStatusNotices';
@@ -362,7 +363,7 @@ export function FixtureApp() {
   // route's input, so it is read here too: this install is the last one for
   // the route and therefore the surface the Git capability actually talks to
   // (#2787's controlled overlap needs it).
-  useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
+  useFixtureGitSurfaces(search);
 
   // The conversation stub, one layer down and for the same reason (#1128).
   // Claude Code's Workspace draws a conversation, and the fixture advertised no
@@ -519,4 +520,17 @@ export function FixtureApp() {
       />
     </div>
   );
+}
+
+
+/** Glue the Git and GitHub transport stubs to the route's lifetime. */
+function useFixtureGitSurfaces(search: string): void {
+  useEffect(() => {
+    const releaseGit = gitApi.install(fixtureGitSurface(search));
+    const releaseGithub = githubApi.install(fixtureGithubSurface(search));
+    return () => {
+      releaseGit();
+      releaseGithub();
+    };
+  }, [search]);
 }

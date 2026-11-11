@@ -33,9 +33,16 @@ describe('capsule capability presence', () => {
   // is not a list of everything that exists.
 
   it('lists a capability that contributes a Peek', () => {
-    // Git is the reference: a changed-file summary is worth a Terminal depth,
+    // Terminal Keys is the reference: a touch keypad is worth a Terminal depth,
     // and that is the only thing that earns explicit discovery.
-    expect(entryIds()).toContain('git');
+    expect(entryIds()).toContain('terminal-keys');
+  });
+
+  it('does not list Git as a Terminal projection (#1290)', () => {
+    // Selecting Git through the Workspace capsule opens the Git Workspace
+    // directly. The legacy Git Peek is migrated away, so it is not offered in
+    // the Terminal entry at all.
+    expect(entryIds()).not.toContain('git');
   });
 
   it('does not list a Workspace-only capability', () => {
