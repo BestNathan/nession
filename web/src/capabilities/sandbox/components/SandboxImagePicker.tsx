@@ -311,7 +311,7 @@ export function SandboxImagePicker({
       setFormError(result.error);
       return;
     }
-    const duplicate = images.add(result.choice);
+    const duplicate = images.add(result.choice, selected.status);
     if (duplicate) {
       setFormError(duplicate);
       return;

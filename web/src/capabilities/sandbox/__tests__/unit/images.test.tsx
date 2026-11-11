@@ -86,23 +86,24 @@ describe('Sandbox image selections', () => {
     };
 
     act(() => {
-      expect(result.current.add(base)).toBeNull();
+      expect(result.current.add(base, 'ready')).toBeNull();
     });
     await waitFor(() => expect(api.imageCacheStatuses).toHaveBeenCalled());
     expect(api.imageCacheStatuses).toHaveBeenCalledWith('a1:s1', [DIGEST]);
+    expect(result.current.serverStatuses.get(DIGEST)).toBe('ready');
     await waitFor(() =>
       expect(result.current.cacheStatuses.get(DIGEST)?.state).toBe('verified'),
     );
 
     act(() => {
-      expect(result.current.add(base)).toContain('already has a Base Runtime');
+      expect(result.current.add(base, 'ready')).toContain('already has a Base Runtime');
     });
     act(() => {
-      expect(result.current.add(toolchain)).toBeNull();
+      expect(result.current.add(toolchain, 'ready')).toBeNull();
     });
     await waitFor(() => expect(result.current.selections).toHaveLength(2));
     act(() => {
-      expect(result.current.add(toolchain)).toContain('already uses that /opt target');
+      expect(result.current.add(toolchain, 'ready')).toContain('already uses that /opt target');
     });
 
     act(() => result.current.remove(0));

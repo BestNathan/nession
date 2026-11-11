@@ -3,15 +3,17 @@ import type {
   ImageCacheStatus,
   SandboxImageSelection,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { cacheStatusByDigest } from '@/capabilities/images';
+import { cacheStatusByDigest, type ImageDescriptor } from '@/capabilities/images';
 import { sandboxApi } from '../SandboxPlugin';
 
 export interface SandboxImagesState {
   selections: SandboxImageSelection[];
+  /** The Server status observed when each digest was selected. */
+  serverStatuses: Map<string, ImageDescriptor['status']>;
   cacheStatuses: Map<string, ImageCacheStatus>;
   cacheLoading: boolean;
   cacheError: string | null;
-  add: (selection: SandboxImageSelection) => string | null;
+  add: (selection: SandboxImageSelection, serverStatus: ImageDescriptor['status']) => string | null;
   remove: (index: number) => void;
   refreshCache: () => void;
 }
@@ -26,6 +28,9 @@ export interface SandboxImagesState {
  */
 export function useSandboxImages(sessionId: string | null): SandboxImagesState {
   const [selections, setSelections] = useState<SandboxImageSelection[]>([]);
+  const [serverStatuses, setServerStatuses] = useState<
+    Map<string, ImageDescriptor['status']>
+  >(() => new Map());
   const [cacheStatuses, setCacheStatuses] = useState<ImageCacheStatus[]>([]);
   const [cacheLoading, setCacheLoading] = useState(false);
   const [cacheError, setCacheError] = useState<string | null>(null);
@@ -71,7 +76,7 @@ export function useSandboxImages(sessionId: string | null): SandboxImagesState {
     };
   }, [sessionId, digests, cacheRevision]);
 
-  const add = useCallback((selection: SandboxImageSelection): string | null => {
+  const add = useCallback((selection: SandboxImageSelection, serverStatus: ImageDescriptor['status']): string | null => {
     if (
       selection.role === 'base'
       && selections.some((item) => item.role === 'base')
@@ -93,6 +98,7 @@ export function useSandboxImages(sessionId: string | null): SandboxImagesState {
       return 'A toolchain image already uses that /opt target.';
     }
     setSelections((current) => [...current, selection]);
+    setServerStatuses((current) => new Map(current).set(selection.digest, serverStatus));
     return null;
   }, [selections]);
 
@@ -106,6 +112,7 @@ export function useSandboxImages(sessionId: string | null): SandboxImagesState {
 
   return {
     selections,
+    serverStatuses,
     cacheStatuses: cacheStatusByDigest(cacheStatuses),
     cacheLoading,
     cacheError,

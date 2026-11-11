@@ -1,8 +1,13 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { FormSection } from '@/components/ui/configuration-form';
-import { cacheStateLabel, shortDigest } from '@/capabilities/images';
+import {
+  cacheStateLabel,
+  imageServerStatusLabel,
+  shortDigest,
+} from '@/capabilities/images';
 import type {
   SandboxCurrentContext,
   SandboxImageSelection,
@@ -38,6 +43,7 @@ function SelectedImages({ images }: { images: SandboxImagesState }) {
     <ul className="flex flex-col gap-2">
       {images.selections.map((selection, index) => {
         const cache = images.cacheStatuses.get(selection.digest);
+        const serverStatus = images.serverStatuses.get(selection.digest);
         return (
           <li
             key={`${selection.digest}-${selection.target ?? selection.role}`}
@@ -45,9 +51,19 @@ function SelectedImages({ images }: { images: SandboxImagesState }) {
             data-testid="sandbox-image-selection"
           >
             <div className="min-w-0">
-              <p className={cn('truncate', chromeSansRole('primary'))}>
-                {selectionLabel(selection)}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className={cn('truncate', chromeSansRole('primary'))}>
+                  {selectionLabel(selection)}
+                </p>
+                {serverStatus ? (
+                  <Badge
+                    variant={serverStatus === 'ready' ? 'secondary' : 'outline'}
+                    data-testid="sandbox-image-server"
+                  >
+                    {imageServerStatusLabel(serverStatus)}
+                  </Badge>
+                ) : null}
+              </div>
               <p className={cn('truncate text-muted-foreground', chromeMonoRole('code'))}>
                 {shortDigest(selection.digest)} ·{' '}
                 {selection.mode === 'overlay' ? 'overlay' : 'read-only'}
