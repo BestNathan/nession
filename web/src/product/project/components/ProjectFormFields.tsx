@@ -106,12 +106,10 @@ function ProjectImageField({
   draft,
   onChange,
   disabled,
-  idPrefix,
 }: {
   draft: ProjectDraft;
   onChange: (next: ProjectDraft) => void;
   disabled: boolean;
-  idPrefix: string;
 }) {
   return (
     <FormSection title="Image">
@@ -119,7 +117,6 @@ function ProjectImageField({
         draft={draft}
         onChange={onChange}
         disabled={disabled}
-        idPrefix={idPrefix}
       />
     </FormSection>
   );
@@ -166,7 +163,6 @@ export function ProjectFormFields({
         draft={draft}
         onChange={onChange}
         disabled={disabled}
-        idPrefix={idPrefix}
       />
     </FormSurface>
   );

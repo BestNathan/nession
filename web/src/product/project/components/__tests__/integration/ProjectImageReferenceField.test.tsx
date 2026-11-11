@@ -56,7 +56,6 @@ describe('Project image reference field', () => {
           changed = next;
         }}
         disabled={false}
-        idPrefix="project"
       />,
     );
     await userEvent.click(screen.getByTestId('project-image-choose'));
@@ -80,7 +79,6 @@ describe('Project image reference field', () => {
           changed = next;
         }}
         disabled={false}
-        idPrefix="project"
       />,
     );
     await userEvent.click(screen.getByTestId('project-image-build'));
@@ -107,7 +105,6 @@ describe('Project image reference field', () => {
           changed = next;
         }}
         disabled={false}
-        idPrefix="project"
       />,
     );
     await userEvent.click(screen.getByTestId('project-image-build'));

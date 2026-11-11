@@ -52,12 +52,10 @@ export function ProjectImageReferenceField({
   draft,
   onChange,
   disabled,
-  idPrefix,
 }: {
   draft: ProjectDraft;
   onChange: (next: ProjectDraft) => void;
   disabled: boolean;
-  idPrefix: string;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [buildState, setBuildState] = useState<
@@ -164,9 +162,6 @@ export function ProjectImageReferenceField({
           setPickerOpen(false);
         }}
       />
-      <span className="sr-only" id={`${idPrefix}-digest-description`}>
-        The selected image digest is a reference to a Server-owned immutable artifact.
-      </span>
     </div>
   );
 }
