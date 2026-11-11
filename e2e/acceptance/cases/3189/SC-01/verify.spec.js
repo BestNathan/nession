@@ -9,7 +9,7 @@ const { openSession } = require('../../../shared/terminal-tools-browser.cjs');
 test('SC-01: send updates History and ghost completion without remount', async ({ page }) => {
   test.setTimeout(240_000);
   const { runtime, sha } = verifiedRuntime('SC-01');
-  await openSession(page, expect, runtime, 'case-3189-sc01');
+  await openSession(page, expect, runtime, 'case-3189-sc01', { width: 1180, height: 900 });
 
   const stamp = String(Date.now());
   const first = 'echo nession-history-' + stamp;
