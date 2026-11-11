@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const {
   assert, fs, path, targetSha, nessionBin, makeRoot, mkdirPrivate,
   serverConfig, agentConfig, runCli, cliOutput, freePort, waitForTcp,
-  waitFor, readIdentity, isRunning,
+  waitFor, readIdentity, isRunning, downloadOfficialRelease,
 } = require('../../../shared/release-hardening-cases.cjs');
 
 const LABEL = 'com.nession.agent';
@@ -145,6 +145,23 @@ async function verify() {
     assert.ok(isRunning(before.pid), 'manager Agent must actually be alive');
     evidence.push({ type: 'runtime', value: before.manager + ' owns real Agent PID ' +
       before.pid + ', version ' + identity.release_version });
+
+    // A real, independently published pre-contract release must fail closed
+    // even while a service manager is keeping the Current Agent alive.
+    // This covers the cross-version selector path without synthesizing an old
+    // shell script or touching the manager's registered binary.
+    const oldVersion = '0.36.0';
+    const legacyBin = path.join(home, 'versions', oldVersion, 'bin');
+    downloadOfficialRelease(oldVersion, legacyBin); // checksums.txt verified
+    const legacy = cliOutput(['+' + oldVersion, 'agent', 'restart', '--config', agentCfg],
+      env, 30000);
+    assert.notEqual(legacy.status, 0, 'legacy cross-version restart must be refused');
+    assert.match(legacy.output, /lifecycle|legacy|contract|unsupported/i);
+    assert.equal(observe(env).pid, before.pid,
+      'cross-version restart must not revive the historical manager binary');
+    evidence.push({ type: 'runtime', value:
+      'Real official v' + oldVersion + ' CLI cross-version restart refused; manager-owned PID ' +
+      before.pid + ' was preserved' });
 
     const start = cliOutput(['agent', 'start', '--config', agentCfg], env, 30000);
     assert.equal(start.status, 0, 'managed Start must remain idempotent: ' + start.output);
