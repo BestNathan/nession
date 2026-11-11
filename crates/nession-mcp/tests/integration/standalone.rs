@@ -4,17 +4,17 @@
 // policy for this file instead of contorting every helper to return Result.
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
-//! End-to-end standalone host (`#565`, SC-02/SC-06/SC-07).
+//! End-to-end standalone host (`#3264` SC-01/SC-04/SC-07).
 //!
-//! The real `nession-mcp` binary is started with a real Nession Server and a
-//! real standalone Agent. The MCP client is a raw HTTP client, so the
-//! transport contract — bearer auth, session header, JSON replies — is what is
-//! observed rather than a library abstraction over it.
+//! The real `nession-mcp` binary is started against a real Nession Server and
+//! a real Agent. The Server route is observed through a broker participant
+//! that registers like an Agent, while the direct-Agent mode is exercised
+//! against the Agent's real tmux Sessions.
 
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -37,6 +37,7 @@ const MCP_TOKEN: &str = "mcp-inbound-token";
 const SERVER_TOKEN: &str = "server-token";
 const AGENT_TOKEN: &str = "agent-token";
 const AGENT_ID: &str = "standalone-agent";
+const CLUSTER_AGENT: &str = "cluster-agent";
 
 struct ChildGuard(Child);
 
@@ -61,8 +62,52 @@ impl HttpResponse {
             .map(|(_, value)| value.as_str())
     }
 
+    fn decoded_body(&self) -> String {
+        let chunked = self
+            .header("transfer-encoding")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"));
+        if !chunked {
+            return self.body.clone();
+        }
+        let mut decoded = String::new();
+        let mut rest = self.body.as_str();
+        while let Some((size_line, tail)) = rest.split_once("\r\n") {
+            let size = usize::from_str_radix(size_line.trim(), 16).unwrap_or(0);
+            if size == 0 {
+                break;
+            }
+            let Some(chunk) = tail.get(..size) else {
+                break;
+            };
+            decoded.push_str(chunk);
+            let Some(next) = tail.get(size + 2..) else {
+                break;
+            };
+            rest = next;
+        }
+        decoded
+    }
+
     fn json(&self) -> Value {
-        serde_json::from_str(&self.body).expect("a JSON body")
+        let body = self.decoded_body();
+        if let Ok(value) = serde_json::from_str::<Value>(&body) {
+            return value;
+        }
+        for event in body.split("\n\n") {
+            let mut data = String::new();
+            for line in event.lines() {
+                if let Some(rest) = line.strip_prefix("data:") {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(rest.trim_start());
+                }
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                return value;
+            }
+        }
+        Value::Null
     }
 }
 
@@ -158,10 +203,6 @@ fn spawn_standalone(config_path: &Path) -> ChildGuard {
 }
 
 /// Read the bound address the standalone binary prints after it binds.
-///
-/// The config asks for port 0, so the port is only known after the bind; the
-/// binary prints it on stdout for exactly this reason. A fixed free-port guess
-/// was racy when two Cases (or two tests) ran at once.
 async fn await_listen_addr(child: &mut Child) -> SocketAddr {
     let stdout = child.stdout.take().expect("piped stdout");
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -203,7 +244,9 @@ async fn send(
 ) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} /mcp HTTP/1.1\r\nHost: test\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+         text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+         Connection: close\r\n",
         body.len()
     );
     if let Some(token) = token {
@@ -216,7 +259,10 @@ async fn send(
     stream.write_all(head.as_bytes()).await.ok()?;
     stream.write_all(body.as_bytes()).await.ok()?;
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await.ok()?;
+    let _ = stream.read_to_end(&mut raw).await;
+    if raw.is_empty() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&raw);
     let (head, body) = text.split_once("\r\n\r\n")?;
     let mut lines = head.split("\r\n");
@@ -237,10 +283,6 @@ async fn send(
         headers,
         body: body.to_string(),
     })
-}
-
-async fn initialize(addr: SocketAddr) -> String {
-    initialize_with(addr, MCP_TOKEN).await
 }
 
 async fn initialize_with(addr: SocketAddr, token: &str) -> String {
@@ -265,7 +307,13 @@ async fn initialize_with(addr: SocketAddr, token: &str) -> String {
         .to_string()
 }
 
-async fn call_tool(addr: SocketAddr, session: &str, name: &str, arguments: Value) -> Value {
+async fn call_tool(
+    addr: SocketAddr,
+    token: &str,
+    session: &str,
+    name: &str,
+    arguments: Value,
+) -> Value {
     let body = json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -273,11 +321,21 @@ async fn call_tool(addr: SocketAddr, session: &str, name: &str, arguments: Value
         "params": { "name": name, "arguments": arguments }
     })
     .to_string();
-    let response = send(addr, "POST", Some(MCP_TOKEN), Some(session), &body)
+    let response = send(addr, "POST", Some(token), Some(session), &body)
         .await
         .expect("tool response");
     assert_eq!(response.status, 200, "{}", response.body);
     response.json()["result"].clone()
+}
+
+async fn tools_of(addr: SocketAddr, token: &str) -> Value {
+    let session = initialize_with(addr, token).await;
+    let body = json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }).to_string();
+    let response = send(addr, "POST", Some(token), Some(&session), &body)
+        .await
+        .expect("tools/list response");
+    assert_eq!(response.status, 200, "{}", response.body);
+    response.json()["result"]["tools"].clone()
 }
 
 fn text_of(result: &Value) -> Value {
@@ -285,7 +343,22 @@ fn text_of(result: &Value) -> Value {
     serde_json::from_str(text).expect("tool text is JSON")
 }
 
-async fn register_and_answer(addr: SocketAddr) -> tokio::task::JoinHandle<()> {
+#[derive(Default)]
+struct BrokerLog {
+    commands: Mutex<Vec<String>>,
+    sessions: Mutex<Vec<String>>,
+}
+
+impl BrokerLog {
+    fn commands(&self) -> Vec<String> {
+        self.commands.lock().expect("broker log").clone()
+    }
+}
+
+/// Register a participant that answers like an Agent and records the commands
+/// the Server routes to it.
+async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, Arc<BrokerLog>) {
+    let log = Arc::new(BrokerLog::default());
     let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
         .await
         .expect("mock agent socket");
@@ -295,7 +368,7 @@ async fn register_and_answer(addr: SocketAddr) -> tokio::task::JoinHandle<()> {
         "id": "register-1",
         "timestamp": 0,
         "payload": {
-            "agent_id": "cluster-agent",
+            "agent_id": CLUSTER_AGENT,
             "hostname": "mock",
             "ip_address": "127.0.0.1",
             "port": 19999,
@@ -311,7 +384,8 @@ async fn register_and_answer(addr: SocketAddr) -> tokio::task::JoinHandle<()> {
     sink.send(WsMessage::Text(register.to_string()))
         .await
         .expect("register");
-    tokio::spawn(async move {
+    let task_log = Arc::clone(&log);
+    let task = tokio::spawn(async move {
         while let Some(Ok(frame)) = stream.next().await {
             let Ok(text) = frame.to_text() else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(text) else {
@@ -320,23 +394,43 @@ async fn register_and_answer(addr: SocketAddr) -> tokio::task::JoinHandle<()> {
             let Some(request_id) = parsed["payload"]["request_id"].as_str() else {
                 continue;
             };
+            let command = parsed["msg_type"].as_str().unwrap_or_default().to_string();
+            task_log
+                .commands
+                .lock()
+                .expect("broker log")
+                .push(command.clone());
             let session_name = parsed["payload"]["name"].as_str().unwrap_or("work");
+            let reported: Vec<Value> = {
+                let mut sessions = task_log.sessions.lock().expect("broker sessions");
+                match command.as_str() {
+                    "agent.session.create" => sessions.push(session_name.to_string()),
+                    "agent.session.kill" => sessions.retain(|name| name != session_name),
+                    _ => {}
+                }
+                sessions
+                    .iter()
+                    .map(|name| json!({ "name": name }))
+                    .collect()
+            };
             let response = json!({
                 "msg_type": "server.agent.command-response",
                 "id": format!("response-{request_id}"),
                 "timestamp": 0,
                 "payload": {
                     "request_id": request_id,
-                    "command": parsed["msg_type"],
+                    "command": command,
                     "success": true,
                     "error": null,
                     "session_name": session_name,
+                    "sessions": reported,
                     "warnings": []
                 }
             });
             let _ = sink.send(WsMessage::Text(response.to_string())).await;
         }
-    })
+    });
+    (task, log)
 }
 
 fn unique_name(prefix: &str) -> String {
@@ -344,7 +438,25 @@ fn unique_name(prefix: &str) -> String {
     format!("nession-test-mcp-{prefix}-{suffix}")
 }
 
-fn write_standalone_config(
+fn write_routed_config(dir: &Path, server_addr: SocketAddr) -> std::path::PathBuf {
+    let config_path = dir.join("mcp.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "[mcp]\n\
+             listen_address = \"127.0.0.1:0\"\n\
+             auth_token = \"{MCP_TOKEN}\"\n\
+             \n\
+             [backend.server]\n\
+             endpoint = \"ws://{server_addr}\"\n\
+             auth_token = \"{SERVER_TOKEN}\"\n"
+        ),
+    )
+    .expect("write config");
+    config_path
+}
+
+fn write_direct_config(
     dir: &Path,
     server_addr: SocketAddr,
     agent_addr: SocketAddr,
@@ -392,13 +504,12 @@ async fn terminate_and_wait(child: &mut Child) {
 }
 
 #[tokio::test]
-async fn standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint() {
+async fn standalone_routes_agent_session_tools_through_the_server() {
     let (server_addr, server_task) = start_server_with_mcp(false).await;
-    let mock_agent = register_and_answer(server_addr).await;
-    let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, false).await;
+    let (mock_agent, broker) = register_and_answer(server_addr).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr);
+    let config_path = write_routed_config(dir.path(), server_addr);
     let mut child = spawn_standalone(&config_path);
     let mcp_addr = await_listen_addr(&mut child.0).await;
 
@@ -413,117 +524,191 @@ async fn standalone_host_serves_cluster_and_node_tools_over_its_own_endpoint() {
     .expect("HTTP answer");
     assert_eq!(anonymous.status, 401);
 
-    let session = initialize(mcp_addr).await;
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+    let tools = tools_of(mcp_addr, MCP_TOKEN).await;
+    assert_eq!(tools.as_array().expect("tools").len(), 4);
 
-    let agents = call_tool(mcp_addr, &session, "nession_server_list_agents", json!({})).await;
-    assert_eq!(agents["isError"], false, "{agents}");
-    assert_eq!(text_of(&agents)["agents"][0]["agent_id"], "cluster-agent");
-
-    let info = call_tool(mcp_addr, &session, "nession_server_get_info", json!({})).await;
-    assert_eq!(info["isError"], false, "{info}");
-
-    let cluster_name = unique_name("cluster");
-    let created = call_tool(
+    let agents = call_tool(
         mcp_addr,
+        MCP_TOKEN,
         &session,
-        "nession_server_create_session",
-        json!({ "agent_id": "cluster-agent", "name": cluster_name }),
-    )
-    .await;
-    assert_eq!(created["isError"], false, "{created}");
-    let listed = call_tool(
-        mcp_addr,
-        &session,
-        "nession_server_list_sessions",
+        "nession_server_list_agents",
         json!({}),
     )
     .await;
+    assert_eq!(agents["isError"], false, "{agents}");
+    assert_eq!(text_of(&agents)["agents"][0]["agent_id"], CLUSTER_AGENT);
+
+    // No [backend.agent] is configured: the Session operation must still reach
+    // the named Agent, through the Server's canonical route.
+    let name = unique_name("routed");
+    let created = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": CLUSTER_AGENT, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+
+    let listed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": CLUSTER_AGENT }),
+    )
+    .await;
     assert_eq!(listed["isError"], false, "{listed}");
+    assert!(
+        text_of(&listed)["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .any(|entry| entry["session_name"] == name),
+        "the Server-routed Agent truth is missing the created Session: {listed}"
+    );
+
     let killed = call_tool(
         mcp_addr,
+        MCP_TOKEN,
         &session,
-        "nession_server_kill_session",
-        json!({ "session_id": format!("cluster-agent:{cluster_name}") }),
+        "nession_agent_kill_session",
+        json!({ "agent_id": CLUSTER_AGENT, "name": name }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
 
-    // Node truth comes from the explicitly configured standalone Agent.
-    let node_name = unique_name("node");
-    let node_created = call_tool(
+    let commands = broker.commands();
+    assert!(
+        commands
+            .iter()
+            .any(|command| command == "agent.session.create"),
+        "the Server route never asked the Agent to create: {commands:?}"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| command == "agent.session.report"),
+        "the Server route never asked the Agent for live Session state: {commands:?}"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| command == "agent.session.kill"),
+        "the Server route never asked the Agent to kill: {commands:?}"
+    );
+
+    let wrong = call_tool(
         mcp_addr,
+        MCP_TOKEN,
         &session,
-        "nession_agent_create_session",
-        json!({ "agent_id": AGENT_ID, "name": node_name }),
+        "nession_agent_list_sessions",
+        json!({ "agent_id": "not-registered" }),
     )
     .await;
-    assert_eq!(node_created["isError"], false, "{node_created}");
-    let node_list = call_tool(
+    assert_eq!(wrong["isError"], true, "{wrong}");
+
+    terminate_and_wait(&mut child.0).await;
+    mock_agent.abort();
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
+    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, false).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_direct_config(dir.path(), server_addr, agent_addr);
+    let mut child = spawn_standalone(&config_path);
+    let mcp_addr = await_listen_addr(&mut child.0).await;
+    let session = initialize_with(mcp_addr, MCP_TOKEN).await;
+
+    let name = unique_name("direct");
+    let created = call_tool(
         mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+
+    let listed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
         &session,
         "nession_agent_list_sessions",
         json!({ "agent_id": AGENT_ID }),
     )
     .await;
-    assert_eq!(node_list["isError"], false, "{node_list}");
+    assert_eq!(listed["isError"], false, "{listed}");
     assert!(
-        text_of(&node_list)["sessions"]
+        text_of(&listed)["sessions"]
             .as_array()
             .expect("sessions")
             .iter()
-            .any(|entry| entry["name"] == node_name),
-        "the standalone Agent's real tmux Session is missing"
+            .any(|entry| entry["name"] == name),
+        "the direct Agent's real tmux Session is missing"
     );
+
     let wrong = call_tool(
         mcp_addr,
+        MCP_TOKEN,
         &session,
         "nession_agent_list_sessions",
         json!({ "agent_id": "not-this-agent" }),
     )
     .await;
     assert_eq!(wrong["isError"], true);
-    let node_killed = call_tool(
+
+    let killed = call_tool(
         mcp_addr,
+        MCP_TOKEN,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": AGENT_ID, "name": node_name }),
+        json!({ "agent_id": AGENT_ID, "name": name }),
     )
     .await;
-    assert_eq!(node_killed["isError"], false, "{node_killed}");
+    assert_eq!(killed["isError"], false, "{killed}");
 
-    // SC-10: SIGTERM stops accepting and the process exits by itself.
     terminate_and_wait(&mut child.0).await;
-
     let _ = agent_handle.shutdown().await;
-    mock_agent.abort();
     server_task.abort();
 }
 
-/// SC-05: all three hosts serve one catalog, byte for byte.
+/// SC-03: all three hosts serve one catalog, byte for byte.
 #[tokio::test]
 async fn all_three_hosts_share_one_tool_catalog() {
     let (server_addr, server_task) = start_server_with_mcp(true).await;
     let (agent_addr, agent_handle) = start_agent(AGENT_TOKEN, true).await;
     let dir = tempfile::tempdir().expect("tempdir");
-    let config_path = write_standalone_config(dir.path(), server_addr, agent_addr);
-    let mut _standalone = spawn_standalone(&config_path);
-    let standalone_addr = await_listen_addr(&mut _standalone.0).await;
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut standalone = spawn_standalone(&config_path);
+    let standalone_addr = await_listen_addr(&mut standalone.0).await;
 
-    async fn tools(addr: SocketAddr, token: &str) -> Value {
-        let session = initialize_with(addr, token).await;
-        let body = json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }).to_string();
-        let response = send(addr, "POST", Some(token), Some(&session), &body)
-            .await
-            .expect("tools/list response");
-        assert_eq!(response.status, 200, "{}", response.body);
-        response.json()["result"]["tools"].clone()
-    }
+    let server_tools = tools_of(server_addr, SERVER_TOKEN).await;
+    let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
+    let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    let server_tools = tools(server_addr, SERVER_TOKEN).await;
-    let agent_tools = tools(agent_addr, AGENT_TOKEN).await;
-    let standalone_tools = tools(standalone_addr, MCP_TOKEN).await;
-
-    assert_eq!(server_tools.as_array().expect("tools").len(), 12);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 4);
+    let names: Vec<_> = server_tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "nession_server_list_agents",
+            "nession_agent_list_sessions",
+            "nession_agent_create_session",
+            "nession_agent_kill_session",
+        ]
+    );
     assert_eq!(
         server_tools, agent_tools,
         "Agent embedded must serve the same catalog as the Server"

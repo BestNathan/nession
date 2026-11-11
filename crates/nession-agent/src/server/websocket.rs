@@ -52,7 +52,7 @@ use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use nession_mcp::http::{PrefixedStream, RequestHead, Sniffed};
+use nession_mcp::http::{PrefixedStream, Sniffed};
 use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_runtime::lane::{KeyedLane, Work};
@@ -3126,7 +3126,7 @@ enum Handshake {
         Box<WebSocketStream<PrefixedStream<TcpOrTls>>>,
         ConnectionAuthority,
     ),
-    Mcp(Arc<McpService>, RequestHead, Box<PrefixedStream<TcpOrTls>>),
+    Mcp(Arc<McpService>, Box<PrefixedStream<TcpOrTls>>),
 }
 
 impl AgentServer {
@@ -3345,7 +3345,7 @@ impl AgentServer {
                                                 terminal_cols, la, aid, am, rtx,
                                             ));
                                         }
-                                        Ok(Handshake::Mcp(service, head, body)) => {
+                                        Ok(Handshake::Mcp(service, stream)) => {
                                             // MCP is not a P2P peer: it had its
                                             // own bearer check, and it must not
                                             // hold the pre-authentication budget
@@ -3353,7 +3353,7 @@ impl AgentServer {
                                             // own request timeout and failure
                                             // handling.
                                             drop(slot);
-                                            if let Err(e) = service.serve(head, *body).await {
+                                            if let Err(e) = service.serve(*stream).await {
                                                 info!("MCP connection from {} ended: {e:#}", addr);
                                             }
                                         }
@@ -3464,8 +3464,8 @@ impl AgentServer {
                         // upgrade request it expects, and the credential callback
                         // below is untouched.
                         Sniffed::WebSocket { stream } => stream,
-                        Sniffed::Http { head, body } => {
-                            return Ok(Handshake::Mcp(service, head, Box::new(body)))
+                        Sniffed::Http { stream, .. } => {
+                            return Ok(Handshake::Mcp(service, Box::new(stream)))
                         }
                     }
                 }
