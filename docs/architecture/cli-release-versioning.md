@@ -54,15 +54,66 @@ delegates to the installed CLI once it supports `install`):
   configuration/state and every other archive are unchanged. Reinstalling a
   complete archive is a no-op; an existing archive's configuration and data are
   never overwritten.
-- **target > Current**: download and SHA256-verify the release, then archive
-  Current's three binaries plus `agent-config.toml`, `server-config.toml`,
-  `agent/` and `server/` into `versions/<current>/`, and atomically replace the
-  managed binaries with the target. The new Current starts with built-in
-  defaults (no inherited config/database). On failure the archived files and
-  binaries are restored; a partial release is never installed.
+- **target > Current**: download and SHA256-verify the release, then run the
+  archive transaction below. The new Current starts with built-in defaults (no
+  inherited config/database).
 
 Versions are strict SemVer; a leading `v` is accepted and normalized. Invalid
 or unavailable releases are rejected before mutation.
+
+### Archive transaction and recovery
+
+A release archive is assembled in a private `versions/.stage-*` directory and
+published by **one atomic rename**. A final `versions/<semver>` directory is
+therefore always complete; `versions::is_complete_archive` requires all three
+binaries before any archive is listed or reused (#3232 F4).
+
+Every mutating phase is recorded in `<NESSION_HOME>/.install-transaction.json`
+before it starts. The journal names the release homes, the exact old/new binary
+SHA256 digests, each configuration/state entry that may move, the original
+`server-config.toml` text and the transaction PID. Phases:
+
+```text
+staging -> state-move -> archive-committed -> binary-swap -> committed
+```
+
+Recovery runs before any command reads Current (including `version list`) and
+under the lifecycle lock, so an active install is skipped rather than raced:
+
+- `staging`: remove the staging directory; Current was untouched.
+- `state-move` / `archive-committed`: restore all three binaries from the
+  archive (or staging before the rename), move configuration/state back, write
+  the original config text, remove the uncommitted archive.
+- `binary-swap`: if all three installed binaries match the journal's new
+  digests, the swap had finished — commit forward and keep the archive.
+  Anything mixed is rolled back from the archive.
+- An unreadable journal, a missing archive copy, or an entry present at both
+  locations is **fail-stop**: the journal is retained and every later command
+  reports the exact repair instead of starting a half-installed release.
+  Recovery errors are never swallowed.
+
+`scripts/install.sh` verifies the release SHA256 before extracting and before
+publishing anything. On a machine whose existing CLI predates `install`, it
+hands the first upgrade to the **new** binary's transaction, so the old three
+binaries, configuration and durable state are archived instead of overwritten.
+A fresh machine still bootstraps the selected binaries from staging in one
+publication step. Neither path stops a running daemon.
+
+### Archived server paths
+
+`config server init` persists the *generated* absolute defaults for `db_path`,
+`image_blob_dir` and `image_build_dir`. Archiving rewrites exactly those values
+to the archived home's defaults so an archived Server opens
+`versions/<old>/server/...`, never Current's state (#3232 F1):
+
+- explicit absolute paths outside the Current home are the operator's external
+  declaration and stay verbatim;
+- a relative, empty, or Current-home path that is not a generated default
+  cannot be relocated safely, so the archive is refused with an actionable
+  diagnostic instead of silently reading Current data;
+- an unreadable or non-string field also refuses the archive.
+
+The transaction restores the exact original config text on rollback.
 
 A Current replacement is **refused while an Agent or Server is live**. Moving
 the configuration and database directories that a running process is using is
@@ -86,6 +137,18 @@ update check for that child. `version` and `install`/`update` always run on
 Current; `install`/`update` reject a non-Current selector instead of silently
 writing into an archived home.
 
+### Shared lifecycle contract
+
+Before dispatching `agent|server start|restart|status|stop` to an archived
+release, the dispatcher probes
+`<archive>/bin/nession --lifecycle-contract`. A contract-aware release prints
+`nession-lifecycle-v1 <its compiled release>`; the probe must report both the
+token and the release named by the archive directory. A release that predates
+the shared lock, PID identity and single-active gate — or a mislabeled archive —
+is refused with a migration hint rather than executed blindly (#3232 F2). The
+probe is a normal child process, so a refusal leaves the caller free to print
+the diagnostic. Other archived commands are unaffected.
+
 The update-check cache is keyed by the writing release; a cache produced by a
 different installed version is ignored. Nothing in selection changes Current.
 
@@ -106,6 +169,11 @@ different installed version is ignored. Nothing in selection changes Current.
   starts therefore produce one process, while stop/restart still use the
   `pid + started_at + kind` ownership identity (#1016) and never signal a
   reused PID.
+- The identity is re-read immediately before a timeout escalates to SIGKILL. A
+  process that exited during the grace period, a reused PID, an unreadable
+  record, or a record that now names another live PID is never signalled. A
+  process that ignored SIGTERM and still owns the record is force-killed as
+  before (#3232 F6, `lifecycle/terminate.rs`).
 - The process identity records the writing release (`version=`), which is what
   `version list` reports as Running, and what the mixed-release check compares
   against.
@@ -127,16 +195,34 @@ number is not a substitute for protocol negotiation.
 Generated systemd user units and launchd LaunchAgents still run the Current
 install path with the resolved `--pid-file` and `NESSION_RUNTIME_DIR` from
 #3155. An archived release is selectable for CLI commands, not installed as the
-service; the service manager is never pointed at an unmanaged second process.
+service.
+
+**The manager is the lifecycle owner of a registered Agent (#3232 F5).** When
+the unit/plist targets the state file this invocation resolved, the CLI
+consults the manager before acting:
+
+- `start` reports an already-running managed Agent as an idempotent success; it
+  refuses to create an unmanaged process when only the registration exists;
+- `restart` and `stop` are refused with the manager command, because
+  `Restart=on-failure` / `KeepAlive` would otherwise race the CLI and could
+  revive the manager's snapshotted (possibly older) binary;
+- commands aimed at a different explicit state file — an isolated runtime — are
+  unaffected, as is `status`.
+
+`nession agent uninstall-service` returns the Agent to CLI-managed operation
+for future starts. Cross-release switching is done by installing the target as
+Current and re-running `install-service` from it.
 
 ## Limits / when to revisit
 
-- A native boot-time service-manager proof is not provided by the source
-  contract tests; a Case that claims it needs a real systemd/launchd runtime.
-- Archived releases older than the shared-runtime change (#3155) cannot observe
-  a process through the OS runtime directory. Their archive remains usable for
-  rollback on a host where their own state is compatible, but cross-release
-  process discovery assumes #3155-or-newer releases.
+- A native boot-time service-manager proof needs a real, isolated systemd or
+  launchd runtime. SC-05 stays Pending when the approved runner cannot provide
+  an isolated user/manager lane; a generated unit/plist fixture is not
+  evidence.
+- Releases older than the shared lifecycle contract can still be archived and
+  run non-lifecycle commands, but cross-release lifecycle commands are refused
+  (see **Shared lifecycle contract**). This is the supported compatibility
+  boundary, not an assumption that old binaries behave like new ones.
 - Selecting the same version as the running entry binary executes the entry
   binary (the equivalence is by release, not by archive path). `version list`
   still shows an otherwise-identical archive.
@@ -150,7 +236,8 @@ service; the service manager is never pointed at an unmanaged second process.
   defined here.
 
 Implementation owners: `crates/nession-cli/src/versions/mod.rs`,
-`crates/nession-cli/src/update/install.rs`,
-`crates/nession-cli/src/lifecycle/{lock,release,pid_file}.rs`,
+`crates/nession-cli/src/update/{install,transaction,release_config}.rs`,
+`crates/nession-cli/src/lifecycle/{lock,release,pid_file,terminate}.rs`,
 `crates/nession-cli/src/commands/{install,version}.rs`,
-`crates/nession-cli/src/commands/{agent,server}/`, and `scripts/install.sh`.
+`crates/nession-cli/src/commands/{agent,server}/`,
+`crates/nession-cli/src/service/mod.rs`, and `scripts/install.sh`.

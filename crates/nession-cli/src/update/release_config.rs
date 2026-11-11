@@ -107,9 +107,13 @@ pub fn rewrite_server_config_for_archive(
         match decision {
             Decision::Rewrite => {
                 let rendered = to_default.to_string_lossy().into_owned();
-                *document
-                    .get_mut(field)
-                    .expect("the field was read from this document") = toml_edit::value(rendered);
+                let Some(item) = document.get_mut(field) else {
+                    bail!(
+                        "server config field `{field}` disappeared while rewriting; \
+                         refusing to archive Current"
+                    );
+                };
+                *item = toml_edit::value(rendered);
                 report.actions.push((field, FieldAction::Rewritten));
             }
             Decision::External => report.actions.push((field, FieldAction::Retained)),

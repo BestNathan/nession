@@ -169,18 +169,26 @@ mod tests {
     }
 
     impl Stubborn {
-        fn spawn() -> Self {
+        fn spawn() -> std::io::Result<Self> {
             let output = std::process::Command::new("sh")
                 .arg("-c")
                 .arg("(trap '' TERM; while :; do sleep 1; done) >/dev/null 2>&1 & echo $!")
-                .output()
-                .expect("spawn a SIGTERM-ignoring child");
-            assert!(output.status.success(), "the helper shell failed");
+                .output()?;
+            if !output.status.success() {
+                return Err(std::io::Error::other(
+                    "the SIGTERM-ignoring helper shell failed",
+                ));
+            }
             let pid = String::from_utf8_lossy(&output.stdout)
                 .trim()
                 .parse::<u32>()
-                .expect("the helper shell reported its child pid");
-            Self { pid }
+                .map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("the helper shell reported no pid: {error}"),
+                    )
+                })?;
+            Ok(Self { pid })
         }
 
         fn pid(&self) -> u32 {
@@ -196,16 +204,16 @@ mod tests {
         }
     }
 
-    fn identity(pid: u32) -> ProcessIdentity {
-        let mut identity = pid_file::ProcessIdentity::of_current_process(Component::Agent).unwrap();
+    fn identity(pid: u32) -> Result<ProcessIdentity> {
+        let mut identity = pid_file::ProcessIdentity::of_current_process(Component::Agent)?;
         identity.pid = pid;
         // The recorded start time is the child's, not this test process's.
-        identity.started_at =
-            pid_file::start_time_of_pid(pid).expect("the child has a readable start time");
-        identity
+        identity.started_at = pid_file::start_time_of_pid(pid)
+            .ok_or_else(|| anyhow::anyhow!("the child has no readable start time"))?;
+        Ok(identity)
     }
 
-    fn write_record(path: &Path, identity: &ProcessIdentity) {
+    fn write_record(path: &Path, identity: &ProcessIdentity) -> std::io::Result<()> {
         fs::write(
             path,
             format!(
@@ -215,19 +223,18 @@ mod tests {
                 identity.kind.as_str(),
                 identity.release_version.as_deref().unwrap_or_default()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        )?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
     }
 
     #[tokio::test]
     async fn a_timeout_force_kills_the_same_recorded_process() {
         let dir = TempDir::new().unwrap();
         let record = dir.path().join("agent.pid");
-        let child = Stubborn::spawn();
+        let child = Stubborn::spawn().unwrap();
         assert!(pid_file::is_process_running(child.pid()));
-        let identity = identity(child.pid());
-        write_record(&record, &identity);
+        let identity = identity(child.pid()).unwrap();
+        write_record(&record, &identity).unwrap();
 
         stop_verified_with_timeout(
             record.to_str().unwrap(),
@@ -248,9 +255,9 @@ mod tests {
     async fn an_identity_change_before_sigkill_is_not_signalled() {
         let dir = TempDir::new().unwrap();
         let record = dir.path().join("agent.pid");
-        let child = Stubborn::spawn();
-        let identity = identity(child.pid());
-        write_record(&record, &identity);
+        let child = Stubborn::spawn().unwrap();
+        let identity = identity(child.pid()).unwrap();
+        write_record(&record, &identity).unwrap();
 
         // Make the record describe a different instance while the child keeps
         // running: exactly what a reused pid looks like from `stop`'s side.
@@ -268,7 +275,7 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(150)).await;
-        write_record(&record, &reused);
+        write_record(&record, &reused).unwrap();
 
         stop.await
             .expect("the stop task completed")
@@ -283,9 +290,9 @@ mod tests {
     async fn an_unreadable_identity_refuses_sigkill() {
         let dir = TempDir::new().unwrap();
         let record = dir.path().join("agent.pid");
-        let child = Stubborn::spawn();
-        let identity = identity(child.pid());
-        write_record(&record, &identity);
+        let child = Stubborn::spawn().unwrap();
+        let identity = identity(child.pid()).unwrap();
+        write_record(&record, &identity).unwrap();
 
         let path = record.to_str().unwrap().to_string();
         let stop = tokio::spawn(async move {

@@ -465,21 +465,9 @@ fn replace_current_with_fault(
     to: &Version,
     archive_dir: &Path,
     staged: &Path,
-    point: FaultPoint,
-    abort: bool,
+    fault: FaultPlan,
 ) -> Result<PathBuf> {
-    replace_current_inner(
-        home,
-        install_dir,
-        from,
-        to,
-        archive_dir,
-        staged,
-        FaultPlan {
-            point: Some(point),
-            abort,
-        },
-    )
+    replace_current_inner(home, install_dir, from, to, archive_dir, staged, fault)
 }
 
 fn replace_current_inner(
@@ -576,7 +564,7 @@ fn replace_current_inner(
         home: home.to_path_buf(),
         install_dir: install_dir.to_path_buf(),
         archive_dir: archive_dir.to_path_buf(),
-        staging_dir: staging_dir.clone(),
+        staging_dir,
         moved,
         swapped: Vec::new(),
         old_digests,
@@ -668,10 +656,7 @@ fn apply(
     }
     if let Some((text, report)) = rewritten {
         fs::write(journal.staging_dir.join(SERVER_CONFIG), text).with_context(|| {
-            format!(
-                "failed to write the release-scoped {} into the archive",
-                SERVER_CONFIG
-            )
+            format!("failed to write the release-scoped {SERVER_CONFIG} into the archive")
         })?;
         journal.server_config_rewritten = true;
         write_journal(journal_file, journal)?;
@@ -989,8 +974,10 @@ mod tests {
             &Version::new(1, 2, 0),
             &fixture.archive,
             &fixture.staged,
-            FaultPoint::Staging,
-            false,
+            FaultPlan {
+                point: Some(FaultPoint::Staging),
+                abort: false,
+            },
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("injected install failure"));
@@ -1013,8 +1000,10 @@ mod tests {
             &Version::new(1, 2, 0),
             &fixture.archive,
             &fixture.staged,
-            FaultPoint::StateMove,
-            false,
+            FaultPlan {
+                point: Some(FaultPoint::StateMove),
+                abort: false,
+            },
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("injected install failure"));
@@ -1036,8 +1025,10 @@ mod tests {
             &Version::new(1, 2, 0),
             &fixture.archive,
             &fixture.staged,
-            FaultPoint::BinarySwap,
-            false,
+            FaultPlan {
+                point: Some(FaultPoint::BinarySwap),
+                abort: false,
+            },
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("injected install failure"));
