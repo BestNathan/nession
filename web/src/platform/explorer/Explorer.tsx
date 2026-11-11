@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
 
@@ -17,6 +17,7 @@ import { ExplorerRegistryContext } from './ExplorerRegistryContext';
 import { useExplorerFileActions } from './hooks/useExplorerFileActions';
 import { useExplorerRegistry } from './hooks/useExplorerRegistry';
 import { useExplorerStore } from './hooks/useExplorerStore';
+import { useExplorerControlledSelection } from './hooks/useExplorerControlledSelection';
 import { useExplorerRevealPath } from './hooks/useExplorerRevealPath';
 import { useExplorerTreeHeight } from './hooks/useExplorerTreeHeight';
 import { useWorkspaceClearancePx } from './hooks/useWorkspaceClearancePx';
@@ -27,7 +28,8 @@ import type { ExplorerNode } from './types';
 export interface ExplorerComponentProps {
   provider: ExplorerDataProvider;
   extensions?: ExplorerExtension[];
-  onFileActivate: (node: ExplorerNode) => void;
+  /** Return false to reject the activation; the tree keeps its selection. */
+  onFileActivate: (node: ExplorerNode) => boolean | void;
   onFileDeleted?: (node: ExplorerNode) => void;
   onFileRenamed?: (node: ExplorerNode, newName: string) => void;
   /** Intercept context-menu delete (e.g. confirmation dialog) instead of deleting immediately. */
@@ -37,6 +39,8 @@ export interface ExplorerComponentProps {
   revealPath?: string;
   /** Hide the built-in refresh toolbar (when an outer shell provides its own). */
   hideToolbar?: boolean;
+  /** The host's open file. Guarded transitions move the row when the host commits. */
+  selectedPath?: string | null;
   /** Receives the ExplorerStore instance for refresh/navigation from a parent shell. */
   storeRef?: MutableRefObject<ExplorerStore | null>;
   className?: string;
@@ -63,6 +67,7 @@ export function Explorer({
   provider,
   extensions,
   onFileActivate,
+  selectedPath,
   onFileDeleted,
   onFileRenamed,
   onDeleteRequest,
@@ -84,6 +89,7 @@ export function Explorer({
   // published measurement the CSS class spends, in the unit a virtualized
   // list needs (see the hook for why the class cannot reach this scroller).
   const clearancePx = useWorkspaceClearancePx(containerRef);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const fileActions = useExplorerFileActions({
     provider,
     store,
@@ -122,6 +128,8 @@ export function Explorer({
 
   useExplorerRevealPath({ store, treeRef, treeData, initialPath, revealPath });
 
+  useExplorerControlledSelection({ store, treeRef, treeData, selectedPath, selectionRevision });
+
   const handleToggle = useCallback(
     (id: string) => {
       if (treeRef.current?.isOpen(id)) {
@@ -144,7 +152,13 @@ export function Explorer({
         onRenameChange={fileActions.setRenameValue}
         onRenameSubmit={fileActions.handleRenameSubmit}
         onRenameCancel={fileActions.handleRenameCancel}
-        onFileActivate={onFileActivate}
+        onFileActivate={(node) => {
+          const accepted = onFileActivate(node);
+          if (accepted === false) {
+            setSelectionRevision((revision) => revision + 1);
+          }
+          return accepted;
+        }}
       />
     ),
     [fileActions, onFileActivate, store],

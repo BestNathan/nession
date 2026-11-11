@@ -30,8 +30,8 @@ belongs to core runtime; layout/selection state belongs to app/workbench.
 | Tree structure, expand/collapse, selection, active | `platform/explorer` — `ExplorerStore` class | One instance per `Explorer` mount (`useExplorerStore`), bound to the provider (→ fileOps → transport) baked in at construction |
 | File operations (list/read/write/rename/delete) | `FileOps` RPC surface (`FilesPlugin`) | Per SessionRuntime agent socket; surfaced to UI as `ctx.fileOps` when a P2P transport is attached |
 | Explorer extensions (decorations, context menus) | `platform/explorer` — `ExplorerRegistry` | One registry per `Explorer` mount; register/unregister notify subscribers → incremental row refresh |
-| Selected file + navigation | Web: `app/experiences/web/FilesWebLayout.tsx`; App: `app/experiences/app/FilesAppLayout.tsx` and `useAppFilesNavigator.ts` | Web tree/detail selection versus App directory/search/pushed viewer state; layout scoped, no shared DocumentStore |
-| File content / edit state (dirty, saving, revision, conflict) | `useFileViewer` per viewer mount | Discarded on tab switch (viewers unmount) |
+| Selected file + navigation | Web: `app/experiences/web/FilesWebLayout.tsx` + `useFilesWebSwitchGuard.ts`; App: `app/experiences/app/FilesAppLayout.tsx` and `useAppFilesNavigator.ts` | Web tree/detail selection and the dirty-switch decision versus App directory/search/pushed viewer state; layout scoped, no shared DocumentStore |
+| File content / edit state (dirty, saving, revision, conflict) | `useFileViewer` per viewer mount | Owned by the mounted viewer; the Web layout receives dirty/saving reports and a guarded save handler so a tree switch cannot unmount a dirty viewer silently |
 | Editor UI state (cursor/selection) | Inside `CodeMirrorEditor`'s EditorView | Not lifted; only text diffs are used for dirty tracking |
 
 **Scoping:** a file reference carries its `sourceId` (Session-derived, Agent
@@ -59,13 +59,37 @@ carries `line`/`column`; the viewer renders source/raw at that position and
 re-activating the same file elsewhere repositions the mounted viewer rather
 than remounting it or discarding edits.
 
+## Web dirty-file switching (#3171)
+
+Web owns selection, so it owns the transition that may replace the mounted
+viewer. It does **not** own the file content: `FileViewer` reports `dirty` and
+`saving`, and registers a guarded save handler. `useFilesWebSwitchGuard` keeps
+the pending target and the one decision:
+
+- a clean file switches directly;
+- a dirty file opens one unsaved-changes dialog naming A and B;
+- Cancel keeps A, its exact draft and the tree selection;
+- Discard opens B and does not persist A's draft;
+- Save and switch calls the viewer's guarded save and opens B only on success;
+  a conflict hands the next step to the viewer's existing conflict dialog
+  without opening B; any other failure keeps A and shows a retryable error;
+- a switch requested while the toolbar's own save is in flight waits for that
+  save, then opens B only if it committed, otherwise keeps A;
+- repeated B/C requests while the decision is pending are ignored, so the
+  dialog and the eventual target cannot disagree.
+
+The App already has a pushed-detail Back guard (`useAppFilesPushedSurface` +
+`AppFilesViewerLayer`) and keeps that behavior. This is a Web selection
+transition, not a global navigation guard, DocumentStore or multi-tab editor.
+
 ## DocumentStore / EditorStore — boundary, not yet entities
 
 The Phase-4 target model names `DocumentStore` (file content + edit state)
 and `EditorStore` (editor UI state) alongside `ExplorerStore`. Those are
-**not implemented as stores yet**: content has no cross-layout cache, viewers unmount on
-switch, and the two live layouts deliberately differ (Web tree + viewer;
-App directory navigator + pushed viewer). The intended
+**not implemented as stores yet**: content has no cross-layout cache, a Web
+dirty switch is an explicit guarded transition, and the two live layouts
+deliberately differ (Web tree + viewer; App directory navigator + pushed
+viewer). The intended
 boundaries:
 
 - **ExplorerStore** — implemented (`platform/explorer/ExplorerStore.ts`).
