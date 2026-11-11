@@ -1,5 +1,6 @@
 name: Acceptance / Manual Request
-run-name: ${{ format('Comment Accept #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) }}
+run-name: >-
+  ${{ format('Comment Accept #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) }}
 
 # Exact owner/collaborator /accept recovery. Only the trusted projector may
 # mark SC Pass: this comment is a recovery request, not a verdict.
