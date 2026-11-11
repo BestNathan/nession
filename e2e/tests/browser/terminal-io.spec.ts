@@ -744,6 +744,11 @@ test.describe('Terminal I/O', () => {
       // The mode is the variable, so the other encoding must not have appeared.
       expect(await countInBuffer(page, '^[OA')).toBe(0);
     }).toPass({ timeout: 15_000 });
+    // Regression for Full #42970306164: an old prompt is still in the
+    // scrollback while cat -v is active. Waiting for that historical prompt
+    // caused the appcursor command to be sent before Ctrl-C completed.
+    expect(await readTerminalBuffer(page)).toMatch(/runner:\S*\$/m);
+    expect(await lastNonEmptyLine(page)).not.toMatch(/^runner:\S*\$/);
     await stopPtyProbe(page);
 
     // Same tap, application cursor mode: ESC O A, rendered `^[OA`. A constant
