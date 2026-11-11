@@ -392,8 +392,8 @@ struct FaultPlan {
     abort: bool,
 }
 
-const FAULT_ENV: &str = "NESSSION_INSTALL_FAULT";
-const ABORT_ENV: &str = "NESSSION_INSTALL_ABORT";
+const FAULT_ENV: &str = "NESSION_INSTALL_FAULT";
+const ABORT_ENV: &str = "NESSION_INSTALL_ABORT";
 
 fn parse_fault(value: Option<String>) -> Option<FaultPoint> {
     match value.as_deref() {

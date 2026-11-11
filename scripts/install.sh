@@ -171,7 +171,13 @@ EXISTING_CLI=""
 if [ -f "$INSTALL_DIR/nession" ] && [ -x "$INSTALL_DIR/nession" ]; then
   EXISTING_CLI="$INSTALL_DIR/nession"
 elif command -v nession >/dev/null 2>&1; then
-  EXISTING_CLI="$(command -v nession)"
+  # A CLI elsewhere on PATH is a different installation unless its directory
+  # is exactly the destination. Delegating it here would migrate that other
+  # installation into --dir.
+  PATH_CLI="$(command -v nession)"
+  if [ "$(dirname "$PATH_CLI")" = "$INSTALL_DIR" ]; then
+    EXISTING_CLI="$PATH_CLI"
+  fi
 fi
 
 # ── Delegate versioned installs to an existing CLI ──────────────────────────
