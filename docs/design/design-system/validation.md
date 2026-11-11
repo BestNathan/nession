@@ -56,6 +56,43 @@ Assertions then verify the contract for that context rather than assuming every 
 
 This is especially important for contextual capability emergence and progressive disclosure.
 
+## Capability visual recipes (#3138)
+
+Valid primitive and token use does not prove that a *composed* capability
+surface belongs to the same visual family as its peers. The shared content
+recipes — [ResourceDetail](patterns/resource-detail.md),
+[ConfigurationForm](patterns/configuration-form.md),
+[OperationSurface](patterns/operation-surface.md) — therefore carry their
+stable anatomy in the pattern contracts:
+
+- `parts` maps each `data-recipe-part` to the typography role(s) it must
+  resolve;
+- `controlHeightToken` names the Experience band shared inputs/actions resolve.
+
+`design/scripts/browser-design-catalog.mjs` (`CAPABILITY_VISUAL_INVARIANTS`) is
+the owner map: for each selected invariant it names the pattern contract, the
+shared component that must be repaired, and the canonical browser spec that
+checks it. A design source test rejects a contract part without an entry, an
+entry without a contract part, and an owner/check path that does not exist.
+
+Checklist for a new capability surface:
+
+1. Select the approved recipe instead of assembling a local hierarchy from
+   primitives.
+2. Identify the visual relation: a typography role (`parts`) or a geometry /
+   action band (`controlHeightToken`), and name its canonical owner.
+3. Add or reuse a deterministic production fixture state; assert corresponding
+   parts against the contract **and** relationally between independent
+   consumers. Experience-specific roles may legitimately differ (Web's title
+   and the App's title are two approved values, not one flattened constant).
+4. Run `./gates/run design-system-fast` while iterating, then the canonical
+   Browser Design profile / Full E2E for browser proof. Inspect the relevant
+   screenshot diff before claiming visual completion.
+
+A screenshot baseline is not behavioral proof. A missing, skipped,
+foreign-SHA, zero-assertion or list-drifted browser report fails closed and is
+never a Pass.
+
 ## Failure shape
 
 Failures should be structured enough for an AI coding agent or developer to diagnose without guessing:

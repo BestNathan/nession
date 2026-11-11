@@ -72,6 +72,8 @@ Examples of useful measurable consequences:
 | `scrollOwner` | Which surface owns scrolling |
 | `touchTargetToken` | App touch accessibility |
 | `visualSizeToken` | The affordance a control *paints*, as opposed to the hit target it offers — the one field that measures something inside the band (#1034) |
+| `controlHeightToken` | The Experience band every shared input/action in a recipe resolves — one statement for a form or operation with several controls (#3138) |
+| `parts` | Per-`data-recipe-part` approved roles: the typography token(s) and/or geometry a shared recipe's stable part must resolve (#3138) |
 | `visibility` | Context/experience-dependent visibility rule |
 | `allowedPrimitive` | Allowed composition primitive when stable |
 | `patternRef` | Canonical pattern prose owner |

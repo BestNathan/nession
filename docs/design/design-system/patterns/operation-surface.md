@@ -73,7 +73,7 @@ The App must not render a dialog-shaped operation as a shrunken Web modal, and W
 - Field errors stay on fields; only an operation-level failure uses `OperationError`.
 - The body is not a second navigation layer: no tabs that push history inside a dialog unless that operation explicitly owns that depth.
 
-Executable form: `data-recipe="operation-surface"` and `data-recipe-part="operation-*"` on the host surface and body; `design/contracts/patterns/operation-surface.json` records the stable scroll/wrap/touch constraints.
+Executable form: `data-recipe="operation-surface"` and `data-recipe-part="operation-*"` on the host surface and body; `design/contracts/patterns/operation-surface.json` records the stable scroll/wrap/touch constraints, the shared `controlHeightToken`, and the operation title/error typography roles (#3138). On App the visible operation name is the host page header's title, so the app block deliberately has no `operation-title` part.
 
 ## Anti-patterns
 
