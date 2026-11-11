@@ -75,7 +75,7 @@ export function mainAncestry(compare,base,tip){
     compare.base_commit?.sha===base);
 }
 export function shouldCollectKnowledgePublication(stage,issue){
-  return stage==='post-merge'&&['3156','3224'].includes(String(issue));
+  return stage==='post-merge'&&['2358','3156','3224'].includes(String(issue));
 }
 export function attestKnowledgePublication({
   targetSha,comment,publisher,signal,pages,proposalCommit,
@@ -275,6 +275,7 @@ export function selfTestKnowledgePublication(){
   assert.equal(prove({}).establishes_sc_verdict,false);
   assert.equal(shouldCollectKnowledgePublication('pre-merge',3156),false);
   assert.equal(shouldCollectKnowledgePublication('post-merge',3224),true);
+  assert.equal(shouldCollectKnowledgePublication('post-merge',2358),true);
   const bad=[
     {comment:{...original.comment,author_association:'MEMBER'}},
     {comment:{...original.comment,updated_at:'2026-11-10T10:00:01Z'}},
