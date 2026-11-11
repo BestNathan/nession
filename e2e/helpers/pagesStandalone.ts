@@ -80,6 +80,33 @@ const knowledge={
  ],
 };
 
+// Browser fixtures show one source-backed release introduction per field.
+// Contract v1/v2 remains a separate typed protocol selector.
+const request={alias:'StatusRequest',shape:{type:'object',properties:{
+  session:{type:'string'}}},fields:[{path:'session',variant:'',type:'string',required:true,
+    description:'Session identity',since:null,since_status:'unknown'}]};
+const response={alias:'StatusResponse',shape:{type:'object',properties:{
+  status:{type:'string'},snapshot:{type:'string'}}},fields:[
+   {path:'status',variant:'state=ok',type:'string',required:true,
+     description:'Repository status',since:'0.36.0',since_status:'verified'},
+   {path:'snapshot',variant:'state=ok',type:'string',required:true,
+     description:'Snapshot token',since:null,since_status:'unreleased'}
+  ]};
+const documents={
+ schema_version:4,status:'available',generated_at:'2026-11-10T10:00:00Z',
+ source:{repository:'BestNathan/nession',branch:'main',sha:'a'.repeat(40),
+   source_version:'0.35.0'},
+ definitions:{},
+ releases:[{version:'0.35.0',tag:'v0.35.0',sha:null,status:'unavailable'},
+  {version:'0.36.0',tag:'v0.36.0',sha:'b'.repeat(40),status:'available'}],
+ protocols:[
+  {id:'git.status',owner:'git',wires:['git.status'],
+    versions:[{version:1,request,response},{version:2,request,response}]},
+  {id:'server.session.create',owner:'core',wires:['server.session.create'],
+    versions:[{version:1,request:{...request,alias:'SessionCreateRequest'},response:null}]}
+ ]
+};
+
 // Browser fixture for the independent, source-only workflow definitions UI.
 const topology={
  schema_version:1,
@@ -119,12 +146,13 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
        source_ref_sha:'d'.repeat(40),
        source_url:'https://github.com/BestNathan/nession/actions/runs/42488022265'}]}}
  }:fixture;
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/documents.js':'documents.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(selected));return;}
   if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
   if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
+  if(path==='/data/documents.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(documents));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
   try {const name=allowed[path],content=await readFile(join(root,name));
    res.writeHead(200,{'content-type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html'});

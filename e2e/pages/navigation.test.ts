@@ -13,7 +13,7 @@ test.describe('public Pages shared navigation',()=>{
   await page.goto(site.origin+'/#/knowledge');
   const nav=page.getByRole('navigation',{name:'Main navigation'});
   const labels=['Overview','AI Agents','Collaboration','Workflows',
-   'Knowledge','Prototypes','Repository','Evidence'];
+   'Knowledge','Documents','Prototypes','Repository','Evidence'];
   await expect(nav.getByRole('link')).toHaveCount(labels.length);
   await expect(nav.getByRole('link')).toHaveText(labels);
   await expect(nav.getByRole('link',{name:'Knowledge'})).toHaveAttribute('aria-current','page');
@@ -24,6 +24,7 @@ test.describe('public Pages shared navigation',()=>{
   await expect(nav.getByRole('link')).toHaveText(labels);
   await expect(nav.getByRole('link',{name:'Workflows'})).toHaveAttribute('aria-current','page');
   await expect(nav.getByRole('link',{name:'Knowledge'})).toHaveAttribute('href','index.html#/knowledge');
+  await expect(nav.getByRole('link',{name:'Documents'})).toHaveAttribute('href','index.html#/documents');
   await expect(nav.getByRole('link',{name:'Prototypes'})).toHaveAttribute('href','index.html#/prototypes');
 
   await nav.getByRole('link',{name:'Prototypes'}).click();
@@ -41,13 +42,13 @@ test.describe('public Pages shared navigation',()=>{
   await page.setViewportSize({width:390,height:844});
   await page.goto(site.origin+'/workflows.html');
   const nav=page.getByRole('navigation',{name:'Main navigation'});
-  await expect(nav.getByRole('link')).toHaveCount(8);
+  await expect(nav.getByRole('link')).toHaveCount(9);
   await nav.getByRole('link',{name:'Knowledge'}).click();
   await expect(page).toHaveURL(/\/index\.html#\/knowledge$/);
   await expect(page.getByRole('heading',{name:'What we’ve learned, kept.'})).toBeVisible();
   await expect(nav.getByRole('link',{name:'Knowledge'})).toHaveAttribute('aria-current','page');
   await nav.getByRole('link',{name:'Workflows'}).click();
   await expect(page.getByRole('heading',{name:'Inside the workflow.'})).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveCount(8);
+  await expect(nav.getByRole('link')).toHaveCount(9);
  });
 });
