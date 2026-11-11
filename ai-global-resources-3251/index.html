@@ -72,7 +72,7 @@ document.getElementById("tab-mcp").setAttribute("aria-selected",String(state.typ
 document.getElementById("add").textContent=state.type==="skills"?"+ Install Skill":"+ Add MCP";
 document.getElementById("add").disabled=!available();
 document.getElementById("search").placeholder="Search Agent "+(state.type==="skills"?"Skills":"MCP");
-document.getElementById("workspace-surface").hidden=state.surface!=="workspace";
+document.getElementById("ai-area").hidden=state.surface!=="workspace";
 document.getElementById("other-surface").hidden=state.surface==="workspace";
 document.getElementById("app-title").textContent=state.detail?(byId(state.selected)?.name||"Resource"):"AI";
 var found=visible();
