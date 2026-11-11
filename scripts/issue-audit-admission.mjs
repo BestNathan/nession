@@ -101,11 +101,11 @@ function selfTest() {
   assert.equal(issueAuditAdmission('issues', edited(original, statusUpdate)).semantic, false);
   assert.equal(issueAuditAdmission('issues', edited(original, reportUpdate)).semantic, false);
   const markdownExample = original.replace('Description of the desired behavior.',
-    'Description of the desired behavior.\\n~~~md\\n## Acceptance Report\\nreal example text\\n~~~');
+    'Description of the desired behavior.\n~~~md\n## Acceptance Report\nreal example text\n~~~');
   assert.equal(issueAuditAdmission('issues', edited(markdownExample,
     markdownExample.replace('real example text', 'changed example requirement'))).semantic, true);
   const fencedCheckbox = original.replace('Description of the desired behavior.',
-    'Description of the desired behavior.\\n~~~md\\n- [ ] SC-01 example\\n~~~');
+    'Description of the desired behavior.\n~~~md\n- [ ] SC-01 example\n~~~');
   assert.equal(issueAuditAdmission('issues', edited(fencedCheckbox,
     fencedCheckbox.replace('- [ ] SC-01 example', '- [x] SC-01 example'))).semantic, true);
   assert.equal(issueAuditAdmission('issues', edited(original, original.replace('SC-01 deterministic gate', 'SC-01 other gate'))).semantic, true);
