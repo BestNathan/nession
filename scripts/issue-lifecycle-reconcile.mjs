@@ -63,10 +63,11 @@ export function selectManualAgentRuns(issue, prs) {
     return [];
   }
   if (!parsed.plan) return []; // Legacy implicit methods cannot authorize a new Agent.
-  const planned = new Set();
+  const planned = new Map();
   for (const [id, entry] of parsed.plan.entries()) {
     const row = report.rows.get(id);
-    if (!row || entry.method !== 'agent' || ['pass', 'n/a'].includes(row.result.toLowerCase())) continue;
+    if (!row || entry.method !== 'agent') continue;
+    if (['pass', 'n/a'].includes(row.result.toLowerCase()) && success.criteria.get(id)?.checked) continue;
     const stage = planStage(entry);
     if (!stage || planned.has(stage)) continue;
     const candidates = prs.filter(pr =>
@@ -78,13 +79,9 @@ export function selectManualAgentRuns(issue, prs) {
     const pr = candidates[0];
     const sha = stage === 'pre-merge' ? pr?.head?.sha : pr?.merge_commit_sha;
     if (!SHA.test(String(sha || ''))) continue;
-    planned.add(stage);
-    planned.add(stage + ':sha:' + sha);
+    planned.set(stage, sha);
   }
-  return [...planned].filter(s => s.includes(':sha:')).map(s => {
-    const [stage, sha] = s.split(':sha:');
-    return { stage, target_ref: sha };
-  });
+  return [...planned].map(([stage, sha]) => ({ stage, target_ref: sha }));
 }
 
 async function githubRequest(path, { token, method = 'GET', body } = {}) {
@@ -178,6 +175,10 @@ async function handleManual(event, repository, actor, token, request = githubReq
     { explicitAccept: true, request });
   if (result.action !== 'pending') return result;
   const issue = await request(prefix + '/issues/' + command.issueNumber, { token });
+  const labels = (issue.labels || []).map(x => typeof x === 'string' ? x : x.name);
+  if (labels.includes('status:blocked') || labels.includes('status:on-hold')) {
+    return { action: 'pending', reason: 'explicit blocker prevents manual re-dispatch' };
+  }
   const prs = await relatedPulls(repository, command.issueNumber, token, null, request);
   const runs = selectManualAgentRuns(issue, prs);
   for (const run of runs) {
@@ -195,10 +196,7 @@ async function handleManual(event, repository, actor, token, request = githubReq
 
 async function selfTest() {
   const sha = 'a'.repeat(40);
-  const body = [
-    '## Success Criteria', '- [x] SC-01 acceptance is proven', '',
-    '## Acceptance Plan', '', '~~~', // replaced below with exact supported YAML
-  ].slice(0, -1).join('\n') + '\n\n' +
+  const body = '## Success Criteria\n- [x] SC-01 acceptance is proven\n\n## Acceptance Plan\n\n' +
   '\x60\x60\x60yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n\x60\x60\x60\n\n' +
   '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n' +
   '| SC-01 | Pass | run 100; ref ' + sha + '; source agent-qwen; test: exact SHA fixture |\n';
