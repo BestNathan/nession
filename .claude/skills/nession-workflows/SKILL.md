@@ -43,6 +43,7 @@ Filename and GitHub Actions display name identify the owner, not the upstream tr
 
 | Domain | File prefix | Actions display prefix | Direct responsibility |
 |---|---|---|---|
+| Automation | `automation-` | `Automation /` | Trusted cross-domain human command intake, not an Agent, Acceptance or CI Executor | 
 | AI Agent | `agent-` | `Agent /` | Actually invokes a model-backed Agent for issue audit, SC assessment, provider smoke, etc. |
 | Acceptance | `acceptance-` | `Acceptance /` | SC selection, orchestration, trusted evaluation, Gate and Issue projection |
 | E2E | `e2e-` | `E2E /` | Test suite, Scenario, Case-independent E2E execution and observations |
