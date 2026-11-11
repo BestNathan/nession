@@ -169,7 +169,7 @@
       },
       {
         "title": "Web terminal emulator engine and component ownership",
-        "description": "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure and mode-owned touch scrolling; Product/UI consumes a narrow emulator port",
+        "description": "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure, mode-owned touch scrolling and tap targeting for Product file links; Product/UI consumes a narrow emulator port",
         "path": "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
         "status": "verified",
         "categories": [
@@ -178,13 +178,13 @@
           "terminal",
           "web"
         ],
-        "updated_at": "2026-11-08T07:34:05Z"
+        "updated_at": "2026-11-11T00:19:24Z"
       }
     ],
     "web": [
       {
         "title": "Files capability identity, creation context and safe mutation ownership",
-        "description": "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, and mutations refuse silent overwrites or stale writes instead of trusting a path alone",
+        "description": "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, Terminal references resolve against the Session CWD at activation time, and mutations refuse silent overwrites or stale writes instead of trusting a path alone",
         "path": "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
         "status": "verified",
         "categories": [
@@ -197,7 +197,7 @@
           "safety",
           "web"
         ],
-        "updated_at": "2026-11-07T11:03:04Z"
+        "updated_at": "2026-11-11T00:19:24Z"
       },
       {
         "title": "Git Changes read-only worktree preview and repository-scoped file read authority",

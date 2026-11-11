@@ -1,12 +1,12 @@
 ---
 title: "Files capability identity, creation context and safe mutation ownership"
-description: "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, and mutations refuse silent overwrites or stale writes instead of trusting a path alone"
+description: "Agent-host Files is source-scoped: a FileRef names its provider, creation freezes one destination when the form opens, Terminal references resolve against the Session CWD at activation time, and mutations refuse silent overwrites or stale writes instead of trusting a path alone"
 topic: web
 categories: ["app", "files", "media", "ownership", "presentation", "protocol", "safety", "web"]
 status: verified
 created_at: 2026-11-05T10:32:06Z
-updated_at: 2026-11-07T11:03:04Z
-sources: ["https://github.com/BestNathan/nession/issues/2751", "https://github.com/BestNathan/nession/pull/2771", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-protocol/src/contracts/file/v1.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-agent/src/fs/ops.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/fileRef.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/createTarget.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/hooks/useFileViewer.ts", "https://github.com/BestNathan/nession/issues/2876", "https://github.com/BestNathan/nession/pull/2909", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/FileContentViewer.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/presentation.ts", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/files/components/FileViewer.tsx"]
+updated_at: 2026-11-11T00:19:24Z
+sources: ["https://github.com/BestNathan/nession/issues/2751", "https://github.com/BestNathan/nession/pull/2771", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/docs/design/design-system/patterns/file-workspace.md", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-protocol/src/contracts/file/v1.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/crates/nession-agent/src/fs/ops.rs", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/fileRef.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/model/createTarget.ts", "https://github.com/BestNathan/nession/blob/9230d49c3a3ae51e5cfe9f3c4551743135486950/web/src/capabilities/files/hooks/useFileViewer.ts", "https://github.com/BestNathan/nession/issues/2876", "https://github.com/BestNathan/nession/pull/2909", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/FileContentViewer.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/presentation.ts", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/files/components/FileViewer.tsx","https://github.com/BestNathan/nession/issues/3187","https://github.com/BestNathan/nession/pull/3230","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/app/workspace/terminalFileReference.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/product/terminal/workspaceFileLinks.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/app/experiences/web/FilesWebLayout.tsx","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/capabilities/files/hooks/useFileViewer.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/capabilities/files/README.md","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/docs/architecture/terminal-engine.md"]
 ---
 
 # Files capability identity, creation context and safe mutation ownership
@@ -46,6 +46,33 @@ viewer instance. Saving sends that revision, and the agent refuses the write if
 the file changed after the read. The client turns that refusal into a choice
 between reloading the newer content and explicitly overwriting it, preserving
 the local edit while the choice is open.
+
+## Terminal file-reference resolution (#3187)
+
+A Terminal reference is not a workspace-root path. The Terminal Product parser
+emits `{path, line?, column?}` with UTF-16 offsets; Files owns resolving and
+reading it through the active Session's bound `FileOps`/`FileSource`.
+
+- A relative path joins `file.cwd` **at activation time** — the Session's
+  current CWD, not the historical CWD of the scrollback line — after `.`/`..`
+  normalization. The joined path uses the source's own convention.
+- An absolute path stays absolute on the same bound source and is never
+  stripped into a workspace-relative path.
+- Resolution lists the referenced parent and requires exactly one entry match
+  by the normalized path or the source's `full_path` spelling (the same
+  directory can be spelled `/tmp/...` vs `/private/tmp/...`). Missing,
+  directory, ambiguous and unavailable sources are surfaced as failures; there
+  is no basename scan, fuzzy search or silent first match.
+- The handoff opens source/raw for a located preview, clamps an out-of-range
+  line/column to the document end, and repositions the mounted viewer when the
+  same file is activated at another location. With no FileOps provider the
+  focus is retired and the capability shows its explicit unavailable state.
+- Acting on a link is not Terminal input: it sends no PTY bytes, so a
+  read-only observer can open a permitted file.
+
+The Terminal side of the contract — recognition and tap/cell targeting — is
+recorded in
+[Web terminal emulator engine and component ownership](../terminal/web-terminal-emulator-engine-and-component-ownership.md#file-reference-link-activation-3187).
 
 ## Mutation contract
 

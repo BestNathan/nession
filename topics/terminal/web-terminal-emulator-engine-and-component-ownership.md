@@ -1,12 +1,12 @@
 ---
 title: "Web terminal emulator engine and component ownership"
-description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure and mode-owned touch scrolling; Product/UI consumes a narrow emulator port"
+description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing, the opt-in Terminal notice disclosure, mode-owned touch scrolling and tap targeting for Product file links; Product/UI consumes a narrow emulator port"
 topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-11-08T07:34:05Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694","https://github.com/BestNathan/nession/blob/af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2656","https://github.com/BestNathan/nession/pull/2708","https://github.com/BestNathan/nession/pull/2709","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/xterm/XtermEmulator.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/controller/TerminalController.ts","https://github.com/BestNathan/nession/issues/2879","https://github.com/BestNathan/nession/pull/2958"]
+updated_at: 2026-11-11T00:19:24Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/dab5685f536722069e3c6c62ff112d8abae3e1a5/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/deb647ec128576b722d7b390c084b4614db9e23a/docs/design/design-system/patterns/terminal-capsule.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/issues/2659","https://github.com/BestNathan/nession/issues/2663","https://github.com/BestNathan/nession/pull/2583","https://github.com/BestNathan/nession/pull/2678","https://github.com/BestNathan/nession/issues/2681","https://github.com/BestNathan/nession/blob/7c633f14a91ff09646c3d69f97420255bbce8548/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2658","https://github.com/BestNathan/nession/pull/2694","https://github.com/BestNathan/nession/blob/af8a11acb4c5d6dea09bf9a7e78d0ac1f4a4b475/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2656","https://github.com/BestNathan/nession/pull/2708","https://github.com/BestNathan/nession/pull/2709","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/capsule/occlusionScroll.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/xterm/XtermEmulator.ts","https://github.com/BestNathan/nession/blob/3ce121b91b44167088a715b20ded5bdda895ca32/web/src/platform/terminal-runtime/controller/TerminalController.ts","https://github.com/BestNathan/nession/issues/2879","https://github.com/BestNathan/nession/pull/2958","https://github.com/BestNathan/nession/issues/3187","https://github.com/BestNathan/nession/pull/3230","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/platform/terminal-runtime/xterm/XtermEmulator.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/platform/terminal-runtime/xterm/XtermMetrics.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/product/terminal/workspaceFileLinks.ts","https://github.com/BestNathan/nession/blob/02eee2f7e655c81b8d05d5b4885e8966e44f92f6/web/src/app/workspace/terminalFileReference.ts"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -148,6 +148,29 @@ releases the latest provider exactly once. These are lifetime guarantees only;
 scrollback capacity, writer/reconciler bounds, detach semantics and terminal
 interaction behavior are unchanged.
 
+## File-reference link activation (#3187)
+
+Product still owns **recognition** (`product/terminal/workspaceFileLinks.ts`)
+and Files owns **resolution and read**. The engine owns the two terminal facts
+a link needs: the logical line under a pointer, with wrapped continuations
+joined, and the cell that line's characters were drawn in.
+
+- Recognition yields `path[:line[:column]]` with UTF-16 offsets. It accepts
+  workspace-relative, `./`, `../`, absolute and quoted/stack-trace forms; the
+  dot-separated extension must begin with a letter, which keeps release
+  versions, IPv4 addresses, URL schemes and timestamps out.
+- The mouse linkifier is xterm's. For touch, `XtermEmulator` maps a short,
+  stationary tap — one finger, under the 10 px gesture slop, under 500 ms — to
+  the drawn character through `XtermMetrics.logicalLinePoint`, walking a
+  wrapped continuation back to its logical-line start, then runs the same
+  Product matcher activation. A tap that moves or lasts longer stays with the
+  scroll/selection/direction-pad owners. Activation writes nothing to the PTY,
+  so an observer/read-only client can still open a permitted file.
+- The navigation action belongs to the experience layouts' existing
+  `CapabilityFocus` handoff; the engine never opens Files and Product never
+  reads xterm cells. The Files side of the contract is recorded in
+  [Files capability identity, creation context and safe mutation ownership](../web/files-capability-identity-creation-context-and-safe-mutation-ownership.md#terminal-file-reference-resolution-3187).
+
 ## Context and evidence
 
 - Requirement: [#2581](https://github.com/BestNathan/nession/issues/2581);
@@ -268,6 +291,7 @@ interaction behavior are unchanged.
 - [Terminal parser progress and exception reconciliation](terminal-parser-progress-and-exception-reconciliation.md) — the negotiated response-less parser-progress wire, the Agent's per-subscriber issued frontier and the exception-only reconcile recovery contract.
 - [App mobile spatial navigation and Terminal touch ownership](../app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md) — the App shell pager's one-contact ownership, edge band and interactive-owner deference around the Terminal.
 - [Terminal tools capsule chord and command ownership](terminal-tools-capsule-chord-and-command-ownership.md) — Terminal Keys one-shot chords, Quick Commands Insert/Run, the shared upper slot and the separate fit/scroll clearances.
+- [Files capability identity, creation context and safe mutation ownership](../web/files-capability-identity-creation-context-and-safe-mutation-ownership.md) — FileRef source identity, safe mutation and the Terminal file-reference resolution/line-navigation contract this engine feeds.
 - [Web primitive focus treatment and visual vocabulary ownership](../web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md) — the modality-aware focus recipe for Web chrome primitives, its token owner and the regression guard; xterm's own caret/focus rendering stays with this terminal boundary.
 - [Nession Sandbox policy and execution isolation architecture](../engineering/nession-sandbox-policy-and-execution-isolation-architecture.md)
 - [Nession instruction architecture and knowledge ownership](../engineering/nession-instruction-architecture-and-knowledge-ownership.md)

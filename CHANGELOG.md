@@ -626,3 +626,17 @@
 - Categories: design, interaction, overlay, dialog, ownership, web, app
 - Reason: Link the new #3137 content-region recipe family; OperationSurface owns the body/action grammar inside these overlay roles and does not fork the primitive
 - Source: https://github.com/BestNathan/nession/issues/3137
+
+## 2026-11-11T00:19:24Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record #3187 file-reference link activation: Product recognition, engine-owned tap to logical-line/cell targeting, and PTY-free activation; cite the merged staging SHA, parser/engine sources and browser Cases
+- Source: https://github.com/BestNathan/nession/issues/3187
+
+## 2026-11-11T00:19:24Z | update | Files capability identity, creation context and safe mutation ownership
+- Path: topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md
+- Topic: web
+- Categories: app, files, media, ownership, presentation, protocol, safety, web
+- Reason: Record #3187 Terminal file-reference resolution: activation-time CWD join, absolute-path retention, exact-parent/one-entry verification, source-raw line/column positioning and unavailable-source retirement; cite the merged staging SHA and sources
+- Source: https://github.com/BestNathan/nession/issues/3187
