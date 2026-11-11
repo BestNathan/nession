@@ -10,3 +10,4 @@ pub mod process;
 pub mod release;
 pub mod secret_handoff;
 pub mod startup;
+pub mod terminate;

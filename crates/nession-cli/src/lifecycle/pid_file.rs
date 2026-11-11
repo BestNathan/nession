@@ -312,6 +312,13 @@ fn start_time_of(pid: u32) -> Option<u64> {
     Some(now.saturating_sub(uptime))
 }
 
+/// The start-time reading for an arbitrary pid, for tests that must describe a
+/// child process rather than the process running the test.
+#[cfg(test)]
+pub(crate) fn start_time_of_pid(pid: u32) -> Option<u64> {
+    start_time_of(pid)
+}
+
 /// Record the identity of the current process at `path`.
 pub fn write_identity(
     path: &str,
