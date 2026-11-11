@@ -385,7 +385,7 @@ export async function stopPtyProbe(page: import('@playwright/test').Page): Promi
   // Wait for the prompt at the live end of the buffer instead.
   await expect
     .poll(async () => lastNonEmptyLine(page), { timeout: 15_000 })
-    .toMatch(/^runner:\\S*\\$/);
+    .toMatch(/^runner:\S*\$/);
 }
 
 /**
