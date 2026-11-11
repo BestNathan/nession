@@ -42,6 +42,7 @@ export const CATALOG = [
   ['acceptance-staging-developer-dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance'],
   ['store-agent-controller-ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
+  ['acceptance-manual-request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance'],
   ['acceptance-orchestrator-background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
   ['acceptance-event-consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance'],
