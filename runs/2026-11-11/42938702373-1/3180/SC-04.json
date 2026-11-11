@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1c07e61031cd6a48b0e78d9710a12b219dd9ad6503e0321217dd36a06d5d2196",
+  "run_id": 42938702373,
+  "run_attempt": 1,
+  "issue": 3180,
+  "criterion": "SC-04",
+  "criterion_text": "In an approved isolated Kubernetes fixture reusing an existing RWX PVC, deleting and recreating disposable test Pods preserves Server Blob and Agent-specific Cache without rebuilding or re-downloading a valid warm Digest; record before/after Pod UID, PVC/PV identity, exact SHA-256 and transferred bytes. A separate corruption fixture fails closed and re-fetches safely.",
+  "stage": "staging",
+  "target_sha": "b02b7ee533927007f0d02f841401c43b116362db",
+  "contract_sha256": "ea48c7e2b5b00b308563c38c09f3cdb269f498e2f67e51c145b06a3afe4ab70c",
+  "case_revision": "b02b7ee533927007f0d02f841401c43b116362db",
+  "case_tree_sha": "8482cc60a55d63ac02d176264a438bc22dbf6565",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T01:26:58.337Z",
+  "finished_at": "2026-11-11T01:28:20.477Z",
+  "duration_ms": 82140,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One isolated kind Kubernetes fixture on one ReadWriteMany PVC: the Server Blob and the Agent identity cache survived Pod deletion/recreation with new Pod UIDs and zero re-transfer, and corrupted cache bytes were rejected and re-fetched exactly once",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA b02b7ee533927007f0d02f841401c43b116362db: kind v0.25.0, Kubernetes v1.31.2, node sc04-control-plane kernel 7.0.0-1017-azure"
+        },
+        {
+          "type": "pvc",
+          "value": "pvc sc04-pvc uid=194351ac-23a7-49c8-9802-7de2ad75701c pv=sc04-pv uid=bc2d7187-a278-4c95-8a16-f60877198cd3 Bound ReadWriteMany"
+        },
+        {
+          "type": "pods",
+          "value": "server Pod b7f2476a-f471-4d19-bb77-dbfef2825126 -> 82316f9c-a9ed-47f6-b007-89e14341dd48; agent Pod ff6bec3a-9b59-404a-8437-796a5079f168 -> 7572fa62-6ced-4365-a77f-78ea331ee58c (deleted and recreated on the same PVC/PV)"
+        },
+        {
+          "type": "blob",
+          "value": "sha256=81d0141af58569f91edf2d036b67a6b82c062d1829fd93aec50ed96b4773d225 size=262144; cold transfers server=262144 agent=262144; after recreation server=0 agent=0"
+        },
+        {
+          "type": "negative",
+          "value": "corruption Pod wrote 7 bytes (sha256 11d510e067d2cdcd7559bd86d27a2f4c20babd43670346b97af99b522c1f0075); the next Agent Pod rejected them and re-fetched 262144 bytes with the original SHA-256"
+        }
+      ],
+      "duration_ms": 76215,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 42938702373,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b02b7ee533927007f0d02f841401c43b116362db",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/42938702373",
+    "record_path": "runs/2026-11-11/42938702373-1/3180/SC-04.json",
+    "source_result_sha256": "fd7b5a0fc984e69eae97193fd8a8021613eb1e009a9fecb548a22783561c910d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-42938702373-1",
+    "sha256": "fd7b5a0fc984e69eae97193fd8a8021613eb1e009a9fecb548a22783561c910d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/42938702373",
+    "durability": "time-limited; object archival not configured"
+  }
+}
