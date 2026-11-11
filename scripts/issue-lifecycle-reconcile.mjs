@@ -49,8 +49,17 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   if (!Array.isArray(associatedPrs) || associatedPrs.length === 0) {
     return { action: 'pending', reason: 'no verified implementation PR association' };
   }
-  if (associatedPrs.some(pr => !pr.merged_at || !['staging', 'main'].includes(pr.base?.ref))) {
-    return { action: 'pending', reason: 'associated implementation PR not merged to staging/main' };
+  // Search finds superseded PRs referenced by Issue number, even when they
+  // were intentionally closed without merging. Do not let an abandoned
+  // alternative block an otherwise accepted implementation indefinitely.
+  const merged = associatedPrs.filter(pr => Boolean(pr.merged_at));
+  if (merged.length === 0) {
+    return { action: 'pending', reason: 'no verified merged implementation PR' };
+  }
+  if (associatedPrs.some(pr =>
+    (pr.state === 'open' && !pr.merged_at) ||
+    (pr.merged_at && !['staging', 'main'].includes(pr.base?.ref)))) {
+    return { action: 'pending', reason: 'associated active PR or invalid merge target' };
   }
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
 }
@@ -233,6 +242,17 @@ async function selfTest() {
   }).action, 'pending', 'stale /accept cannot bypass human-reopen hold');
   assert.equal(decideIssueClosure(issue, []).action, 'pending');
   assert.equal(decideIssueClosure(issue, [{ ...pr, merged_at: null }]).action, 'pending');
+  const abandoned = { ...pr, number: 3098, state: 'closed', merged_at: null };
+  assert.equal(decideIssueClosure(issue, [pr, abandoned]).action, 'close',
+    'superseded closed-unmerged PR cannot block a completed implementation');
+  assert.equal(decideIssueClosure(issue, [abandoned]).action, 'pending',
+    'abandoned PR alone is not implementation proof');
+  assert.equal(decideIssueClosure(issue,
+    [pr, { ...abandoned, state: 'open' }]).action, 'pending',
+    'an active unmerged implementation must still block closure');
+  assert.equal(decideIssueClosure(issue,
+    [{ ...pr, base: { ref: 'prototype' } }, abandoned]).action, 'pending',
+    'no unapproved merge target may confer implementation completion');
   assert.equal(decideIssueClosure({ ...issue, body: body.replace('| Pass |', '| Pending |') },
     [pr]).action, 'pending');
   assert.equal(decideIssueClosure({ ...issue, labels: [{ name: 'bug' }, { name: 'requirement' }] },
