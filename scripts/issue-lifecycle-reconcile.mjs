@@ -193,7 +193,7 @@ async function handleManual(event, repository, actor, token, request = githubReq
     agent_runs: runs, note: 'Case/deployed proof remains with its existing trusted runner' };
 }
 
-function selfTest() {
+async function selfTest() {
   const sha = 'a'.repeat(40);
   const body = [
     '## Success Criteria', '- [x] SC-01 acceptance is proven', '',
@@ -236,12 +236,70 @@ function selfTest() {
     { issue: { ...e.issue, state: 'closed' } },
     { sender: { login: 'forged' } },
   ]) assert.equal(resolveAcceptComment({ ...e, ...mutated }, 'X/y', 'owner'), null);
+  // Exercise the real mocked REST orchestration, not merely the policy function.
+  let live = { ...issue, updated_at: '2026-11-11T01:00:00Z' };
+  let writes = 0, dispatches = 0;
+  const mock = async (path, options = {}) => {
+    if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
+      items: [{ number: 21 }] };
+    if (path.endsWith('/pulls/21')) return pr;
+    if (path.endsWith('/issues/19/events?per_page=100')) return [];
+    if (path.endsWith('/actions/workflows/agent-sc-acceptance.yml/dispatches')) {
+      assert.equal(options.method, 'POST');
+      assert.equal(options.body.inputs.target_ref, sha);
+      dispatches += 1; return null;
+    }
+    if (path.endsWith('/issues/19')) {
+      if (options.method === 'PATCH') {
+        assert.equal(options.body.state, 'closed');
+        writes += 1; live = { ...live, state: 'closed' };
+      }
+      return live;
+    }
+    throw Error('unexpected fixture API path ' + path);
+  };
+  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock });
+  assert.equal(once.action, 'closed');
+  assert.equal(writes, 1);
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'skip');
+  assert.equal(writes, 1, 'repeat delivery must never write another closure');
+  live = { ...issue, updated_at: '2026-11-11T01:01:00Z',
+    body: body.replace('| Pass |', '| Pending |') };
+  const manual = await handleManual(e, 'X/y', 'owner', 'fixture-token', mock);
+  assert.equal(manual.action, 'dispatched');
+  assert.equal(dispatches, 1);
+  assert.equal(writes, 1, 'manual command cannot turn Pending into Pass');
+  assert.equal((await handleManual({ ...e, comment: { ...e.comment, body: '/accept all' } },
+    'X/y', 'owner', 'fixture-token', mock)).action, 'skip');
+  assert.equal(dispatches, 1, 'untrusted comments cannot dispatch');
+  live = { ...issue, body, updated_at: '2026-11-11T01:02:00Z' };
+  const stale = async (path, options = {}) => {
+    if (path.endsWith('/issues/19') && options.method !== 'PATCH')
+      return { ...live, updated_at: new Date().toISOString() };
+    return mock(path, options);
+  };
+  // Distinct timestamps across successive reads force no mutation.
+  let reads = 0;
+  const race = async (path, options = {}) => {
+    if (path.endsWith('/issues/19') && options.method !== 'PATCH') {
+      reads += 1; return { ...live, updated_at: '2026-11-11T01:02:0' + reads + 'Z' };
+    }
+    return mock(path, options);
+  };
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: race })).action, 'pending');
+  assert.equal(writes, 1, 'racing edits must not close the Issue');
+  await assert.rejects(reconcileIssue('X/y', 19, 'fixture-token', {
+    request: async (path, options) => path.endsWith('/events?per_page=100')
+      ? Array(100).fill({event:'labeled'}) : mock(path, options),
+  }), /event history incomplete/);
   console.log('issue-lifecycle-reconcile: closure and exact /accept negative fixtures passed');
 }
 
 async function main() {
   const [command, value] = process.argv.slice(2);
-  if (command === 'self-test') { selfTest(); return; }
+  if (command === 'self-test') { await selfTest(); return; }
   const repository = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   let result;
