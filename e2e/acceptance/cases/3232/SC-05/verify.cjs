@@ -156,15 +156,21 @@ async function verify() {
     const oldVersion = '0.36.0';
     const legacyBin = path.join(home, 'versions', oldVersion, 'bin');
     downloadOfficialRelease(oldVersion, legacyBin); // checksums.txt verified
-    const legacy = cliOutput(['+' + oldVersion, 'agent', 'restart', '--config', agentCfg],
-      env, 30000);
-    assert.notEqual(legacy.status, 0, 'legacy cross-version restart must be refused');
-    assert.match(legacy.output, /lifecycle|legacy|contract|unsupported/i);
-    assert.equal(observe(env).pid, before.pid,
-      'cross-version restart must not revive the historical manager binary');
-    evidence.push({ type: 'runtime', value:
-      'Real official v' + oldVersion + ' CLI cross-version restart refused; manager-owned PID ' +
-      before.pid + ' was preserved' });
+    for (const action of ['stop', 'restart']) {
+      const legacyArgs = ['+' + oldVersion, 'agent', action];
+      if (action === 'restart') legacyArgs.push('--config', agentCfg);
+      const legacy = cliOutput(legacyArgs, env, 30000);
+      assert.notEqual(legacy.status, 0,
+        'legacy cross-version ' + action + ' must fail closed');
+      assert.match(legacy.output, /lifecycle|legacy|contract|unsupported/i);
+      assert.equal(observe(env).pid, before.pid,
+        'cross-version ' + action + ' must not replace the manager-owned Agent');
+      assert.ok(isRunning(before.pid),
+        'cross-version ' + action + ' must not terminate the manager-owned Agent');
+      evidence.push({ type: 'runtime', value:
+        'Real official v' + oldVersion + ' CLI cross-version ' + action +
+        ' refused; native manager PID ' + before.pid + ' survived' });
+    }
 
     const start = cliOutput(['agent', 'start', '--config', agentCfg], env, 30000);
     assert.equal(start.status, 0, 'managed Start must remain idempotent: ' + start.output);
