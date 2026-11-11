@@ -52,15 +52,16 @@ for(const fragment of [
 assert.match(background,/\n  acceptance-close-guard:/);
 assert.match(background,/\n  merged-agent-acceptance:/);
 assert.match(background,/\n  post-merge-provider-evidence-acceptance:/);
-assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195'))"),
-  'only the three narrowly approved per-Issue collectors may receive pre-merge CI evidence');
+assert.ok(acceptor.includes("if: inputs.stage != 'pre-merge' || (inputs.stage == 'pre-merge' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '2990'))"),
+  'only narrowly approved per-Issue collectors may receive pre-merge CI evidence');
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-fixture/);
 assert.match(acceptor,/3195\) node scripts\/acceptance-pr-pages-e2e-evidence\.mjs collect/);
+assert.match(acceptor,/2990\) node scripts\/acceptance-pr-lifecycle-ci-evidence\.mjs collect/);
 assert.match(acceptor,/\*\) echo "Unsupported PR-stage collector Issue:/,
   'unknown PR-stage Issues must still fail closed before receiving CI evidence');
 assert.match(acceptor,/ci_evidence_file="-"/);
-assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 ]]; then'),
+assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 2990 ]]; then'),
   'all other pre-merge contexts must still omit CI evidence');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
