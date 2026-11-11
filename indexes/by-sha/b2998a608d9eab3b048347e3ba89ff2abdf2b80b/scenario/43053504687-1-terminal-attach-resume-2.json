@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43053504687,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3181-server-images",
+    "target_sha": "b2998a608d9eab3b048347e3ba89ff2abdf2b80b",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43053504687",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "cc10b3e329c1c672e90f5811a599489f2666fbf47486eb04b4c37f43c2134781"
+  },
+  "record": "runs/2026-11-11/43053504687-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "e55381751868a747fbf5b6bbf4424e20c887dbc8b1256475b2dd59d829930856"
+}
