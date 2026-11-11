@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ce80cdcd878e6a923fc4582e189351d215bed32b304788b836109f12d08c3ff8",
+  "run_id": 43024596296,
+  "run_attempt": 1,
+  "issue": 3264,
+  "criterion": "SC-04",
+  "criterion_text": "In a real isolated Server+Agent fixture, Server-embedded and Standalone MCP invoke the **same** `nession_agent_create_session`/`kill_session` on the specified remote Agent through canonical Server routing, while Agent-embedded invokes its own SessionManager; wrong target and offline cases do not operate another Agent/local tmux. Verifier: source-aligned protocol/runtime Case with before/after tmux state, no direct Agent endpoint required for Standalone routed mode.",
+  "stage": "staging",
+  "target_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "contract_sha256": "809c3ffb37787e40e279e8a4f6ff6a1ec655d5b179eb9f11c281a36a0d8ed3fd",
+  "case_revision": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "case_tree_sha": "c677c910fd6cd592755e5231fdd5af45b1f3122f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T13:00:08.073Z",
+  "finished_at": "2026-11-11T13:01:20.480Z",
+  "duration_ms": 72407,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Server-embedded, Standalone-routed, Standalone-direct and Agent-embedded all act on the explicitly named Agent; wrong targets and missing targets are refused",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging SHA 00fd6c624e9907c14df6003b94bd2002606a9973: Standalone with only [backend.server] invoked create/list/kill on the named Agent and the Server broker carried agent.session.create/report/kill; the returned Agent truth contained the created Session"
+        },
+        {
+          "type": "runtime",
+          "value": "Server-embedded routed the same operations to the registered Agent, Agent-embedded and explicit direct-Agent mode created/listed/killed a real tmux Session, and a mismatched/unknown target was refused in every mode"
+        }
+      ],
+      "duration_ms": 72371,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43024596296,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "record_path": "runs/2026-11-11/43024596296-1/3264/SC-04.json",
+    "source_result_sha256": "a4426cef9b7785428832612755542552c406df3efb9a7355068ecb991326a312"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43024596296-1",
+    "sha256": "a4426cef9b7785428832612755542552c406df3efb9a7355068ecb991326a312",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "durability": "time-limited; object archival not configured"
+  }
+}

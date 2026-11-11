@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0c7bba8098dbc1a3951c088e6ac80737a20cfc376561c103cacb5dee8292386b",
+  "run_id": 43024596296,
+  "run_attempt": 1,
+  "issue": 3264,
+  "criterion": "SC-07",
+  "criterion_text": "In Standalone/Server/Agent hosting, /mcp enforces Origin policy, valid non-empty scoped bearer tokens, bounded concurrency/deadline and meaningful error responses, while existing WebSocket/P2P and orderly shutdown continue to work. Verifier: actual listener/transport Case with negative request fixtures and authenticated target-scoped effects.",
+  "stage": "staging",
+  "target_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "contract_sha256": "809c3ffb37787e40e279e8a4f6ff6a1ec655d5b179eb9f11c281a36a0d8ed3fd",
+  "case_revision": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "case_tree_sha": "4d3c5e0ca83f28a36fd5b92586d2450fa63977b7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T13:01:21.399Z",
+  "finished_at": "2026-11-11T13:01:22.883Z",
+  "duration_ms": 1484,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "auth, Origin, deadlines and errors are enforced on the real listener while WebSocket, legacy sessions and orderly shutdown continue to work",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging SHA 00fd6c624e9907c14df6003b94bd2002606a9973: anonymous and wrong bearer tokens received 401 with no detail, a present browser Origin was refused 403, and a slow backend became an isError timeout result with its kind preserved"
+        },
+        {
+          "type": "runtime",
+          "value": "the same listener still authenticated a WebSocket client and served server.agent.list, unknown/terminated MCP sessions were refused, and SIGTERM stopped the standalone host cleanly"
+        }
+      ],
+      "duration_ms": 1445,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43024596296,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "record_path": "runs/2026-11-11/43024596296-1/3264/SC-07.json",
+    "source_result_sha256": "efc2ae81b6c5a8f01aabb4fb8ef853fcf3ae27ec51439fb061669cade81b2d3b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43024596296-1",
+    "sha256": "efc2ae81b6c5a8f01aabb4fb8ef853fcf3ae27ec51439fb061669cade81b2d3b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "durability": "time-limited; object archival not configured"
+  }
+}

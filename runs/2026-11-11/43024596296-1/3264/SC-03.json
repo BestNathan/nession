@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5cf27f3b07bb02728f64630819cdff2c3b43e89452e64664ae63b57c7a36834d",
+  "run_id": 43024596296,
+  "run_attempt": 1,
+  "issue": 3264,
+  "criterion": "SC-03",
+  "criterion_text": "A typed Tool argument fixture accepts valid inputs and rejects missing, invalid and unexpected keys in agreement with its emitted input schema; tool name/schema/response-error contract is identical across host adapters and `ToolRegistry` is built once at startup. Verifier: focused Rust contract tests + source check.",
+  "stage": "staging",
+  "target_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "contract_sha256": "809c3ffb37787e40e279e8a4f6ff6a1ec655d5b179eb9f11c281a36a0d8ed3fd",
+  "case_revision": "00fd6c624e9907c14df6003b94bd2002606a9973",
+  "case_tree_sha": "bbb21b4ac19dc41eade5ae3b611c22177997bc7e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T13:00:03.746Z",
+  "finished_at": "2026-11-11T13:00:08.073Z",
+  "duration_ms": 4327,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "typed argument contract, emitted schema and runtime validation agree; the catalog is identical across hosts and built once at startup",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 00fd6c624e9907c14df6003b94bd2002606a9973: the schema is generated from the same typed contract that parses arguments; valid input is accepted and missing/typed-wrong/unexpected keys are refused"
+        },
+        {
+          "type": "runtime",
+          "value": "Server-embedded, Agent-embedded and Standalone advertised byte-identical Tool definitions at 00fd6c624e9907c14df6003b94bd2002606a9973, and the registry is constructed once in McpService::new"
+        }
+      ],
+      "duration_ms": 4291,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43024596296,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00fd6c624e9907c14df6003b94bd2002606a9973",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "record_path": "runs/2026-11-11/43024596296-1/3264/SC-03.json",
+    "source_result_sha256": "7ebf852aa1292094247e0de38852feb964fc078a638846a1501dbb1e94de4a86"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43024596296-1",
+    "sha256": "7ebf852aa1292094247e0de38852feb964fc078a638846a1501dbb1e94de4a86",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43024596296",
+    "durability": "time-limited; object archival not configured"
+  }
+}
