@@ -5,7 +5,7 @@ topic: web
 categories: ["git", "files", "media", "presentation", "protocol", "safety", "read-only", "ownership", "web"]
 status: verified
 created_at: 2026-11-06T09:03:13Z
-updated_at: 2026-11-07T11:03:04Z
+updated_at: 2026-11-11T18:25:00Z
 sources: ["https://github.com/BestNathan/nession/issues/2838", "https://github.com/BestNathan/nession/pull/2846", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/protocol/preview/v1.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/preview.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/crates/nession-git/src/runtime/status.rs", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/hooks/useGitSelection.ts", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/web/src/capabilities/git/components/GitFilePreviewView.tsx", "https://github.com/BestNathan/nession/blob/eb29231c5ab94205b2e8a0c8cefc30287be65c60/e2e/tests/browser/fixture-git.spec.ts", "https://github.com/BestNathan/nession/issues/2876", "https://github.com/BestNathan/nession/pull/2909", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/crates/nession-git/src/protocol/preview/v1.rs", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/crates/nession-git/src/runtime/preview.rs", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/git/hooks/useGitSelection.ts", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/capabilities/git/components/GitFilePreviewView.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/FileContentViewer.tsx", "https://github.com/BestNathan/nession/blob/abeebc119fde48de10befb24a596fa8d8a97fed2/web/src/shared/file-viewer/presentation.ts"]
 ---
 
@@ -152,5 +152,6 @@ Session/mount visibility assumption.
 
 ### Related knowledge
 
+- [Git capability local repository and read-only GitHub hosting context ownership](git-capability-local-repository-and-read-only-github-hosting-context-ownership.md) — the hosting provider layered over the same Session repository; its GitHub reads never become local Git authority.
 - [Files capability identity, creation context and safe mutation ownership](files-capability-identity-creation-context-and-safe-mutation-ownership.md) — the source-scoped Files boundary; its browse root is deliberately not reused as Git preview authority.
 - [Nession Sandbox policy and execution isolation architecture](../engineering/nession-sandbox-policy-and-execution-isolation-architecture.md) — Sandbox policy ownership and why the Agent file root is not an isolation guarantee.

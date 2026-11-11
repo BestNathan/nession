@@ -696,3 +696,17 @@
 - Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox
 - Reason: Record #3181's complete paged inventory with aliases, Project-or-Session scoped grants and m009, Workspace Images discovery, independent Project/Sandbox selection, Sandbox Enter composition and Agent cache observation; update the #3303 shared-cache ownership and exact staging source SHA
 - Source: https://github.com/BestNathan/nession/issues/3181
+
+## 2026-11-11T18:25:00Z | create | Git capability local repository and read-only GitHub hosting context ownership
+- Path: topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md
+- Topic: web
+- Categories: git, github, architecture, ownership, protocol, security, read-only, web
+- Reason: Record #1290's single Git capability with two providers: nession-git remains the sole GitCmd/local-repository owner, nession-github owns typed read-only GitHub identity/client/auth/failure bounds, and the Workspace groups Repository and GitHub without a second capability or Git Peek; cite the merged staging SHA and the accepted Case/Agent evidence
+- Source: https://github.com/BestNathan/nession/issues/1290
+
+## 2026-11-11T18:25:00Z | update | Git Changes read-only worktree preview and repository-scoped file read authority
+- Path: topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md
+- Topic: web
+- Categories: git, files, media, presentation, protocol, safety, read-only, ownership, web
+- Reason: Cross-link the new Git capability/hosting ownership article: the GitHub provider is layered over the same Session repository boundary and never becomes local Git authority (#1290)
+- Source: https://github.com/BestNathan/nession/issues/1290

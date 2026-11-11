@@ -216,6 +216,23 @@
         "updated_at": "2026-11-11T00:19:24Z"
       },
       {
+        "title": "Git capability local repository and read-only GitHub hosting context ownership",
+        "description": "One Git capability with two providers: nession-git stays the sole GitCmd and local-repository owner, nession-github owns typed read-only GitHub identity/client/auth/failures, and the Workspace groups Repository and GitHub without a second capability or Git Peek",
+        "path": "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
+        "status": "verified",
+        "categories": [
+          "git",
+          "github",
+          "architecture",
+          "ownership",
+          "protocol",
+          "security",
+          "read-only",
+          "web"
+        ],
+        "updated_at": "2026-11-11T18:25:00Z"
+      },
+      {
         "title": "Git Changes read-only worktree preview and repository-scoped file read authority",
         "description": "A Git Changes row without a diff opens its actual worktree content through a Session/repository-bound git.preview read; text and media share one authorized boundary and one shared file-content presentation owner, never git.diff, the broad Files reader or a guessed empty diff",
         "path": "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
@@ -231,7 +248,7 @@
           "ownership",
           "web"
         ],
-        "updated_at": "2026-11-07T11:03:04Z"
+        "updated_at": "2026-11-11T18:25:00Z"
       },
       {
         "title": "Session and Project operation surface presentation by Experience",
@@ -386,6 +403,7 @@
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ],
     "capsule": [
@@ -422,7 +440,11 @@
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "git": [
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
+    ],
+    "github": [
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md"
     ],
     "identity": [
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
@@ -475,6 +497,7 @@
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md",
@@ -505,12 +528,14 @@
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "provenance": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
     ],
     "read-only": [
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "recovery": [
@@ -539,6 +564,7 @@
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
@@ -580,6 +606,7 @@
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
+      "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md",
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
       "topics/web/shared-content-region-visual-recipes.md",
