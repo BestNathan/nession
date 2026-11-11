@@ -21,5 +21,6 @@ gate_check() {
   gate_run_invariant node scripts/e2e-selected-run-receipt.mjs self-test
   gate_run_invariant node scripts/acceptance-ci-evidence.mjs self-test
   gate_run_invariant node scripts/acceptance-pr-pages-e2e-evidence.mjs self-test
+  gate_run_invariant node scripts/acceptance-pr-lifecycle-ci-evidence.mjs self-test
 }
 gate_main "$@"
