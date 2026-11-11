@@ -3,6 +3,12 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
+import {loadDocuments,projectProtocolSchema,validPublicDocuments}
+  from './documents-project.mjs';
+import {releaseProtocolHistory} from './protocol-release-history.mjs';
+import {cachedTaggedProtocolSchema} from './protocol-git-history.mjs';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
@@ -170,6 +176,35 @@ const generatedAt=new Date().toISOString();
 const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
   sha:process.env.KNOWLEDGE_SHA,generatedAt});
 if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
+const mainSha=process.env.SOURCE_MAIN_SHA;
+const releaseList=await optionalList('/releases?per_page=100');
+// PRIVILEGED PUBLICATION BOUNDARY: this process holds a read-only GitHub
+// token for the public snapshot. Never compile code from historical commits
+// here. The credential-free producer ran earlier, and the release-tag SHA
+// from GitHub is independently checked when reading its derived cache entry.
+const releases=await releaseProtocolHistory({api,releases:releaseList||[],
+  snapshotAtTag:process.env.PAGES_OFFLINE==='1'?null:async({tag,sha})=>
+    cachedTaggedProtocolSchema({tag,sha,
+      cacheDir:process.env.PAGES_PROTOCOL_CACHE_DIR})});
+const validMainSha=/^[a-f0-9]{40}$/.test(mainSha||'');
+const cargoText=await readFile(join(root,'../Cargo.toml'),'utf8');
+const sourceVersion=/\[workspace\.package\][\s\S]*?\bversion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"/
+  .exec(cargoText)?.[1]||null;
+let documents;
+if(validMainSha&&!process.env.PAGES_PROTOCOL_SCHEMA_FILE&&
+   process.env.PAGES_OFFLINE!=='1'){
+  // Compile the sole canonical Rust generator at the pinned main checkout.
+  // A failed generator aborts publication rather than serving stale contracts.
+  const {stdout}=await promisify(execFile)('cargo',
+    ['run','--quiet','-p','nession-protocol-codegen','--','--schema'],
+    {cwd:resolve(root,'..'),maxBuffer:8_000_000,timeout:600_000});
+  documents=projectProtocolSchema(JSON.parse(stdout),
+    {sha:mainSha,generatedAt,releases,sourceVersion});
+}else{
+  documents=await loadDocuments({schemaPath:process.env.PAGES_PROTOCOL_SCHEMA_FILE,
+    sha:validMainSha?mainSha:null,generatedAt,releases,sourceVersion});
+}
+if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
@@ -273,10 +308,11 @@ const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
   /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
   generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','navigation.js','app.js','favicon.svg','workflows.html','workflows.js','workflows.css','knowledge.js','documents.js']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/documents.json'),JSON.stringify(documents,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,
@@ -293,5 +329,6 @@ console.log(JSON.stringify({
   agent_result_observations:result.work.agent_result_observations.status,
   agent_result_count:result.work.agent_result_observations.records.length,
   stores:result.evidence.stores.map(x=>[x.name,x.state]),
-  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null}
+  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null},
+  documents:{status:documents.status,protocols:documents.protocols.length,sha:documents.source?.sha||null}
 }));
