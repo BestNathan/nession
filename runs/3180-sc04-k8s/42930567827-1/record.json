@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "3180-sc04-k8s",
+  "source_sha": "1fb85eb0a0d74b428607f27bc4fe8a666eed699a",
+  "source_digest": "d73a295516b3b18dc284a649a43ee251ce949983f161b005d2f18c76823d5067",
+  "entry": "run.mjs",
+  "workflow": {
+    "id": 42930567827,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/42930567827",
+    "event": "push",
+    "branch": "task/3180-sc04-k8s",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-11T00:20:38.506Z",
+    "finished_at": "2026-11-11T00:22:19.013Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "k8s_pod_pvc_recreation_fixture",
+      "issue": 3180,
+      "source_sha": "1fb85eb0a0d74b428607f27bc4fe8a666eed699a",
+      "cluster": {
+        "kind_version": "kind v0.25.0 go1.22.9 linux/amd64",
+        "kubernetes": "v1.31.2",
+        "node": "sc04-control-plane",
+        "node_kind": "v1.31.2",
+        "kernel": "7.0.0-1017-azure"
+      },
+      "pvc": {
+        "name": "sc04-pvc",
+        "uid": "b03f9f39-fb2a-42fa-ad85-0e4dab96def7",
+        "phase": "Bound",
+        "pv": "sc04-pv",
+        "pv_uid": "710d7065-8a98-44f9-a42a-3ce26d5f51a7",
+        "volume": "sc04-pv",
+        "access_modes": "ReadWriteMany"
+      },
+      "pods": {
+        "server_first": {
+          "from_cache": false,
+          "bytes": 266240,
+          "pod_uid": "0ff89fd3-cbd4-45f1-80b5-66e79973f29b",
+          "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+          "size": 266240,
+          "name": "sc04-server-1"
+        },
+        "agent_first": {
+          "identity": "agent-sc04",
+          "from_cache": false,
+          "bytes": 266240,
+          "pod_uid": "0ed2b912-07c1-4ff2-bea5-ddacf40965a3",
+          "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+          "size": 266240,
+          "name": "sc04-agent-1"
+        },
+        "server_second": {
+          "from_cache": true,
+          "bytes": 0,
+          "pod_uid": "e61f9461-c4fd-4a95-9e23-f107aa32b1f5",
+          "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+          "size": 266240,
+          "name": "sc04-server-2"
+        },
+        "agent_second": {
+          "identity": "agent-sc04",
+          "from_cache": true,
+          "bytes": 0,
+          "pod_uid": "818a947d-5199-4cb3-97cd-92b696a029a1",
+          "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+          "size": 266240,
+          "name": "sc04-agent-2"
+        },
+        "corruption": {
+          "name": "sc04-agent-corrupt",
+          "pod_uid": "d6f21833-7ee6-4fee-a2aa-8d6c4bdc0082",
+          "sha256": "11d510e067d2cdcd7559bd86d27a2f4c20babd43670346b97af99b522c1f0075",
+          "size": 7
+        },
+        "agent_refetched": {
+          "identity": "agent-sc04",
+          "from_cache": false,
+          "bytes": 266240,
+          "pod_uid": "e3ea2b34-c53b-4469-b555-71c0d0abd29e",
+          "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+          "size": 266240,
+          "name": "sc04-agent-3"
+        }
+      },
+      "blob": {
+        "format": "EROFS",
+        "packaging": {
+          "timestamp": 0,
+          "uuid": "11111111-1111-4111-8111-111111111111",
+          "block_size": 4096
+        },
+        "sha256": "4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de",
+        "size": 266240,
+        "path": "sha256/4e7759d38ddb67486af764802c366d31b432f4242aac1bc73edec4fe704999de"
+      },
+      "transfers": {
+        "initial_http_get_blob": 2,
+        "after_recreate_http_get_blob": 2,
+        "after_corruption_http_get_blob": 3,
+        "server_first_bytes": 266240,
+        "server_second_bytes": 0,
+        "agent_first_bytes": 266240,
+        "agent_second_bytes": 0,
+        "agent_refetched_bytes": 266240
+      },
+      "assertions": {
+        "server_first_downloaded": true,
+        "server_second_reused_blob": true,
+        "server_second_transferred_nothing": true,
+        "server_bytes_byte_identical": true,
+        "agent_first_downloaded": true,
+        "agent_second_reused_warm_cache": true,
+        "agent_second_transferred_nothing": true,
+        "agent_bytes_byte_identical": true,
+        "pods_are_distinct": true,
+        "no_transfer_during_recreate": true,
+        "pvc_unchanged": true,
+        "corruption_changed_bytes": true,
+        "corrupted_blob_rejected_and_refetched": true,
+        "exactly_one_refetch_after_corruption": true
+      },
+      "result": "pass"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/1fb85eb0a0d74b428607f27bc4fe8a666eed699a/3180-sc04-k8s.json"
+}

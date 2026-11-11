@@ -1,0 +1,8 @@
+{
+  "task_id": "3180-sc04-k8s",
+  "source_sha": "1fb85eb0a0d74b428607f27bc4fe8a666eed699a",
+  "run_id": 42930567827,
+  "run_attempt": 1,
+  "record_path": "runs/3180-sc04-k8s/42930567827-1/record.json",
+  "source_path": "sources/1fb85eb0a0d74b428607f27bc4fe8a666eed699a/3180-sc04-k8s.json"
+}
