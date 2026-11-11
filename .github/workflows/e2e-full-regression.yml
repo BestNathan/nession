@@ -163,6 +163,10 @@ jobs:
            (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 65
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     env:
       RUSTC_WRAPPER: ""
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
@@ -178,6 +182,17 @@ jobs:
         run: |
           node scripts/e2e-full-failure-manifest.mjs self-test
           cp scripts/e2e-full-failure-manifest.mjs "$RUNNER_TEMP/e2e-full-failure-manifest.mjs"
+      - name: Verify original PR comment and exact HEAD for routed Full
+        if: inputs.source_comment_id != '' || inputs.source_pr_number != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_COMMENT_ID: ${{ inputs.source_comment_id }}
+          SOURCE_PR_NUMBER: ${{ inputs.source_pr_number }}
+          REQUESTED_REF: ${{ inputs.target_ref }}
+          REQUESTED_SHA: ${{ inputs.target_sha }}
+        run: |
+          node scripts/github-comment-source.mjs verify-pr \
+            "$SOURCE_PR_NUMBER" "$SOURCE_COMMENT_ID" "$REQUESTED_REF" "$REQUESTED_SHA"
       - name: Resolve immutable branch/SHA target
         id: pin
         env:
