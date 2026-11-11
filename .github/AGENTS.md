@@ -6,6 +6,22 @@ Load `nession-workflows` for the implemented Workflow taxonomy, Agent/non-Agent 
 
 Load `nession-cicd` for release/deployment changes and `nession-gates` for Gate routing. The currently checked-in workflow files and canonical scripts remain executable truth until a migration lands.
 
+
+## Human comment command routing
+
+`Automation / Comment Router` is the canonical ordinary Issue/PR slash-command
+entrypoint. Its trusted-main registry and exact target binding live in
+`scripts/github-comment-command.mjs`. Commands may request work but never
+authorize Acceptance Pass, bypass Outbox/Agent admission or select arbitrary
+workflow/ref code. Downstream bot-dispatched Audit/Acceptance jobs independently
+fetch and validate the original GitHub human comment before model or write
+credentials. See [GitHub command routing](../docs/architecture/github-comment-routing.md).
+
+Do not add another ordinary human `issue_comment` listener; specialized
+existing owner-only recovery/bot signals are separately scoped and must not
+be silently migrated without proven Run/Artifact identity compatibility.
+
+
 ## Workflow branch / merge policy
 
 Repository merge policy is owned by `nession-cicd`: PRs are merged with `--merge`, never squash/rebase.
