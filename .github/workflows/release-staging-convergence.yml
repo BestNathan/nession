@@ -131,6 +131,29 @@ jobs:
         with:
           node-version: '24'
 
+      # #3247/#3248: immutable, token-free source fields make the real
+      # workflow_run -> converge link independently auditable on Main.
+      # A wake is observation only; it cannot authorize any promotion.
+      - name: Record authenticated workflow wake receipt
+        if: github.event_name == 'workflow_run'
+        run: |
+          jq -c --arg controller_run "$GITHUB_RUN_ID" '
+            {
+              receipt: "CONVERGENCE_WAKE_V1",
+              controller_run: ($controller_run | tonumber),
+              source_run_id: .workflow_run.id,
+              source_attempt: .workflow_run.run_attempt,
+              source_event: .workflow_run.event,
+              source_path: .workflow_run.path,
+              source_name: .workflow_run.name,
+              source_repository: .workflow_run.repository.full_name,
+              source_head_repository: .workflow_run.head_repository.full_name,
+              source_sha: .workflow_run.head_sha,
+              source_branch: .workflow_run.head_branch,
+              source_conclusion: .workflow_run.conclusion
+            }
+          ' "$GITHUB_EVENT_PATH"
+
       - name: Verify trusted main and deterministic negative fixtures
         run: |
           set -euo pipefail
