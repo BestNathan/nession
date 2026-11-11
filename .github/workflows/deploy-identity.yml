@@ -5,6 +5,13 @@ name: Deploy / Identity
 # the source SHA currently deployed on an isolated staging lane matches the
 # trusted build provenance and the observed ready workloads.
 on:
+  # The source is a completed, GitHub-owned Staging release, not a PR artifact.
+  # The protected Main job independently checks original Run/Job/Step identity
+  # before any access to the read-only Kubernetes observation credentials.
+  workflow_run:
+    workflows: ["Release / Staging Artifacts"]
+    branches: [staging]
+    types: [completed]
   workflow_dispatch:
     inputs:
       environment:
@@ -17,7 +24,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: deploy-identity-${{ github.event.inputs.environment }}
+  group: deploy-identity-${{ github.event.inputs.environment || 'staging' }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +32,29 @@ jobs:
     # The existing relay/cluster secrets must never run on a dispatch from
     # another branch, fork, or repository. Environment protection rules are
     # configured in GitHub and must restrict this environment to trusted main.
-    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.name == 'Release / Staging Artifacts' &&
+          (
+            github.event.workflow_run.path == '.github/workflows/release-staging.yml' ||
+            github.event.workflow_run.path == '.github/workflows/release-staging.yml@refs/heads/staging'
+          ) &&
+          (
+            github.event.workflow_run.event == 'push' ||
+            github.event.workflow_run.event == 'workflow_dispatch'
+          ) &&
+          github.event.workflow_run.head_branch == 'staging' &&
+          github.event.workflow_run.repository.full_name == github.repository &&
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          github.event.workflow_run.status == 'completed' &&
+          github.event.workflow_run.conclusion == 'success'
+        )
+      )
     runs-on: ubuntu-24.04
     environment:
       name: nession-staging-identity
@@ -37,9 +66,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up Node for original release source verification
+        if: github.event_name == 'workflow_run'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Authenticate original successful Staging release Run/Jobs
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/deployment-identity-trigger.mjs verify "$GITHUB_EVENT_PATH"
+
       - name: Validate environment and read trusted GitOps state
         env:
-          ENVIRONMENT: ${{ github.event.inputs.environment }}
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
         shell: bash
         run: |
           set -euo pipefail
