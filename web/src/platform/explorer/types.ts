@@ -31,7 +31,8 @@ export interface ExplorerNode {
 export interface ExplorerProps {
   provider: ExplorerDataProvider;
   extensions?: ExplorerExtension[];
-  onFileActivate: (node: ExplorerNode) => void;
+  /** Return false to reject the activation; the tree keeps its selection. */
+  onFileActivate: (node: ExplorerNode) => boolean | void;
   onFileDeleted?: (node: ExplorerNode) => void;
   onFileRenamed?: (node: ExplorerNode, newName: string) => void;
   initialPath?: string;

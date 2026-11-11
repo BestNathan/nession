@@ -44,3 +44,7 @@ export type { FileErrorKind } from './model/fileErrors';
 export { FileBrowser } from './components/FileBrowser';
 export { FileList } from './components/FileList';
 export { FileViewer } from './components/FileViewer';
+export type {
+  FileSaveHandler,
+  FileSaveOutcome,
+} from './hooks/useFileViewer';

@@ -19,7 +19,7 @@ export interface ExplorerArboristNodeProps {
   onRenameChange: (value: string) => void;
   onRenameSubmit: (node: ExplorerNode) => void;
   onRenameCancel: () => void;
-  onFileActivate: (node: ExplorerNode) => void;
+  onFileActivate: (node: ExplorerNode) => boolean | void;
 }
 
 export function ExplorerArboristNode({
@@ -67,21 +67,18 @@ export function ExplorerArboristNode({
       }}
       onRenameCancel={onRenameCancel}
       onActivate={() => {
-        // Activating a row selects it; expansion and the browse directory stay
-        // separate state. The old directory branch only toggled, so "New file"
-        // had no selected directory to resolve and silently used the browse
-        // path instead.
+        // A file activation may be rejected by the host (a dirty-file
+        // navigation guard). Select only after the host accepts, so the row
+        // highlight can never point at a file the viewer did not open.
+        if (explorerNode.kind !== 'directory' && onFileActivate(explorerNode) === false) {
+          return;
+        }
         store.setSelection([explorerNode.id]);
         store.setActive(explorerNode.id);
-        // The row wrapper's own click-selection runs on the same event, but
-        // selecting here keeps the highlight truthful if a context-menu
-        // trigger ever stops that propagation.
         node.select();
         if (explorerNode.kind === 'directory') {
           node.toggle();
-          return;
         }
-        onFileActivate(explorerNode);
       }}
     />
   );

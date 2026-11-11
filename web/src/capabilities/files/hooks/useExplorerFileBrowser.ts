@@ -51,7 +51,7 @@ export function createLangAwareFileSystemProvider(fileOps: FileOps): ExplorerDat
 export interface UseExplorerFileBrowserOptions {
   fileOps: FileOps;
   initialPath?: string;
-  onFileClick: (entry: FileEntry) => void;
+  onFileClick: (entry: FileEntry) => boolean | void;
   onFileDeleted?: (path: string) => void;
   onFileRenamed?: (oldPath: string, newPath: string) => void;
   onGetTerminalPwd?: () => Promise<string>;
@@ -346,7 +346,7 @@ export function useExplorerFileBrowser({
         toast.error(`${label} too large for preview (>${maxSize / 1024 / 1024}MB)`);
         return;
       }
-      onFileClick(entry);
+      return onFileClick(entry);
     },
     [navigation, onFileClick],
   );

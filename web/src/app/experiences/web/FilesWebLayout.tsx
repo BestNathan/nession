@@ -1,29 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   FileBrowser,
   FileViewer,
   makeFileRef,
   resolveFileSource,
   type FileEntry,
-  type FileRef,
 } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useFilesWebFocusHandoff, type WebFilesFocusTarget } from './useFilesWebFocusHandoff';
-
-interface SelectedFile {
-  ref: FileRef;
-  filename: string;
-  size: number;
-  line?: number;
-  column?: number;
-}
+import { FilesWebSwitchDialog } from './FilesWebSwitchDialog';
+import { useFilesWebSwitchGuard } from './useFilesWebSwitchGuard';
 
 /** Web layout: tree ‖ editor on a CSS grid — proportions, no fixed px. */
 export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
-  const [selected, setSelected] = useState<SelectedFile | null>(null);
-
   const source = useMemo(
     () =>
       resolveFileSource({
@@ -34,16 +25,19 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
       }),
     [ctx.session?.session_id, ctx.agent, ctx.fileOps],
   );
+  const resetKey = useMemo(() => [source.id, ctx.fileOps], [source.id, ctx.fileOps]);
+  const guard = useFilesWebSwitchGuard(resetKey);
+  const { requestFile } = guard;
 
   const openFocusTarget = useCallback((target: WebFilesFocusTarget) => {
-    setSelected({
+    requestFile({
       ref: { sourceId: source.id, path: target.path },
       filename: target.name,
       size: target.size,
       line: target.line,
       column: target.column,
     });
-  }, [source.id]);
+  }, [requestFile, source.id]);
   const handoffError = useFilesWebFocusHandoff({
     focus: ctx.focus,
     fileOps: source.fileOps,
@@ -52,11 +46,6 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
     onOpenFile: openFocusTarget,
   });
 
-  // Reset the viewer when the source changes (detach/reattach, Session switch,
-  // or a different provider): a path is only meaningful inside its source.
-  useEffect(() => {
-    setSelected(null);
-  }, [source.id, ctx.fileOps]);
 
   if (source.fileOps === null) {
     return (
@@ -93,31 +82,37 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
         <div className="bg-workspace-navigation min-h-0 overflow-hidden">
           <FileBrowser
             fileOps={source.fileOps}
+            selectedPath={guard.selected?.ref.path ?? null}
             onFileClick={(entry: FileEntry) => {
               const ref = makeFileRef(source, entry.path);
-              if (ref !== null) {
-                setSelected({ ref, filename: entry.name, size: entry.size });
+              if (ref === null) {
+                return true;
               }
+              return requestFile({ ref, filename: entry.name, size: entry.size });
             }}
           />
         </div>
         <div className="min-h-0 overflow-hidden">
-          {selected ? (
+          {guard.selected ? (
             <FileViewer
-              key={`${source.id}:${selected.ref.path}`}
+              key={`${source.id}:${guard.selected.ref.path}`}
               fileOps={source.fileOps}
-              path={selected.ref.path}
-              filename={selected.filename}
-              fileSize={selected.size}
-              initialLine={selected.line}
-              initialColumn={selected.column}
-              onClose={() => setSelected(null)}
+              path={guard.selected.ref.path}
+              filename={guard.selected.filename}
+              fileSize={guard.selected.size}
+              initialLine={guard.selected.line}
+              initialColumn={guard.selected.column}
+              onClose={guard.closeFile}
+              onDirtyChange={guard.onDirtyChange}
+              onSavingChange={guard.onSavingChange}
+              onSaveHandlerChange={guard.onSaveHandlerChange}
             />
           ) : (
             <div className={cn('flex h-full items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view it.</div>
           )}
         </div>
       </div>
+      <FilesWebSwitchDialog selected={guard.selected} state={guard.switchState} />
     </div>
   );
 }

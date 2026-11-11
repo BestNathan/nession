@@ -17,7 +17,11 @@ import {
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 import { formatSize } from '@/shared/lib/format';
-import { useFileViewer, type ViewMode } from '../hooks/useFileViewer';
+import {
+  useFileViewer,
+  type FileSaveHandler,
+  type ViewMode,
+} from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 
@@ -34,6 +38,10 @@ export interface FileViewerProps {
    */
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Save-in-flight state, for a caller guarding its own navigation. */
+  onSavingChange?: (saving: boolean) => void;
+  /** Register the viewer's guarded save; the caller owns the navigation. */
+  onSaveHandlerChange?: (handler: FileSaveHandler | null) => void;
   initialLine?: number;
   /** 1-based column when a Terminal reference carried one (#3187). */
   initialColumn?: number;
@@ -344,6 +352,8 @@ export function FileViewer({
   fileSize,
   onClose,
   onDirtyChange,
+  onSavingChange,
+  onSaveHandlerChange,
   initialLine,
   initialColumn,
 }: FileViewerProps) {
@@ -384,8 +394,8 @@ export function FileViewer({
     handleSuggestionDismiss,
     handleCancelLoad,
   } = useFileViewer({
-    fileOps, path, filename, onClose, onDirtyChange, fileSize,
-    initialLine, initialColumn,
+    fileOps, path, filename, onClose, onDirtyChange, onSavingChange,
+    onSaveHandlerChange, fileSize, initialLine, initialColumn,
   });
 
   return (
