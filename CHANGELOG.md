@@ -682,3 +682,10 @@
 - Categories: architecture, session, metadata, identity, ownership, web, app
 - Reason: Cross-link the new MCP access-layer article: MCP Session Tools route to this same Agent-owned Session authority rather than a second one (#3264)
 - Source: https://github.com/BestNathan/nession/issues/3264
+
+## 2026-11-11T15:23:49Z | update | Unified overlay and operation surface system
+- Path: topics/web/unified-overlay-and-operation-surface-system.md
+- Topic: web
+- Categories: design, interaction, overlay, dialog, ownership, web, app
+- Reason: Record #3298's non-scrolling three-zone Dialog: DialogBody as the sole scroll owner, full-width opaque Header/Footer bands, form ownership wrapping body+footer, consumer and App operation migrations, the updated overlay-surfaces contract, and the exact-SHA Case/E2E/prototype proof
+- Source: https://github.com/BestNathan/nession/issues/3298

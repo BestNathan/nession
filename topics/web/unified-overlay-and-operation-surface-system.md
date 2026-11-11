@@ -1,12 +1,12 @@
 ---
 title: "Unified overlay and operation surface system"
-description: "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, trigger-relative Select placement with collision as an exception, one scrim/surface/title vocabulary, one scroll owner, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics"
+description: "One cross-family overlay contract: six roles, action/resource anchored-choice anatomies, token-owned Web size and choice-width roles, trigger-relative Select placement with collision as an exception, a non-scrolling three-zone Dialog with DialogBody as the one scroll owner, one scrim/surface/title vocabulary, explicit stacking, Experience-scoped and modal-owned popup hosts, and first-innermost Escape/dismissal semantics"
 topic: web
 categories: ["design", "interaction", "overlay", "dialog", "ownership", "web", "app"]
 status: verified
 created_at: 2026-11-10T04:45:00Z
-updated_at: 2026-11-11T05:09:53Z
-sources: ["https://github.com/BestNathan/nession/issues/3142", "https://github.com/BestNathan/nession/pull/3144", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/web.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/app.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/semantic.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/overlayStyles.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/alert-dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/design/contracts/patterns/choice-item.json", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-item.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-itemStyles.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3246", "https://github.com/BestNathan/nession/pull/3254", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/design/contracts/patterns/popup-menu.json", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/helpers/selectAnchor.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-01/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-03/verify.spec.ts"]
+updated_at: 2026-11-11T15:23:49Z
+sources: ["https://github.com/BestNathan/nession/issues/3142", "https://github.com/BestNathan/nession/pull/3144", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/docs/design/design-system/patterns.md", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/web.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/experience/app.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/design/tokens/semantic.json", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/overlayStyles.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/alert-dialog.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/d59b62c2a79a4a9786484c5880232e0dc5e19dc1/e2e/acceptance/cases/3142/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3164", "https://github.com/BestNathan/nession/pull/3184", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/design/contracts/patterns/choice-item.json", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-item.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/choice-itemStyles.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/dae365aa51972495086360eb1e8d0f9c18e72f00/e2e/acceptance/cases/3164/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3246", "https://github.com/BestNathan/nession/pull/3254", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/web/src/components/ui/select.tsx", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/docs/design/design-system/patterns/popup-menu.md", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/design/contracts/patterns/popup-menu.json", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/helpers/selectAnchor.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-01/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/1c2e06b81a62e40d51c829c44813b3f6ed665497/e2e/acceptance/cases/3246/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/issues/3298", "https://github.com/BestNathan/nession/pull/3306", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/web/src/components/ui/dialog.tsx", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/docs/design/design-system/patterns/overlay-surfaces.md", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/design/contracts/patterns/overlay-surfaces.json", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/e2e/acceptance/cases/3298/SC-01/verify.spec.ts", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/e2e/acceptance/cases/3298/SC-02/verify.spec.ts", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/e2e/acceptance/cases/3298/SC-03/verify.spec.ts", "https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/e2e/acceptance/cases/3298/SC-04/verify.spec.ts", "https://github.com/BestNathan/nession/blob/6dbcc2a3fad8a0f59b6dc7f4dcb72e832f1f573d/overlay-system-3142/index.html"]
 ---
 
 # Unified overlay and operation surface system
@@ -91,21 +91,26 @@ it is not a global menu restyle, and it never changes the 28/44 action band.
 
 ```text
 ┌──────────────────────────────┐
-│ Header — sticky, opaque      │  title/identity, close/back
+│ Header — fixed, opaque band  │  title/identity, close/back
 ├──────────────────────────────┤
 │ Body — the sole scroll owner │  fields, lists, anchored controls
+│                              │
 ├──────────────────────────────┤
-│ Footer — sticky, opaque,     │  cancel + one primary action
+│ Footer — fixed, opaque band  │  cancel + one primary action
 │ flush with the surface edge  │
 └──────────────────────────────┘
 ```
 
-Content takes natural height until the viewport clamp applies; after that the
-body scrolls and the header/footer stay put. The sticky footer is an opaque band
-flush with the dialog edge (#3128), so scrolling content cannot show through. A
-form inside the body must not create a second vertical scroller; lists that need
-their own scroll own a bounded region with one axis. Long paths/URLs wrap or
-scroll horizontally inside their own field and provide a copy/inspect affordance.
+The dialog surface is a non-scrolling column (#3298). `DialogHeader` and
+`DialogFooter` are full-width, opaque, non-scrolling bands; `DialogBody` is the
+one primary vertical scroll owner. Content takes natural height until the
+viewport clamp applies; after that the body shrinks and scrolls while header,
+close control and footer stay fixed. The footer meets the real surface bottom
+without consumer negative margins or sticky compensation. A form has one owner:
+it wraps the body and footer so Enter/submit, validation and busy state work
+without a second form or scroll region. Lists that need their own scroll own a
+bounded region with one axis. Long paths/URLs wrap or scroll horizontally inside
+their own field and provide a copy/inspect affordance.
 
 ### Experience composition
 
@@ -297,6 +302,40 @@ not by adding consumer offsets:
   `session-operation-surfaces-3089` and #3164 `choice-list-3164` prototypes were
   audited at `2126adf00`: both already place options start-aligned below the
   trigger, so no prototype revision or stale marking was required.
+
+### Three-zone dialog anatomy and scroll ownership (#3298)
+
+PR [#3306](https://github.com/BestNathan/nession/pull/3306) merged to staging at
+`5b2cf65b4f99995e02d17edc6397b2338cd3481c` centralized the modal shell in
+[`web/src/components/ui/dialog.tsx`](https://github.com/BestNathan/nession/blob/5b2cf65b4f99995e02d17edc6397b2338cd3481c/web/src/components/ui/dialog.tsx):
+
+- **One scroll owner.** `DialogContent` no longer scrolls (`overflow-hidden`,
+  flex column); the exported `DialogBody` is the only primary vertical scroll
+  owner. Short dialogs stay content-sized; overflow shrinks the body. Header and
+  Footer are full-width opaque bands, the close control stays in the header
+  band, and the footer reaches the real surface bottom without negative-margin
+  sticky compensation.
+- **Measured regression.** Before the fix, scrolling a New Project dialog moved
+  the absolute close control from the top band to `y=-275` at 1440 while the
+  header was only a 28px title row. After the fix the header band is full-width
+  and stationary at top/middle/bottom, the close stays inside it, and the footer
+  is flush within 1px.
+- **Form semantics.** The one form wraps `DialogBody` + `DialogFooter`, so
+  Enter/submit, validation, busy/disabled and error visibility stay native. All
+  existing `DialogContent` consumers were migrated; App keeps one Back/header,
+  safe-area footer and body-only scrolling in its sheet/operation depths.
+- **Canonical owners.** `docs/design/design-system/patterns/overlay-surfaces.md`
+  and the `overlay-surfaces` contract now name the
+  `dialog-body` scroll owner. The misleading #3142 whole-dialog scroll assertion
+  and the historical #3128 sticky-footer Case were updated to the new contract;
+  their historical Acceptance receipts are unchanged.
+- **Proof.** Pre-merge Cases SC-01..SC-04 at `f670b0de70001157e10ce07e2fa8533b25c39c3c` (run `43044034980`); the
+  selected E2E regressions (`project-management`, `app-attach-presentation`,
+  `app-session-operations`, `ui-contract-matrix`, `fixture-visual-app`, run
+  `43044035291`) passed at the PR head. The existing `overlay-system-3142` prototype
+  was revised in place at `6dbcc2a3fad8a0f59b6dc7f4dcb72e832f1f573d`; the trusted
+  Pages manifest binds that source SHA and the published Chromium walkthrough
+  passed.
 
 ## Related knowledge
 
