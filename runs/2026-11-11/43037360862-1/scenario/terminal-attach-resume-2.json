@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "41d5d3ce236094ebcb78935d4c585453a626a5e1",
+  "scenario_revision": "41d5d3ce236094ebcb78935d4c585453a626a5e1",
+  "run_id": 43037360862,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-11T14:25:35.001Z",
+  "finished_at": "2026-11-11T14:25:44.716Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-11T14:25:43.858Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "51433a9815eb8f2f39a632fb888a3db0f2142c9eee7ea1cd8f256e59e6d49d5f",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-11T14:25:44.146Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "51433a9815eb8f2f39a632fb888a3db0f2142c9eee7ea1cd8f256e59e6d49d5f",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-11T14:25:44.660Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "51433a9815eb8f2f39a632fb888a3db0f2142c9eee7ea1cd8f256e59e6d49d5f",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43037360862,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3303-erofs-crate-consolidation",
+    "target_sha": "41d5d3ce236094ebcb78935d4c585453a626a5e1",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43037360862",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0550ace360de2e8c5b58ac2855a3fd3377597617767017b9d2062a012182fa7f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-43037360862-1",
+    "sha256": "0550ace360de2e8c5b58ac2855a3fd3377597617767017b9d2062a012182fa7f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43037360862",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "0f830335704df0b993d938d6a0fce98dd15f3d59d439365a7aa16d8e38f22aa8"
+}
