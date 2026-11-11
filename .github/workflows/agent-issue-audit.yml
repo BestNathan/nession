@@ -1,5 +1,6 @@
 name: Agent / Issue Audit
-run-name: ${{ inputs.source_comment_id && format('Comment Audit #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) || format('Issue Audit #{0}', github.event.issue.number || inputs.issue_number || 'unknown') }}
+run-name: >-
+  ${{ inputs.source_comment_id && format('Comment Audit #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) || format('Issue Audit #{0}', github.event.issue.number || inputs.issue_number || 'unknown') }}
 
 on:
   issues:
