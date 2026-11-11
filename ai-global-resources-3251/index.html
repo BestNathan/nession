@@ -47,18 +47,20 @@
 var p=document.getElementById("product"),items=document.getElementById("items"),detail=document.getElementById("detail"),msg=document.getElementById("feedback"),modal=document.getElementById("modal");
 var state={type:"skills",target:"devbox",selected:"skill-2",detail:false,surface:"workspace",operation:"",records:[],count:0};
 var fixture=[
-{id:"skill-1",kind:"skills",name:"coding-standards",client:"Shared",source:"~/.agents/skills/coding-standards/",description:"Shared coding conventions",origin:"external",detail:"SKILL.md",status:"Discovered"},
-{id:"skill-2",kind:"skills",name:"review-go",client:"Claude Code",source:"~/.claude/skills/review-go/",description:"Go code review checklist",origin:"managed",detail:"git:example/skills@2f37cda",status:"Installed"},
-{id:"skill-3",kind:"skills",name:"python-env",client:"Codex",source:"~/.agents/skills/python-env/",description:"Python environment guide",origin:"external",detail:"SKILL.md",status:"Discovered"},
-{id:"mcp-1",kind:"mcp",name:"docs",client:"Claude Code",source:"~/.claude.json",description:"Developer documentation",origin:"external",detail:"HTTP · https://docs.example.invalid/mcp",status:"Configured · Not probed"},
-{id:"mcp-2",kind:"mcp",name:"local-files",client:"Codex",source:"~/.codex/config.toml",description:"Local filesystem MCP server",origin:"managed",detail:"stdio · binary not available",status:"Configured · Runtime missing"}
+{id:"skill-1",target:"devbox",kind:"skills",name:"coding-standards",client:"Shared",source:"~/.agents/skills/coding-standards/",description:"Shared coding conventions",origin:"external",detail:"SKILL.md",status:"Discovered"},
+{id:"skill-2",target:"devbox",kind:"skills",name:"review-go",client:"Claude Code",source:"~/.claude/skills/review-go/",description:"Go code review checklist",origin:"managed",detail:"git:example/skills@2f37cda",status:"Installed"},
+{id:"skill-3",target:"devbox",kind:"skills",name:"python-env",client:"Codex",source:"~/.agents/skills/python-env/",description:"Python environment guide",origin:"external",detail:"SKILL.md",status:"Discovered"},
+{id:"mcp-1",target:"devbox",kind:"mcp",name:"docs",client:"Claude Code",source:"~/.claude.json",description:"Developer documentation",origin:"external",detail:"HTTP · https://docs.example.invalid/mcp",status:"Configured · Not probed"},
+{id:"mcp-2",target:"devbox",kind:"mcp",name:"local-files",client:"Codex",source:"~/.codex/config.toml",description:"Local filesystem MCP server",origin:"managed",detail:"stdio · binary not available",status:"Configured · Runtime missing"},
+{id:"skill-mac",target:"macbook",kind:"skills",name:"swift-review",client:"Codex",source:"~/.agents/skills/swift-review/",description:"Swift review conventions",origin:"external",detail:"SKILL.md",status:"Discovered"},
+{id:"mcp-mac",target:"macbook",kind:"mcp",name:"remote-docs",client:"Claude Code",source:"~/.claude.json",description:"Remote documentation",origin:"managed",detail:"HTTP · https://docs.example.invalid/mcp",status:"Configured · Not probed"}
 ];
 state.records=fixture.slice();
 function byId(id){return state.records.find(function(x){return x.id===id})}
 function escapeText(v){return String(v||"").replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function notify(s){msg.textContent=s;msg.hidden=false;document.getElementById("inspector").textContent=JSON.stringify({event:s,type:state.type,target:state.target,selected:state.selected,detail:state.detail},null,2)}
 function available(){return state.target!=="offline"}
-function visible(){var q=document.getElementById("search").value.trim().toLowerCase();if(state.target==="offline"||state.target==="empty")return [];return state.records.filter(function(x){return x.kind===state.type&&([x.name,x.client,x.source,x.description].join(" ").toLowerCase().indexOf(q)!==-1)})}
+function visible(){var q=document.getElementById("search").value.trim().toLowerCase();if(state.target==="offline"||state.target==="empty")return [];return state.records.filter(function(x){return x.target===state.target&&x.kind===state.type&&([x.name,x.client,x.source,x.description].join(" ").toLowerCase().indexOf(q)!==-1)})}
 function render(){
 p.setAttribute("data-detail",state.detail?"open":"closed");p.setAttribute("data-surface",state.surface);
 document.getElementById("target").value=state.target;
@@ -79,7 +81,7 @@ var x=byId(state.selected);if(!x||x.kind!==state.type||!available()||!found.some
 detail.innerHTML='<h3>'+escapeText(x.name)+'</h3><p>'+escapeText(x.description)+'</p><dl><dt>Client</dt><dd>'+escapeText(x.client)+'</dd><dt>Scope</dt><dd>Agent user / global</dd><dt>Source path</dt><dd class="mono">'+escapeText(x.source)+'</dd><dt>Origin</dt><dd>'+escapeText(x.origin==="managed"?"Nession-managed":"External / discovered")+'</dd><dt>Status</dt><dd>'+escapeText(x.status)+'</dd><dt>Provenance</dt><dd class="mono">'+escapeText(x.detail)+'</dd></dl>'+(x.origin==="external"?'<div class="notice">External resource: visible, but not owned by Nession. Overwrite or removal is unavailable.</div>':'<div class="actions"><button class="button" data-update="'+escapeText(x.id)+'">'+(x.kind==="skills"?"Update":"Edit")+'</button><button class="button danger" data-remove="'+escapeText(x.id)+'">Remove</button></div>')+'<h4>'+(x.kind==="skills"?"SKILL.md preview":"MCP configuration preview")+'</h4><div class="code-surface mono">'+(x.kind==="skills"?'---\nname: '+escapeText(x.name)+'\ndescription: '+escapeText(x.description)+'\n---\n\n# '+escapeText(x.name)+'\n\nContent is not executed during discovery.':'name: '+escapeText(x.name)+'\ntransport: '+escapeText(x.detail)+'\nauth: [hidden]\nprobe: not performed automatically')+'</div>';
 }
 function pick(id){state.selected=id;state.detail=true;msg.hidden=true;render()}
-function setTab(t){state.type=t;state.selected=state.records.find(function(x){return x.kind===t})?.id||"";state.detail=false;document.getElementById("search").value="";msg.hidden=true;render()}
+function setTab(t){state.type=t;state.selected=state.records.find(function(x){return x.target===state.target&&x.kind===t})?.id||"";state.detail=false;document.getElementById("search").value="";msg.hidden=true;render()}
 function op(type,id){state.operation=type;state.operationId=id||"";document.getElementById("form-error").hidden=true;var x=byId(id),fields=document.getElementById("form-fields");var isSkill=state.type==="skills";var title=type==="add"?(isSkill?"Install global Skill":"Add global MCP server"):(type==="remove"?"Remove resource":(isSkill?"Update Skill":"Edit MCP"));
 document.getElementById("modal-title").textContent=title;
 document.getElementById("modal-subtitle").textContent=type==="remove"?"This operation requires explicit confirmation.":"Targets only the selected Agent user's global configuration.";
@@ -97,7 +99,7 @@ document.getElementById("items").addEventListener("click",function(e){var el=e.t
 document.getElementById("detail").addEventListener("click",function(e){var remove=e.target.closest("[data-remove]"),update=e.target.closest("[data-update]");if(remove)op("remove",remove.dataset.remove);if(update)op("update",update.dataset.update)});
 document.getElementById("tab-skills").onclick=function(){setTab("skills")};
 document.getElementById("tab-mcp").onclick=function(){setTab("mcp")};
-document.getElementById("target").onchange=function(e){state.target=e.target.value;state.detail=false;notify("Target changed: "+state.target);render()};
+document.getElementById("target").onchange=function(e){state.target=e.target.value;state.selected=state.records.find(function(x){return x.target===state.target&&x.kind===state.type})?.id||"";state.detail=false;notify("Target changed: "+state.target);render()};
 document.getElementById("search").oninput=function(){state.detail=false;render()};
 document.getElementById("add").onclick=function(){if(available())op("add")};
 document.getElementById("cancel").onclick=close;
@@ -106,14 +108,14 @@ document.getElementById("operation").addEventListener("submit",function(e){
 e.preventDefault();var type=state.operation;if(type==="remove"){var existing=byId(state.operationId);if(existing?.origin!=="managed"){document.getElementById("form-error").textContent="Unmanaged entries cannot be removed";document.getElementById("form-error").hidden=false;return}state.records=state.records.filter(function(x){return x.id!==state.operationId});state.detail=false;state.selected="";modal.hidden=true;notify("Managed global resource removed (mock)");render();return}
 var f=new FormData(e.target),name=String(f.get("name")||"").trim(),source=String(f.get("source")||"").trim(),sha=String(f.get("sha")||"").trim(),client=String(f.get("client")||"Claude Code"),isSkill=state.type==="skills",err="";
 if(!/^[\w.-]{2,80}$/.test(name))err="Use a valid resource name (2–80 characters).";
-else if(type==="add"&&state.records.some(function(x){return x.name===name&&x.client===client&&x.kind===state.type}))err="This global resource already exists for the selected client.";
+else if(type==="add"&&state.records.some(function(x){return x.target===state.target&&x.name===name&&x.client===client&&x.kind===state.type}))err="This global resource already exists for the selected client.";
 else if(isSkill&&!/^[a-f0-9]{40}$/i.test(sha))err="Pin a full 40-character Git commit SHA.";
 else if(isSkill&&!/^(https:\/\/|github\.com\/)[^\s]+$/.test(source))err="Use a valid GitHub or HTTPS Git source.";
 else if(!isSkill&&f.get("transport")==="HTTP"&&!/^https:\/\//.test(source))err="HTTP MCP needs an HTTPS URL.";
 else if(!isSkill&&f.get("transport")==="stdio"&&(!source||source.indexOf(" ")>=0))err="Use an executable path/name without shell arguments in this mock.";
 if(err){var error=document.getElementById("form-error");error.textContent=err;error.hidden=false;return}
 var id=type==="update"?state.operationId:"new-"+(++state.count);
-var item={id:id,kind:state.type,name:name,client:client,source:isSkill?"~/.agents/skills/"+name+"/":(client==="Codex"?"~/.codex/config.toml":"~/.claude.json"),description:isSkill?"Installed from pinned Git source":"Configured MCP server",origin:"managed",detail:isSkill?"git:"+source+"@"+sha.slice(0,10):String(f.get("transport"))+" · "+source,status:isSkill?"Installed":"Configured · Not probed"};
+var item={id:id,target:state.target,kind:state.type,name:name,client:client,source:isSkill?"~/.agents/skills/"+name+"/":(client==="Codex"?"~/.codex/config.toml":"~/.claude.json"),description:isSkill?"Installed from pinned Git source":"Configured MCP server",origin:"managed",detail:isSkill?"git:"+source+"@"+sha.slice(0,10):String(f.get("transport"))+" · "+source,status:isSkill?"Installed":"Configured · Not probed"};
 if(type==="update")state.records=state.records.map(function(x){return x.id===id?item:x});else state.records.push(item);
 state.selected=id;state.detail=true;modal.hidden=true;notify((type==="update"?"Updated":"Added")+" global resource (mock; no disk or network effects)");render();
 });
