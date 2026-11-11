@@ -81,6 +81,7 @@ jobs:
       - name: Validate environment and read trusted GitOps state
         env:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
+          SOURCE_RELEASE_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -107,6 +108,13 @@ jobs:
           FULL=$(git rev-parse --verify --quiet "${SHORT}^{commit}") \
             || { echo "::error::deployed short SHA is not uniquely resolvable: $SHORT"; exit 1; }
           [[ "$FULL" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::resolved SHA is invalid"; exit 1; }
+          # A completed Release event cannot attest a newer, unrelated
+          # GitOps target if the requested source was superseded meanwhile.
+          # Manual observers continue to attest the actual current target.
+          if [[ -n "${SOURCE_RELEASE_SHA:-}" && "$FULL" != "$SOURCE_RELEASE_SHA" ]]; then
+            echo "::error::Staging release $SOURCE_RELEASE_SHA was superseded by desired $FULL before observation"
+            exit 1
+          fi
           {
             echo "NAMESPACE=$NAMESPACE"
             echo "OVERLAY_PATH=$OVERLAY_PATH"
