@@ -379,9 +379,13 @@ export async function startPtyProbe(page: import('@playwright/test').Page, mode:
 /** End the probe: Ctrl-C kills `cat -v` and returns the shell prompt. */
 export async function stopPtyProbe(page: import('@playwright/test').Page): Promise<void> {
   await sendRawToTerminal(page, '\x03');
+  // A previous shell prompt remains in xterm scrollback while `cat -v`
+  // still owns the PTY. Checking any historical prompt returns immediately,
+  // racing the next command against the prior probe's Ctrl-C teardown.
+  // Wait for the prompt at the live end of the buffer instead.
   await expect
-    .poll(async () => /runner:\S*\$/m.test(await readTerminalBuffer(page)), { timeout: 15_000 })
-    .toBe(true);
+    .poll(async () => lastNonEmptyLine(page), { timeout: 15_000 })
+    .toMatch(/^runner:\\S*\\$/);
 }
 
 /**
