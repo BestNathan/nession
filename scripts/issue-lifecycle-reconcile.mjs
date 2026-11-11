@@ -270,10 +270,11 @@ async function selfTest() {
   // Exercise the real mocked REST orchestration, not merely the policy function.
   let live = { ...issue, updated_at: '2026-11-11T01:00:00Z' };
   let writes = 0, dispatches = 0;
+  let effectivePr = pr;
   const mock = async (path, options = {}) => {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
       items: [{ number: 21 }] };
-    if (path.endsWith('/pulls/21')) return pr;
+    if (path.endsWith('/pulls/21')) return effectivePr;
     if (path.endsWith('/issues/19/events?per_page=100')) return [];
     if (path.endsWith('/actions/workflows/agent-sc-acceptance.yml/dispatches')) {
       assert.equal(options.method, 'POST');
@@ -295,12 +296,38 @@ async function selfTest() {
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
     { request: mock })).action, 'skip');
   assert.equal(writes, 1, 'repeat delivery must never write another closure');
+  // Acceptance-first: a trusted Pass arriving before merge cannot close;
+  // the subsequent merge event converges using the already projected proof.
+  live = { ...issue, updated_at: '2026-11-11T01:00:01Z' };
+  effectivePr = { ...pr, merged_at: null };
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'pending');
+  assert.equal(writes, 1);
+  effectivePr = pr;
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'closed');
+  assert.equal(writes, 2);
+  // Merge-first: missing SC proof keeps Issue Open until the later
+  // authorized Acceptance projection causes another reconciliation.
+  live = { ...issue, updated_at: '2026-11-11T01:00:02Z',
+    body: body.replace('| Pass |', '| Pending |') };
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'pending');
+  assert.equal(writes, 2);
+  live = { ...issue, updated_at: '2026-11-11T01:00:03Z' };
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'closed');
+  assert.equal(writes, 3);
+  assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
+    { request: mock })).action, 'skip');
+  assert.equal(writes, 3, 'both event orders must converge exactly once');
+  // Restore an open pending Issue to exercise explicitly requested recovery.
   live = { ...issue, updated_at: '2026-11-11T01:01:00Z',
     body: body.replace('| Pass |', '| Pending |') };
   const manual = await handleManual(e, 'X/y', 'owner', 'fixture-token', mock);
   assert.equal(manual.action, 'dispatched');
   assert.equal(dispatches, 1);
-  assert.equal(writes, 1, 'manual command cannot turn Pending into Pass');
+  assert.equal(writes, 3, 'manual command cannot turn Pending into Pass');
   assert.equal((await handleManual({ ...e, comment: { ...e.comment, body: '/accept all' } },
     'X/y', 'owner', 'fixture-token', mock)).action, 'skip');
   assert.equal(dispatches, 1, 'untrusted comments cannot dispatch');
@@ -315,7 +342,7 @@ async function selfTest() {
   };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
     { request: race })).action, 'pending');
-  assert.equal(writes, 1, 'racing edits must not close the Issue');
+  assert.equal(writes, 3, 'racing edits must not close the Issue');
   await assert.rejects(reconcileIssue('X/y', 19, 'fixture-token', {
     request: async (path, options) => path.endsWith('/events?per_page=100')
       ? Array(100).fill({event:'labeled'}) : mock(path, options),
