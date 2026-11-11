@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectSelectAnchored } from '../../helpers/selectAnchor';
 import { waitForShell } from '../../helpers/shell';
 
 // Real-stack creation and the fixture's offline branch. Browser execution is
@@ -122,23 +123,27 @@ test.describe('Project Existing-location Session creation', () => {
       await trigger.click();
       const options = page.getByRole('option');
       await expect(options).toHaveCount(2);
-      const popup = page.locator('[data-slot="select-content"]');
-      const popupBox = await popup.boundingBox();
-      expect(popupBox).not.toBeNull();
-      expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(viewport.width + 0.5);
-      const openTriggerBox = await trigger.boundingBox();
-      expect(openTriggerBox).not.toBeNull();
+      // issue 3246: the content-sized list must grow from the trigger's start
+      // edge, not drift with the selected item. At 390 the list is wider than
+      // the trigger and Base UI shifts it inside the viewport; that legal
+      // collision shift is asserted by the helper instead of forced to zero.
+      const anchor = await expectSelectAnchored(page, trigger, {
+        requireNoCollision: viewport.width >= 1024,
+      });
+      const popupBox = anchor.popup;
+      expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width + 2);
+      const openTriggerBox = anchor.trigger;
       // The #3199 regression follows the approved resource-choice width contract:
       // resource choices may grow wider than the narrow anchor to
       // reveal metadata/long paths. They must still contain the anchor width
       // and fit inside the viewport; exact equality is the old action-list
       // contract, not the current rich-choice contract.
-      expect(popupBox!.width).toBeGreaterThanOrEqual(openTriggerBox!.width - 1);
-      expect(popupBox!.x).toBeGreaterThanOrEqual(-0.5);
+      expect(popupBox.width).toBeGreaterThanOrEqual(openTriggerBox.width - 1);
+      expect(popupBox.x).toBeGreaterThanOrEqual(-0.5);
       for (const option of await options.all()) {
         const optionBox = await option.boundingBox();
         expect(optionBox).not.toBeNull();
-        expect(optionBox!.width).toBeLessThanOrEqual(popupBox!.width + 0.5);
+        expect(optionBox!.width).toBeLessThanOrEqual(popupBox.width + 0.5);
         expect(
           await option.evaluate((element) => element.scrollWidth - element.clientWidth),
         ).toBeLessThanOrEqual(1);
@@ -159,6 +164,11 @@ test.describe('Project Existing-location Session creation', () => {
       await page.keyboard.press('Escape');
       await expect(page.getByRole('option')).toHaveCount(0);
       await trigger.press('ArrowDown');
+      // Keyboard opening uses the same anchored geometry as a pointer open.
+      const keyboardAnchor = await expectSelectAnchored(page, trigger, {
+        requireNoCollision: viewport.width >= 1024,
+      });
+      expect(Math.abs(keyboardAnchor.gap - anchor.gap)).toBeLessThanOrEqual(1);
       const secondOption = page.getByRole('option').nth(1);
       await expect(secondOption).toBeVisible();
       await secondOption.focus();
@@ -170,6 +180,15 @@ test.describe('Project Existing-location Session creation', () => {
       await trigger.click();
       await page.getByRole('option').first().click();
       await expect(trigger).toContainText('macbook');
+      // The selected option index does not move the popup's anchor.
+      await trigger.click();
+      const reopened = await expectSelectAnchored(page, trigger, {
+        requireNoCollision: viewport.width >= 1024,
+      });
+      expect(Math.abs(reopened.popup.x - anchor.popup.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(reopened.popup.width - anchor.popup.width)).toBeLessThanOrEqual(1);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('option')).toHaveCount(0);
       const selectedBox = await trigger.boundingBox();
       expect(selectedBox).not.toBeNull();
       expect(selectedBox!.y + selectedBox!.height).toBeLessThanOrEqual(

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectSelectAnchored } from '../../helpers/selectAnchor';
 
 // The fixture route needs no Server, but the repository's canonical E2E policy
 // still runs browser specs only in CI.
@@ -94,6 +95,18 @@ test.describe('Project management', () => {
     expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(
       footerBox!.y + footerBox!.height + 0.5,
     );
+
+    // issue 3246: a Select opened in the scrolled dialog keeps its trigger
+    // geometry even though its popup host lives inside the translated dialog
+    // rather than on the body.
+    const agent = dialog.locator('#project-create-location-agent-0');
+    await agent.click();
+    const anchor = await expectSelectAnchored(page, agent);
+    expect(anchor.side).toBe('bottom');
+    expect(anchor.horizontalCollision).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('option')).toHaveCount(0);
+    await expect(dialog).toBeVisible();
   });
 
   test('Projects remain reachable with zero Sessions', async ({ page }) => {
