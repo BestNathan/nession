@@ -74,15 +74,17 @@ pub(crate) fn build(
         mutations,
     });
 
+    let allowed_hosts =
+        config.mcp.allowed_hosts.clone().unwrap_or_else(|| {
+            nession_mcp::service::allowed_hosts_for_bind(&config.listen_address)
+        });
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
         auth_token: config.agent_token.clone(),
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
-        session_idle: std::time::Duration::from_secs(
-            nession_mcp::protocol::DEFAULT_SESSION_IDLE_SECS,
-        ),
-        max_sessions: nession_mcp::protocol::DEFAULT_MAX_SESSIONS,
+        allowed_origins: config.mcp.allowed_origins.clone(),
+        allowed_hosts,
     };
     let service = McpService::new(service_config, cluster, node)?;
     Ok(Some(Arc::new(service)))

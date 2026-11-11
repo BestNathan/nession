@@ -1,59 +1,81 @@
-//! The MCP Streamable HTTP service: lifecycle, auth, tools, sessions.
+//! The MCP service: protocol/transport adapter, auth, deadlines, tools (`#3264`).
 //!
 //! One [`McpService`] answers every hosting mode. A host supplies the two
-//! backends and the inbound token; nothing else differs.
+//! semantic backends and the inbound token; nothing else differs.
 //!
-//! ## Inbound authentication
+//! The wire grammar — `2026-07-28`'s stateless per-request metadata and
+//! `Mcp-Method`/`Mcp-Name` header validation, plus the legacy `2025-03-26`
+//! `initialize`/`Mcp-Session-Id` lifecycle — belongs to the official `rmcp`
+//! SDK. This module owns Nession's policy around it:
 //!
-//! Every request to the MCP endpoint must carry `Authorization: Bearer …`.
-//! The token is the host's configured MCP token (a host reuses its native
-//! token source — see the mode table in the requirement); a standalone host
-//! configures its own. Missing, malformed and wrong tokens are indistinguishable
-//! to the peer, and no token ever enters a tool schema, argument, result or log.
+//! * fail-closed bearer authentication on every request;
+//! * the endpoint path;
+//! * the flat Tool registry and its per-call concurrency/deadline bounds;
+//! * the stable tool-result shape shared by all three hosts.
 //!
-//! ## Lifecycle
-//!
-//! `initialize` negotiates the protocol version and creates an
-//! `Mcp-Session-Id`; subsequent requests must present it, `notifications/
-//! initialized` marks the session ready, and `DELETE` terminates it. The store
-//! is bounded and idle-expired, so an abandoned session cannot grow the host.
-//!
-//! Tool executions are bounded by [`ServiceConfig::tool_timeout`] and by a
-//! semaphore, so a slow backend cannot consume the host's tasks or block its
-//! heartbeat.
+//! The registry is built **once** at startup; no request rebuilds the catalog.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::convert::Infallible;
+use std::future::Future;
 use std::io;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
+use bytes::Bytes;
+use http::{Request, Response, StatusCode};
+use http_body::Body as HttpBody;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Empty};
+use rmcp::model::{
+    CacheScope, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult,
+    PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
+};
+use rmcp::service::RequestContext;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tokio::time::timeout;
+use tower_service::Service;
+use tracing::{info, warn};
 
 use crate::backend::{ClusterBackend, NodeBackend};
 use crate::error::ToolError;
-use crate::http::{self, HttpError, PrefixedStream, RequestHead, Response};
-use crate::jsonrpc::{codes, ErrorResponse, Request, SuccessResponse};
+use crate::http::PrefixedStream;
 use crate::protocol;
+use crate::registry::ToolRegistry;
+use crate::tool::{reply_is_error, ToolContext};
 use crate::tools;
+
+/// The exact response body type the rmcp Streamable HTTP service produces.
+type RmcpBody = BoxBody<Bytes, Infallible>;
 
 /// How the service is configured.
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     /// The endpoint path, normally `/mcp`.
     pub path: String,
-    /// The required bearer token.
+    /// The required inbound bearer token.
     pub auth_token: String,
     /// Bound on one tool execution (and on waiting for a concurrency slot).
     pub tool_timeout: Duration,
     /// Maximum concurrent tool executions.
     pub max_concurrent_calls: usize,
-    /// Idle lifetime of one MCP session.
-    pub session_idle: Duration,
-    /// Maximum live MCP sessions.
-    pub max_sessions: usize,
+    /// Browser origins allowed to call the endpoint.
+    ///
+    /// Empty means **no** browser origin is allowed: a request carrying an
+    /// `Origin` header is refused. Requests without `Origin` (MCP clients) pass.
+    pub allowed_origins: Vec<String>,
+    /// Host header authorities accepted by the transport.
+    ///
+    /// Empty disables Host validation; the host adapter derives a specific
+    /// allowlist whenever the listener binds a concrete host.
+    pub allowed_hosts: Vec<String>,
 }
 
 impl ServiceConfig {
@@ -64,8 +86,8 @@ impl ServiceConfig {
             auth_token: auth_token.into(),
             tool_timeout: Duration::from_secs(protocol::DEFAULT_TOOL_TIMEOUT_SECS),
             max_concurrent_calls: protocol::DEFAULT_MAX_CONCURRENT_CALLS,
-            session_idle: Duration::from_secs(protocol::DEFAULT_SESSION_IDLE_SECS),
-            max_sessions: protocol::DEFAULT_MAX_SESSIONS,
+            allowed_origins: Vec::new(),
+            allowed_hosts: Vec::new(),
         }
     }
 
@@ -82,9 +104,6 @@ impl ServiceConfig {
         }
         if self.max_concurrent_calls == 0 {
             return Err(ServiceConfigError::InvalidConcurrency);
-        }
-        if self.max_sessions == 0 {
-            return Err(ServiceConfigError::InvalidSessionBound);
         }
         Ok(())
     }
@@ -108,481 +127,241 @@ pub enum ServiceConfigError {
     /// The concurrency bound is zero.
     #[error("MCP max_concurrent_calls must be greater than zero")]
     InvalidConcurrency,
-    /// The session bound is zero.
-    #[error("MCP max_sessions must be greater than zero")]
-    InvalidSessionBound,
+    /// The explicit Tool registration did not satisfy the registry contract.
+    #[error("MCP Tool registry is invalid: {0}")]
+    InvalidRegistry(String),
 }
 
-struct Session {
-    last_seen: Instant,
-    initialized: bool,
-}
-
-struct SessionStore {
-    sessions: HashMap<String, Session>,
-    idle: Duration,
-    max: usize,
-}
-
-impl SessionStore {
-    fn new(idle: Duration, max: usize) -> Self {
-        Self {
-            sessions: HashMap::new(),
-            idle,
-            max,
+/// Derive the Host allowlist for a listener bind address.
+///
+/// A concrete host is accepted together with loopback. An unspecified bind
+/// (`0.0.0.0`/`::`) leaves the transport's Host check disabled: the client
+/// chooses whichever interface address it dialled, so an allowlist cannot be
+/// derived. Bearer authentication and the Origin policy remain mandatory in
+/// that configuration.
+pub fn allowed_hosts_for_bind(bind_address: &str) -> Vec<String> {
+    let host = match bind_address.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => bind_address
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(bind_address),
+    };
+    match host {
+        "" | "0.0.0.0" | "::" => Vec::new(),
+        "localhost" | "127.0.0.1" | "::1" => {
+            vec![
+                "localhost".to_string(),
+                "127.0.0.1".to_string(),
+                "::1".to_string(),
+            ]
         }
-    }
-
-    fn prune(&mut self) {
-        let now = Instant::now();
-        let idle = self.idle;
-        self.sessions
-            .retain(|_, session| now.duration_since(session.last_seen) <= idle);
-    }
-
-    fn create(&mut self) -> String {
-        self.prune();
-        if self.sessions.len() >= self.max {
-            // Evict the least recently used session rather than refusing every
-            // later initialisation. A live client that keeps calling stays
-            // recent; the oldest abandoned session is the safest to drop.
-            if let Some(oldest) = self
-                .sessions
-                .iter()
-                .min_by_key(|(_, session)| session.last_seen)
-                .map(|(id, _)| id.clone())
-            {
-                self.sessions.remove(&oldest);
-            }
-        }
-        let id = uuid::Uuid::new_v4().to_string();
-        self.sessions.insert(
-            id.clone(),
-            Session {
-                last_seen: Instant::now(),
-                initialized: false,
-            },
-        );
-        id
-    }
-
-    fn touch(&mut self, id: &str) -> bool {
-        match self.sessions.get_mut(id) {
-            Some(session) => {
-                session.last_seen = Instant::now();
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn mark_initialized(&mut self, id: &str) -> bool {
-        match self.sessions.get_mut(id) {
-            Some(session) => {
-                session.last_seen = Instant::now();
-                session.initialized = true;
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn remove(&mut self, id: &str) -> bool {
-        self.sessions.remove(id).is_some()
+        concrete => vec![
+            concrete.to_string(),
+            "localhost".to_string(),
+            "127.0.0.1".to_string(),
+            "::1".to_string(),
+        ],
     }
 }
 
 /// The shared MCP access layer.
 pub struct McpService {
-    config: ServiceConfig,
-    cluster: std::sync::Arc<dyn ClusterBackend>,
-    node: std::sync::Arc<dyn NodeBackend>,
-    sessions: Mutex<SessionStore>,
-    calls: Semaphore,
+    path: Arc<str>,
+    /// The authenticated, path-scoped tower service in front of rmcp.
+    endpoint: AuthorizedMcp,
 }
 
 impl McpService {
     /// Build a service and validate its configuration.
+    ///
+    /// The Tool registry is constructed here, once, from the explicit
+    /// registration list in [`crate::tools`].
     pub fn new(
         config: ServiceConfig,
-        cluster: std::sync::Arc<dyn ClusterBackend>,
-        node: std::sync::Arc<dyn NodeBackend>,
+        cluster: Arc<dyn ClusterBackend>,
+        node: Arc<dyn NodeBackend>,
     ) -> Result<Self, ServiceConfigError> {
         config.validate()?;
+        let registry = tools::registry()
+            .map_err(|error| ServiceConfigError::InvalidRegistry(error.to_string()))?;
+        let handler = RegistryServer {
+            registry: Arc::new(registry),
+            context: Arc::new(ToolContext::new(cluster, node)),
+            calls: Arc::new(Semaphore::new(config.max_concurrent_calls)),
+            tool_timeout: config.tool_timeout,
+        };
+
+        let mut transport = StreamableHttpServerConfig::default()
+            // Dual-era: `initialize` sessions for legacy versions, stateless
+            // per-request metadata for `2026-07-28`.
+            .with_legacy_session_mode(true)
+            .with_json_response(true)
+            .with_stateless_protocol_metadata_required(true);
+        // An empty allowlist is not "allow everything": a request presenting a
+        // browser Origin is refused, which is the DNS-rebinding boundary.
+        transport = if config.allowed_origins.is_empty() {
+            transport
+                .with_allowed_origins(Vec::<String>::new())
+                .enforce_origin_validation()
+        } else {
+            transport.with_allowed_origins(config.allowed_origins.clone())
+        };
+        transport = if config.allowed_hosts.is_empty() {
+            transport.disable_allowed_hosts()
+        } else {
+            transport.with_allowed_hosts(config.allowed_hosts.clone())
+        };
+
+        let inner: StreamableHttpService<RegistryServer, LocalSessionManager> =
+            StreamableHttpService::new(move || Ok(handler.clone()), Default::default(), transport);
         Ok(Self {
-            calls: Semaphore::new(config.max_concurrent_calls),
-            sessions: Mutex::new(SessionStore::new(config.session_idle, config.max_sessions)),
-            config,
-            cluster,
-            node,
+            path: Arc::from(config.path.as_str()),
+            endpoint: AuthorizedMcp {
+                inner,
+                path: Arc::from(config.path.as_str()),
+                auth_token: Arc::from(config.auth_token.as_str()),
+            },
         })
     }
 
     /// The endpoint path this service answers on.
     pub fn path(&self) -> &str {
-        &self.config.path
+        &self.path
     }
 
-    /// Read one HTTP request and write its response on the same stream.
+    /// Serve one replayed HTTP connection.
     ///
-    /// A malformed request is answered with the closest HTTP status the parser
-    /// can name; the connection is always closed afterwards, so one bad
-    /// request cannot become a persistent half-open task.
-    pub async fn serve<S>(&self, head: RequestHead, mut body: PrefixedStream<S>) -> io::Result<()>
+    /// The stream starts with the request head the host already read; the
+    /// embedded hosts therefore keep their single `/ws` listener without a
+    /// second port or a framework change to the WebSocket handshake.
+    pub async fn serve<S>(&self, stream: PrefixedStream<S>) -> io::Result<()>
     where
-        S: AsyncRead + AsyncWrite + Unpin,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let response = self.handle(head, &mut body).await;
-        http::write_response(&mut body, response).await
-    }
-
-    async fn handle<S>(&self, head: RequestHead, body: &mut S) -> Response
-    where
-        S: AsyncRead + Unpin,
-    {
-        let request_id = uuid::Uuid::new_v4().to_string();
-
-        if head.path() != self.config.path {
-            return Response::empty(404);
-        }
-        if !self.authorized(&head) {
-            warn!(request_id = %request_id, "MCP request refused: no valid bearer token");
-            return Response::empty(401).with_header("WWW-Authenticate", "Bearer");
-        }
-        if let Some(version) = head.header("mcp-protocol-version") {
-            if !protocol::SUPPORTED_PROTOCOL_VERSIONS.contains(&version) {
-                return json_response(
-                    400,
-                    &ErrorResponse::new(
-                        None,
-                        codes::INVALID_REQUEST,
-                        format!("unsupported MCP protocol version `{version}`"),
-                    )
-                    .with_data(json!({
-                        "supported": protocol::SUPPORTED_PROTOCOL_VERSIONS,
-                    })),
-                    None,
-                );
-            }
-        }
-
-        match head.method.as_str() {
-            "POST" => {
-                let bytes = match http::read_body(body, &head, http::DEFAULT_IO_TIMEOUT).await {
-                    Ok(bytes) => bytes,
-                    Err(error) => return self.http_error_response(error),
-                };
-                self.handle_post(&head, &bytes).await
-            }
-            "DELETE" => self.handle_delete(&head),
-            "GET" => Response::empty(405).with_header("Allow", "POST, DELETE"),
-            _ => Response::empty(405).with_header("Allow", "POST, DELETE"),
-        }
-    }
-
-    fn authorized(&self, head: &RequestHead) -> bool {
-        let Some(value) = head.header("authorization") else {
-            return false;
-        };
-        let mut parts = value.splitn(2, ' ');
-        let scheme = parts.next().unwrap_or_default();
-        if !scheme.eq_ignore_ascii_case("bearer") {
-            return false;
-        }
-        let Some(presented) = parts.next() else {
-            return false;
-        };
-        constant_time_eq(presented.trim(), &self.config.auth_token)
-    }
-
-    fn http_error_response(&self, error: HttpError) -> Response {
-        match error {
-            HttpError::Timeout => Response::empty(408),
-            HttpError::HeaderTooLarge | HttpError::BodyTooLarge => Response::empty(413),
-            HttpError::BadRequest(message) => json_response(
-                400,
-                &ErrorResponse::new(None, codes::INVALID_REQUEST, message.to_string()),
-                None,
-            ),
-            HttpError::Io(error) => {
-                warn!(%error, "MCP request body read failed");
-                Response::empty(400)
-            }
-        }
-    }
-
-    fn handle_delete(&self, head: &RequestHead) -> Response {
-        let Some(session_id) = head.header("mcp-session-id") else {
-            return Response::empty(400);
-        };
-        let mut store = self.lock_sessions();
-        if store.remove(session_id) {
-            Response::empty(200)
-        } else {
-            Response::empty(404)
-        }
-    }
-
-    async fn handle_post(&self, head: &RequestHead, bytes: &[u8]) -> Response {
-        let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
-            return json_response(
-                400,
-                &ErrorResponse::new(None, codes::PARSE_ERROR, "invalid JSON body"),
-                None,
-            );
-        };
-
-        let items = match value {
-            Value::Array(items) => items,
-            other => vec![other],
-        };
-        if items.is_empty() {
-            return json_response(
-                400,
-                &ErrorResponse::new(None, codes::INVALID_REQUEST, "empty batch"),
-                None,
-            );
-        }
-
-        let mut parsed: Vec<Result<Request, ErrorResponse>> = Vec::with_capacity(items.len());
-        for item in items {
-            match serde_json::from_value::<Request>(item) {
-                Ok(request) if request.jsonrpc == "2.0" => parsed.push(Ok(request)),
-                Ok(_) => parsed.push(Err(ErrorResponse::new(
-                    None,
-                    codes::INVALID_REQUEST,
-                    "jsonrpc must be \"2.0\"",
-                ))),
-                Err(_) => parsed.push(Err(ErrorResponse::new(
-                    None,
-                    codes::INVALID_REQUEST,
-                    "not a JSON-RPC request",
-                ))),
-            }
-        }
-
-        let has_initialize = parsed.iter().any(|entry| {
-            entry
-                .as_ref()
-                .map(|request| request.method == "initialize")
-                .unwrap_or(false)
-        });
-        let header_session = head.header("mcp-session-id").map(str::to_string);
-
-        let mut session_id = match &header_session {
-            Some(id) => {
-                let mut store = self.lock_sessions();
-                if !store.touch(id) {
-                    if !has_initialize {
-                        return Response::empty(404);
-                    }
-                    None
-                } else {
-                    Some(id.clone())
-                }
-            }
-            None => None,
-        };
-
-        if session_id.is_none() && !has_initialize {
-            return json_response(
-                400,
-                &ErrorResponse::new(
-                    None,
-                    codes::INVALID_REQUEST,
-                    "Mcp-Session-Id is required; send initialize first",
-                ),
-                None,
-            );
-        }
-
-        let mut responses: Vec<Value> = Vec::new();
-        for entry in parsed {
-            match entry {
-                Err(error) => {
-                    responses.push(serde_json::to_value(error).unwrap_or(Value::Null));
-                }
-                Ok(request) => {
-                    let is_initialize = request.method == "initialize";
-                    if is_initialize {
-                        let new_id = self.lock_sessions().create();
-                        session_id = Some(new_id);
-                    }
-                    if let Some(response) =
-                        self.process_request(request, session_id.as_deref()).await
-                    {
-                        responses.push(response);
-                    }
-                }
-            }
-        }
-
-        if responses.is_empty() {
-            // Notifications only: the transport acknowledges with 202 and no
-            // body, which is the positive receipt for an MCP notification.
-            return Response::empty(202);
-        }
-
-        let payload = if responses.len() == 1 {
-            responses.into_iter().next().unwrap_or(Value::Null)
-        } else {
-            Value::Array(responses)
-        };
-        let body = serde_json::to_vec(&payload).unwrap_or_default();
-        let mut response = Response::json(200, body).with_header("Cache-Control", "no-store");
-        if let Some(id) = session_id {
-            response = response.with_header("Mcp-Session-Id", id);
-        }
-        response
-    }
-
-    async fn process_request(&self, request: Request, session_id: Option<&str>) -> Option<Value> {
-        let is_notification = request.is_notification();
-        let id = request.id.clone();
-
-        if is_notification {
-            if request.method == "notifications/initialized" {
-                if let Some(session) = session_id {
-                    self.lock_sessions().mark_initialized(session);
-                }
-            } else if request.method == "notifications/cancelled" {
-                debug!("MCP client cancelled a request");
-            }
-            return None;
-        }
-
-        let response = match request.method.as_str() {
-            "initialize" => SuccessResponse {
-                jsonrpc: "2.0",
-                id,
-                result: initialize_result(),
-            },
-            "ping" => SuccessResponse {
-                jsonrpc: "2.0",
-                id,
-                result: json!({}),
-            },
-            "tools/list" => SuccessResponse {
-                jsonrpc: "2.0",
-                id,
-                result: json!({
-                    "tools": tools::catalog()
-                        .iter()
-                        .map(tools::ToolDefinition::to_wire)
-                        .collect::<Vec<_>>(),
+        let endpoint = self.endpoint.clone();
+        let connection = hyper::server::conn::http1::Builder::new()
+            // A configured header timeout needs an explicit timer in hyper 1.x.
+            .timer(hyper_util::rt::TokioTimer::new())
+            .header_read_timeout(Duration::from_secs(10))
+            .serve_connection(
+                hyper_util::rt::TokioIo::new(stream),
+                hyper::service::service_fn(move |request| {
+                    let mut endpoint = endpoint.clone();
+                    async move { Service::call(&mut endpoint, request).await }
                 }),
-            },
-            "tools/call" => match self.tool_call(request.params).await {
-                Ok(result) => SuccessResponse {
-                    jsonrpc: "2.0",
-                    id,
-                    result: tool_result(&result),
-                },
-                Err(error) => SuccessResponse {
-                    jsonrpc: "2.0",
-                    id,
-                    result: tool_error_result(&error),
-                },
-            },
-            other => {
-                return Some(
-                    serde_json::to_value(ErrorResponse::new(
-                        id,
-                        codes::METHOD_NOT_FOUND,
-                        format!("method `{other}` is not supported"),
-                    ))
-                    .unwrap_or(Value::Null),
-                );
+            );
+        connection.await.map_err(io::Error::other)
+    }
+}
+
+/// The MCP handler rmcp drives: flat registry, bounded execution, stable result
+/// shape.
+#[derive(Clone)]
+struct RegistryServer {
+    registry: Arc<ToolRegistry>,
+    context: Arc<ToolContext>,
+    calls: Arc<Semaphore>,
+    tool_timeout: Duration,
+}
+
+impl ServerHandler for RegistryServer {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                protocol::SERVER_NAME,
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(
+                "Nession MCP: `nession_server_list_agents` answers from the Nession Server's \
+                 cluster registry; `nession_agent_*` tools act on the explicitly named Agent \
+                 node and never fall back to the host running MCP.",
+            )
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Owned(vec![
+            ProtocolVersion::V_2026_07_28,
+            ProtocolVersion::V_2025_03_26,
+        ])
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(self.registry.list())
+            .with_ttl_ms(protocol::TOOLS_LIST_TTL_MS)
+            .with_cache_scope(CacheScope::Private))
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let name = request.name.to_string();
+        let arguments = request.arguments;
+
+        let permit = match timeout(self.tool_timeout, Arc::clone(&self.calls).acquire_owned()).await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => {
+                return Ok(CallToolResponse::Complete(tool_error_result(
+                    &ToolError::unavailable("the MCP tool executor is shutting down"),
+                )))
+            }
+            Err(_) => {
+                return Ok(CallToolResponse::Complete(tool_error_result(
+                    &ToolError::timeout("the MCP tool executor is saturated; retry later"),
+                )))
             }
         };
 
-        Some(serde_json::to_value(response).unwrap_or(Value::Null))
-    }
-
-    async fn tool_call(&self, params: Option<Value>) -> Result<Value, ToolError> {
-        let params = params.unwrap_or(Value::Null);
-        let Some(name) = params.get("name").and_then(Value::as_str) else {
-            return Err(ToolError::invalid_argument("`name` is required"));
-        };
-        if !tools::catalog().iter().any(|tool| tool.name == name) {
-            return Err(ToolError::invalid_argument(format!(
-                "unknown tool `{name}`"
-            )));
-        }
-        let arguments = params.get("arguments").cloned();
-
-        let permit =
-            match tokio::time::timeout(self.config.tool_timeout, self.calls.acquire()).await {
-                Ok(Ok(permit)) => permit,
-                Ok(Err(_)) => {
-                    return Err(ToolError::unavailable(
-                        "the MCP tool executor is shutting down",
-                    ))
-                }
-                Err(_) => {
-                    return Err(ToolError::timeout(
-                        "the MCP tool executor is saturated; retry later",
-                    ))
-                }
-            };
-
-        let outcome = tokio::time::timeout(
-            self.config.tool_timeout,
-            tools::call(name, arguments.as_ref(), &*self.cluster, &*self.node),
+        let outcome = timeout(
+            self.tool_timeout,
+            self.registry.call(&self.context, &name, arguments),
         )
         .await;
         drop(permit);
 
-        match outcome {
-            Ok(result) => {
-                let failed = result.as_ref().map(tools::reply_is_error).unwrap_or(true);
-                info!(tool = name, is_error = failed, "MCP tool call completed");
-                result
+        Ok(CallToolResponse::Complete(match outcome {
+            Ok(Ok(reply)) => {
+                let is_error = reply_is_error(&reply);
+                info!(tool = %name, is_error, "MCP tool call completed");
+                tool_result(&reply)
+            }
+            Ok(Err(error)) => {
+                warn!(tool = %name, kind = error.kind.as_str(), "MCP tool call failed");
+                tool_error_result(&error)
             }
             Err(_) => {
-                warn!(tool = name, "MCP tool call timed out");
-                Err(ToolError::timeout(format!(
+                warn!(tool = %name, "MCP tool call timed out");
+                tool_error_result(&ToolError::timeout(format!(
                     "tool `{name}` did not answer in time"
                 )))
             }
-        }
-    }
-
-    fn lock_sessions(&self) -> std::sync::MutexGuard<'_, SessionStore> {
-        // A poisoned lock is recovered: the store holds session ids and
-        // `Instant`s, so a panic elsewhere cannot have left it inconsistent,
-        // and refusing every MCP call forever would turn a local panic into a
-        // permanent endpoint outage.
-        self.sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }))
     }
 }
 
-fn initialize_result() -> Value {
-    json!({
-        "protocolVersion": protocol::PROTOCOL_VERSION,
-        "capabilities": {
-            "tools": {}
-        },
-        "serverInfo": {
-            "name": protocol::SERVER_NAME,
-            "version": env!("CARGO_PKG_VERSION"),
-        },
-        "instructions": "Nession MCP: `nession_server_*` tools answer from the Nession Server's \
-            cluster view; `nession_agent_*` tools act on the explicitly named Agent node.",
-    })
-}
-
-fn tool_result(value: &Value) -> Value {
+/// The stable `tools/call` result shape.
+///
+/// The owner's reply is rendered as pretty JSON in a text block; a delivered
+/// refusal sets `isError`. This is the same shape in every hosting mode.
+fn tool_result(value: &Value) -> CallToolResult {
     let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-    json!({
-        "content": [{ "type": "text", "text": text }],
-        "isError": tools::reply_is_error(value),
-    })
+    let content = vec![ContentBlock::text(text)];
+    if reply_is_error(value) {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    }
 }
 
-fn tool_error_result(error: &ToolError) -> Value {
+/// The stable structured error shape for a tool-level failure.
+fn tool_error_result(error: &ToolError) -> CallToolResult {
     let payload = json!({
         "error": {
             "kind": error.kind.as_str(),
@@ -590,21 +369,90 @@ fn tool_error_result(error: &ToolError) -> Value {
         }
     });
     let text = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| error.message.clone());
-    json!({
-        "content": [{ "type": "text", "text": text }],
-        "isError": true,
-    })
+    CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
-fn json_response(status: u16, error: &ErrorResponse, session_id: Option<&str>) -> Response {
-    let body = serde_json::to_vec(error).unwrap_or_default();
-    let mut response = Response::json(status, body);
-    if let Some(id) = session_id {
-        response = response.with_header("Mcp-Session-Id", id);
+/// The bearer/path gate in front of the rmcp service.
+#[derive(Clone)]
+struct AuthorizedMcp {
+    inner: StreamableHttpService<RegistryServer, LocalSessionManager>,
+    path: Arc<str>,
+    auth_token: Arc<str>,
+}
+
+impl AuthorizedMcp {
+    fn unauthorized() -> Response<RmcpBody> {
+        Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("WWW-Authenticate", "Bearer")
+            .body(empty_body())
+            .unwrap_or_else(|_| Response::new(empty_body()))
     }
-    response.with_header("Cache-Control", "no-store")
+
+    fn not_found() -> Response<RmcpBody> {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(empty_body())
+            .unwrap_or_else(|_| Response::new(empty_body()))
+    }
 }
 
+fn empty_body() -> RmcpBody {
+    Empty::<Bytes>::new().boxed()
+}
+
+impl<B> Service<Request<B>> for AuthorizedMcp
+where
+    B: HttpBody + Send + 'static,
+    B::Data: Send + 'static,
+    B::Error: std::fmt::Display,
+{
+    type Response = Response<RmcpBody>;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn call(&mut self, request: Request<B>) -> Self::Future {
+        if request.uri().path() != &*self.path {
+            return Box::pin(async { Ok(Self::not_found()) });
+        }
+        if !authorized_by(&request, &self.auth_token) {
+            warn!("MCP request refused: no valid bearer token");
+            return Box::pin(async { Ok(Self::unauthorized()) });
+        }
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
+            match inner.call(request).await {
+                Ok(response) => Ok(response),
+                Err(never) => match never {},
+            }
+        })
+    }
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+fn authorized_by<B>(request: &Request<B>, expected: &str) -> bool {
+    let Some(value) = request
+        .headers()
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let mut parts = value.splitn(2, ' ');
+    let scheme = parts.next().unwrap_or_default();
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return false;
+    }
+    let Some(presented) = parts.next() else {
+        return false;
+    };
+    constant_time_eq(presented.trim(), expected)
+}
+
+/// Compare a presented token with the configured one without an early exit.
 fn constant_time_eq(presented: &str, expected: &str) -> bool {
     let presented = presented.as_bytes();
     let expected = expected.as_bytes();
@@ -618,221 +466,9 @@ fn constant_time_eq(presented: &str, expected: &str) -> bool {
     difference == 0
 }
 
-/// Whether `id` is a supported negotiated protocol version.
-pub fn supports_protocol_version(version: &str) -> bool {
-    protocol::SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::UnavailableNodeBackend;
-    use async_trait::async_trait;
-    use serde_json::json;
-    use std::sync::Arc;
-
-    struct TestCluster {
-        delay: std::time::Duration,
-    }
-
-    #[async_trait]
-    impl ClusterBackend for TestCluster {
-        async fn list_agents(&self) -> Result<Value, ToolError> {
-            tokio::time::sleep(self.delay).await;
-            Ok(json!({ "agents": [] }))
-        }
-        async fn list_sessions(
-            &self,
-            _agent_id: Option<&str>,
-            _force: bool,
-        ) -> Result<Value, ToolError> {
-            Ok(json!({ "sessions": [], "stale_agents": [] }))
-        }
-        async fn get_info(&self) -> Result<Value, ToolError> {
-            Ok(json!({ "version": "test" }))
-        }
-        async fn capture_session_preview(
-            &self,
-            _session_id: &str,
-            _lines: u32,
-        ) -> Result<Value, ToolError> {
-            Ok(json!({ "error": "not here" }))
-        }
-        async fn get_session_attach_info(&self, _session_id: &str) -> Result<Value, ToolError> {
-            Ok(json!({ "session_id": "a:b" }))
-        }
-        async fn create_session(&self, _agent_id: &str, _name: &str) -> Result<Value, ToolError> {
-            Ok(json!({ "success": false, "error": "offline" }))
-        }
-        async fn kill_session(&self, _session_id: &str) -> Result<Value, ToolError> {
-            Ok(json!({ "success": false, "error": "missing" }))
-        }
-        async fn rename_agent(
-            &self,
-            _agent_id: &str,
-            _display_name: Option<&str>,
-        ) -> Result<Value, ToolError> {
-            Ok(json!({ "success": true }))
-        }
-        async fn delete_agent(&self, _agent_id: &str) -> Result<Value, ToolError> {
-            Ok(json!({ "success": true }))
-        }
-    }
-
-    fn service() -> Arc<McpService> {
-        service_with(TestCluster {
-            delay: std::time::Duration::ZERO,
-        })
-    }
-
-    fn service_with(cluster: TestCluster) -> Arc<McpService> {
-        Arc::new(
-            McpService::new(
-                ServiceConfig::new("secret"),
-                Arc::new(cluster),
-                Arc::new(UnavailableNodeBackend::new("no node")),
-            )
-            .expect("service"),
-        )
-    }
-
-    fn post() -> RequestHead {
-        RequestHead {
-            method: "POST".to_string(),
-            target: "/mcp".to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: vec![("authorization".to_string(), "Bearer secret".to_string())],
-        }
-    }
-
-    #[tokio::test]
-    async fn an_anonymous_request_is_refused() {
-        let service = service();
-        let head = RequestHead {
-            method: "POST".to_string(),
-            target: "/mcp".to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: Vec::new(),
-        };
-        let response = service.handle(head, &mut b"{}".as_slice()).await;
-        assert_eq!(response.status, 401);
-    }
-
-    #[tokio::test]
-    async fn initialize_creates_a_session_and_tools_list_uses_it() {
-        let service = service();
-        let body = br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#.to_vec();
-        let response = service.handle_post(&post(), &body).await;
-        assert_eq!(response.status, 200);
-        let session = response
-            .headers
-            .iter()
-            .find(|(name, _)| name == "Mcp-Session-Id")
-            .map(|(_, value)| value.clone())
-            .expect("session header");
-        assert!(!session.is_empty());
-
-        let list = br#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#.to_vec();
-        let mut head = post();
-        head.headers.push(("mcp-session-id".to_string(), session));
-        let response = service.handle_post(&head, &list).await;
-        assert_eq!(response.status, 200);
-        let payload: Value = serde_json::from_slice(&response.body).expect("json");
-        let tools = payload
-            .get("result")
-            .and_then(|value| value.get("tools"))
-            .and_then(Value::as_array)
-            .expect("tools");
-        assert_eq!(tools.len(), 12);
-    }
-
-    #[tokio::test]
-    async fn a_tool_refusal_is_an_error_result_not_a_transport_error() {
-        let service = service();
-        let init = br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.to_vec();
-        let response = service.handle_post(&post(), &init).await;
-        let session = response
-            .headers
-            .iter()
-            .find(|(name, _)| name == "Mcp-Session-Id")
-            .map(|(_, value)| value.clone())
-            .expect("session");
-
-        let call = json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "nession_server_create_session",
-                "arguments": { "agent_id": "a", "name": "n" }
-            }
-        })
-        .to_string()
-        .into_bytes();
-        let mut head = post();
-        head.headers.push(("mcp-session-id".to_string(), session));
-        let response = service.handle_post(&head, &call).await;
-        assert_eq!(response.status, 200);
-        let payload: Value = serde_json::from_slice(&response.body).expect("json");
-        assert_eq!(
-            payload
-                .get("result")
-                .and_then(|value| value.get("isError"))
-                .and_then(Value::as_bool),
-            Some(true)
-        );
-    }
-
-    #[tokio::test]
-    async fn a_notification_only_body_is_accepted_with_202() {
-        let service = service();
-        let body = br#"{"jsonrpc":"2.0","method":"notifications/cancelled"}"#.to_vec();
-        let response = service.handle_post(&post(), &body).await;
-        // No session: the transport refuses before the notification is read.
-        assert_eq!(response.status, 400);
-
-        let init = br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.to_vec();
-        let init_response = service.handle_post(&post(), &init).await;
-        let session = init_response
-            .headers
-            .iter()
-            .find(|(name, _)| name == "Mcp-Session-Id")
-            .map(|(_, value)| value.clone())
-            .expect("session");
-        let mut head = post();
-        head.headers.push(("mcp-session-id".to_string(), session));
-        let response = service.handle_post(&head, &body).await;
-        assert_eq!(response.status, 202);
-        assert!(response.body.is_empty());
-    }
-
-    #[tokio::test]
-    async fn an_unknown_path_is_not_found() {
-        let service = service();
-        let mut head = post();
-        head.target = "/ws".to_string();
-        let response = service.handle(head, &mut b"{}".as_slice()).await;
-        assert_eq!(response.status, 404);
-    }
-
-    #[tokio::test]
-    async fn tools_are_identical_across_every_catalog_read() {
-        let first = serde_json::to_value(
-            tools::catalog()
-                .iter()
-                .map(tools::ToolDefinition::to_wire)
-                .collect::<Vec<_>>(),
-        )
-        .expect("json");
-        let second = serde_json::to_value(
-            tools::catalog()
-                .iter()
-                .map(tools::ToolDefinition::to_wire)
-                .collect::<Vec<_>>(),
-        )
-        .expect("json");
-        assert_eq!(first, second);
-    }
 
     #[test]
     fn tokens_compare_by_content_and_length() {
@@ -840,111 +476,5 @@ mod tests {
         assert!(!constant_time_eq("abc", "abd"));
         assert!(!constant_time_eq("ab", "abc"));
         assert!(!constant_time_eq("", "abc"));
-    }
-
-    async fn _assert_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<McpService>();
-    }
-
-    async fn session_for(service: &McpService) -> String {
-        let init = br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.to_vec();
-        let response = service.handle_post(&post(), &init).await;
-        response
-            .headers
-            .iter()
-            .find(|(name, _)| name == "Mcp-Session-Id")
-            .map(|(_, value)| value.clone())
-            .expect("session")
-    }
-
-    async fn raw_call(
-        service: &McpService,
-        session: &str,
-        id: u64,
-        name: &str,
-        arguments: Value,
-    ) -> Value {
-        let body = json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": "tools/call",
-            "params": { "name": name, "arguments": arguments }
-        })
-        .to_string()
-        .into_bytes();
-        let mut head = post();
-        head.headers
-            .push(("mcp-session-id".to_string(), session.to_string()));
-        let response = service.handle_post(&head, &body).await;
-        assert_eq!(response.status, 200);
-        serde_json::from_slice(&response.body).expect("json")
-    }
-
-    async fn call(service: &McpService, session: &str, name: &str, arguments: Value) -> Value {
-        raw_call(service, session, 2, name, arguments)
-            .await
-            .get("result")
-            .cloned()
-            .expect("result")
-    }
-
-    #[tokio::test]
-    async fn a_slow_backend_times_out_as_a_tool_error() {
-        let config = ServiceConfig {
-            tool_timeout: std::time::Duration::from_millis(20),
-            ..ServiceConfig::new("secret")
-        };
-        let service = Arc::new(
-            McpService::new(
-                config,
-                Arc::new(TestCluster {
-                    delay: std::time::Duration::from_millis(200),
-                }),
-                Arc::new(UnavailableNodeBackend::new("no node")),
-            )
-            .expect("service"),
-        );
-        let session = session_for(&service).await;
-        let result = call(&service, &session, "nession_server_list_agents", json!({})).await;
-        assert_eq!(result["isError"], true);
-        let text = result["content"][0]["text"].as_str().expect("text");
-        assert!(text.contains("timeout"), "{text}");
-    }
-
-    #[tokio::test]
-    async fn concurrent_calls_keep_their_own_ids() {
-        let service = service();
-        let session = session_for(&service).await;
-        let (first, second) = tokio::join!(
-            raw_call(
-                &service,
-                &session,
-                11,
-                "nession_server_list_sessions",
-                json!({})
-            ),
-            raw_call(&service, &session, 12, "nession_server_get_info", json!({})),
-        );
-        assert_eq!(first["id"], 11);
-        assert_eq!(second["id"], 12);
-        assert_eq!(first["result"]["isError"], false);
-        assert_eq!(second["result"]["isError"], false);
-    }
-
-    #[tokio::test]
-    async fn a_missing_required_argument_is_an_argument_error() {
-        let service = service();
-        let session = session_for(&service).await;
-        let result = call(
-            &service,
-            &session,
-            "nession_server_create_session",
-            json!({ "agent_id": "a" }),
-        )
-        .await;
-        assert_eq!(result["isError"], true);
-        let text = result["content"][0]["text"].as_str().expect("text");
-        assert!(text.contains("name"), "{text}");
     }
 }
