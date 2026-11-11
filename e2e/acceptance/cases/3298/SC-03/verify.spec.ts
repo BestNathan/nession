@@ -89,6 +89,9 @@ test('SC-03: Web dialog roles keep the three-zone shell at desktop and constrain
     await page.goto('/#/fixture?experience=web&projects=long');
     await page.getByTestId('project-item-row').first().waitFor();
     await page.getByTestId('project-item-row').first().click();
+    if (await page.getByTestId('sidebar-drawer-close').isVisible().catch(() => false)) {
+      await page.getByTestId('sidebar-drawer-close').click();
+    }
     await page.getByTestId('project-detail-create-session').click();
     const dialog = page.getByTestId('create-session-dialog');
     await expect(dialog).toBeVisible();
@@ -121,6 +124,7 @@ test('SC-03: Web dialog roles keep the three-zone shell at desktop and constrain
   // Narrow forced-Web keeps the Web dialog composition (not an App page).
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/fixture?experience=web&projects=long');
+  await page.reload();
   await page.getByTestId('project-item-row').first().waitFor();
   await page.getByTestId('project-item-row').first().click();
   await page.getByTestId('sidebar-drawer-close').click();
@@ -136,6 +140,9 @@ test('SC-03: Web dialog roles keep the three-zone shell at desktop and constrain
     description: 'exact SHA ' + sha + ': ' + observed.join(' | '),
   });
 });
+
+test.describe('App touch', () => {
+  test.use({ hasTouch: true });
 
 test('SC-03: App keeps one header, safe-area footer and nested focus at 375/390/430', async ({ page }) => {
   test.setTimeout(110_000);
@@ -252,4 +259,5 @@ test('SC-03: App sheet and landscape operation preserve the role and footer edge
       'kept one App header and Back, and the 844x390 operation kept one header, Body scroll ' +
       'and a footer flush with the viewport bottom',
   });
+});
 });

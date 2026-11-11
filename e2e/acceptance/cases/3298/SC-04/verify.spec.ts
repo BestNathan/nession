@@ -51,23 +51,26 @@ test('SC-04: the published mock revision proves the three-zone comparison', asyn
   await expect(report).toContainText('Scroll owner: Body');
 
   // Top → Middle → Bottom: corrected header/footer geometry stays put.
+  const dialogBefore = await dialog.boundingBox();
   const headerBefore = await dialog.locator('.dialog-head').boundingBox();
   const footerBefore = await dialog.locator('.dialog-foot').boundingBox();
-  const dialogBefore = await dialog.boundingBox();
+  const headerOffset = (headerBefore?.y ?? 0) - (dialogBefore?.y ?? 0);
+  const footerBottomOffset =
+    (footerBefore?.y ?? 0) + (footerBefore?.height ?? 0) -
+    ((dialogBefore?.y ?? 0) + (dialogBefore?.height ?? 0));
   for (const position of ['start', 'middle', 'end']) {
     await page.locator(`[data-anatomy-scroll="${position}"]`).click();
     await expect(report).toHaveAttribute('data-geometry', 'pass');
+    const dialogNow = await dialog.boundingBox();
     const headerNow = await dialog.locator('.dialog-head').boundingBox();
     const footerNow = await dialog.locator('.dialog-foot').boundingBox();
-    expect(headerNow?.y).toBeCloseTo(headerBefore?.y ?? -1, 0);
-    expect(footerNow?.y).toBeCloseTo(footerBefore?.y ?? -1, 0);
-    expect(footerNow).not.toBeNull();
+    // The control clicks may scroll the surrounding documentation page; compare
+    // offsets inside the product surface, not absolute viewport coordinates.
+    expect((headerNow?.y ?? 0) - (dialogNow?.y ?? 0)).toBeCloseTo(headerOffset, 0);
     expect(
-      Math.abs(
-        (footerNow!.y + footerNow!.height) -
-        ((dialogBefore?.y ?? 0) + (dialogBefore?.height ?? 0)),
-      ),
-    ).toBeLessThanOrEqual(1);
+      (footerNow?.y ?? 0) + (footerNow?.height ?? 0) -
+      ((dialogNow?.y ?? 0) + (dialogNow?.height ?? 0)),
+    ).toBeCloseTo(footerBottomOffset, 0);
   }
 
   // The legacy approximation intentionally models the faulty anatomy; the
@@ -87,6 +90,10 @@ test('SC-04: the published mock revision proves the three-zone comparison', asyn
   await expect(appDialog).toBeVisible();
   await expect(appDialog.locator('.dialog-head')).toHaveCount(1);
   await expect(report).toHaveAttribute('data-geometry', 'pass');
+  await page.keyboard.press('Escape');
+  await expect(product.locator('.dialog')).toHaveCount(0);
+  await page.locator('[data-np-size="1180"][data-np-experience="web"]').click();
+  await expect(product).toHaveAttribute('data-experience', 'web');
 
   // Offline/invalid fixtures keep the error readable and the primary disabled.
   for (const fixture of ['invalid', 'offline']) {
