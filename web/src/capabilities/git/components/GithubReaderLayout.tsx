@@ -52,7 +52,7 @@ export function GithubReaderLayout({
         data-testid={readerTestId}
         className={cn(
           'flex min-h-0 flex-1 flex-col',
-          !selected && 'hidden md:flex',
+          !pushed && 'hidden md:flex',
         )}
       >
         {selected ? (
@@ -81,7 +81,7 @@ export function GithubReaderLayout({
             </Button>
           </div>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div data-testid={`${readerTestId}-scroll`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {reader}
         </div>
       </div>

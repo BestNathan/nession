@@ -58,8 +58,8 @@ test('Issues: bounded list, lazy full detail, safe Markdown and independent scro
   expect(before?.issueDetail).toBe(0);
 
   // The list and the reader are separate scroll owners, not one page.
-  const list = page.getByTestId('github-issue-list');
-  const reader = page.getByTestId('github-issue-reader');
+  const list = page.getByTestId('github-issue-list-scroll');
+  const reader = page.getByTestId('github-issue-reader-scroll');
   expect(await list.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
   expect(await reader.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
   await list.evaluate((element) => { element.scrollTop = 48; });
@@ -100,7 +100,7 @@ test('Mobile: push detail and Back restore filtering, search, scroll and selecti
   await page.getByTestId('github-issues-search').fill('session');
   await page.getByTestId('github-issues-search').press('Enter');
   await expect(page.getByTestId('github-issue-row-2514')).toBeVisible();
-  const list = page.getByTestId('github-issue-list');
+  const list = page.getByTestId('github-issue-list-scroll');
   await list.evaluate((element) => { element.scrollTop = 96; });
 
   await page.getByTestId('github-issue-row-2514').click();

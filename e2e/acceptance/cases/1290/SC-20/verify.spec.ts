@@ -13,8 +13,8 @@ test('desktop: independent list/reader, Focus reading and safe lazy detail', asy
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoGithub(page);
   await expect(page.getByTestId('github-issue-row-1290')).toBeVisible();
-  const list = page.getByTestId('github-issue-list');
-  const reader = page.getByTestId('github-issue-reader');
+  const list = page.getByTestId('github-issue-list-scroll');
+  const reader = page.getByTestId('github-issue-reader-scroll');
   expect(await list.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
   expect(await reader.evaluate((element) => getComputedStyle(element).overflowY)).toBe('auto');
   await page.getByTestId('github-issue-row-1290').click();
@@ -31,7 +31,7 @@ test('mobile: list → detail → Back keeps filter, search, scroll and selectio
   await page.getByTestId('github-filter-all').click();
   await page.getByTestId('github-issues-search').fill('session');
   await expect(page.getByTestId('github-issue-row-2514')).toBeVisible();
-  const list = page.getByTestId('github-issue-list');
+  const list = page.getByTestId('github-issue-list-scroll');
   await list.evaluate((element) => { element.scrollTop = 96; });
   await page.getByTestId('github-issue-row-2514').click();
   await expect(page.getByTestId('github-issue-detail-2514')).toBeVisible();

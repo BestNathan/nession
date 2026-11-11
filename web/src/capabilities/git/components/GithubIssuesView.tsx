@@ -154,7 +154,7 @@ function IssuesListBody({
   onLoadMore: () => void;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+    <div data-testid="github-issue-list-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
       {error ? (
         <GithubNotice error={error} testId="github-issues-error" onRetry={onRefresh} />
       ) : loading ? (
