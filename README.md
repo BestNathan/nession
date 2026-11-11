@@ -15,6 +15,9 @@
 
 ## Catalog
 
+| AI · Agent-global Skills / MCP (project scopes belong to client extensions), Web/App master-detail and safe management | [#3251](https://github.com/BestNathan/nession/issues/3251) | [Interactive HTML](ai-global-resources-3251/index.html) · [Scenario & fidelity](ai-global-resources-3251/README.md) |
+
+
 | Layout Consistency Lab: shared Experience / semantic layout vs local class drift, Web/App / three surfaces / scroll metrics | [#3194](https://github.com/BestNathan/nession/issues/3194) | [Interactive HTML](layout-consistency-3194/index.html) · [Scenario & fidelity](layout-consistency-3194/README.md) |
 
 | Select / Choice Items: Base UI current vs Nession option visual candidate, Web/App / long-path / keyboard / dark | [#3164](https://github.com/BestNathan/nession/issues/3164) | [Interactive HTML](choice-list-3164/index.html) · [Scenario & fidelity](choice-list-3164/README.md) |
