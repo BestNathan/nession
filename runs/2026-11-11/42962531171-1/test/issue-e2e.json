@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "849a32af2611748181902a68ec0a0005dc35d73e",
+  "run_id": 42962531171,
+  "run_attempt": 1,
+  "plan_digest": "10d847473d226a9800076ecaa1e26d092af40954ec3ad418a32c34a29cb4ea61",
+  "artifact_digest": "sha256:431e2d15e37bc44adb9fc518e105ce1fac98ee172d5488ed63b6709c97fba320",
+  "results": [
+    {
+      "id": "project-management",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 40
+    },
+    {
+      "id": "project-session-create",
+      "result": "Pass",
+      "discovered": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 288
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 100,
+      "passed": 100,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 848
+    }
+  ]
+}
