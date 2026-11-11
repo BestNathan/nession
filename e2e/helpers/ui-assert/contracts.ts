@@ -68,7 +68,45 @@ export interface ContractBlock {
    */
   rowHeightToken?: string;
   rowHeightTokenPx?: number;
+  /**
+   * The Experience control band every shared input/action in a recipe
+   * resolves (#3138). Distinct from `heightToken`, which pins the recipe's own
+   * surface: a form or operation has several controls, so the band is one
+   * statement rather than a copy of `control.md` at each consumer.
+   */
+  controlHeightToken?: string;
+  controlHeightTokenPx?: number;
+  /**
+   * Per-`data-recipe-part` approved roles (#3138). The role values are resolved
+   * from the pattern contract, so a spec never re-declares 16px/12.5px/etc.
+   *
+   * A role's `lineHeight` is unitless in the token source; the browser resolves
+   * `lineHeightVar` (the same variable the recipe paints through) rather than
+   * comparing `1.25` with a computed length.
+   */
+  parts?: Record<string, PartBlock>;
   visibility?: { mode: string; breakpoint?: string };
+}
+
+export interface TypographyRole {
+  sizePx: number;
+  weight: number;
+  lineHeight: number;
+  sizeVar: string;
+  weightVar: string;
+  lineHeightVar: string;
+}
+
+export interface PartBlock {
+  typographyToken?: string;
+  typography?: TypographyRole;
+  /** Approved alternatives for a part whose domain content chooses the role. */
+  typographyTokens?: string[];
+  typographies?: TypographyRole[];
+  heightToken?: string;
+  heightTokenPx?: number;
+  touchTargetToken?: string;
+  touchTargetTokenPx?: number;
 }
 
 export interface MergedPattern {

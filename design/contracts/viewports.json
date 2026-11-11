@@ -2,6 +2,20 @@
   "$description": "Sole source of the canonical Web/App validation viewport matrix (docs/design/design-system/validation.md, #547). Tests must never redefine these dimensions — only this file. Experience tags drive which contract blocks apply; ids appear verbatim in assertion failure output.",
   "viewports": [
     {
+      "id": "web.small-laptop",
+      "experience": "web",
+      "role": "Small laptop",
+      "width": 1024,
+      "height": 768
+    },
+    {
+      "id": "web.narrow-laptop",
+      "experience": "web",
+      "role": "Narrow laptop",
+      "width": 1180,
+      "height": 900
+    },
+    {
       "id": "web.compact-laptop",
       "experience": "web",
       "role": "Compact laptop",

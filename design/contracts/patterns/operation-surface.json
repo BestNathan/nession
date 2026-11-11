@@ -1,16 +1,25 @@
 {
   "id": "pattern.operation-surface",
-  "$description": "The shared body/action grammar inside an operation depth (#3137). The surface primitive owns close/Back, focus, dismissal and stacking — see pattern.overlay-surfaces and #3089 — while this block records the body constraint: one scrolling body, wrapped content, one action line, and App actions at the touch floor.",
+  "$description": "The shared body/action grammar inside an operation depth (#3137). The surface primitive owns close/Back, focus, dismissal and stacking — see pattern.overlay-surfaces and #3089 — while this block records the body constraint: one scrolling body, wrapped content, one action line, and App actions at the touch floor. `controlHeightToken` names the Experience band shared control/actions resolve; `parts` maps the recipe's stable data-recipe-part anatomy to its typography role (#3138). On App the visible operation name is the host page header's title (the recipe places the host header), so the app block has no operation-title part.",
   "patternRef": "docs/design/design-system/patterns/operation-surface.md",
   "web": {
     "wrap": true,
     "overflow": "scroll",
-    "scrollOwner": true
+    "scrollOwner": true,
+    "controlHeightToken": "experience.web.control.md",
+    "parts": {
+      "operation-title": { "typographyToken": "experience.web.typography.title" },
+      "operation-error": { "typographyToken": "experience.web.typography.secondary" }
+    }
   },
   "app": {
     "wrap": true,
     "overflow": "scroll",
     "scrollOwner": true,
-    "touchTargetToken": "experience.app.touchTarget.min"
+    "touchTargetToken": "experience.app.touchTarget.min",
+    "controlHeightToken": "experience.app.control.md",
+    "parts": {
+      "operation-error": { "typographyToken": "experience.app.typography.secondary" }
+    }
   }
 }

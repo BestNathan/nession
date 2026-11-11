@@ -136,7 +136,7 @@ The App must not render a second header bar inside the content. If the host head
 - One dominant action per local region; secondary actions stay secondary.
 - Long text wraps without horizontal overflow and without hiding its own beginning.
 
-Executable form: `data-recipe="resource-detail"` plus `data-recipe-part="detail-*"` on the shared owner. Corresponding parts must resolve the same typography/material relationships in independent consumers. `design/contracts/patterns/resource-detail.json` records the stable wrap/overflow constraint.
+Executable form: `data-recipe="resource-detail"` plus `data-recipe-part="detail-*"` on the shared owner. Corresponding parts must resolve the same typography/material relationships in independent consumers. `design/contracts/patterns/resource-detail.json` records the stable wrap/overflow constraint and maps each `detail-*` part to its approved typography role; `e2e/tests/browser/ui-contract-assertions.spec.ts` checks those roles on the real Project and Sandbox fixtures (#3138).
 
 ## Anti-patterns
 
