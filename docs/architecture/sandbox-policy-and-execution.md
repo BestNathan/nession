@@ -116,6 +116,44 @@ before mounting anything.
   `UnsupportedPolicy("filesystem.composition … unsupported on macOS")`; no
   equivalence is claimed.
 
+## Managed EROFS Session creation (#3062)
+
+The Managed path turns a Project declaration plus a pinned artifact set into a
+Session whose initial Pane runs in a prepared composition. Ownership is split
+the same way as the rest of the stack:
+
+- **Server.** `server.session.create` with a `managed` request (Base Runtime
+  digest + optional `{digest, target}` toolchains) requires a Project whose
+  `image_digest` pins the Project Source image. The Server normalizes and
+  resolves every digest through the Image Manager, requires each artifact to be
+  `ready`, mints one scoped grant per artifact (`grant_managed_access`, a
+  Server-internal path that keeps the client-facing `server.image.access`
+  Project-reference rule intact) and records the durable
+  `session_managed_context` row (`preparing` → `ready`/`failed`). An
+  `attempt_id` fences concurrent attempts for one Session name: a losing
+  attempt cannot overwrite the winner's disposition.
+- **Agent.** `agent.session.create` with the managed grants opens the durable
+  identity-namespaced EROFS cache, downloads/verifies each image through the
+  same `server.image.access` bearer path, creates one Agent-owned bounded
+  workspace (`<sandbox state>/managed/<uuid>/workspace`) and builds a
+  `filesystem.composition` policy: Base Runtime at `/`, Project Source at
+  `/workspace` with the writable directory bound over it, toolchains at
+  `/opt/<name>`. The sandbox cwd is `/workspace`; tmux starts in the
+  Agent-owned host workspace. The policy is compiled before `new-session` and
+  a host that cannot install it refuses the create — there is no Native
+  fallback.
+- **Statuses.** The Server persists `preparing` before dispatch and
+  `ready`/`failed` after the Agent answers; a disconnect or timeout marks the
+  attempt failed. Retrying a failed or timed-out attempt starts a new attempt
+  (the cache is already warm) and a late reply from the previous attempt cannot
+  rewrite the new attempt's row; a same-named create against an already
+  `ready` Session is refused before dispatch so it cannot overwrite the
+  winner. Killing a Session deletes its managed context; other Sessions'
+  contexts, workspaces and shared image bytes are untouched.
+- **Visibility.** The managed section is a Rust contract only (`ts(skip)` on
+  the generated fields); the Web projection does not expose native image
+  digests or paths. Web/app product surface remains #3025's scope.
+
 ## Launch barrier
 
 1. `prepare` compiles the policy, probes the host, creates only owned

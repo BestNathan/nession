@@ -100,6 +100,14 @@ old digest.
 All four require an authenticated client. The contract types and validation
 live in `nession-protocol::contracts::image::v1`.
 
+`server.session.create`'s Managed path (#3062) is a Server-originated image
+consumer: after resolving the Project's pinned Source image and the requested
+Base Runtime/toolchain digests, the Server mints scoped grants with
+`ImageManager::grant_managed_access`. It keeps the same Ready and digest rules
+but does not require the Project to reference a global Base Runtime/toolchain
+artifact; the client-facing `server.image.access` unit keeps that
+Project-reference rule unchanged.
+
 ## Authorized blob HTTP
 
 The existing Server listener sniffs one HTTP request head and routes

@@ -632,6 +632,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             binding_revision: Some(7),
             terminal_cols: None,
             sandbox: None,
+            managed: None,
         },
     );
     let reply: ProtocolMessage<SessionCreateResponse> =
@@ -661,6 +662,7 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             binding_revision: Some(7),
             terminal_cols: None,
             sandbox: None,
+            managed: None,
         })
         .await
         .unwrap();

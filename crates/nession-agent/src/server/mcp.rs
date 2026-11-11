@@ -197,6 +197,7 @@ impl NodeBackend for AgentNodeBackend {
                     name: queued_name,
                     warnings: outcome.warnings,
                     sandbox: outcome.sandbox,
+                    workspace: None,
                 })
             })
             .await?;

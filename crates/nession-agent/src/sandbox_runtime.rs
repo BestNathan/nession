@@ -75,6 +75,9 @@ pub struct SandboxRuntime {
     catalog_cache: Mutex<Option<(Instant, SandboxCapabilityCatalog)>>,
     reaper_started: AtomicBool,
     tmux: Mutex<Option<TmuxDep>>,
+    /// The Agent's durable EROFS cache (#3062). Managed creation downloads
+    /// its pinned images here; a runtime without one refuses Managed creates.
+    erofs_cache: Mutex<Option<Arc<crate::erofs_cache::ErofsCache>>>,
 }
 
 impl SandboxRuntime {
@@ -87,6 +90,7 @@ impl SandboxRuntime {
             catalog_cache: Mutex::new(None),
             reaper_started: AtomicBool::new(false),
             tmux: Mutex::new(None),
+            erofs_cache: Mutex::new(None),
         })
     }
 
@@ -96,7 +100,11 @@ impl SandboxRuntime {
     /// namespaced per identity (#3180), so the sandbox mounts only the images
     /// this Agent owns; another identity's blobs are not reachable through the
     /// composition root.
-    pub fn from_config(config: &crate::config::AgentConfig, identity: &str) -> Arc<Self> {
+    pub fn from_config(
+        config: &crate::config::AgentConfig,
+        identity: &str,
+        erofs_cache: Option<Arc<crate::erofs_cache::ErofsCache>>,
+    ) -> Arc<Self> {
         let agent_dir = nession_common::paths::agent_dir().ok();
         let state_dir = config
             .sandbox
@@ -145,7 +153,22 @@ impl SandboxRuntime {
             // see them even when no filesystem policy was requested.
             settings.private_directories.push(agent_dir);
         }
-        Self::new(settings)
+        let runtime = Self::new(settings);
+        // `new` returns an `Arc`, so expose the cache through a one-shot
+        // setter rather than rebuilding the runtime.
+        runtime.set_erofs_cache(erofs_cache);
+        runtime
+    }
+
+    fn set_erofs_cache(&self, cache: Option<Arc<crate::erofs_cache::ErofsCache>>) {
+        if let Ok(mut slot) = self.erofs_cache.lock() {
+            *slot = cache;
+        }
+    }
+
+    /// The Agent's durable EROFS cache, when configured.
+    pub fn erofs_cache(&self) -> Option<Arc<crate::erofs_cache::ErofsCache>> {
+        self.erofs_cache.lock().ok().and_then(|slot| slot.clone())
     }
 
     /// The host settings, for diagnostics and tests.
