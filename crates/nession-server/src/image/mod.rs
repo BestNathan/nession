@@ -349,6 +349,31 @@ impl ImageManager {
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
+        self.mint_access_grant(project_id, digest, true).await
+    }
+
+    /// Mint a scoped read grant for a Server-resolved Managed Session artifact
+    /// (#3062).
+    ///
+    /// Managed creation is orchestrated by the Server: the Project pins the
+    /// source image and the request pins the Base Runtime/toolchain artifacts,
+    /// so the Server authorizes every one of them for the Session. This is
+    /// deliberately separate from the client-facing `server.image.access`
+    /// unit, which keeps the "Project references this digest" rule.
+    pub async fn grant_managed_access(
+        &self,
+        project_id: &str,
+        digest: &str,
+    ) -> std::result::Result<ImageAccessGrant, ImageError> {
+        self.mint_access_grant(project_id, digest, false).await
+    }
+
+    async fn mint_access_grant(
+        &self,
+        project_id: &str,
+        digest: &str,
+        require_project_reference: bool,
+    ) -> std::result::Result<ImageAccessGrant, ImageError> {
         if !is_valid_project_id(project_id) {
             return Err(ImageError::Invalid(
                 "project_id is not a valid Project identity".to_string(),
@@ -366,15 +391,19 @@ impl ImageManager {
                 "image bytes are not ready".to_string(),
             ));
         }
-        let referenced = self
-            .db
-            .project_references_image(project_id, &digest)
-            .await
-            .map_err(|e| ImageError::Unavailable(format!("image authorization failed: {e:#}")))?;
-        if !referenced {
-            return Err(ImageError::Forbidden(
-                "Project does not reference this image".to_string(),
-            ));
+        if require_project_reference {
+            let referenced = self
+                .db
+                .project_references_image(project_id, &digest)
+                .await
+                .map_err(|e| {
+                    ImageError::Unavailable(format!("image authorization failed: {e:#}"))
+                })?;
+            if !referenced {
+                return Err(ImageError::Forbidden(
+                    "Project does not reference this image".to_string(),
+                ));
+            }
         }
         let mut token = String::with_capacity(64);
         let mut bytes = [0_u8; 32];

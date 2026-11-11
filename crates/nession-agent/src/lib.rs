@@ -17,6 +17,7 @@ pub mod extension;
 pub mod fs;
 pub mod git_workdir;
 pub mod identity;
+pub mod managed_session;
 pub mod memory;
 pub mod netdetect;
 pub mod netwatch;

@@ -394,6 +394,7 @@ impl ClientConnection {
                     env_files: Vec::new(),
                     sandbox,
                     project_id: None,
+                    managed: None,
                 },
             ),
             SESSION_CREATE_TIMEOUT,

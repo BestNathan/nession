@@ -139,6 +139,7 @@ impl AgentConnection {
                         // the policy lets the Agent apply its configured
                         // default (#2681).
                         sandbox: None,
+                        managed: None,
                     },
                 ),
                 CREATE_TIMEOUT,

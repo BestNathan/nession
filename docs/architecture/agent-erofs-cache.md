@@ -126,6 +126,19 @@ logical Agent and deliberately share one namespace.
   (`<nfs path>[/subPath]/erofs`). The `gitops-storage-contract` Gate runs it in
   the unconditional PR tooling suite (#3180).
 
+## Managed Session preparation (#3062)
+
+The Agent runtime opens the cache once at startup (`ErofsCache::open_resolved`
+with the resolved identity). Managed Session creation is the first production
+consumer: the Server hands over one scoped grant per pinned image (Base
+Runtime, Project Source, toolchains), the Agent fetches each through the same
+verified download path, and the prepared composition mounts the resulting
+`<storage_dir>/agents/<identity>/sha256/<hex>` files. The cache namespace is
+therefore the only source root the composition may use; a missing cache,
+grant or image refuses the Managed create rather than falling back to Native.
+The write workspace lives under the Sandbox state directory, never in the
+cache.
+
 ## Failure semantics
 
 - Missing, non-writable, wrongly owned or (for an explicit path) ephemeral

@@ -323,6 +323,10 @@ pub struct SessionManager {
     /// The Agent's Sandbox runtime. `None` refuses an explicit policy rather
     /// than silently executing it as Native.
     sandbox: Option<Arc<crate::sandbox_runtime::SandboxRuntime>>,
+    /// The central Server's configured WebSocket URL (#3062). Managed
+    /// creation derives its authorized blob HTTP base from this value; the
+    /// Server never guesses its own public hostname.
+    server_url: String,
 }
 
 /// The result of one Session create.
@@ -354,6 +358,7 @@ impl SessionManager {
             create_timeout: TMUX_CREATE_TIMEOUT,
             memory_threshold_percent: None,
             sandbox: None,
+            server_url: String::new(),
         }
     }
 
@@ -383,6 +388,17 @@ impl SessionManager {
         sandbox.arm_reaper(self.tmux_dep());
         self.sandbox = Some(sandbox);
         self
+    }
+
+    /// Record the central Server URL used to derive Managed download URLs.
+    pub fn with_server_url(mut self, server_url: impl Into<String>) -> Self {
+        self.server_url = server_url.into();
+        self
+    }
+
+    /// The central Server URL this manager was composed with, when any.
+    pub fn server_url(&self) -> &str {
+        &self.server_url
     }
 
     /// The Sandbox runtime this manager was composed with, when any.
@@ -644,7 +660,7 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
-        self.create_session_inner(name, width, height, working_dir, env, None, None)
+        self.create_session_inner(name, width, height, working_dir, env, None, None, None)
             .await
             .map(|_| ())
     }
@@ -668,8 +684,17 @@ impl SessionManager {
         working_dir: &str,
         binding: SessionBindingInput<'_>,
     ) -> Result<SessionCreateOutcome> {
-        self.create_session_inner(name, width, height, working_dir, &[], Some(binding), None)
-            .await
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            working_dir,
+            &[],
+            Some(binding),
+            None,
+            None,
+        )
+        .await
     }
 
     /// Create a Session with an optional Environment Binding and an optional
@@ -687,8 +712,49 @@ impl SessionManager {
         binding: Option<SessionBindingInput<'_>>,
         sandbox: Option<&SandboxPolicy>,
     ) -> Result<SessionCreateOutcome> {
-        self.create_session_inner(name, width, height, working_dir, &[], binding, sandbox)
-            .await
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            working_dir,
+            &[],
+            binding,
+            sandbox,
+            None,
+        )
+        .await
+    }
+
+    /// Create a Session whose initial Pane runs inside a prepared EROFS
+    /// composition (#3062).
+    ///
+    /// `tmux_working_dir` is the Agent-owned host directory tmux starts the
+    /// Session in; `sandbox_working_dir` is the composed path (`/workspace`)
+    /// the launcher enters inside the sandbox. The policy is compiled and
+    /// prepared before `new-session`, and a host that cannot install it
+    /// refuses the create with no Native fallback.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_session_managed(
+        &self,
+        name: &str,
+        width: u16,
+        height: u16,
+        tmux_working_dir: &str,
+        sandbox_working_dir: &str,
+        binding: Option<SessionBindingInput<'_>>,
+        sandbox: &SandboxPolicy,
+    ) -> Result<SessionCreateOutcome> {
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            tmux_working_dir,
+            &[],
+            binding,
+            Some(sandbox),
+            Some(sandbox_working_dir),
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -701,6 +767,7 @@ impl SessionManager {
         env: &[(String, String)],
         binding: Option<SessionBindingInput<'_>>,
         sandbox: Option<&SandboxPolicy>,
+        sandbox_working_dir: Option<&str>,
     ) -> Result<SessionCreateOutcome> {
         // Check memory pressure before creating a new session. This prevents
         // container-level OOM by refusing new sessions when memory usage is too
@@ -750,6 +817,7 @@ impl SessionManager {
                 env,
                 binding,
                 sandbox,
+                sandbox_working_dir.unwrap_or(working_dir),
                 &token,
                 &progress,
             )
@@ -801,6 +869,7 @@ impl SessionManager {
         env: &[(String, String)],
         binding: Option<SessionBindingInput<'_>>,
         sandbox: Option<&SandboxPolicy>,
+        sandbox_working_dir: &str,
         token: &str,
         progress: &CreateProgress,
     ) -> Result<SessionCreateOutcome> {
@@ -921,7 +990,7 @@ impl SessionManager {
                         policy: policy.clone(),
                         session_name: name.to_string(),
                         instance_id: instance_id.clone(),
-                        working_dir: working_dir.to_string(),
+                        working_dir: sandbox_working_dir.to_string(),
                         inner_command,
                         tmux_socket: Some(self.socket_path().to_path_buf()),
                     };

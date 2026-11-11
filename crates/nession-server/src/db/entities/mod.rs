@@ -9,5 +9,6 @@ pub mod images;
 pub mod projects;
 pub mod quick_commands;
 pub mod session_env_bindings;
+pub mod session_managed_context;
 pub mod session_project_bindings;
 pub mod sessions;

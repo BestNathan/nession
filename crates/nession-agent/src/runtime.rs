@@ -179,8 +179,30 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     }
 
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
+    // The Agent's durable EROFS cache (#3062): opened once for Managed
+    // creation downloads. Inability to open it is not fatal for ordinary
+    // Sessions, but every Managed create is refused rather than falling back.
+    let erofs_cache = match config.effective_erofs_storage_dir() {
+        Ok(resolved) => {
+            match crate::erofs_cache::ErofsCache::open_resolved(&resolved, &agent_id).await {
+                Ok(cache) => Some(Arc::new(cache)),
+                Err(error) => {
+                    tracing::warn!(
+                        "EROFS cache unavailable; Managed Session creation will be refused: {error:#}"
+                    );
+                    None
+                }
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                "EROFS cache path is unresolved; Managed Session creation will be refused: {error:#}"
+            );
+            None
+        }
+    };
     let tmux_for_client = {
-        let mut mgr = SessionManager::new();
+        let mut mgr = SessionManager::new().with_server_url(config.server_url.clone());
         // Binding state has to outlive this process: a tmux Session does, and
         // the Agent must still know a managed key's base value after a
         // restart. The directory is created here, where the Agent's state
@@ -200,7 +222,11 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         // Sandbox host configuration and the execution reaper (#2681). The
         // runtime is always present; `sandbox.enabled = false` makes every
         // explicit policy fail closed with a backend-unavailable reason.
-        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(&config, &agent_id);
+        let sandbox = crate::sandbox_runtime::SandboxRuntime::from_config(
+            &config,
+            &agent_id,
+            erofs_cache.clone(),
+        );
         mgr = mgr.with_sandbox(Arc::clone(&sandbox));
         Arc::new(mgr)
     };
