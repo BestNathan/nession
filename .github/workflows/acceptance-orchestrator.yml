@@ -3,7 +3,7 @@ name: Acceptance / Orchestrator
 on:
   pull_request_target:
     branches: [staging, main]
-    types: [opened, synchronize, reopened, edited, ready_for_review]
+    types: [opened, synchronize, reopened, edited, ready_for_review, closed]
   repository_dispatch:
     types: [nession-agent-telemetry-ingested]
   issues:
@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   prepare-pre-merge:
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request_target' && github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -89,6 +89,37 @@ jobs:
       target_ref: ${{ needs.prepare-pre-merge.outputs.head_sha }}
       deployment: ''
     secrets: inherit
+
+  reconcile-merged-pr:
+    # A merge event wakes the canonical state decision; SC verdicts still come
+    # only from the trusted Acceptance projectors, never PR closing keywords.
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Checkout trusted lifecycle owner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify deterministic lifecycle policy
+        run: node scripts/issue-lifecycle-reconcile.mjs self-test
+      - name: Reconcile Issues associated with the merged PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/issue-lifecycle-reconcile.mjs pr "$PR_NUMBER"
 
   background:
     if: >-
