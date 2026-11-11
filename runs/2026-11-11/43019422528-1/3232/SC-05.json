@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5178ea0acc87d29786a2ca73c2ab4b0b4af3eab64b71c0a76240ec1d0c60b026",
+  "run_id": 43019422528,
+  "run_attempt": 1,
+  "issue": 3232,
+  "criterion": "SC-05",
+  "criterion_text": "在 Linux systemd user 与 macOS launchd 用户服务可用的隔离执行环境，验证托管 Agent 的同版与异版 CLI Restart/Stop 不触发 manager 和 CLI 竞相启动、错误版本自动复活或两个进程同时存在；若安全切换尚不支持，必须可诊断地拒绝，且不破坏托管进程。OS manager 不可用时该平台证据为 Pending，不能用生成 unit/plist 的静态测试代替实机行为。",
+  "stage": "staging",
+  "target_sha": "444c0cff7280de76f37e7420556fc1936804ac88",
+  "contract_sha256": "cfeb43c1eae1dd591ac3a6d68d518781f6aaacab543cc080cd54ad9a6a1f3dad",
+  "case_revision": "444c0cff7280de76f37e7420556fc1936804ac88",
+  "case_tree_sha": "cefa9b72f16ab56f48a0919998daf95f31b81368",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-11T12:33:51.482Z",
+  "finished_at": "2026-11-11T12:34:10.530Z",
+  "duration_ms": 19046,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Linux: Native systemd owned the real Agent: CLI start idempotent, stop/restart refused, manager restart preserved release (exact SHA 444c0cff7280de76f37e7420556fc1936804ac88)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Native manager preflight: MainPID=0 LoadState=not-found ActiveState=inactive"
+        },
+        {
+          "type": "runtime",
+          "value": "systemd nession-agent.service owns real Agent PID 4160, version 0.35.0"
+        },
+        {
+          "type": "runtime",
+          "value": "Real official v0.36.0 CLI cross-version stop refused; native manager PID 4160 survived"
+        },
+        {
+          "type": "runtime",
+          "value": "Real official v0.36.0 CLI cross-version restart refused; native manager PID 4160 survived"
+        },
+        {
+          "type": "runtime",
+          "value": "CLI stop refused; manager PID remained 4160"
+        },
+        {
+          "type": "runtime",
+          "value": "CLI restart refused; manager PID remained 4160"
+        },
+        {
+          "type": "runtime",
+          "value": "Native manager restarted Agent PID 4160 -> 4231; release remained 0.35.0"
+        },
+        {
+          "type": "runtime",
+          "value": "Only Case-owned service/runtime were torn down"
+        },
+        {
+          "type": "runtime",
+          "value": "platform=Linux"
+        }
+      ],
+      "duration_ms": 1841,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "macOS: Native launchd owned the real Agent: CLI start idempotent, stop/restart refused, manager restart preserved release (exact SHA 444c0cff7280de76f37e7420556fc1936804ac88)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Native manager preflight: No launchd job registered"
+        },
+        {
+          "type": "runtime",
+          "value": "launchd gui/501/com.nession.agent owns real Agent PID 14585, version 0.35.0"
+        },
+        {
+          "type": "runtime",
+          "value": "Real official v0.36.0 CLI cross-version stop refused; native manager PID 14585 survived"
+        },
+        {
+          "type": "runtime",
+          "value": "Real official v0.36.0 CLI cross-version restart refused; native manager PID 14585 survived"
+        },
+        {
+          "type": "runtime",
+          "value": "CLI stop refused; manager PID remained 14585"
+        },
+        {
+          "type": "runtime",
+          "value": "CLI restart refused; manager PID remained 14585"
+        },
+        {
+          "type": "runtime",
+          "value": "Native manager restarted Agent PID 14585 -> 15049; release remained 0.35.0"
+        },
+        {
+          "type": "runtime",
+          "value": "Only Case-owned service/runtime were torn down"
+        },
+        {
+          "type": "runtime",
+          "value": "platform=macOS"
+        }
+      ],
+      "duration_ms": 11658,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 43019422528,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "444c0cff7280de76f37e7420556fc1936804ac88",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/43019422528",
+    "record_path": "runs/2026-11-11/43019422528-1/3232/SC-05.json",
+    "source_result_sha256": "56baacc6c52bc7e15a2f799074d62aff1066669f4ee1d51201226821aa0abaf1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-43019422528-1",
+    "sha256": "56baacc6c52bc7e15a2f799074d62aff1066669f4ee1d51201226821aa0abaf1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/43019422528",
+    "durability": "time-limited; object archival not configured"
+  }
+}
