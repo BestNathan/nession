@@ -121,7 +121,8 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
     /SC-02:\s*\n\s*when: merged\s*\n\s*branch: staging\s*\n\s*method: agent/);
   const row = pendingRow(issue.body);
   if (!row || row.sha !== POSITIVE_SHA) return null;
-  const waker = await nativeAttempt(row.runId, 1);
+  const wakerMeta = await get(resource('/actions/runs/' + row.runId));
+  const waker = await nativeAttempt(row.runId, wakerMeta.run_attempt);
   // The initial push Acceptance is not post-attestation reconciliation.
   if (waker.run.name !== 'Acceptance / Post-Run Waker') return null;
   assert.equal(waker.run.path.split('@')[0],
@@ -131,17 +132,17 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
   assert.equal(waker.run.status, 'completed');
   assert.equal(waker.run.conclusion, 'success');
   const selector = matchJob(waker.jobs, n => n === 'select-staging',
-    'source-bound Staging selector', 1);
+    'source-bound Staging selector', waker.run.run_attempt);
   hasStep(selector, 'Authenticate completed Staging attestation ingestion');
   hasStep(selector, 'Select pending exact-SHA merged-Staging Agent criteria');
   const evaluator = matchJob(waker.jobs,
     n => n.includes('evaluate-staging (' + POSITIVE_ISSUE + ')') &&
       n.endsWith('/ Execute acceptance'),
-    'matched Staging Agent evaluator', 1);
+    'matched Staging Agent evaluator', waker.run.run_attempt);
   const updater = matchJob(waker.jobs,
     n => n.includes('evaluate-staging (' + POSITIVE_ISSUE + ')') &&
       n.endsWith('/ Deterministic Issue updater'),
-    'matched canonical Issue updater', 1);
+    'matched canonical Issue updater', waker.run.run_attempt);
   // Successful jobs alone are not evidence that the exact target ever ran.
   // Re-attest an immutable by-SHA Staging record and original K8s source.
   const prefix = 'indexes/by-sha/' + POSITIVE_SHA + '/deployment/';
@@ -175,7 +176,7 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
   // not to a different / more recent evaluation with no proven provenance.
   return {
     issue: POSITIVE_ISSUE, target: POSITIVE_SHA,
-    waker: waker.run.id, source: source.run.id,
+    waker: waker.run.id, wakerAttempt: waker.run.run_attempt, source: source.run.id,
     sourceAttempt: source.run.run_attempt,
     record: recordPath, index: indexPath,
     observedAt: attested.observed_at, result: row.result,
@@ -266,7 +267,8 @@ async function main() {
         positive.sourceAttempt + ' at ' + positive.observedAt +
         '; immutable index ' + positive.index + '; record ' + positive.record },
       { type: 'runtime', value: 'Trusted source-bound Post-Run Waker ' +
-        positive.waker + '/1 selected the exact matching Staging Agent obligation; ' +
+        positive.waker + '/' + positive.wakerAttempt +
+        ' selected the exact matching Staging Agent obligation; ' +
         positive.evaluator + ' and ' + positive.updater +
         ' both completed successfully; canonical Issue result remains ' +
         positive.result + ' (not coerced to Pass)' },
