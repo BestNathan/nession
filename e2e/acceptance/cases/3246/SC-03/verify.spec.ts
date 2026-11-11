@@ -177,7 +177,7 @@ test('SC-03: DropdownMenu, ContextMenu and Popover keep their own overlay semant
   await expect(menu).toHaveCount(0);
   await actions.click();
   await expect(menu).toBeVisible();
-  await page.getByTestId('projects-section').click({ position: { x: 2, y: 2 } });
+  await page.mouse.click(800, 120);
   await expect(menu).toHaveCount(0);
 
   // ContextMenu: a right-click opens at the pointer origin, Escape dismisses.
