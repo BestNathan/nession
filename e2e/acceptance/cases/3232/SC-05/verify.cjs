@@ -36,7 +36,7 @@ function systemdProperties(env) {
     registered: props.LoadState === 'loaded',
     running: props.LoadState === 'loaded' && props.ActiveState === 'active',
     pid: Number(props.MainPID || 0),
-    detail: result.output.trim().slice(0, 500),
+    detail: oneLine(result.output).slice(0, 500),
   };
 }
 function launchdProperties(env) {
@@ -49,7 +49,7 @@ function launchdProperties(env) {
     return {
       manager: 'launchd', available: true, registered: true,
       running: /^\s*state = running\s*$/m.test(result.output) && pid > 0,
-      pid, target, detail: result.output.slice(0, 500),
+      pid, target, detail: oneLine(result.output).slice(0, 500),
     };
   }
   const domainAvailable = ['gui', 'user'].some((domain) =>
@@ -78,6 +78,11 @@ function managerStop(state, env) {
     command('systemctl', ['--user', 'disable', '--now', UNIT], env);
   }
 }
+/** Evidence values must be single-line; manager output is not. */
+function oneLine(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
 function emit(status, summary, evidence) {
   process.stdout.write(JSON.stringify({ status, summary, evidence }) + '\n');
 }
@@ -146,8 +151,8 @@ async function verify() {
     const identity = readIdentity(path.join(runtime, 'agent.pid'));
     assert.equal(identity.pid, before.pid, 'manager and Agent PID identity must agree');
     assert.ok(isRunning(before.pid), 'manager Agent must actually be alive');
-    evidence.push({ type: 'runtime', value: before.manager + ' owns real Agent PID ' +
-      before.pid + ', version ' + identity.release_version });
+    evidence.push({ type: 'runtime', value: before.manager + ' ' + (before.target || UNIT) +
+      ' owns real Agent PID ' + before.pid + ', version ' + identity.release_version });
 
     // A real, independently published pre-contract release must fail closed
     // even while a service manager is keeping the Current Agent alive.
@@ -226,7 +231,7 @@ async function verify() {
     }
     if (cleanupErrors.length > 0) {
       // Cleanup failures are never suppressed as a successful proof.
-      evidence.push({ type: 'runtime', value: 'CLEANUP FAILED: ' + cleanupErrors.join('; ').slice(-1200) });
+      evidence.push({ type: 'runtime', value: oneLine('CLEANUP FAILED: ' + cleanupErrors.join('; ')).slice(-1200) });
       if (!error) throw Error('Native service cleanup failed: ' + cleanupErrors.join('; '));
     } else {
       evidence.push({ type: 'runtime', value: 'Only Case-owned service/runtime were torn down' });
