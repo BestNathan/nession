@@ -1,16 +1,19 @@
 name: Agent / Issue Audit
-run-name: "Issue Audit #${{ github.event.issue.number || inputs.issue_number || 'unknown' }}"
+run-name: ${{ inputs.source_comment_id && format('Comment Audit #{0} comment:{1}', inputs.issue_number, inputs.source_comment_id) || format('Issue Audit #{0}', github.event.issue.number || inputs.issue_number || 'unknown') }}
 
 on:
   issues:
     types: [opened, edited, reopened, labeled, unlabeled]
-  issue_comment:
-    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
         description: Issue number to audit
         required: true
+        type: string
+      source_comment_id:
+        description: Authenticated original human comment id from trusted Router (bot dispatch only)
+        required: false
+        default: ''
         type: string
       provider:
         description: Issue Audit Agent provider
@@ -68,6 +71,8 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           INPUT_ISSUE: ${{ inputs.issue_number }}
           INPUT_PROVIDER: ${{ inputs.provider }}
+          SOURCE_COMMENT_ID: ${{ inputs.source_comment_id }}
+          GITHUB_TOKEN: ${{ github.token }}
           DEFAULT_AUDITOR: ${{ vars.AGENT_DEFAULT_AUDITOR }}
         run: |
           set -euo pipefail
@@ -99,6 +104,19 @@ jobs:
           # The model provider is not an Agent identity; only the registry
           # selector may attest which Auditor executed.
           echo "agent_id=${agent_id}" >> "$GITHUB_OUTPUT"
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${SOURCE_COMMENT_ID}" ]]; then
+            # github-actions[bot] is the *dispatcher*, not the human author.
+            # Re-read authoritative REST comment + Issue before model tokens.
+            [[ "${EVENT_ACTOR}" == "github-actions[bot]" ]] || exit 1
+            node scripts/github-comment-source.mjs materialize audit \
+              "${INPUT_ISSUE}" "${SOURCE_COMMENT_ID}" "${RUNNER_TEMP}/original-comment.json"
+            original_actor="$(jq -er .sender.login "${RUNNER_TEMP}/original-comment.json")"
+            ISSUE_AUDIT_PROVIDER_SELECTION="$provider" \
+              ISSUE_AUDIT_ENVIRONMENT_SELECTION="$environment" \
+              node scripts/issue-audit-command.mjs resolve \
+                "${RUNNER_TEMP}/original-comment.json" "$GITHUB_REPOSITORY" "$original_actor"
+            exit 0
+          fi
           if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
             # The trusted main-owned command parser validates exact body,
             # author association, sender identity and non-PR, open Issue.
