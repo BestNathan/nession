@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {makeProjection} from '../scripts/project.mjs';
 
 const app=(await readFile(new URL('../app.js',import.meta.url),'utf8'))
-  .replace(/^import .*;\s*\n/,'').replace(/\ninit\(\);\s*$/,'');
+  .replace(/^import .*;\s*\n/gm,'').replace(/\ninit\(\);\s*$/,'');
 const now='2026-11-03T06:00:00Z';
 class TestElement {
   constructor(tag){
@@ -47,6 +47,8 @@ function harness(hash='#/work',fetcher=async()=>{throw Error('fixture offline');
     URL,URLSearchParams,AbortSignal,Date,Intl,fetch:fetcher,
     renderKnowledge(root){root.append(new TestElement('section'));root.append(new TestElement('p'));root.nodes.at(-1).textContent='Knowledge independent';},
     validKnowledgeSnapshot:()=>true,
+    renderDocuments(root){const e=new TestElement('section');e.textContent='Documents independent';root.append(e);},
+    validDocumentsSnapshot:()=>true,
     console:{error:(...args)=>errors.push(args),warn(){}},
   });
   vm.runInContext(app,context,{filename:'pages/app.js'});
@@ -76,7 +78,7 @@ test('a failed site source produces a truthful unavailable state, not a renderer
   assert.match(h.main.textContent,/Engineering snapshot unavailable/);
   assert.equal(h.errors.length,0);
 });
-test('Knowledge and Prototypes remain independent of an unavailable site snapshot',()=>{
+test('Knowledge, Documents and Prototypes remain independent of an unavailable site snapshot',()=>{
   const h=harness('#/prototypes');
   h.run("siteSnapshotStatus='unavailable'; render()");
   assert.match(h.main.textContent,/Loading published prototypes/);
@@ -86,6 +88,10 @@ test('Knowledge and Prototypes remain independent of an unavailable site snapsho
   h.run("knowledgeSnapshotStatus='available'; render()");
   assert.match(h.main.textContent,/Knowledge independent/);
   assert.doesNotMatch(h.main.textContent,/Engineering snapshot unavailable/);
+  h.run("location.hash='#/documents'; render()");
+  assert.match(h.main.textContent,/Loading technical Documents/);
+  h.run("documentsSnapshotStatus='available'; render()");
+  assert.match(h.main.textContent,/Documents independent/);
   assert.equal(h.errors.length,0);
 });
 test('recovered, valid source renders public Issues and PRs after pending startup',()=>{
@@ -134,6 +140,8 @@ test('source fetch is bounded and app schedules a rerender after success or fail
   assert.match(app,/if\(needsSite&&!snapshot\)/);
   assert.match(app,/async function loadKnowledgeCatalog\(\)/);
   assert.match(app,/data\/knowledge\.json/);
+  assert.match(app,/data\/documents\.json/);
+  assert.match(app,/async function loadDocumentsCatalog\(\)/);
   assert.match(app,/window\.addEventListener\('hashchange',render\)/);
 });
 

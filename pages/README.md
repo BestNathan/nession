@@ -2,7 +2,7 @@
 
 Independent public site for project introduction, AI workflow Agents, repository engineering indicators, active GitHub Issues/PRs, and metadata-only orphan Run Store inventory. See [Issue #1782](https://github.com/BestNathan/nession/issues/1782).
 
-This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`; Node 24 is the only build requirement and there are no npm dependencies.
+This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`; Node 24 is the base build requirement with no npm dependencies; pinned Protocol generation additionally requires Rust/Cargo.
 
 ## Build locally (sanitized / offline-capable)
 
@@ -35,6 +35,73 @@ Publishing has a stricter proof than a successful artifact upload or matching ma
 
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
+
+## Documents / Protocol Reference
+
+Requirement owner: [#3195](https://github.com/BestNathan/nession/issues/3195).
+The E2E declaration there explicitly owns the new `pages-documents` browser spec
+and existing `pages-overview` regression at the exact PR head; publish only
+after the trusted Issue-selected E2E evidence is verified.
+
+
+The first version of `#/documents` is a **Protocol Reference**. It projects
+the compile-checked Protocol Unit catalog from canonical Rust contracts via
+`cargo run --quiet -p nession-protocol-codegen -- --schema`. Each protocol shows
+its owner, wire, contract versions (v1/v2), full request/response JSON Schema,
+nested field paths, response variants, types, requiredness and descriptions.
+No handwritten Pages protocol registry is maintained.
+
+**Since Nession** is **one field**, e.g. `0.36.0`, not a compatibility
+matrix. Contract v1/v2 selects which protocol schema is being displayed.
+Nession release SemVer (0.x.y) instead identifies **when the field started
+being supported**. The version is displayed only when the release-tagged
+schemas prove a transition from absent in the immediately preceding release
+to present in that release, with no later unverified gap. Otherwise the
+value is `Unknown`. If the latest verified release lacks a field visible
+in current main, the value is `Unreleased`; this is not a claim that main
+is a published release. Never infer the introduction date from the latest
+Cargo workspace version or assume all prior Releases lacked the field.
+
+`pages/scripts/protocol-release-history.mjs` lists official stable GitHub
+Releases, resolves every `vX.Y.Z` Git Tag to its **commit SHA**, and prefers
+a verified immutable `nession-protocol-schema.json` Release asset (envelope
+`schema_version: 1`, `source: {repository, tag, sha, version}`, `schema`
+containing that tag's Rust-generated JSON Schema). Without an asset,
+a separate credential-free build step (`generate-protocol-history.mjs`)
+can fetch the exact tag, compare its commit SHA to GitHub's resolved SHA,
+create an isolated temporary Git worktree, and run **that tag's** Rust codegen.
+The result is cached under its commit SHA. Only the latest eight asset-less
+Releases are auto-reconstructed per run; cached older versions remain
+available to the reader. Missing older snapshots show `Unknown`, never
+an assumed absence.
+
+Historical Rust codegen runs **before** the credentialed publisher step,
+without inherited GitHub tokens or the runner's HOME/CARGO_HOME; its
+compilation is bounded. `build.mjs` is a read-only cache consumer and
+**never executes a historical tag** in the token-bearing process. Older
+Releases such as v0.35.0 predate the generator and therefore remain
+`Unknown` until a verifiable historical schema is available. A future
+Release-asset producer can replace historical compilation without adding
+manually maintained `since` metadata.
+
+The Pages static artifact carries exact main SHA and observed release
+provenance. The Rust generator runs at the pinned main checkout; failure
+blocks a trusted public build. The current main source Cargo version is
+development metadata, never a statement of released availability.
+
+The base Pages build requires Node 24 with no npm dependencies. Trusted
+Protocol projection additionally needs Rust/Cargo and Git (for historical
+tag reconstruction). Set `PAGES_PROTOCOL_CACHE_DIR` to a persistent,
+trusted build cache to reuse previously compiled tag snapshots. Deterministic
+fixtures may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo
+for the current main revision; `PAGES_OFFLINE=1` disables GitHub history reads.
+
+Run `node pages/scripts/generate-protocol-history.mjs` **in a separate,
+credential-free environment** before the credential-bearing Pages
+`node pages/scripts/build.mjs` step. Both commands must share
+`PAGES_PROTOCOL_CACHE_DIR`. The Deploy workflow caches only the
+`schema-<tag-commit-SHA>.json` files, never historical source or build
+outputs.
 
 ## Knowledge Explorer / public reading surface (#2664)
 
