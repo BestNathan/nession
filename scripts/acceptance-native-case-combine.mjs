@@ -78,6 +78,25 @@ function test(){
   assert.equal(combine(example('Pass'),example('Fail')).result,'Fail');
   const bad=example('Pass');bad.target_sha='f'.repeat(40);bad.case_revision=bad.target_sha;
   assert.throws(()=>combine(example('Pass'),bad),/target_sha/);
+  const tmp=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||'/tmp','nession-native-pair-'));
+  try {
+    const selectFile=path.join(tmp,'selection.json');
+    const linux=path.join(tmp,'linux'),mac=path.join(tmp,'mac');
+    fs.mkdirSync(linux);fs.mkdirSync(mac);
+    fs.writeFileSync(selectFile,JSON.stringify([{issue:3232,criterion:'SC-05',platform:'both'}]));
+    fs.writeFileSync(output(linux,'3232-SC-05'),JSON.stringify(example('Pass')));
+    fs.writeFileSync(output(mac,'3232-SC-05'),JSON.stringify(example('Pass')));
+    detach(selectFile,linux);
+    assert.ok(!fs.existsSync(output(linux,'3232-SC-05')));
+    finish(selectFile,linux,mac);
+    assert.equal(JSON.parse(fs.readFileSync(output(mac,'3232-SC-05'),'utf8')).result,'Pass');
+    fs.rmSync(output(mac,'3232-SC-05'));
+    fs.writeFileSync(output(mac,'3232-SC-05'),JSON.stringify(example('Pass')));
+    fs.rmSync(raw(linux,'linux','3232-SC-05'));
+    assert.throws(()=>finish(selectFile,linux,mac),/ENOENT/);
+    assert.ok(!fs.existsSync(output(mac,'3232-SC-05')),
+      'A missing Linux proof must never leave macOS Pass eligible for ingestion');
+  } finally {fs.rmSync(tmp,{recursive:true,force:true});}
   console.log('Native pair positive/negative tests passed');
 }
 const [action,...args]=process.argv.slice(2);
