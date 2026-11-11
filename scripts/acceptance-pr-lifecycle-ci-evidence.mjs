@@ -34,7 +34,10 @@ function runSource(run,sha){
     String(run.path).replace(/@refs\/.*$/,'')===WORKFLOW.path&&
     run.event==='pull_request'&&run.head_sha===sha&&
     run.head_repository?.full_name===REPO&&
-    run.pull_requests?.some(p=>p.number===PR);
+    // GitHub clears workflow_run.pull_requests after the source PR is merged.
+    // The separately authenticated PR head and exact SHA remain authoritative.
+    Array.isArray(run.pull_requests)&&
+    (run.pull_requests.length===0||run.pull_requests.some(p=>p.number===PR));
 }
 function requiredJob(jobs,name,stepName){
   const job=unique(jobs,j=>j.name===name,name+' job');
@@ -148,7 +151,12 @@ async function selfTest(){
   };
   // PR #3241 must remain source-verifiable after its authorized Main merge.
   const mergedPr={...pr,state:'closed',merged_at:'2026-11-11T01:21:00Z'};
-  const mergedGet=async path=>path.endsWith('/pulls/'+PR)?mergedPr:request(path);
+  const mergedGet=async path=>{
+    if(path.endsWith('/pulls/'+PR))return mergedPr;
+    if(path.includes('/actions/runs?'))return {workflow_runs:[{...run,pull_requests:[]}],total_count:1};
+    if(path.endsWith('/actions/runs/100'))return {...run,pull_requests:[]};
+    return request(path);
+  };
   assert.equal((await collectVerifiedIssueLifecycleCi(source,mergedGet,
     async()=>log)).pr,PR);
   const real=await collectVerifiedIssueLifecycleCi(source,request,async()=>log);
@@ -161,6 +169,7 @@ async function selfTest(){
     [source,async p=>p.endsWith('/pulls/'+PR)?{...pr,head:{...pr.head,sha:'b'.repeat(40)}}:request(p),async()=>log],
     [source,async p=>p.includes('/actions/runs?')?{workflow_runs:[{...run,conclusion:'failure'}],total_count:1}:request(p),async()=>log],
     [source,async p=>p.includes('/actions/runs?')?{workflow_runs:[{...run,path:'.github/workflows/fake.yml'}],total_count:1}:request(p),async()=>log],
+    [source,async p=>p.includes('/actions/runs?')?{workflow_runs:[{...run,pull_requests:[{number:777}]}],total_count:1}:request(p),async()=>log],
     [source,async p=>p.includes('/actions/runs?')?{workflow_runs:[{...run,head_sha:'b'.repeat(40)}],total_count:1}:request(p),async()=>log],
     [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:jobs.filter(j=>j.name!=='tooling-check')}:request(p),async()=>log],
     [source,async p=>p.includes('/attempts/1/jobs?')?{jobs:[...jobs,jobs[0]]}:request(p),async()=>log],
@@ -174,7 +183,7 @@ async function selfTest(){
     await assert.rejects(collectVerifiedIssueLifecycleCi(s,g,t),
       /unverified #2990 CI source/);
   }
-  console.log('PR lifecycle CI: positive and thirteen fail-closed source/step/Gate fixtures passed');
+  console.log('PR lifecycle CI: positive and fourteen fail-closed source/step/Gate fixtures passed');
 }
 async function main(){
   const cmd=process.argv[2];
