@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 43038518437,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/3303-erofs-crate-consolidation",
+    "target_sha": "2c6bdeabbaf83858889a8e42732d28d0dd5fca6d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/43038518437",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "22d420381ca4d566c08a7b64fd23e1ebb94b3f48fc636e843b844b6d0ab37dbd"
+  },
+  "record": "runs/2026-11-11/43038518437-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "d86bba57fbc6281af847fe420465cca98848454c0d5194f5855ce2603b8a87c0"
+}
