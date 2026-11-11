@@ -129,15 +129,32 @@ async function relatedPulls(repository, issueNumber, token, includePr = null, re
   return prs;
 }
 
+export function hasUnrecoveredHumanReopen(events, comments) {
+  const reopens = events.filter(e => e.event === 'reopened' && e.actor?.type === 'User')
+    .map(e => e.created_at).filter(Boolean).sort();
+  if (!reopens.length) return false;
+  const lastReopen = reopens.at(-1);
+  // /accept is an explicit owner/collaborator recovery intent. The later
+  // trusted projector still has to prove every applicable SC independently.
+  return !comments.some(c => c.body === '/accept' && c.user?.type === 'User' &&
+    TRUSTED_ASSOCIATIONS.has(c.author_association) &&
+    typeof c.created_at === 'string' && c.created_at > lastReopen);
+}
+
 async function humanReopened(repository, issueNumber, token, request = githubRequest) {
   const { prefix } = repoParts(repository);
-  // Fail closed if history exceeds one page: a hidden older human reopen
-  // cannot be silently treated as absent.
+  // Incomplete event/comment history cannot prove the absence of a later
+  // human hold. Fail closed rather than treating an unseen /accept as authority.
   const events = await request(prefix + '/issues/' + issueNumber + '/events?per_page=100', { token });
   if (!Array.isArray(events) || events.length === 100) {
     throw Error('Issue event history incomplete; refusing automatic close');
   }
-  return events.some(event => event.event === 'reopened' && event.actor?.type === 'User');
+  if (!events.some(e => e.event === 'reopened' && e.actor?.type === 'User')) return false;
+  const comments = await request(prefix + '/issues/' + issueNumber + '/comments?per_page=100', { token });
+  if (!Array.isArray(comments) || comments.length === 100) {
+    throw Error('Issue comment history incomplete; refusing automatic close');
+  }
+  return hasUnrecoveredHumanReopen(events, comments);
 }
 
 async function reconcileIssue(repository, number, token, { explicitAccept = false, includePr = null,
@@ -221,6 +238,17 @@ async function selfTest() {
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
     [{ stage: 'pre-merge', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
+  const reopened = [{ event: 'reopened', actor: { type: 'User' }, created_at: '2026-11-11T02:00:00Z' }];
+  const recovery = [{ body: '/accept', user: { type: 'User' },
+    author_association: 'OWNER', created_at: '2026-11-11T02:01:00Z' }];
+  assert.equal(hasUnrecoveredHumanReopen(reopened, []), true);
+  assert.equal(hasUnrecoveredHumanReopen(reopened, recovery), false);
+  assert.equal(hasUnrecoveredHumanReopen(reopened, [{ ...recovery[0],
+    user: { type: 'Bot' } }]), true);
+  assert.equal(hasUnrecoveredHumanReopen(reopened, [{ ...recovery[0],
+    created_at: '2026-11-11T01:59:00Z' }]), true);
+  assert.equal(hasUnrecoveredHumanReopen([...reopened, { ...reopened[0],
+    created_at: '2026-11-11T02:05:00Z' }], recovery), true);
   const e = { action: 'created', repository: { full_name: 'X/y' },
     issue: { number: 19, state: 'open' }, sender: { login: 'owner' },
     comment: { body: '/accept', id: 7, user: { login: 'owner', type: 'User' },
