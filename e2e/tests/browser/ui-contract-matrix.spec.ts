@@ -13,6 +13,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   expectDrawnAffordance,
+  expectNoPageOverflow,
   expectNoUnexpectedOverflow,
   expectMaxWidth,
   expectPaddingX,
@@ -25,6 +26,12 @@ import {
   expectVisibleWithin,
   waitForSettledBox,
 } from '../../helpers/ui-assert/assertions';
+import {
+  expectFormFieldAlignment,
+  expectSingleAppHeader,
+  expectSingleWorkspaceScrollOwner,
+  growUntilWorkspaceScrolls,
+} from '../../helpers/ui-assert/layout';
 import { loadContracts, patternBlock, type Experience } from '../../helpers/ui-assert/contracts';
 import {
   addSecondSwipeTouch,
@@ -915,6 +922,35 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(xterm).toHaveCount(1);
       await expect(xterm).toHaveAttribute('data-2724-instance', 'original');
       expect(await page.locator('.xterm-rows').innerText()).toBe(rowsBefore);
+    });
+
+    test('App capability surfaces keep one header and one host scroll owner (#3194)', async ({ page }) => {
+      const opts = {
+        pattern: 'pattern.workspace-navigation',
+        experience: 'app' as const,
+        viewport: row.id,
+      };
+
+      await page.goto('/#/fixture/app');
+      await page.getByTestId('app-header-workspace').first().click();
+      await page.getByTestId('workspace-tool-sandbox').click();
+      await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
+      await expectSingleAppHeader(page, opts);
+
+      // Grow the policy past the viewport: the shared WorkspaceScrollRegion is
+      // the one owner, and the App page header/Back does not multiply.
+      await page.getByTestId('sandbox-tab-resource').click();
+      await growUntilWorkspaceScrolls(page, 'sandbox-resource-add');
+      await expectFormFieldAlignment(
+        page.locator('[data-recipe="configuration-form"]').first(),
+        opts,
+      );
+      await expectSingleWorkspaceScrollOwner(page.getByTestId('workspace-tool-content'), {
+        ...opts,
+        recipe: true,
+      });
+      await expectSingleAppHeader(page, opts);
+      await expectNoPageOverflow(page, opts);
     });
   });
 }

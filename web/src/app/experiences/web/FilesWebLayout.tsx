@@ -7,6 +7,7 @@ import {
   type FileEntry,
 } from '@/capabilities/files';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import { WorkspaceMasterDetail } from '@/app/workspace/layout/workspaceLayout';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { useFilesWebFocusHandoff, type WebFilesFocusTarget } from './useFilesWebFocusHandoff';
@@ -74,12 +75,12 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
           paths — and a `1fr 2fr` split hands it a third of the pane whatever it
           holds. No border either: the tree carries `workspace.navigation` (the
           chrome surface) and the editor keeps the canvas, so the background
-          shift is the separator, as in the shell (visual-language.md P7). */}
-      <div
+          shift is the separator, as in the shell (visual-language.md P7).
+          This relationship is the shared recipe (#3194); a consumer that
+          restates the grid is the drift the layout Gate rejects. */}
+      <WorkspaceMasterDetail
         data-testid="files-web-layout"
-        className="grid h-full min-h-0 grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)] overflow-hidden"
-      >
-        <div className="bg-workspace-navigation min-h-0 overflow-hidden">
+        navigation={
           <FileBrowser
             fileOps={source.fileOps}
             selectedPath={guard.selected?.ref.path ?? null}
@@ -91,27 +92,26 @@ export function FilesWebLayout({ ctx }: { ctx: WorkspaceContext }) {
               return requestFile({ ref, filename: entry.name, size: entry.size });
             }}
           />
-        </div>
-        <div className="min-h-0 overflow-hidden">
-          {guard.selected ? (
-            <FileViewer
-              key={`${source.id}:${guard.selected.ref.path}`}
-              fileOps={source.fileOps}
-              path={guard.selected.ref.path}
-              filename={guard.selected.filename}
-              fileSize={guard.selected.size}
-              initialLine={guard.selected.line}
-              initialColumn={guard.selected.column}
-              onClose={guard.closeFile}
-              onDirtyChange={guard.onDirtyChange}
-              onSavingChange={guard.onSavingChange}
-              onSaveHandlerChange={guard.onSaveHandlerChange}
-            />
-          ) : (
-            <div className={cn('flex h-full items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view it.</div>
-          )}
-        </div>
-      </div>
+        }
+      >
+        {guard.selected ? (
+          <FileViewer
+            key={`${source.id}:${guard.selected.ref.path}`}
+            fileOps={source.fileOps}
+            path={guard.selected.ref.path}
+            filename={guard.selected.filename}
+            fileSize={guard.selected.size}
+            initialLine={guard.selected.line}
+            initialColumn={guard.selected.column}
+            onClose={guard.closeFile}
+            onDirtyChange={guard.onDirtyChange}
+            onSavingChange={guard.onSavingChange}
+            onSaveHandlerChange={guard.onSaveHandlerChange}
+          />
+        ) : (
+          <div className={cn('flex h-full items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view it.</div>
+        )}
+      </WorkspaceMasterDetail>
       <FilesWebSwitchDialog selected={guard.selected} state={guard.switchState} />
     </div>
   );
