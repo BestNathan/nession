@@ -5,6 +5,7 @@
 
 use serde_json::{json, Value};
 
+use crate::image::ImageListPage;
 use crate::server::handler::{reply_json, HandlerAction};
 use nession_protocol::contracts::image::v1::ImageDescriptor;
 
@@ -12,8 +13,15 @@ pub(super) fn image_success_reply(id: &str, wire: &str, image: &ImageDescriptor)
     reply_json(id, wire, json!({ "success": true, "image": image }))
 }
 
-pub(super) fn image_list_reply(id: &str, wire: &str, images: &[ImageDescriptor]) -> HandlerAction {
-    reply_json(id, wire, json!({ "success": true, "images": images }))
+pub(super) fn image_list_reply(id: &str, wire: &str, page: &ImageListPage) -> HandlerAction {
+    let mut payload = serde_json::Map::new();
+    payload.insert("success".to_string(), json!(true));
+    payload.insert("images".to_string(), json!(page.images));
+    payload.insert("total".to_string(), json!(page.total));
+    if let Some(next_offset) = page.next_offset {
+        payload.insert("next_offset".to_string(), json!(next_offset));
+    }
+    reply_json(id, wire, Value::Object(payload))
 }
 
 pub(super) fn image_access_reply(

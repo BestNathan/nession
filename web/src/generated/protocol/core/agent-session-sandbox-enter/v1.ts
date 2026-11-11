@@ -21,7 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ServerSessionSandboxEnterPayload = { request_id: string, session_name: string, generation: string, probe_generation: string, enter_id: string, policy: SandboxPolicyDraft, working_dir: string, };
+export type ServerSessionSandboxEnterPayload = { request_id: string, session_name: string, generation: string, probe_generation: string, enter_id: string, policy: SandboxPolicyDraft, 
+/**
+ * Server-authorized image grants. The Agent prepares each one in its
+ * durable cache and builds the local composition; the Server never sends
+ * a native cache path.
+ */
+images: Array<ManagedImageGrant>, working_dir: string, };
 export type SandboxContextStatus = "inside" | "outside" | "unknown";
 export type SandboxPaneScope = { session_name: string, 
 /**
@@ -157,6 +163,19 @@ resource: Array<SandboxKvEntry>,
  * `syscall.seccomp` rows; empty means the group is omitted.
  */
 syscall: Array<SandboxKvEntry>, enforcement: SandboxEnforcement, };
+export type SandboxImageRole = "base" | "workspace" | "toolchain";
+export type SandboxImageMode = "read_only" | "overlay";
+export type SandboxImageSelection = { role: SandboxImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of a Server Ready image.
+ */
+digest: string, 
+/**
+ * `/opt/<name>` for a toolchain; absent for the other roles.
+ */
+target?: string | null, mode: SandboxImageMode, };
+export type ImageCacheState = "verified" | "preparing" | "absent" | "failed" | "unavailable";
+export type ImageCacheStatus = { digest: string, state: ImageCacheState, detail?: string | null, };
 export type SandboxKvEntry = { key: string, value: string, };
 export type SandboxEnforcement = "required";
 export type SandboxFilesystemPolicy = { access: SandboxFilesystemAccess, };
@@ -221,11 +240,35 @@ export type SandboxActionResult = { success: boolean, error_kind?: SandboxAction
  */
 context?: SandboxCurrentContext | null, };
 export type SandboxActionErrorKind = "conflict" | "invalid" | "unavailable" | "failed";
+export type ManagedImageGrant = { role: ManagedImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of the exact bytes.
+ */
+digest: string, 
+/**
+ * Authorized route, `/images/blobs/<digest>`.
+ */
+path: string, 
+/**
+ * Scoped bearer grant for exactly this digest.
+ */
+token: string, 
+/**
+ * `/opt/<name>` for a toolchain image; absent otherwise.
+ */
+target?: string | null, };
+export type ManagedImageRole = "base" | "workspace" | "toolchain";
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ServerSessionSandboxEnterCall = { request_id: string, session_name: string, generation: string, probe_generation: string, enter_id: string, policy: SandboxPolicyDraft, working_dir: string, };
+export type ServerSessionSandboxEnterCall = { request_id: string, session_name: string, generation: string, probe_generation: string, enter_id: string, policy: SandboxPolicyDraft, 
+/**
+ * Server-authorized image grants. The Agent prepares each one in its
+ * durable cache and builds the local composition; the Server never sends
+ * a native cache path.
+ */
+images: Array<ManagedImageGrant>, working_dir: string, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

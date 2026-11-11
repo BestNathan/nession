@@ -39,6 +39,7 @@ describe('workspace capability providers', () => {
       'session',
       'agent',
       'env',
+      'images',
       'sandbox',
       'claude-code',
       'git',
@@ -46,6 +47,12 @@ describe('workspace capability providers', () => {
       'project',
       'quick-commands',
     ]);
+  });
+
+  it('offers Images without a Session (#3181)', () => {
+    expect(
+      snapshotFor('images', workspaceContext({ session: null, agent: undefined, fileOps: null })),
+    ).toMatchObject({ title: 'Images', state: 'available' });
   });
 
   it('registers Sandbox where a Session and its Agent exist (#3124)', () => {

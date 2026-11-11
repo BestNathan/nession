@@ -1,12 +1,13 @@
 # Sandbox policy and execution isolation
 
 Status: **V1 delivered in source for #2681**, with the context capability and
-existing-Session Enter added by #3124 and the prepared EROFS root composition
-added by #3024 (on-demand, Pane-scoped execution; not whole-Session
+existing-Session Enter added by #3124, the prepared EROFS root composition
+added by #3024, and Server-owned image composition on existing-Session Enter
+added by #3181 (on-demand, Pane-scoped execution; not whole-Session
 enforcement). Real Linux/macOS proof is bound to the Acceptance Cases under
-`e2e/acceptance/cases/2681/`, `e2e/acceptance/cases/3124/` and
-`e2e/acceptance/cases/3024/`; nothing in this document is evidence that a
-particular runner installed a mechanism.
+`e2e/acceptance/cases/2681/`, `e2e/acceptance/cases/3124/`,
+`e2e/acceptance/cases/3024/` and `e2e/acceptance/cases/3181/`; nothing in this
+document is evidence that a particular runner installed a mechanism.
 
 This is the canonical current-architecture owner for Sandbox behaviour. The
 product decision (what V1 promises and explicitly does not) remains Requirement
@@ -28,6 +29,12 @@ The shared tmux server, the Agent and Native Sessions never enter an execution
 domain. `nession-tmux` receives only an explicit argv (`NewSession.command`);
 it does not know what a sandbox is. `nession-sandbox` does not create tmux
 objects, own attach state or mutate Session environment bindings (#170).
+
+Server-owned images enter this chain only through the Image Manager: the Server
+mints a scoped bearer grant per selected digest, the Agent verifies and caches
+the bytes, and `nession-sandbox` receives local, already-prepared EROFS paths
+inside its authorized image root. No client-supplied host path or URL crosses
+that boundary.
 
 ## Policy contract
 
@@ -159,6 +166,45 @@ the same way as the rest of the stack:
 - **Visibility.** The managed section is a Rust contract only (`ts(skip)` on
   the generated fields); the Web projection does not expose native image
   digests or paths. Web/app product surface remains #3025's scope.
+
+### Existing-Session image composition (#3181)
+
+An already-running Session can Enter a Sandbox Pane whose root is composed from
+Server-owned images. The client never sends a native source path; it sends
+`sandbox_image_selection` values (`role`, immutable `digest`, optional
+`target`, `mode`) on preflight and Enter. The rules split by owner:
+
+- **Policy shape.** `nession-sandbox`/`nession-protocol` validate the canonical
+  composition: at most one `base` (read-only at `/`), at most one `workspace`
+  (overlay at `/workspace`), any number of `toolchain` entries (read-only at
+  `/opt/<name>`). A nonempty composition requires exactly one base, base and
+  toolchain must be read-only, workspace must be overlay, and toolchain targets
+  must be one lowercase-level `/opt/<name>`. A composition and
+  `filesystem.access` remain mutually exclusive.
+- **Server authorization.** The Server validates the selection shape, requires
+  every digest to be Ready in the Image Manager, and mints one
+  `grant_sandbox_access(session_id, digest)` grant per image on the Enter
+  reply. The grant is Session-scoped and digest-bound; a client cannot turn a
+  Project reference or a guessed digest into bytes. The Server forwards image
+  metadata (digest/role/target/mode) on preflight — no token is minted before
+  the mutation.
+- **Agent preparation.** On Enter the Agent opens its identity-namespaced EROFS
+  cache, fetches each grant through the same `server.image.access` bearer path,
+  verifies the digest, and prepares one Agent-owned workspace directory under
+  `<sandbox state>/sandbox-workspaces/workspace-<uuid>`. It then builds the
+  canonical `filesystem.composition` and calls `prepare`. Only paths inside the
+  authorized image root and that owned workspace reach the sandbox. A failure
+  before the sandbox owns the workspace removes it; after a successful
+  prepare, sandbox cleanup owns it through the composition record.
+- **Preflight without fetch.** A preflight that includes images validates the
+  selection and composes placeholder local paths, so host-capability checks run
+  without downloading or reserving image bytes. Enter still re-probes.
+- **Cache observation.** `server.session.sandbox.context` accepts optional
+  `cache_digests` and answers `cache_statuses` with
+  `verified | preparing | absent | failed | unavailable`. This is an Agent-local
+  observation and is deliberately separate from the Server's image Ready state:
+  a Server-Ready image that the Agent has not fetched is not mount-ready, and a
+  failed or partial cache is never shown as verified.
 
 ## Launch barrier
 

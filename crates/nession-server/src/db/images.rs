@@ -8,8 +8,8 @@ use super::Database;
 use crate::db::entities::{image_access_grants, image_aliases, image_leases, images, projects};
 use anyhow::{Context, Result};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, QueryTrait, Set,
 };
 
 /// Image rows by lifecycle status (#3180 SC-05 diagnostics).
@@ -40,7 +40,8 @@ pub struct ImageRow {
 pub struct ImageGrantRow {
     pub token_hash: String,
     pub image_digest: String,
-    pub project_id: String,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
     pub expires_at: i64,
 }
 
@@ -168,14 +169,64 @@ impl Database {
     }
 
     pub async fn list_images(&self, limit: u64) -> Result<Vec<ImageRow>> {
-        let rows = images::Entity::find()
+        self.list_images_page(0, limit, "").await
+    }
+
+    /// One page of image rows in the stable newest-first order.
+    pub async fn list_images_page(
+        &self,
+        offset: u64,
+        limit: u64,
+        query: &str,
+    ) -> Result<Vec<ImageRow>> {
+        let mut find = images::Entity::find();
+        if let Some(condition) = image_query_condition(query) {
+            find = find.filter(condition);
+        }
+        let rows = find
             .order_by_desc(images::Column::CreatedAt)
             .order_by_asc(images::Column::ImageId)
+            .offset(offset)
             .limit(limit)
             .all(&self.conn)
             .await
             .context("failed to list images")?;
         Ok(rows.into_iter().map(row_from_model).collect())
+    }
+
+    /// Number of image build attempts visible to the registry.
+    pub async fn count_images(&self, query: &str) -> Result<u64> {
+        let mut find = images::Entity::find();
+        if let Some(condition) = image_query_condition(query) {
+            find = find.filter(condition);
+        }
+        find.count(&self.conn)
+            .await
+            .context("failed to count images")
+    }
+
+    /// Every alias and the digest it currently resolves to, sorted by alias.
+    pub async fn list_image_aliases(&self) -> Result<Vec<(String, String)>> {
+        let rows = image_aliases::Entity::find()
+            .order_by_asc(image_aliases::Column::Alias)
+            .all(&self.conn)
+            .await
+            .context("failed to list image aliases")?;
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.alias, row.image_digest))
+            .collect())
+    }
+
+    /// Aliases currently resolving to one immutable digest, sorted.
+    pub async fn aliases_for_digest(&self, digest: &str) -> Result<Vec<String>> {
+        let rows = image_aliases::Entity::find()
+            .filter(image_aliases::Column::ImageDigest.eq(digest))
+            .order_by_asc(image_aliases::Column::Alias)
+            .all(&self.conn)
+            .await
+            .context("failed to list image aliases for digest")?;
+        Ok(rows.into_iter().map(|row| row.alias).collect())
     }
 
     /// Count image rows by lifecycle status without materializing every row
@@ -254,6 +305,7 @@ impl Database {
             token_hash: Set(grant.token_hash.clone()),
             image_digest: Set(grant.image_digest.clone()),
             project_id: Set(grant.project_id.clone()),
+            session_id: Set(grant.session_id.clone()),
             expires_at: Set(grant.expires_at),
         })
         .exec(&self.conn)
@@ -271,6 +323,7 @@ impl Database {
             token_hash: model.token_hash,
             image_digest: model.image_digest,
             project_id: model.project_id,
+            session_id: model.session_id,
             expires_at: model.expires_at,
         }))
     }
@@ -369,6 +422,27 @@ impl Database {
             .context("failed to delete image row")?;
         Ok(result.rows_affected > 0)
     }
+}
+
+/// The optional registry filter shared by page and count queries.
+fn image_query_condition(query: &str) -> Option<Condition> {
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    let pattern = format!("%{query}%");
+    let alias_digests = image_aliases::Entity::find()
+        .select_only()
+        .column(image_aliases::Column::ImageDigest)
+        .filter(image_aliases::Column::Alias.like(pattern.clone()))
+        .into_query();
+    Some(
+        Condition::any()
+            .add(images::Column::ImageId.like(pattern.clone()))
+            .add(images::Column::Digest.like(pattern.clone()))
+            .add(images::Column::SourceJson.like(pattern))
+            .add(images::Column::Digest.in_subquery(alias_digests)),
+    )
 }
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ import type { Agent, Session } from '@/types';
 import { fixtureAgents } from './fixtureAgents';
 import { fixtureConnection } from './fixtureConnection';
 import { fixtureGitSurface } from './fixtureGit';
+import { useFixtureImages } from './fixtureImages';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import { fixturePaneCommand } from './fixturePaneCommand';
@@ -170,6 +171,7 @@ export function FixtureShell() {
   // show the capability entry but not a Peek behind it, which is why #1046's
   // second depth had no Web baseline at all (#1102).
   useEffect(() => gitApi.install(fixtureGitSurface(search)), [search]);
+  useFixtureImages(search);
 
   const {
     agents,

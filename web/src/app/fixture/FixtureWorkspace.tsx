@@ -15,6 +15,8 @@ import { claudeCodeApi } from '@/capabilities/claude-code';
 import { envApi } from '@/capabilities/env';
 import { gitApi } from '@/capabilities/git';
 import { sandboxApi } from '@/capabilities/sandbox';
+import { imagesApi } from '@/capabilities/images';
+import { fixtureImagesSurface } from './fixtureImages';
 import { fixtureTranscriptsSurface } from './fixtureTranscripts';
 import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
@@ -54,6 +56,7 @@ export function FixtureWorkspace() {
   // wire. The route's `?sessionMetadata=` selects the state; absent is legacy.
   useFixtureSessionMetadata(search);
   const capability = openedCapability(search);
+  const noSession = new URLSearchParams(search).get('session') === 'none';
   const gitScenario = new URLSearchParams(search).get('git');
   const [gitSessionId, setGitSessionId] = useState(FIXTURE_SELECTED_ID);
   const gitSessionIdRef = useRef(FIXTURE_SELECTED_ID);
@@ -69,6 +72,11 @@ export function FixtureWorkspace() {
     capability === 'sandbox',
     search,
     installSandboxSurface,
+  );
+  const imagesReady = useFixtureSurface(
+    capability === 'images' || capability === 'sandbox',
+    search,
+    installImagesSurface,
   );
   // #2803: the Agent capability's two-Agent same-name process scenario. The
   // route names the environment input, and the mounted capability observes the
@@ -122,7 +130,9 @@ export function FixtureWorkspace() {
       : metadataOwnership
         ? ownershipSessionId
         : FIXTURE_SELECTED_ID;
-  const selectedSession = sessions.find((s) => s.session_id === selectedId) ?? null;
+  const selectedSession = noSession
+    ? null
+    : (sessions.find((s) => s.session_id === selectedId) ?? null);
   const selectedAgent = agents.find((a) => a.agent_id === selectedSession?.agent_id);
   const domain = selectedSession
     ? mapDomainState({
@@ -134,7 +144,7 @@ export function FixtureWorkspace() {
         attachFailedId: null,
       })
     : null;
-  if (!gitReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady) {
+  if (!gitReady || !conversationReady || !envReady || !agentProcessReady || !sandboxReady || !imagesReady) {
     // One frame, and only while the asked-for route's stub is being bound.
     return null;
   }
@@ -162,7 +172,9 @@ export function FixtureWorkspace() {
            (#1204) — inert here, but the canonical Workspace screen is not the
            shipped one without it. */
         surfaceAction={
-          <SurfaceDestinationAction destination="terminal" onOpen={() => {}} />
+          noSession ? undefined : (
+            <SurfaceDestinationAction destination="terminal" onOpen={() => {}} />
+          )
         }
       />
     </div>
@@ -193,6 +205,9 @@ function openedCapability(search: string): CapabilityId {
   if (requested === 'sandbox') {
     return 'sandbox';
   }
+  if (requested === 'images') {
+    return 'images';
+  }
   return requested === 'session' ? 'session' : 'files';
 }
 
@@ -222,6 +237,10 @@ function installSandboxSurface(search: string): () => void {
  * the capability, but Claude Code's *Workspace* is what draws a transcript, and
  * `#/fixture/workspace?capability=claude-code` is how a spec gets there.
  */
+function installImagesSurface(search: string): () => void {
+  return imagesApi.install(fixtureImagesSurface(search));
+}
+
 function installConversationSurface(search: string): () => void {
   return claudeCodeApi.install(fixtureTranscriptsSurface(search));
 }

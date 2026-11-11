@@ -179,6 +179,11 @@ fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
         decl_of::<sandbox::SandboxUnsupportedReason>(cfg),
         decl_of::<sandbox::SandboxCurrentContext>(cfg),
         decl_of::<sandbox::SandboxPolicyDraft>(cfg),
+        decl_of::<sandbox::SandboxImageRole>(cfg),
+        decl_of::<sandbox::SandboxImageMode>(cfg),
+        decl_of::<sandbox::SandboxImageSelection>(cfg),
+        decl_of::<nession_protocol::contracts::image::v1::ImageCacheState>(cfg),
+        decl_of::<nession_protocol::contracts::image::v1::ImageCacheStatus>(cfg),
         decl_of::<sandbox::SandboxKvEntry>(cfg),
         decl_of::<sandbox::SandboxEnforcement>(cfg),
         decl_of::<sandbox::SandboxFilesystemPolicy>(cfg),
@@ -194,6 +199,8 @@ fn sandbox_capability_decls(cfg: &ts_rs::Config) -> Vec<Decl> {
         decl_of::<sandbox::SandboxPreflightResult>(cfg),
         decl_of::<sandbox::SandboxActionResult>(cfg),
         decl_of::<sandbox::SandboxActionErrorKind>(cfg),
+        decl_of::<nession_protocol::contracts::session::v1::ManagedImageGrant>(cfg),
+        decl_of::<nession_protocol::contracts::session::v1::ManagedImageRole>(cfg),
     ]
 }
 

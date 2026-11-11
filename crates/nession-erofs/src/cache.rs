@@ -24,6 +24,23 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::digest::{is_valid_digest, regular_file_digest, DIGEST_PREFIX};
 
+/// The local readiness of one digest, observed without downloading or mutating.
+///
+/// This is a protocol-free projection: a runtime owner maps it to its own wire
+/// vocabulary. It is deliberately not an availability promise — a verified
+/// blob may still be evicted, and a missing one may be fetched later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheObservation {
+    /// The published blob exists and its bytes match the digest.
+    Verified,
+    /// A partial download exists; a later fetch resumes it.
+    Preparing,
+    /// Neither a published blob nor a partial download exists.
+    Absent,
+    /// A published blob exists but does not match the digest, or the digest is invalid.
+    Failed { detail: String },
+}
+
 /// One read/write chunk. The cache never buffers a whole image in memory.
 pub const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 /// A partial download older than this is reconciled; a newer one is resumed.
@@ -329,6 +346,44 @@ impl ErofsCache {
         Ok(self.root.join("sha256").join(hex))
     }
 
+    /// The partial-download path for a validated digest.
+    pub fn partial_path(&self, digest: &str) -> Result<PathBuf> {
+        validate_digest(digest)?;
+        let hex = digest
+            .strip_prefix(DIGEST_PREFIX)
+            .ok_or_else(|| anyhow::anyhow!("invalid image digest"))?;
+        Ok(self.root.join("tmp").join(format!("{hex}.part")))
+    }
+
+    /// Observe one digest's local readiness without downloading or mutating.
+    ///
+    /// A published blob is verified here, so a corrupt file is reported as
+    /// failed rather than as available. A valid blob wins over a stale partial
+    /// from a previous interrupted attempt.
+    pub async fn observe(&self, digest: &str) -> CacheObservation {
+        let Ok(final_path) = self.blob_path(digest) else {
+            return CacheObservation::Failed {
+                detail: "invalid image digest".to_string(),
+            };
+        };
+        if self.verify_file(&final_path, digest).await.unwrap_or(false) {
+            return CacheObservation::Verified;
+        }
+        if final_path.exists() {
+            return CacheObservation::Failed {
+                detail: "cached blob failed digest verification".to_string(),
+            };
+        }
+        if self
+            .partial_path(digest)
+            .map(|partial| partial.exists())
+            .unwrap_or(false)
+        {
+            return CacheObservation::Preparing;
+        }
+        CacheObservation::Absent
+    }
+
     /// Return the verified blob, downloading it only when the cache is cold.
     ///
     /// Concurrent callers for one digest share a single fetch. A warm hit
@@ -441,14 +496,6 @@ impl ErofsCache {
             .entry(digest.to_string())
             .or_insert_with(|| Arc::new(AsyncMutex::new(())))
             .clone()
-    }
-
-    fn partial_path(&self, digest: &str) -> Result<PathBuf> {
-        validate_digest(digest)?;
-        let hex = digest
-            .strip_prefix(DIGEST_PREFIX)
-            .ok_or_else(|| anyhow::anyhow!("invalid image digest"))?;
-        Ok(self.root.join("tmp").join(format!("{hex}.part")))
     }
 
     async fn verify_file(&self, path: &Path, digest: &str) -> Result<bool> {

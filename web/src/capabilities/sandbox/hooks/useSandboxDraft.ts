@@ -21,6 +21,7 @@ export interface SandboxDraftState {
   addFilesystemPath: (field: 'read' | 'write') => void;
   updateFilesystemPath: (field: 'read' | 'write', index: number, value: string) => void;
   removeFilesystemPath: (field: 'read' | 'write', index: number) => void;
+  clearFilesystemAccess: () => void;
   addEgressRule: (field: 'allow' | 'deny') => void;
   updateEgressRule: (field: 'allow' | 'deny', index: number, value: string) => void;
   removeEgressRule: (field: 'allow' | 'deny', index: number) => void;
@@ -110,6 +111,10 @@ export function useSandboxDraft(context: SandboxCurrentContext | null): SandboxD
     );
   }, []);
 
+  const clearFilesystemAccess = useCallback(() => {
+    setDraft((current) => ({ ...current, filesystem: undefined }));
+  }, []);
+
   const addEgressRule = useCallback((field: 'allow' | 'deny') => {
     setDraft((current) => withEgressList(current, field, (list) => [...list, '']));
   }, []);
@@ -182,6 +187,7 @@ export function useSandboxDraft(context: SandboxCurrentContext | null): SandboxD
     addFilesystemPath,
     updateFilesystemPath,
     removeFilesystemPath,
+    clearFilesystemAccess,
     addEgressRule,
     updateEgressRule,
     removeEgressRule,

@@ -5,6 +5,7 @@ import { WorkspaceScrollRegion } from '@/app/workspace/layout/workspaceLayout';
 import { FilesWebLayout } from './FilesWebLayout';
 import { EnvWebLayout } from './EnvWebLayout';
 import { SandboxWebLayout } from '@/capabilities/sandbox';
+import { ImagesWebLayout } from '@/capabilities/images';
 import type { WorkspaceContext, WorkspaceViewId } from '@/app/workspace/workspaceContext';
 
 /**
@@ -46,4 +47,5 @@ export const WEB_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<{ ctx: W
   env: EnvWebLayout,
   files: FilesWebLayout,
   sandbox: SandboxWebLayout,
+  images: ImagesWebLayout,
 };

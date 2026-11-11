@@ -1,5 +1,7 @@
 import type {
   SandboxCapabilityCatalog,
+  SandboxImageMode,
+  SandboxImageSelection,
   SandboxCurrentContext,
   SandboxFieldEntry,
   SandboxImplementationSupport,
@@ -25,6 +27,7 @@ export const SANDBOX_TITLE = 'Sandbox';
 export const IMPLEMENTATION_PATHS = {
   filesystemAccess: 'filesystem.access',
   filesystemComposition: 'filesystem.composition',
+  composition: 'filesystem.composition',
   network: 'network',
   linuxNamespaces: 'process.linux_namespaces',
   cgroupV2: 'resource.cgroup_v2',
@@ -350,4 +353,79 @@ export function namespaceDisabledReason(
   return optionAvailable(catalog, IMPLEMENTATION_PATHS.linuxNamespaces, namespace)
     ? null
     : optionDisabledReason(catalog, IMPLEMENTATION_PATHS.linuxNamespaces, namespace);
+}
+
+/** One Sandbox-owned image selection, before the Server resolves it. */
+export type SandboxImageChoice = SandboxImageSelection;
+
+/**
+ * Infer the canonical role from the target the user typed.
+ *
+ * `/` is the Base Runtime, `/workspace` is the merged writable workspace and
+ * `/opt/<name>` is a read-only toolchain. Other targets are refused instead of
+ * being guessed into a composition the Agent would reject.
+ */
+export function sandboxImageChoice(input: {
+  digest: string;
+  target: string;
+  mode: SandboxImageMode;
+}): { choice: SandboxImageSelection } | { error: string } {
+  const target = input.target.trim();
+  if (target === '/') {
+    if (input.mode !== 'read_only') {
+      return { error: 'The Base Runtime image at / is read-only.' };
+    }
+    return {
+      choice: { role: 'base', digest: input.digest, mode: 'read_only' },
+    };
+  }
+  if (target === '/workspace') {
+    if (input.mode !== 'overlay') {
+      return { error: 'The workspace image at /workspace requires the overlay mode.' };
+    }
+    return {
+      choice: { role: 'workspace', digest: input.digest, mode: 'overlay' },
+    };
+  }
+  if (target.startsWith('/opt/') && target.length > 5 && !target.includes('..')) {
+    if (input.mode !== 'read_only') {
+      return { error: 'A toolchain image under /opt is read-only.' };
+    }
+    return {
+      choice: {
+        role: 'toolchain',
+        digest: input.digest,
+        target,
+        mode: 'read_only',
+      },
+    };
+  }
+  return {
+    error: 'Use / for the Base Runtime, /workspace for the workspace, or /opt/<name> for a toolchain.',
+  };
+}
+
+/** Whether these selections can become a coherent composition. */
+export function sandboxImagesValid(selections: readonly SandboxImageSelection[]): boolean {
+  if (selections.length === 0) {
+    return true;
+  }
+  const bases = selections.filter((selection) => selection.role === 'base');
+  const workspaces = selections.filter((selection) => selection.role === 'workspace');
+  return bases.length === 1 && workspaces.length <= 1;
+}
+
+/** A stable signature over the draft and its Sandbox-owned image selections. */
+export function sandboxSelectionSignature(
+  selections: readonly SandboxImageSelection[],
+): string {
+  return JSON.stringify(selections);
+}
+
+/** One signature for the policy draft and the Sandbox-owned image selections. */
+export function sandboxDraftSignature(
+  draft: SandboxPolicyDraft,
+  images: readonly SandboxImageSelection[],
+): string {
+  return `${draftSignature(draft)}|${sandboxSelectionSignature(images)}`;
 }

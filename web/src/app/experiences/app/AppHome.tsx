@@ -30,6 +30,8 @@ export interface AppHomeProps {
   onBrowse: () => void;
   /** No Agent is online, so creation cannot succeed. */
   createDisabled: boolean;
+  /** Opens the Server-owned Images capability without creating a Session. */
+  onOpenImages?: () => void;
 }
 
 /**
@@ -52,7 +54,7 @@ export interface AppHomeProps {
  * `body`, which is the App's *control* role and would make prose read as an
  * action.
  */
-export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
+export function AppHome({ onCreate, onBrowse, createDisabled, onOpenImages }: AppHomeProps) {
   return (
     <div
       data-testid="app-home"
@@ -93,6 +95,16 @@ export function AppHome({ onCreate, onBrowse, createDisabled }: AppHomeProps) {
       >
         Browse sessions
       </Button>
+      {onOpenImages ? (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => onOpenImages()}
+          data-testid="app-home-open-images"
+        >
+          Server Images
+        </Button>
+      ) : null}
     </div>
   );
 }

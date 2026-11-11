@@ -21,8 +21,21 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ImageListPayload = Record<symbol, never>;
-export type ImageListResponsePayload = { images: Array<ImageDescriptor>, error?: string | null, };
+export type ImageListPayload = { offset: number, limit: number, 
+/**
+ * Case-sensitive substring filter over alias, digest, image id and
+ * persisted source. Empty returns the unfiltered registry page.
+ */
+query: string, };
+export type ImageListResponsePayload = { images: Array<ImageDescriptor>, 
+/**
+ * The number of images visible to this authenticated client.
+ */
+total: number, 
+/**
+ * The offset of the next page, or absent when this page reaches `total`.
+ */
+next_offset?: number | null, error?: string | null, };
 export type ImageDescriptor = { image_id: string, 
 /**
  * `sha256:<64 lowercase hex>` once ready; absent for a failed build.
@@ -35,7 +48,11 @@ source_sha?: string | null, packaging: ImagePackaging, status: ImageStatus, erro
 /**
  * The alias that was set by the build request, when one was supplied.
  */
-alias?: string | null, created_at: number, updated_at: number, };
+alias?: string | null, 
+/**
+ * Every mutable tag currently resolving to this digest, sorted.
+ */
+aliases: Array<string>, created_at: number, updated_at: number, };
 export type ImageSource = { "kind": "github", repository_url: string, ref: string, } | { "kind": "local_directory", path: string, };
 export type ImagePackaging = { compression: string, block_size: number, fixed_timestamp: number, fixed_uuid: string, };
 export type ImageStatus = "building" | "ready" | "failed";
@@ -43,8 +60,21 @@ export type ImageStatus = "building" | "ready" | "failed";
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ImageListCall = Record<symbol, never>;
+export type ImageListCall = { offset: number, limit: number, 
+/**
+ * Case-sensitive substring filter over alias, digest, image id and
+ * persisted source. Empty returns the unfiltered registry page.
+ */
+query: string, };
 
 /** The payload the provider answers with. */
-export type ImageListReply = { images: Array<ImageDescriptor>, error?: string | null, };
+export type ImageListReply = { images: Array<ImageDescriptor>, 
+/**
+ * The number of images visible to this authenticated client.
+ */
+total: number, 
+/**
+ * The offset of the next page, or absent when this page reaches `total`.
+ */
+next_offset?: number | null, error?: string | null, };
 

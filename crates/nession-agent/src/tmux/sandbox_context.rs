@@ -15,13 +15,14 @@ use anyhow::{Context as _, Result};
 use nession_protocol::contracts::sandbox::v1::{
     SandboxActionErrorKind, SandboxActionResult, SandboxCapabilityCatalog, SandboxCatalogStatus,
     SandboxContextStatus, SandboxCurrentContext, SandboxExecutionView, SandboxFieldError,
-    SandboxImplementationSupport, SandboxNativePane, SandboxPaneRef, SandboxPaneScope,
-    SandboxPolicyDraft, SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS,
+    SandboxImageSelection, SandboxImplementationSupport, SandboxNativePane, SandboxPaneRef,
+    SandboxPaneScope, SandboxPolicyDraft, SandboxPreflightResult, REGISTERED_IMPLEMENTATION_PATHS,
     SANDBOX_CATALOG_VERSION,
 };
+use nession_protocol::contracts::session::v1::ManagedImageGrant;
 use nession_sandbox::{
-    draft_from_policy, materialize, requested_mechanisms, ExecutionRecord, LaunchRequest,
-    SandboxError,
+    draft_from_policy, materialize, materialize_with_composition, preflight_unprepared_composition,
+    requested_mechanisms, ExecutionRecord, LaunchRequest, SandboxError,
 };
 use nession_tmux::ops::PaneSummary;
 
@@ -33,6 +34,19 @@ pub const PREFLIGHT_COMMAND: &str = "agent.session.sandbox.preflight";
 pub const ENTER_COMMAND: &str = "agent.session.sandbox.enter";
 pub const RETURN_COMMAND: &str = "agent.session.sandbox.return-to-native";
 pub const FOCUS_COMMAND: &str = "agent.session.sandbox.focus";
+
+/// One explicit Enter request, grouped so the Agent's lifecycle call stays
+/// readable as the image composition added its grants.
+pub struct SandboxEnterInput<'a> {
+    pub session_name: &'a str,
+    pub generation: &'a str,
+    pub probe_generation: &'a str,
+    pub enter_id: &'a str,
+    pub draft: &'a SandboxPolicyDraft,
+    pub images: &'a [ManagedImageGrant],
+    pub server_url: &'a str,
+    pub working_dir: &'a str,
+}
 
 impl SessionManager {
     /// Observe the selected Session's active Pane and its Sandbox context.
@@ -126,6 +140,7 @@ impl SessionManager {
         generation: &str,
         probe_generation: &str,
         draft: &SandboxPolicyDraft,
+        images: &[SandboxImageSelection],
         working_dir: &str,
     ) -> SandboxPreflightResult {
         let context = match self.sandbox_context(session_name).await {
@@ -209,7 +224,43 @@ impl SessionManager {
                 "not-enterable",
             );
         };
-        let policy = match materialize(draft) {
+        let cache = runtime.erofs_cache();
+        let composition = if images.is_empty() {
+            None
+        } else {
+            let Some(cache) = cache.as_ref() else {
+                return refuse(
+                    "this Agent has no EROFS cache configured; it cannot prepare a Sandbox image composition"
+                        .to_string(),
+                    "not-enterable",
+                );
+            };
+            match crate::sandbox_images::preflight_composition(cache, images) {
+                Ok(composition) => Some(composition),
+                Err(error) => {
+                    return SandboxPreflightResult {
+                        ok: false,
+                        error: None,
+                        generation: context.generation.clone(),
+                        policy_digest: None,
+                        backend: None,
+                        mechanisms: Vec::new(),
+                        errors: vec![SandboxFieldError {
+                            field: "images".to_string(),
+                            code: "invalid-composition".to_string(),
+                            message: format!("{error:#}"),
+                        }],
+                        warnings: Vec::new(),
+                        catalog,
+                    };
+                }
+            }
+        };
+        let policy = match composition {
+            Some(composition) => materialize_with_composition(draft, composition),
+            None => materialize(draft),
+        };
+        let policy = match policy {
             Ok(policy) => policy,
             Err(errors) => {
                 return SandboxPreflightResult {
@@ -250,9 +301,15 @@ impl SessionManager {
             tmux_socket: Some(self.socket_path().to_path_buf()),
         };
         let settings = runtime.settings().clone();
-        let preflight =
-            tokio::task::spawn_blocking(move || nession_sandbox::preflight(&request, &settings))
-                .await;
+        let images_selected = !images.is_empty();
+        let preflight = tokio::task::spawn_blocking(move || {
+            if images_selected {
+                preflight_unprepared_composition(&request, &settings)
+            } else {
+                nession_sandbox::preflight(&request, &settings)
+            }
+        })
+        .await;
         match preflight {
             Ok(Ok(report)) => {
                 let mut mechanisms = requested_mechanisms(&report.compiled);
@@ -309,15 +366,17 @@ impl SessionManager {
 
     /// The one explicit Enter: allocate an isolated Pane in the same logical
     /// Session, verify the barrier, then focus it.
-    pub async fn sandbox_enter(
-        &self,
-        session_name: &str,
-        generation: &str,
-        probe_generation: &str,
-        enter_id: &str,
-        draft: &SandboxPolicyDraft,
-        working_dir: &str,
-    ) -> SandboxActionResult {
+    pub async fn sandbox_enter(&self, input: SandboxEnterInput<'_>) -> SandboxActionResult {
+        let SandboxEnterInput {
+            session_name,
+            generation,
+            probe_generation,
+            enter_id,
+            draft,
+            images,
+            server_url,
+            working_dir,
+        } = input;
         let Some(runtime) = self.sandbox_runtime().cloned() else {
             return action_refusal(
                 SandboxActionErrorKind::Unavailable,
@@ -406,7 +465,40 @@ impl SessionManager {
                 None,
             );
         };
-        let policy = match materialize(draft) {
+        let mut prepared_images = if images.is_empty() {
+            None
+        } else {
+            let Some(cache) = runtime.erofs_cache() else {
+                return refusal(
+                    SandboxActionErrorKind::Unavailable,
+                    "this Agent has no EROFS cache configured; it cannot prepare a Sandbox image composition"
+                        .to_string(),
+                    None,
+                );
+            };
+            match crate::sandbox_images::prepare(
+                &cache,
+                images,
+                server_url,
+                &runtime.settings().state_dir,
+            )
+            .await
+            {
+                Ok(prepared) => Some(prepared),
+                Err(error) => {
+                    return refusal(
+                        SandboxActionErrorKind::Failed,
+                        format!("cannot prepare the Sandbox image composition: {error:#}"),
+                        None,
+                    )
+                }
+            }
+        };
+        let policy = match prepared_images.as_ref() {
+            Some(prepared) => materialize_with_composition(draft, prepared.composition.clone()),
+            None => materialize(draft),
+        };
+        let policy = match policy {
             Ok(policy) => policy,
             Err(errors) => {
                 return refusal(
@@ -476,6 +568,11 @@ impl SessionManager {
                 )
             }
         };
+        if let Some(prepared_images) = prepared_images.as_mut() {
+            // The execution record now owns the writable composition workspace;
+            // its bounded cleanup removes it with the execution.
+            prepared_images.workspace_guard.disarm();
+        }
         prepared.set_native_pane(&window_id, &pane_id);
 
         let ops = self.tmux_dep().ops();

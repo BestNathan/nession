@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   SandboxCurrentContext,
+  SandboxImageSelection,
   SandboxPolicyDraft,
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
-import { draftSignature } from '../model';
+import { sandboxDraftSignature } from '../model';
 import { sandboxApi } from '../SandboxPlugin';
 
 export interface SandboxPreflightState {
@@ -28,9 +29,10 @@ export interface SandboxPreflightState {
 export function useSandboxPreflight(options: {
   sessionId: string | null;
   context: SandboxCurrentContext | null;
+  images: readonly SandboxImageSelection[];
   workingDir: string;
 }): SandboxPreflightState {
-  const { sessionId, context, workingDir } = options;
+  const { sessionId, context, images, workingDir } = options;
   const [preflight, setPreflight] = useState<{
     signature: string;
     result: SandboxPreflightResult;
@@ -55,9 +57,12 @@ export function useSandboxPreflight(options: {
           generation: context.generation,
           probeGeneration: context.catalog.probe_generation,
           policy: draft,
+          images,
           workingDir,
         })
-        .then((result) => setPreflight({ signature: draftSignature(draft), result }))
+        .then((result) =>
+          setPreflight({ signature: sandboxDraftSignature(draft, images), result }),
+        )
         .catch((failure: unknown) => {
           setPreflightError(
             failure instanceof Error
@@ -67,7 +72,7 @@ export function useSandboxPreflight(options: {
         })
         .finally(() => setPreflightBusy(false));
     },
-    [sessionId, context, workingDir],
+    [sessionId, context, images, workingDir],
   );
 
   const clearPreflight = useCallback(() => {

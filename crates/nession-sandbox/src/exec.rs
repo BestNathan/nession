@@ -435,6 +435,27 @@ pub struct PreflightReport {
 /// step removed. Preflight is a hint to the caller, not a reservation: Enter
 /// re-runs the whole `prepare` path and fails closed on its own.
 pub fn preflight(request: &LaunchRequest, settings: &SandboxSettings) -> Result<PreflightReport> {
+    preflight_inner(request, settings, false)
+}
+
+/// Preflight an image composition whose local files have not been prepared yet.
+///
+/// The Agent uses this before Enter: it validates the canonical composition
+/// shape, the host's EROFS support and the working directory, but deliberately
+/// skips the host existence/hash checks. Enter remains authoritative and
+/// re-validates the prepared paths before any mount.
+pub fn preflight_unprepared_composition(
+    request: &LaunchRequest,
+    settings: &SandboxSettings,
+) -> Result<PreflightReport> {
+    preflight_inner(request, settings, true)
+}
+
+fn preflight_inner(
+    request: &LaunchRequest,
+    settings: &SandboxSettings,
+    allow_unprepared_composition: bool,
+) -> Result<PreflightReport> {
     let compiled = compile(&request.policy)?;
     if !request.policy.enabled {
         return Err(SandboxError::InvalidPolicy(
@@ -455,7 +476,14 @@ pub fn preflight(request: &LaunchRequest, settings: &SandboxSettings) -> Result<
     crate::capabilities::validate(&compiled, &capabilities)?;
     let mut warnings = capabilities.detail.clone();
     if let Some(filesystem) = &compiled.filesystem {
-        warnings.extend(validate_host_paths(filesystem, settings)?);
+        if allow_unprepared_composition && filesystem.composition.is_some() {
+            warnings.push(
+                "image composition paths are prepared by Enter; this preflight checked shape and host support only"
+                    .to_string(),
+            );
+        } else {
+            warnings.extend(validate_host_paths(filesystem, settings)?);
+        }
     }
     let _ = working_dir;
     Ok(PreflightReport {
@@ -717,6 +745,36 @@ pub(crate) fn write_record(settings: &SandboxSettings, record: &ExecutionRecord)
     })
 }
 
+/// Remove the Agent-created writable workspace of an image composition.
+///
+/// The workspace is created below `state_dir/sandbox-workspaces` and named
+/// `workspace-<uuid>` by the Agent. Cleanup removes only a direct child of that
+/// root with that exact shape; an arbitrary path in a recovered record is left
+/// untouched.
+fn remove_owned_composition_workspace(settings: &SandboxSettings, record: &ExecutionRecord) {
+    let Some(workspace) = record
+        .effective_policy
+        .as_ref()
+        .and_then(|policy| policy.filesystem.as_ref())
+        .and_then(|filesystem| filesystem.composition.as_ref())
+        .and_then(|composition| composition.workspace.as_ref())
+        .map(|workspace| Path::new(&workspace.write))
+    else {
+        return;
+    };
+    let root = settings.state_dir.join("sandbox-workspaces");
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
+    let canonical = std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
+    let owned_name = workspace
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("workspace-"))
+        .is_some_and(|suffix| uuid::Uuid::parse_str(suffix).is_ok());
+    if canonical.starts_with(&root) && canonical.parent() == Some(root.as_path()) && owned_name {
+        let _ = std::fs::remove_dir_all(canonical);
+    }
+}
+
 /// Remove the record and the execution directory.
 pub(crate) fn remove_owned_paths(
     settings: &SandboxSettings,
@@ -739,6 +797,7 @@ pub(crate) fn remove_owned_paths(
     if safe_dir {
         let _ = std::fs::remove_dir_all(execution_dir);
     }
+    remove_owned_composition_workspace(settings, record);
     // The channel directory lives under the short runtime root, not the state
     // dir. Remove only the directory whose name is this execution's id and
     // whose parent is the configured root; an unknown path is left untouched.
