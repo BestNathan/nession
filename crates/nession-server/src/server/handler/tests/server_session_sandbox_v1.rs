@@ -277,3 +277,197 @@ async fn an_agent_transport_failure_is_a_typed_unavailable_result() {
     assert_eq!(reply["payload"]["success"], false);
     assert_eq!(reply["payload"]["error_kind"], "unavailable");
 }
+
+async fn insert_ready_image(h: &ConnectionHandler, image_id: &str, digest: &str) {
+    h.db.insert_image(&crate::db::ImageRow {
+        image_id: image_id.to_string(),
+        digest: Some(digest.to_string()),
+        size_bytes: 1,
+        source_json: serde_json::json!({
+            "kind": "local_directory",
+            "path": "/tmp/nession-test-image",
+        })
+        .to_string(),
+        source_sha: None,
+        packaging_json: serde_json::to_string(
+            &nession_protocol::contracts::image::v1::ImagePackaging::default(),
+        )
+        .unwrap(),
+        status: "ready".to_string(),
+        error: None,
+        created_at: 1,
+        updated_at: 1,
+    })
+    .await
+    .unwrap();
+}
+
+fn base_digest() -> String {
+    format!("sha256:{}", "a".repeat(64))
+}
+
+fn tool_digest() -> String {
+    format!("sha256:{}", "b".repeat(64))
+}
+
+#[tokio::test]
+async fn preflight_forwards_image_selection_metadata_and_refuses_a_missing_base() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.preflight",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "policy": { "enabled": true },
+            "images": [{
+                "role": "base",
+                "digest": base_digest(),
+                "mode": "read_only",
+            }],
+            "working_dir": "/workspace",
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.preflight",
+            json!({
+                "success": true,
+                "result": {
+                    "ok": true,
+                    "generation": "gen-1",
+                    "mechanisms": ["filesystem.erofs"],
+                    "errors": [],
+                    "warnings": [],
+                    "catalog": {
+                        "status": "available",
+                        "platform": "linux",
+                        "backend": "linux-bwrap",
+                        "probe_generation": "probe-1",
+                        "source": "agent-host-probe",
+                        "resource_fields": [],
+                        "syscall_fields": [],
+                    },
+                }
+            }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(sent["payload"]["images"][0]["role"], "base");
+    assert!(sent["payload"]["images"][0].get("token").is_none());
+    assert_eq!(reply["payload"]["ok"], true);
+
+    let refusal = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.sandbox.preflight",
+            json!({
+                "session_id": "a1:s1",
+                "generation": "gen-1",
+                "policy": { "enabled": true },
+                "images": [{
+                    "role": "toolchain",
+                    "digest": tool_digest(),
+                    "target": "/opt/tool",
+                    "mode": "read_only",
+                }],
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(refusal["payload"]["ok"], false);
+    assert_eq!(refusal["payload"]["errors"][0]["field"], "images.base");
+}
+
+#[tokio::test]
+async fn enter_authorizes_each_image_and_forwards_scoped_grants() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    insert_ready_image(&h, "image-base", &base_digest()).await;
+    insert_ready_image(&h, "image-tool", &tool_digest()).await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.enter",
+        json!({
+            "session_id": "a1:s1",
+            "generation": "gen-1",
+            "probe_generation": "probe-1",
+            "enter_id": "enter-images",
+            "policy": { "enabled": true },
+            "images": [
+                { "role": "base", "digest": base_digest(), "mode": "read_only" },
+                { "role": "toolchain", "digest": tool_digest(), "target": "/opt/tool", "mode": "read_only" }
+            ],
+        }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.enter",
+            json!({
+                "success": true,
+                "result": {
+                    "success": false,
+                    "error_kind": "conflict",
+                    "error": "test refusal after authorization",
+                }
+            }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    let images = sent["payload"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0]["role"], "base");
+    assert_eq!(images[1]["role"], "toolchain");
+    assert_eq!(images[1]["target"], "/opt/tool");
+    assert!(images[0]["token"].as_str().unwrap().len() == 64);
+    assert_eq!(
+        images[1]["path"],
+        format!("/images/blobs/{}", tool_digest())
+    );
+    assert_eq!(reply["payload"]["error_kind"], "conflict");
+}
+
+#[tokio::test]
+async fn context_relays_per_digest_cache_statuses() {
+    let mut h = handler_with_online_agent().await;
+    register_session(&h, "a1:s1").await;
+    let (broker, mut rx) = claim_agent(&h).await;
+
+    let handled = h.handle_message(proto_msg(
+        "server.session.sandbox.context",
+        json!({ "session_id": "a1:s1", "cache_digests": [base_digest()] }),
+    ));
+    let agent = async move {
+        answer_agent_frame(
+            &mut rx,
+            &broker,
+            "agent.session.sandbox.context",
+            json!({
+                "success": true,
+                "context": context_payload(),
+                "cache_statuses": [{
+                    "digest": base_digest(),
+                    "state": "verified",
+                }],
+            }),
+        )
+        .await
+    };
+    let (action, sent) = tokio::join!(handled, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(sent["payload"]["cache_digests"][0], base_digest());
+    assert_eq!(reply["payload"]["cache_statuses"][0]["state"], "verified");
+}

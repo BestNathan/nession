@@ -1,4 +1,5 @@
 import { Input } from '@/components/ui/input';
+import { ProjectImageReferenceField } from './ProjectImageReferenceField';
 import {
   FormField,
   FormGrid,
@@ -114,20 +115,12 @@ function ProjectImageField({
 }) {
   return (
     <FormSection title="Image">
-      <FormField
-        id={`${idPrefix}-digest`}
-        label="Image digest reference (optional)"
-        description="A reference only. The Project never owns the image bytes."
-      >
-        <Input
-          id={`${idPrefix}-digest`}
-          value={draft.image_digest ?? ''}
-          onChange={(event) => onChange({ ...draft, image_digest: event.target.value })}
-          placeholder="sha256:<64 lowercase hex>"
-          disabled={disabled}
-          autoComplete="off"
-        />
-      </FormField>
+      <ProjectImageReferenceField
+        draft={draft}
+        onChange={onChange}
+        disabled={disabled}
+        idPrefix={idPrefix}
+      />
     </FormSection>
   );
 }

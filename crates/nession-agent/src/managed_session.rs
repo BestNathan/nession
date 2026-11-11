@@ -45,7 +45,7 @@ pub struct PreparedManagedSession {
 /// The Server states an authorized route, never a URL: the Agent is the side
 /// that knows how it reaches its Server (`ws://`/`wss://`), so the scheme and
 /// origin come from here and the path comes from the grant.
-fn blob_origin(server_url: &str) -> Result<String> {
+pub(crate) fn blob_origin(server_url: &str) -> Result<String> {
     let url = reqwest::Url::parse(server_url)
         .with_context(|| format!("the Agent's server_url '{server_url}' is not a URL"))?;
     let scheme = match url.scheme() {

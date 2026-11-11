@@ -32,6 +32,12 @@ generation: string,
  */
 probe_generation: string, policy: SandboxPolicyDraft, 
 /**
+ * Optional image composition for this Enter. Each digest is authorized by
+ * the Server against the authenticated Session before the Agent prepares
+ * it; the Web contract carries no local cache path.
+ */
+images: Array<SandboxImageSelection>, 
+/**
  * The Pane's initial working directory. Empty asks the Agent to use the
  * active Pane's own current directory.
  */
@@ -171,6 +177,19 @@ resource: Array<SandboxKvEntry>,
  * `syscall.seccomp` rows; empty means the group is omitted.
  */
 syscall: Array<SandboxKvEntry>, enforcement: SandboxEnforcement, };
+export type SandboxImageRole = "base" | "workspace" | "toolchain";
+export type SandboxImageMode = "read_only" | "overlay";
+export type SandboxImageSelection = { role: SandboxImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of a Server Ready image.
+ */
+digest: string, 
+/**
+ * `/opt/<name>` for a toolchain; absent for the other roles.
+ */
+target?: string | null, mode: SandboxImageMode, };
+export type ImageCacheState = "verified" | "preparing" | "absent" | "failed" | "unavailable";
+export type ImageCacheStatus = { digest: string, state: ImageCacheState, detail?: string | null, };
 export type SandboxKvEntry = { key: string, value: string, };
 export type SandboxEnforcement = "required";
 export type SandboxFilesystemPolicy = { access: SandboxFilesystemAccess, };
@@ -235,6 +254,24 @@ export type SandboxActionResult = { success: boolean, error_kind?: SandboxAction
  */
 context?: SandboxCurrentContext | null, };
 export type SandboxActionErrorKind = "conflict" | "invalid" | "unavailable" | "failed";
+export type ManagedImageGrant = { role: ManagedImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of the exact bytes.
+ */
+digest: string, 
+/**
+ * Authorized route, `/images/blobs/<digest>`.
+ */
+path: string, 
+/**
+ * Scoped bearer grant for exactly this digest.
+ */
+token: string, 
+/**
+ * `/opt/<name>` for a toolchain image; absent otherwise.
+ */
+target?: string | null, };
+export type ManagedImageRole = "base" | "workspace" | "toolchain";
 
 // ── Operations ──
 
@@ -249,6 +286,12 @@ generation: string,
  * capability change between composition and preflight is stale.
  */
 probe_generation: string, policy: SandboxPolicyDraft, 
+/**
+ * Optional image composition for this Enter. Each digest is authorized by
+ * the Server against the authenticated Session before the Agent prepares
+ * it; the Web contract carries no local cache path.
+ */
+images: Array<SandboxImageSelection>, 
 /**
  * The Pane's initial working directory. Empty asks the Agent to use the
  * active Pane's own current directory.

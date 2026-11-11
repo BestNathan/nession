@@ -10,7 +10,7 @@ use nession_protocol::contracts::image::v1::ImageListPayload;
 const WIRE: &str = "server.image.list";
 
 impl ConnectionHandler {
-    /// `server.image.list` — newest builds first, bounded.
+    /// `server.image.list` — newest builds first, with complete pagination.
     pub(super) async fn handle_client_image_list(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -18,12 +18,16 @@ impl ConnectionHandler {
         if !self.authenticated_client {
             return Ok(image_unauthenticated_reply(&msg.id, WIRE));
         }
-        let _: ImageListPayload = match parse_image_payload(&msg.id, WIRE, msg.payload) {
+        let payload: ImageListPayload = match parse_image_payload(&msg.id, WIRE, msg.payload) {
             Ok(payload) => payload,
             Err(reply) => return Ok(reply),
         };
-        match self.image_manager.list(200).await {
-            Ok(images) => Ok(image_list_reply(&msg.id, WIRE, &images)),
+        match self
+            .image_manager
+            .list(payload.offset, payload.limit, &payload.query)
+            .await
+        {
+            Ok(page) => Ok(image_list_reply(&msg.id, WIRE, &page)),
             Err(error) => Ok(image_error_reply(
                 &msg.id,
                 WIRE,

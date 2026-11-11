@@ -11,7 +11,7 @@ import type { CapsuleCapabilityContribution } from '@/app/capsulePresence';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { TerminalWell } from '@/app/TerminalWell';
-import type { CapabilityId } from '@/product/capability';
+import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { CapabilityFocus, Experience } from '@/app/workspace/workspaceContext';
 import type { Surface } from '@/app/patterns/SessionHeader';
 import { SessionMainHeader } from '@/app/SessionMainHeader';
@@ -134,11 +134,13 @@ function NoSessionSurface({
   onCreate,
   onBrowse,
   createDisabled,
+  onOpenImages,
 }: {
   experience: Experience;
   onCreate: () => void;
   onBrowse: () => void;
   createDisabled: boolean;
+  onOpenImages: () => void;
 }) {
   if (experience === 'app') {
     return (
@@ -146,6 +148,7 @@ function NoSessionSurface({
         onCreate={onCreate}
         onBrowse={onBrowse}
         createDisabled={createDisabled}
+        onOpenImages={onOpenImages}
       />
     );
   }
@@ -155,7 +158,91 @@ function NoSessionSurface({
       className={cn('flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted-foreground', chromeSansRole('secondary'))}
     >
       <p>Select a session to start working</p>
+      <Button
+        type="button"
+        variant="ghost"
+        data-testid="session-empty-open-images"
+        onClick={() => onOpenImages()}
+      >
+        Server Images
+      </Button>
     </div>
+  );
+}
+
+/**
+ * The no-Session work area: either the Workspace (where Images is discoverable
+ * without a Session) or the experience's ordinary empty/home screen.
+ */
+function NoSessionWorkArea({
+  surface,
+  showWorkspace,
+  agents,
+  tool,
+  fileOps,
+  experience,
+  facts,
+  onSurfaceChange,
+  onToolChange,
+  onWorkspaceDepthChange,
+  focus,
+  onFocusConsumed,
+  openWorktreeSession,
+  sessionProject,
+  onCreate,
+  onOpenDrawer,
+}: {
+  surface: Surface;
+  showWorkspace: boolean;
+  agents: Agent[];
+  tool: CapabilityId;
+  fileOps: FileOps | null;
+  experience: Experience;
+  facts: CapabilityFacts | undefined;
+  onSurfaceChange: (surface: Surface) => void;
+  onToolChange: (tool: CapabilityId) => void;
+  onWorkspaceDepthChange?: (pushed: boolean) => void;
+  focus: CapabilityFocus | undefined;
+  onFocusConsumed: (() => void) | undefined;
+  openWorktreeSession: ShellMainProps['onOpenWorktreeSession'];
+  sessionProject: SessionProjectContext | undefined;
+  onCreate: () => void;
+  onOpenDrawer?: () => void;
+}) {
+  if (surface === 'workspace' && showWorkspace) {
+    return (
+      <WorkspacePanel
+        selectedSession={null}
+        selectedAgent={undefined}
+        agents={agents}
+        domain={null}
+        surface={surface}
+        tool={tool}
+        fileOps={fileOps}
+        experience={experience}
+        facts={facts}
+        onSurfaceChange={onSurfaceChange}
+        onToolChange={onToolChange}
+        onDepthChange={onWorkspaceDepthChange}
+        focus={focus}
+        onFocusConsumed={onFocusConsumed}
+        openWorktreeSession={openWorktreeSession}
+        focusedProject={sessionProject?.focusedProject}
+        sessionProject={sessionProject}
+      />
+    );
+  }
+  return (
+    <NoSessionSurface
+      experience={experience}
+      onCreate={onCreate}
+      onBrowse={() => onOpenDrawer?.()}
+      createDisabled={agents.every((agent) => agent.status !== 'online')}
+      onOpenImages={() => {
+        onToolChange('images');
+        onSurfaceChange('workspace');
+      }}
+    />
   );
 }
 
@@ -350,28 +437,12 @@ export function ShellMain({
   sessionProject,
 }: ShellMainProps) {
   const hasSession = selectedSession !== null && domain !== null;
-  const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(
-    incomingFocus,
-    onIncomingFocusApplied,
-  );
-  const { openTool, openWorkspaceFromCapsule } = useShellMainFocusTooling(
-    setFocus,
-    onToolChange,
-    onSurfaceChange,
-  );
-  const { facts, capsuleCapabilities, projection, sessionContextAction } =
-    useSessionCapsuleChrome({
-      selectedSession,
-      selectedAgent,
-      agents,
-      domain,
-      fileOps,
-      experience,
-      openTool,
-      onSurfaceChange,
-      openWorkspaceFromCapsule,
-      sessionProject,
-    });
+  const { focus, setFocus, consumeFocus } = useIncomingCapabilityFocus(incomingFocus, onIncomingFocusApplied);
+  const { openTool, openWorkspaceFromCapsule } = useShellMainFocusTooling(setFocus, onToolChange, onSurfaceChange);
+  const { facts, capsuleCapabilities, projection, sessionContextAction } = useSessionCapsuleChrome({
+    selectedSession, selectedAgent, agents, domain, fileOps, experience,
+    openTool, onSurfaceChange, openWorkspaceFromCapsule, sessionProject,
+  });
   const workContext = useWorkSignals(facts);
   const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
   const capsuleZoneRef = useRef<HTMLDivElement>(null);
@@ -403,11 +474,23 @@ export function ShellMain({
         data-testid="main-content"
         className="relative flex min-h-0 flex-1 flex-col gap-0">
         {!hasSession ? (
-          <NoSessionSurface
+          <NoSessionWorkArea
+            surface={surface}
+            showWorkspace={showWorkspace}
+            agents={agents}
+            tool={tool}
+            fileOps={fileOps}
             experience={experience}
+            facts={facts}
+            onSurfaceChange={onSurfaceChange}
+            onToolChange={openTool}
+            onWorkspaceDepthChange={onWorkspaceDepthChange}
+            focus={focus}
+            onFocusConsumed={consumeFocus}
+            openWorktreeSession={onOpenWorktreeSession}
+            sessionProject={sessionProject}
             onCreate={() => onCreate?.()}
-            onBrowse={() => onOpenDrawer?.()}
-            createDisabled={agents.every((agent) => agent.status !== 'online')}
+            onOpenDrawer={onOpenDrawer}
           />
         ) : (
           <>

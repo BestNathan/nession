@@ -10,6 +10,7 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
+import { useSandboxImages, type SandboxImagesState } from '../hooks/useSandboxImages';
 import {
   useSandboxPreflight,
   type SandboxPreflightState,
@@ -51,6 +52,7 @@ interface SandboxBodyProps {
   actionError: SandboxActionError | null;
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
+  images: SandboxImagesState;
   experience: 'web' | 'app';
   activeTab: SandboxTabId;
   onTabChange: (tab: SandboxTabId) => void;
@@ -65,6 +67,7 @@ function SandboxBody({
   actionError,
   workingDir,
   onWorkingDirChange,
+  images,
   experience,
   activeTab,
   onTabChange,
@@ -139,6 +142,7 @@ function SandboxBody({
       actionError={actionError}
       workingDir={workingDir}
       onWorkingDirChange={onWorkingDirChange}
+      images={images}
       onPreflight={() => preflightState.runPreflight(draft.draft)}
       onRequestEnter={transitions.requestEnter}
       onFocusPane={transitions.focusPane}
@@ -176,14 +180,17 @@ export function SandboxWorkspace({
   const [activeTab, setActiveTab] = useState<SandboxTabId>('overview');
   const sandbox = useSandboxContext(sessionId);
   const draft = useSandboxDraft(sandbox.context);
+  const images = useSandboxImages(sessionId);
   const [workingDir, setWorkingDir] = useState('');
   const preflightState = useSandboxPreflight({
     sessionId,
     context: sandbox.context,
+    images: images.selections,
     workingDir,
   });
   const transitions = useSandboxTransitions({
     sessionId,
+    images: images.selections,
     workingDir,
     applyContext: sandbox.applyContext,
   });
@@ -236,6 +243,7 @@ export function SandboxWorkspace({
           actionError={actionError}
           workingDir={workingDir}
           onWorkingDirChange={setWorkingDir}
+          images={images}
           experience={ctx.experience}
           activeTab={activeTab}
           onTabChange={setActiveTab}

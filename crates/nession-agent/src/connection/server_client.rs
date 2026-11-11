@@ -4578,6 +4578,31 @@ core_routes!(agent, msg, responses;
                                 (false, None, Some(format!("{e:#}")))
                             }
                         };
+                    let cache_statuses = if payload.cache_digests.is_empty() {
+                        Vec::new()
+                    } else if let Some(cache) = agent
+                        .tmux
+                        .sandbox_runtime()
+                        .and_then(|runtime| runtime.erofs_cache())
+                    {
+                        let mut statuses = Vec::with_capacity(payload.cache_digests.len());
+                        for digest in &payload.cache_digests {
+                            statuses.push(cache.status(digest).await);
+                        }
+                        statuses
+                    } else {
+                        payload
+                            .cache_digests
+                            .iter()
+                            .map(|digest| nession_protocol::contracts::image::v1::ImageCacheStatus {
+                                digest: digest.clone(),
+                                state: nession_protocol::contracts::image::v1::ImageCacheState::Unavailable,
+                                detail: Some(
+                                    "this Agent has no EROFS cache configured".to_string(),
+                                ),
+                            })
+                            .collect()
+                    };
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
                         "id": uuid::Uuid::new_v4().to_string(),
@@ -4588,6 +4613,7 @@ core_routes!(agent, msg, responses;
                             "success": success,
                             "context": context,
                             "error": error,
+                            "cache_statuses": cache_statuses,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4621,6 +4647,7 @@ core_routes!(agent, msg, responses;
                             &payload.generation,
                             &payload.probe_generation,
                             &payload.policy,
+                            &payload.images,
                             &payload.working_dir,
                         )
                         .await;
@@ -4661,14 +4688,16 @@ core_routes!(agent, msg, responses;
                     let request_id = payload.request_id.clone();
                     let result = agent
                         .tmux
-                        .sandbox_enter(
-                            &payload.session_name,
-                            &payload.generation,
-                            &payload.probe_generation,
-                            &payload.enter_id,
-                            &payload.policy,
-                            &payload.working_dir,
-                        )
+                        .sandbox_enter(crate::tmux::sandbox_context::SandboxEnterInput {
+                            session_name: &payload.session_name,
+                            generation: &payload.generation,
+                            probe_generation: &payload.probe_generation,
+                            enter_id: &payload.enter_id,
+                            draft: &payload.policy,
+                            images: &payload.images,
+                            server_url: &agent.server_url,
+                            working_dir: &payload.working_dir,
+                        })
                         .await;
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",

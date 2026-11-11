@@ -2,6 +2,7 @@ import {
   WIRE as CONTEXT_WIRE,
   type SandboxActionResult,
   type SandboxContextResponse,
+  type SandboxImageSelection,
   type SandboxPolicyDraft,
   type SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
@@ -39,10 +40,30 @@ export class SandboxPlugin implements TransportPlugin {
   }
 
   /** The active Pane's authenticated context for one Session. */
-  async context(sessionId: string): Promise<SandboxContextResponse> {
+  async context(
+    sessionId: string,
+    cacheDigests: readonly string[] = [],
+  ): Promise<SandboxContextResponse> {
     return this.requireConnection().request<SandboxContextResponse>(CONTEXT_WIRE, {
       session_id: sessionId,
+      cache_digests: [...cacheDigests],
     });
+  }
+
+  /**
+   * Per-digest Agent cache observations. This reuses the context wire so the
+   * Agent answers with the same authenticated Session identity; it does not
+   * create a second cache-status protocol.
+   */
+  async imageCacheStatuses(
+    sessionId: string,
+    cacheDigests: readonly string[],
+  ): Promise<SandboxContextResponse['cache_statuses']> {
+    const response = await this.context(sessionId, cacheDigests);
+    if (!response.success) {
+      throw new Error(response.error ?? 'Agent image cache status is unavailable');
+    }
+    return response.cache_statuses;
   }
 
   /** Validate one draft against the exact context generation. */
@@ -51,6 +72,7 @@ export class SandboxPlugin implements TransportPlugin {
     generation: string;
     probeGeneration: string;
     policy: SandboxPolicyDraft;
+    images?: readonly SandboxImageSelection[];
     workingDir: string;
   }): Promise<SandboxPreflightResult> {
     return this.requireConnection().request<SandboxPreflightResult>(PREFLIGHT_WIRE, {
@@ -58,6 +80,7 @@ export class SandboxPlugin implements TransportPlugin {
       generation: request.generation,
       probe_generation: request.probeGeneration,
       policy: request.policy,
+      images: request.images ? [...request.images] : [],
       working_dir: request.workingDir,
     });
   }
@@ -73,6 +96,7 @@ export class SandboxPlugin implements TransportPlugin {
     probeGeneration: string;
     enterId: string;
     policy: SandboxPolicyDraft;
+    images?: readonly SandboxImageSelection[];
     workingDir: string;
   }): Promise<SandboxActionResult> {
     return this.requireConnection().request<SandboxActionResult>(ENTER_WIRE, {
@@ -81,6 +105,7 @@ export class SandboxPlugin implements TransportPlugin {
       probe_generation: request.probeGeneration,
       enter_id: request.enterId,
       policy: request.policy,
+      images: request.images ? [...request.images] : [],
       working_dir: request.workingDir,
     });
   }

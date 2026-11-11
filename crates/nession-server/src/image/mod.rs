@@ -20,7 +20,7 @@ use nession_erofs::{BlobStore, BuiltImage, ErofsBuilder};
 use nession_protocol::contracts::image::v1::{
     is_valid_image_digest, normalize_alias, normalize_image_digest, normalize_image_source,
     ImageDescriptor, ImagePackaging, ImageSource, ImageStatus, NormalizedImageSource,
-    IMAGE_BLOB_PATH_PREFIX,
+    IMAGE_BLOB_PATH_PREFIX, IMAGE_LIST_MAX_LIMIT,
 };
 use nession_protocol::contracts::project::v1::is_valid_project_id;
 
@@ -85,6 +85,20 @@ impl std::fmt::Display for ImageError {
 }
 
 impl std::error::Error for ImageError {}
+
+/// One page of the complete registry inventory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageListPage {
+    pub images: Vec<ImageDescriptor>,
+    pub total: u64,
+    pub next_offset: Option<u32>,
+}
+
+/// The single consumer context a grant is scoped to.
+enum GrantConsumer<'a> {
+    Project(&'a str),
+    Session(&'a str),
+}
 
 impl From<nession_protocol::contracts::image::v1::ImageValidationError> for ImageError {
     fn from(error: nession_protocol::contracts::image::v1::ImageValidationError) -> Self {
@@ -271,7 +285,7 @@ impl ImageManager {
                             ImageError::Unavailable(format!("image alias failed: {e:#}"))
                         })?;
                 }
-                return self.descriptor(&existing, alias.clone());
+                return self.descriptor_with_aliases(&existing, alias.clone()).await;
             }
         }
 
@@ -296,16 +310,60 @@ impl ImageManager {
                 .await
                 .map_err(|e| ImageError::Unavailable(format!("image alias failed: {e:#}")))?;
         }
-        self.descriptor(&finished, alias)
+        self.descriptor_with_aliases(&finished, alias).await
     }
 
-    pub async fn list(&self, limit: u64) -> Result<Vec<ImageDescriptor>, ImageError> {
-        let rows = self
+    pub async fn list(
+        &self,
+        offset: u32,
+        limit: u32,
+        query: &str,
+    ) -> Result<ImageListPage, ImageError> {
+        let limit = limit.clamp(1, IMAGE_LIST_MAX_LIMIT);
+        let total = self
             .db
-            .list_images(limit.clamp(1, 200))
+            .count_images(query)
             .await
             .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
-        rows.iter().map(|row| self.descriptor(row, None)).collect()
+        let rows = self
+            .db
+            .list_images_page(u64::from(offset), u64::from(limit), query)
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+        let aliases = self
+            .db
+            .list_image_aliases()
+            .await
+            .map_err(|e| ImageError::Unavailable(format!("image list failed: {e:#}")))?;
+        let mut aliases_by_digest: HashMap<String, Vec<String>> = HashMap::new();
+        for (alias, digest) in aliases {
+            aliases_by_digest.entry(digest).or_default().push(alias);
+        }
+        let images = rows
+            .iter()
+            .map(|row| {
+                let digest_aliases = row
+                    .digest
+                    .as_ref()
+                    .and_then(|digest| aliases_by_digest.get(digest))
+                    .cloned()
+                    .unwrap_or_default();
+                self.descriptor(row, None, digest_aliases)
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let consumed = u32::try_from(images.len()).map_err(|_| {
+            ImageError::Unavailable("image page is larger than the protocol offset".to_string())
+        })?;
+        let next_offset = if u64::from(offset) + u64::from(consumed) < total {
+            Some(offset.saturating_add(consumed))
+        } else {
+            None
+        };
+        Ok(ImageListPage {
+            images,
+            total,
+            next_offset,
+        })
     }
 
     pub async fn get(
@@ -340,7 +398,7 @@ impl ImageManager {
                 ))
             }
         };
-        self.descriptor(&row, used_alias)
+        self.descriptor_with_aliases(&row, used_alias).await
     }
 
     /// Mint a scoped read grant for one Project's referenced digest.
@@ -349,7 +407,8 @@ impl ImageManager {
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(project_id, digest, true).await
+        self.mint_access_grant(GrantConsumer::Project(project_id), digest, true, false)
+            .await
     }
 
     /// Mint a scoped read grant for a Server-resolved Managed Session artifact
@@ -365,20 +424,61 @@ impl ImageManager {
         project_id: &str,
         digest: &str,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        self.mint_access_grant(project_id, digest, false).await
+        self.mint_access_grant(GrantConsumer::Project(project_id), digest, false, false)
+            .await
+    }
+
+    /// Mint a Session-scoped grant for a digest the Session's Managed context
+    /// already resolved. Knowing a digest or another Session's identity is not
+    /// authorization.
+    pub async fn grant_session_access(
+        &self,
+        session_id: &str,
+        digest: &str,
+    ) -> std::result::Result<ImageAccessGrant, ImageError> {
+        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, true)
+            .await
+    }
+
+    /// Mint a Session-scoped grant for an explicit Sandbox composition image.
+    ///
+    /// The caller has already resolved the authenticated Session and Agent; the
+    /// grant is still bound to one `(session_id, digest)` so a token cannot be
+    /// replayed for another digest or claimed by another consumer.
+    pub async fn grant_sandbox_access(
+        &self,
+        session_id: &str,
+        digest: &str,
+    ) -> std::result::Result<ImageAccessGrant, ImageError> {
+        self.mint_access_grant(GrantConsumer::Session(session_id), digest, false, false)
+            .await
     }
 
     async fn mint_access_grant(
         &self,
-        project_id: &str,
+        consumer: GrantConsumer<'_>,
         digest: &str,
         require_project_reference: bool,
+        require_session_membership: bool,
     ) -> std::result::Result<ImageAccessGrant, ImageError> {
-        if !is_valid_project_id(project_id) {
-            return Err(ImageError::Invalid(
-                "project_id is not a valid Project identity".to_string(),
-            ));
-        }
+        let (project_id, session_id) = match consumer {
+            GrantConsumer::Project(project_id) => {
+                if !is_valid_project_id(project_id) {
+                    return Err(ImageError::Invalid(
+                        "project_id is not a valid Project identity".to_string(),
+                    ));
+                }
+                (Some(project_id.to_string()), None)
+            }
+            GrantConsumer::Session(session_id) => {
+                if session_id.is_empty() {
+                    return Err(ImageError::Invalid(
+                        "session_id must not be empty".to_string(),
+                    ));
+                }
+                (None, Some(session_id.to_string()))
+            }
+        };
         let digest = normalize_image_digest(digest)?;
         let row = self
             .db
@@ -392,6 +492,11 @@ impl ImageManager {
             ));
         }
         if require_project_reference {
+            let Some(project_id) = project_id.as_deref() else {
+                return Err(ImageError::Invalid(
+                    "a Project reference requires project_id".to_string(),
+                ));
+            };
             let referenced = self
                 .db
                 .project_references_image(project_id, &digest)
@@ -402,6 +507,36 @@ impl ImageManager {
             if !referenced {
                 return Err(ImageError::Forbidden(
                     "Project does not reference this image".to_string(),
+                ));
+            }
+        }
+        if require_session_membership {
+            let Some(session_id) = session_id.as_deref() else {
+                return Err(ImageError::Invalid(
+                    "a Session reference requires session_id".to_string(),
+                ));
+            };
+            let context = self
+                .db
+                .get_session_managed_context(session_id)
+                .await
+                .map_err(|e| ImageError::Unavailable(format!("image authorization failed: {e:#}")))?
+                .filter(|context| context.status == "ready")
+                .ok_or_else(|| {
+                    ImageError::Forbidden("Session has no ready managed image context".to_string())
+                })?;
+            let allowed = std::iter::once(context.base_digest.as_str())
+                .chain(std::iter::once(context.workspace_digest.as_str()))
+                .chain(
+                    context
+                        .toolchains
+                        .iter()
+                        .map(|toolchain| toolchain.digest.as_str()),
+                )
+                .any(|allowed| allowed == digest);
+            if !allowed {
+                return Err(ImageError::Forbidden(
+                    "Session does not reference this image".to_string(),
                 ));
             }
         }
@@ -417,7 +552,8 @@ impl ImageManager {
             .insert_image_access_grant(&ImageGrantRow {
                 token_hash,
                 image_digest: digest.clone(),
-                project_id: project_id.to_string(),
+                project_id,
+                session_id,
                 expires_at: expires_at as i64,
             })
             .await
@@ -583,6 +719,7 @@ impl ImageManager {
         &self,
         row: &ImageRow,
         alias: Option<String>,
+        aliases: Vec<String>,
     ) -> std::result::Result<ImageDescriptor, ImageError> {
         let source: ImageSource = serde_json::from_str(&row.source_json).map_err(|e| {
             ImageError::Unavailable(format!("stored image source is unreadable: {e}"))
@@ -603,9 +740,27 @@ impl ImageManager {
             status,
             error: row.error.clone(),
             alias,
+            aliases,
             created_at: u64::try_from(row.created_at).unwrap_or(0),
             updated_at: u64::try_from(row.updated_at).unwrap_or(0),
         })
+    }
+
+    /// Resolve a descriptor and the aliases that currently name its digest.
+    async fn descriptor_with_aliases(
+        &self,
+        row: &ImageRow,
+        alias: Option<String>,
+    ) -> std::result::Result<ImageDescriptor, ImageError> {
+        let aliases = match row.digest.as_ref() {
+            Some(digest) => self
+                .db
+                .aliases_for_digest(digest)
+                .await
+                .map_err(|e| ImageError::Unavailable(format!("image read failed: {e:#}")))?,
+            None => Vec::new(),
+        };
+        self.descriptor(row, alias, aliases)
     }
 }
 
@@ -804,7 +959,7 @@ mod tests {
             .unwrap();
         assert_eq!(first.digest, second.digest);
         assert_eq!(first.status, ImageStatus::Ready);
-        let images = manager.list(10).await.unwrap();
+        let images = manager.list(0, 10, "").await.unwrap().images;
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].digest, first.digest);
         assert_eq!(images[0].alias, None);
@@ -816,6 +971,69 @@ mod tests {
         );
         let by_alias = manager.get(None, Some("latest")).await.unwrap();
         assert_eq!(by_alias.digest, first.digest);
+    }
+
+    #[tokio::test]
+    async fn a_complete_inventory_pages_past_two_hundred_and_reports_aliases() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, _backend, db) = manager(dir.path()).await;
+        let packaging = serde_json::to_string(&ImagePackaging::default()).unwrap();
+        let source = serde_json::to_string(&local("/source/page")).unwrap();
+        for index in 0..235_u64 {
+            let digest = format!("sha256:{index:064x}");
+            let image_id = format!("image-page-{index}");
+            db.insert_image(&crate::db::ImageRow {
+                image_id: image_id.clone(),
+                digest: Some(digest.clone()),
+                size_bytes: 1,
+                source_json: source.clone(),
+                source_sha: None,
+                packaging_json: packaging.clone(),
+                status: ImageStatus::Ready.as_str().to_string(),
+                error: None,
+                created_at: index as i64,
+                updated_at: index as i64,
+            })
+            .await
+            .unwrap();
+            if index == 0 {
+                db.upsert_image_alias("paged-latest", &digest, 1)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let first = manager.list(0, 200, "").await.unwrap();
+        assert_eq!(first.total, 235);
+        assert_eq!(first.images.len(), 200);
+        assert_eq!(first.next_offset, Some(200));
+        assert_eq!(first.images[0].image_id, "image-page-234");
+        assert_eq!(first.images[0].aliases, Vec::<String>::new());
+
+        let second = manager.list(200, 200, "").await.unwrap();
+        assert_eq!(second.total, 235);
+        assert_eq!(second.images.len(), 35);
+        assert_eq!(second.next_offset, None);
+        let aliased = second
+            .images
+            .iter()
+            .find(|image| image.image_id == "image-page-0")
+            .expect("aliased image is on the second page");
+        assert_eq!(aliased.aliases, vec!["paged-latest".to_string()]);
+
+        let past_end = manager.list(400, 50, "").await.unwrap();
+        assert_eq!(past_end.total, 235);
+        assert!(past_end.images.is_empty());
+        assert_eq!(past_end.next_offset, None);
+
+        let by_alias = manager.list(0, 50, "paged-latest").await.unwrap();
+        assert_eq!(by_alias.total, 1);
+        assert_eq!(by_alias.images[0].image_id, "image-page-0");
+        let by_source = manager.list(0, 50, "source/page").await.unwrap();
+        assert_eq!(by_source.total, 235);
+        let no_match = manager.list(0, 50, "does-not-exist").await.unwrap();
+        assert_eq!(no_match.total, 0);
+        assert!(no_match.images.is_empty());
     }
 
     #[tokio::test]
@@ -850,7 +1068,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.kind(), "build_failed");
-        let images = manager.list(10).await.unwrap();
+        let images = manager.list(0, 10, "").await.unwrap().images;
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].status, ImageStatus::Failed);
         assert_eq!(images[0].digest, None);
@@ -865,6 +1083,81 @@ mod tests {
             .read_dir()
             .map(|mut d| d.next().is_some())
             .unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn a_session_grant_is_bounded_by_its_managed_context_and_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, backend, db) = manager(dir.path()).await;
+        backend.set("/source/base", b"base image");
+        backend.set("/source/tool", b"tool image");
+        backend.set("/source/other", b"other image");
+        let base = manager.build(&local("/source/base"), None).await.unwrap();
+        let tool = manager.build(&local("/source/tool"), None).await.unwrap();
+        let other = manager.build(&local("/source/other"), None).await.unwrap();
+        let base_digest = base.digest.clone().unwrap();
+        let tool_digest = tool.digest.clone().unwrap();
+        let other_digest = other.digest.clone().unwrap();
+        db.begin_session_managed_context(&crate::db::SessionManagedContextRow {
+            session_id: "a1:s1".to_string(),
+            agent_id: "a1".to_string(),
+            project_id: "project-00000000-0000-0000-0000-000000000001".to_string(),
+            attempt_id: "attempt-1".to_string(),
+            base_digest: base_digest.clone(),
+            workspace_digest: base_digest.clone(),
+            toolchains: vec![
+                nession_protocol::contracts::session::v1::ManagedToolchainRequest {
+                    digest: tool_digest.clone(),
+                    target: "/opt/tool".to_string(),
+                },
+            ],
+            source_sha: None,
+            workspace: None,
+            status: "ready".to_string(),
+            error: None,
+            updated_at: now_i64(),
+        })
+        .await
+        .unwrap();
+
+        let base_grant = manager
+            .grant_session_access("a1:s1", &base_digest)
+            .await
+            .unwrap();
+        manager
+            .authorize(&base_grant.token, &base_digest)
+            .await
+            .unwrap();
+        assert!(manager
+            .grant_session_access("a1:s1", &other_digest)
+            .await
+            .is_err());
+        assert!(manager
+            .grant_session_access("a1:other", &base_digest)
+            .await
+            .is_err());
+        manager
+            .grant_session_access("a1:s1", &tool_digest)
+            .await
+            .unwrap();
+
+        // The internal Sandbox path authorizes an explicit selection for an
+        // existing Session even before a Managed context references it.
+        let sandbox_grant = manager
+            .grant_sandbox_access("a1:s1", &other_digest)
+            .await
+            .unwrap();
+        manager
+            .authorize(&sandbox_grant.token, &other_digest)
+            .await
+            .unwrap();
+        let stored = db
+            .get_image_access_grant(&sha256_hex(&sandbox_grant.token))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.project_id, None);
+        assert_eq!(stored.session_id.as_deref(), Some("a1:s1"));
     }
 
     #[tokio::test]
@@ -998,7 +1291,7 @@ mod tests {
         assert_eq!(first.removed_blobs, 1);
         assert_eq!(first.reclaimed_bytes, 1);
         assert_eq!(first.deferred_by_limit, 2);
-        assert_eq!(manager.list(10).await.unwrap().len(), 2);
+        assert_eq!(manager.list(0, 10, "").await.unwrap().images.len(), 2);
 
         // The next sweep re-selects the deferred rows from the database.
         let second = manager
@@ -1011,7 +1304,7 @@ mod tests {
         assert_eq!(second.candidates, 2);
         assert_eq!(second.removed_images, 2);
         assert_eq!(second.deferred_by_limit, 0);
-        assert!(manager.list(10).await.unwrap().is_empty());
+        assert!(manager.list(0, 10, "").await.unwrap().images.is_empty());
     }
 
     /// #3180 SC-02: a byte budget leaves a ready row and its bytes untouched

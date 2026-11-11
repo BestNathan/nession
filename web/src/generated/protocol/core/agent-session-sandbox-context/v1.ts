@@ -25,7 +25,7 @@ export type ServerSessionSandboxContextPayload = {
 /**
  * Injected by the Server's command broker, like every `agent.*` command.
  */
-request_id: string, session_name: string, };
+request_id: string, session_name: string, cache_digests: Array<string>, };
 export type SandboxContextStatus = "inside" | "outside" | "unknown";
 export type SandboxPaneScope = { session_name: string, 
 /**
@@ -161,6 +161,19 @@ resource: Array<SandboxKvEntry>,
  * `syscall.seccomp` rows; empty means the group is omitted.
  */
 syscall: Array<SandboxKvEntry>, enforcement: SandboxEnforcement, };
+export type SandboxImageRole = "base" | "workspace" | "toolchain";
+export type SandboxImageMode = "read_only" | "overlay";
+export type SandboxImageSelection = { role: SandboxImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of a Server Ready image.
+ */
+digest: string, 
+/**
+ * `/opt/<name>` for a toolchain; absent for the other roles.
+ */
+target?: string | null, mode: SandboxImageMode, };
+export type ImageCacheState = "verified" | "preparing" | "absent" | "failed" | "unavailable";
+export type ImageCacheStatus = { digest: string, state: ImageCacheState, detail?: string | null, };
 export type SandboxKvEntry = { key: string, value: string, };
 export type SandboxEnforcement = "required";
 export type SandboxFilesystemPolicy = { access: SandboxFilesystemAccess, };
@@ -225,6 +238,24 @@ export type SandboxActionResult = { success: boolean, error_kind?: SandboxAction
  */
 context?: SandboxCurrentContext | null, };
 export type SandboxActionErrorKind = "conflict" | "invalid" | "unavailable" | "failed";
+export type ManagedImageGrant = { role: ManagedImageRole, 
+/**
+ * `sha256:<64 lowercase hex>` of the exact bytes.
+ */
+digest: string, 
+/**
+ * Authorized route, `/images/blobs/<digest>`.
+ */
+path: string, 
+/**
+ * Scoped bearer grant for exactly this digest.
+ */
+token: string, 
+/**
+ * `/opt/<name>` for a toolchain image; absent otherwise.
+ */
+target?: string | null, };
+export type ManagedImageRole = "base" | "workspace" | "toolchain";
 
 // ── Operations ──
 
@@ -233,7 +264,7 @@ export type ServerSessionSandboxContextCall = {
 /**
  * Injected by the Server's command broker, like every `agent.*` command.
  */
-request_id: string, session_name: string, };
+request_id: string, session_name: string, cache_digests: Array<string>, };
 
 /**
  * No response alias: the catalog declares no response shape for this unit.

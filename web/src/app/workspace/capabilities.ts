@@ -27,6 +27,7 @@ import {
 } from '@/product/terminal/quickCommands/quickCommands';
 import { PROJECT_CAPABILITY_ID, PROJECT_CAPABILITY_TITLE, resolveProjectCapabilityState } from '@/capabilities/project';
 import { SANDBOX_CAPABILITY_ID, SANDBOX_TITLE } from '@/capabilities/sandbox';
+import { IMAGES_CAPABILITY_ID, IMAGES_TITLE } from '@/capabilities/images';
 import type { WorkspaceContext } from './workspaceContext';
 
 export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityContext {
@@ -79,6 +80,9 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'session', title: 'Session', available: () => true },
   { id: 'agent', title: 'Agent', available: () => true },
   { id: 'env', title: 'Environment', shortTitle: 'Env', available: () => true },
+  // Images are Server-owned and discoverable without a Session or Agent (#3181).
+  // The transport reports unavailability through the view if the registry read fails.
+  { id: IMAGES_CAPABILITY_ID, title: IMAGES_TITLE, available: () => true },
   // Sandbox exists where there is a Session and the Agent that owns it (#3124).
   // `inside`/`outside`/`unknown` is the Agent's authenticated observation,
   // read by the capability view on open; host support is Enter eligibility,

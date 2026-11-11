@@ -33,6 +33,7 @@ import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureSandboxSurface } from './fixtureSandbox';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
+import { useFixtureImages } from './fixtureImages';
 import { fixtureInputDrop } from './fixtureInputDrop';
 import { fixtureStatusInputs } from './fixtureStatusNotices';
 import { fixturePaneCommand } from './fixturePaneCommand';
@@ -308,6 +309,7 @@ function useFixtureAppOperations(search: string) {
         : null,
   );
   const [ready, setReady] = useState(false);
+  useFixtureImages(search);
   useEffect(() => setReady(true), []);
   return { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready };
 }
@@ -347,7 +349,6 @@ export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
   // #2789: rows and the Workspace Session view read the Agent-owned store.
-
   const projectLayer = useFixtureProjectShell(search);
   const projectBinding = useSessionProjectBinding();
   const { createOpen, setCreateOpen, attachIntent, setAttachIntent, ready: operationsReady } =

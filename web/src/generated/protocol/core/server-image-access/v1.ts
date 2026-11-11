@@ -21,13 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ImageAccessPayload = { project_id: string, digest: string, };
+export type ImageAccessPayload = { project_id?: string | null, session_id?: string | null, digest: string, };
 export type ImageAccessResponsePayload = { success: boolean, token?: string | null, expires_at?: number | null, path?: string | null, error?: string | null, error_kind?: string | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ImageAccessCall = { project_id: string, digest: string, };
+export type ImageAccessCall = { project_id?: string | null, session_id?: string | null, digest: string, };
 
 /** The payload the provider answers with. */
 export type ImageAccessReply = { success: boolean, token?: string | null, expires_at?: number | null, path?: string | null, error?: string | null, error_kind?: string | null, };

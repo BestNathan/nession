@@ -21,10 +21,10 @@ import type {
 } from '@/app/workspace/workspaceContext';
 
 export interface WorkspacePanelProps {
-  selectedSession: Session;
+  selectedSession: Session | null;
   selectedAgent: Agent | undefined;
   agents: Agent[];
-  domain: DomainState;
+  domain: DomainState | null;
   surface: Surface;
   tool: CapabilityId;
   fileOps: FileOps | null;
@@ -46,6 +46,26 @@ export interface WorkspacePanelProps {
   /** Focused Session's Project resolution and actions (#3082). */
   focusedProject?: FocusedProject;
   sessionProject?: SessionProjectContext;
+}
+
+/** The Web's one surface-leave destination action, when a Session exists. */
+function surfaceActionFor(
+  experience: Experience,
+  hasSession: boolean,
+  onSurfaceChange: (surface: Surface) => void,
+  conversationGlyph: React.ElementType | undefined,
+) {
+  if (experience !== 'web' || !hasSession) {
+    return undefined;
+  }
+  const Glyph = conversationGlyph;
+  return (
+    <SurfaceDestinationAction
+      destination="terminal"
+      onOpen={() => onSurfaceChange('terminal')}
+      glyph={Glyph ? <Glyph aria-hidden /> : undefined}
+    />
+  );
 }
 
 /** Which capability registered the push on screen. */
@@ -200,14 +220,7 @@ export function WorkspacePanel({
   // inner Terminal icon, so the destination is untouched (SC-26).
   const conversation = resolveConversationIdentity(facts);
   const ConversationGlyph = conversation?.glyph;
-  const surfaceAction =
-    experience === 'web' ? (
-      <SurfaceDestinationAction
-        destination="terminal"
-        onOpen={() => onSurfaceChange('terminal')}
-        glyph={ConversationGlyph ? <ConversationGlyph aria-hidden /> : undefined}
-      />
-    ) : undefined;
+  const surfaceAction = surfaceActionFor(experience, selectedSession !== null, onSurfaceChange, ConversationGlyph);
 
   return (
     <div
@@ -222,7 +235,13 @@ export function WorkspacePanel({
              from a capability root, the capability root from a pushed detail.
              `#1051`'s rule is one predictable leave per depth, so this is the
              only affordance in the App that leaves either of them. */
-          backLabel={push ? `Back to ${activeLabel}` : 'Back to terminal'}
+          backLabel={
+            push
+              ? `Back to ${activeLabel}`
+              : selectedSession
+                ? 'Back to terminal'
+                : 'Back to sessions'
+          }
           onBack={push ? push.onLeave : () => onSurfaceChange('terminal')}
           title={push ? push.title : activeLabel}
           technical={push !== null}

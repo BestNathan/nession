@@ -9,7 +9,9 @@
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use nession_protocol::contracts::image::v1::is_valid_image_digest;
+use nession_protocol::contracts::image::v1::{
+    is_valid_image_digest, ImageCacheState, ImageCacheStatus,
+};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -325,6 +327,61 @@ impl ErofsCache {
             .strip_prefix(DIGEST_PREFIX)
             .ok_or_else(|| anyhow::anyhow!("invalid image digest"))?;
         Ok(self.root.join("sha256").join(hex))
+    }
+
+    /// Observe one digest without downloading or mutating the cache.
+    ///
+    /// A final blob is verified here, so a corrupt file is reported as failed
+    /// rather than as available. A partial file is preparing; neither file is
+    /// absent. This is the only projection the Sandbox readiness UI consumes.
+    pub async fn status(&self, digest: &str) -> ImageCacheStatus {
+        if !is_valid_image_digest(digest) {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Failed,
+                detail: Some("invalid image digest".to_string()),
+            };
+        }
+        let Ok(final_path) = self.blob_path(digest) else {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Failed,
+                detail: Some("invalid image digest".to_string()),
+            };
+        };
+        if self.verify_file(&final_path, digest).await.unwrap_or(false) {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Verified,
+                detail: None,
+            };
+        }
+        if final_path.exists() {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Failed,
+                detail: Some("cached blob failed digest verification".to_string()),
+            };
+        }
+        let Ok(partial) = self.partial_path(digest) else {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Absent,
+                detail: None,
+            };
+        };
+        if partial.exists() {
+            return ImageCacheStatus {
+                digest: digest.to_string(),
+                state: ImageCacheState::Preparing,
+                detail: Some("a partial download exists; Enter will resume it".to_string()),
+            };
+        }
+        ImageCacheStatus {
+            digest: digest.to_string(),
+            state: ImageCacheState::Absent,
+            detail: Some("not cached on this Agent; Enter will download it".to_string()),
+        }
     }
 
     /// Return the verified blob, downloading it only when the cache is cold.
@@ -696,6 +753,40 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn status_distinguishes_absent_verified_and_preparing_without_mutating() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"status image body".to_vec();
+        let digest = digest_for(&bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/blobs/{digest}")))
+                .times(1)
+                .respond_with(Response::builder().status(200).body(bytes.clone()).unwrap()),
+        );
+        let cache = cache(dir.path(), true, "nfs").await;
+        assert_eq!(cache.status(&digest).await.state, ImageCacheState::Absent);
+        let grant = DownloadGrant {
+            url: server.url(&format!("/blobs/{digest}")).to_string(),
+            token: "scoped-token".to_string(),
+        };
+        cache.get_or_fetch(&digest, &grant).await.unwrap();
+        let verified = cache.status(&digest).await;
+        assert_eq!(verified.state, ImageCacheState::Verified);
+        assert!(verified.detail.is_none());
+
+        let other = format!("sha256:{}", "a".repeat(64));
+        let partial = cache.partial_path(&other).unwrap();
+        std::fs::write(&partial, b"partial").unwrap();
+        let preparing = cache.status(&other).await;
+        assert_eq!(preparing.state, ImageCacheState::Preparing);
+        assert!(preparing.detail.as_deref().unwrap().contains("partial"));
+        assert_eq!(
+            cache.status("sha256:not-a-digest").await.state,
+            ImageCacheState::Failed
+        );
     }
 
     #[tokio::test]
