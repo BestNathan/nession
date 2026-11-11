@@ -11,7 +11,7 @@
 
 use anyhow::{Context, Result};
 use nession_agent::config::ResolvedErofsStorage;
-use nession_agent::erofs_cache::{DownloadGrant, ErofsCache};
+use nession_agent::erofs_cache::{open_resolved, DownloadGrant};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
         token: token.context("--token is required")?,
     };
 
-    let cache = ErofsCache::open_resolved(&storage, &identity)
+    let cache = open_resolved(&storage, &identity)
         .await
         .context("failed to open the EROFS cache at the declared durable root")?;
     let image = cache.get_or_fetch(&digest, &grant).await?;

@@ -242,7 +242,7 @@ mod tests {
     }
 
     async fn cache(root: &Path) -> ErofsCache {
-        ErofsCache::open_resolved(
+        crate::erofs_cache::open_resolved(
             &ResolvedErofsStorage {
                 path: root.to_path_buf(),
                 explicit: false,
