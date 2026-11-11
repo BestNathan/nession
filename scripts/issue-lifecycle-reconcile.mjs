@@ -151,7 +151,7 @@ async function reconcileIssue(repository, number, token, { explicitAccept = fals
   const prs = await relatedPulls(repository, number, token, includePr, request);
   const manualReopened = await humanReopened(repository, number, token, request);
   const decision = decideIssueClosure(issue, prs, { manualReopened, explicitAccept });
-  if (decision.action !== 'close') return { ...decision, prs };
+  if (decision.action !== 'close') return { ...decision, prs: prs.map(pr => pr.number) };
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
   const fresh = await request(prefix + '/issues/' + number, { token });
